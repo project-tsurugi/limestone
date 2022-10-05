@@ -69,6 +69,26 @@ protected:
 
         // cleanup
         datastore_->shutdown();
+
+        // second recovery
+        datastore_->recover();
+        datastore_->ready();
+        datastore_->switch_epoch(3); // trigger of flush log record which belongs to epoch 2.
+        limestone::api::log_channel& channel2 = datastore_->create_channel(boost::filesystem::path(data_location));
+        channel2.begin_session();
+        channel2.add_entry(st, "k", "v2", {2, 0}); // epoch 2 log record
+        channel2.end_session(); // (*1)
+        datastore_->switch_epoch(4);
+        // wait durable (*1)
+        for (;;) {
+            if (get_durable_epoch() >= 3) {
+                break;
+            }
+            _mm_pause();
+        }
+
+        // cleanup
+        datastore_->shutdown();
     }
 
     virtual void TearDown() {
@@ -95,7 +115,7 @@ TEST_F(log_and_recover_test, recovery) {
     cursor->key(buf);
     ASSERT_EQ(buf, "k");
     cursor->value(buf);
-    ASSERT_EQ(buf, "v");
+    ASSERT_EQ(buf, "v2");
     ASSERT_EQ(cursor->storage(), 2);
     ASSERT_FALSE(cursor->next()); // nothing
 
