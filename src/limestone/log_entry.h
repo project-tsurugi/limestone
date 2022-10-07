@@ -143,10 +143,12 @@ public:
     }
 
     void write_version(write_version_type& buf) {
+        // XXX: endian?
         memcpy(static_cast<void*>(&buf), value_etc_.data(), sizeof(epoch_id_type) + sizeof(std::uint64_t));
     }
     storage_id_type storage() {
         storage_id_type storage_id{};
+        // XXX: endian?
         memcpy(static_cast<void*>(&storage_id), key_sid_.data(), sizeof(storage_id_type));
         return storage_id;
     }
