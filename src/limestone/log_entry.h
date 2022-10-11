@@ -174,14 +174,10 @@ public:
         return key_sid_;
     }
     static epoch_id_type write_version_epoch_number(std::string_view value_etc) {
-        epoch_id_type epoch_id{};
-        memcpy(static_cast<void*>(&epoch_id), value_etc.data(), sizeof(epoch_id_type));
-        return epoch_id;
+        return boost::endian::load_little_u64(reinterpret_cast<const unsigned char*>(value_etc.data()));
     }
     static std::uint64_t write_version_minor_write_version(std::string_view value_etc) {
-        std::uint64_t minor_write_version{};
-        memcpy(static_cast<void*>(&minor_write_version), value_etc.data() + sizeof(epoch_id_type), sizeof(std::uint64_t));
-        return minor_write_version;
+        return boost::endian::load_little_u64(reinterpret_cast<const unsigned char*>(value_etc.data()) + sizeof(epoch_id_type));
     }
 
 private:
@@ -195,38 +191,22 @@ private:
         out.put(static_cast<char>(value));
     }
     static void write_uint32(std::ostream& out, const std::uint32_t value) {
-        out.put(static_cast<char>((value>>0U)&0xFFU));
-        out.put(static_cast<char>((value>>8U)&0xFFU));
-        out.put(static_cast<char>((value>>16U)&0xFFU));
-        out.put(static_cast<char>((value>>24U)&0xFFU));
+        boost::endian::little_uint32_buf_t x{value};
+        out.write(reinterpret_cast<const char*>(x.data()), 4);
     }
     static std::uint32_t read_uint32(std::istream& in) {
-        std::uint32_t value = (static_cast<std::uint8_t>(in.get())&0xFFU);
-        value |= (static_cast<std::uint8_t>(in.get())&0xFFU)<<8U;
-        value |= (static_cast<std::uint8_t>(in.get())&0xFFU)<<16U;
-        value |= (static_cast<std::uint8_t>(in.get())&0xFFU)<<24U;
-        return value;
+        boost::endian::little_uint32_buf_t x;
+        in.read(reinterpret_cast<char*>(x.data()), 4);
+        return x.value();
     }
     static void write_uint64(std::ostream& out, const std::uint64_t value) {
-        out.put(static_cast<char>((value>>0U)&0xFFU));
-        out.put(static_cast<char>((value>>8U)&0xFFU));
-        out.put(static_cast<char>((value>>16U)&0xFFU));
-        out.put(static_cast<char>((value>>24U)&0xFFU));
-        out.put(static_cast<char>((value>>32U)&0xFFU));
-        out.put(static_cast<char>((value>>40U)&0xFFU));
-        out.put(static_cast<char>((value>>48U)&0xFFU));
-        out.put(static_cast<char>((value>>56U)&0xFFU));
+        boost::endian::little_uint64_buf_t x{value};
+        out.write(reinterpret_cast<const char*>(x.data()), 8);
     }
     static std::uint64_t read_uint64(std::istream& in) {
-        std::uint64_t value_l = (static_cast<std::uint8_t>(in.get())&0xFFU);
-        value_l |= (static_cast<std::uint8_t>(in.get())&0xFFU)<<8U;
-        value_l |= (static_cast<std::uint8_t>(in.get())&0xFFU)<<16U;
-        value_l |= (static_cast<std::uint8_t>(in.get())&0xFFU)<<24U;
-        std::uint64_t value_u = (static_cast<std::uint8_t>(in.get())&0xFFU);
-        value_u |= (static_cast<std::uint8_t>(in.get())&0xFFU)<<8U;
-        value_u |= (static_cast<std::uint8_t>(in.get())&0xFFU)<<16U;
-        value_u |= (static_cast<std::uint8_t>(in.get())&0xFFU)<<24U;
-        return ((value_u << 32U) & 0xFFFFFFFF00000000UL) | value_l;
+        boost::endian::little_uint64_buf_t x;
+        in.read(reinterpret_cast<char*>(x.data()), 8);
+        return x.value();
     }
 };
 
