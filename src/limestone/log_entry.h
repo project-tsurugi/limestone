@@ -19,6 +19,7 @@
 #include <string_view>
 #include <exception>
 
+#include <boost/endian.hpp>
 #include <boost/filesystem/path.hpp>
 #include <boost/filesystem/fstream.hpp>
 
@@ -40,6 +41,9 @@ public:
     };
     
     log_entry() = default;
+
+    static_assert(sizeof(epoch_id_type) == sizeof(uint64_t), "This code assumes that epoch_id_type is 64-bit width");
+    static_assert(sizeof(storage_id_type) == sizeof(uint64_t), "This code assumes that storage_id_type is 64-bit width");
 
     static void begin_session(boost::filesystem::ofstream& strm, epoch_id_type epoch) {
         entry_type type = entry_type::marker_begin;
@@ -143,14 +147,11 @@ public:
     }
 
     void write_version(write_version_type& buf) {
-        // XXX: endian?
-        memcpy(static_cast<void*>(&buf), value_etc_.data(), sizeof(epoch_id_type) + sizeof(std::uint64_t));
+        buf.epoch_number_ = boost::endian::load_little_u64(reinterpret_cast<unsigned char*>(value_etc_.data()));
+        buf.minor_write_version_ = boost::endian::load_little_u64(reinterpret_cast<unsigned char*>(value_etc_.data()) + sizeof(epoch_id_type));
     }
     storage_id_type storage() {
-        storage_id_type storage_id{};
-        // XXX: endian?
-        memcpy(static_cast<void*>(&storage_id), key_sid_.data(), sizeof(storage_id_type));
-        return storage_id;
+        return boost::endian::load_little_u64(reinterpret_cast<const unsigned char*>(key_sid_.data()));
     }
     void value(std::string& buf) {
         buf = value_etc_.substr(sizeof(epoch_id_type) + sizeof(std::uint64_t));
