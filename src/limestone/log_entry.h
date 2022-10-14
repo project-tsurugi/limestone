@@ -31,6 +31,7 @@ namespace limestone::api {
 
 class datastore;
 
+// NOLINTBEGIN(cppcoreguidelines-pro-type-reinterpret-cast)
 class log_entry {
 public:
     enum class entry_type : std::uint8_t {
@@ -150,6 +151,7 @@ public:
     void write_version(write_version_type& buf) {
         // TODO: boost 1.72 has boost::endian::load_little_u64
         buf.epoch_number_ = boost::endian::endian_load<boost::uint64_t, 8, boost::endian::order::little>(reinterpret_cast<unsigned char*>(value_etc_.data()));
+        // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-pointer-arithmetic)
         buf.minor_write_version_ = boost::endian::endian_load<boost::uint64_t, 8, boost::endian::order::little>(reinterpret_cast<unsigned char*>(value_etc_.data()) + sizeof(epoch_id_type));
     }
     storage_id_type storage() {
@@ -179,6 +181,7 @@ public:
         return boost::endian::endian_load<boost::uint64_t, 8, boost::endian::order::little>(reinterpret_cast<const unsigned char*>(value_etc.data()));
     }
     static std::uint64_t write_version_minor_write_version(std::string_view value_etc) {
+        // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-pointer-arithmetic)
         return boost::endian::endian_load<boost::uint64_t, 8, boost::endian::order::little>(reinterpret_cast<const unsigned char*>(value_etc.data()) + sizeof(epoch_id_type));
     }
 
@@ -189,6 +192,15 @@ private:
     std::string value_etc_{};
     char one_char_{};
 
+    // Historical notes: type of boost::endian::endian_buffer::data() has been changed
+    // between boost 1.71 and boost 1.72.
+    static inline char* cast_to_char_ptr(const char* data) {  // for boost 1.71
+        return const_cast<char*>(data);
+    }
+    static inline char* cast_to_char_ptr(unsigned char* data) {  // for boost 1.72
+        return reinterpret_cast<char*>(data);
+    }
+
     static void write_uint8(std::ostream& out, const std::uint8_t value) {
         out.put(static_cast<char>(value));
     }
@@ -198,9 +210,7 @@ private:
     }
     static std::uint32_t read_uint32(std::istream& in) {
         boost::endian::little_uint32_buf_t x;
-        //in.read(const_cast<char*>(x.data()), 4);  // boost 1.71
-        //in.read(reinterpret_cast<char*>(x.data()), 4); // boost 1.72
-        in.read((char*)x.data(), 4);
+        in.read(cast_to_char_ptr(x.data()), 4);
         return x.value();
     }
     static void write_uint64(std::ostream& out, const std::uint64_t value) {
@@ -209,11 +219,10 @@ private:
     }
     static std::uint64_t read_uint64(std::istream& in) {
         boost::endian::little_uint64_buf_t x;
-        //in.read(const_cast<char*>(x.data()), 8);  // boost 1.71
-        //in.read(reinterpret_cast<char*>(x.data()), 8); // boost 1.72
-        in.read((char*)x.data(), 8);
+        in.read(cast_to_char_ptr(x.data()), 8);
         return x.value();
     }
 };
+// NOLINTEND(cppcoreguidelines-pro-type-reinterpret-cast)
 
 } // namespace limestone::api
