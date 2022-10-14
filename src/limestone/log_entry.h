@@ -148,11 +148,12 @@ public:
     }
 
     void write_version(write_version_type& buf) {
-        buf.epoch_number_ = boost::endian::load_little_u64(reinterpret_cast<unsigned char*>(value_etc_.data()));
-        buf.minor_write_version_ = boost::endian::load_little_u64(reinterpret_cast<unsigned char*>(value_etc_.data()) + sizeof(epoch_id_type));
+        // TODO: boost 1.72 has boost::endian::load_little_u64
+        buf.epoch_number_ = boost::endian::endian_load<boost::uint64_t, 8, boost::endian::order::little>(reinterpret_cast<unsigned char*>(value_etc_.data()));
+        buf.minor_write_version_ = boost::endian::endian_load<boost::uint64_t, 8, boost::endian::order::little>(reinterpret_cast<unsigned char*>(value_etc_.data()) + sizeof(epoch_id_type));
     }
     storage_id_type storage() {
-        return boost::endian::load_little_u64(reinterpret_cast<const unsigned char*>(key_sid_.data()));
+        return boost::endian::endian_load<boost::uint64_t, 8, boost::endian::order::little>(reinterpret_cast<const unsigned char*>(key_sid_.data()));
     }
     void value(std::string& buf) {
         buf = value_etc_.substr(sizeof(epoch_id_type) + sizeof(std::uint64_t));
@@ -175,10 +176,10 @@ public:
         return key_sid_;
     }
     static epoch_id_type write_version_epoch_number(std::string_view value_etc) {
-        return boost::endian::load_little_u64(reinterpret_cast<const unsigned char*>(value_etc.data()));
+        return boost::endian::endian_load<boost::uint64_t, 8, boost::endian::order::little>(reinterpret_cast<const unsigned char*>(value_etc.data()));
     }
     static std::uint64_t write_version_minor_write_version(std::string_view value_etc) {
-        return boost::endian::load_little_u64(reinterpret_cast<const unsigned char*>(value_etc.data()) + sizeof(epoch_id_type));
+        return boost::endian::endian_load<boost::uint64_t, 8, boost::endian::order::little>(reinterpret_cast<const unsigned char*>(value_etc.data()) + sizeof(epoch_id_type));
     }
 
 private:
@@ -197,7 +198,9 @@ private:
     }
     static std::uint32_t read_uint32(std::istream& in) {
         boost::endian::little_uint32_buf_t x;
-        in.read(reinterpret_cast<char*>(x.data()), 4);
+        //in.read(const_cast<char*>(x.data()), 4);  // boost 1.71
+        //in.read(reinterpret_cast<char*>(x.data()), 4); // boost 1.72
+        in.read((char*)x.data(), 4);
         return x.value();
     }
     static void write_uint64(std::ostream& out, const std::uint64_t value) {
@@ -206,7 +209,9 @@ private:
     }
     static std::uint64_t read_uint64(std::istream& in) {
         boost::endian::little_uint64_buf_t x;
-        in.read(reinterpret_cast<char*>(x.data()), 8);
+        //in.read(const_cast<char*>(x.data()), 8);  // boost 1.71
+        //in.read(reinterpret_cast<char*>(x.data()), 8); // boost 1.72
+        in.read((char*)x.data(), 8);
         return x.value();
     }
 };
