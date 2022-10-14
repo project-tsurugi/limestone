@@ -19,7 +19,8 @@
 #include <string_view>
 #include <exception>
 
-#include <boost/endian.hpp>
+#include <boost/endian/buffers.hpp>
+#include <boost/endian/conversion.hpp>
 #include <boost/filesystem/path.hpp>
 #include <boost/filesystem/fstream.hpp>
 
