@@ -121,4 +121,14 @@ TEST_F(log_entry_test, write_and_read_and_write_and_read) {
     EXPECT_TRUE(buf_version == write_version);
 }
 
+TEST_F(log_entry_test, unittest_write_version_members) {
+    // little endian u64 0x0807060504030201ULL, 0x1817161514131211ULL
+    std::string bytes{"\x01\x02\x03\x04\x05\x06\x07\x08\x11\x12\x13\x14\x15\x16\x17\x18"};
+
+    limestone::api::epoch_id_type epoch_number = limestone::api::log_entry::write_version_epoch_number(bytes);
+    std::uint64_t minor_write_ver = limestone::api::log_entry::write_version_minor_write_version(bytes);
+    EXPECT_EQ(epoch_number, 0x0807060504030201ULL);
+    EXPECT_EQ(minor_write_ver, 0x1817161514131211ULL);
+}
+
 }  // namespace limestone::testing
