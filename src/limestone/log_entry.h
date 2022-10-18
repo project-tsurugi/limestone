@@ -31,7 +31,6 @@ namespace limestone::api {
 
 class datastore;
 
-// NOLINTBEGIN(cppcoreguidelines-pro-type-reinterpret-cast)
 class log_entry {
 public:
     enum class entry_type : std::uint8_t {
@@ -150,11 +149,13 @@ public:
 
     void write_version(write_version_type& buf) {
         // TODO: boost 1.72 has boost::endian::load_little_u64
+        // NOLINTNEXTLINE(cppcoreguidelines-pro-type-reinterpret-cast)
         buf.epoch_number_ = boost::endian::endian_load<boost::uint64_t, 8, boost::endian::order::little>(reinterpret_cast<unsigned char*>(value_etc_.data()));
-        // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-pointer-arithmetic)
+        // NOLINTNEXTLINE(cppcoreguidelines-pro-type-reinterpret-cast,cppcoreguidelines-pro-bounds-pointer-arithmetic)
         buf.minor_write_version_ = boost::endian::endian_load<boost::uint64_t, 8, boost::endian::order::little>(reinterpret_cast<unsigned char*>(value_etc_.data()) + sizeof(epoch_id_type));
     }
     storage_id_type storage() {
+        // NOLINTNEXTLINE(cppcoreguidelines-pro-type-reinterpret-cast)
         return boost::endian::endian_load<boost::uint64_t, 8, boost::endian::order::little>(reinterpret_cast<const unsigned char*>(key_sid_.data()));
     }
     void value(std::string& buf) {
@@ -178,10 +179,11 @@ public:
         return key_sid_;
     }
     static epoch_id_type write_version_epoch_number(std::string_view value_etc) {
+        // NOLINTNEXTLINE(cppcoreguidelines-pro-type-reinterpret-cast)
         return boost::endian::endian_load<boost::uint64_t, 8, boost::endian::order::little>(reinterpret_cast<const unsigned char*>(value_etc.data()));
     }
     static std::uint64_t write_version_minor_write_version(std::string_view value_etc) {
-        // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-pointer-arithmetic)
+        // NOLINTNEXTLINE(cppcoreguidelines-pro-type-reinterpret-cast,cppcoreguidelines-pro-bounds-pointer-arithmetic)
         return boost::endian::endian_load<boost::uint64_t, 8, boost::endian::order::little>(reinterpret_cast<const unsigned char*>(value_etc.data()) + sizeof(epoch_id_type));
     }
 
@@ -198,7 +200,7 @@ private:
         return const_cast<char*>(data);
     }
     static inline char* cast_to_char_ptr(unsigned char* data) {  // for boost 1.72
-        return reinterpret_cast<char*>(data);
+        return reinterpret_cast<char*>(data);  // NOLINT(cppcoreguidelines-pro-type-reinterpret-cast)
     }
 
     static void write_uint8(std::ostream& out, const std::uint8_t value) {
@@ -206,7 +208,7 @@ private:
     }
     static void write_uint32(std::ostream& out, const std::uint32_t value) {
         boost::endian::little_uint32_buf_t x{value};
-        out.write(reinterpret_cast<const char*>(x.data()), 4);
+        out.write(reinterpret_cast<const char*>(x.data()), 4);  // NOLINT(cppcoreguidelines-pro-type-reinterpret-cast)
     }
     static std::uint32_t read_uint32(std::istream& in) {
         boost::endian::little_uint32_buf_t x;
@@ -215,7 +217,7 @@ private:
     }
     static void write_uint64(std::ostream& out, const std::uint64_t value) {
         boost::endian::little_uint64_buf_t x{value};
-        out.write(reinterpret_cast<const char*>(x.data()), 8);
+        out.write(reinterpret_cast<const char*>(x.data()), 8);  // NOLINT(cppcoreguidelines-pro-type-reinterpret-cast)
     }
     static std::uint64_t read_uint64(std::istream& in) {
         boost::endian::little_uint64_buf_t x;
@@ -223,6 +225,5 @@ private:
         return x.value();
     }
 };
-// NOLINTEND(cppcoreguidelines-pro-type-reinterpret-cast)
 
 } // namespace limestone::api
