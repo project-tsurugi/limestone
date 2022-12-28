@@ -27,7 +27,7 @@ Tsurugi DB の 永続化モジュール `limestone` の `LOG-2` 実装の設計 
 
 * Safe Snapshot データストア (Safe Snapshot Datastore / SSDS)
     * Safe Snapshot 以前の write version のデータを格納する記憶領域。スナップショットの形でデータを提供する
-    * RocksDB を用いて実現する。 
+    * RocksDB を用いて実現する。
 * スナップショット作成処理
     * データベース内容全体の スナップショットを提供する。このスナップショットはカーソル経由でスナップショットエントリ読み取るが、読み出し中にデータ更新があっても、読み出される内容に影響を与えない。
 <!--
@@ -42,7 +42,7 @@ Tsurugi DB の 永続化モジュール `limestone` の `LOG-2` 実装の設計 
 * 吸い上げ処理
     * ログディレクトリ中に存在するログ(pWAL)ファイルを監視し、更新分を読み出し、逐次 VB に投入する。
 * Version Buffer (VB)
-    * 投入されたログエントリを write version 順に取り出せるように蓄えるバッファ。safe snapshot までーのデータを蓄える。
+    * 投入されたログエントリを write version 順に取り出せるように蓄えるバッファ。safe snapshot までのデータを蓄える。
         * RocksDB で Priority Queue を実現する方法と、自前で Priority Queue + ファイル書き出しを実装する実現方法の2案がある。
             * 性能評価をして、採用する方法を選択する。
 * Version順反映処理
