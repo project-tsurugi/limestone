@@ -15,7 +15,7 @@ Tsurugi DB の 永続化モジュール `limestone` の `LOG-2` 実装の設計 
 
 ## 構成概要
 
-マルチバージョンのログをバッファリングし、 write version 順に並び変えて、後段の 単バージョン (mono version) データストア (以下、1VDS) に格納していく。
+マルチバージョンのログをバッファリングし、 write version 順に並び変えて、後段の Safe Snapshot データストア (以下、SSDS) に格納していく。
 
 ![概略構成図](module.drawio.svg)
 
@@ -23,11 +23,9 @@ Tsurugi DB の 永続化モジュール `limestone` の `LOG-2` 実装の設計 
 
 ## 各部構成 (構成要素と処理概要)
 
-### 単バージョンデータストア (mono version datastore / 1VDS)
+### Safe Snapshot データストア (Safe Snapshot Datastore / SSDS)
 
-<!-- mono version を MV と略すとむしろ multi version のように見える -->
-
-* 単バージョンデータストア (mono version datastore / 1VDS)
+* Safe Snapshot データストア (Safe Snapshot Datastore / SSDS)
     * Safe Snapshot 以前の write version のデータを格納する記憶領域。スナップショットの形でデータを提供する
     * RocksDB を用いて実現する。 
 * スナップショット作成処理
@@ -49,17 +47,17 @@ Tsurugi DB の 永続化モジュール `limestone` の `LOG-2` 実装の設計 
             * 性能評価をして、採用する方法を選択する。
 * Version順反映処理
     * safe snapshot version が更新されるたびに実施される処理。
-    * VB から safe snapshot version までのログエントリを write version 順に取り出し、1VDS に逐次データ反映していく。
+    * VB から safe snapshot version までのログエントリを write version 順に取り出し、SSDS に逐次データ反映していく。
 
 ### PITR保存領域
 
 ![PITR保存領域](backup2.drawio.svg)
 
 * PITR保存領域
-    * サーバのローカルディスク上に作成された領域で、DB領域(SVDS イメージ と VB イメージ)のコピーを任意の個数(0..n)格納する。
+    * サーバのローカルディスク上に作成された領域で、DB領域(SSDS イメージ と VB イメージ)のコピーを任意の個数(0..n)格納する。
 * PITR 作成処理
-    * PITR 保存領域に DB領域(1VDS と VB) のコピーを作る。
-        * 1VDS については RocksDB の Checkpoint 機能により実現する。低負荷で実行できる。
+    * PITR 保存領域に DB領域(SSDS と VB) のコピーを作る。
+        * SSDS については RocksDB の Checkpoint 機能により実現する。低負荷で実行できる。
     * VB を自前実装した場合には、VB の全内容をファイル(群)に書き出し、保存する。
 * PITR 復元処理
     * PITR 保存領域から、メイン DB 領域へファイルを移動する。
@@ -70,16 +68,16 @@ Tsurugi DB の 永続化モジュール `limestone` の `LOG-2` 実装の設計 
 ![バックアップ領域](backup3.drawio.svg)
 
 * メインDB一時保存領域
-    * サーバのローカルディスク上に作成された領域で、DB領域(1VDS イメージ と VB イメージ)のコピーを一時的に格納する。
+    * サーバのローカルディスク上に作成された領域で、DB領域(SSDS イメージ と VB イメージ)のコピーを一時的に格納する。
 * バックアップ領域
     * メインDB一時保存領域 と PITR 保存領域を合わせたもの
     * この領域のファイル群を保存することで、バックアップ機能を実現する。
 * フルバックアップ処理
-    * メインDB一時保存領域に DB領域(1VDS と VB) の一時コピーを作る。
+    * メインDB一時保存領域に DB領域(SSDS と VB) の一時コピーを作る。
     * バックアップ領域のファイル群をサーバプロセス外から保存する。
     * バックアップ処理完了後に一時コピーを削除する。
 * フルバックアップ復元処理
-    * バックアップイメージ中の DB領域(1VDS と VB) 、PITR 保存領域のデータを取り出し、復元する。
+    * バックアップイメージ中の DB領域(SSDS と VB) 、PITR 保存領域のデータを取り出し、復元する。
 
 ## 実装詳細
 
