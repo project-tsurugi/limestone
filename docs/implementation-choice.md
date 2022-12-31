@@ -7,6 +7,9 @@
     * 各選択肢には固有の識別コードを振った。
     * 対立点に対しての考察を記述した。
 
+<!-- 用語の統一
+　吸い上げ　←　吸出し
+ -->
 
 
 ## ログデータを VB に渡すところ
@@ -14,18 +17,18 @@
 * コントロールフローの向き 候補
     * 監視型 (ログディレクトリを監視して pWAL ファイルへの追記分を VB に吸い上げる)
         * (SYNC-WP) 別プロセス
-            * (\*-NO) inotify/kqueue で変更が検出されたファイルを open, seek, read, close
-            * (\*-NR) inotify/kqueue で変更が検出されたファイルを read。各pWALファイルは開きっぱなし
-            * (\*-LR) wait しつつファイル無限 read loop。各pWALファイルは開きっぱなし
+            * (SYNC-WP-NO) inotify/kqueue で変更が検出されたファイルを open, seek, read, close
+            * (SYNC-WP-NR) inotify/kqueue で変更が検出されたファイルを read。各pWALファイルは開きっぱなし
+            * (SYNC-WP-LR) wait しつつファイル無限 read loop。各pWALファイルは開きっぱなし
         * (SYNC-WT) 別スレッド
-            * (\*-NO) inotify/kqueue で変更が検出されたファイルを open, seek, read, close
-            * (\*-NR) inotify/kqueue で変更が検出されたファイルを read。各pWALファイルは開きっぱなし
-            * (\*-LR) wait しつつファイル無限 read loop。各pWALファイルは開きっぱなし
+            * (SYNC-WT-NO) inotify/kqueue で変更が検出されたファイルを open, seek, read, close
+            * (SYNC-WT-NR) inotify/kqueue で変更が検出されたファイルを read。各pWALファイルは開きっぱなし
+            * (SYNC-WT-LR) wait しつつファイル無限 read loop。各pWALファイルは開きっぱなし
     * 通知型 (`log_channel` がログデータを受け取るたびに VB 吸い上げ機構へ通知)
         * (SYNC-LN) `log_channel::write_entry` 等が pWAL への書き込みの直後に、吸い上げスレッドに通知。吸い上げスレッドは、通知ドリブンでそのファイルを読んで吸い上げる
             * (コメント) スレッドを分けているのは、素早く返るため
-            * (\*-NO) 通知されたファイルを open, seek, read, close
-            * (\*-NR) 通知されたファイルを read。各pWALファイルは開きっぱなし
+            * (SYNC-LN-NO) 通知されたファイルを open, seek, read, close
+            * (SYNC-LN-NR) 通知されたファイルを read。各pWALファイルは開きっぱなし
     * push 型 (`log_channel` がログデータを VB へ投入)
         * (SYNC-LP) `log_channel::write_entry` 等が pWAL への書き込みの直後に、追加されたログエントリを VB に格納する (データは pWALファイルを経由しない)
             * (SYNC-LP-C) enQ を別スレッド
@@ -42,7 +45,9 @@
 * NR では、ファイルデスクリプタを監視対象数ぶん消費(利用)する。一番 naive だと log ディレクトリにある pWAL ファイル総数 (閉じられているファイルも入る)
     * 工夫の余地はある。SYNC-WP/WT ではログファイルの開閉も監視して監視対象を減らす、SYNC-LN ではアクティブな pWAL ファイルがわかる、等
 * LR では、ファイルデスクリプタを利用 log_channel数 ぶん消費(利用)する。
-* NO では、ファイルデスクリプタを並列吸い上げ数ぶん、消費(利用)する。付加が低い時は 0 だが、高並列時には LR と同じになる。吸い上げの同時並列数に制約を設けることでファイルデスクリプタの使用数に上限を設定できる。
+    * 基本的に log_channel ぶんのスレッドにて並列に処理する
+* NO では、ファイルデスクリプタを並列吸い上げ数ぶん、消費(利用)する。負荷が低い時は 0 だが、高並列時には LR と同じになる。
+    * 吸い上げの同時並列数に制約を設けることでファイルデスクリプタの使用数に上限を設定できる。
 * NO では、NR,LR に比べてファイル開閉のオーバーヘッドが発生する。また、(想像だが) ディスクキャッシュ的にも不利ではないか?
 * (総括) 仮に、ファイルデスクリプタの数が問題にならないということであれば、 NO を選ぶ理由はない。
 
@@ -86,6 +91,9 @@
 * ひっ迫していなくても、バックアップ要求時には、強制的にファイルに吐くことにする。そうしないと PITR 等を永続化できない。
     * (safe snapshot 以後なので SSDS には格納できない、pWAL ファイルはいずれ移動されてしまう)
 * VB が肥大化しているときに PITR 要求が来ると、処理に大きく時間がかかる
+
+(VB-S)
+* VB-R, VB-M-\* と比較して、特に有利な点がなさそうなので候補から除外する
 
 ### Safe Snapshot データストア (Safe Snapshot Datastore / SSDS)
 
