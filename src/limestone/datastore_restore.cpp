@@ -18,12 +18,12 @@
 
 #include <glog/logging.h>
 #include <limestone/logging.h>
+#include <limestone/status.h>
 #include "logging_helper.h"
 
-#include <limestone/api/datastore.h>
-#include <limestone/status.h>
+#include "datastore.h"
 
-namespace limestone::api {
+namespace limestone::api::impl {
 
 status datastore::restore(std::string_view from, bool keep_backup) const noexcept {
     DVLOG_LP(log_debug) << "restore begin, from directory = " << from << " , keep_backup = " << (keep_backup ? "true" : "false");
@@ -105,4 +105,10 @@ status datastore::restore(std::string_view from, std::vector<file_set_entry>& en
     return status::ok;
 }
 
-} // namespace limestone::api
+api::restore_progress datastore::restore_status() const noexcept {
+    // FIXME
+    std::abort();
+    return api::restore_progress::FIXME;
+}
+
+} // namespace limestone::api::impl

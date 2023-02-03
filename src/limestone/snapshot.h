@@ -22,18 +22,24 @@
 #include <boost/filesystem/fstream.hpp>
 
 #include <limestone/api/cursor.h>
+#include <limestone/api/snapshot.h>
 
-namespace limestone::api {
+namespace limestone::api::impl {
 
 /**
  * @brief a snapshot of the data at a point in time on the data store
  */
-class snapshot {
+class snapshot : public api::snapshot {
 public:
     /**
-     * @brief create empty object
+     * @brief directory name of a snapshot
      */
-    snapshot() noexcept = default;
+    constexpr static const std::string_view subdirectory_name_ = "data";
+
+    /**
+     * @brief file name of a snapshot lodated on the directory named subdirectory_name_
+     */
+    constexpr static const std::string_view file_name_ = "snapshot";
 
     /**
      * @brief create a cursor to read the entire contents of the snapshot and returns it
@@ -41,7 +47,7 @@ public:
      * @attention this function is thread-safe.
      * @return unique pointer of the cursor
      */
-    [[nodiscard]] virtual std::unique_ptr<cursor> get_cursor() const noexcept = 0;
+    [[nodiscard]] std::unique_ptr<api::cursor> get_cursor() const noexcept override;
 
     /**
      * @brief create a cursor for an entry at a given location on the snapshot and returns it
@@ -52,7 +58,7 @@ public:
      * @attention this function is thread-safe.
      * @return unique pointer of the cursor
      */
-    [[nodiscard]] virtual std::unique_ptr<cursor> find(storage_id_type storage_id, std::string_view entry_key) const noexcept = 0;
+    [[nodiscard]] std::unique_ptr<api::cursor> find(storage_id_type storage_id, std::string_view entry_key) const noexcept override;
 
     /**
      * @brief create a cursor for the first entry that exists after the given location on the snapshot and returns it
@@ -63,7 +69,16 @@ public:
      * @attention this function is thread-safe.
      * @return unique pointer of the cursor
      */
-    [[nodiscard]] virtual std::unique_ptr<cursor> scan(storage_id_type storage_id, std::string_view entry_key, bool inclusive) const noexcept = 0;
+    [[nodiscard]] std::unique_ptr<api::cursor> scan(storage_id_type storage_id, std::string_view entry_key, bool inclusive) const noexcept override;
+
+private:
+    boost::filesystem::path dir_{};
+
+    [[nodiscard]] boost::filesystem::path file_path() const noexcept;
+
+    explicit snapshot(const boost::filesystem::path& location) noexcept;
+
+    friend class datastore;
 };
 
-} // namespace limestone::api
+} // namespace limestone::api::impl

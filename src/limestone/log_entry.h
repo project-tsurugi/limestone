@@ -25,7 +25,7 @@
 #include <limestone/api/storage_id_type.h>
 #include <limestone/api/write_version_type.h>
 
-namespace limestone::api {
+namespace limestone::api::impl {
 
 class datastore;
 
@@ -96,8 +96,8 @@ public:
         write_uint64(strm, static_cast<std::uint64_t>(storage_id));
         strm.write(key.data(), key_len);
 
-        write_uint64(strm, static_cast<std::uint64_t>(write_version.epoch_number_));
-        write_uint64(strm, static_cast<std::uint64_t>(write_version.minor_write_version_));
+        write_uint64(strm, static_cast<std::uint64_t>(write_version.epoch_number()));
+        write_uint64(strm, static_cast<std::uint64_t>(write_version.minor_write_version()));
         strm.write(value.data(), value_len);
     }
 
@@ -128,8 +128,8 @@ public:
         write_uint64(strm, static_cast<std::uint64_t>(storage_id));
         strm.write(key.data(), key_len);
 
-        write_uint64(strm, static_cast<std::uint64_t>(write_version.epoch_number_));
-        write_uint64(strm, static_cast<std::uint64_t>(write_version.minor_write_version_));
+        write_uint64(strm, static_cast<std::uint64_t>(write_version.epoch_number()));
+        write_uint64(strm, static_cast<std::uint64_t>(write_version.minor_write_version()));
     }
 
     static void write_remove(boost::filesystem::ofstream& strm, std::string_view key_sid, std::string_view value_etc) {
@@ -272,4 +272,4 @@ private:
     }
 };
 
-} // namespace limestone::api
+} // namespace limestone::api::impl

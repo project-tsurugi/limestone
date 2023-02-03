@@ -20,14 +20,15 @@
 
 #include <boost/filesystem/path.hpp>
 
+#include <limestone/api/backup.h>
 #include <limestone/api/log_channel.h>
 
-namespace limestone::api {
+namespace limestone::api::impl {
 
 /**
  * @brief class encapsulating backup operations
  */
-class backup {
+class backup : public api::backup {
 public:
     /**
      * @brief create empty object
@@ -39,24 +40,36 @@ public:
     backup& operator=(backup&& other) noexcept = delete;
 
     /**
+     * @brief destruct the object
+     */
+    ~backup() noexcept;
+
+    /**
      * @brief returns whether the current backup operation is available
      * @return true if the current backup operation is available, false otherwise
      */
-    [[nodiscard]] virtual bool is_ready() const noexcept = 0;
+    [[nodiscard]] bool is_ready() const noexcept override;
 
     /**
      * @brief wait until backup operation is available
      * @param duration the maximum time to wait
      * @return true if the current backup operation is available, false otherwise
      */
-    [[nodiscard]] virtual bool wait_for_ready(std::size_t duration) const noexcept = 0;
+    [[nodiscard]] bool wait_for_ready(std::size_t duration) const noexcept override;
 
     /**
      * @brief returns a list of files to be backed up
      * @returns a list of files to be backed up
      * @note this operation requires that a backup is available
      */
-    virtual std::vector<boost::filesystem::path>& files() noexcept = 0;
+    std::vector<boost::filesystem::path>& files() noexcept override;
+
+private:
+    std::vector<boost::filesystem::path> files_;
+
+    explicit backup(std::set<boost::filesystem::path>& files) noexcept;
+
+    friend class datastore;
 };
 
-} // namespace limestone::api
+} // namespace limestone::api::impl

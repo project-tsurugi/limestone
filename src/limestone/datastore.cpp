@@ -25,15 +25,19 @@
 #include <limestone/logging.h>
 #include "logging_helper.h"
 
-#include <limestone/api/datastore.h>
-#include "log_entry.h"
+#include <limestone/api/backup_detail.h>
 
-namespace limestone::api {
+#include "datastore.h"
+#include "backup.h"
+#include "log_entry.h"
+#include "snapshot.h"
+
+namespace limestone::api::impl {
 
 datastore::datastore() noexcept = default;
 
-datastore::datastore(configuration const& conf) {
-    location_ = conf.data_locations_.at(0);
+datastore::datastore(api::configuration const& conf) {
+    location_ = conf.data_locations().at(0);
     boost::system::error_code error;
     const bool result_check = boost::filesystem::exists(location_, error);
     if (!result_check || error) {
@@ -79,17 +83,17 @@ void datastore::ready() noexcept {
     state_ = state::ready;
 }
 
-std::unique_ptr<snapshot> datastore::get_snapshot() const noexcept {
+std::unique_ptr<api::snapshot> datastore::get_snapshot() const noexcept {
     check_after_ready(static_cast<const char*>(__func__));
     return std::unique_ptr<snapshot>(new snapshot(location_));
 }
 
-std::shared_ptr<snapshot> datastore::shared_snapshot() const noexcept {
+std::shared_ptr<api::snapshot> datastore::shared_snapshot() const noexcept {
     check_after_ready(static_cast<const char*>(__func__));
     return std::shared_ptr<snapshot>(new snapshot(location_));
 }
 
-log_channel& datastore::create_channel(const boost::filesystem::path& location) noexcept {
+api::log_channel& datastore::create_channel(const boost::filesystem::path& location) noexcept {
     check_before_ready(static_cast<const char*>(__func__));
     
     std::lock_guard<std::mutex> lock(mtx_channel_);
@@ -182,12 +186,12 @@ std::future<void> datastore::shutdown() noexcept {
 }
 
 // old interface
-backup& datastore::begin_backup() noexcept {
+api::backup& datastore::begin_backup() noexcept {
     backup_ = std::unique_ptr<backup>(new backup(files_));
     return *backup_;
 }
 
-std::unique_ptr<backup_detail> datastore::begin_backup(backup_type btype) {
+std::unique_ptr<api::backup_detail> datastore::begin_backup(backup_type btype) {
     rotate_log_files();
 
     // LOG-0: all files are log file, so all files are selected in both standard/transaction mode.
@@ -237,10 +241,10 @@ std::unique_ptr<backup_detail> datastore::begin_backup(backup_type btype) {
             }
         }
     }
-    return std::unique_ptr<backup_detail>(new backup_detail(entries, epoch_id_switched_.load()));
+    return std::unique_ptr<backup_detail>(new api::backup_detail(entries, epoch_id_switched_.load()));
 }
 
-tag_repository& datastore::epoch_tag_repository() noexcept {
+api::tag_repository& datastore::epoch_tag_repository() noexcept {
     return tag_repository_;
 }
 
@@ -320,4 +324,14 @@ int64_t datastore::current_unix_epoch_in_millis() {
     return std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::system_clock::now().time_since_epoch()).count();
 }
 
+} // namespace limestone::api::impl
+
+namespace limestone::api {
+/**
+ * @brief factory method for datastore with the given configuration
+ * @param conf a reference to a configuration object used in the object construction
+ */
+std::unique_ptr<datastore> create_datastore(configuration const& conf) {
+    return std::make_unique<impl::datastore>(conf);
+}
 } // namespace limestone::api

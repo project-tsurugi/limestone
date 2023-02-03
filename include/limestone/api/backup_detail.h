@@ -24,9 +24,11 @@
 
 #include <limestone/api/epoch_id_type.h>
 
-namespace limestone::api {
-
+namespace limestone::api::impl {
 class datastore;
+} // namespace limestone::api::impl
+
+namespace limestone::api {
 
 /**
  * @brief information for prusik-era backup
@@ -99,7 +101,7 @@ private:
 
     std::vector<backup_detail::entry> entries_;
 
-    friend class datastore;
+    friend class impl::datastore;
 };
 
 enum class backup_type { standard, transaction };

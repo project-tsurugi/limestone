@@ -15,15 +15,29 @@
  */
 #pragma once
 
-#include <istream>
+#include <limestone/api/restore_progress.h>
+#include <limestone/status.h>
 
-namespace limestone::api {
+namespace limestone::api::impl {
 
-class large_object_view {
-public:
-    virtual std::size_t size() = 0;
+class datastore;
 
-    virtual std::iostream open() = 0;
+/**
+ * @brief a tag associated with a specific epoch
+ */
+class restore_progress : public api::restore_progress {
+private:
+/* FIXME: NOT IMPLEMENTED YET
+    const status status_;
+
+    const status_kind comments_;
+
+    const std::string source_;
+
+    const float progress_;
+
+    friend class datastore;
+*/
 };
-
-} // namespace limestone::api
+    
+} // namespace limestone::api::impl

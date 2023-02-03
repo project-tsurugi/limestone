@@ -44,6 +44,9 @@ public:
         return this->epoch_number_ < value.epoch_number_;
     }
 
+    epoch_id_type epoch_number() const noexcept { return epoch_number_; }
+    std::uint64_t minor_write_version() const noexcept { return minor_write_version_; }
+
 private:
     /**
      * @brief For PITR and major write version

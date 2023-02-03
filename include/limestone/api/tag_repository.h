@@ -22,9 +22,11 @@
 
 #include <limestone/api/epoch_tag.h>
 
-namespace limestone::api {
-
+namespace limestone::api::impl {
 class datastore;
+} // namespace limestone::api::impl
+
+namespace limestone::api {
 
 /**
  * @brief a repository of epoch tags
@@ -72,7 +74,7 @@ private:
 
     tag_repository() noexcept;
 
-    friend class datastore;
+    friend class impl::datastore;
 };
 
 } // namespace limestone::api

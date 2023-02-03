@@ -17,13 +17,16 @@
 
 #include <istream>
 
-namespace limestone::api {
+#include <limestone/api/large_object_view.h>
 
-class large_object_view {
+namespace limestone::api::impl {
+
+class large_object_view : public api::large_object_view {
 public:
-    virtual std::size_t size() = 0;
 
-    virtual std::iostream open() = 0;
+    std::size_t size() override;
+
+    std::iostream open() override;
 };
 
-} // namespace limestone::api
+} // namespace limestone::api::impl

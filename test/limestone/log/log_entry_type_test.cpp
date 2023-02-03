@@ -50,21 +50,21 @@ protected:
         }
     }
 
-    limestone::api::log_entry log_entry_begin_{};
-    limestone::api::log_entry log_entry_normal_{};
-    limestone::api::log_entry log_entry_end_{};
+    limestone::api::impl::log_entry log_entry_begin_{};
+    limestone::api::impl::log_entry log_entry_normal_{};
+    limestone::api::impl::log_entry log_entry_end_{};
     boost::filesystem::path file1_{};
     boost::filesystem::path file2_{};
 };
 
 TEST_F(log_entry_type_test, write_and_read) {
     boost::filesystem::ofstream ostrm;
-    limestone::api::log_entry log_entry;
+    limestone::api::impl::log_entry log_entry;
 
     ostrm.open(file1_, std::ios_base::out | std::ios_base::app | std::ios_base::binary);
-    limestone::api::log_entry::begin_session(ostrm, epoch_id);
-    limestone::api::log_entry::write(ostrm, storage_id, key, value, write_version);
-    limestone::api::log_entry::end_session(ostrm, epoch_id + 1);
+    limestone::api::impl::log_entry::begin_session(ostrm, epoch_id);
+    limestone::api::impl::log_entry::write(ostrm, storage_id, key, value, write_version);
+    limestone::api::impl::log_entry::end_session(ostrm, epoch_id + 1);
     ostrm.close();
 
     boost::filesystem::ifstream istrm;
@@ -75,10 +75,10 @@ TEST_F(log_entry_type_test, write_and_read) {
     EXPECT_FALSE(log_entry.read(istrm));
     istrm.close();
 
-    EXPECT_EQ(log_entry_begin_.type(), limestone::api::log_entry::entry_type::marker_begin);
+    EXPECT_EQ(log_entry_begin_.type(), limestone::api::impl::log_entry::entry_type::marker_begin);
     EXPECT_EQ(log_entry_begin_.epoch_id(), epoch_id);
 
-    EXPECT_EQ(log_entry_normal_.type(), limestone::api::log_entry::entry_type::normal_entry);
+    EXPECT_EQ(log_entry_normal_.type(), limestone::api::impl::log_entry::entry_type::normal_entry);
     EXPECT_EQ(log_entry_normal_.storage(), storage_id);
 
     std::string buf_key;
@@ -93,18 +93,18 @@ TEST_F(log_entry_type_test, write_and_read) {
     log_entry_normal_.write_version(buf_version);
     EXPECT_TRUE(buf_version == write_version);
 
-    EXPECT_EQ(log_entry_end_.type(), limestone::api::log_entry::entry_type::marker_end);
+    EXPECT_EQ(log_entry_end_.type(), limestone::api::impl::log_entry::entry_type::marker_end);
     EXPECT_EQ(log_entry_end_.epoch_id(), epoch_id + 1);
 }
 
 TEST_F(log_entry_type_test, write_and_read_and_write_and_read) {
     boost::filesystem::ofstream ostrm;
-    limestone::api::log_entry log_entry;
+    limestone::api::impl::log_entry log_entry;
     
     ostrm.open(file1_, std::ios_base::out | std::ios_base::app | std::ios_base::binary);
-    limestone::api::log_entry::begin_session(ostrm, epoch_id);
-    limestone::api::log_entry::write(ostrm, storage_id, key, value, write_version);
-    limestone::api::log_entry::end_session(ostrm, epoch_id + 1);
+    limestone::api::impl::log_entry::begin_session(ostrm, epoch_id);
+    limestone::api::impl::log_entry::write(ostrm, storage_id, key, value, write_version);
+    limestone::api::impl::log_entry::end_session(ostrm, epoch_id + 1);
     ostrm.close();
 
     boost::filesystem::ifstream istrm;
@@ -126,10 +126,10 @@ TEST_F(log_entry_type_test, write_and_read_and_write_and_read) {
     istrm2.close();
 
 
-    EXPECT_EQ(log_entry_begin_.type(), limestone::api::log_entry::entry_type::marker_begin);
+    EXPECT_EQ(log_entry_begin_.type(), limestone::api::impl::log_entry::entry_type::marker_begin);
     EXPECT_EQ(log_entry_begin_.epoch_id(), epoch_id);
 
-    EXPECT_EQ(log_entry_normal_.type(), limestone::api::log_entry::entry_type::normal_entry);
+    EXPECT_EQ(log_entry_normal_.type(), limestone::api::impl::log_entry::entry_type::normal_entry);
     EXPECT_EQ(log_entry_normal_.storage(), storage_id);
 
     std::string buf_key;
@@ -144,7 +144,7 @@ TEST_F(log_entry_type_test, write_and_read_and_write_and_read) {
     log_entry_normal_.write_version(buf_version);
     EXPECT_TRUE(buf_version == write_version);
 
-    EXPECT_EQ(log_entry_end_.type(), limestone::api::log_entry::entry_type::marker_end);
+    EXPECT_EQ(log_entry_end_.type(), limestone::api::impl::log_entry::entry_type::marker_end);
     EXPECT_EQ(log_entry_end_.epoch_id(), epoch_id + 1);
 }
 

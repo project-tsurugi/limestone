@@ -47,12 +47,15 @@ public:
      */
     configuration(const std::vector<boost::filesystem::path>&& data_locations, boost::filesystem::path metadata_location) noexcept;
 
+    std::vector<boost::filesystem::path> data_locations() const noexcept { return data_locations_; }
+
+    boost::filesystem::path metadata_location() const noexcept { return metadata_location_; };
+
 private:
     std::vector<boost::filesystem::path> data_locations_{};
 
     boost::filesystem::path metadata_location_{};
 
-    friend class datastore;
 };
 
 } // namespace limestone::api

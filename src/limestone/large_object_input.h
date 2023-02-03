@@ -15,15 +15,25 @@
  */
 #pragma once
 
-#include <istream>
+#include <string>
 
-namespace limestone::api {
+#include <boost/filesystem/path.hpp>
 
-class large_object_view {
+#include <limestone/api/large_object_input.h>
+
+namespace limestone::api::impl {
+
+class large_object_input : public api::large_object_input {
 public:
-    virtual std::size_t size() = 0;
+    
+    explicit large_object_input(std::string buffer);
+    explicit large_object_input(boost::filesystem::path path);
+    ~large_object_input();
 
-    virtual std::iostream open() = 0;
+    void locate(boost::filesystem::path path) override;
+
+    void detach() override;
+
 };
 
-} // namespace limestone::api
+} // namespace limestone::api::impl

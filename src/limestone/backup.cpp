@@ -13,9 +13,9 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-#include <limestone/api/backup.h>
+#include "backup.h"
 
-namespace limestone::api {
+namespace limestone::api::impl {
 
 backup::backup(std::set<boost::filesystem::path>& files) noexcept {
     for(auto& e : files) {
@@ -38,4 +38,4 @@ std::vector<boost::filesystem::path>& backup::files() noexcept {
 }
 
 
-} // namespace limestone::api
+} // namespace limestone::api::impl

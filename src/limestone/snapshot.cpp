@@ -21,21 +21,24 @@
 
 #include <boost/filesystem.hpp>
 
-namespace limestone::api {  // FIXME fill implementation
+#include "cursor.h"
+#include "snapshot.h"
+
+namespace limestone::api::impl {  // FIXME fill implementation
 
 snapshot::snapshot(const boost::filesystem::path& location) noexcept : dir_(location / boost::filesystem::path(std::string(subdirectory_name_))) {
 }
 
-std::unique_ptr<cursor> snapshot::get_cursor() const noexcept {
+std::unique_ptr<api::cursor> snapshot::get_cursor() const noexcept {
     return std::unique_ptr<cursor>(new cursor(file_path()));
 }
 
-std::unique_ptr<cursor> snapshot::find([[maybe_unused]] storage_id_type storage_id, [[maybe_unused]] std::string_view entry_key) const noexcept {
+std::unique_ptr<api::cursor> snapshot::find([[maybe_unused]] storage_id_type storage_id, [[maybe_unused]] std::string_view entry_key) const noexcept {
     LOG_LP(ERROR) << "not implemented";
     std::abort();  // FIXME should implement
 }
 
-std::unique_ptr<cursor> snapshot::scan([[maybe_unused]] storage_id_type storage_id, [[maybe_unused]] std::string_view entry_key, [[maybe_unused]] bool inclusive) const noexcept {
+std::unique_ptr<api::cursor> snapshot::scan([[maybe_unused]] storage_id_type storage_id, [[maybe_unused]] std::string_view entry_key, [[maybe_unused]] bool inclusive) const noexcept {
     LOG_LP(ERROR) << "not implemented";
     std::abort();  // FIXME should implement
 }
@@ -44,4 +47,4 @@ boost::filesystem::path snapshot::file_path() const noexcept {
     return dir_ / boost::filesystem::path(std::string(file_name_));
 }
 
-} // namespace limestone::api
+} // namespace limestone::api::impl

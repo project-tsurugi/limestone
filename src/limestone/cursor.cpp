@@ -19,9 +19,10 @@
 #include <limestone/logging.h>
 #include "logging_helper.h"
 
+#include "cursor.h"
 #include "log_entry.h"
 
-namespace limestone::api {
+namespace limestone::api::impl {
 
 cursor::cursor(const boost::filesystem::path& file) noexcept : log_entry_(std::make_unique<log_entry>()) {
     istrm_.open(file, std::ios_base::in | std::ios_base::binary );

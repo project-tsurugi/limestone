@@ -37,18 +37,11 @@ public:
         canceled = -2,
     };
 
-    restore_progress() = delete;
+    // FIXME
+    // restore_progress() = delete;
+    restore_progress() {}
 
-private:
-    const status status_;
-
-    const status_kind comments_;
-
-    const std::string source_;
-
-    const float progress_;
-
-    friend class datastore;
+    static const restore_progress FIXME;
 };
     
 } // namespace limestone::api

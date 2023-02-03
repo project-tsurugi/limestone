@@ -23,20 +23,16 @@ namespace limestone::api {
 
 class large_object_input {
 public:
-    
-    explicit large_object_input(std::string buffer);
-    explicit large_object_input(boost::filesystem::path path);
-    ~large_object_input();
+    virtual ~large_object_input() = default;
 
     large_object_input(large_object_input const& other) = delete;
     large_object_input& operator=(large_object_input const& other) = delete;
     large_object_input(large_object_input&& other) noexcept = delete;
     large_object_input& operator=(large_object_input&& other) noexcept = delete;
 
-    void locate(boost::filesystem::path path);
+    virtual void locate(boost::filesystem::path path) = 0;
 
-    void detach();
-
+    virtual void detach() = 0;
 };
 
 } // namespace limestone::api

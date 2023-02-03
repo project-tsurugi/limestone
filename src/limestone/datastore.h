@@ -26,24 +26,28 @@
 #include <boost/filesystem/path.hpp>
 
 #include <limestone/status.h>
-#include <limestone/api/backup.h>
 #include <limestone/api/backup_detail.h>
-#include <limestone/api/log_channel.h>
 #include <limestone/api/configuration.h>
+#include <limestone/api/datastore.h>
 #include <limestone/api/file_set_entry.h>
-#include <limestone/api/snapshot.h>
 #include <limestone/api/epoch_id_type.h>
 #include <limestone/api/write_version_type.h>
-#include <limestone/api/tag_repository.h>
-#include <limestone/api/restore_progress.h>
 
-namespace limestone::api {
+#include "log_channel.h"
+
+namespace limestone::api::impl {
 
 /**
  * @brief datastore interface to start/stop the services, store log, create snapshot for recover from log files
  * @details this object is not thread-safe except for create_channel().
  */
-class datastore {
+class datastore : public api::datastore {
+    friend class log_channel;
+
+    /**
+     * @brief name of a file to record durable epoch
+     */
+    static constexpr const std::string_view epoch_file_name = "epoch";  // NOLINT
 
     enum class state : std::int64_t {
         not_ready = 0,
@@ -54,13 +58,20 @@ class datastore {
 public:
     /**
      * @brief create empty object
+     * @note this is for test purpose only, must not be used for any purpose other than testing
      */
-    datastore() = default;
+    datastore() noexcept;
+
+    /**
+     * @brief create an object with the given configuration
+     * @param conf a reference to a configuration object used in the object construction
+     */
+    explicit datastore(api::configuration const& conf);
 
     /**
      * @brief destruct the object
      */
-    virtual ~datastore() noexcept = default;
+    ~datastore() noexcept override;
 
     datastore(datastore const& other) = delete;
     datastore& operator=(datastore const& other) = delete;
@@ -74,7 +85,7 @@ public:
      * @attention this function is not thread-safe.
      * @note overwrite flag is deplicated
      */
-    virtual void recover() const noexcept = 0;
+    void recover() const noexcept override;
 
     /**
      * @brief restore log files, etc. located at from directory
@@ -83,38 +94,38 @@ public:
      * @attention this function is not thread-safe.
      * @return status indicating whether the process ends successfully or not
      */
-    virtual status restore(std::string_view from, bool keep_backup) const noexcept = 0;
+    status restore(std::string_view from, bool keep_backup) const noexcept override;
 
     // restore (prusik era)
-    virtual status restore(std::string_view from, std::vector<file_set_entry>& entries) = 0;
+    status restore(std::string_view from, std::vector<file_set_entry>& entries) override;
 
     /**
      * @brief returns the status of the restore process that is currently in progress or that has finished immediately before
      * @attention this function is not thread-safe.
      * @return the status of the restore process
      */
-    virtual restore_progress restore_status() const noexcept = 0;
+    api::restore_progress restore_status() const noexcept override;
 
     /**
      * @brief transition this object to an operational state
      * @details after this method is called, create_channel() can be invoked.
      * @attention this function is not thread-safe, and the from directory must not contain any files other than log files.
      */
-    virtual void ready() noexcept = 0;
+    void ready() noexcept override;
 
     /**
      * @brief provides a pointer of the snapshot object
      * @details snapshot used is location_ / snapshot::subdirectory_name_ / snapshot::file_name_
      * @return the reference to the object associated with the latest available snapshot
      */
-    virtual std::unique_ptr<snapshot> get_snapshot() const noexcept = 0;
+    std::unique_ptr<api::snapshot> get_snapshot() const noexcept override;
 
     /**
      * @brief provides a shared pointer of the snapshot object
      * @details snapshot is location_ / snapshot::subdirectory_name_ / snapshot::file_name_
      * @return a shared pointer to the object associated with the latest available snapshot
      */
-    virtual std::shared_ptr<snapshot> shared_snapshot() const noexcept = 0;
+    std::shared_ptr<api::snapshot> shared_snapshot() const noexcept override;
 
     /**
      * @brief create a log_channel to write logs to a file
@@ -123,28 +134,28 @@ public:
      * @return the reference of the log_channel
      * @attention this function should be called before the ready() is called.
      */
-    virtual log_channel& create_channel(const boost::filesystem::path& location) noexcept = 0;
+    api::log_channel& create_channel(const boost::filesystem::path& location) noexcept override;
 
     /**
      * @brief provide the largest epoch ID
      * @return the largest epoch ID that has been successfully persisted
      * @note designed to make epoch ID monotonic across reboots
      */
-    virtual epoch_id_type last_epoch() const noexcept = 0;
+    epoch_id_type last_epoch() const noexcept override;
 
     /**
      * @brief change the current epoch ID
      * @param new epoch id which must be greater than current epoch ID.
      * @attention this function should be called after the ready() is called.
      */
-    virtual void switch_epoch(epoch_id_type epoch_id) noexcept = 0;
+    void switch_epoch(epoch_id_type epoch_id) noexcept override;
 
     /**
      * @brief register a callback on successful persistence
      * @param callback a pointer to the callback function
      * @attention this function should be called before the ready() is called.
      */
-    virtual void add_persistent_callback(std::function<void(epoch_id_type)> callback) noexcept = 0;
+    void add_persistent_callback(std::function<void(epoch_id_type)> callback) noexcept override;
 
     /**
      * @brief notify this of the location of available safe snapshots
@@ -156,28 +167,28 @@ public:
      * @note immediately after datastore::ready(), the last_epoch is treated as the maximum write version
      * with last_epoch as the write major version.
      */
-    virtual void switch_safe_snapshot(write_version_type write_version, bool inclusive) const noexcept = 0;
+    void switch_safe_snapshot(write_version_type write_version, bool inclusive) const noexcept override;
 
     /**
      * @brief register a callback to be called when the safe snapshot location is changed internally
      * @param callback a pointer to the callback function
      * @attention this function should be called before the ready() is called.
      */
-    virtual void add_snapshot_callback(std::function<void(write_version_type)> callback) noexcept = 0;
+    void add_snapshot_callback(std::function<void(write_version_type)> callback) noexcept override;
 
     /**
      * @brief prohibits new persistent sessions from starting thereafter
      * @detail move to the stop preparation state.
      * @return the future of void, which allows get() after the transition to the stop preparation state.
      */
-    virtual std::future<void> shutdown() noexcept = 0;
+    std::future<void> shutdown() noexcept override;
 
     /**
      * @brief start backup operation
      * @detail a backup object is created, which contains a list of log files.
      * @return a reference to the backup object.
      */
-    virtual backup& begin_backup() noexcept = 0;
+    api::backup& begin_backup() noexcept override;
 
     // backup (prusik era)
     /**
@@ -185,26 +196,96 @@ public:
      * @detail a backup_detail object is created, which contains a list of log entry.
      * @return a reference to the backup_detail object.
      */
-    virtual std::unique_ptr<backup_detail> begin_backup(backup_type btype) = 0;
+    std::unique_ptr<api::backup_detail> begin_backup(backup_type btype) override;
 
     /**
      * @brief provide epoch tag repository
      * @return a reference to the epoch tag repository
      * @note available both before and after ready() call
      */
-    virtual tag_repository& epoch_tag_repository() noexcept = 0;
+    api::tag_repository& epoch_tag_repository() noexcept override;
 
     /**
      * @brief rewinds the state of the data store to the point in time of the specified epoch
      * @detail create a snapshot file for the specified epoch.
      * @attention this function should be called before the ready() is called.
      */
-    virtual void recover(const epoch_tag&) const noexcept = 0;
+    void recover(const epoch_tag&) const noexcept override;
+
+protected:  // for tests
+    auto& log_channels_for_tests() const noexcept { return log_channels_; }
+    auto epoch_id_informed_for_tests() const noexcept { return epoch_id_informed_.load(); }
+    auto epoch_id_recorded_for_tests() const noexcept { return epoch_id_recorded_.load(); }
+    auto& files_for_tests() const noexcept { return files_; }
+    
+private:
+    std::vector<std::unique_ptr<log_channel>> log_channels_;
+
+    boost::filesystem::path location_{};
+
+    std::atomic_uint64_t epoch_id_switched_{};
+
+    std::atomic_uint64_t epoch_id_informed_{};
+
+    std::atomic_uint64_t epoch_id_recorded_{};
+
+    std::unique_ptr<backup> backup_{};
+
+    std::function<void(epoch_id_type)> persistent_callback_;
+
+    std::function<void(write_version_type)> snapshot_callback_;
+
+    boost::filesystem::path epoch_file_path_{};
+
+    api::tag_repository tag_repository_{};
+
+    std::atomic_uint64_t log_channel_id_{};
+
+    // used for backup
+    //   (old) full backup :   target is entire <files_>
+    //   (new/prusik) backup : target is rotated files, i.e. <files_> minus active log files
+    std::set<boost::filesystem::path> files_{};
+
+    std::mutex mtx_channel_{};
+
+    std::mutex mtx_files_{};
+
+    std::mutex mtx_epoch_file_{};
+
+    state state_{};
+
+    void add_file(const boost::filesystem::path& file) noexcept;
+
+    // opposite of add_file
+    void subtract_file(const boost::filesystem::path& file);
+
+    epoch_id_type search_max_durable_epock_id() noexcept;
+
+    void update_min_epoch_id(bool from_switch_epoch = false) noexcept;
+    
+    void check_after_ready(std::string_view func) const noexcept;
+
+    void check_before_ready(std::string_view func) const noexcept;
+
+    /**
+     * @brief create snapshot from log files stored in the location directory
+     * @details file name of snapshot to be created is snapshot::file_name_ which is stored in location_ / snapshot::subdirectory_name_.
+     * @param from the location of log files
+     * @attention this function is not thread-safe.
+     */
+    void create_snapshot() noexcept;
+
+    /**
+     * @brief requests the data store to rotate log files
+     */
+    epoch_id_type rotate_log_files();
+
+    /**
+     * @brief rotate epoch file
+     */
+    void rotate_epoch_file();
+
+    int64_t current_unix_epoch_in_millis();
 };
 
-/**
- * @brief factory method for datastore with the given configuration
- * @param conf a reference to a configuration object used in the object construction
- */
-std::unique_ptr<datastore> create_datastore(configuration const& conf);
-} // namespace limestone::api
+} // namespace limestone::api::impl

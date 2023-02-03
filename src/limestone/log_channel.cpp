@@ -22,12 +22,11 @@
 #include <limestone/logging.h>
 #include "logging_helper.h"
 
-#include <limestone/api/log_channel.h>
-
-#include <limestone/api/datastore.h>
+#include "datastore.h"
+#include "log_channel.h"
 #include "log_entry.h"
 
-namespace limestone::api {
+namespace limestone::api::impl {
 
 log_channel::log_channel(boost::filesystem::path location, std::size_t id, datastore& envelope) noexcept
     : envelope_(envelope), location_(std::move(location)), id_(id)
@@ -117,4 +116,4 @@ void log_channel::do_rotate_file(epoch_id_type epoch) {
     registered_ = false;
 }
 
-} // namespace limestone::api
+} // namespace limestone::api::impl

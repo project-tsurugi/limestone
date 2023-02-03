@@ -23,7 +23,7 @@
 // #include <limestone/api/datastore.h>
 // #include "log_entry.h"
 
-namespace limestone::api {
+namespace limestone::api::impl {
 
 static constexpr const std::string_view leveldb_dir = "leveldb";
 
@@ -78,4 +78,4 @@ private:
     }
 };
 
-} // namespace limestone::api
+} // namespace limestone::api::impl

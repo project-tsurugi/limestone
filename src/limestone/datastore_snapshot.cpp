@@ -21,11 +21,13 @@
 #include <limestone/logging.h>
 #include "logging_helper.h"
 
-#include <limestone/api/datastore.h>
-#include "log_entry.h"
+#include "datastore.h"
 #include "leveldb_wrapper.h"
+#include "log_entry.h"
+#include "log_channel.h"
+#include "snapshot.h"
 
-namespace limestone::api {
+namespace limestone::api::impl {
 
 static epoch_id_type last_durable_epoch(const boost::filesystem::path& file) noexcept {
     epoch_id_type rv{};
@@ -161,4 +163,4 @@ void datastore::create_snapshot() noexcept {
     delete it;  // NOLINT (typical usage of leveldb)
 }
 
-} // namespace limestone::api
+} // namespace limestone::api::impl

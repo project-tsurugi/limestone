@@ -21,25 +21,24 @@
 #include <boost/filesystem/path.hpp>
 #include <boost/filesystem.hpp>
 
+#include <limestone/api/cursor.h>
 #include <limestone/api/storage_id_type.h>
 #include <limestone/api/large_object_view.h>
 
-namespace limestone::api {
+namespace limestone::api::impl {
+
+class log_entry;
+class snapshot;
 
 /**
  * @brief a cursor to scan entries on the snapshot
  */
-class cursor {
+class cursor :public api::cursor {
 public:
-    /**
-     * @brief create empty object
-     */
-    cursor() = default;
-
     /**
      * @brief destruct the object
      */
-    virtual ~cursor() noexcept = default;
+    ~cursor() noexcept override;
 
     cursor(cursor const& other) = delete;
     cursor& operator=(cursor const& other) = delete;
@@ -51,31 +50,40 @@ public:
      * @attention this function is not thread-safe.
      * @return true if the next entry exists, false otherwise
      */
-    virtual bool next() noexcept = 0;
+    bool next() noexcept override;
 
     /**
      * @brief returns the storage ID of the entry at the current cursor position
      * @return the storage ID of the current entry
      */
-    virtual storage_id_type storage() const noexcept = 0;
+    storage_id_type storage() const noexcept override;
 
     /**
      * @brief returns the key byte string of the entry at the current cursor position
      * @param buf a reference to a byte string in which the key is stored
      */
-    virtual void key(std::string& buf) const noexcept = 0;
+    void key(std::string& buf) const noexcept override;
 
     /**
      * @brief returns the value byte string of the entry at the current cursor position
      * @param buf a reference to a byte string in which the value is stored
      */
-    virtual void value(std::string& buf) const noexcept = 0;
+    void value(std::string& buf) const noexcept override;
 
     /**
      * @brief returns a list of large objects associated with the entry at the current cursor position
      * @return a list of large objects associated with the current entry
      */
-    virtual std::vector<large_object_view>& large_objects() noexcept = 0;
+    std::vector<large_object_view>& large_objects() noexcept override;
+
+private:
+    boost::filesystem::ifstream istrm_{};
+    std::unique_ptr<log_entry> log_entry_;
+    std::vector<large_object_view> large_objects_{};
+
+    explicit cursor(const boost::filesystem::path& file) noexcept;
+ 
+    friend class snapshot;
 };
 
-} // namespace limestone::api
+} // namespace limestone::api::impl

@@ -49,8 +49,8 @@ protected:
         }
     }
 
-    limestone::api::log_entry log_entry_{};
-    limestone::api::log_entry log_entry2_{};
+    limestone::api::impl::log_entry log_entry_{};
+    limestone::api::impl::log_entry log_entry2_{};
     boost::filesystem::path file1_{};
     boost::filesystem::path file2_{};
 };
@@ -59,7 +59,7 @@ TEST_F(log_entry_test, write_and_read) {
     boost::filesystem::ofstream ostrm;
     
     ostrm.open(file1_, std::ios_base::out | std::ios_base::app | std::ios_base::binary);
-    limestone::api::log_entry::write(ostrm, storage_id, key, value, write_version);
+    limestone::api::impl::log_entry::write(ostrm, storage_id, key, value, write_version);
     ostrm.close();
 
     boost::filesystem::ifstream istrm;
@@ -87,7 +87,7 @@ TEST_F(log_entry_test, write_and_read_and_write_and_read) {
     boost::filesystem::ofstream ostrm;
     
     ostrm.open(file1_, std::ios_base::out | std::ios_base::app | std::ios_base::binary);
-    limestone::api::log_entry::write(ostrm, storage_id, key, value, write_version);
+    limestone::api::impl::log_entry::write(ostrm, storage_id, key, value, write_version);
     ostrm.close();
 
     boost::filesystem::ifstream istrm;
@@ -97,7 +97,7 @@ TEST_F(log_entry_test, write_and_read_and_write_and_read) {
 
     boost::filesystem::ofstream ostrm2;
     ostrm2.open(file2_, std::ios_base::out | std::ios_base::app | std::ios_base::binary);
-    limestone::api::log_entry::write(ostrm2, storage_id, key, value, write_version);
+    limestone::api::impl::log_entry::write(ostrm2, storage_id, key, value, write_version);
     ostrm2.close();
 
     boost::filesystem::ifstream istrm2;
