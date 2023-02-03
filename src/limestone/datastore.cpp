@@ -69,7 +69,7 @@ datastore::datastore(api::configuration const& conf) {
         add_file(epoch_file_path_);
     }
     
-    DVLOG_LP(log_debug) << "datastore is created, location = " << location_.string();
+    VLOG_LP(log_debug) << "datastore is created, location = " << location_.string();
 }
 
 datastore::~datastore() noexcept = default;
@@ -310,13 +310,13 @@ void datastore::subtract_file(const boost::filesystem::path& file) {
 
 void datastore::check_after_ready(std::string_view func) const noexcept {
     if (state_ == state::not_ready) {
-        DVLOG_LP(log_debug) << func << " called before ready()";
+        LOG_LP(WARNING) << func << " called before ready()";
     }
 }
 
 void datastore::check_before_ready(std::string_view func) const noexcept {
     if (state_ != state::not_ready) {
-        DVLOG_LP(log_debug) << func << " called after ready()";
+        LOG_LP(WARNING) << func << " called after ready()";
     }
 }
 

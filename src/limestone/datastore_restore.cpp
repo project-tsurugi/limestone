@@ -26,7 +26,7 @@
 namespace limestone::api::impl {
 
 status datastore::restore(std::string_view from, bool keep_backup) const noexcept {
-    DVLOG_LP(log_debug) << "restore begin, from directory = " << from << " , keep_backup = " << (keep_backup ? "true" : "false");
+    VLOG_LP(log_debug) << "restore begin, from directory = " << from << " , keep_backup = " << std::boolalpha << keep_backup;
 
     BOOST_FOREACH(const boost::filesystem::path& p, std::make_pair(boost::filesystem::directory_iterator(location_), boost::filesystem::directory_iterator())) {
         if(!boost::filesystem::is_directory(p)) {
@@ -64,10 +64,10 @@ status datastore::restore(std::string_view from, bool keep_backup) const noexcep
 
 // prusik era
 status datastore::restore(std::string_view from, std::vector<file_set_entry>& entries) {
-    DVLOG_LP(log_debug) << "restore (from prusik) begin, from directory = " << from;
+    VLOG_LP(log_debug) << "restore (from prusik) begin, from directory = " << from;
 
     // purge logdir
-    // FIXME: copied from (old) restore(), fix duplicate
+    // FIXME: copied this code from (old) restore(), fix duplicate
     BOOST_FOREACH(const boost::filesystem::path& p, std::make_pair(boost::filesystem::directory_iterator(location_), boost::filesystem::directory_iterator())) {
         if(!boost::filesystem::is_directory(p)) {
             try {

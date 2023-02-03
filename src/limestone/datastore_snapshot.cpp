@@ -29,14 +29,15 @@
 
 namespace limestone::api::impl {
 
-static epoch_id_type last_durable_epoch(const boost::filesystem::path& file) noexcept {
-    epoch_id_type rv{};
+// return max epoch in file.
+static std::optional<epoch_id_type> last_durable_epoch(const boost::filesystem::path& file) noexcept {
+    std::optional<epoch_id_type> rv;
 
     boost::filesystem::ifstream istrm;
     log_entry e;
     istrm.open(file, std::ios_base::in | std::ios_base::binary);
     while (e.read(istrm)) {
-        if (e.epoch_id() > rv) {
+        if (!rv.has_value() || e.epoch_id() > rv) {
             rv = e.epoch_id();
         }
     }
@@ -44,16 +45,42 @@ static epoch_id_type last_durable_epoch(const boost::filesystem::path& file) noe
     return rv;
 }
 
+epoch_id_type datastore::last_durable_epoch_in_dir() noexcept {
+    auto& from_dir = location_;
+    // read main epoch file first
+    std::optional<epoch_id_type> ld_epoch = last_durable_epoch(from_dir / std::string(log_channel::prefix));
+    if (ld_epoch.has_value()) {
+        return *ld_epoch;
+    }
+
+    // main epoch file is empty,
+    // read all rotated-epoch files
+    for (const boost::filesystem::path& p : boost::filesystem::directory_iterator(from_dir)) {
+        if (p.filename().string().rfind(log_channel::prefix, 0) == 0) {  // starts_with(log_channel::prefix)
+            // this is epoch file (main one or rotated)
+            std::optional<epoch_id_type> epoch = last_durable_epoch(p);
+            if (!epoch.has_value()) {
+                continue;  // file is empty
+            }
+            // ld_epoch = max(ld_epoch, epoch)
+            if (!ld_epoch.has_value() || *ld_epoch < *epoch) {
+                ld_epoch = epoch;
+            }
+        }
+    }
+    return ld_epoch.value_or(0);  // 0 = minimum epoch
+}
+
 void datastore::create_snapshot() noexcept {
     auto& from_dir = location_;
     auto lvldb = std::make_unique<leveldb_wrapper>(from_dir);
 
-    epoch_id_type ld_epoch = last_durable_epoch(from_dir / boost::filesystem::path(std::string(epoch_file_name)));
+    epoch_id_type ld_epoch = last_durable_epoch_in_dir();
     epoch_id_switched_.store(ld_epoch + 1);
 
     BOOST_FOREACH(const boost::filesystem::path& p, std::make_pair(boost::filesystem::directory_iterator(from_dir), boost::filesystem::directory_iterator())) {
         if (p.filename().string().substr(0, log_channel::prefix.length()) == log_channel::prefix) {
-            DVLOG_LP(log_debug) << "processing pwal file: " << p.filename().string();
+            VLOG_LP(log_info) << "processing pwal file: " << p.filename().string();
             log_entry e;
             epoch_id_type current_epoch{UINT64_MAX};
 

@@ -20,6 +20,10 @@ public:
             std::cerr << "cannot make directory" << std::endl;
         }
 
+        regen_datastore();
+    }
+
+    void regen_datastore() {
         std::vector<boost::filesystem::path> data_locations{};
         data_locations.emplace_back(location);
         boost::filesystem::path metadata_location{location};
@@ -30,7 +34,7 @@ public:
 
     void TearDown() {
         datastore_ = nullptr;
-//        boost::filesystem::remove_all(location);
+        boost::filesystem::remove_all(location);
     }
 
     bool starts_with(std::string a, std::string b) { return a.substr(0, b.length()) == b; };
@@ -38,6 +42,15 @@ public:
 protected:
     std::unique_ptr<limestone::api::datastore_test> datastore_{};
 };
+
+void create_file(boost::filesystem::path path, std::string_view content) {
+    boost::filesystem::ofstream strm{};
+    strm.open(path, std::ios_base::out | std::ios_base::app | std::ios_base::binary);
+    strm.write(content.data(), content.size());
+    strm.flush();
+    ASSERT_FALSE(!strm || !strm.is_open() || strm.bad() || strm.fail());
+    strm.close();
+}
 
 TEST_F(rotate_test, log_is_rotated) { // NOLINT
     using namespace limestone::api;
@@ -113,24 +126,9 @@ TEST_F(rotate_test, restore_prusik_all_abs) { // NOLINT
     boost::filesystem::create_directories(pwal2d);
     boost::filesystem::create_directories(epochd);
 
-    boost::filesystem::ofstream strm{};
-    strm.open(pwal1d / pwal1fn, std::ios_base::out | std::ios_base::app | std::ios_base::binary);
-    strm.write("1", 1);
-    strm.flush();
-    ASSERT_FALSE(!strm || !strm.is_open() || strm.bad() || strm.fail());
-    strm.close();
-
-    strm.open(pwal2d / pwal2fn, std::ios_base::out | std::ios_base::app | std::ios_base::binary);
-    strm.write("2", 1);
-    strm.flush();
-    ASSERT_FALSE(!strm || !strm.is_open() || strm.bad() || strm.fail());
-    strm.close();
-
-    strm.open(epochd / epochfn, std::ios_base::out | std::ios_base::app | std::ios_base::binary);
-    strm.write("e", 1);
-    strm.flush();
-    ASSERT_FALSE(!strm || !strm.is_open() || strm.bad() || strm.fail());
-    strm.close();
+    create_file(pwal1d / pwal1fn, "1");
+    create_file(pwal2d / pwal2fn, "2");
+    create_file(epochd / epochfn, "e");
     // setup done
 
     std::vector<file_set_entry> data{};
@@ -145,14 +143,9 @@ TEST_F(rotate_test, restore_prusik_all_abs) { // NOLINT
     EXPECT_TRUE(boost::filesystem::exists(location_path / epochfn));
 
     // file count check, using newly created datastore
-    std::vector<boost::filesystem::path> data_locations{};
-    data_locations.emplace_back(location);
-    boost::filesystem::path metadata_location{location};
-    limestone::api::configuration conf(data_locations, metadata_location);
+    regen_datastore();
 
-    auto datastore2 = std::make_unique<limestone::api::datastore_test>(conf);
-
-    auto& backup = datastore2->begin_backup();  // const function
+    auto& backup = datastore_->begin_backup();  // const function
     auto files = backup.files();
     EXPECT_EQ(files.size(), 3);
 }
@@ -171,24 +164,9 @@ TEST_F(rotate_test, restore_prusik_all_rel) { // NOLINT
     boost::filesystem::create_directories(pwal2d);
     boost::filesystem::create_directories(epochd);
 
-    boost::filesystem::ofstream strm{};
-    strm.open(pwal1d / pwal1fn, std::ios_base::out | std::ios_base::app | std::ios_base::binary);
-    strm.write("1", 1);
-    strm.flush();
-    ASSERT_FALSE(!strm || !strm.is_open() || strm.bad() || strm.fail());
-    strm.close();
-
-    strm.open(pwal2d / pwal2fn, std::ios_base::out | std::ios_base::app | std::ios_base::binary);
-    strm.write("2", 1);
-    strm.flush();
-    ASSERT_FALSE(!strm || !strm.is_open() || strm.bad() || strm.fail());
-    strm.close();
-
-    strm.open(epochd / epochfn, std::ios_base::out | std::ios_base::app | std::ios_base::binary);
-    strm.write("e", 1);
-    strm.flush();
-    ASSERT_FALSE(!strm || !strm.is_open() || strm.bad() || strm.fail());
-    strm.close();
+    create_file(pwal1d / pwal1fn, "1");
+    create_file(pwal2d / pwal2fn, "2");
+    create_file(epochd / epochfn, "e");
     // setup done
 
     std::vector<file_set_entry> data{};
@@ -203,15 +181,43 @@ TEST_F(rotate_test, restore_prusik_all_rel) { // NOLINT
     EXPECT_TRUE(boost::filesystem::exists(location_path / epochfn));
 
     // file count check, using newly created datastore
-    std::vector<boost::filesystem::path> data_locations{};
-    data_locations.emplace_back(location);
-    boost::filesystem::path metadata_location{location};
-    limestone::api::configuration conf(data_locations, metadata_location);
-    auto datastore2 = std::make_unique<limestone::api::datastore_test>(conf);
+    regen_datastore();
 
-    auto& backup = datastore2->begin_backup();  // const function
+    auto& backup = datastore_->begin_backup();  // const function
     auto files = backup.files();
     EXPECT_EQ(files.size(), 3);
+}
+
+TEST_F(rotate_test, get_snapshot_works) { // NOLINT
+    using namespace limestone::api;
+
+    datastore_->ready();
+    log_channel& channel = datastore_->create_channel(boost::filesystem::path(location));
+    log_channel& unused_channel = datastore_->create_channel(boost::filesystem::path(location));
+    datastore_->switch_epoch(42);
+    channel.begin_session();
+    channel.add_entry(3, "k1", "v1", {100, 4});
+    channel.end_session();
+    datastore_->switch_epoch(43);
+
+    datastore_->begin_backup(backup_type::standard);  // rotate files
+
+    datastore_->shutdown();
+    regen_datastore();
+    // setup done
+
+    datastore_->recover();
+    datastore_->ready();
+    auto snapshot = datastore_->get_snapshot();
+    auto cursor = snapshot->get_cursor();
+    std::string buf;
+
+    ASSERT_TRUE(cursor->next());
+    EXPECT_EQ(cursor->storage(), 3);
+    EXPECT_EQ((cursor->key(buf), buf), "k1");
+    EXPECT_EQ((cursor->value(buf), buf), "v1");
+    EXPECT_FALSE(cursor->next());
+    datastore_->shutdown();
 }
 
 }  // namespace limestone::testing
