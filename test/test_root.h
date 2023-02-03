@@ -29,6 +29,7 @@ class datastore_test : public impl::datastore {
 public:
     explicit datastore_test(configuration& conf) : impl::datastore(conf) {}
     datastore_test() : impl::datastore() {}
+    ~datastore_test() noexcept override = default;
     auto& log_channels() const noexcept { return log_channels_for_tests(); }
     auto epoch_id_informed() const noexcept { return epoch_id_informed_for_tests(); }
     auto epoch_id_recorded() const noexcept { return epoch_id_recorded_for_tests(); }

@@ -39,6 +39,11 @@ public:
     backup& operator=(backup&& other) noexcept = delete;
 
     /**
+     * @brief destruct the object
+     */
+    virtual ~backup() noexcept = default;
+
+    /**
      * @brief returns whether the current backup operation is available
      * @return true if the current backup operation is available, false otherwise
      */

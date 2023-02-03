@@ -42,6 +42,11 @@ public:
     constexpr static const std::string_view file_name_ = "snapshot";
 
     /**
+     * @brief destruct the object
+     */
+    ~snapshot() noexcept override;
+
+    /**
      * @brief create a cursor to read the entire contents of the snapshot and returns it
      * @details the returned cursor points to the first element by calling cursor::next().
      * @attention this function is thread-safe.

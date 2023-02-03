@@ -36,6 +36,11 @@ public:
     snapshot() noexcept = default;
 
     /**
+     * @brief destruct the object
+     */
+    virtual ~snapshot() noexcept = default;
+
+    /**
      * @brief create a cursor to read the entire contents of the snapshot and returns it
      * @details the returned cursor points to the first element by calling cursor::next().
      * @attention this function is thread-safe.
