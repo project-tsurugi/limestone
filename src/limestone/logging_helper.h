@@ -20,6 +20,9 @@
 
 namespace limestone {
 
+// NOLINTNEXTLINE
+#define AUTO_LOCATION_PREFIX_VERSION 2
+
 // location prefix ver.1
 
 constexpr std::string_view find_fullname(std::string_view prettyname, std::string_view funcname) {
@@ -269,8 +272,14 @@ constexpr auto location_prefix_v2(const char (&prettyname)[N]) {  // NOLINT
 
 // N.B. use consteval in C++20
 
+#if AUTO_LOCATION_PREFIX_VERSION == 2
+// NOLINTNEXTLINE
+#define _LOCATION_PREFIX_TO_STREAM(stream)  if (constexpr auto __tmplp = location_prefix_v2(__PRETTY_FUNCTION__); false) {} else stream << __tmplp.data()
+#else
 // NOLINTNEXTLINE
 #define _LOCATION_PREFIX_TO_STREAM(stream)  if (constexpr auto __tmplp = location_prefix(__PRETTY_FUNCTION__, __FUNCTION__); false) {} else stream << __tmplp.data()
+#endif
+
 // NOLINTNEXTLINE
 #define LOG_LP(x)   _LOCATION_PREFIX_TO_STREAM(LOG(x))
 // NOLINTNEXTLINE

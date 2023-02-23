@@ -106,13 +106,15 @@ public:
         // limestone::logging_helper_test_foo2<T, n>::foo
         lbuf.str("");
         LOG_LP(0) << "TEST";
-        assert(lbuf.str() == "/:limestone:testing:logging_helper_test_foo2:foo TEST");
+        EXPECT_EQ(lbuf.str(), "/:limestone:testing:logging_helper_test_foo2:foo TEST");
         auto lambda1 = [&lbuf](int u){
             // g++-9:      limestone::testing::logging_helper_test_foo2<T, n>::foo<long unsigned int, 99>::<lambda(int)>
             // clang++-11: auto limestone::testing::logging_helper_test_foo2<unsigned long, 99>::foo(int &, int &)::(anonymous class)::operator()(int)
             lbuf.str("");
             LOG_LP(0) << "TEST";
-            //assert(lbuf.str() == "/:limestone:testing:logging_helper_test_foo2:foo:lambda TEST");
+#if AUTO_LOCATION_PREFIX_VERSION == 2
+            EXPECT_EQ(lbuf.str(), "/:limestone:testing:logging_helper_test_foo2:foo:lambda TEST");
+#endif
         };
         lambda1(1);
         std::function<long double(int)> lambda2 = [&lbuf](int u){
@@ -120,7 +122,9 @@ public:
             // clang++-11: auto limestone::testing::logging_helper_test_foo2<unsigned long, 99>::foo(int &, int &)::(anonymous class)::operator()(int)
             lbuf.str("");
             LOG_LP(0) << "TEST";
-            //assert(lbuf.str() == "/:limestone:testing:logging_helper_test_foo2:foo:lambda TEST");
+#if AUTO_LOCATION_PREFIX_VERSION == 2
+            EXPECT_EQ(lbuf.str(), "/:limestone:testing:logging_helper_test_foo2:foo:lambda TEST");
+#endif
             return 0.0;
         };
         lambda2(1);
@@ -129,14 +133,18 @@ public:
     long double operator() (const char *p) {
         std::ostringstream lbuf;
         LOG_LP(0) << "TEST";
-        assert(lbuf.str() == "/:limestone:testing:logging_helper_test_foo2:operator() TEST");
+#if AUTO_LOCATION_PREFIX_VERSION == 2
+        EXPECT_EQ(lbuf.str(), "/:limestone:testing:logging_helper_test_foo2:operator TEST");
+#endif
         auto lambda1 = [&lbuf](int u){
             //std::cout << "PF:" << __PRETTY_FUNCTION__ << " F:" << __FUNCTION__ << std::endl;
             // g++-9:      limestone::testing::logging_helper_test_foo2<T, n>::operator()(const char*) [with T = long unsigned int; int n = 99]::<lambda(int)>
             // clang++-11: auto limestone::testing::logging_helper_test_foo2<unsigned long, 99>::operator()(const char *)::(anonymous class)::operator()(int) const [T = unsigned long, n = 99]
             lbuf.str("");
             LOG_LP(0) << "TEST";
-            //assert(lbuf.str() == ???);
+#if AUTO_LOCATION_PREFIX_VERSION == 2
+            EXPECT_EQ(lbuf.str(), "/:limestone:testing:logging_helper_test_foo2:operator:lambda TEST");
+#endif
         };
         lambda1(1);
         return 0.0;
@@ -146,13 +154,17 @@ public:
         //std::cout << "PF:" << __PRETTY_FUNCTION__ << " F:" << __FUNCTION__ << std::endl;
         // g++-9:      long double limestone::testing::logging_helper_test_foo2<T, n>::operator<<=(const char*) [with T = long unsigned int; int n = 99]
         LOG_LP(0) << "TEST";
-        //assert(lbuf.str() == "/:limestone:testing:logging_helper_test_foo2:operator TEST");
+#if AUTO_LOCATION_PREFIX_VERSION == 2
+        EXPECT_EQ(lbuf.str(), "/:limestone:testing:logging_helper_test_foo2:operator TEST");
+#endif
         auto lambda1 = [&lbuf](int u){
             //std::cout << "PF:" << __PRETTY_FUNCTION__ << " F:" << __FUNCTION__ << std::endl;
             // g++-9:      limestone::testing::logging_helper_test_foo2<T, n>::operator<<=(const char*) [with T = long unsigned int; int n = 99]::<lambda(int)>
             lbuf.str("");
             LOG_LP(0) << "TEST";
-            //assert(lbuf.str() == "/:limestone:testing:logging_helper_test_foo2:operator:lambda TEST");
+#if AUTO_LOCATION_PREFIX_VERSION == 2
+            EXPECT_EQ(lbuf.str(), "/:limestone:testing:logging_helper_test_foo2:operator:lambda TEST");
+#endif
         };
         lambda1(1);
         return 0.0;
@@ -162,13 +174,17 @@ public:
         //std::cout << "PF:" << __PRETTY_FUNCTION__ << " F:" << __FUNCTION__ << std::endl;
         // g++-9:      limestone::testing::logging_helper_test_foo2<T, n>::operator std::vector<limestone::testing::logging_helper_test_foo2<char* const, -5> >() [with T = long unsigned int; int n = 99] F:operator std::vector<limestone::testing::logging_helper_test_foo2<char* const, -5> >
         LOG_LP(0) << "TEST";
-        //assert(lbuf.str() == "/:limestone:testing:logging_helper_test_foo2:operator TEST");
+#if AUTO_LOCATION_PREFIX_VERSION == 2
+        EXPECT_EQ(lbuf.str(), "/:limestone:testing:logging_helper_test_foo2:operator TEST");
+#endif
         auto lambda1 = [&lbuf](int u){
             //std::cout << "PF:" << __PRETTY_FUNCTION__ << " F:" << __FUNCTION__ << std::endl;
             // g++-9:      limestone::testing::logging_helper_test_foo2<T, n>::operator std::vector<limestone::testing::logging_helper_test_foo2<char* const, -5> >() [with T = long unsigned int; int n = 99]::<lambda(int)>
             lbuf.str("");
             LOG_LP(0) << "TEST";
-            //assert(lbuf.str() == "/:limestone:testing:logging_helper_test_foo2:operator:lambda TEST");
+#if AUTO_LOCATION_PREFIX_VERSION == 2
+            EXPECT_EQ(lbuf.str(), "/:limestone:testing:logging_helper_test_foo2:operator:lambda TEST");
+#endif
         };
         lambda1(1);
         return std::vector<logging_helper_test_foo2<char * const, -5>>{};
