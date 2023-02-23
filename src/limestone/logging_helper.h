@@ -132,6 +132,8 @@ constexpr void array_appendstr(std::array<char, N>& buf, size_t &off, const char
 
 template<size_t N>
 constexpr auto shrink_prettyname(const char (&prettyname)[N]) {  // NOLINT
+    // is underscore or alnum (std::isalnum is not constexpr in C++17)
+    auto isualnum = [](unsigned char c) { return c == '_' || ('0' <= c && c <= '9') || ('A' <= c && c <= 'Z') || ('a' <= c && c <= 'z'); };  // assume ASCII
     std::array<char, N> buf{}; // store funcname
     std::string_view pn{prettyname, N-1};  // NOLINT
     bool funcname_found = false;  // function-name is found
@@ -160,24 +162,24 @@ constexpr auto shrink_prettyname(const char (&prettyname)[N]) {  // NOLINT
             buf_off = 0;  // buf reset
             continue;
         }
-        if (pn.find("::<lambda(", i) == i) {
+        if (pn.find("<lambda(", i) == i) {
             // g++ closure, form: "::<lambda(...)>"
-            i += 9;
+            i += 7;
             i += skip_paren(std::string_view{pn.data() + i, pn.length() - i});
             if (pn.at(++i) != '>') {
                 throw std::runtime_error("right '>' error");
             }
             i++;
-            array_appendstr(buf, buf_off, ":lambda");
+            array_appendstr(buf, buf_off, "lambda");
             if (pn.length() == i) {  // if tail, this is function name
                 funcname_found = true;
             }
             continue;
         }
-        if (pn.find("::(anonymous class)::operator()", i) == i) {
+        if (pn.find("(anonymous class)::operator()", i) == i) {
             // clang closure
-            array_appendstr(buf, buf_off, ":lambda");
-            i += 31-1;
+            array_appendstr(buf, buf_off, "lambda");
+            i += 29-1;
             continue;
         }
         if (c == '(' || c == '<' || c == '[') {
@@ -199,7 +201,21 @@ constexpr auto shrink_prettyname(const char (&prettyname)[N]) {  // NOLINT
             //     TODO: parse error
             continue;
         }
-        if (pn.find("operator", i) == i) {
+        if (pn.find("operator ", i) == i
+            && !(pn.find("new", i + 9) == i + 9  // exclude operator new
+                 && pn.length() > i + 12 && !isualnum(pn.at(i + 12)))
+            && !(pn.find("delete", i + 9) == i + 9  // exclude operator delete
+                 && pn.length() > i + 15 && !isualnum(pn.at(i + 15)))) {
+            // cast: "oprator type (...)"
+            i += 9;  // "operator "
+            array_appendstr(buf, buf_off, "cast");
+            while (pn.at(i) != '(' && pn.at(i) != '<') {
+                i++;
+            }
+            // reached end of type
+            i--;
+        } else if (pn.find("operator", i) == i
+            && pn.length() > i + 8 && !isualnum(pn.at(i + 8))) {  // exclude normal funcname s.t. "operator_abc"
             i += 8;  // "operator"
             // this implementation simply drop symbols, i.e. any operatorXX -> "operator"
             array_appendstr(buf, buf_off, "operator");
@@ -225,6 +241,11 @@ constexpr auto shrink_prettyname(const char (&prettyname)[N]) {  // NOLINT
                 i++;
             }
             // reached end of operator-name
+            i--;
+        } else if (isualnum(c)) {
+            do {
+                buf.at(buf_off++) = pn.at(i++);
+            } while (i < pn.length() && isualnum(pn.at(i)));
             i--;
         } else {
             buf.at(buf_off++) = c;

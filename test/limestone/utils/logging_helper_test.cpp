@@ -69,8 +69,8 @@ TEST_F(logging_helper_test, shrink_prettyname) { // NOLINT
 
     /// cast
     // g++-9
-    __CHECK("aa::bb<T, n>::operator std::vector<aa::bb<char* const, -5> >() [with T = long unsigned int; int n = 99]", "aa:bb:operator");
-    __CHECK("aa::bb<T, n>::operator std::vector<aa::bb<char* const, -5> >() [with T = long unsigned int; int n = 99]::<lambda(int)>", "aa:bb:operator:lambda");
+    __CHECK("aa::bb<T, n>::operator std::vector<aa::bb<char* const, -5> >() [with T = long unsigned int; int n = 99]", "aa:bb:cast");
+    __CHECK("aa::bb<T, n>::operator std::vector<aa::bb<char* const, -5> >() [with T = long unsigned int; int n = 99]::<lambda(int)>", "aa:bb:cast:lambda");
 #undef __CHECK
 }
 
@@ -175,6 +175,28 @@ public:
         // g++-9:      limestone::testing::logging_helper_test_foo2<T, n>::operator std::vector<limestone::testing::logging_helper_test_foo2<char* const, -5> >() [with T = long unsigned int; int n = 99] F:operator std::vector<limestone::testing::logging_helper_test_foo2<char* const, -5> >
         LOG_LP(0) << "TEST";
 #if AUTO_LOCATION_PREFIX_VERSION == 2
+        EXPECT_EQ(lbuf.str(), "/:limestone:testing:logging_helper_test_foo2:cast TEST");
+#endif
+        auto lambda1 = [&lbuf](int u){
+            //std::cout << "PF:" << __PRETTY_FUNCTION__ << " F:" << __FUNCTION__ << std::endl;
+            // g++-9:      limestone::testing::logging_helper_test_foo2<T, n>::operator std::vector<limestone::testing::logging_helper_test_foo2<char* const, -5> >() [with T = long unsigned int; int n = 99]::<lambda(int)>
+            lbuf.str("");
+            LOG_LP(0) << "TEST";
+#if AUTO_LOCATION_PREFIX_VERSION == 2
+            EXPECT_EQ(lbuf.str(), "/:limestone:testing:logging_helper_test_foo2:cast:lambda TEST");
+#endif
+        };
+        lambda1(1);
+        return std::vector<logging_helper_test_foo2<char * const, -5>>{};
+    }
+#if 0
+    // address sanytizer brakes this
+    void *operator new (size_t a) {
+        std::ostringstream lbuf;
+        std::cout << "PF:" << __PRETTY_FUNCTION__ << " F:" << __FUNCTION__ << std::endl;
+        // g++-9:      limestone::testing::logging_helper_test_foo2<T, n>::operator std::vector<limestone::testing::logging_helper_test_foo2<char* const, -5> >() [with T = long unsigned int; int n = 99] F:operator std::vector<limestone::testing::logging_helper_test_foo2<char* const, -5> >
+        LOG_LP(0) << "TEST";
+#if AUTO_LOCATION_PREFIX_VERSION == 2
         EXPECT_EQ(lbuf.str(), "/:limestone:testing:logging_helper_test_foo2:operator TEST");
 #endif
         auto lambda1 = [&lbuf](int u){
@@ -187,8 +209,19 @@ public:
 #endif
         };
         lambda1(1);
-        return std::vector<logging_helper_test_foo2<char * const, -5>>{};
+        return malloc(a);
     }
+#endif
+};
+
+auto test_namespace_lambda = [](){
+    std::ostringstream lbuf;
+    //std::cout << "PF:" << __PRETTY_FUNCTION__ << " F:" << __FUNCTION__ << std::endl;
+    // g++-9:      limestone::testing::<lambda()>
+    LOG_LP(0) << "TEST";
+#if AUTO_LOCATION_PREFIX_VERSION == 2
+    EXPECT_EQ(lbuf.str(), "/:limestone:testing:lambda TEST");
+#endif
 };
 
 TEST_F(logging_helper_test, assert_in_other_methods) { // NOLINT
@@ -200,6 +233,26 @@ TEST_F(logging_helper_test, assert_in_other_methods) { // NOLINT
     foo2("a");
     foo2 <<= "a";
     (std::vector<logging_helper_test_foo2<char * const, -5>>)foo2;
+    auto *p = new logging_helper_test_foo2<int, 1>;
+    delete p;
 }
 
+}  // namespace limestone::testing
+
+auto test_global_lambda = [](){
+using namespace limestone;
+    std::ostringstream lbuf;
+    std::cout << "PF:" << __PRETTY_FUNCTION__ << " F:" << __FUNCTION__ << std::endl;
+    // g++-9:      limestone::testing::<lambda()>
+    LOG_LP(0) << "TEST";
+#if AUTO_LOCATION_PREFIX_VERSION == 2
+    EXPECT_EQ(lbuf.str(), "/:lambda TEST");
+#endif
+};
+
+namespace limestone::testing {
+TEST_F(logging_helper_test, global_lambda) { // NOLINT
+    test_namespace_lambda();
+    test_global_lambda();
+}
 }  // namespace limestone::testing
