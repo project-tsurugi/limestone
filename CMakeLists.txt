@@ -97,6 +97,7 @@ endif()
 # if (BUILD_DOCUMENTS)
 #     add_subdirectory(doxygen)
 # endif()
+add_subdirectory(util)
 
 install(
     TARGETS
