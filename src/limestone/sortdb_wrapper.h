@@ -1,5 +1,5 @@
 /*
- * Copyright 2022-2022 tsurugi project.
+ * Copyright 2022-2023 tsurugi project.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -13,7 +13,8 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-// #include <boost/filesystem/operations.hpp>
+
+#include <filesystem>
 
 #ifdef SORT_METHOD_USE_ROCKSDB
 #include <rocksdb/db.h>
@@ -46,8 +47,8 @@ public:
      * @param dir the directory where DB library files will be placed
      * @param keycomp (optional) user-defined comparator
      */
-    explicit sortdb_wrapper(const boost::filesystem::path& dir, keycomp keycomp = nullptr)
-        : workdir_path_(dir / boost::filesystem::path(std::string(sortdb_dir))) {
+    explicit sortdb_wrapper(const std::filesystem::path& dir, keycomp keycomp = nullptr)
+        : workdir_path_(dir / std::filesystem::path(std::string(sortdb_dir))) {
         clear_directory();
         
         Options options;
@@ -116,12 +117,12 @@ private:
 
     std::unique_ptr<comparator> comp_{};
 
-    boost::filesystem::path workdir_path_;
+    std::filesystem::path workdir_path_;
 
     void clear_directory() const noexcept {
-        if (boost::filesystem::exists(workdir_path_)) {
-            if (boost::filesystem::is_directory(workdir_path_)) {
-                boost::filesystem::remove_all(workdir_path_);
+        if (std::filesystem::exists(workdir_path_)) {
+            if (std::filesystem::is_directory(workdir_path_)) {
+                std::filesystem::remove_all(workdir_path_);
             } else {
                 LOG_LP(ERROR) << workdir_path_.string() << " is not a directory";
                 std::abort();

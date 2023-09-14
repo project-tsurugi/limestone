@@ -15,13 +15,12 @@
  */
 #pragma once
 
+#include <filesystem>
+#include <fstream>
 #include <string>
 #include <string_view>
 #include <cstdint>
 #include <atomic>
-
-#include <boost/filesystem/path.hpp>
-#include <boost/filesystem/fstream.hpp>
 
 #include <limestone/status.h>
 #include <limestone/api/storage_id_type.h>
@@ -128,18 +127,18 @@ public:
     /**
      * @brief this is for test purpose only, must not be used for any purpose other than testing
      */
-    boost::filesystem::path file_path() const noexcept;
+    std::filesystem::path file_path() const noexcept;
 
 private:
     datastore& envelope_;
 
-    boost::filesystem::path location_;
+    std::filesystem::path location_;
 
-    boost::filesystem::path file_;
+    std::filesystem::path file_;
 
     std::size_t id_{};
 
-    boost::filesystem::ofstream strm_;
+    std::ofstream strm_;
 
     bool registered_{};
 
@@ -149,7 +148,7 @@ private:
 
     std::atomic_uint64_t finished_epoch_id_{0};
 
-    log_channel(boost::filesystem::path location, std::size_t id, datastore& envelope) noexcept;
+    log_channel(std::filesystem::path location, std::size_t id, datastore& envelope) noexcept;
 
     void request_rotate();
 

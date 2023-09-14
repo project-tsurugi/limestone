@@ -1,5 +1,5 @@
 /*
- * Copyright 2022-2022 tsurugi project.
+ * Copyright 2022-2023 tsurugi project.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -14,13 +14,14 @@
  * limitations under the License.
  */
 #pragma once
+
+#include <cassert>
+#include <cstring>
+#include <fstream>
 #include <iostream>
 #include <string>
 #include <string_view>
 #include <exception>
-
-#include <boost/filesystem/path.hpp>
-#include <boost/filesystem/fstream.hpp>
 
 #include <limestone/api/storage_id_type.h>
 #include <limestone/api/write_version_type.h>
@@ -42,24 +43,24 @@ public:
     
     log_entry() = default;
 
-    static void begin_session(boost::filesystem::ofstream& strm, epoch_id_type epoch) {
+    static void begin_session(std::ofstream& strm, epoch_id_type epoch) {
         entry_type type = entry_type::marker_begin;
         write_uint8(strm, static_cast<std::uint8_t>(type));
         write_uint64(strm, static_cast<std::uint64_t>(epoch));
     }
-    static void end_session(boost::filesystem::ofstream& strm, epoch_id_type epoch) {
+    static void end_session(std::ofstream& strm, epoch_id_type epoch) {
         entry_type type = entry_type::marker_end;
         write_uint8(strm, static_cast<std::uint8_t>(type));
         write_uint64(strm, static_cast<std::uint64_t>(epoch));
     }
-    static void durable_epoch(boost::filesystem::ofstream& strm, epoch_id_type epoch) {
+    static void durable_epoch(std::ofstream& strm, epoch_id_type epoch) {
         entry_type type = entry_type::marker_durable;
         write_uint8(strm, static_cast<std::uint8_t>(type));
         write_uint64(strm, static_cast<std::uint64_t>(epoch));
     }
 
 // for writer (entry)
-    void write(boost::filesystem::ofstream& strm) {
+    void write(std::ofstream& strm) {
         switch(entry_type_) {
         case entry_type::normal_entry:
             write(strm, key_sid_, value_etc_);
@@ -81,7 +82,7 @@ public:
         }
     }
 
-    static void write(boost::filesystem::ofstream& strm, storage_id_type storage_id, std::string_view key, std::string_view value, write_version_type write_version) {
+    static void write(std::ofstream& strm, storage_id_type storage_id, std::string_view key, std::string_view value, write_version_type write_version) {
         entry_type type = entry_type::normal_entry;
         write_uint8(strm, static_cast<std::uint8_t>(type));
 
@@ -101,7 +102,7 @@ public:
         strm.write(value.data(), static_cast<std::streamsize>(value_len));
     }
 
-    static void write(boost::filesystem::ofstream& strm, std::string_view key_sid, std::string_view value_etc) {
+    static void write(std::ofstream& strm, std::string_view key_sid, std::string_view value_etc) {
         entry_type type = entry_type::normal_entry;
         write_uint8(strm, static_cast<std::uint8_t>(type));
 
@@ -117,7 +118,7 @@ public:
         strm.write(value_etc.data(), static_cast<std::streamsize>(value_etc.length()));
     }
 
-    static void write_remove(boost::filesystem::ofstream& strm, storage_id_type storage_id, std::string_view key, write_version_type write_version) {
+    static void write_remove(std::ofstream& strm, storage_id_type storage_id, std::string_view key, write_version_type write_version) {
         entry_type type = entry_type::remove_entry;
         write_uint8(strm, static_cast<std::uint8_t>(type));
 
@@ -132,7 +133,7 @@ public:
         write_uint64(strm, static_cast<std::uint64_t>(write_version.minor_write_version_));
     }
 
-    static void write_remove(boost::filesystem::ofstream& strm, std::string_view key_sid, std::string_view value_etc) {
+    static void write_remove(std::ofstream& strm, std::string_view key_sid, std::string_view value_etc) {
         entry_type type = entry_type::remove_entry;
         write_uint8(strm, static_cast<std::uint8_t>(type));
 
@@ -145,7 +146,7 @@ public:
     }
 
 // for reader
-    bool read(boost::filesystem::ifstream& strm) {
+    bool read(std::ifstream& strm) {
         strm.read(&one_char_, sizeof(char));
         entry_type_ = static_cast<entry_type>(one_char_);        
         if (strm.eof()) {

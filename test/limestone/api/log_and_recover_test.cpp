@@ -21,14 +21,14 @@ protected:
             std::cerr << "cannot make directory" << std::endl;
         }
 
-        std::vector<boost::filesystem::path> data_locations{};
+        std::vector<std::filesystem::path> data_locations{};
         data_locations.emplace_back(data_location);
-        boost::filesystem::path metadata_location_path{metadata_location};
+        std::filesystem::path metadata_location_path{metadata_location};
         limestone::api::configuration conf(data_locations, metadata_location_path);
 
         datastore_ = std::make_unique<limestone::api::datastore_test>(conf);
 
-        limestone::api::log_channel& channel = datastore_->create_channel(boost::filesystem::path(data_location));
+        limestone::api::log_channel& channel = datastore_->create_channel(std::filesystem::path(data_location));
 
         // prepare durable epoch
         std::atomic<std::size_t> durable_epoch{0};
@@ -74,7 +74,7 @@ protected:
         datastore_->recover();
         datastore_->ready();
         datastore_->switch_epoch(3); // trigger of flush log record which belongs to epoch 2.
-        limestone::api::log_channel& channel2 = datastore_->create_channel(boost::filesystem::path(data_location));
+        limestone::api::log_channel& channel2 = datastore_->create_channel(std::filesystem::path(data_location));
         channel2.begin_session();
         channel2.add_entry(st, "k", "v2", {2, 0}); // epoch 2 log record
         channel2.end_session(); // (*1)
@@ -125,9 +125,9 @@ TEST_F(log_and_recover_test, recovery) {
 
 TEST_F(log_and_recover_test, recovery_interrupt_datastore_object_reallocation) { // NOLINT
     LOG(INFO);
-    std::vector<boost::filesystem::path> data_locations{};
+    std::vector<std::filesystem::path> data_locations{};
     data_locations.emplace_back(data_location);
-    boost::filesystem::path metadata_location_path{metadata_location};
+    std::filesystem::path metadata_location_path{metadata_location};
     limestone::api::configuration conf(data_locations, metadata_location_path);
 
     datastore_ = std::make_unique<limestone::api::datastore_test>(conf);

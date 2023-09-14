@@ -1,5 +1,5 @@
 /*
- * Copyright 2022-2022 tsurugi project.
+ * Copyright 2022-2023 tsurugi project.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -13,11 +13,12 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
+
 #include <limestone/api/backup.h>
 
 namespace limestone::api {
 
-backup::backup(std::set<boost::filesystem::path>& files) noexcept {
+backup::backup(std::set<std::filesystem::path>& files) noexcept {
     for(auto& e : files) {
         files_.emplace_back(e);
     }
@@ -33,7 +34,7 @@ bool backup::wait_for_ready([[maybe_unused]] std::size_t duration) const noexcep
     return true;  // FIXME
 }
 
-std::vector<boost::filesystem::path>& backup::files() noexcept {
+std::vector<std::filesystem::path>& backup::files() noexcept {
     return files_;
 }
 

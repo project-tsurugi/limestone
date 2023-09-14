@@ -29,7 +29,7 @@
 
 namespace limestone::api {
 
-log_channel::log_channel(boost::filesystem::path location, std::size_t id, datastore& envelope) noexcept
+log_channel::log_channel(std::filesystem::path location, std::size_t id, datastore& envelope) noexcept
     : envelope_(envelope), location_(std::move(location)), id_(id)
 {
     std::stringstream ss;
@@ -95,7 +95,7 @@ void log_channel::truncate_storage([[maybe_unused]] storage_id_type storage_id, 
     std::abort();  // FIXME
 }
 
-boost::filesystem::path log_channel::file_path() const noexcept {
+std::filesystem::path log_channel::file_path() const noexcept {
     return location_ / file_;
 }
 
@@ -109,8 +109,8 @@ void log_channel::do_rotate_file(epoch_id_type epoch) {
        << std::setw(14) << std::setfill('0') << envelope_.current_unix_epoch_in_millis()
        << "." << epoch;
     std::string new_name = ss.str();
-    boost::filesystem::path new_file = location_ / new_name;
-    boost::filesystem::rename(file_path(), new_file);
+    std::filesystem::path new_file = location_ / new_name;
+    std::filesystem::rename(file_path(), new_file);
     envelope_.add_file(new_file);
 
     envelope_.subtract_file(location_ / file_);

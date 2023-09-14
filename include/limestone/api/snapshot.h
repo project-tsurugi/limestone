@@ -1,5 +1,5 @@
 /*
- * Copyright 2022-2022 tsurugi project.
+ * Copyright 2022-2023 tsurugi project.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -15,11 +15,9 @@
  */
 #pragma once
 
+#include <filesystem>
 #include <memory>
 #include <string_view>
-
-#include <boost/filesystem/path.hpp>
-#include <boost/filesystem/fstream.hpp>
 
 #include <limestone/api/cursor.h>
 
@@ -73,11 +71,11 @@ public:
     [[nodiscard]] std::unique_ptr<cursor> scan(storage_id_type storage_id, std::string_view entry_key, bool inclusive) const noexcept;
 
 private:
-    boost::filesystem::path dir_{};
+    std::filesystem::path dir_{};
 
-    [[nodiscard]] boost::filesystem::path file_path() const noexcept;
+    [[nodiscard]] std::filesystem::path file_path() const noexcept;
 
-    explicit snapshot(const boost::filesystem::path& location) noexcept;
+    explicit snapshot(const std::filesystem::path& location) noexcept;
 
     friend class datastore;
 };

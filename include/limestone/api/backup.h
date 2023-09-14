@@ -1,5 +1,5 @@
 /*
- * Copyright 2022-2022 tsurugi project.
+ * Copyright 2022-2023 tsurugi project.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -15,10 +15,9 @@
  */
 #pragma once
 
+#include <filesystem>
 #include <vector>
 #include <set>
-
-#include <boost/filesystem/path.hpp>
 
 #include <limestone/api/log_channel.h>
 
@@ -59,12 +58,12 @@ public:
      * @returns a list of files to be backed up
      * @note this operation requires that a backup is available
      */
-    std::vector<boost::filesystem::path>& files() noexcept;
+    std::vector<std::filesystem::path>& files() noexcept;
 
 private:
-    std::vector<boost::filesystem::path> files_;
+    std::vector<std::filesystem::path> files_;
 
-    explicit backup(std::set<boost::filesystem::path>& files) noexcept;
+    explicit backup(std::set<std::filesystem::path>& files) noexcept;
 
     friend class datastore;
 };

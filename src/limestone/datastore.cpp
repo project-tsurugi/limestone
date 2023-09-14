@@ -13,13 +13,13 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
+
 #include <thread>
 #include <chrono>
+#include <fstream>
 #include <iomanip>
 #include <stdexcept>
-
-#include <boost/filesystem/operations.hpp>
-#include <boost/foreach.hpp>
+#include <system_error>
 
 #include <glog/logging.h>
 #include <limestone/logging.h>
@@ -33,17 +33,17 @@ namespace limestone::api {
 datastore::datastore() noexcept = default;
 
 datastore::datastore(configuration const& conf) : location_(conf.data_locations_.at(0)) {
-    boost::system::error_code error;
-    const bool result_check = boost::filesystem::exists(location_, error);
+    std::error_code error;
+    const bool result_check = std::filesystem::exists(location_, error);
     if (!result_check || error) {
-        const bool result_mkdir = boost::filesystem::create_directory(location_, error);
+        const bool result_mkdir = std::filesystem::create_directory(location_, error);
         if (!result_mkdir || error) {
             LOG_LP(ERROR) << "fail to create directory: result_mkdir: " << result_mkdir << ", error_code: " << error << ", path: " << location_;
             throw std::runtime_error("fail to create the log_location directory");  //NOLINT
         }
     } else {
-        BOOST_FOREACH(const boost::filesystem::path& p, std::make_pair(boost::filesystem::directory_iterator(location_), boost::filesystem::directory_iterator())) {
-            if (!boost::filesystem::is_directory(p)) {
+        for (const std::filesystem::path& p : std::filesystem::directory_iterator(location_)) {
+            if (!std::filesystem::is_directory(p)) {
                 add_file(p);
             }
         }
@@ -51,10 +51,10 @@ datastore::datastore(configuration const& conf) : location_(conf.data_locations_
 
     // XXX: prusik era
     // TODO: read rotated epoch files if main epoch file does not exist
-    epoch_file_path_ = location_ / boost::filesystem::path(std::string(epoch_file_name));
-    const bool result = boost::filesystem::exists(epoch_file_path_, error);
+    epoch_file_path_ = location_ / std::filesystem::path(epoch_file_name);
+    const bool result = std::filesystem::exists(epoch_file_path_, error);
     if (!result || error) {
-        boost::filesystem::ofstream strm{};
+        std::ofstream strm{};
         strm.open(epoch_file_path_, std::ios_base::out | std::ios_base::app | std::ios_base::binary);
         if(!strm || !strm.is_open() || strm.bad() || strm.fail()){
             LOG_LP(ERROR) << "does not have write permission for the log_location directory, path: " <<  location_;
@@ -90,7 +90,7 @@ std::shared_ptr<snapshot> datastore::shared_snapshot() const {
     return std::shared_ptr<snapshot>(new snapshot(location_));
 }
 
-log_channel& datastore::create_channel(const boost::filesystem::path& location) {
+log_channel& datastore::create_channel(const std::filesystem::path& location) {
     check_before_ready(static_cast<const char*>(__func__));
     
     std::lock_guard<std::mutex> lock(mtx_channel_);
@@ -154,7 +154,7 @@ void datastore::update_min_epoch_id(bool from_switch_epoch) noexcept {
         if (epoch_id_recorded_.compare_exchange_strong(old_epoch_id, to_be_epoch)) {
             std::lock_guard<std::mutex> lock(mtx_epoch_file_);
 
-            boost::filesystem::ofstream strm{};
+            std::ofstream strm{};
             strm.open(epoch_file_path_, std::ios_base::out | std::ios_base::app | std::ios_base::binary );
             log_entry::durable_epoch(strm, static_cast<epoch_id_type>(epoch_id_informed_.load()));
             strm.close();
@@ -199,7 +199,7 @@ std::unique_ptr<backup_detail> datastore::begin_backup(backup_type btype) {  // 
     (void) btype;
 
     // calcuate files_ minus active-files
-    std::set<boost::filesystem::path> inactive_files(files_);
+    std::set<std::filesystem::path> inactive_files(files_);
     inactive_files.erase(epoch_file_path_);
     for (const auto& lc : log_channels_) {
         if (lc->registered_) {
@@ -223,8 +223,8 @@ std::unique_ptr<backup_detail> datastore::begin_backup(backup_type btype) {  // 
                     // it will cause some trouble if a file (that has the name of mutable files) is saved as immutable file.
                     // but, by skip, backup files may be imcomplete.
                     if (filename.length() == 9) {  // FIXME: too adohoc check
-                        boost::system::error_code error;
-                        bool result = boost::filesystem::is_empty(ent, error);
+                        std::error_code error;
+                        bool result = std::filesystem::is_empty(ent, error);
                         if (!error && !result) {
                             LOG_LP(ERROR) << "skip the file with the name like active files: " << filename;
                         }
@@ -287,12 +287,12 @@ epoch_id_type datastore::rotate_log_files() {
             continue;
         }
 #else
-        boost::system::error_code error;
-        bool result = boost::filesystem::exists(lc->file_path(), error);
+        std::error_code error;
+        bool result = std::filesystem::exists(lc->file_path(), error);
         if (!result || error) {
             continue;  // skip if not exists
         }
-        result = boost::filesystem::is_empty(lc->file_path(), error);
+        result = std::filesystem::is_empty(lc->file_path(), error);
         if (result || error) {
             continue;  // skip if empty
         }
@@ -312,12 +312,12 @@ void datastore::rotate_epoch_file() {
        << std::setw(14) << std::setfill('0') << current_unix_epoch_in_millis()
        << "." << epoch_id_switched_.load();
     std::string new_name = ss.str();
-    boost::filesystem::path new_file = location_ / new_name;
-    boost::filesystem::rename(epoch_file_path_, new_file);
+    std::filesystem::path new_file = location_ / new_name;
+    std::filesystem::rename(epoch_file_path_, new_file);
     add_file(new_file);
 
     // create new one
-    boost::filesystem::ofstream strm{};
+    std::ofstream strm{};
     strm.open(epoch_file_path_, std::ios_base::out | std::ios_base::app | std::ios_base::binary);
     if(!strm || !strm.is_open() || strm.bad() || strm.fail()){
         LOG_LP(ERROR) << "does not have write permission for the log_location directory, path: " <<  location_;
@@ -326,13 +326,13 @@ void datastore::rotate_epoch_file() {
     strm.close();
 }
 
-void datastore::add_file(const boost::filesystem::path& file) noexcept {
+void datastore::add_file(const std::filesystem::path& file) noexcept {
     std::lock_guard<std::mutex> lock(mtx_files_);
 
     files_.insert(file);
 }
 
-void datastore::subtract_file(const boost::filesystem::path& file) {
+void datastore::subtract_file(const std::filesystem::path& file) {
     std::lock_guard<std::mutex> lock(mtx_files_);
 
     files_.erase(file);

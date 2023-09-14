@@ -1,5 +1,5 @@
 /*
- * Copyright 2022-2022 tsurugi project.
+ * Copyright 2022-2023 tsurugi project.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -13,20 +13,21 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
+
 #include <limestone/api/configuration.h>
 
 namespace limestone::api {
 
 configuration::configuration() = default;
 
-configuration::configuration(const std::vector<boost::filesystem::path>& data_locations, boost::filesystem::path metadata_location) noexcept
+configuration::configuration(const std::vector<std::filesystem::path>& data_locations, std::filesystem::path metadata_location) noexcept
     : metadata_location_(std::move(metadata_location)) {
     for (auto &&e : data_locations) {
         data_locations_.emplace_back(e);
     }
 }
 
-configuration::configuration(const std::vector<boost::filesystem::path>&& data_locations, boost::filesystem::path metadata_location) noexcept
+configuration::configuration(std::vector<std::filesystem::path>&& data_locations, std::filesystem::path metadata_location) noexcept
     : metadata_location_(std::move(metadata_location)) {
     for (auto &&e : data_locations) {
         data_locations_.emplace_back(e);

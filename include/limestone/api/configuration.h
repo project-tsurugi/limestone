@@ -15,9 +15,8 @@
  */
 #pragma once
 
+#include <filesystem>
 #include <vector>
-
-#include <boost/filesystem/path.hpp>
 
 namespace limestone::api {
 
@@ -43,14 +42,14 @@ public:
      * @param data_locations the list of data locations
      * @param metadata_location the location of the metadata
      */
-    configuration(const std::vector<boost::filesystem::path>& data_locations, boost::filesystem::path metadata_location) noexcept;
+    configuration(const std::vector<std::filesystem::path>& data_locations, std::filesystem::path metadata_location) noexcept;
 
     /**
      * @brief create a object
      * @param data_locations the list of data locations
      * @param metadata_location the location of the metadata
      */
-    configuration(const std::vector<boost::filesystem::path>&& data_locations, boost::filesystem::path metadata_location) noexcept;
+    configuration(std::vector<std::filesystem::path>&& data_locations, std::filesystem::path metadata_location) noexcept;
 
     /**
      * @brief setter for recover_max_parallelism
@@ -61,9 +60,9 @@ public:
     }
 
 private:
-    std::vector<boost::filesystem::path> data_locations_{};
+    std::vector<std::filesystem::path> data_locations_{};
 
-    boost::filesystem::path metadata_location_{};
+    std::filesystem::path metadata_location_{};
 
     int recover_max_parallelism_{default_recover_max_parallelism};
 

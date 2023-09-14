@@ -13,8 +13,6 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-#include <boost/filesystem/operations.hpp>
-#include <boost/foreach.hpp>
 
 #include <glog/logging.h>
 #include <limestone/logging.h>
@@ -28,33 +26,31 @@ namespace limestone::api {
 status datastore::restore(std::string_view from, bool keep_backup) const noexcept {
     VLOG_LP(log_debug) << "restore begin, from directory = " << from << " , keep_backup = " << std::boolalpha << keep_backup;
 
-    BOOST_FOREACH(const boost::filesystem::path& p, std::make_pair(boost::filesystem::directory_iterator(location_), boost::filesystem::directory_iterator())) {
-        if(!boost::filesystem::is_directory(p)) {
+    for (const std::filesystem::path& p : std::filesystem::directory_iterator(location_)) {
+        if (!std::filesystem::is_directory(p)) {
             try {
-                boost::filesystem::remove(p);
-            } catch (boost::filesystem::filesystem_error& ex) {
+                std::filesystem::remove(p);
+            } catch (std::filesystem::filesystem_error& ex) {
                 LOG_LP(ERROR) << ex.what() << " file = " << p.string();
                 return status::err_permission_error;
             }
         }
     }
 
-    auto from_dir = boost::filesystem::path(std::string(from));
-    BOOST_FOREACH(const boost::filesystem::path& p, std::make_pair(boost::filesystem::directory_iterator(from_dir), boost::filesystem::directory_iterator())) {
+    auto from_dir = std::filesystem::path(from);
+    for (const std::filesystem::path& p : std::filesystem::directory_iterator(from_dir)) {
         try {
-            boost::filesystem::copy_file(p, location_ / p.filename());
-        }
-        catch (boost::filesystem::filesystem_error& ex) {
+            std::filesystem::copy_file(p, location_ / p.filename());
+        } catch (std::filesystem::filesystem_error& ex) {
             LOG_LP(ERROR) << ex.what() << " file = " << p.string();
             return status::err_permission_error;
         }
     }
     if (!keep_backup) {
-        BOOST_FOREACH(const boost::filesystem::path& p, std::make_pair(boost::filesystem::directory_iterator(from_dir), boost::filesystem::directory_iterator())) {
+        for (const std::filesystem::path& p : std::filesystem::directory_iterator(from_dir)) {
             try {
-                boost::filesystem::remove(p);
-            }
-            catch (boost::filesystem::filesystem_error& ex) {
+                std::filesystem::remove(p);
+            } catch (std::filesystem::filesystem_error& ex) {
                 LOG_LP(WARNING) << ex.what() << " file = " << p.string();
             }
         }
@@ -68,21 +64,21 @@ status datastore::restore(std::string_view from, std::vector<file_set_entry>& en
 
     // purge logdir
     // FIXME: copied this code from (old) restore(), fix duplicate
-    BOOST_FOREACH(const boost::filesystem::path& p, std::make_pair(boost::filesystem::directory_iterator(location_), boost::filesystem::directory_iterator())) {
-        if(!boost::filesystem::is_directory(p)) {
+    for (const std::filesystem::path& p : std::filesystem::directory_iterator(location_)) {
+        if (!std::filesystem::is_directory(p)) {
             try {
-                boost::filesystem::remove(p);
-            } catch (boost::filesystem::filesystem_error& ex) {
+                std::filesystem::remove(p);
+            } catch (std::filesystem::filesystem_error& ex) {
                 LOG_LP(ERROR) << ex.what() << " file = " << p.string();
                 return status::err_permission_error;
             }
         }
     }
 
-    auto from_dir = boost::filesystem::path(std::string(from));
+    auto from_dir = std::filesystem::path(from);
     for (auto & ent : entries) {
-        boost::filesystem::path src{ent.source_path()};
-        boost::filesystem::path dst{ent.destination_path()};
+        std::filesystem::path src{ent.source_path()};
+        std::filesystem::path dst{ent.destination_path()};
         if (src.is_absolute()) {
             // use it
         } else {
@@ -90,13 +86,13 @@ status datastore::restore(std::string_view from, std::vector<file_set_entry>& en
         }
         // TODO: location check (for security)
         // TODO: assert dst.is_relative()
-        if (!boost::filesystem::exists(src) || !boost::filesystem::is_regular_file(src)) {
+        if (!std::filesystem::exists(src) || !std::filesystem::is_regular_file(src)) {
             LOG_LP(ERROR) << "file not found : file = " << src.string();
             return status::err_not_found;
         }
         try {
-            boost::filesystem::copy_file(src, location_ / dst);
-        } catch (boost::filesystem::filesystem_error& ex) {
+            std::filesystem::copy_file(src, location_ / dst);
+        } catch (std::filesystem::filesystem_error& ex) {
             LOG_LP(ERROR) << ex.what() << " file = " << src.string();
             return status::err_permission_error;
         }

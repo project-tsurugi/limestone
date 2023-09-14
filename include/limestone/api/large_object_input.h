@@ -1,5 +1,5 @@
 /*
- * Copyright 2022-2022 tsurugi project.
+ * Copyright 2022-2023 tsurugi project.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -15,9 +15,8 @@
  */
 #pragma once
 
+#include <filesystem>
 #include <string>
-
-#include <boost/filesystem/path.hpp>
 
 namespace limestone::api {
 
@@ -25,7 +24,7 @@ class large_object_input {
 public:
     
     explicit large_object_input(std::string buffer);
-    explicit large_object_input(boost::filesystem::path path);
+    explicit large_object_input(std::filesystem::path path);
     ~large_object_input();
 
     large_object_input(large_object_input const& other) = delete;
@@ -33,7 +32,7 @@ public:
     large_object_input(large_object_input&& other) noexcept = delete;
     large_object_input& operator=(large_object_input&& other) noexcept = delete;
 
-    void locate(boost::filesystem::path path);
+    void locate(std::filesystem::path path);
 
     void detach();
 

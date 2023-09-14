@@ -1,5 +1,5 @@
 /*
- * Copyright 2022-2022 tsurugi project.
+ * Copyright 2022-2023 tsurugi project.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -13,17 +13,16 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
+
 #include <limestone/api/snapshot.h>
 
 #include <glog/logging.h>
 #include <limestone/logging.h>
 #include "logging_helper.h"
 
-#include <boost/filesystem.hpp>
-
 namespace limestone::api {  // FIXME fill implementation
 
-snapshot::snapshot(const boost::filesystem::path& location) noexcept : dir_(location / boost::filesystem::path(std::string(subdirectory_name_))) {
+snapshot::snapshot(const std::filesystem::path& location) noexcept : dir_(location / std::filesystem::path(subdirectory_name_)) {
 }
 
 std::unique_ptr<cursor> snapshot::get_cursor() const {
@@ -40,8 +39,8 @@ std::unique_ptr<cursor> snapshot::scan([[maybe_unused]] storage_id_type storage_
     std::abort();  // FIXME should implement
 }
 
-boost::filesystem::path snapshot::file_path() const noexcept {
-    return dir_ / boost::filesystem::path(std::string(file_name_));
+std::filesystem::path snapshot::file_path() const noexcept {
+    return dir_ / std::filesystem::path(file_name_);
 }
 
 } // namespace limestone::api

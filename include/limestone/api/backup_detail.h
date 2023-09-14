@@ -15,12 +15,11 @@
  */
 #pragma once
 
+#include <filesystem>
 #include <optional>
 #include <set>
 #include <string_view>
 #include <vector>
-
-#include <boost/filesystem/path.hpp>
 
 #include <limestone/api/epoch_id_type.h>
 
@@ -45,16 +44,16 @@ public:
         entry(entry &&) noexcept = default;
         entry& operator=(entry &&) noexcept = default;
 
-        entry(boost::filesystem::path source_path, boost::filesystem::path destination_path, bool is_mutable, bool is_detached)
+        entry(std::filesystem::path source_path, std::filesystem::path destination_path, bool is_mutable, bool is_detached)
         : source_path_(std::move(source_path)), destination_path_(std::move(destination_path)), is_mutable_(is_mutable), is_detached_(is_detached) {}
 
-        [[nodiscard]] boost::filesystem::path source_path() const { return source_path_; }
-        [[nodiscard]] boost::filesystem::path destination_path() const { return destination_path_; }
+        [[nodiscard]] std::filesystem::path source_path() const { return source_path_; }
+        [[nodiscard]] std::filesystem::path destination_path() const { return destination_path_; }
         [[nodiscard]] bool is_mutable() const { return is_mutable_; }
         [[nodiscard]] bool is_detached() const { return is_detached_; }
     private:
-        boost::filesystem::path source_path_ {};
-        boost::filesystem::path destination_path_ {};
+        std::filesystem::path source_path_ {};
+        std::filesystem::path destination_path_ {};
         bool is_mutable_ {};
         bool is_detached_ {};
     };

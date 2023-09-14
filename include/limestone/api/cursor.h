@@ -1,5 +1,5 @@
 /*
- * Copyright 2022-2022 tsurugi project.
+ * Copyright 2022-2023 tsurugi project.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -15,11 +15,10 @@
  */
 #pragma once
 
+#include <filesystem>
+#include <fstream>
 #include <memory>
 #include <vector>
-
-#include <boost/filesystem/path.hpp>
-#include <boost/filesystem.hpp>
 
 #include <limestone/api/storage_id_type.h>
 #include <limestone/api/large_object_view.h>
@@ -76,11 +75,11 @@ public:
     std::vector<large_object_view>& large_objects() noexcept;
 
 private:
-    boost::filesystem::ifstream istrm_{};
+    std::ifstream istrm_{};
     std::unique_ptr<log_entry> log_entry_;
     std::vector<large_object_view> large_objects_{};
 
-    explicit cursor(const boost::filesystem::path& file) noexcept;
+    explicit cursor(const std::filesystem::path& file) noexcept;
  
     friend class snapshot;
 };

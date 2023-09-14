@@ -1,10 +1,9 @@
 
 #include <algorithm>
+#include <fstream>
 #include <sstream>
-#include <limestone/logging.h>
 
-#include <boost/filesystem/path.hpp>
-#include <boost/filesystem/fstream.hpp>
+#include <limestone/logging.h>
 
 #include "test_root.h"
 
@@ -15,8 +14,8 @@ inline constexpr const char* location = "/tmp/rotate_test";
 class rotate_test : public ::testing::Test {
 public:
     void SetUp() {
-        boost::filesystem::remove_all(location);
-        if (!boost::filesystem::create_directory(location)) {
+        std::filesystem::remove_all(location);
+        if (!std::filesystem::create_directory(location)) {
             std::cerr << "cannot make directory" << std::endl;
         }
 
@@ -24,9 +23,9 @@ public:
     }
 
     void regen_datastore() {
-        std::vector<boost::filesystem::path> data_locations{};
+        std::vector<std::filesystem::path> data_locations{};
         data_locations.emplace_back(location);
-        boost::filesystem::path metadata_location{location};
+        std::filesystem::path metadata_location{location};
         limestone::api::configuration conf(data_locations, metadata_location);
 
         datastore_ = std::make_unique<limestone::api::datastore_test>(conf);
@@ -34,7 +33,7 @@ public:
 
     void TearDown() {
         datastore_ = nullptr;
-        boost::filesystem::remove_all(location);
+        std::filesystem::remove_all(location);
     }
 
     bool starts_with(std::string a, std::string b) { return a.substr(0, b.length()) == b; };
@@ -43,8 +42,8 @@ protected:
     std::unique_ptr<limestone::api::datastore_test> datastore_{};
 };
 
-void create_file(boost::filesystem::path path, std::string_view content) {
-    boost::filesystem::ofstream strm{};
+void create_file(std::filesystem::path path, std::string_view content) {
+    std::ofstream strm{};
     strm.open(path, std::ios_base::out | std::ios_base::app | std::ios_base::binary);
     strm.write(content.data(), content.size());
     strm.flush();
@@ -55,8 +54,8 @@ void create_file(boost::filesystem::path path, std::string_view content) {
 TEST_F(rotate_test, log_is_rotated) { // NOLINT
     using namespace limestone::api;
 
-    log_channel& channel = datastore_->create_channel(boost::filesystem::path(location));
-    log_channel& unused_channel = datastore_->create_channel(boost::filesystem::path(location));
+    log_channel& channel = datastore_->create_channel(std::filesystem::path(location));
+    log_channel& unused_channel = datastore_->create_channel(std::filesystem::path(location));
     datastore_->switch_epoch(42);
     channel.begin_session();
     channel.add_entry(42, "k1", "v1", {100, 4});
@@ -128,9 +127,9 @@ TEST_F(rotate_test, inactive_files_are_also_backed_up) { // NOLINT
     //    DATA LOST if step f. is wrong
 
     {
-        log_channel& channel1_0 = datastore_->create_channel(boost::filesystem::path(location));  // pwal_0000
-        log_channel& channel1_1 = datastore_->create_channel(boost::filesystem::path(location));  // pwal_0001
-        log_channel& unused_1_2 = datastore_->create_channel(boost::filesystem::path(location));  // pwal_0002 unused
+        log_channel& channel1_0 = datastore_->create_channel(std::filesystem::path(location));  // pwal_0000
+        log_channel& channel1_1 = datastore_->create_channel(std::filesystem::path(location));  // pwal_0001
+        log_channel& unused_1_2 = datastore_->create_channel(std::filesystem::path(location));  // pwal_0002 unused
         datastore_->ready();
         datastore_->switch_epoch(42);
         channel1_0.begin_session();
@@ -143,9 +142,9 @@ TEST_F(rotate_test, inactive_files_are_also_backed_up) { // NOLINT
     }
     regen_datastore();
     {
-        log_channel& channel2_0 = datastore_->create_channel(boost::filesystem::path(location));  // pwal_0000
-        log_channel& unused_2_1 = datastore_->create_channel(boost::filesystem::path(location));  // pwal_0001 unused
-        log_channel& unused_2_2 = datastore_->create_channel(boost::filesystem::path(location));  // pwal_0002 unused
+        log_channel& channel2_0 = datastore_->create_channel(std::filesystem::path(location));  // pwal_0000
+        log_channel& unused_2_1 = datastore_->create_channel(std::filesystem::path(location));  // pwal_0001 unused
+        log_channel& unused_2_2 = datastore_->create_channel(std::filesystem::path(location));  // pwal_0002 unused
         datastore_->ready();
         datastore_->switch_epoch(44);
         channel2_0.begin_session();
@@ -187,7 +186,7 @@ TEST_F(rotate_test, inactive_files_are_also_backed_up) { // NOLINT
 // why in this file??
 TEST_F(rotate_test, restore_prusik_all_abs) { // NOLINT
     using namespace limestone::api;
-    auto location_path = boost::filesystem::path(location);
+    auto location_path = std::filesystem::path(location);
 
     auto pwal1fn = "pwal_0000.1.1";
     auto pwal2fn = "pwal_0000.2.2";
@@ -195,9 +194,9 @@ TEST_F(rotate_test, restore_prusik_all_abs) { // NOLINT
     auto pwal1d = location_path / "bk1";
     auto pwal2d = location_path / "bk2";
     auto epochd = location_path / "bk3";
-    boost::filesystem::create_directories(pwal1d);
-    boost::filesystem::create_directories(pwal2d);
-    boost::filesystem::create_directories(epochd);
+    std::filesystem::create_directories(pwal1d);
+    std::filesystem::create_directories(pwal2d);
+    std::filesystem::create_directories(epochd);
 
     create_file(pwal1d / pwal1fn, "1");
     create_file(pwal2d / pwal2fn, "2");
@@ -211,9 +210,9 @@ TEST_F(rotate_test, restore_prusik_all_abs) { // NOLINT
 
     datastore_->restore(location, data);
 
-    EXPECT_TRUE(boost::filesystem::exists(location_path / pwal1fn));
-    EXPECT_TRUE(boost::filesystem::exists(location_path / pwal2fn));
-    EXPECT_TRUE(boost::filesystem::exists(location_path / epochfn));
+    EXPECT_TRUE(std::filesystem::exists(location_path / pwal1fn));
+    EXPECT_TRUE(std::filesystem::exists(location_path / pwal2fn));
+    EXPECT_TRUE(std::filesystem::exists(location_path / epochfn));
 
     // file count check, using newly created datastore
     regen_datastore();
@@ -225,7 +224,7 @@ TEST_F(rotate_test, restore_prusik_all_abs) { // NOLINT
 
 TEST_F(rotate_test, restore_prusik_all_rel) { // NOLINT
     using namespace limestone::api;
-    auto location_path = boost::filesystem::path(location);
+    auto location_path = std::filesystem::path(location);
 
     std::string pwal1fn = "pwal_0000.1.1";
     std::string pwal2fn = "pwal_0000.2.2";
@@ -233,9 +232,9 @@ TEST_F(rotate_test, restore_prusik_all_rel) { // NOLINT
     auto pwal1d = location_path / "bk1";
     auto pwal2d = location_path / "bk2";
     auto epochd = location_path / "bk3";
-    boost::filesystem::create_directories(pwal1d);
-    boost::filesystem::create_directories(pwal2d);
-    boost::filesystem::create_directories(epochd);
+    std::filesystem::create_directories(pwal1d);
+    std::filesystem::create_directories(pwal2d);
+    std::filesystem::create_directories(epochd);
 
     create_file(pwal1d / pwal1fn, "1");
     create_file(pwal2d / pwal2fn, "2");
@@ -249,9 +248,9 @@ TEST_F(rotate_test, restore_prusik_all_rel) { // NOLINT
 
     datastore_->restore(location, data);
 
-    EXPECT_TRUE(boost::filesystem::exists(location_path / pwal1fn));
-    EXPECT_TRUE(boost::filesystem::exists(location_path / pwal2fn));
-    EXPECT_TRUE(boost::filesystem::exists(location_path / epochfn));
+    EXPECT_TRUE(std::filesystem::exists(location_path / pwal1fn));
+    EXPECT_TRUE(std::filesystem::exists(location_path / pwal2fn));
+    EXPECT_TRUE(std::filesystem::exists(location_path / epochfn));
 
     // file count check, using newly created datastore
     regen_datastore();
@@ -265,8 +264,8 @@ TEST_F(rotate_test, get_snapshot_works) { // NOLINT
     using namespace limestone::api;
 
     datastore_->ready();
-    log_channel& channel = datastore_->create_channel(boost::filesystem::path(location));
-    log_channel& unused_channel = datastore_->create_channel(boost::filesystem::path(location));
+    log_channel& channel = datastore_->create_channel(std::filesystem::path(location));
+    log_channel& unused_channel = datastore_->create_channel(std::filesystem::path(location));
     datastore_->switch_epoch(42);
     channel.begin_session();
     channel.add_entry(3, "k1", "v1", {100, 4});

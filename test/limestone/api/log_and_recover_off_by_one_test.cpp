@@ -35,14 +35,14 @@ TEST_F(log_and_recover_off_by_one_test, log_and_recovery) {
         std::cerr << "cannot make directory" << std::endl;
     }
 
-    std::vector<boost::filesystem::path> data_locations{};
+    std::vector<std::filesystem::path> data_locations{};
     data_locations.emplace_back(data_location);
-    boost::filesystem::path metadata_location_path{metadata_location};
+    std::filesystem::path metadata_location_path{metadata_location};
     limestone::api::configuration conf(data_locations, metadata_location_path);
 
     datastore_ = std::make_unique<limestone::api::datastore_test>(conf);
 
-    limestone::api::log_channel& channel = datastore_->create_channel(boost::filesystem::path(data_location));
+    limestone::api::log_channel& channel = datastore_->create_channel(std::filesystem::path(data_location));
 
     // prepare durable epoch
     std::atomic<std::size_t> durable_epoch{0};

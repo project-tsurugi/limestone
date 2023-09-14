@@ -15,10 +15,12 @@
  */
 
 #include <byteswap.h>
-#include <boost/filesystem/operations.hpp>
 #include <cstdlib>
 #include <cstring>
+#include <filesystem>
+#include <fstream>
 #include <mutex>
+#include <system_error>
 
 #include <glog/logging.h>
 #include <limestone/logging.h>
@@ -34,10 +36,10 @@ constexpr std::size_t write_version_size = sizeof(epoch_id_type) + sizeof(std::u
 static_assert(write_version_size == 16);
 
 // return max epoch in file.
-static std::optional<epoch_id_type> last_durable_epoch(const boost::filesystem::path& file) noexcept {
+static std::optional<epoch_id_type> last_durable_epoch(const std::filesystem::path& file) noexcept {
     std::optional<epoch_id_type> rv;
 
-    boost::filesystem::ifstream istrm;
+    std::ifstream istrm;
     log_entry e;
     istrm.open(file, std::ios_base::in | std::ios_base::binary);
     while (e.read(istrm)) {
@@ -59,7 +61,7 @@ epoch_id_type datastore::last_durable_epoch_in_dir() noexcept {
 
     // main epoch file is empty,
     // read all rotated-epoch files
-    for (const boost::filesystem::path& p : boost::filesystem::directory_iterator(from_dir)) {
+    for (const std::filesystem::path& p : std::filesystem::directory_iterator(from_dir)) {
         if (p.filename().string().rfind(log_channel::prefix, 0) == 0) {  // starts_with(log_channel::prefix)
             // this is epoch file (main one or rotated)
             std::optional<epoch_id_type> epoch = last_durable_epoch(p);
@@ -143,13 +145,13 @@ void datastore::create_snapshot() noexcept {  // NOLINT(readability-function-cog
     auto add_entry = insert_entry_or_update_to_max;
     bool works_with_multi_thread = false;
 #endif
-    auto process_file = [ld_epoch, &add_entry](const boost::filesystem::path& p) {
+    auto process_file = [ld_epoch, &add_entry](const std::filesystem::path& p) {
         if (p.filename().string().substr(0, log_channel::prefix.length()) == log_channel::prefix) {
             VLOG(log_info) << "processing pwal file: " << p.filename().string();
             log_entry e;
             epoch_id_type current_epoch{UINT64_MAX};
 
-            boost::filesystem::ifstream istrm;
+            std::ifstream istrm;
             istrm.open(p, std::ios_base::in | std::ios_base::binary);
             while(e.read(istrm)) {
                 switch(e.type()) {
@@ -180,14 +182,14 @@ void datastore::create_snapshot() noexcept {  // NOLINT(readability-function-cog
         num_worker = 1;
     }
     std::mutex dir_mtx;
-    auto dir_begin = boost::filesystem::directory_iterator(from_dir);
-    auto dir_end = boost::filesystem::directory_iterator();
+    auto dir_begin = std::filesystem::directory_iterator(from_dir);
+    auto dir_end = std::filesystem::directory_iterator();
     std::vector<std::thread> workers;
     workers.reserve(num_worker);
     for (int i = 0; i < num_worker; i++) {
         workers.emplace_back(std::thread([&dir_mtx, &dir_begin, &dir_end, &process_file](){
             for (;;) {
-                boost::filesystem::path p;
+                std::filesystem::path p;
                 {
                     std::lock_guard<std::mutex> g{dir_mtx};
                     if (dir_begin == dir_end) break;
@@ -201,19 +203,19 @@ void datastore::create_snapshot() noexcept {  // NOLINT(readability-function-cog
         workers[i].join();
     }
 
-    boost::filesystem::path sub_dir = location_ / boost::filesystem::path(std::string(snapshot::subdirectory_name_));
-    boost::system::error_code error;
-    const bool result_check = boost::filesystem::exists(sub_dir, error);
+    std::filesystem::path sub_dir = location_ / std::filesystem::path(snapshot::subdirectory_name_);
+    std::error_code error;
+    const bool result_check = std::filesystem::exists(sub_dir, error);
     if (!result_check || error) {
-        const bool result_mkdir = boost::filesystem::create_directory(sub_dir, error);
+        const bool result_mkdir = std::filesystem::create_directory(sub_dir, error);
         if (!result_mkdir || error) {
             LOG_LP(ERROR) << "fail to create directory";
             std::abort();
         }
     }
 
-    boost::filesystem::ofstream ostrm{};
-    boost::filesystem::path snapshot_file = sub_dir / boost::filesystem::path(std::string(snapshot::file_name_));
+    std::ofstream ostrm{};
+    std::filesystem::path snapshot_file = sub_dir / std::filesystem::path(snapshot::file_name_);
     VLOG_LP(log_info) << "generating snapshot file: " << snapshot_file;
     ostrm.open(snapshot_file, std::ios_base::out | std::ios_base::trunc | std::ios_base::binary);
     if( ostrm.fail() ){

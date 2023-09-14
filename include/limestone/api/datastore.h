@@ -19,11 +19,10 @@
 #include <future>
 #include <atomic>
 #include <chrono>
+#include <filesystem>
 #include <vector>
 #include <set>
 #include <mutex>
-
-#include <boost/filesystem/path.hpp>
 
 #include <limestone/status.h>
 #include <limestone/api/backup.h>
@@ -136,7 +135,7 @@ public:
      * @return the reference of the log_channel
      * @attention this function should be called before the ready() is called.
      */
-    log_channel& create_channel(const boost::filesystem::path& location);
+    log_channel& create_channel(const std::filesystem::path& location);
 
     /**
      * @brief provide the largest epoch ID
@@ -223,7 +222,7 @@ protected:  // for tests
 private:
     std::vector<std::unique_ptr<log_channel>> log_channels_;
 
-    boost::filesystem::path location_{};
+    std::filesystem::path location_{};
 
     std::atomic_uint64_t epoch_id_switched_{};
 
@@ -237,7 +236,7 @@ private:
 
     std::function<void(write_version_type)> snapshot_callback_;
 
-    boost::filesystem::path epoch_file_path_{};
+    std::filesystem::path epoch_file_path_{};
 
     tag_repository tag_repository_{};
 
@@ -246,7 +245,7 @@ private:
     // used for backup
     //   (old) full backup :   target is entire <files_>
     //   (new/prusik) backup : target is rotated files, i.e. <files_> minus active log files
-    std::set<boost::filesystem::path> files_{};
+    std::set<std::filesystem::path> files_{};
 
     std::mutex mtx_channel_{};
 
@@ -258,10 +257,10 @@ private:
 
     state state_{};
 
-    void add_file(const boost::filesystem::path& file) noexcept;
+    void add_file(const std::filesystem::path& file) noexcept;
 
     // opposite of add_file
-    void subtract_file(const boost::filesystem::path& file);
+    void subtract_file(const std::filesystem::path& file);
 
     epoch_id_type search_max_durable_epock_id() noexcept;
 

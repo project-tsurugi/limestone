@@ -1,5 +1,5 @@
 /*
- * Copyright 2022-2022 tsurugi project.
+ * Copyright 2022-2023 tsurugi project.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -13,6 +13,7 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
+
 #include <unistd.h>
 #include "test_root.h"
 
@@ -30,9 +31,9 @@ public:
             std::cerr << "cannot make directory" << std::endl;
         }
 
-        std::vector<boost::filesystem::path> data_locations{};
+        std::vector<std::filesystem::path> data_locations{};
         data_locations.emplace_back(location);
-        boost::filesystem::path metadata_location{location};
+        std::filesystem::path metadata_location{location};
         limestone::api::configuration conf(data_locations, metadata_location);
 
         datastore_ = std::make_unique<limestone::api::datastore_test>(conf);
@@ -50,15 +51,15 @@ protected:
 };
 
 TEST_F(log_channel_test, name) {
-    limestone::api::log_channel& channel = datastore_->create_channel(boost::filesystem::path(location));
+    limestone::api::log_channel& channel = datastore_->create_channel(std::filesystem::path(location));
     EXPECT_EQ(channel.file_path().string(), std::string(location) + "/pwal_0000");
 }
 
 TEST_F(log_channel_test, number_and_backup) {
-    limestone::api::log_channel& channel1 = datastore_->create_channel(boost::filesystem::path(location));
-    limestone::api::log_channel& channel2 = datastore_->create_channel(boost::filesystem::path(location));
-    limestone::api::log_channel& channel3 = datastore_->create_channel(boost::filesystem::path(location));
-    limestone::api::log_channel& channel4 = datastore_->create_channel(boost::filesystem::path(location));
+    limestone::api::log_channel& channel1 = datastore_->create_channel(std::filesystem::path(location));
+    limestone::api::log_channel& channel2 = datastore_->create_channel(std::filesystem::path(location));
+    limestone::api::log_channel& channel3 = datastore_->create_channel(std::filesystem::path(location));
+    limestone::api::log_channel& channel4 = datastore_->create_channel(std::filesystem::path(location));
 
     channel1.begin_session();
     channel2.begin_session();
@@ -86,7 +87,7 @@ TEST_F(log_channel_test, number_and_backup) {
 }
 
 TEST_F(log_channel_test, remove) {
-    limestone::api::log_channel& channel = datastore_->create_channel(boost::filesystem::path(location));
+    limestone::api::log_channel& channel = datastore_->create_channel(std::filesystem::path(location));
 
     channel.begin_session();
     channel.add_entry(42, "k1", "v1", {100, 4});

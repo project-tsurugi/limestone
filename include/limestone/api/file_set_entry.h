@@ -15,10 +15,8 @@
  */
 #pragma once
 
+#include <filesystem>
 #include <string_view>
-
-#include <boost/filesystem/path.hpp>
-
 
 namespace limestone::api {
 
@@ -34,16 +32,16 @@ public:
     file_set_entry(file_set_entry &&) noexcept = default;
     file_set_entry& operator=(file_set_entry &&) noexcept = default;
 
-    file_set_entry(boost::filesystem::path source_path, boost::filesystem::path destination_path, bool is_detached)
+    file_set_entry(std::filesystem::path source_path, std::filesystem::path destination_path, bool is_detached)
     : source_path_(std::move(source_path)), destination_path_(std::move(destination_path)), is_detached_(is_detached) {}
 
-    [[nodiscard]] boost::filesystem::path source_path() const { return source_path_; }
-    [[nodiscard]] boost::filesystem::path destination_path() const { return destination_path_; }
+    [[nodiscard]] std::filesystem::path source_path() const { return source_path_; }
+    [[nodiscard]] std::filesystem::path destination_path() const { return destination_path_; }
     [[nodiscard]] bool is_detached() const { return is_detached_; }
 
 private:
-    boost::filesystem::path source_path_ {};
-    boost::filesystem::path destination_path_ {};
+    std::filesystem::path source_path_ {};
+    std::filesystem::path destination_path_ {};
     bool is_detached_ {};
 };
 

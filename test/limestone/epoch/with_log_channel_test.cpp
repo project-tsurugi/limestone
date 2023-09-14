@@ -21,9 +21,9 @@ protected:
             std::cerr << "cannot make directory" << std::endl;
         }
 
-        std::vector<boost::filesystem::path> data_locations{};
+        std::vector<std::filesystem::path> data_locations{};
         data_locations.emplace_back(data_location);
-        boost::filesystem::path metadata_location_path{metadata_location};
+        std::filesystem::path metadata_location_path{metadata_location};
         limestone::api::configuration conf(data_locations, metadata_location_path);
 
         datastore_ = std::make_unique<limestone::api::datastore_test>(conf);
@@ -40,7 +40,7 @@ protected:
 };
 
 TEST_F(with_log_channel_test, one_log_channel) {
-    limestone::api::log_channel& channel = datastore_->create_channel(boost::filesystem::path(data_location));
+    limestone::api::log_channel& channel = datastore_->create_channel(std::filesystem::path(data_location));
     
     datastore_->ready();
 
@@ -69,8 +69,8 @@ TEST_F(with_log_channel_test, one_log_channel) {
 }
 
 TEST_F(with_log_channel_test, log_channels) {
-    limestone::api::log_channel& channel1 = datastore_->create_channel(boost::filesystem::path(data_location));
-    limestone::api::log_channel& channel2 = datastore_->create_channel(boost::filesystem::path(data_location));
+    limestone::api::log_channel& channel1 = datastore_->create_channel(std::filesystem::path(data_location));
+    limestone::api::log_channel& channel2 = datastore_->create_channel(std::filesystem::path(data_location));
     
     datastore_->ready();
 
