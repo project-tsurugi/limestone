@@ -43,8 +43,8 @@ available options:
 * `-DBUILD_DOCUMENTS=OFF` - don't build documents by doxygen
 * `-DINSTALL_EXAMPLES=ON` - install example applications
 * `-DFORCE_INSTALL_RPATH=ON` - automatically configure `INSTALL_RPATH` for non-default library paths
-* `-DRECOVERY_SORTER_KVSLIB=<library>` - select the eKVS library using at recovery process. (`LEVELDB` (default) or `ROCKSDB`, case-insensitive)
-* `-DRECOVERY_SORTER_PUT_ONLY=ON` - using put-only method at recovery process (faster)
+* `-DRECOVERY_SORTER_KVSLIB=<library>` - select the eKVS library using at recovery process. (`LEVELDB` or `ROCKSDB` (default), case-insensitive)
+* `-DRECOVERY_SORTER_PUT_ONLY=OFF` - don't use put-only method at recovery process (faster)
 * for debugging only
   * `-DENABLE_SANITIZER=OFF` - disable sanitizers (requires `-DCMAKE_BUILD_TYPE=Debug`)
   * `-DENABLE_UB_SANITIZER=ON` - enable undefined behavior sanitizer (requires `-DENABLE_SANITIZER=ON`)
