@@ -235,7 +235,7 @@ void datastore::create_snapshot() {  // NOLINT(readability-function-cognitive-co
         switch (entry_type) {
         case log_entry::entry_type::normal_entry: {
             std::string value(write_version_size + db_value.size() - 1, '\0');
-            store_bswap64_value(&value[0], &db_key[0]);
+            store_bswap64_value(&value[0], &db_key[0]);  // NOLINT(readability-container-data-pointer)
             store_bswap64_value(&value[8], &db_key[8]);
             std::memcpy(&value[write_version_size], &db_value[1], db_value.size() - 1);
             log_entry::write(ostrm, key, value);
