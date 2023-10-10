@@ -131,6 +131,8 @@ public:
      */
     [[nodiscard]] boost::filesystem::path file_path() const noexcept;
 
+    ~log_channel();
+
 private:
     datastore& envelope_;
 
@@ -150,7 +152,11 @@ private:
 
     std::atomic_uint64_t finished_epoch_id_{0};
 
+    std::atomic_bool need_close_{false};
+
     log_channel(boost::filesystem::path location, std::size_t id, datastore& envelope) noexcept;
+
+    void close_file();
 
     void request_rotate();
 

@@ -19,6 +19,7 @@
 #include <future>
 #include <atomic>
 #include <chrono>
+#include <cstdio>
 #include <vector>
 #include <set>
 #include <mutex>
@@ -257,6 +258,8 @@ private:
     std::mutex mtx_epoch_file_{};
 
     state state_{};
+
+    FILE* epoch_strm_{};
 
     void add_file(const boost::filesystem::path& file) noexcept;
 

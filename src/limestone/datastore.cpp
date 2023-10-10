@@ -60,10 +60,7 @@ datastore::datastore(configuration const& conf) : location_(conf.data_locations_
             LOG_LP(ERROR) << "does not have write permission for the log_location directory, path: " <<  location_;
             throw std::runtime_error("does not have write permission for the log_location directory");
         }
-        if (fclose(strm) != 0) {  // NOLINT(*-owning-memory)
-            LOG_LP(ERROR) << "fclose failed, errno = " << errno;
-            throw std::runtime_error("I/O error");
-        }
+        epoch_strm_ = strm;
         add_file(epoch_file_path_);
     }
 
@@ -73,7 +70,14 @@ datastore::datastore(configuration const& conf) : location_(conf.data_locations_
     VLOG_LP(log_debug) << "datastore is created, location = " << location_.string();
 }
 
-datastore::~datastore() noexcept = default;
+datastore::~datastore() noexcept {
+    if (epoch_strm_) {
+        if (fclose(epoch_strm_) != 0) {  // NOLINT(*-owning-memory)
+            LOG_LP(ERROR) << "fclose failed, errno = " << errno;
+            std::abort();
+        }
+    }
+}
 
 void datastore::recover() const noexcept {
     check_before_ready(static_cast<const char*>(__func__));
@@ -146,10 +150,14 @@ void datastore::update_min_epoch_id(bool from_switch_epoch) noexcept {  // NOLIN
         if (epoch_id_recorded_.compare_exchange_strong(old_epoch_id, to_be_epoch)) {
             std::lock_guard<std::mutex> lock(mtx_epoch_file_);
 
-            FILE* strm = fopen(epoch_file_path_.c_str(), "a");  // NOLINT(*-owning-memory)
+            FILE* strm = epoch_strm_;
             if (!strm) {
-                LOG_LP(ERROR) << "fopen failed, errno = " << errno;
-                std::abort();
+                strm = fopen(epoch_file_path_.c_str(), "a");  // NOLINT(*-owning-memory)
+                if (!strm) {
+                    LOG_LP(ERROR) << "fopen failed, errno = " << errno;
+                    std::abort();
+                }
+                epoch_strm_ = strm;
             }
             log_entry::durable_epoch(strm, static_cast<epoch_id_type>(epoch_id_informed_.load()));
             if (fflush(strm) != 0) {
@@ -158,10 +166,6 @@ void datastore::update_min_epoch_id(bool from_switch_epoch) noexcept {  // NOLIN
             }
             if (fsync(fileno(strm)) != 0) {
                 LOG_LP(ERROR) << "fsync failed, errno = " << errno;
-                std::abort();
-            }
-            if (fclose(strm) != 0) {  // NOLINT(*-owning-memory)
-                LOG_LP(ERROR) << "fclose failed, errno = " << errno;
                 std::abort();
             }
             break;
@@ -326,7 +330,7 @@ epoch_id_type datastore::rotate_log_files() {
 }
 
 void datastore::rotate_epoch_file() {
-    // XXX: multi-thread broken
+    std::lock_guard<std::mutex> lock(mtx_epoch_file_);
 
     std::stringstream ss;
     ss << "epoch."
@@ -337,14 +341,21 @@ void datastore::rotate_epoch_file() {
     boost::filesystem::rename(epoch_file_path_, new_file);
     add_file(new_file);
 
+    if (epoch_strm_) {
+        if (fclose(epoch_strm_) != 0) {  // NOLINT(*-owning-memory)
+            LOG_LP(ERROR) << "fclose failed, errno = " << errno;
+            throw std::runtime_error("I/O error");
+        }
+        epoch_strm_ = nullptr;
+    }
+
     // create new one
-    boost::filesystem::ofstream strm{};
-    strm.open(epoch_file_path_, std::ios_base::out | std::ios_base::app | std::ios_base::binary);
-    if(!strm || !strm.is_open() || strm.bad() || strm.fail()){
+    FILE* strm = fopen(epoch_file_path_.c_str(), "a");  // NOLINT(*-owning-memory)
+    if (!strm) {
         LOG_LP(ERROR) << "does not have write permission for the log_location directory, path: " <<  location_;
         throw std::runtime_error("does not have write permission for the log_location directory");
     }
-    strm.close();
+    epoch_strm_ = strm;
 }
 
 void datastore::add_file(const boost::filesystem::path& file) noexcept {

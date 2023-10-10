@@ -37,24 +37,40 @@ log_channel::log_channel(boost::filesystem::path location, std::size_t id, datas
     file_ = ss.str();
 }
 
+log_channel::~log_channel() {
+    if (strm_) {
+        close_file();
+    }
+}
+
 void log_channel::begin_session() noexcept {
     do {
         current_epoch_id_.store(envelope_.epoch_id_switched_.load());
         std::atomic_thread_fence(std::memory_order_acq_rel);
     } while (current_epoch_id_.load() != envelope_.epoch_id_switched_.load());
 
-    auto log_file = file_path();
-    strm_ = fopen(log_file.c_str(), "a");  // NOLINT(*-owning-memory)
     if (!strm_) {
-        LOG_LP(ERROR) << "I/O error, cannot make file on " <<  location_ << ", errno = " << errno;
-        std::abort();
-    }
-    setvbuf(strm_, nullptr, _IOFBF, 128L * 1024L);  // NOLINT, NB. glibc may ignore size when _IOFBF and buffer=NULL
-    if (!registered_) {
-        envelope_.add_file(log_file);
-        registered_ = true;
+        auto log_file = file_path();
+        strm_ = fopen(log_file.c_str(), "a");  // NOLINT(*-owning-memory)
+        if (!strm_) {
+            LOG_LP(ERROR) << "I/O error, cannot make file on " <<  location_ << ", errno = " << errno;
+            std::abort();
+        }
+        setvbuf(strm_, nullptr, _IOFBF, 128L * 1024L);  // NOLINT, NB. glibc may ignore size when _IOFBF and buffer=NULL
+        if (!registered_) {
+            envelope_.add_file(log_file);
+            registered_ = true;
+        }
     }
     log_entry::begin_session(strm_, static_cast<epoch_id_type>(current_epoch_id_.load()));
+}
+
+void log_channel::close_file() {
+    if (fclose(strm_) != 0) {  // NOLINT(*-owning-memory)
+        LOG_LP(ERROR) << "fclose failed, errno = " << errno;
+        std::abort();
+    }
+    strm_ = nullptr;
 }
 
 void log_channel::end_session() noexcept {
@@ -69,9 +85,9 @@ void log_channel::end_session() noexcept {
     finished_epoch_id_.store(current_epoch_id_.load());
     current_epoch_id_.store(UINT64_MAX);
     envelope_.update_min_epoch_id();
-    if (fclose(strm_) != 0) {  // NOLINT(*-owning-memory)
-        LOG_LP(ERROR) << "fclose failed, errno = " << errno;
-        std::abort();
+    if (need_close_) {
+        need_close_ = false;
+        close_file();
     }
 }
 
@@ -126,6 +142,7 @@ void log_channel::do_rotate_file(epoch_id_type epoch) {
     std::string new_name = ss.str();
     boost::filesystem::path new_file = location_ / new_name;
     boost::filesystem::rename(file_path(), new_file);
+    need_close_ = true;
     envelope_.add_file(new_file);
 
     envelope_.subtract_file(location_ / file_);
