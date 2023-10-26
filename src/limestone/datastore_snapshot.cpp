@@ -92,7 +92,7 @@ static int comp_twisted_key(const std::string_view& a, const std::string_view& b
     return std::memcmp(b.data(), a.data(), write_version_size);
 }
 
-void datastore::create_snapshot() noexcept {  // NOLINT(readability-function-cognitive-complexity)
+void datastore::create_snapshot() {  // NOLINT(readability-function-cognitive-complexity)
     auto& from_dir = location_;
 #if defined SORT_METHOD_PUT_ONLY
     auto sortdb = std::make_unique<sortdb_wrapper>(from_dir, comp_twisted_key);
@@ -208,7 +208,7 @@ void datastore::create_snapshot() noexcept {  // NOLINT(readability-function-cog
         const bool result_mkdir = boost::filesystem::create_directory(sub_dir, error);
         if (!result_mkdir || error) {
             LOG_LP(ERROR) << "fail to create directory";
-            std::abort();
+            throw std::runtime_error("I/O error");
         }
     }
 
@@ -217,7 +217,7 @@ void datastore::create_snapshot() noexcept {  // NOLINT(readability-function-cog
     FILE* ostrm = fopen(snapshot_file.c_str(), "w");  // NOLINT(*-owning-memory)
     if (!ostrm) {
         LOG_LP(ERROR) << "cannot create snapshot file (" << snapshot_file << ")";
-        std::abort();
+        throw std::runtime_error("I/O error");
     }
     setvbuf(ostrm, nullptr, _IOFBF, 128L * 1024L);  // NOLINT, NB. glibc may ignore size when _IOFBF and buffer=NULL
     static_assert(sizeof(log_entry::entry_type) == 1);
@@ -266,7 +266,7 @@ void datastore::create_snapshot() noexcept {  // NOLINT(readability-function-cog
 #endif
     if (fclose(ostrm) != 0) {  // NOLINT(*-owning-memory)
         LOG_LP(ERROR) << "cannot close snapshot file (" << snapshot_file << "), errno = " << errno;
-        std::abort();
+        throw std::runtime_error("I/O error");
     }
 }
 

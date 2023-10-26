@@ -243,7 +243,7 @@ private:
         int ret = fputc(value, out);
         if (ret == EOF) {
             LOG_LP(ERROR) << "fputc failed, errno = " << errno;
-            std::abort();
+            throw std::runtime_error("I/O error");
         }
     }
     static void write_uint32le(FILE* out, const std::uint32_t value) {
@@ -269,7 +269,7 @@ private:
         auto ret = fwrite(buf, len, 1, out);
         if (ret != 1) {
             LOG_LP(ERROR) << "fwrite failed, errno = " << errno;
-            std::abort();
+            throw std::runtime_error("I/O error");
         }
     }
 };

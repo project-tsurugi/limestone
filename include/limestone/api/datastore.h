@@ -151,7 +151,7 @@ public:
      * @param new epoch id which must be greater than current epoch ID.
      * @attention this function should be called after the ready() is called.
      */
-    void switch_epoch(epoch_id_type epoch_id) noexcept;
+    void switch_epoch(epoch_id_type epoch_id);
 
     /**
      * @brief register a callback on successful persistence
@@ -268,7 +268,7 @@ private:
 
     epoch_id_type search_max_durable_epock_id() noexcept;
 
-    void update_min_epoch_id(bool from_switch_epoch = false) noexcept;
+    void update_min_epoch_id(bool from_switch_epoch = false);
     
     void check_after_ready(std::string_view func) const noexcept;
 
@@ -280,7 +280,7 @@ private:
      * @param from the location of log files
      * @attention this function is not thread-safe.
      */
-    void create_snapshot() noexcept;
+    void create_snapshot();
 
     epoch_id_type last_durable_epoch_in_dir() noexcept;
 
