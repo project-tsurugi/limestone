@@ -37,9 +37,13 @@ log_channel::log_channel(boost::filesystem::path location, std::size_t id, datas
     file_ = ss.str();
 }
 
-log_channel::~log_channel() {
+log_channel::~log_channel() noexcept {
     if (strm_) {
-        close_file();
+        try {
+            close_file();
+        } catch (std::exception const&) {
+            LOG_LP(ERROR) << "I/O error in dtor, but previous fsync has successed, so ignore this";
+        }
     }
 }
 

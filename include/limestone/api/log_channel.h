@@ -37,7 +37,7 @@ class datastore;
  * @brief log_channel interface to output logs
  * @details this object is not thread-safe, assuming each thread uses its own log_channel
  */
-class log_channel {
+class log_channel {  // FIXME: NOLINT(*-special-member-functions)
     /**
      * @brief prefix of pwal file name
      */
@@ -131,7 +131,7 @@ public:
      */
     [[nodiscard]] boost::filesystem::path file_path() const noexcept;
 
-    ~log_channel();
+    ~log_channel() noexcept;
 
 private:
     datastore& envelope_;
