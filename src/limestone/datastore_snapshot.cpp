@@ -222,7 +222,6 @@ void datastore::create_snapshot() {
 #endif
 
     epoch_id_type ld_epoch = last_durable_epoch_in_dir();
-    epoch_id_switched_.store(ld_epoch + 1);  // ??
 
     [[maybe_unused]]
     auto insert_entry_or_update_to_max = [&sortdb](log_entry& e){
@@ -272,7 +271,9 @@ void datastore::create_snapshot() {
     }
     auto is_wal = [](const boost::filesystem::path& p){ return p.filename().string().substr(0, log_channel::prefix.length()) == log_channel::prefix; };
     epoch_id_type max_appeared_epoch = scan_pwal_files_in_dir(from_dir, num_worker, is_wal, ld_epoch, add_entry);
-    epoch_id_informed_.store(max_appeared_epoch);
+    // epoch +1 for margin (probably unnecessary)
+    epoch_id_switched_.store(max_appeared_epoch + 1);
+    epoch_id_informed_.store(max_appeared_epoch + 1);
 
     boost::filesystem::path sub_dir = location_ / boost::filesystem::path(std::string(snapshot::subdirectory_name_));
     boost::system::error_code error;

@@ -121,8 +121,8 @@ void datastore::switch_epoch(epoch_id_type new_epoch_id) {
     check_after_ready(static_cast<const char*>(__func__));
 
     auto neid = static_cast<std::uint64_t>(new_epoch_id);
-    if (neid <= epoch_id_switched_.load()) {
-        LOG_LP(WARNING) << "switch to epoch_id_type of " << neid << " is curious";
+    if (auto switched = epoch_id_switched_.load(); neid <= switched) {
+        LOG_LP(WARNING) << "switch to epoch_id_type of " << neid << " (<=" << switched << ") is curious";
     }
 
     epoch_id_switched_.store(neid);
