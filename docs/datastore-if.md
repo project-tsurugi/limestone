@@ -192,7 +192,7 @@
       * この操作は `ready()` が呼び出される前に行う必要がある
   * `datastore::last_epoch() -> epoch_id_type`
     * overview
-      * 永続化に成功した最大の epoch ID を返す
+      * 永続化データ中に含まれる最大の epoch ID 以上の値を返す
     * note
       * この操作は、 `datastore::ready()` の実行前後のいずれでも利用可能 (`LOG-0` を除く)
     * impl

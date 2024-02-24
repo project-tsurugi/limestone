@@ -33,6 +33,7 @@ public:
 
     static void set_durable_epoch(std::size_t n) {
         durable_epoch_.store(n, std::memory_order_release);
+        VLOG(30) << "set_durable_epoch " << n;
     }
 
 protected:
@@ -59,17 +60,19 @@ TEST_F(datastore_test, add_persistent_callback_test) { // NOLINT
     // register persistent callback
     datastore_->add_persistent_callback(set_durable_epoch);
 
-    // epoch 1
-    datastore_->switch_epoch(1);
-
     // ready
     datastore_->ready();
 
-    // epoch 2
-    datastore_->switch_epoch(2);
+    auto initial_epoch = datastore_->last_epoch();  // after ready()
+
+    VLOG(30) << "epoch 1";
+    datastore_->switch_epoch(initial_epoch + 1);  // this will trigger no durable callbacks
+
+    VLOG(30) << "epoch 2";
+    datastore_->switch_epoch(initial_epoch + 2);
 
     for (;;) {
-        if (get_durable_epoch() >= 1) {
+        if (get_durable_epoch() >= initial_epoch + 1) {
             break;
         }
         _mm_pause();
@@ -80,11 +83,11 @@ TEST_F(datastore_test, add_persistent_callback_test) { // NOLINT
 #endif
     }
 
-    // epoch 3
-    datastore_->switch_epoch(3);
+    VLOG(30) << "epoch 3";
+    datastore_->switch_epoch(initial_epoch + 3);
 
     for (;;) {
-        if (get_durable_epoch() >= 2) {
+        if (get_durable_epoch() >= initial_epoch + 2) {
             break;
         }
         _mm_pause();
