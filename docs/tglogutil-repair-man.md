@@ -16,10 +16,14 @@ Specify the location set in the `log_location` parameter in the `[datastore]` se
 Options:
 * `--thread-num=<number>`
     * Number (default `1`) of concurrent processing thread of repair
+* `--verbose=<bool>`
+    * Verbose mode (default `false`)
 * `--epoch=<epoch>`
     * Upper limit epoch number to be accepted as valid data (default is the value recorded in the transaction log directory)
 * `--cut=<bool>`
     * Truncate the end of file when processing corruption-type (see section [TYPES OF CORRUPTION TO HANDLE](#types-of-corruption-to-handle) below) `truncated` and `damaged` (default `false`)
+* `-h`, `--help`
+    * Display usage information and exit
 
 ## EXIT STATUS
 

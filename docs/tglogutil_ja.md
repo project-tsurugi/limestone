@@ -73,5 +73,5 @@ $ tglogutil repair [options] <dblogdir>
 $ tglogutil compaction [options] <dblogdir>
 ```
 
-詳細は [](tglogutil-compaction-man.md) を参照のこと
+詳細は [tglogutil-compaction-man.md](tglogutil-compaction-man.md) を参照のこと
 
