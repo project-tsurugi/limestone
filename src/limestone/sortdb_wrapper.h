@@ -1,5 +1,5 @@
 /*
- * Copyright 2022-2023 Project Tsurugi.
+ * Copyright 2022-2024 Project Tsurugi.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -90,13 +90,16 @@ public:
     }
 
     void each(const std::function<void(std::string_view, std::string_view)>& fun) {
-        Iterator* it = sortdb_->NewIterator(ReadOptions());  // NOLINT (typical usage of API)
+        std::unique_ptr<Iterator> it{sortdb_->NewIterator(ReadOptions())};
         for (it->SeekToFirst(); it->Valid(); it->Next()) {
             Slice key = it->key();
             Slice value = it->value();
             fun(std::string_view(key.data(), key.size()), std::string_view(value.data(), value.size()));
         }
-        delete it;  // NOLINT (typical usage of API)
+        if (!it->status().ok()) {
+            LOG_LP(ERROR) << "sortdb iterator invalidated, status: " << it->status().ToString();
+            throw std::runtime_error("error in sortdb read iteration");
+        }
     }
     
 private:
