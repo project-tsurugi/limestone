@@ -77,16 +77,21 @@ public:
     sortdb_wrapper(sortdb_wrapper&& other) noexcept = delete;
     sortdb_wrapper& operator=(sortdb_wrapper&& other) noexcept = delete;
 
-    bool put(const std::string& key, const std::string& value) {
+    void put(const std::string& key, const std::string& value) {
         WriteOptions write_options{};
         auto status = sortdb_->Put(write_options, key, value);
-        return status.ok();
+        if (status.ok()) { return; }
+        LOG_LP(ERROR) << "sortdb put error, status: " << status.ToString();
+        throw std::runtime_error("error in sortdb put");
     }
 
     bool get(const std::string& key, std::string* value) {
         ReadOptions read_options{};
         auto status = sortdb_->Get(read_options, key, value);
-        return status.ok();
+        if (status.ok()) { return true; }
+        if (status.IsNotFound()) { return false; }
+        LOG_LP(ERROR) << "sortdb get error, status: " << status.ToString();
+        throw std::runtime_error("error in sortdb get");
     }
 
     void each(const std::function<void(std::string_view, std::string_view)>& fun) {
