@@ -1,4 +1,7 @@
 
+#include <atomic>
+#include <thread>
+#include <chrono>
 #include <sstream>
 #include <limestone/logging.h>
 
@@ -9,7 +12,8 @@
 
 #include "test_root.h"
 
-#define LOGFORMAT_V1
+#define LOGFORMAT_VER 2
+
 
 namespace limestone::testing {
 
@@ -22,7 +26,7 @@ public:
         if (!boost::filesystem::create_directory(location)) {
             std::cerr << "cannot make directory" << std::endl;
         }
-#ifdef LOGFORMAT_V1
+#if LOGFORMAT_VER >=1
         limestone::internal::setup_initial_logdir(boost::filesystem::path(location));
 #endif
 
@@ -47,6 +51,30 @@ public:
 
 protected:
     std::unique_ptr<limestone::api::datastore_test> datastore_{};
+
+    std::unique_ptr<limestone::api::backup_detail> run_backup_with_epoch_switch(limestone::api::backup_type type, int initial_epoch) {
+        std::atomic<bool> backup_completed(false);
+        std::atomic<int> epoch_value(initial_epoch);  
+
+        // Repeatally call switch_epoch until backup is completed in another thread
+        std::thread switch_epoch_thread([&]() {
+            while (!backup_completed.load()) {
+                datastore_->switch_epoch(epoch_value++);
+                std::this_thread::sleep_for(std::chrono::milliseconds(1));
+            }
+        });
+
+        // Begin backup and wait for completion in main thread
+        std::unique_ptr<limestone::api::backup_detail> bd = datastore_->begin_backup(type);
+
+        // Set flag to notify backup completion
+        backup_completed.store(true);
+
+        // Wait for switch_epoch_thread to finish
+        switch_epoch_thread.join();
+
+        return bd;
+    }
 };
 
 extern void create_file(const boost::filesystem::path& path, std::string_view content);
@@ -63,8 +91,10 @@ TEST_F(rotate_test, log_is_rotated) { // NOLINT
     channel.end_session();
     datastore_->switch_epoch(43);
 
-#ifdef LOGFORMAT_V1
+#if LOGFORMAT_VER ==1
     int manifest_file_num = 1;
+#elif LOGFORMAT_VER >= 2
+    int manifest_file_num = 2;
 #else
     int manifest_file_num = 0;
 #endif
@@ -74,15 +104,18 @@ TEST_F(rotate_test, log_is_rotated) { // NOLINT
 
         ASSERT_EQ(files.size(), 2 + manifest_file_num);
         int i = 0;
+#if LOGFORMAT_VER >=2        
+        ASSERT_EQ(files[i++].string(), std::string(location) + "/compaction_catalog");
+#endif
         ASSERT_EQ(files[i++].string(), std::string(location) + "/epoch");
-#ifdef LOGFORMAT_V1
+#if LOGFORMAT_VER >=1
         ASSERT_EQ(files[i++].string(), std::string(location) + "/" + std::string(limestone::internal::manifest_file_name));
 #endif
         ASSERT_EQ(files[i++].string(), std::string(location) + "/pwal_0000");
     }
     // setup done
 
-    std::unique_ptr<backup_detail> bd = datastore_->begin_backup(backup_type::standard);
+    std::unique_ptr<backup_detail> bd = run_backup_with_epoch_switch(backup_type::standard, 44);
     auto entries = bd->entries();
 
     {  // result check
@@ -95,12 +128,19 @@ TEST_F(rotate_test, log_is_rotated) { // NOLINT
         }
         EXPECT_EQ(v.size(), 2 + manifest_file_num);
         int i = 0;
+#if LOGFORMAT_VER >=2
+        EXPECT_TRUE(starts_with(v[i].destination_path().string(), "compaction_catalog"));  // relative
+        EXPECT_TRUE(starts_with(v[i].source_path().string(), location));  // absolute
+        EXPECT_EQ(v[i].is_detached(), false);
+        EXPECT_EQ(v[i].is_mutable(), false);
+        i++;
+#endif        
         EXPECT_TRUE(starts_with(v[i].destination_path().string(), "epoch"));  // relative
         EXPECT_TRUE(starts_with(v[i].source_path().string(), location));  // absolute
         //EXPECT_EQ(v[i].is_detached(), false);
         EXPECT_EQ(v[i].is_mutable(), false);
         i++;
-#ifdef LOGFORMAT_V1
+#if LOGFORMAT_VER >=1
         EXPECT_EQ(v[i].destination_path().string(), limestone::internal::manifest_file_name);  // relative
         EXPECT_TRUE(starts_with(v[i].source_path().string(), location));  // absolute
         EXPECT_EQ(v[i].is_detached(), false);
@@ -123,9 +163,12 @@ TEST_F(rotate_test, log_is_rotated) { // NOLINT
         // not contains active pwal just after rotate
         EXPECT_EQ(files.size(), 3 + manifest_file_num);
         int i = 0;
+#if LOGFORMAT_VER >=2        
+        ASSERT_EQ(files[i++].string(), std::string(location) + "/compaction_catalog");
+#endif
         EXPECT_EQ(files[i++].string(), std::string(location) + "/epoch");  // active epoch
         EXPECT_TRUE(starts_with(files[i++].string(), std::string(location) + "/epoch."));  // rotated epoch
-#ifdef LOGFORMAT_V1
+#if LOGFORMAT_VER >=1
         ASSERT_EQ(files[i++].string(), std::string(location) + "/" + std::string(limestone::internal::manifest_file_name));
 #endif
         EXPECT_TRUE(starts_with(files[i++].string(), std::string(location) + "/pwal_0000."));  // rotated pwal
@@ -178,7 +221,7 @@ TEST_F(rotate_test, inactive_files_are_also_backed_up) { // NOLINT
 
     // setup done
 
-    std::unique_ptr<backup_detail> bd = datastore_->begin_backup(backup_type::standard);
+    std::unique_ptr<backup_detail> bd = run_backup_with_epoch_switch(backup_type::standard,46);
     auto entries = bd->entries();
 
     {  // result check
@@ -189,19 +232,28 @@ TEST_F(rotate_test, inactive_files_are_also_backed_up) { // NOLINT
         for (auto & e : v) {
             //std::cout << e.source_path() << std::endl;  // print debug
         }
-#ifdef LOGFORMAT_V1
+#if LOGFORMAT_VER == 1
         int manifest_file_num = 1;
+#elif LOGFORMAT_VER >= 2
+        int manifest_file_num = 2;
 #else
         int manifest_file_num = 0;
 #endif
-        EXPECT_EQ(v.size(), 3 + manifest_file_num);
+       EXPECT_EQ(v.size(), 3 + manifest_file_num);
         int i = 0;
+#if LOGFORMAT_VER >=2
+        EXPECT_TRUE(starts_with(v[i].destination_path().string(), "compaction_catalog"));  // relative
+        EXPECT_TRUE(starts_with(v[i].source_path().string(), location));  // absolute
+        EXPECT_EQ(v[i].is_detached(), false);
+        EXPECT_EQ(v[i].is_mutable(), false);
+        i++;
+#endif            
         EXPECT_TRUE(starts_with(v[i].destination_path().string(), "epoch."));  // relative
         EXPECT_TRUE(starts_with(v[i].source_path().string(), location));  // absolute
         //EXPECT_EQ(v[i].is_detached(), false);
         EXPECT_EQ(v[i].is_mutable(), false);
         i++;
-#ifdef LOGFORMAT_V1
+#if LOGFORMAT_VER >=1
         EXPECT_EQ(v[i].destination_path().string(), limestone::internal::manifest_file_name);  // relative
         EXPECT_TRUE(starts_with(v[i].source_path().string(), location));  // absolute
         EXPECT_EQ(v[i].is_detached(), false);
@@ -245,7 +297,7 @@ TEST_F(rotate_test, restore_prusik_all_abs) { // NOLINT
     data.emplace_back(pwal1d / pwal1fn, pwal1fn, false);
     data.emplace_back(pwal2d / pwal2fn, pwal2fn, false);
     data.emplace_back(epochd / epochfn, epochfn, false);
-#ifdef LOGFORMAT_V1
+#if LOGFORMAT_VER >=1
     auto conffn = std::string(limestone::internal::manifest_file_name);
     auto confd = location_path / "bk0";
     boost::filesystem::create_directories(confd);
@@ -264,8 +316,10 @@ TEST_F(rotate_test, restore_prusik_all_abs) { // NOLINT
 
     auto& backup = datastore_->begin_backup();  // const function
     auto files = backup.files();
-#ifdef LOGFORMAT_V1
+#if LOGFORMAT_VER ==1
     int manifest_file_num = 1;
+#elif LOGFORMAT_VER >= 2
+    int manifest_file_num = 2;
 #else
     int manifest_file_num = 0;
 #endif
@@ -295,7 +349,7 @@ TEST_F(rotate_test, restore_prusik_all_rel) { // NOLINT
     data.emplace_back("bk1/" + pwal1fn, pwal1fn, false);
     data.emplace_back("bk2/" + pwal2fn, pwal2fn, false);
     data.emplace_back("bk3/" + epochfn, epochfn, false);
-#ifdef LOGFORMAT_V1
+#if LOGFORMAT_VER >=1
     std::string conffn(limestone::internal::manifest_file_name);
     auto confd = location_path / "bk0";
     boost::filesystem::create_directories(confd);
@@ -314,8 +368,10 @@ TEST_F(rotate_test, restore_prusik_all_rel) { // NOLINT
 
     auto& backup = datastore_->begin_backup();  // const function
     auto files = backup.files();
-#ifdef LOGFORMAT_V1
+#if LOGFORMAT_VER == 1
     int manifest_file_num = 1;
+#elif LOGFORMAT_VER >= 2
+    int manifest_file_num = 2;
 #else
     int manifest_file_num = 0;
 #endif
@@ -334,7 +390,7 @@ TEST_F(rotate_test, get_snapshot_works) { // NOLINT
     channel.end_session();
     datastore_->switch_epoch(43);
 
-    datastore_->begin_backup(backup_type::standard);  // rotate files
+    run_backup_with_epoch_switch(backup_type::standard,46);
 
     datastore_->shutdown();
     regen_datastore();

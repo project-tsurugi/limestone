@@ -85,13 +85,16 @@ static void insert_twisted_entry(sortdb_wrapper* sortdb, log_entry& e) {
     sortdb->put(db_key, db_value);
 }
 
-static std::pair<epoch_id_type, std::unique_ptr<sortdb_wrapper>> create_sortdb_from_wals(const boost::filesystem::path& from_dir, int num_worker) {
+static std::pair<epoch_id_type, std::unique_ptr<sortdb_wrapper>> create_sortdb_from_wals(
+    const boost::filesystem::path& from_dir,
+    int num_worker,
+    const std::set<std::string>& file_names = std::set<std::string>()) {
 #if defined SORT_METHOD_PUT_ONLY
     auto sortdb = std::make_unique<sortdb_wrapper>(from_dir, comp_twisted_key);
 #else
     auto sortdb = std::make_unique<sortdb_wrapper>(from_dir);
 #endif
-    dblog_scan logscan{from_dir};
+    dblog_scan logscan = file_names.empty() ? dblog_scan{from_dir} : dblog_scan{from_dir, file_names};
 
     epoch_id_type ld_epoch = logscan.last_durable_epoch_in_dir();
 
@@ -166,8 +169,12 @@ static void sortdb_foreach(sortdb_wrapper *sortdb, std::function<void(const std:
 #endif
 }
 
-void create_comapct_pwal(const boost::filesystem::path& from_dir, const boost::filesystem::path& to_dir, int num_worker) {
-    auto [max_appeared_epoch, sortdb] = create_sortdb_from_wals(from_dir, num_worker);
+void create_compact_pwal(
+    const boost::filesystem::path& from_dir, 
+    const boost::filesystem::path& to_dir, 
+    int num_worker,
+    const std::set<std::string>& file_names) {
+    auto [max_appeared_epoch, sortdb] = create_sortdb_from_wals(from_dir, num_worker, file_names);
 
     boost::system::error_code error;
     const bool result_check = boost::filesystem::exists(to_dir, error);
@@ -213,9 +220,9 @@ void create_comapct_pwal(const boost::filesystem::path& from_dir, const boost::f
 namespace limestone::api {
 using namespace limestone::internal;
 
-void datastore::create_snapshot() {
+void datastore::create_snapshot(const std::set<std::string>& file_names) {
     const auto& from_dir = location_;
-    auto [max_appeared_epoch, sortdb] = create_sortdb_from_wals(from_dir, recover_max_parallelism_);
+    auto [max_appeared_epoch, sortdb] = create_sortdb_from_wals(from_dir, recover_max_parallelism_, file_names);
     epoch_id_switched_.store(max_appeared_epoch);
     epoch_id_informed_.store(max_appeared_epoch);
 

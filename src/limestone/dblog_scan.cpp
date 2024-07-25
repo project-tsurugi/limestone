@@ -30,6 +30,7 @@
 namespace limestone::internal {
 using namespace limestone::api;
 
+
 // return max epoch in file.
 std::optional<epoch_id_type> last_durable_epoch(const boost::filesystem::path& file) {
     std::optional<epoch_id_type> rv;
@@ -194,32 +195,36 @@ epoch_id_type dblog_scan::scan_pwal_files(  // NOLINT(readability-function-cogni
             }
         }
     };
-    std::mutex dir_mtx;
-    auto dir_begin = boost::filesystem::directory_iterator(dblogdir_);
-    auto dir_end = boost::filesystem::directory_iterator();
-    std::vector<std::thread> workers;
-    std::mutex ex_mtx;
+
+    std::mutex list_mtx;
     std::exception_ptr ex_ptr{};
+    bool done = false;
+    
+    auto temp_list = path_list_;
+    std::vector<std::thread> workers;
     workers.reserve(thread_num_);
     for (int i = 0; i < thread_num_; i++) {
         workers.emplace_back(std::thread([&](){
             for (;;) {
                 boost::filesystem::path p;
                 {
-                    std::lock_guard<std::mutex> g{dir_mtx};
-                    if (dir_begin == dir_end) break;
-                    p = *dir_begin++;
+                    std::lock_guard<std::mutex> lock(list_mtx);
+                    if (temp_list.empty() || done) break; 
+                    p = temp_list.front();
+                    temp_list.pop_front();
                 }
+
                 try {
                     process_file(p);
                 } catch (std::runtime_error& ex) {
                     VLOG(log_info) << "/:limestone catch runtime_error(" << ex.what() << ")";
-                    std::lock_guard<std::mutex> g2{ex_mtx};
-                    if (!ex_ptr) {  // only save one
-                        ex_ptr = std::current_exception();
+                    {
+                        std::lock_guard<std::mutex> lock(list_mtx);
+                        if (!ex_ptr) {  // only save one
+                            ex_ptr = std::current_exception();
+                        }
+                        done = true;
                     }
-                    std::lock_guard<std::mutex> g{dir_mtx};
-                    dir_begin = dir_end;  // skip all unprocessed files
                     break;
                 }
             }
@@ -245,4 +250,13 @@ epoch_id_type dblog_scan::scan_pwal_files_throws(epoch_id_type ld_epoch, const s
     return scan_pwal_files(ld_epoch, add_entry, log_error_and_throw);
 }
 
+void dblog_scan::rescan_directory_paths() {
+    path_list_.clear();
+    if (boost::filesystem::exists(dblogdir_) && boost::filesystem::is_directory(dblogdir_)) {
+        for (boost::filesystem::directory_iterator it(dblogdir_), end; it != end; ++it) {
+            path_list_.push_back(it->path());
+        }
+    }
 }
+
+} // namespace limestone::internal

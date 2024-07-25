@@ -36,6 +36,7 @@ epoch_id_type scan_one_pwal_file(const boost::filesystem::path& pwal, epoch_id_t
 // from datastore_format.cpp
 
 inline constexpr const std::string_view manifest_file_name = "limestone-manifest.json";
+inline constexpr const std::string_view manifest_file_backup_name = "limestone-manifest.json.back";
 
 void setup_initial_logdir(const boost::filesystem::path& logdir);
 
@@ -44,7 +45,7 @@ void setup_initial_logdir(const boost::filesystem::path& logdir);
  */
 int is_supported_version(const boost::filesystem::path& manifest_path, std::string& errmsg);
 
-void check_logdir_format(const boost::filesystem::path& logdir);
+void check_and_migrate_logdir_format(const boost::filesystem::path& logdir);
 
 // from datastore_restore.cpp
 
@@ -52,6 +53,10 @@ status purge_dir(const boost::filesystem::path& dir);
 
 // from datastore_snapshot.cpp
 
-void create_comapct_pwal(const boost::filesystem::path& from_dir, const boost::filesystem::path& to_dir, int num_worker);
+void create_compact_pwal(
+    const boost::filesystem::path& from_dir, 
+    const boost::filesystem::path& to_dir, 
+    int num_worker,
+    const std::set<std::string>& file_names = std::set<std::string>());
 
 }
