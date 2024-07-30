@@ -1,4 +1,4 @@
-// tests/test_compaction_catalog.cpp
+// tests/compaction_catalog_test.cpp
 
 #include <gtest/gtest.h>
 #include "compaction_catalog.h"
@@ -8,7 +8,7 @@
 using namespace limestone::api;
 
 // Fixture for compaction_catalog tests
-class CompactionCatalogTest : public ::testing::Test {
+class compaction_catalog_test : public ::testing::Test {
 protected:
     void SetUp() override {
         // Create a temporary directory for testing
@@ -29,14 +29,14 @@ protected:
 };
 
 // Test default constructor
-TEST_F(CompactionCatalogTest, DefaultConstructor) {
+TEST_F(compaction_catalog_test, DefaultConstructor) {
     EXPECT_EQ(catalog.get_max_epoch_id(), 0);
     EXPECT_TRUE(catalog.get_compacted_files().empty());
     EXPECT_TRUE(catalog.get_migrated_pwals().empty());
 }
 
 // Test update_catalog method
-TEST_F(CompactionCatalogTest, UpdateCatalog) {
+TEST_F(compaction_catalog_test, UpdateCatalog) {
     epoch_id_type new_epoch_id = 42;
     std::set<compacted_file_info> compacted_files = {
         {"file1", 1},
@@ -52,7 +52,7 @@ TEST_F(CompactionCatalogTest, UpdateCatalog) {
 }
 
 // Test update_catalog_file method
-TEST_F(CompactionCatalogTest, UpdateCatalogFile) {
+TEST_F(compaction_catalog_test, UpdateCatalogFile) {
     epoch_id_type new_epoch_id = 42;
     std::set<compacted_file_info> compacted_files = {
         {"file1", 1},
