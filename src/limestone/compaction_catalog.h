@@ -29,8 +29,9 @@ namespace limestone::api {
 
     class compaction_catalog {
     public:
-        // Default constructor
-        compaction_catalog();
+public:
+        // Constructor
+        compaction_catalog(const boost::filesystem::path& directory_path);
 
         // Static method to create a compaction_catalog from a catalog file
         static compaction_catalog from_catalog_file(const boost::filesystem::path& directory_path);

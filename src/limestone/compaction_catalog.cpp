@@ -11,23 +11,23 @@ namespace limestone::api {
 
 // Define constants for file names
 const std::string compaction_catalog::COMPACTION_CATALOG_FILENAME = "compaction_catalog";
-const std::string compaction_catalog::COMPACTION_CATALOG_BACKUP_FILENAME = "compaction_catalog.bak";
+const std::string compaction_catalog::COMPACTION_CATALOG_BACKUP_FILENAME = "compaction_catalog.back";
 const std::string compaction_catalog::HEADER_LINE = "COMPACTION_CATALOG_HEADER";
 const std::string compaction_catalog::FOOTER_LINE = "COMPACTION_CATALOG_FOOTER";
 const std::string compaction_catalog::COMPACTED_FILE_KEY = "COMPACTED_FILE";
 const std::string compaction_catalog::MIGRATED_PWAL_KEY = "MIGRATED_PWAL";
 const std::string compaction_catalog::MAX_EPOCH_ID_KEY = "MAX_EPOCH_ID";
 
-// Default constructor
-compaction_catalog::compaction_catalog()
-    : max_epoch_id_(0) {}
+// Constructor that takes a directory path and initializes file paths
+compaction_catalog::compaction_catalog(const boost::filesystem::path& directory_path) {
+    catalog_file_path_ = directory_path / COMPACTION_CATALOG_FILENAME;
+    backup_file_path_ = directory_path / COMPACTION_CATALOG_BACKUP_FILENAME;
+    max_epoch_id_ = 0;
+}
 
 // Static method to create a compaction_catalog from a catalog file
 compaction_catalog compaction_catalog::from_catalog_file(const boost::filesystem::path& directory_path) {
-    compaction_catalog catalog;
-    catalog.catalog_file_path_ = directory_path / COMPACTION_CATALOG_FILENAME;
-    catalog.backup_file_path_ = directory_path / COMPACTION_CATALOG_BACKUP_FILENAME;
-
+    compaction_catalog catalog(directory_path);
     try {
         catalog.load_catalog_file(directory_path);
     } catch (const std::runtime_error& e) {
