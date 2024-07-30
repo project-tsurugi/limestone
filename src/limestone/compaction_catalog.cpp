@@ -29,7 +29,7 @@ compaction_catalog::compaction_catalog(const boost::filesystem::path& directory_
 compaction_catalog compaction_catalog::from_catalog_file(const boost::filesystem::path& directory_path) {
     compaction_catalog catalog(directory_path);
     try {
-        catalog.load_catalog_file(directory_path);
+        catalog.load_catalog_file(catalog.catalog_file_path_);
     } catch (const std::runtime_error& e) {
         // Handle error and attempt to restore from backup
         if (boost::filesystem::exists(catalog.backup_file_path_)) {
@@ -58,13 +58,11 @@ compaction_catalog compaction_catalog::from_catalog_file(const boost::filesystem
 
 
 // Helper method to load the catalog file
-void compaction_catalog::load_catalog_file(const boost::filesystem::path& directory_path) {
-    catalog_file_path_ = directory_path / COMPACTION_CATALOG_FILENAME;
-    backup_file_path_ = directory_path / COMPACTION_CATALOG_BACKUP_FILENAME;
+void compaction_catalog::load_catalog_file(const boost::filesystem::path& path) {
 
-    std::ifstream file(catalog_file_path_.string());
+    std::ifstream file(path.string());
     if (!file.is_open()) {
-        throw std::runtime_error("Failed to open compaction catalog file: " + catalog_file_path_.string());
+        throw std::runtime_error("Failed to open compaction catalog file: " + path.string());
     }
 
     std::string line;

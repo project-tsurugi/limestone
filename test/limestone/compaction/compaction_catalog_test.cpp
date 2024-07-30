@@ -4,7 +4,7 @@
 
 namespace {
 
-class CompactionCatalogTest : public ::testing::Test {
+class compaction_catalog_test : public ::testing::Test {
 protected:
     void SetUp() override {
         // テスト用のディレクトリを作成
@@ -27,7 +27,7 @@ protected:
     boost::filesystem::path backup_file_path;
 };
 
-TEST_F(CompactionCatalogTest, CreateCatalog) {
+TEST_F(compaction_catalog_test, CreateCatalog) {
     limestone::api::compaction_catalog catalog(test_dir);
 
     EXPECT_EQ(catalog.get_max_epoch_id(), 0);
@@ -35,7 +35,7 @@ TEST_F(CompactionCatalogTest, CreateCatalog) {
     EXPECT_TRUE(catalog.get_migrated_pwals().empty());
 }
 
-TEST_F(CompactionCatalogTest, UpdateCatalog) {
+TEST_F(compaction_catalog_test, UpdateCatalog) {
     limestone::api::compaction_catalog catalog(test_dir);
 
     limestone::api::epoch_id_type max_epoch_id = 123;
@@ -52,7 +52,7 @@ TEST_F(CompactionCatalogTest, UpdateCatalog) {
     EXPECT_EQ(catalog.get_migrated_pwals(), migrated_pwals);
 }
 
-TEST_F(CompactionCatalogTest, UpdateAndLoadCatalogFile) {
+TEST_F(compaction_catalog_test, UpdateAndLoadCatalogFile) {
     limestone::api::compaction_catalog catalog(test_dir);
 
     limestone::api::epoch_id_type max_epoch_id = 123;
@@ -72,7 +72,7 @@ TEST_F(CompactionCatalogTest, UpdateAndLoadCatalogFile) {
     EXPECT_EQ(loaded_catalog.get_migrated_pwals(), migrated_pwals);
 }
 
-TEST_F(CompactionCatalogTest, LoadFromBackup) {
+TEST_F(compaction_catalog_test, LoadFromBackup) {
     // まずカタログファイルを作成
     {
         limestone::api::compaction_catalog catalog(test_dir);
