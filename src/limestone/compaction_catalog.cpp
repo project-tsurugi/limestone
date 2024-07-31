@@ -9,14 +9,6 @@
 
 namespace limestone::api {
 
-// Define constants for file names
-const std::string compaction_catalog::COMPACTION_CATALOG_FILENAME = "compaction_catalog";
-const std::string compaction_catalog::COMPACTION_CATALOG_BACKUP_FILENAME = "compaction_catalog.back";
-const std::string compaction_catalog::HEADER_LINE = "COMPACTION_CATALOG_HEADER";
-const std::string compaction_catalog::FOOTER_LINE = "COMPACTION_CATALOG_FOOTER";
-const std::string compaction_catalog::COMPACTED_FILE_KEY = "COMPACTED_FILE";
-const std::string compaction_catalog::MIGRATED_PWAL_KEY = "MIGRATED_PWAL";
-const std::string compaction_catalog::MAX_EPOCH_ID_KEY = "MAX_EPOCH_ID";
 
 // Constructor that takes a directory path and initializes file paths
 compaction_catalog::compaction_catalog(const boost::filesystem::path& directory_path) {
@@ -94,14 +86,14 @@ void compaction_catalog::load_catalog_file(const boost::filesystem::path& path) 
             if (iss >> file_name >> version) {
                 compacted_files_.insert({file_name, version});
             } else {
-                throw std::runtime_error("Invalid format for " + COMPACTED_FILE_KEY + ": " + line);
+                throw std::runtime_error("Invalid format for " + std::string(COMPACTED_FILE_KEY) + ": " + line);
             }
         } else if (type == MIGRATED_PWAL_KEY) {
             std::string pwal;
             if (iss >> pwal) {
                 migrated_pwals_.insert(pwal);
             } else {
-                throw std::runtime_error("Invalid format for " + MIGRATED_PWAL_KEY + ": " + line);
+                throw std::runtime_error("Invalid format for " + std::string(MIGRATED_PWAL_KEY) + ": " + line);
             }
         } else if (type == MAX_EPOCH_ID_KEY) {
             epoch_id_type epoch_id;
@@ -109,7 +101,7 @@ void compaction_catalog::load_catalog_file(const boost::filesystem::path& path) 
                 max_epoch_id_ = epoch_id;
                 max_epoch_id_found = true;
             } else {
-                throw std::runtime_error("Invalid format for " + MAX_EPOCH_ID_KEY + ": " + line);
+                throw std::runtime_error("Invalid format for " + std::string(MAX_EPOCH_ID_KEY) + ": " + line);
             }
         } else {
             throw std::runtime_error("Unknown entry type: " + type);
