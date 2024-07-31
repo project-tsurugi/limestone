@@ -53,7 +53,6 @@ compaction_catalog compaction_catalog::from_catalog_file(const boost::filesystem
 
 // Helper method to load the catalog file
 void compaction_catalog::load_catalog_file(const boost::filesystem::path& path) {
-
     std::ifstream file(path.string());
     if (!file.is_open()) {
         throw std::runtime_error("Failed to open compaction catalog file: " + path.string());
@@ -63,7 +62,7 @@ void compaction_catalog::load_catalog_file(const boost::filesystem::path& path) 
 
     // Check header line
     if (!std::getline(file, line) || line != HEADER_LINE) {
-        throw std::runtime_error("Invalid or missing header{} line: " + line);
+        throw std::runtime_error("Invalid or missing header line: " + line);
     }
 
     bool max_epoch_id_found = false;
@@ -76,42 +75,49 @@ void compaction_catalog::load_catalog_file(const boost::filesystem::path& path) 
             return; // Footer found, exit successfully
         }
 
-        std::istringstream iss(line);
-        std::string type;
-        if (!(iss >> type)) {
-            continue; // Skip empty lines
-        }
-
-        if (type == COMPACTED_FILE_KEY) {
-            std::string file_name;
-            int version = 0;
-            if (iss >> file_name >> version) {
-                compacted_files_.insert({file_name, version});
-            } else {
-                throw std::runtime_error("Invalid format for " + std::string(COMPACTED_FILE_KEY) + ": " + line);
-            }
-        } else if (type == MIGRATED_PWAL_KEY) {
-            std::string pwal;
-            if (iss >> pwal) {
-                migrated_pwals_.insert(pwal);
-            } else {
-                throw std::runtime_error("Invalid format for " + std::string(MIGRATED_PWAL_KEY) + ": " + line);
-            }
-        } else if (type == MAX_EPOCH_ID_KEY) {
-            epoch_id_type epoch_id = 0;
-            if (iss >> epoch_id) {
-                max_epoch_id_ = epoch_id;
-                max_epoch_id_found = true;
-            } else {
-                throw std::runtime_error("Invalid format for " + std::string(MAX_EPOCH_ID_KEY) + ": " + line);
-            }
-        } else {
-            throw std::runtime_error("Unknown entry type: " + type);
-        }
+        parse_catalog_entry(line, max_epoch_id_found);
     }
 
     // If the footer line was not found, throw an error
     throw std::runtime_error("Missing footer line");
+}
+
+// Helper method to parse a catalog entry
+void compaction_catalog::parse_catalog_entry(const std::string& line, bool& max_epoch_id_found) {
+    std::istringstream iss(line);
+    std::string type;
+    if (!(iss >> type)) {
+        return; // Skip empty lines
+    }
+
+    if (type == COMPACTED_FILE_KEY) {
+        std::string file_name;
+        int version = 0;
+        if (iss >> file_name >> version) {
+            compacted_files_.insert({file_name, version});
+        } else {
+            throw std::runtime_error("Invalid format for " + std::string(COMPACTED_FILE_KEY) + ": " + line);
+        }
+    } else if (type == MIGRATED_PWAL_KEY) {
+        std::string pwal;
+        if (iss >> pwal) {
+            migrated_pwals_.insert(pwal);
+        } else {
+            throw std::runtime_error("Invalid format for " + std::string(MIGRATED_PWAL_KEY) + ": " + line);
+        }
+    } else if (type == MAX_EPOCH_ID_KEY) {
+        epoch_id_type epoch_id{};  // デフォルト初期化
+
+
+        if (iss >> epoch_id) {
+            max_epoch_id_ = epoch_id;
+            max_epoch_id_found = true;
+        } else {
+            throw std::runtime_error("Invalid format for " + std::string(MAX_EPOCH_ID_KEY) + ": " + line);
+        }
+    } else {
+        throw std::runtime_error("Unknown entry type: " + type);
+    }
 }
 
 // Method to update the compaction catalog
@@ -172,27 +178,23 @@ void compaction_catalog::update_catalog_file(epoch_id_type max_epoch_id, const s
                                      "': " + std::string(strerror(errno)));
         }
 
-    } catch (...) {
-        // If an exception occurs, ensure the file is closed and retain the original exception
-        try {
-            if (fclose(file) != 0) { // NOLINT(*-owning-memory)
-                LOG_LP(ERROR) << "fclose failed for file '" << catalog_file_path_.string() << "', errno = " << errno;
-                throw std::runtime_error("I/O error occurred while closing file '" + catalog_file_path_.string() +
-                                         "': " + std::string(strerror(errno)));
-            }
-        } catch (...) {
-            // Throw the original exception and the exception from fclose
-            std::throw_with_nested(std::runtime_error("Failed to close the file after an error occurred"));
+} catch (...) {
+    // If an exception occurs, ensure the file is closed and retain the original exception
+    try {
+        if (fclose(file) != 0) { // NOLINT(*-owning-memory)
+            LOG_LP(ERROR) << "fclose failed for file '" << catalog_file_path_.string() << "', errno = " << errno;
+            throw std::runtime_error("I/O error occurred while closing file '" + catalog_file_path_.string() +
+                                     "': " + std::string(strerror(errno)));
         }
-        throw; // Re-throw the caught exception
+    } catch (const std::exception& e) {
+        // Nest the current exception within a new exception and re-throw
+        std::throw_with_nested(std::runtime_error(std::string("Failed to close the file after an error occurred: ") + e.what()));
     }
 
-    // Close the file descriptor
-    if (fclose(file) != 0) { // NOLINT(*-owning-memory)
-        LOG_LP(ERROR) << "fclose failed for file '" << catalog_file_path_.string() << "', errno = " << errno;
-        throw std::runtime_error("I/O error occurred while closing file '" + catalog_file_path_.string() +
-                                 "': " + std::string(strerror(errno)));
-    }
+    // Re-throw the caught exception
+    throw;
+}
+
 }
 
 // Helper function to create the catalog content from instance fields

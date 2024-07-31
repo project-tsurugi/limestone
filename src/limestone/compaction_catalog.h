@@ -68,15 +68,17 @@ private:
     static constexpr const char *MAX_EPOCH_ID_KEY = "MAX_EPOCH_ID";
 
     // Member variables
-    boost::filesystem::path catalog_file_path_;     // Path of the compaction catalog file
-    boost::filesystem::path backup_file_path_;      // Path of the backup file
-    std::set<compacted_file_info> compacted_files_; // Set of compacted files
-    std::set<std::string> migrated_pwals_;          // Set of migrated PWALs
-    epoch_id_type max_epoch_id_ = 0;                // Maximum epoch ID included in the compacted files
+    boost::filesystem::path catalog_file_path_;       // Path of the compaction catalog file
+    boost::filesystem::path backup_file_path_;        // Path of the backup file
+    std::set<compacted_file_info> compacted_files_{}; // Set of compacted files
+    std::set<std::string> migrated_pwals_{};          // Set of migrated PWALs
+    epoch_id_type max_epoch_id_ = 0;                  // Maximum epoch ID included in the compacted files
 
     // Helper method to load the catalog file
     void load_catalog_file(const boost::filesystem::path &directory_path);
 
+    // Helper method to parse a catalog entry
+    void parse_catalog_entry(const std::string& line, bool& max_epoch_id_found);
 
     // Helper function to create the catalog content from instance fields
     [[nodiscard]] std::string create_catalog_content() const;
