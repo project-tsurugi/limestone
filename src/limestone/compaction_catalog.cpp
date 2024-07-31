@@ -10,6 +10,7 @@
 
 #include "compaction_catalog.h"
 #include "logging_helper.h"
+#include "limestone/api/epoch_id_type.h"
 
 namespace limestone::api {
 
@@ -106,9 +107,7 @@ void compaction_catalog::parse_catalog_entry(const std::string& line, bool& max_
             throw std::runtime_error("Invalid format for " + std::string(MIGRATED_PWAL_KEY) + ": " + line);
         }
     } else if (type == MAX_EPOCH_ID_KEY) {
-        epoch_id_type epoch_id{};  // デフォルト初期化
-
-
+        size_t epoch_id = 0; 
         if (iss >> epoch_id) {
             max_epoch_id_ = epoch_id;
             max_epoch_id_found = true;

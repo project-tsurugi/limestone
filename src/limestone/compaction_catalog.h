@@ -42,8 +42,25 @@ public:
 
 class compaction_catalog {
 public:
-    // Constructor
+    // constructor
     explicit compaction_catalog(const boost::filesystem::path &directory_path);
+
+    // move constructor
+    compaction_catalog(compaction_catalog&& other) noexcept
+        : catalog_file_path_(std::move(other.catalog_file_path_)),
+          backup_file_path_(std::move(other.backup_file_path_)),
+          compacted_files_(std::move(other.compacted_files_)),
+          migrated_pwals_(std::move(other.migrated_pwals_)),
+          max_epoch_id_(other.max_epoch_id_) {};
+
+    // other operators and constructors are deleted
+    compaction_catalog(const compaction_catalog& other) = delete;
+    compaction_catalog& operator=(compaction_catalog const& other) = delete;
+    compaction_catalog& operator=(compaction_catalog&& other) noexcept = delete;
+
+    // Destructor
+    ~compaction_catalog() = default;
+
 
     // Static method to create a compaction_catalog from a catalog file
     static compaction_catalog from_catalog_file(const boost::filesystem::path &directory_path);
