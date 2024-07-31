@@ -45,7 +45,7 @@ TEST_F(compaction_catalog_test, UpdateCatalog) {
     };
     std::set<std::string> migrated_pwals = {"pwal1", "pwal2"};
 
-    catalog.update_catalog(max_epoch_id, compacted_files, migrated_pwals);
+    catalog.update_catalog_file(max_epoch_id, compacted_files, migrated_pwals);
 
     EXPECT_EQ(catalog.get_max_epoch_id(), max_epoch_id);
     EXPECT_EQ(catalog.get_compacted_files(), compacted_files);
@@ -62,8 +62,7 @@ TEST_F(compaction_catalog_test, UpdateAndLoadCatalogFile) {
     };
     std::set<std::string> migrated_pwals = {"pwal1", "pwal2"};
 
-    catalog.update_catalog(max_epoch_id, compacted_files, migrated_pwals);
-    catalog.update_catalog_file();
+    catalog.update_catalog_file(max_epoch_id, compacted_files, migrated_pwals);
 
     limestone::api::compaction_catalog loaded_catalog = limestone::api::compaction_catalog::from_catalog_file(test_dir);
 
@@ -84,8 +83,8 @@ TEST_F(compaction_catalog_test, LoadFromBackup) {
         };
         std::set<std::string> migrated_pwals = {"pwal1", "pwal2"};
 
-        catalog.update_catalog(max_epoch_id, compacted_files, migrated_pwals);
-        catalog.update_catalog_file();
+        catalog.update_catalog_file(max_epoch_id, compacted_files, migrated_pwals);
+
     }
 
     // バックアップを作成

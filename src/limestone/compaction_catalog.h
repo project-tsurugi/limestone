@@ -48,12 +48,9 @@ public:
     // Static method to create a compaction_catalog from a catalog file
     static compaction_catalog from_catalog_file(const boost::filesystem::path &directory_path);
 
-    // Method to update the compaction catalog
-    void update_catalog(epoch_id_type max_epoch_id, const std::set<compacted_file_info> &compacted_files,
+    // Method to update the compaction catalog and write it to a file
+    void update_catalog_file(epoch_id_type max_epoch_id, const std::set<compacted_file_info> &compacted_files,
                         const std::set<std::string> &migrated_pwals);
-
-    // Method to write the compaction catalog to a file
-    void update_catalog_file() const;
 
     // Getter methods
     [[nodiscard]] epoch_id_type get_max_epoch_id() const;
@@ -75,10 +72,14 @@ private:
     boost::filesystem::path backup_file_path_;      // Path of the backup file
     std::set<compacted_file_info> compacted_files_; // Set of compacted files
     std::set<std::string> migrated_pwals_;          // Set of migrated PWALs
-    epoch_id_type max_epoch_id_;                    // Maximum epoch ID included in the compacted files
+    epoch_id_type max_epoch_id_ = 0;                // Maximum epoch ID included in the compacted files
 
     // Helper method to load the catalog file
     void load_catalog_file(const boost::filesystem::path &directory_path);
+
+
+    // Helper function to create the catalog content from instance fields
+    [[nodiscard]] std::string create_catalog_content() const;
 };
 
 } // namespace limestone::api
