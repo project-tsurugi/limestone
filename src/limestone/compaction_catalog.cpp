@@ -152,7 +152,7 @@ void compaction_catalog::update_catalog_file() const {
 
     // Write compacted files
     for (const auto& file_info : compacted_files_) {
-        catalog_file << COMPACTED_FILE_KEY << " " << file_info.file_name << " " << file_info.version << "\n";
+        catalog_file << COMPACTED_FILE_KEY << " " << file_info.get_file_name()  << " " << file_info.get_version() << "\n";
     }
 
     // Write migrated PWALs
