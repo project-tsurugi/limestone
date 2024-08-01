@@ -30,9 +30,6 @@ using namespace limestone::api;
 // return max epoch in file.
 std::optional<epoch_id_type> last_durable_epoch(const boost::filesystem::path& file);
 
-// deprecated, to be removed
-epoch_id_type scan_one_pwal_file(const boost::filesystem::path& pwal, epoch_id_type ld_epoch, const std::function<void(log_entry&)>& add_entry);
-
 // from datastore_format.cpp
 
 inline constexpr const std::string_view manifest_file_name = "limestone-manifest.json";

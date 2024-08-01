@@ -5,6 +5,7 @@
 
 #include <boost/filesystem.hpp>
 
+#include "dblog_scan.h"
 #include "internal.h"
 #include "log_entry.h"
 
@@ -150,6 +151,21 @@ TEST_F(durable_test, invalidated_entries_are_never_reused) {
     datastore_->shutdown();
 }
 
+limestone::api::epoch_id_type scan_one_pwal_file(const boost::filesystem::path& p, limestone::api::epoch_id_type ld_epoch, const std::function<void(limestone::api::log_entry&)>& add_entry) {
+    using limestone::internal::dblog_scan;
+    dblog_scan ds{""};  // dummy
+    dblog_scan::parse_error ec;
+    ds.set_fail_fast(true);
+    ds.set_process_at_nondurable_epoch_snippet(dblog_scan::process_at_nondurable::repair_by_mark);
+    ds.set_process_at_truncated_epoch_snippet(dblog_scan::process_at_truncated::report);
+    ds.set_process_at_damaged_epoch_snippet(dblog_scan::process_at_damaged::report);
+    auto rc = ds.scan_one_pwal_file(p, ld_epoch, add_entry, [](limestone::api::log_entry::read_error& e) -> bool {
+        LOG(ERROR) << "this pwal file is broken: " << e.message();
+        throw std::runtime_error("pwal file read error");
+    }, ec);
+    return rc;
+}
+
 TEST_F(durable_test, ut_scan_one_pwal_file_nondurable_entry) {
     using namespace limestone::api;
 
@@ -168,7 +184,7 @@ TEST_F(durable_test, ut_scan_one_pwal_file_nondurable_entry) {
         entries.emplace_back(e);
     };
 
-    epoch_id_type last_epoch = limestone::internal::scan_one_pwal_file(pwal, 42, add_entry);
+    epoch_id_type last_epoch = scan_one_pwal_file(pwal, 42, add_entry);
     EXPECT_EQ(last_epoch, 43);
     EXPECT_EQ(entries.size(), 1);
     {  // check (marked) pwal file after scan
@@ -206,7 +222,7 @@ TEST_F(durable_test, ut_scan_one_pwal_file_broken_entry_nondurable_trimmed) {
     }
     auto add_entry = [](log_entry&){ /* nop */ };
 
-    EXPECT_EQ(limestone::internal::scan_one_pwal_file(pwal, 42, add_entry), 43);
+    EXPECT_EQ(scan_one_pwal_file(pwal, 42, add_entry), 43);
 }
 
 // broken entry in durable epoch is error
@@ -228,7 +244,7 @@ TEST_F(durable_test, ut_scan_one_pwal_file_broken_entry_trimmed) {
     auto add_entry = [](log_entry&){ /* nop */ };
 
     EXPECT_THROW({
-        limestone::internal::scan_one_pwal_file(pwal, 43, add_entry);
+        scan_one_pwal_file(pwal, 43, add_entry);
     }, std::exception);
 }
 
@@ -247,7 +263,7 @@ TEST_F(durable_test, ut_scan_one_pwal_file_broken_entry_type0) {
     auto add_entry = [](log_entry&){ /* nop */ };
 
     EXPECT_THROW({
-        limestone::internal::scan_one_pwal_file(pwal, 42, add_entry);
+        scan_one_pwal_file(pwal, 42, add_entry);
     }, std::exception);
 }
 
@@ -266,7 +282,7 @@ TEST_F(durable_test, ut_scan_one_pwal_file_broken_entry_type99) {
     auto add_entry = [](log_entry&){ /* nop */ };
 
     EXPECT_THROW({
-        limestone::internal::scan_one_pwal_file(pwal, 42, add_entry);
+        scan_one_pwal_file(pwal, 42, add_entry);
     }, std::exception);
 }
 
