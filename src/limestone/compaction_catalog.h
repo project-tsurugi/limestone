@@ -10,22 +10,50 @@
 
 namespace limestone::api {
 
-// Structure to hold information about compacted files
+/**
+ * @brief Structure to hold information about compacted files.
+ * 
+ * This structure stores the filename and version information for files
+ * that have been compacted. It also provides comparison operators to
+ * facilitate sorting and equality checks.
+ */
 struct compacted_file_info {
 private:
-    std::string file_name;
-    int version;
+    std::string file_name; ///< Name of the compacted file
+    int version; ///< Version of the compacted file
 
 public:
-    // Constructor
+    /**
+     * @brief Constructs a new compacted_file_info object.
+     * 
+     * @param file_name Name of the compacted file.
+     * @param version Version number of the compacted file.
+     */
     compacted_file_info(std::string file_name, int version) : file_name(std::move(file_name)), version(version) {}
 
-    // Accessor methods
+    /**
+     * @brief Gets the name of the compacted file.
+     * 
+     * @return const std::string& Reference to the name of the file.
+     */
     [[nodiscard]] const std::string &get_file_name() const { return file_name; }
+
+    /**
+     * @brief Gets the version of the compacted file.
+     * 
+     * @return int Version number of the file.
+     */
     [[nodiscard]] int get_version() const { return version; }
 
-    // Define less-than operator for
-    // comparison
+    /**
+     * @brief Comparison operator to determine the order of compacted files.
+     * 
+     * Files are first compared by their name and then by their version.
+     * 
+     * @param other Another compacted_file_info object to compare against.
+     * @return true If this file is considered less than the other file.
+     * @return false Otherwise.
+     */
     bool operator<(const compacted_file_info &other) const {
         if (file_name != other.file_name) {
             return file_name < other.file_name;
@@ -33,71 +61,142 @@ public:
         return version < other.version;
     }
 
-    // Define equality operator for
-    // comparison
+    /**
+     * @brief Equality operator to check if two compacted_file_info objects are identical.
+     * 
+     * Files are considered equal if both their name and version match.
+     * 
+     * @param other Another compacted_file_info object to compare against.
+     * @return true If both objects are equal.
+     * @return false Otherwise.
+     */
     bool operator==(const compacted_file_info &other) const {
         return file_name == other.file_name && version == other.version;
     }
 };
 
+/**
+ * @brief Class to manage the compaction catalog.
+ * 
+ * This class handles the cataloging of compacted files within a specific directory.
+ * It provides methods for updating, loading, and retrieving information about
+ * the results of the compaction process.
+ */
 class compaction_catalog {
 public:
-    // constructor
+    /**
+     * @brief Constructs a new compaction_catalog object.
+     * 
+     * @param directory_path Path to the directory where the catalog is located.
+     */
     explicit compaction_catalog(const boost::filesystem::path &directory_path);
 
-    // move constructor
-    compaction_catalog(compaction_catalog&& other) noexcept
-        : catalog_file_path_(std::move(other.catalog_file_path_)),
-          backup_file_path_(std::move(other.backup_file_path_)),
-          compacted_files_(std::move(other.compacted_files_)),
-          migrated_pwals_(std::move(other.migrated_pwals_)),
-          max_epoch_id_(other.max_epoch_id_) {};
+    /**
+     * @brief Move constructor.
+     * 
+     * Transfers ownership of the catalog data from another compaction_catalog object.
+     * 
+     * @param other Another compaction_catalog object to move data from.
+     */
+    compaction_catalog(compaction_catalog&& other) noexcept;
 
-    // other operators and constructors are deleted
+    /**
+     * @brief Deleted copy constructor.
+     * 
+     * Copying compaction_catalog objects is not allowed.
+     */
     compaction_catalog(const compaction_catalog& other) = delete;
+
+    /**
+     * @brief Deleted copy assignment operator.
+     * 
+     * Copying compaction_catalog objects is not allowed.
+     * 
+     * @return compaction_catalog& 
+     */
     compaction_catalog& operator=(compaction_catalog const& other) = delete;
+
+    /**
+     * @brief Deleted move assignment operator.
+     * 
+     * Moving compaction_catalog objects is allowed during construction but not through assignment.
+     * 
+     * @return compaction_catalog& 
+     */
     compaction_catalog& operator=(compaction_catalog&& other) noexcept = delete;
 
-    // Destructor
+    /**
+     * @brief Destroys the compaction_catalog object.
+     */
     ~compaction_catalog() = default;
 
-
-    // Static method to create a compaction_catalog from a catalog file
+    /**
+     * @brief Creates a compaction_catalog object from an existing catalog file.
+     * 
+     * This static method loads the catalog data from a file in the specified directory.
+     * 
+     * @param directory_path Path to the directory containing the catalog file.
+     * @return compaction_catalog A compaction_catalog object with the loaded data.
+     */
     static compaction_catalog from_catalog_file(const boost::filesystem::path &directory_path);
 
-    // Method to update the compaction catalog and write it to a file
+    /**
+     * @brief Updates the compaction catalog and writes the changes to a file.
+     * 
+     * This method updates the catalog with new compacted files, migrated PWALs, and the maximum epoch ID,
+     * then writes the updated catalog to a file.
+     * 
+     * @param max_epoch_id The maximum epoch ID to be recorded in the catalog.
+     * @param compacted_files Set of compacted files to be included in the catalog.
+     * @param migrated_pwals Set of migrated PWALs to be included in the catalog.
+     */
     void update_catalog_file(epoch_id_type max_epoch_id, const std::set<compacted_file_info> &compacted_files,
                         const std::set<std::string> &migrated_pwals);
 
-    // Getter methods
+    /**
+     * @brief Gets the maximum epoch ID from the catalog.
+     * 
+     * @return epoch_id_type The maximum epoch ID recorded in the catalog.
+     */
     [[nodiscard]] epoch_id_type get_max_epoch_id() const;
+
+    /**
+     * @brief Gets the set of migrated PWALs from the catalog.
+     *
+     * PWAL is not compacted directly but migrated for other purposes.
+     * This method retrieves the set of PWALs that have been moved for further use after compaction.
+     *
+     * @return const std::set<std::string>& Reference to the set of migrated PWALs.
+     */
     [[nodiscard]] const std::set<compacted_file_info> &get_compacted_files() const;
+
+    /**
+     * @brief Gets the set of migrated PWALs from the catalog.
+     * 
+     * @return const std::set<std::string>& Reference to the set of migrated PWALs.
+     */
     [[nodiscard]] const std::set<std::string> &get_migrated_pwals() const;
 
 private:
     // Constants
-    static constexpr const char *COMPACTION_CATALOG_FILENAME = "compaction_catalog";
-    static constexpr const char *COMPACTION_CATALOG_BACKUP_FILENAME = "compaction_catalog.back";
-    static constexpr const char *HEADER_LINE = "COMPACTION_CATALOG_HEADER";
-    static constexpr const char *FOOTER_LINE = "COMPACTION_CATALOG_FOOTER";
-    static constexpr const char *COMPACTED_FILE_KEY = "COMPACTED_FILE";
-    static constexpr const char *MIGRATED_PWAL_KEY = "MIGRATED_PWAL";
-    static constexpr const char *MAX_EPOCH_ID_KEY = "MAX_EPOCH_ID";
+    static constexpr const char *COMPACTION_CATALOG_FILENAME = "compaction_catalog"; ///< Name of the catalog file
+    static constexpr const char *COMPACTION_CATALOG_BACKUP_FILENAME = "compaction_catalog.back"; ///< Name of the backup catalog file
+    static constexpr const char *HEADER_LINE = "COMPACTION_CATALOG_HEADER"; ///< Header identifier for the catalog file
+    static constexpr const char *FOOTER_LINE = "COMPACTION_CATALOG_FOOTER"; ///< Footer identifier for the catalog file
+    static constexpr const char *COMPACTED_FILE_KEY = "COMPACTED_FILE"; ///< Key for compacted files in the catalog file
+    static constexpr const char *MIGRATED_PWAL_KEY = "MIGRATED_PWAL"; ///< Key for migrated PWALs in the catalog file
+    static constexpr const char *MAX_EPOCH_ID_KEY = "MAX_EPOCH_ID"; ///< Key for maximum epoch ID in the catalog file
 
     // Member variables
-    boost::filesystem::path catalog_file_path_;       // Path of the compaction catalog file
-    boost::filesystem::path backup_file_path_;        // Path of the backup file
-    std::set<compacted_file_info> compacted_files_{}; // Set of compacted files
-    std::set<std::string> migrated_pwals_{};          // Set of migrated PWALs
-    epoch_id_type max_epoch_id_ = 0;                  // Maximum epoch ID included in the compacted files
+    boost::filesystem::path catalog_file_path_; ///< Path of the compaction catalog file
+    boost::filesystem::path backup_file_path_; ///< Path of the backup file
+    std::set<compacted_file_info> compacted_files_{}; ///< Set of compacted files
+    std::set<std::string> migrated_pwals_{}; ///< Set of migrated PWALs
+    epoch_id_type max_epoch_id_ = 0; ///< Maximum epoch ID included in the compacted files
 
-    // Helper method to load the catalog file
+    // Helper methods
     void load_catalog_file(const boost::filesystem::path &directory_path);
-
-    // Helper method to parse a catalog entry
     void parse_catalog_entry(const std::string& line, bool& max_epoch_id_found);
-
-    // Helper function to create the catalog content from instance fields
     [[nodiscard]] std::string create_catalog_content() const;
 };
 
