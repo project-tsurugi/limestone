@@ -1,5 +1,5 @@
 /*
- * Copyright 2022-2023 Project Tsurugi.
+ * Copyright 2022-2024 Project Tsurugi.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -45,11 +45,6 @@ namespace limestone::api {
  */
 class datastore {
     friend class log_channel;
-
-    /**
-     * @brief name of a file to record durable epoch
-     */
-    static constexpr const std::string_view epoch_file_name = "epoch";
 
     enum class state : std::int64_t {
         not_ready = 0,

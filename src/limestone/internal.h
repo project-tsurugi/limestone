@@ -25,6 +25,18 @@
 namespace limestone::internal {
 using namespace limestone::api;
 
+// moved from datastore.h
+/**
+ * @brief name of a file to record durable epoch
+ */
+static constexpr const std::string_view epoch_file_name = "epoch";
+
+// moved from log_channel.h
+/**
+ * @brief prefix of pwal file name
+ */
+static constexpr const std::string_view log_channel_prefix = "pwal_";
+
 // from dblog_scan.cpp
 
 // return max epoch in file.

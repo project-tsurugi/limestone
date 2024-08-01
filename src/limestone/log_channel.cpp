@@ -1,5 +1,5 @@
 /*
- * Copyright 2022-2023 Project Tsurugi.
+ * Copyright 2022-2024 Project Tsurugi.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -25,6 +25,7 @@
 #include <limestone/api/log_channel.h>
 
 #include <limestone/api/datastore.h>
+#include "internal.h"
 #include "log_entry.h"
 
 namespace limestone::api {
@@ -33,7 +34,7 @@ log_channel::log_channel(boost::filesystem::path location, std::size_t id, datas
     : envelope_(envelope), location_(std::move(location)), id_(id)
 {
     std::stringstream ss;
-    ss << prefix << std::setw(4) << std::setfill('0') << std::dec << id_;
+    ss << limestone::internal::log_channel_prefix << std::setw(4) << std::setfill('0') << std::dec << id_;
     file_ = ss.str();
 }
 
