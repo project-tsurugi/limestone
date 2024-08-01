@@ -151,19 +151,26 @@ TEST_F(durable_test, invalidated_entries_are_never_reused) {
     datastore_->shutdown();
 }
 
-limestone::api::epoch_id_type scan_one_pwal_file(const boost::filesystem::path& p, limestone::api::epoch_id_type ld_epoch, const std::function<void(limestone::api::log_entry&)>& add_entry) {
+std::tuple<limestone::api::log_entry::read_error, limestone::api::epoch_id_type, std::vector<limestone::api::log_entry>> scan_one_pwal_file(const boost::filesystem::path& p, limestone::api::epoch_id_type ld_epoch) {
     using limestone::internal::dblog_scan;
+    using limestone::api::log_entry;
     dblog_scan ds{""};  // dummy
     dblog_scan::parse_error ec;
     ds.set_fail_fast(true);
     ds.set_process_at_nondurable_epoch_snippet(dblog_scan::process_at_nondurable::repair_by_mark);
     ds.set_process_at_truncated_epoch_snippet(dblog_scan::process_at_truncated::report);
     ds.set_process_at_damaged_epoch_snippet(dblog_scan::process_at_damaged::report);
-    auto rc = ds.scan_one_pwal_file(p, ld_epoch, add_entry, [](limestone::api::log_entry::read_error& e) -> bool {
-        LOG(ERROR) << "this pwal file is broken: " << e.message();
-        throw std::runtime_error("pwal file read error");
-    }, ec);
-    return rc;
+    log_entry::read_error err;
+    std::vector<log_entry> entries;
+    limestone::api::epoch_id_type durable_epoch = UINT64_MAX;
+    try {
+        durable_epoch = ds.scan_one_pwal_file(p, ld_epoch, [&entries](log_entry& e){ entries.emplace_back(e); }, [&err](log_entry::read_error& e) -> bool {
+            err = e;
+            throw std::runtime_error("pwal file read error");
+        }, ec);
+    } catch (std::runtime_error& re) {
+    }
+    return {err, durable_epoch, std::move(entries)};
 }
 
 TEST_F(durable_test, ut_scan_one_pwal_file_nondurable_entry) {
@@ -179,12 +186,9 @@ TEST_F(durable_test, ut_scan_one_pwal_file_nondurable_entry) {
         log_entry::write(f, 1, "k2", "v2", {43, 1});
         fclose(f);
     }
-    std::vector<log_entry> entries;
-    auto add_entry = [&entries](log_entry& e){
-        entries.emplace_back(e);
-    };
 
-    epoch_id_type last_epoch = scan_one_pwal_file(pwal, 42, add_entry);
+    auto [err, last_epoch, entries] = scan_one_pwal_file(pwal, 42);
+    ASSERT_EQ(err.value(), log_entry::read_error::ok);
     EXPECT_EQ(last_epoch, 43);
     EXPECT_EQ(entries.size(), 1);
     {  // check (marked) pwal file after scan
@@ -220,9 +224,10 @@ TEST_F(durable_test, ut_scan_one_pwal_file_broken_entry_nondurable_trimmed) {
         fputc(99, f);  // the end of file is missing
         fclose(f);
     }
-    auto add_entry = [](log_entry&){ /* nop */ };
 
-    EXPECT_EQ(scan_one_pwal_file(pwal, 42, add_entry), 43);
+    auto [err, last_epoch, entries] = scan_one_pwal_file(pwal, 42);
+    ASSERT_EQ(err.value(), log_entry::read_error::ok);
+    EXPECT_EQ(last_epoch, 43);
 }
 
 // broken entry in durable epoch is error
@@ -241,11 +246,9 @@ TEST_F(durable_test, ut_scan_one_pwal_file_broken_entry_trimmed) {
         fputc(99, f);  // the end of file is missing
         fclose(f);
     }
-    auto add_entry = [](log_entry&){ /* nop */ };
 
-    EXPECT_THROW({
-        scan_one_pwal_file(pwal, 43, add_entry);
-    }, std::exception);
+    auto [err, last_epoch, entries] = scan_one_pwal_file(pwal, 43);
+    ASSERT_EQ(err.value(), log_entry::read_error::short_entry);
 }
 
 TEST_F(durable_test, ut_scan_one_pwal_file_broken_entry_type0) {
@@ -260,11 +263,8 @@ TEST_F(durable_test, ut_scan_one_pwal_file_broken_entry_type0) {
         fputc(static_cast<int>(log_entry::entry_type::this_id_is_not_used), f);
         fclose(f);
     }
-    auto add_entry = [](log_entry&){ /* nop */ };
-
-    EXPECT_THROW({
-        scan_one_pwal_file(pwal, 42, add_entry);
-    }, std::exception);
+    auto [err, last_epoch, entries] = scan_one_pwal_file(pwal, 42);
+    ASSERT_EQ(err.value(), log_entry::read_error::unknown_type);
 }
 
 TEST_F(durable_test, ut_scan_one_pwal_file_broken_entry_type99) {
@@ -279,11 +279,8 @@ TEST_F(durable_test, ut_scan_one_pwal_file_broken_entry_type99) {
         fputc(0x99, f);  // undefined entry_type
         fclose(f);
     }
-    auto add_entry = [](log_entry&){ /* nop */ };
-
-    EXPECT_THROW({
-        scan_one_pwal_file(pwal, 42, add_entry);
-    }, std::exception);
+    auto [err, last_epoch, entries] = scan_one_pwal_file(pwal, 42);
+    ASSERT_EQ(err.value(), log_entry::read_error::unknown_type);
 }
 
 TEST_F(durable_test, ut_last_durable_epoch_normal) {
