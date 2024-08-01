@@ -22,6 +22,7 @@
 #include <vector>
 #include <set>
 #include <mutex>
+#include <queue>
 
 #include <boost/filesystem.hpp>
 
@@ -259,6 +260,13 @@ private:
 
     state state_{};
 
+
+    // For rotation requests
+    std::queue<std::function<void()>> rotation_requests_;
+    std::mutex rotation_mutex_;
+    std::condition_variable rotation_cv_;
+
+
     void add_file(const boost::filesystem::path& file) noexcept;
 
     // opposite of add_file
@@ -292,7 +300,19 @@ private:
      */
     void rotate_epoch_file();
 
+    struct rotation_result {
+        std::vector<std::string> rotated_files;
+        epoch_id_type epoch_id;
+    };
+
+    rotation_result request_rotation_with_result();
+
+    rotation_result execute_rotation();
+
     int64_t current_unix_epoch_in_millis();
+
+
+
 };
 
 } // namespace limestone::api
