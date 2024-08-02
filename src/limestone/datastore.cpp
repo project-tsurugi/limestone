@@ -120,16 +120,14 @@ epoch_id_type datastore::last_epoch() const noexcept { return static_cast<epoch_
 
 void datastore::switch_epoch(epoch_id_type new_epoch_id) {
     check_after_ready(static_cast<const char*>(__func__));
-
-        {
-            std::lock_guard<std::mutex> lock(rotation_mutex_);
-            if (!rotation_requests_.empty()) {
-                auto rotation_request = std::move(rotation_requests_.front());
-                rotation_requests_.pop();
-                rotation_request();
-            }
+    {
+        std::lock_guard<std::mutex> lock(rotation_mutex_);
+        if (!rotation_requests_.empty()) {
+            auto rotation_request = std::move(rotation_requests_.front());
+            rotation_requests_.pop();
+            rotation_request();
         }
-
+    }
     auto neid = static_cast<std::uint64_t>(new_epoch_id);
     if (auto switched = epoch_id_switched_.load(); neid <= switched) {
         LOG_LP(WARNING) << "switch to epoch_id_type of " << neid << " (<=" << switched << ") is curious";
