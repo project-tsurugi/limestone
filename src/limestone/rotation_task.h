@@ -40,8 +40,7 @@ private:
 class rotation_task_manager {
 public:
     void enqueue_task(std::shared_ptr<rotation_task> task);
-    void execute_next_task();
-    bool has_pending_tasks();
+    void execute_task();
 
 private:
     std::queue<std::shared_ptr<rotation_task>> tasks_;

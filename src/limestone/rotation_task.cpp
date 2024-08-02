@@ -30,7 +30,7 @@ void rotation_task_manager::enqueue_task(std::shared_ptr<rotation_task> task) {
     tasks_.push(task);
 }
 
-void rotation_task_manager::execute_next_task() {
+void rotation_task_manager::execute_task() {
     std::shared_ptr<rotation_task> task;
 
     {
@@ -45,11 +45,6 @@ void rotation_task_manager::execute_next_task() {
 
     // タスクを実行
     task->rotate();
-}
-
-bool rotation_task_manager::has_pending_tasks() {
-    std::lock_guard<std::mutex> lock(mutex_);
-    return !tasks_.empty();
 }
 
 } // namespace limestone::api
