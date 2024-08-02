@@ -69,11 +69,21 @@ void log_channel::end_session() {
     finished_epoch_id_.store(current_epoch_id_.load());
     current_epoch_id_.store(UINT64_MAX);
     envelope_.update_min_epoch_id();
+
     if (fclose(strm_) != 0) {  // NOLINT(*-owning-memory)
         LOG_LP(ERROR) << "fclose failed, errno = " << errno;
         throw std::runtime_error("I/O error");
     }
+
+    // Remove current_epoch_id_ from waiting_epoch_ids_
+    {
+        std::lock_guard<std::mutex> lock(session_mutex_);
+        waiting_epoch_ids_.erase(finished_epoch_id_.load());
+        // Notify waiting threads
+        session_cv_.notify_all();
+    }
 }
+
 
 void log_channel::abort_session([[maybe_unused]] status status_code, [[maybe_unused]] const std::string& message) noexcept {
     LOG_LP(ERROR) << "not implemented";
@@ -116,9 +126,7 @@ boost::filesystem::path log_channel::file_path() const noexcept {
 
 // DO rotate without condition check.
 //  use this after your check
-void log_channel::do_rotate_file(epoch_id_type epoch) {
-    // XXX: multi-thread broken
-
+epoch_id_type log_channel::do_rotate_file(epoch_id_type epoch) {
     std::stringstream ss;
     ss << file_.string() << "."
        << std::setw(14) << std::setfill('0') << envelope_.current_unix_epoch_in_millis()
@@ -128,8 +136,26 @@ void log_channel::do_rotate_file(epoch_id_type epoch) {
     boost::filesystem::rename(file_path(), new_file);
     envelope_.add_file(new_file);
 
-    envelope_.subtract_file(location_ / file_);
     registered_ = false;
+    envelope_.subtract_file(location_ / file_);
+
+    // Add current_epoch_id_ to waiting_epoch_ids_
+    {
+        std::lock_guard<std::mutex> lock(session_mutex_);
+        waiting_epoch_ids_.insert(current_epoch_id_.load());
+    }
+
+    return current_epoch_id_.load();
 }
+
+void log_channel::wait_for_end_session(epoch_id_type epoch) {
+    std::unique_lock<std::mutex> lock(session_mutex_);
+
+    // Wait until the specified epoch_id is removed from waiting_epoch_ids_
+    session_cv_.wait(lock, [this, epoch]() {
+        return waiting_epoch_ids_.find(epoch) == waiting_epoch_ids_.end();
+    });
+}
+
 
 } // namespace limestone::api
