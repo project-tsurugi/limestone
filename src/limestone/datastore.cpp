@@ -120,14 +120,6 @@ epoch_id_type datastore::last_epoch() const noexcept { return static_cast<epoch_
 
 void datastore::switch_epoch(epoch_id_type new_epoch_id) {
     check_after_ready(static_cast<const char*>(__func__));
-    {
-        std::lock_guard<std::mutex> lock(rotation_mutex_);
-        if (!rotation_requests_.empty()) {
-            auto rotation_request = std::move(rotation_requests_.front());
-            rotation_requests_.pop();
-            rotation_request();
-        }
-    }
     auto neid = static_cast<std::uint64_t>(new_epoch_id);
     if (auto switched = epoch_id_switched_.load(); neid <= switched) {
         LOG_LP(WARNING) << "switch to epoch_id_type of " << neid << " (<=" << switched << ") is curious";
@@ -372,46 +364,6 @@ void datastore::rotate_epoch_file() {
     }
     strm.close();
 }
-
-datastore::rotation_result datastore::request_rotation_with_result() {
-    // std::promise<rotation_result> を作成
-    auto promise = std::make_shared<std::promise<rotation_result>>();
-    
-    // std::future<rotation_result> を取得
-    auto future = promise->get_future();
-
-    {
-        // rotation_requests_ キューへのアクセスをスレッドセーフにするためにロックを取得
-        std::lock_guard<std::mutex> lock(rotation_mutex_);
-        
-        // ラムダ関数をキューに追加
-        rotation_requests_.emplace([this, promise]() mutable {
-            try {
-                // rotate() メソッドを呼び出してローテーションを実行
-                rotation_result result = this->execute_rotation();
-                
-                // 成功した場合、promise に値を設定して、対応する future の待機を解除
-                promise->set_value(result);
-            } catch (...) {
-                // 例外が発生した場合、promise に例外を設定して、対応する future の待機を例外で解除
-                promise->set_exception(std::current_exception());
-            }
-        });
-    }
-
-    // ローテーション要求がキューに追加されたことを通知
-    rotation_cv_.notify_one();
-
-    // future.get() を呼び出して、ローテーションの結果を待機し、取得
-    return future.get();
-}
-
-datastore::rotation_result datastore::execute_rotation() {
-    // ダミーの値を返すために、rotation_result 構造体を初期化して返します
-    return rotation_result{ std::vector<std::string>{}, epoch_id_type{} };
-}
-
-
 
 void datastore::add_file(const boost::filesystem::path& file) noexcept {
     std::lock_guard<std::mutex> lock(mtx_files_);

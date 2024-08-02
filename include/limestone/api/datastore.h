@@ -260,13 +260,6 @@ private:
 
     state state_{};
 
-
-    // For rotation requests
-    std::queue<std::function<void()>> rotation_requests_;
-    std::mutex rotation_mutex_;
-    std::condition_variable rotation_cv_;
-
-
     void add_file(const boost::filesystem::path& file) noexcept;
 
     // opposite of add_file
