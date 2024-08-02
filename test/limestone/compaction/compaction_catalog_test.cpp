@@ -2,8 +2,9 @@
 #include <boost/filesystem.hpp>
 #include "compaction_catalog.h"
 
-namespace {
+namespace limestone::internal {
 
+using limestone::api::epoch_id_type;
 class compaction_catalog_test : public ::testing::Test {
 protected:
     void SetUp() override {
@@ -28,7 +29,7 @@ protected:
 };
 
 TEST_F(compaction_catalog_test, CreateCatalog) {
-    limestone::api::compaction_catalog catalog(test_dir);
+    compaction_catalog catalog(test_dir);
 
     EXPECT_EQ(catalog.get_max_epoch_id(), 0);
     EXPECT_TRUE(catalog.get_compacted_files().empty());
@@ -36,10 +37,10 @@ TEST_F(compaction_catalog_test, CreateCatalog) {
 }
 
 TEST_F(compaction_catalog_test, UpdateCatalog) {
-    limestone::api::compaction_catalog catalog(test_dir);
+    compaction_catalog catalog(test_dir);
 
-    limestone::api::epoch_id_type max_epoch_id = 123;
-    std::set<limestone::api::compacted_file_info> compacted_files = {
+    limestone::internal::epoch_id_type max_epoch_id = 123;
+    std::set<compacted_file_info> compacted_files = {
         {"file1", 1},
         {"file2", 2}
     };
@@ -53,10 +54,10 @@ TEST_F(compaction_catalog_test, UpdateCatalog) {
 }
 
 TEST_F(compaction_catalog_test, UpdateAndLoadCatalogFile) {
-    limestone::api::compaction_catalog catalog(test_dir);
+    compaction_catalog catalog(test_dir);
 
-    limestone::api::epoch_id_type max_epoch_id = 123;
-    std::set<limestone::api::compacted_file_info> compacted_files = {
+    epoch_id_type max_epoch_id = 123;
+    std::set<compacted_file_info> compacted_files = {
         {"file1", 1},
         {"file2", 2}
     };
@@ -64,7 +65,7 @@ TEST_F(compaction_catalog_test, UpdateAndLoadCatalogFile) {
 
     catalog.update_catalog_file(max_epoch_id, compacted_files, migrated_pwals);
 
-    limestone::api::compaction_catalog loaded_catalog = limestone::api::compaction_catalog::from_catalog_file(test_dir);
+    compaction_catalog loaded_catalog = compaction_catalog::from_catalog_file(test_dir);
 
     EXPECT_EQ(loaded_catalog.get_max_epoch_id(), max_epoch_id);
     EXPECT_EQ(loaded_catalog.get_compacted_files(), compacted_files);
@@ -74,10 +75,10 @@ TEST_F(compaction_catalog_test, UpdateAndLoadCatalogFile) {
 TEST_F(compaction_catalog_test, LoadFromBackup) {
     // まずカタログファイルを作成
     {
-        limestone::api::compaction_catalog catalog(test_dir);
+        compaction_catalog catalog(test_dir);
 
-        limestone::api::epoch_id_type max_epoch_id = 123;
-        std::set<limestone::api::compacted_file_info> compacted_files = {
+        epoch_id_type max_epoch_id = 123;
+        std::set<compacted_file_info> compacted_files = {
             {"file1", 1},
             {"file2", 2}
         };
@@ -94,11 +95,11 @@ TEST_F(compaction_catalog_test, LoadFromBackup) {
     boost::filesystem::remove(catalog_file_path);
 
     // バックアップから読み込み
-    limestone::api::compaction_catalog loaded_catalog = limestone::api::compaction_catalog::from_catalog_file(test_dir);
+    compaction_catalog loaded_catalog = compaction_catalog::from_catalog_file(test_dir);
 
     EXPECT_EQ(loaded_catalog.get_max_epoch_id(), 123);
     EXPECT_EQ(loaded_catalog.get_compacted_files().size(), 2);
     EXPECT_EQ(loaded_catalog.get_migrated_pwals().size(), 2);
 }
 
-}  // namespace
+}  // namespace limestone::internal

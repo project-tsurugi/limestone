@@ -12,8 +12,9 @@
 #include "logging_helper.h"
 #include "limestone/api/epoch_id_type.h"
 
-namespace limestone::api {
+namespace limestone::internal {
 
+using limestone::api::epoch_id_type;
 
 // Constructor that takes a directory path and initializes file paths
 compaction_catalog::compaction_catalog(const boost::filesystem::path &directory_path)

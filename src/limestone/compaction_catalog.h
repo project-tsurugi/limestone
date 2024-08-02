@@ -8,7 +8,10 @@
 
 #include "limestone/api/epoch_id_type.h"
 
-namespace limestone::api {
+namespace limestone::internal {
+
+using limestone::api::epoch_id_type;
+
 
 /**
  * @brief Structure to hold information about compacted files.
