@@ -11,8 +11,7 @@
 
 #include "limestone/api/epoch_id_type.h"
 #include "limestone/api/datastore.h"
-namespace limestone::internal {
-using namespace limestone::api;
+namespace limestone::api {
 
 // ローテーションの結果を表す構造体
 struct rotation_result {
@@ -61,6 +60,6 @@ private:
     static std::mutex mutex_;
 };
 
-} // namespace limestone::internal
+} // namespace limestone::api
 
 #endif // ROTATION_TASK_H

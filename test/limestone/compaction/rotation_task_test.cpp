@@ -1,8 +1,8 @@
-#include "rotation_task.h"
+#include <limestone/api/rotation_task.h>
 #include <gtest/gtest.h>
 #include "test_root.h"
 
-namespace limestone::internal {
+namespace limestone::api {
 
 constexpr const char* data_location = "/tmp/rotation_task_test/data_location";
 constexpr const char* metadata_location = "/tmp/rotation_task_test/metadata_location";
@@ -69,4 +69,4 @@ TEST_F(rotation_task_test, no_task_execution_when_queue_is_empty) {
     SUCCEED();
 }
 
-}  // namespace limestone::internal
+}  // namespace limestone::api

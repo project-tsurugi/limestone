@@ -1,19 +1,50 @@
-#include "rotation_task.h"
+#include <limestone/api/rotation_task.h>
 #include <limestone/api/datastore.h>
 
-namespace limestone::internal {
-    using namespace limestone::api;
-
+namespace limestone::api {
 
 rotation_task::rotation_task(datastore& envelope) 
     : envelope_(envelope),  result_future_(result_promise_.get_future()) {}
 
 
 void rotation_task::rotate() {
-    // ダミーのローテーション処理
+    envelope_.add_file(log_file);   
+
+    // TODO:
+    //   for each logchannel lc:
+    //     if lc is in session, reserve do_rotate for end-of-session
+    //               otherwise, lc.do_rotate_file() immediately
+    //   rotate epoch file
+
+    // XXX: adhoc implementation:
+    //   for each logchannel lc:
+    //       lc.do_rotate_file()
+    //   rotate epoch file
+    for (const auto& lc : log_channels_) {
+#if 0
+        // XXX: this condition may miss log-files made before this process and not rotated
+        if (!lc->registered_) {
+            continue;
+        }
+#else
+        boost::system::error_code error;
+        bool result = boost::filesystem::exists(lc->file_path(), error);
+        if (!result || error) {
+            continue;  // skip if not exists
+        }
+        result = boost::filesystem::is_empty(lc->file_path(), error);
+        if (result || error) {
+            continue;  // skip if empty
+        }
+#endif
+        lc->do_rotate_file();
+    }
+    envelope_.rotate_epoch_file();
+
+        // ダミーのローテーション処理
     rotation_result result;
     result.rotated_files = {"file1.log", "file2.log"};
-    result.epoch_id = 123;
+    result.epoch_id = envelope_.epoch_id_switched_.load();
 
     // 結果をセット
     result_promise_.set_value(result);
@@ -47,4 +78,4 @@ void rotation_task_helper::clear_tasks() {
     std::swap(tasks_, empty);
 }
 
-} // namespace limestone::internal
+} // namespace limestone::api

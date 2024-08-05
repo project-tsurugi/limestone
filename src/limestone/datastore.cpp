@@ -27,7 +27,7 @@
 
 #include <limestone/api/datastore.h>
 #include "internal.h"
-#include "rotation_task.h"
+#include <limestone/api/rotation_task.h>
 #include "log_entry.h"
 
 namespace limestone::api {
@@ -314,40 +314,7 @@ epoch_id_type datastore::rotate_log_files() {
     auto task = rotation_task_helper::create_and_enqueue_task(*this);
     rotation_task_helper::attempt_task_execution_from_queue(); // 本来はエポック切替時に実行される。
     rotation_result result = task->wait_for_result();
-
-
-    // TODO:
-    //   for each logchannel lc:
-    //     if lc is in session, reserve do_rotate for end-of-session
-    //               otherwise, lc.do_rotate_file() immediately
-    //   rotate epoch file
-
-    // XXX: adhoc implementation:
-    //   for each logchannel lc:
-    //       lc.do_rotate_file()
-    //   rotate epoch file
-    for (const auto& lc : log_channels_) {
-#if 0
-        // XXX: this condition may miss log-files made before this process and not rotated
-        if (!lc->registered_) {
-            continue;
-        }
-#else
-        boost::system::error_code error;
-        bool result = boost::filesystem::exists(lc->file_path(), error);
-        if (!result || error) {
-            continue;  // skip if not exists
-        }
-        result = boost::filesystem::is_empty(lc->file_path(), error);
-        if (result || error) {
-            continue;  // skip if empty
-        }
-#endif
-        lc->do_rotate_file();
-    }
-    rotate_epoch_file();
-
-    return epoch_id_switched_.load();
+    return result.epoch_id;
 }
 
 void datastore::rotate_epoch_file() {

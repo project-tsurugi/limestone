@@ -37,6 +37,7 @@
 #include <limestone/api/write_version_type.h>
 #include <limestone/api/tag_repository.h>
 #include <limestone/api/restore_progress.h>
+#include <limestone/api/rotation_task.h>
 
 namespace limestone::api {
 
@@ -46,6 +47,7 @@ namespace limestone::api {
  */
 class datastore {
     friend class log_channel;
+    friend class rotation_task;
 
     /**
      * @brief name of a file to record durable epoch
