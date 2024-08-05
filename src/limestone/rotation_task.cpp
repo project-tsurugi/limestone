@@ -1,54 +1,44 @@
 #include "rotation_task.h"
-#include <thread>
-#include <chrono>
+#include <limestone/api/datastore.h>
 
-namespace limestone::api {
+namespace limestone::internal {
+    using namespace limestone::api;
 
-// rotation_taskクラスの実装
-rotation_task::rotation_task() : result_promise_(), result_future_(result_promise_.get_future()) {}
+
+rotation_task::rotation_task(datastore& envelope) 
+    : envelope_(envelope),  result_future_(result_promise_.get_future()) {}
+
 
 void rotation_task::rotate() {
-    // ローテーション処理のシミュレーション（実際のローテーション処理に置き換えてください）
-    std::this_thread::sleep_for(std::chrono::seconds(2)); // 例: 2秒待つ
-    
-    // ローテーション結果を作成
+    // ダミーのローテーション処理
     rotation_result result;
-    result.rotated_files = {"file1.log", "file2.log"}; // 例としていくつかのファイル名
-    result.epoch_id = 123; // 例としてエポックIDを設定
+    result.rotated_files = {"file1.log", "file2.log"};
+    result.epoch_id = 123;
 
-    // 結果を設定
+    // 結果をセット
     result_promise_.set_value(result);
 }
 
-rotation_result rotation_task::get_result() {
-    return result_future_.get(); // 結果が得られるまで待機し、結果を返す
+rotation_result rotation_task::wait_for_result() {
+    return result_future_.get();
 }
 
-// 静的メンバ変数の初期化
+// rotation_task_helper クラスの実装
 std::queue<std::shared_ptr<rotation_task>> rotation_task_helper::tasks_;
 std::mutex rotation_task_helper::mutex_;
 
-// rotation_task_helperクラスの実装
 void rotation_task_helper::enqueue_task(std::shared_ptr<rotation_task> task) {
     std::lock_guard<std::mutex> lock(mutex_);
     tasks_.push(task);
 }
 
-void rotation_task_helper::execute_task() {
-    std::shared_ptr<rotation_task> task;
-
-    {
-        std::lock_guard<std::mutex> lock(mutex_);
-        if (tasks_.empty()) {
-            return; // キューが空の場合は何もしない
-        }
-
-        task = tasks_.front();
+void rotation_task_helper::attempt_task_execution_from_queue() {
+    std::lock_guard<std::mutex> lock(mutex_);
+    if (!tasks_.empty()) {
+        auto task = tasks_.front();
         tasks_.pop();
+        task->rotate();
     }
-
-    // タスクを実行
-    task->rotate();
 }
 
 void rotation_task_helper::clear_tasks() {
@@ -57,4 +47,4 @@ void rotation_task_helper::clear_tasks() {
     std::swap(tasks_, empty);
 }
 
-} // namespace limestone::api
+} // namespace limestone::internal

@@ -27,9 +27,11 @@
 
 #include <limestone/api/datastore.h>
 #include "internal.h"
+#include "rotation_task.h"
 #include "log_entry.h"
 
 namespace limestone::api {
+using namespace limestone::internal;
 
 datastore::datastore() noexcept = default;
 
@@ -309,6 +311,11 @@ void datastore::recover([[maybe_unused]] const epoch_tag& tag) const noexcept {
 }
 
 epoch_id_type datastore::rotate_log_files() {
+    auto task = rotation_task_helper::create_and_enqueue_task(*this);
+    rotation_task_helper::attempt_task_execution_from_queue(); // 本来はエポック切替時に実行される。
+    rotation_result result = task->wait_for_result();
+
+
     // TODO:
     //   for each logchannel lc:
     //     if lc is in session, reserve do_rotate for end-of-session
