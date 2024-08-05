@@ -24,13 +24,17 @@ rotation_result rotation_task::get_result() {
     return result_future_.get(); // 結果が得られるまで待機し、結果を返す
 }
 
-// rotation_task_managerクラスの実装
-void rotation_task_manager::enqueue_task(std::shared_ptr<rotation_task> task) {
+// 静的メンバ変数の初期化
+std::queue<std::shared_ptr<rotation_task>> rotation_task_helper::tasks_;
+std::mutex rotation_task_helper::mutex_;
+
+// rotation_task_helperクラスの実装
+void rotation_task_helper::enqueue_task(std::shared_ptr<rotation_task> task) {
     std::lock_guard<std::mutex> lock(mutex_);
     tasks_.push(task);
 }
 
-void rotation_task_manager::execute_task() {
+void rotation_task_helper::execute_task() {
     std::shared_ptr<rotation_task> task;
 
     {
@@ -45,6 +49,12 @@ void rotation_task_manager::execute_task() {
 
     // タスクを実行
     task->rotate();
+}
+
+void rotation_task_helper::clear_tasks() {
+    std::lock_guard<std::mutex> lock(mutex_);
+    std::queue<std::shared_ptr<rotation_task>> empty;
+    std::swap(tasks_, empty);
 }
 
 } // namespace limestone::api

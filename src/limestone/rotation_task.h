@@ -2,13 +2,12 @@
 #define ROTATION_TASK_H
 
 #include <iostream>
-#include <queue>
-#include <mutex>
-#include <condition_variable>
-#include <functional>
 #include <future>
 #include <vector>
 #include <string>
+#include <queue>
+#include <mutex>
+#include <memory>
 
 #include "limestone/api/epoch_id_type.h"
 
@@ -36,18 +35,18 @@ private:
     std::future<rotation_result> result_future_;
 };
 
-// rotation_task_managerクラスの宣言
-class rotation_task_manager {
+// rotation_task_helperクラスの宣言
+class rotation_task_helper {
 public:
-    void enqueue_task(std::shared_ptr<rotation_task> task);
-    void execute_task();
+    static void enqueue_task(std::shared_ptr<rotation_task> task);
+    static void execute_task();
+    static void clear_tasks(); // 追加: テストのためにキューをクリアするメソッド
 
 private:
-    std::queue<std::shared_ptr<rotation_task>> tasks_;
-    std::mutex mutex_;
+    static std::queue<std::shared_ptr<rotation_task>> tasks_;
+    static std::mutex mutex_;
 };
 
 } // namespace limestone::api
 
 #endif // ROTATION_TASK_H
-

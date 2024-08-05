@@ -7,7 +7,10 @@ class rotation_task_test : public ::testing::Test {
 protected:
     void SetUp() override {}
 
-    void TearDown() override {}
+    void TearDown() override {
+        // テスト後にキューをクリアする
+        rotation_task_helper::clear_tasks();
+    }
 };
 
 TEST_F(rotation_task_test, rotate_sets_result) {
@@ -27,29 +30,25 @@ TEST_F(rotation_task_test, rotate_sets_result) {
 }
 
 TEST_F(rotation_task_test, enqueue_and_execute_task) {
-    rotation_task_manager manager;
-
     auto task1 = std::make_shared<rotation_task>();
-    manager.enqueue_task(task1);
+    rotation_task_helper::enqueue_task(task1);
 
     auto task2 = std::make_shared<rotation_task>();
-    manager.enqueue_task(task2);
+    rotation_task_helper::enqueue_task(task2);
 
-    manager.execute_task();
+    rotation_task_helper::execute_task();
     rotation_result result1 = task1->get_result();
     EXPECT_EQ(result1.rotated_files.size(), 2);
     EXPECT_EQ(result1.epoch_id, 123);
 
-    manager.execute_task();
+    rotation_task_helper::execute_task();
     rotation_result result2 = task2->get_result();
     EXPECT_EQ(result2.rotated_files.size(), 2);
     EXPECT_EQ(result2.epoch_id, 123);
 }
 
 TEST_F(rotation_task_test, no_task_execution_when_queue_is_empty) {
-    rotation_task_manager manager;
-
-    manager.execute_task();
+    rotation_task_helper::execute_task();
 
     SUCCEED();
 }
