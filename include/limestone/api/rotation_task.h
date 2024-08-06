@@ -11,6 +11,7 @@
 
 #include "limestone/api/epoch_id_type.h"
 #include "limestone/api/datastore.h"
+
 namespace limestone::api {
 
 // ローテーションの結果を表す構造体

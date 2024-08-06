@@ -30,15 +30,19 @@
 #include <limestone/api/write_version_type.h>
 #include <limestone/api/large_object_input.h>
 
+
 namespace limestone::api {
 
 class datastore;
+struct rotation_result;
 
 /**
  * @brief log_channel interface to output logs
  * @details this object is not thread-safe, assuming each thread uses its own log_channel
  */
 class log_channel {
+    friend class rotation_task;
+
     /**
      * @brief prefix of pwal file name
      */
@@ -167,7 +171,7 @@ private:
 
     void request_rotate();
 
-    epoch_id_type do_rotate_file(epoch_id_type epoch = 0);
+    rotation_result do_rotate_file(epoch_id_type epoch = 0);
 
     friend class datastore;
 };

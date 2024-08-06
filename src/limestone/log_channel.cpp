@@ -23,7 +23,6 @@
 #include "logging_helper.h"
 
 #include <limestone/api/log_channel.h>
-
 #include <limestone/api/datastore.h>
 #include "log_entry.h"
 
@@ -126,7 +125,7 @@ boost::filesystem::path log_channel::file_path() const noexcept {
 
 // DO rotate without condition check.
 //  use this after your check
-epoch_id_type log_channel::do_rotate_file(epoch_id_type epoch) {
+rotation_result log_channel::do_rotate_file(epoch_id_type epoch) {
     std::stringstream ss;
     ss << file_.string() << "."
        << std::setw(14) << std::setfill('0') << envelope_.current_unix_epoch_in_millis()
@@ -144,8 +143,10 @@ epoch_id_type log_channel::do_rotate_file(epoch_id_type epoch) {
         std::lock_guard<std::mutex> lock(session_mutex_);
         waiting_epoch_ids_.insert(current_epoch_id_.load());
     }
-
-    return current_epoch_id_.load();
+    rotation_result result;
+    result.rotated_files.push_back(new_name);
+    result.epoch_id = current_epoch_id_.load();
+    return result;
 }
 
 void log_channel::wait_for_end_session(epoch_id_type epoch) {

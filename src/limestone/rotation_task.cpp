@@ -8,8 +8,6 @@ rotation_task::rotation_task(datastore& envelope)
 
 
 void rotation_task::rotate() {
-    envelope_.add_file(log_file);   
-
     // TODO:
     //   for each logchannel lc:
     //     if lc is in session, reserve do_rotate for end-of-session
@@ -20,7 +18,7 @@ void rotation_task::rotate() {
     //   for each logchannel lc:
     //       lc.do_rotate_file()
     //   rotate epoch file
-    for (const auto& lc : log_channels_) {
+    for (const auto& lc : envelope_.log_channels_) {
 #if 0
         // XXX: this condition may miss log-files made before this process and not rotated
         if (!lc->registered_) {
