@@ -23,8 +23,8 @@ public:
     // ファイル名とepoch_idを引数に取るコンストラクタ
     rotation_result(std::vector<std::string> files, epoch_id_type epoch);
 
-    const std::vector<std::string>& get_rotated_files() const;
-    std::optional<epoch_id_type> get_epoch_id() const;
+    [[nodiscard]] const std::vector<std::string>& get_rotated_files() const;
+    [[nodiscard]] std::optional<epoch_id_type> get_epoch_id() const;
 
     // 他のrotation_resultを追加するメソッド
     void add_rotation_result(const rotation_result& other);
@@ -45,7 +45,7 @@ public:
 
 private:
     // コンストラクタをprivateにして直接インスタンス化できないようにする
-    rotation_task(datastore& envelope);
+    explicit rotation_task(datastore& envelope);
     
     datastore& envelope_;
 
@@ -73,6 +73,7 @@ public:
 private:
     static std::queue<std::shared_ptr<rotation_task>>& get_tasks();
     static std::mutex& get_mutex();
+};
 
 } // namespace limestone::api
 

@@ -200,7 +200,7 @@ private:
     // Helper methods
     void load_catalog_file(const boost::filesystem::path &directory_path);
     void parse_catalog_entry(const std::string& line, bool& max_epoch_id_found);
-    std::string create_catalog_content() const;
+    [[nodiscard]] std::string create_catalog_content() const;
 };
 
 } // namespace limestone::api
