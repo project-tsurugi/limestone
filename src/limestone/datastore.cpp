@@ -312,8 +312,16 @@ void datastore::recover([[maybe_unused]] const epoch_tag& tag) const noexcept {
 }
 
 epoch_id_type datastore::rotate_log_files() {
+    // Create and enqueue a rotation task.
+    // Rotation task is executed when switch_epoch() is called.
+    // Wait for the result of the rotation task.
     auto task = rotation_task_helper::create_and_enqueue_task(*this);
     rotation_result result = task->wait_for_result();
+
+    // Wait for all log channels to complete the session with the specified session ID.
+    for(auto& lc: log_channels_) {
+        lc->wait_for_end_session(result.get_epoch_id().value());
+    }
     return result.get_epoch_id().value();
 }
 

@@ -21,7 +21,7 @@ public:
     rotation_result();
 
     // ファイル名とepoch_idを引数に取るコンストラクタ
-    rotation_result(std::vector<std::string> files, epoch_id_type epoch);
+    rotation_result(std::string file, epoch_id_type epoch);
 
     [[nodiscard]] const std::vector<std::string>& get_rotated_files() const;
     [[nodiscard]] std::optional<epoch_id_type> get_epoch_id() const;
@@ -62,7 +62,7 @@ public:
     static void enqueue_task(const std::shared_ptr<rotation_task>& task);
     static void attempt_task_execution_from_queue();
     static void clear_tasks(); // for testing
-    static int queue_size(); // for testing
+    static size_t queue_size(); // for testing
 
 
     // 新しいタスクを生成してキューに追加するヘルパーメソッド

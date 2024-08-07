@@ -146,14 +146,14 @@ rotation_result log_channel::do_rotate_file(epoch_id_type epoch) {
             waiting_epoch_ids_.insert(c);  // Insert the current epoch ID into the waiting set
         }
         // Create a rotation result with the current epoch ID
-        rotation_result result({new_name}, c);
+        rotation_result result(new_name, c);
         return result;
     }
 
     // Session is inactive
     // When the session is inactive, current_epoch_id_ does not hold a valid value.
     // Therefore, we use epoch_id_switched_ as a fallback value in place of current_epoch_id_.
-    rotation_result result({new_name}, envelope_.epoch_id_switched_.load());
+    rotation_result result(new_name, envelope_.epoch_id_switched_.load());
     return result;
 }
 

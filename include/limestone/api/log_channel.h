@@ -169,8 +169,6 @@ private:
 
     log_channel(boost::filesystem::path location, std::size_t id, datastore& envelope) noexcept;
 
-    void request_rotate();
-
     rotation_result do_rotate_file(epoch_id_type epoch = 0);
 
     friend class datastore;

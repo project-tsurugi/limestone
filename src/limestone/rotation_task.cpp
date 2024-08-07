@@ -7,8 +7,9 @@ namespace limestone::api {
 rotation_result::rotation_result() = default;
 
 // ファイル名とepoch_idを引数に取るコンストラクタ
-rotation_result::rotation_result(std::vector<std::string> files, epoch_id_type epoch)
-    : rotated_files_(std::move(files)), epoch_id_(epoch) {}
+rotation_result::rotation_result(std::string file, epoch_id_type epoch) : epoch_id_(epoch) {
+    rotated_files_.emplace_back(std::move(file));
+}
 
 // Getter
 const std::vector<std::string>& rotation_result::get_rotated_files() const {
@@ -21,7 +22,6 @@ std::optional<epoch_id_type> rotation_result::get_epoch_id() const {
 
 // 他のrotation_resultを追加するメソッド
 void rotation_result::add_rotation_result(const rotation_result& other) {
-    // rotated_files_に追加
     rotated_files_.insert(rotated_files_.end(), other.rotated_files_.begin(), other.rotated_files_.end());
 
     // epoch_id_が未設定の場合、otherのepoch_id_を設定
@@ -88,7 +88,7 @@ void rotation_task_helper::clear_tasks() {
     std::swap(get_tasks(), empty);
 }
 
-int rotation_task_helper::queue_size() {
+size_t rotation_task_helper::queue_size() {
     std::lock_guard<std::mutex> lock(get_mutex());
     return get_tasks().size();
 }
