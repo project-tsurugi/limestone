@@ -71,15 +71,8 @@ public:
     }
 
 private:
-    static std::queue<std::shared_ptr<rotation_task>>& get_tasks() {
-        static std::queue<std::shared_ptr<rotation_task>> tasks_;
-        return tasks_;
-    }
-
-    static std::mutex& get_mutex() {
-        static std::mutex mutex_;
-        return mutex_;
-    }};
+    static std::queue<std::shared_ptr<rotation_task>>& get_tasks();
+    static std::mutex& get_mutex();
 
 } // namespace limestone::api
 

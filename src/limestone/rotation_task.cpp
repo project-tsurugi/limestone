@@ -88,4 +88,14 @@ void rotation_task_helper::clear_tasks() {
     std::swap(get_tasks(), empty);
 }
 
+std::queue<std::shared_ptr<rotation_task>>& rotation_task_helper::get_tasks() {
+    static std::queue<std::shared_ptr<rotation_task>> tasks_;
+    return tasks_;
+}
+
+std::mutex& rotation_task_helper::get_mutex() {
+    static std::mutex mutex_;
+    return mutex_;
+}
+
 } // namespace limestone::api
