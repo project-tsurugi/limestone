@@ -21,9 +21,8 @@ public:
     rotation_result();
 
     // ファイル名とepoch_idを引数に取るコンストラクタ
-    rotation_result(const std::vector<std::string>& files, epoch_id_type epoch);
+    rotation_result(std::vector<std::string> files, epoch_id_type epoch);
 
-    // Getter
     const std::vector<std::string>& get_rotated_files() const;
     std::optional<epoch_id_type> get_epoch_id() const;
 
@@ -60,7 +59,7 @@ private:
 // rotation_task_helperクラスの宣言
 class rotation_task_helper {
 public:
-    static void enqueue_task(std::shared_ptr<rotation_task> task);
+    static void enqueue_task(const std::shared_ptr<rotation_task>& task);
     static void attempt_task_execution_from_queue();
     static void clear_tasks(); // 追加: テストのためにキューをクリアするメソッド
 
@@ -72,9 +71,15 @@ public:
     }
 
 private:
-    static std::queue<std::shared_ptr<rotation_task>> tasks_;
-    static std::mutex mutex_;
-};
+    static std::queue<std::shared_ptr<rotation_task>>& get_tasks() {
+        static std::queue<std::shared_ptr<rotation_task>> tasks_;
+        return tasks_;
+    }
+
+    static std::mutex& get_mutex() {
+        static std::mutex mutex_;
+        return mutex_;
+    }};
 
 } // namespace limestone::api
 

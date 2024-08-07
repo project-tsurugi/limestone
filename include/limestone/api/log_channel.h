@@ -34,7 +34,7 @@
 namespace limestone::api {
 
 class datastore;
-struct rotation_result;
+class rotation_result;
 
 /**
  * @brief log_channel interface to output logs

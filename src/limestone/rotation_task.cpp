@@ -7,8 +7,8 @@ namespace limestone::api {
 rotation_result::rotation_result() = default;
 
 // ファイル名とepoch_idを引数に取るコンストラクタ
-rotation_result::rotation_result(const std::vector<std::string>& files, epoch_id_type epoch)
-    : rotated_files_(files), epoch_id_(epoch) {}
+rotation_result::rotation_result(std::vector<std::string> files, epoch_id_type epoch)
+    : rotated_files_(std::move(files)), epoch_id_(epoch) {}
 
 // Getter
 const std::vector<std::string>& rotation_result::get_rotated_files() const {
@@ -68,28 +68,24 @@ rotation_result rotation_task::wait_for_result() {
     return result_future_.get();
 }
 
-// rotation_task_helper クラスの実装
-std::queue<std::shared_ptr<rotation_task>> rotation_task_helper::tasks_;
-std::mutex rotation_task_helper::mutex_;
-
-void rotation_task_helper::enqueue_task(std::shared_ptr<rotation_task> task) {
-    std::lock_guard<std::mutex> lock(mutex_);
-    tasks_.push(task);
+void rotation_task_helper::enqueue_task(const std::shared_ptr<rotation_task>& task) {
+    std::lock_guard<std::mutex> lock(get_mutex());
+    get_tasks().push(task);
 }
 
 void rotation_task_helper::attempt_task_execution_from_queue() {
-    std::lock_guard<std::mutex> lock(mutex_);
-    if (!tasks_.empty()) {
-        auto task = tasks_.front();
-        tasks_.pop();
+    std::lock_guard<std::mutex> lock(get_mutex());
+    if (!get_tasks().empty()) {
+        auto task = get_tasks().front();
+        get_tasks().pop();
         task->rotate();
     }
 }
 
 void rotation_task_helper::clear_tasks() {
-    std::lock_guard<std::mutex> lock(mutex_);
+    std::lock_guard<std::mutex> lock(get_mutex());
     std::queue<std::shared_ptr<rotation_task>> empty;
-    std::swap(tasks_, empty);
+    std::swap(get_tasks(), empty);
 }
 
 } // namespace limestone::api
