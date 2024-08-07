@@ -88,6 +88,11 @@ void rotation_task_helper::clear_tasks() {
     std::swap(get_tasks(), empty);
 }
 
+int rotation_task_helper::queue_size() {
+    std::lock_guard<std::mutex> lock(get_mutex());
+    return get_tasks().size();
+}
+
 std::queue<std::shared_ptr<rotation_task>>& rotation_task_helper::get_tasks() {
     static std::queue<std::shared_ptr<rotation_task>> tasks_;
     return tasks_;

@@ -61,7 +61,9 @@ class rotation_task_helper {
 public:
     static void enqueue_task(const std::shared_ptr<rotation_task>& task);
     static void attempt_task_execution_from_queue();
-    static void clear_tasks(); // 追加: テストのためにキューをクリアするメソッド
+    static void clear_tasks(); // for testing
+    static int queue_size(); // for testing
+
 
     // 新しいタスクを生成してキューに追加するヘルパーメソッド
     static std::shared_ptr<rotation_task> create_and_enqueue_task(datastore& envelope) {

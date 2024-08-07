@@ -1,4 +1,7 @@
 
+#include <atomic>
+#include <thread>
+#include <chrono>
 #include <sstream>
 #include <limestone/logging.h>
 
@@ -47,6 +50,30 @@ public:
 
 protected:
     std::unique_ptr<limestone::api::datastore_test> datastore_{};
+
+    std::unique_ptr<limestone::api::backup_detail> run_backup_with_epoch_switch(limestone::api::backup_type type, int initial_epoch) {
+        std::atomic<bool> backup_completed(false);
+        std::atomic<int> epoch_value(initial_epoch);  // 初期のepoch値
+
+        // 別スレッドで `switch_epoch` を複数回呼び出す
+        std::thread switch_epoch_thread([&]() {
+            while (!backup_completed.load()) {
+                datastore_->switch_epoch(epoch_value++);
+                std::this_thread::sleep_for(std::chrono::milliseconds(10));  // 短いスリープを入れる
+            }
+        });
+
+        // メインスレッドでバックアップ処理を開始
+        std::unique_ptr<limestone::api::backup_detail> bd = datastore_->begin_backup(type);
+
+        // バックアップが完了したらフラグを設定
+        backup_completed.store(true);
+
+        // 別スレッドの完了を待機
+        switch_epoch_thread.join();
+
+        return bd;
+    }
 };
 
 extern void create_file(const boost::filesystem::path& path, std::string_view content);
@@ -82,7 +109,7 @@ TEST_F(rotate_test, log_is_rotated) { // NOLINT
     }
     // setup done
 
-    std::unique_ptr<backup_detail> bd = datastore_->begin_backup(backup_type::standard);
+    std::unique_ptr<backup_detail> bd = run_backup_with_epoch_switch(backup_type::standard, 44);
     auto entries = bd->entries();
 
     {  // result check
@@ -178,7 +205,7 @@ TEST_F(rotate_test, inactive_files_are_also_backed_up) { // NOLINT
 
     // setup done
 
-    std::unique_ptr<backup_detail> bd = datastore_->begin_backup(backup_type::standard);
+    std::unique_ptr<backup_detail> bd = run_backup_with_epoch_switch(backup_type::standard,46);
     auto entries = bd->entries();
 
     {  // result check
@@ -334,7 +361,7 @@ TEST_F(rotate_test, get_snapshot_works) { // NOLINT
     channel.end_session();
     datastore_->switch_epoch(43);
 
-    datastore_->begin_backup(backup_type::standard);  // rotate files
+    run_backup_with_epoch_switch(backup_type::standard,46);
 
     datastore_->shutdown();
     regen_datastore();

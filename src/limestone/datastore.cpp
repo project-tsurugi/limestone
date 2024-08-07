@@ -122,6 +122,7 @@ epoch_id_type datastore::last_epoch() const noexcept { return static_cast<epoch_
 
 void datastore::switch_epoch(epoch_id_type new_epoch_id) {
     check_after_ready(static_cast<const char*>(__func__));
+    rotation_task_helper::attempt_task_execution_from_queue(); 
     auto neid = static_cast<std::uint64_t>(new_epoch_id);
     if (auto switched = epoch_id_switched_.load(); neid <= switched) {
         LOG_LP(WARNING) << "switch to epoch_id_type of " << neid << " (<=" << switched << ") is curious";
@@ -312,7 +313,6 @@ void datastore::recover([[maybe_unused]] const epoch_tag& tag) const noexcept {
 
 epoch_id_type datastore::rotate_log_files() {
     auto task = rotation_task_helper::create_and_enqueue_task(*this);
-    rotation_task_helper::attempt_task_execution_from_queue(); // 本来はエポック切替時に実行される。
     rotation_result result = task->wait_for_result();
     return result.get_epoch_id().value();
 }

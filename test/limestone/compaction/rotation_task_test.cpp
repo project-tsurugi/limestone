@@ -33,9 +33,6 @@ protected:
         datastore_->switch_epoch(123);
         boost::filesystem::path location_path(data_location);
         lc0_ = &datastore_->create_channel(location_path);
-        lc0_->begin_session();
-        lc0_->add_entry(1, "k1", "v1", {4, 0});
-        lc0_->end_session();
         lc1_ = &datastore_->create_channel(location_path);
         lc2_ = &datastore_->create_channel(location_path);
         lc3_ = &datastore_->create_channel(location_path);
@@ -96,10 +93,14 @@ TEST_F(rotation_task_test, rotate_sets_result) {
 }
 
 TEST_F(rotation_task_test, enqueue_and_execute_task) {
+    EXPECT_EQ(rotation_task_helper::queue_size(), 0);
     auto task1 = rotation_task_helper::create_and_enqueue_task(*datastore_);
+    EXPECT_EQ(rotation_task_helper::queue_size(), 1);
     auto task2 = rotation_task_helper::create_and_enqueue_task(*datastore_);
+    EXPECT_EQ(rotation_task_helper::queue_size(), 2);
 
-    rotation_task_helper::attempt_task_execution_from_queue();
+    datastore_->switch_epoch(124); // dexecute rotation_task in switch_epoch
+    EXPECT_EQ(rotation_task_helper::queue_size(), 1);
     rotation_result result1 = task1->wait_for_result();
     EXPECT_EQ(result1.get_rotated_files().size(), 3);
     check_rotated_file(result1.get_rotated_files()[0], pwal0_path);
@@ -107,10 +108,10 @@ TEST_F(rotation_task_test, enqueue_and_execute_task) {
     check_rotated_file(result1.get_rotated_files()[2], pwal2_path);
     EXPECT_EQ(result1.get_epoch_id(), 123);
 
-    datastore_->switch_epoch(124);
     write_to_channel(lc3_);
-
-    rotation_task_helper::attempt_task_execution_from_queue();
+    EXPECT_EQ(rotation_task_helper::queue_size(), 1);
+    datastore_->switch_epoch(125); // dexecute rotation_task in switch_epoch
+    EXPECT_EQ(rotation_task_helper::queue_size(), 0);
     rotation_result result2 = task2->wait_for_result();
     EXPECT_EQ(result2.get_rotated_files().size(), 1);
     check_rotated_file(result2.get_rotated_files()[0], pwal3_path);
