@@ -138,14 +138,22 @@ rotation_result log_channel::do_rotate_file(epoch_id_type epoch) {
     registered_ = false;
     envelope_.subtract_file(location_ / file_);
 
-    // Add current_epoch_id_ to waiting_epoch_ids_
-    {
-        std::lock_guard<std::mutex> lock(session_mutex_);
-        waiting_epoch_ids_.insert(current_epoch_id_.load());
+    auto c = current_epoch_id_.load();
+    if (c != UINT64_MAX) {  // Session is active
+        // Add current_epoch_id_ to waiting_epoch_ids_ to track the active session
+        {
+            std::lock_guard<std::mutex> lock(session_mutex_);
+            waiting_epoch_ids_.insert(c);  // Insert the current epoch ID into the waiting set
+        }
+        // Create a rotation result with the current epoch ID
+        rotation_result result({new_name}, c);
+        return result;
     }
-    rotation_result result;
-    result.rotated_files.push_back(new_name);
-    result.epoch_id = current_epoch_id_.load();
+
+    // Session is inactive
+    // When the session is inactive, current_epoch_id_ does not hold a valid value.
+    // Therefore, we use epoch_id_switched_ as a fallback value in place of current_epoch_id_.
+    rotation_result result({new_name}, envelope_.epoch_id_switched_.load());
     return result;
 }
 

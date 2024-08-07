@@ -15,9 +15,24 @@
 namespace limestone::api {
 
 // ローテーションの結果を表す構造体
-struct rotation_result {
-    std::vector<std::string> rotated_files;
-    epoch_id_type epoch_id;
+class rotation_result {
+public:
+    // デフォルトコンストラクタ
+    rotation_result();
+
+    // ファイル名とepoch_idを引数に取るコンストラクタ
+    rotation_result(const std::vector<std::string>& files, epoch_id_type epoch);
+
+    // Getter
+    const std::vector<std::string>& get_rotated_files() const;
+    std::optional<epoch_id_type> get_epoch_id() const;
+
+    // 他のrotation_resultを追加するメソッド
+    void add_rotation_result(const rotation_result& other);
+
+private:
+    std::vector<std::string> rotated_files_;
+    std::optional<epoch_id_type> epoch_id_;
 };
 
 // rotation_taskクラスの宣言

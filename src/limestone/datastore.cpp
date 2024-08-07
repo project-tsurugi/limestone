@@ -314,7 +314,7 @@ epoch_id_type datastore::rotate_log_files() {
     auto task = rotation_task_helper::create_and_enqueue_task(*this);
     rotation_task_helper::attempt_task_execution_from_queue(); // 本来はエポック切替時に実行される。
     rotation_result result = task->wait_for_result();
-    return result.epoch_id;
+    return result.get_epoch_id().value();
 }
 
 void datastore::rotate_epoch_file() {
