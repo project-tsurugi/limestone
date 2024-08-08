@@ -31,9 +31,9 @@ using namespace limestone::api;
 
 // setup log-dir with no data
 void setup_initial_logdir(const boost::filesystem::path& logdir) {
-    nlohmann::json manifest_v1 = {
+    nlohmann::json manifest_v2 = {
         { "format_version", "1.0" },
-        { "persistent_format_version", 2 }
+        { "persistent_format_version", 2}
     };
     boost::filesystem::path config = logdir / std::string(manifest_file_name);
     FILE* strm = fopen(config.c_str(), "w");  // NOLINT(*-owning-memory)
@@ -41,7 +41,7 @@ void setup_initial_logdir(const boost::filesystem::path& logdir) {
         LOG_LP(ERROR) << "fopen for write failed, errno = " << errno;
         throw std::runtime_error("I/O error");
     }
-    std::string manifest_str = manifest_v1.dump(4);
+    std::string manifest_str = manifest_v2.dump(4);
     auto ret = fwrite(manifest_str.c_str(), manifest_str.length(), 1, strm);
     if (ret != 1) {
         LOG_LP(ERROR) << "fwrite failed, errno = " << errno;

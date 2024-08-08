@@ -139,7 +139,7 @@ TEST_F(log_dir_test, rotate_old_rejects_unsupported_data) {
         LOG(FATAL) << "cannot make directory";
     }
     create_file(bk_path / "epoch", epoch_0_str);
-    create_file(bk_path / std::string(limestone::internal::manifest_file_name), data_manifest(2));
+    create_file(bk_path / std::string(limestone::internal::manifest_file_name), data_manifest(3));
 
     gen_datastore();
 
@@ -199,7 +199,7 @@ TEST_F(log_dir_test, rotate_prusik_rejects_unsupported_data) {
         LOG(FATAL) << "cannot make directory";
     }
     create_file(bk_path / "epoch", epoch_0_str);
-    create_file(bk_path / std::string(limestone::internal::manifest_file_name), data_manifest(2));
+    create_file(bk_path / std::string(limestone::internal::manifest_file_name), data_manifest(3));
     // setup entries
     std::vector<limestone::api::file_set_entry> entries;
     entries.emplace_back("epoch", "epoch", false);
