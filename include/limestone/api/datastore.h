@@ -218,6 +218,16 @@ public:
      */
     void recover(const epoch_tag&) const noexcept;
 
+    /**
+     * @brief Perform online compaction of data.
+     * @details This method triggers a compaction process that consolidates and optimizes
+     * the existing data files while the datastore remains operational. The compaction
+     * process is designed to run in the background, ensuring minimal impact on active
+     * operations.
+     * @note This method should be thread-safe and able to be called concurrently with other operations.
+     */
+    void compact_online();
+
 protected:  // for tests
     auto& log_channels_for_tests() const noexcept { return log_channels_; }
     auto epoch_id_informed_for_tests() const noexcept { return epoch_id_informed_.load(); }

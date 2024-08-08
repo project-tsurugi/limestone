@@ -375,4 +375,9 @@ int64_t datastore::current_unix_epoch_in_millis() {
     return std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::system_clock::now().time_since_epoch()).count();
 }
 
+void datastore::compact_online() {
+    rotation_result result =  rotate_log_files();
+
+}
+
 } // namespace limestone::api

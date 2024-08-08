@@ -90,7 +90,7 @@ TEST_F(rotation_task_test, rotate_sets_result) {
     task->rotate();
     rotation_result result = task->wait_for_result();
     EXPECT_EQ(result.get_latest_rotated_files().size(), 3);
-    check_rotated_file(result.get_latest_rotaed_files(), pwal0);
+    check_rotated_file(result.get_latest_rotated_files(), pwal0);
     check_rotated_file(result.get_latest_rotated_files(), pwal1);
     check_rotated_file(result.get_latest_rotated_files(), pwal2);
     EXPECT_EQ(result.get_epoch_id(), 123);
