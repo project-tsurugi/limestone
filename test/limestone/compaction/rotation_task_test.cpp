@@ -22,9 +22,6 @@ protected:
             std::cerr << "cannot make directory" << std::endl;
         }
 
-        std::ofstream(pwal0_path.string()).put('b');  // サイズ1のファイル
-        std::ofstream(pwal1_path.string()).close();   // サイズ0バイトのファイルを作成
-        std::ofstream(pwal2_path.string()).put('b');  // サイズ1のファイル
         // pwal3は存在しない
 
         // データストアのセットアップ
@@ -61,23 +58,30 @@ protected:
     log_channel* lc2_{};
     log_channel* lc3_{};
 
-    boost::filesystem::path pwal0_path{"/tmp/rotation_task_test/data_location/pwal_0000"};
-    boost::filesystem::path pwal1_path{"/tmp/rotation_task_test/data_location/pwal_0001"};
-    boost::filesystem::path pwal2_path{"/tmp/rotation_task_test/data_location/pwal_0002"};
-    boost::filesystem::path pwal3_path{"/tmp/rotation_task_test/data_location/pwal_0003"};
+    const std::string pwal0{"pwal_0000"};
+    const std::string pwal1{"pwal_0001"};
+    const std::string pwal2{"pwal_0002"};
+    const std::string pwal3{"pwal_0003"};
+
 };
 
 // ファイル名の前方一致をチェックする関数
-void check_rotated_file(const std::string& actual_file, const boost::filesystem::path& expected_path) {
-    std::string expected_filename = expected_path.filename().string();
-    std::string actual_filename = boost::filesystem::path(actual_file).filename().string();
-
+void check_rotated_file(const std::set<std::string>& actual_files, const std::string& expected_filename) {
     auto starts_with = [](const std::string& full_string, const std::string& prefix) {
         return full_string.find(prefix) == 0;
     };
 
-    EXPECT_TRUE(starts_with(actual_filename, expected_filename))
-        << "Expected filename to start with: " << expected_filename << ", but got: " << actual_filename;
+    bool match_found = false;
+    for (const auto& actual_file : actual_files) {
+        std::string actual_filename = boost::filesystem::path(actual_file).filename().string();
+        if (starts_with(actual_filename, expected_filename)) {
+            match_found = true;
+            break;
+        }
+    }
+
+    EXPECT_TRUE(match_found)
+        << "Expected filename to start with: " << expected_filename << ", but none of the actual files matched.";
 }
 
 TEST_F(rotation_task_test, rotate_sets_result) {
@@ -85,10 +89,10 @@ TEST_F(rotation_task_test, rotate_sets_result) {
 
     task->rotate();
     rotation_result result = task->wait_for_result();
-    EXPECT_EQ(result.get_rotated_files().size(), 3);
-    check_rotated_file(result.get_rotated_files()[0], pwal0_path);
-    check_rotated_file(result.get_rotated_files()[1], pwal1_path);
-    check_rotated_file(result.get_rotated_files()[2], pwal2_path);
+    EXPECT_EQ(result.get_latest_rotated_files().size(), 3);
+    check_rotated_file(result.get_latest_rotaed_files(), pwal0);
+    check_rotated_file(result.get_latest_rotated_files(), pwal1);
+    check_rotated_file(result.get_latest_rotated_files(), pwal2);
     EXPECT_EQ(result.get_epoch_id(), 123);
 }
 
@@ -102,10 +106,10 @@ TEST_F(rotation_task_test, enqueue_and_execute_task) {
     datastore_->switch_epoch(124); // dexecute rotation_task in switch_epoch
     EXPECT_EQ(rotation_task_helper::queue_size(), 1);
     rotation_result result1 = task1->wait_for_result();
-    EXPECT_EQ(result1.get_rotated_files().size(), 3);
-    check_rotated_file(result1.get_rotated_files()[0], pwal0_path);
-    check_rotated_file(result1.get_rotated_files()[1], pwal1_path);
-    check_rotated_file(result1.get_rotated_files()[2], pwal2_path);
+    EXPECT_EQ(result1.get_latest_rotated_files().size(), 3);
+    check_rotated_file(result1.get_latest_rotated_files(), pwal0);
+    check_rotated_file(result1.get_latest_rotated_files(), pwal1);
+    check_rotated_file(result1.get_latest_rotated_files(), pwal2);
     EXPECT_EQ(result1.get_epoch_id(), 123);
 
     write_to_channel(lc3_);
@@ -113,8 +117,8 @@ TEST_F(rotation_task_test, enqueue_and_execute_task) {
     datastore_->switch_epoch(125); // dexecute rotation_task in switch_epoch
     EXPECT_EQ(rotation_task_helper::queue_size(), 0);
     rotation_result result2 = task2->wait_for_result();
-    EXPECT_EQ(result2.get_rotated_files().size(), 1);
-    check_rotated_file(result2.get_rotated_files()[0], pwal3_path);
+    EXPECT_EQ(result2.get_latest_rotated_files().size(), 1);
+    check_rotated_file(result2.get_latest_rotated_files(), pwal3);
     EXPECT_EQ(result2.get_epoch_id(), 124);
 }
 

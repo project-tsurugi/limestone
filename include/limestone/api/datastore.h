@@ -288,7 +288,7 @@ private:
     /**
      * @brief requests the data store to rotate log files
      */
-    epoch_id_type rotate_log_files();
+    rotation_result rotate_log_files();
 
     /**
      * @brief rotate epoch file

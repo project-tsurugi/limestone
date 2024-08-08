@@ -8,12 +8,16 @@ rotation_result::rotation_result() = default;
 
 // ファイル名とepoch_idを引数に取るコンストラクタ
 rotation_result::rotation_result(std::string file, epoch_id_type epoch) : epoch_id_(epoch) {
-    rotated_files_.emplace_back(std::move(file));
+    latest_rotated_files_.emplace(std::move(file));
 }
 
 // Getter
-const std::vector<std::string>& rotation_result::get_rotated_files() const {
-    return rotated_files_;
+const std::set<std::string>& rotation_result::get_latest_rotated_files() const {
+    return latest_rotated_files_;
+}
+
+const std::set<std::string>& rotation_result::get_remaining_rotated_files() const {
+    return remaining_rotated_files_;
 }
 
 std::optional<epoch_id_type> rotation_result::get_epoch_id() const {
@@ -22,7 +26,7 @@ std::optional<epoch_id_type> rotation_result::get_epoch_id() const {
 
 // 他のrotation_resultを追加するメソッド
 void rotation_result::add_rotation_result(const rotation_result& other) {
-    rotated_files_.insert(rotated_files_.end(), other.rotated_files_.begin(), other.rotated_files_.end());
+    latest_rotated_files_.insert(other.latest_rotated_files_.begin(), other.latest_rotated_files_.end());
 
     // epoch_id_が未設定の場合、otherのepoch_id_を設定
     if (!epoch_id_.has_value()) {
@@ -33,6 +37,12 @@ void rotation_result::add_rotation_result(const rotation_result& other) {
     }
 }
 
+// 新規メソッド
+void rotation_result::add_rotated_file(const std::string& file) {
+    if (latest_rotated_files_.find(file) == latest_rotated_files_.end()) {
+        remaining_rotated_files_.insert(file);
+    }
+}
 
 rotation_task::rotation_task(datastore& envelope) 
     : envelope_(envelope),  result_future_(result_promise_.get_future()) {}
