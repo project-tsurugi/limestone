@@ -36,6 +36,7 @@ epoch_id_type scan_one_pwal_file(const boost::filesystem::path& pwal, epoch_id_t
 // from datastore_format.cpp
 
 inline constexpr const std::string_view manifest_file_name = "limestone-manifest.json";
+inline constexpr const std::string_view manifest_file_backup_name = "limestone-manifest.json.back";
 
 void setup_initial_logdir(const boost::filesystem::path& logdir);
 
