@@ -44,7 +44,7 @@ void setup_initial_logdir(const boost::filesystem::path& logdir);
  */
 int is_supported_version(const boost::filesystem::path& manifest_path, std::string& errmsg);
 
-void check_logdir_format(const boost::filesystem::path& logdir);
+void check_and_migrate_logdir_format(const boost::filesystem::path& logdir);
 
 // from datastore_restore.cpp
 

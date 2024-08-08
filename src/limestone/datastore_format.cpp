@@ -33,7 +33,7 @@ using namespace limestone::api;
 void setup_initial_logdir(const boost::filesystem::path& logdir) {
     nlohmann::json manifest_v1 = {
         { "format_version", "1.0" },
-        { "persistent_format_version", 1 }
+        { "persistent_format_version", 2 }
     };
     boost::filesystem::path config = logdir / std::string(manifest_file_name);
     FILE* strm = fopen(config.c_str(), "w");  // NOLINT(*-owning-memory)
@@ -75,8 +75,8 @@ int is_supported_version(const boost::filesystem::path& manifest_path, std::stri
         istrm >> manifest;
         auto version = manifest["persistent_format_version"];
         if (version.is_number_integer()) {
-            if (version == 1) {
-                return 1;  // supported
+            if (version == 1 || version == 2) {
+                return version;  // supported
             }
             errmsg = "version mismatch: version " + version.dump() + ", server supports version 1";
             return 0;
@@ -90,7 +90,7 @@ int is_supported_version(const boost::filesystem::path& manifest_path, std::stri
     }
 }
 
-void check_logdir_format(const boost::filesystem::path& logdir) {
+void check_and_migrate_logdir_format(const boost::filesystem::path& logdir) {
     boost::filesystem::path manifest_path = logdir / std::string(manifest_file_name);
     if (!boost::filesystem::exists(manifest_path)) {
         VLOG_LP(log_info) << "no manifest file in logdir, maybe v0";

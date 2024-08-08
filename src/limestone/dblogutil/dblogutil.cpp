@@ -291,7 +291,7 @@ int main(char *dir, subcommand mode) {  // NOLINT
         log_and_exit(64);
     }
     try {
-        check_logdir_format(p);
+        check_and_migrate_logdir_format(p);
         dblog_scan ds(p);
         ds.set_thread_num(FLAGS_thread_num);
         if (mode == cmd_inspect) inspect(ds, opt_epoch);

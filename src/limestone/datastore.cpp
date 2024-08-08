@@ -93,7 +93,7 @@ void datastore::recover() const noexcept {
 }
 
 void datastore::ready() {
-    internal::check_logdir_format(location_);
+    internal::check_and_migrate_logdir_format(location_);
     create_snapshot();
     state_ = state::ready;
 }
