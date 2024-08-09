@@ -180,6 +180,13 @@ public:
      */
     [[nodiscard]] const std::set<std::string> &get_migrated_pwals() const;
 
+    /**
+     * @brief Returns the filename of the compaction catalog.
+     * 
+     * @return The filename of the compaction catalog.
+     */
+    [[nodiscard]] static inline std::string_view get_catalog_filename() { return COMPACTION_CATALOG_FILENAME; }
+
 private:
     // Constants
     static constexpr const char *COMPACTION_CATALOG_FILENAME = "compaction_catalog"; ///< Name of the catalog file
