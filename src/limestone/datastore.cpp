@@ -27,6 +27,7 @@
 
 #include <limestone/api/datastore.h>
 #include "internal.h"
+#include "compaction_catalog.h"
 #include <limestone/api/rotation_task.h>
 #include "log_entry.h"
 
@@ -246,7 +247,7 @@ std::unique_ptr<backup_detail> datastore::begin_backup(backup_type btype) {  // 
     std::vector<backup_detail::entry> entries;
     for (auto & ent : inactive_files) {
         // LOG-0: assume files are located flat in logdir.
-        auto filename = ent.filename().string();
+        std::string filename = ent.filename().string();
         auto dst = filename;
         switch (filename[0]) {
             case 'p': {
@@ -294,6 +295,15 @@ std::unique_ptr<backup_detail> datastore::begin_backup(backup_type btype) {  // 
                 } else {
                     // unknown type
                 }
+                break;
+            }
+            case 'c': {
+                if (filename == compaction_catalog::get_catalog_filename()) {
+                    entries.emplace_back(ent.string(), dst, false, false);
+                } else if(filename.find("mpct", 1) == 1) {
+                    entries.emplace_back(ent.string(), dst, false, false);
+                }
+                break;
             }
             default: {
                 // unknown type

@@ -45,8 +45,20 @@ public:
         entry(entry &&) noexcept = default;
         entry& operator=(entry &&) noexcept = default;
 
+        /**
+         * @brief Constructs a new entry object.
+         *
+         * @param source_path The path to the target file.
+         *                    If a relative path is specified, it is calculated relative to the directory where the file list is stored.
+         *                    For security reasons, parent directory references ("..") are not allowed in the relative path.
+         * @param destination_path The path where the target file will be placed.
+         *                         This is typically specified as the value of FileSet.Entry.getDestinationPath() during the backup process.
+         * @param is_mutable Indicates whether the target file is mutable (i.e., can be changed during the backup process).
+         * @param is_detached Indicates whether the target file can be moved.
+         *                    If true, the command may or may not move this file.
+         */
         entry(boost::filesystem::path source_path, boost::filesystem::path destination_path, bool is_mutable, bool is_detached)
-        : source_path_(std::move(source_path)), destination_path_(std::move(destination_path)), is_mutable_(is_mutable), is_detached_(is_detached) {}
+            : source_path_(std::move(source_path)), destination_path_(std::move(destination_path)), is_mutable_(is_mutable), is_detached_(is_detached) {}
 
         [[nodiscard]] boost::filesystem::path source_path() const { return source_path_; }
         [[nodiscard]] boost::filesystem::path destination_path() const { return destination_path_; }
