@@ -158,9 +158,13 @@ void check_and_migrate_logdir_format(const boost::filesystem::path& logdir) {
         }
         setup_initial_logdir(logdir);
         VLOG_LP(log_info) << "migration done";
+        boost::filesystem::remove(manifest_backup_path, ec);
+        if (ec) {
+            std::string err_msg = "Failed to remove backup manifest file: " + manifest_backup_path.string() + ". Error: " + ec.message();
+            LOG(ERROR) << err_msg;
+            throw std::runtime_error(err_msg);
+        }
     }
 }
-
-
 
 } // namespace limestone::internal

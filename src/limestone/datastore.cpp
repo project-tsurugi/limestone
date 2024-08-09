@@ -41,6 +41,7 @@ datastore::datastore(configuration const& conf) : location_(conf.data_locations_
     boost::system::error_code error;
     const bool result_check = boost::filesystem::exists(location_, error);
     boost::filesystem::path manifest_path = boost::filesystem::path(location_) / std::string(internal::manifest_file_name);
+    boost::filesystem::path compaction_catalog_path= boost::filesystem::path(location_) / std::string(compaction_catalog::get_catalog_filename());
     if (!result_check || error) {
         const bool result_mkdir = boost::filesystem::create_directory(location_, error);
         if (!result_mkdir || error) {
@@ -63,6 +64,8 @@ datastore::datastore(configuration const& conf) : location_(conf.data_locations_
             add_file(manifest_path);
         }
     }
+    internal::check_and_migrate_logdir_format(location_);
+    add_file(compaction_catalog_path);
 
     // XXX: prusik era
     // TODO: read rotated epoch files if main epoch file does not exist
@@ -94,7 +97,6 @@ void datastore::recover() const noexcept {
 }
 
 void datastore::ready() {
-    internal::check_and_migrate_logdir_format(location_);
     create_snapshot();
     state_ = state::ready;
 }
