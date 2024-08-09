@@ -12,7 +12,8 @@
 
 #include "test_root.h"
 
-#define LOGFORMAT_V1
+#define LOGFORMAT_VER 1
+
 
 namespace limestone::testing {
 
@@ -25,7 +26,7 @@ public:
         if (!boost::filesystem::create_directory(location)) {
             std::cerr << "cannot make directory" << std::endl;
         }
-#ifdef LOGFORMAT_V1
+#if LOGFORMAT_VER == 1
         limestone::internal::setup_initial_logdir(boost::filesystem::path(location));
 #endif
 
@@ -90,7 +91,7 @@ TEST_F(rotate_test, log_is_rotated) { // NOLINT
     channel.end_session();
     datastore_->switch_epoch(43);
 
-#ifdef LOGFORMAT_V1
+#if LOGFORMAT_VER == 1
     int manifest_file_num = 1;
 #else
     int manifest_file_num = 0;
@@ -102,7 +103,7 @@ TEST_F(rotate_test, log_is_rotated) { // NOLINT
         ASSERT_EQ(files.size(), 2 + manifest_file_num);
         int i = 0;
         ASSERT_EQ(files[i++].string(), std::string(location) + "/epoch");
-#ifdef LOGFORMAT_V1
+#if LOGFORMAT_VER == 1
         ASSERT_EQ(files[i++].string(), std::string(location) + "/" + std::string(limestone::internal::manifest_file_name));
 #endif
         ASSERT_EQ(files[i++].string(), std::string(location) + "/pwal_0000");
@@ -127,7 +128,7 @@ TEST_F(rotate_test, log_is_rotated) { // NOLINT
         //EXPECT_EQ(v[i].is_detached(), false);
         EXPECT_EQ(v[i].is_mutable(), false);
         i++;
-#ifdef LOGFORMAT_V1
+#if LOGFORMAT_VER == 1
         EXPECT_EQ(v[i].destination_path().string(), limestone::internal::manifest_file_name);  // relative
         EXPECT_TRUE(starts_with(v[i].source_path().string(), location));  // absolute
         EXPECT_EQ(v[i].is_detached(), false);
@@ -152,7 +153,7 @@ TEST_F(rotate_test, log_is_rotated) { // NOLINT
         int i = 0;
         EXPECT_EQ(files[i++].string(), std::string(location) + "/epoch");  // active epoch
         EXPECT_TRUE(starts_with(files[i++].string(), std::string(location) + "/epoch."));  // rotated epoch
-#ifdef LOGFORMAT_V1
+#if LOGFORMAT_VER == 1
         ASSERT_EQ(files[i++].string(), std::string(location) + "/" + std::string(limestone::internal::manifest_file_name));
 #endif
         EXPECT_TRUE(starts_with(files[i++].string(), std::string(location) + "/pwal_0000."));  // rotated pwal

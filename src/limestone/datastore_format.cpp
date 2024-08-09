@@ -25,6 +25,8 @@
 
 #include "internal.h"
 #include "log_entry.h"
+#include "compaction_catalog.h"
+
 
 namespace limestone::internal {
 using namespace limestone::api;
@@ -32,6 +34,7 @@ using namespace limestone::api;
 // Create or initialize the manifest file in the specified log directory
 // This function is used during logdir setup or when migrating logdir formats.
 void setup_initial_logdir(const boost::filesystem::path& logdir) {
+    // Create manifest file
     nlohmann::json manifest_v2 = {
         { "format_version", "1.0" },
         { "persistent_format_version", 2}
@@ -65,6 +68,9 @@ void setup_initial_logdir(const boost::filesystem::path& logdir) {
         LOG_LP(ERROR) << err_msg;
         throw std::runtime_error(err_msg);
     }
+    // Create compaction catalog file
+    compaction_catalog catalog(logdir);
+    catalog.update_catalog_file(0, {}, {});
 }
 
 
@@ -82,10 +88,11 @@ int is_supported_version(const boost::filesystem::path& manifest_path, std::stri
         istrm >> manifest;
         auto version = manifest["persistent_format_version"];
         if (version.is_number_integer()) {
-            if (version == 1 || version == 2) {
-                return version;  // supported
+            int v = version;
+            if (v == 1 || v == 2) {
+                return v;  // supported
             }
-            errmsg = "version mismatch: version " + version.dump() + ", server supports version 1";
+            errmsg = "version mismatch: version " + version.dump() + ", server supports version 1 or 2";
             return 0;
         }
         errmsg = "invalid manifest file, invalid persistent_format_version: " + version.dump();
