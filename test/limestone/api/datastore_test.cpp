@@ -133,7 +133,7 @@ TEST_F(datastore_test, add_persistent_callback_test) { // NOLINT
 
 }
 
-TEST_F(datastore_test, data_location_directory_test) { // NOLINT
+TEST_F(datastore_test, DataLocationParentDirectoryDoesNotExistTest) { // NOLINT
     boost::filesystem::path parent_path{parent_directory};
     if (boost::filesystem::exists(parent_path)) {
         boost::filesystem::remove_all(parent_path);
@@ -151,16 +151,34 @@ TEST_F(datastore_test, data_location_directory_test) { // NOLINT
     } catch (const std::exception& e) {
         SUCCEED();
     }
+}
 
+TEST_F(datastore_test, DataLocationDirectoryExistsTest) { // NOLINT
+    boost::filesystem::path parent_path{parent_directory};
     boost::filesystem::create_directories(parent_path);
+
+    std::vector<boost::filesystem::path> data_locations{};
+    data_locations.emplace_back(data_location);
+    boost::filesystem::path metadata_location_path{metadata_location};
+    limestone::api::configuration conf(data_locations, metadata_location_path);
+
     boost::filesystem::create_directories(data_locations[0]);
 
-    // test when the directory not exist
+    // test when the directory exists
     datastore_ = std::make_unique<limestone::api::datastore_test>(conf);
     boost::filesystem::path data_location_path{data_location};
     verify_datastore_initialization(data_location_path);
+}
 
-    datastore_.reset();
+TEST_F(datastore_test, DataLocationDirectoryIsEmptyTest) { // NOLINT
+    boost::filesystem::path parent_path{parent_directory};
+    boost::filesystem::create_directories(parent_path);
+
+    std::vector<boost::filesystem::path> data_locations{};
+    data_locations.emplace_back(data_location);
+    boost::filesystem::path metadata_location_path{metadata_location};
+    limestone::api::configuration conf(data_locations, metadata_location_path);
+
     if (boost::filesystem::exists(data_location)) {
         boost::filesystem::remove_all(data_location);
     }
@@ -168,23 +186,43 @@ TEST_F(datastore_test, data_location_directory_test) { // NOLINT
 
     // test when the directory is empty
     datastore_ = std::make_unique<limestone::api::datastore_test>(conf);
+    boost::filesystem::path data_location_path{data_location};
     verify_datastore_initialization(data_location_path);
+}
 
-    datastore_.reset();
+TEST_F(datastore_test, DataLocationReinitializationTest) { // NOLINT
+    boost::filesystem::path parent_path{parent_directory};
+    boost::filesystem::create_directories(parent_path);
+
+    std::vector<boost::filesystem::path> data_locations{};
+    data_locations.emplace_back(data_location);
+    boost::filesystem::path metadata_location_path{metadata_location};
+    limestone::api::configuration conf(data_locations, metadata_location_path);
+
+    boost::filesystem::create_directories(data_locations[0]);
 
     // test reinitialization
     datastore_ = std::make_unique<limestone::api::datastore_test>(conf);
+    boost::filesystem::path data_location_path{data_location};
     verify_datastore_initialization(data_location_path);
+}
 
-    datastore_.reset();
+TEST_F(datastore_test, ManifestVersionMigrationTest) { // NOLINT
+    boost::filesystem::path parent_path{parent_directory};
+    boost::filesystem::create_directories(parent_path);
 
-    // Test for migration from manifest version 1 to version 2
+    std::vector<boost::filesystem::path> data_locations{};
+    data_locations.emplace_back(data_location);
+    boost::filesystem::path metadata_location_path{metadata_location};
+    limestone::api::configuration conf(data_locations, metadata_location_path);
+
     if (boost::filesystem::exists(data_location)) {
         boost::filesystem::remove_all(data_location);
     }
     boost::filesystem::create_directories(data_location);
 
     // Create a limestone-manifest.json file with version 1.0 and persistent_format_version 1
+    boost::filesystem::path data_location_path{data_location};
     boost::filesystem::path manifest_path = data_location_path / "limestone-manifest.json";
     std::ofstream manifest_file(manifest_path.string());
     manifest_file << R"({
