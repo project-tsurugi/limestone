@@ -371,6 +371,12 @@ void datastore::subtract_file(const boost::filesystem::path& file) {
     files_.erase(file);
 }
 
+std::set<boost::filesystem::path> datastore::get_files() {
+    std::lock_guard<std::mutex> lock(mtx_files_);
+
+    return files_;
+}
+
 void datastore::check_after_ready(std::string_view func) const noexcept {
     if (state_ == state::not_ready) {
         LOG_LP(WARNING) << func << " called before ready()";

@@ -277,6 +277,8 @@ private:
     // opposite of add_file
     void subtract_file(const boost::filesystem::path& file);
 
+    std::set<boost::filesystem::path> get_files();
+
     epoch_id_type search_max_durable_epock_id() noexcept;
 
     void update_min_epoch_id(bool from_switch_epoch = false);
