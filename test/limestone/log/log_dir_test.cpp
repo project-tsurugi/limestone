@@ -2,6 +2,7 @@
 #include <boost/filesystem.hpp>
 
 #include <limestone/logging.h>
+#include "compaction_catalog.h"
 
 #include "dblog_scan.h"
 #include "internal.h"
@@ -25,6 +26,7 @@ class log_dir_test : public ::testing::Test {
 public:
 static constexpr const char* location = "/tmp/log_dir_test";
 const boost::filesystem::path manifest_path = boost::filesystem::path(location) / std::string(limestone::internal::manifest_file_name);
+const boost::filesystem::path compaction_catalog_path = boost::filesystem::path(location) / "compaction_catalog";
 
     void SetUp() {
         boost::filesystem::remove_all(location);
@@ -64,6 +66,7 @@ TEST_F(log_dir_test, newly_created_directory_contains_manifest_file) {
     gen_datastore();
 
     EXPECT_TRUE(boost::filesystem::exists(manifest_path));
+    EXPECT_TRUE(boost::filesystem::exists(compaction_catalog_path));
 }
 
 TEST_F(log_dir_test, reject_directory_without_manifest_file) {
@@ -107,6 +110,21 @@ TEST_F(log_dir_test, accept_directory_only_correct_manifest_file) {
 TEST_F(log_dir_test, reject_directory_of_different_version) {
     create_mainfest_file(222);
 
+    EXPECT_THROW({ gen_datastore(); }, std::exception);
+}
+
+TEST_F(log_dir_test, accept__manifest_version_v1) {
+    create_mainfest_file(1);
+    gen_datastore();   // success
+}
+
+TEST_F(log_dir_test, accept__manifest_version_v2) {
+    create_mainfest_file(2);
+    gen_datastore();   // success
+}
+
+TEST_F(log_dir_test, reject_manifest_version_v3) {
+    create_mainfest_file(3);
     EXPECT_THROW({ gen_datastore(); }, std::exception);
 }
 
