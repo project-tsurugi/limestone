@@ -16,12 +16,16 @@ const std::set<std::string>& rotation_result::get_latest_rotated_files() const {
     return latest_rotated_files_;
 }
 
-const std::set<std::string>& rotation_result::get_remaining_rotated_files() const {
-    return remaining_rotated_files_;
-}
-
 std::optional<epoch_id_type> rotation_result::get_epoch_id() const {
     return epoch_id_;
+}
+
+void rotation_result::set_rotation_end_files(const std::set<boost::filesystem::path>& files) {
+    rotation_end_files = files;
+}
+
+const std::set<boost::filesystem::path>& rotation_result::get_rotation_end_files() const {
+    return rotation_end_files;
 }
 
 // 他のrotation_resultを追加するメソッド
@@ -37,13 +41,6 @@ void rotation_result::add_rotation_result(const rotation_result& other) {
     }
 }
 
-// 新規メソッド
-void rotation_result::add_rotated_file(const std::string& file) {
-    if (latest_rotated_files_.find(file) == latest_rotated_files_.end()) {
-        remaining_rotated_files_.insert(file);
-    }
-}
-
 rotation_task::rotation_task(datastore& envelope) 
     : envelope_(envelope),  result_future_(result_promise_.get_future()) {}
 
@@ -56,11 +53,11 @@ void rotation_task::rotate() {
         if (!result || error) {
             continue;  // skip if not exists
         }
-        // The following code was commented out because it introduces a bug:
-        // Checking if the file is empty and skipping it can cause valid log files 
-        // to be ignored during rotation, leading to potential data loss or inconsistency.
-        // The rotation process should handle all files that exist, regardless of their size.
-        // 
+        // The following code may seem necessary at first glance, but there is a possibility
+        // that files could be appended to before the rotation is complete.
+        // In that case, skipping them could result in missing files that should be processed.
+        // Therefore, this check is not required and has been commented out.
+        //
         // result = boost::filesystem::is_empty(lc->file_path(), error);
         // if (result || error) {
         //     continue;  // skip if empty
@@ -69,7 +66,7 @@ void rotation_task::rotate() {
         final_result.add_rotation_result(channel_result);
     }
     envelope_.rotate_epoch_file();
-
+    final_result.set_rotation_end_files(envelope_.get_files());
     // 結果をセット
     result_promise_.set_value(final_result);
 }

@@ -226,18 +226,19 @@ std::future<void> datastore::shutdown() noexcept {
 
 // old interface
 backup& datastore::begin_backup() {
-    backup_ = std::unique_ptr<backup>(new backup(files_));
+    auto tmp_files = get_files();
+    backup_ = std::unique_ptr<backup>(new backup(tmp_files));
     return *backup_;
 }
 
 std::unique_ptr<backup_detail> datastore::begin_backup(backup_type btype) {  // NOLINT(readability-function-cognitive-complexity)
-    rotate_log_files();
+   rotation_result result = rotate_log_files();
 
     // LOG-0: all files are log file, so all files are selected in both standard/transaction mode.
     (void) btype;
 
     // calcuate files_ minus active-files
-    std::set<boost::filesystem::path> inactive_files(files_);
+    std::set<boost::filesystem::path> inactive_files(result.get_rotation_end_files());
     inactive_files.erase(epoch_file_path_);
     for (const auto& lc : log_channels_) {
         if (lc->registered_) {

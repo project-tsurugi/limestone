@@ -14,29 +14,27 @@
 
 namespace limestone::api {
 
-// ローテーションの結果を表すクラス
 class rotation_result {
 public:
-    // デフォルトコンストラクタ
     rotation_result();
 
-    // ファイル名とepoch_idを引数に取るコンストラクタ
     rotation_result(std::string file, epoch_id_type epoch);
 
     [[nodiscard]] const std::set<std::string>& get_latest_rotated_files() const;
-    [[nodiscard]] const std::set<std::string>& get_remaining_rotated_files() const;
     [[nodiscard]] std::optional<epoch_id_type> get_epoch_id() const;
+    [[nodiscard]] const std::set<boost::filesystem::path>& get_rotation_end_files() const;
+    void set_rotation_end_files(const std::set<boost::filesystem::path>& files);
 
-    // 他のrotation_resultを追加するメソッド
     void add_rotation_result(const rotation_result& other);
-
-    // この情報は別管理にすべきなので、おそらく不要になる
-    void add_rotated_file(const std::string& file);
-
 private:
+    // A set of filenames that were rotated in this rotation process.
     std::set<std::string> latest_rotated_files_;
-    // この情報は別管理にすべきなので、おそらく不要になる
-    std::set<std::string> remaining_rotated_files_;
+
+    // A set of file paths managed by the datastore at the end of this rotation.
+    std::set<boost::filesystem::path> rotation_end_files;
+
+    // The epoch ID at the time of the rotation. Any WAL entries with an epoch ID
+    // equal to or greater than this are guaranteed not to be present in the rotated files.
     std::optional<epoch_id_type> epoch_id_;
 };
 
@@ -44,14 +42,11 @@ private:
 // rotation_taskクラスの宣言
 class rotation_task {
 public:
-    // ローテーションを行うメソッド
     void rotate();
 
-    // ローテーション結果を取得するメソッド
     rotation_result wait_for_result();
 
 private:
-    // コンストラクタをprivateにして直接インスタンス化できないようにする
     explicit rotation_task(datastore& envelope);
     
     datastore& envelope_;
@@ -59,11 +54,9 @@ private:
     std::promise<rotation_result> result_promise_;
     std::future<rotation_result> result_future_;
 
-    // `rotation_task_helper` が `rotation_task` を生成できるようにフレンドクラスに指定
     friend class rotation_task_helper;
 };
 
-// rotation_task_helperクラスの宣言
 class rotation_task_helper {
 public:
     static void enqueue_task(const std::shared_ptr<rotation_task>& task);

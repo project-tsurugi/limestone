@@ -64,7 +64,7 @@ public:
 private:
     std::vector<boost::filesystem::path> files_;
 
-    explicit backup(std::set<boost::filesystem::path>& files) noexcept;
+    explicit backup(const std::set<boost::filesystem::path>& files) noexcept;
 
     friend class datastore;
 };
