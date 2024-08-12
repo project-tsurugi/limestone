@@ -62,7 +62,6 @@ protected:
 
 TEST_F(log_dir_test, newly_created_directory_contains_manifest_file) {
     gen_datastore();
-    limestone::internal::check_and_migrate_logdir_format(location);
 
     EXPECT_TRUE(boost::filesystem::exists(manifest_path));
 }
@@ -70,52 +69,45 @@ TEST_F(log_dir_test, newly_created_directory_contains_manifest_file) {
 TEST_F(log_dir_test, reject_directory_without_manifest_file) {
     create_file(boost::filesystem::path(location) / "epoch", epoch_0_str);
 
-    gen_datastore();
-    EXPECT_THROW({ limestone::internal::check_and_migrate_logdir_format(location); }, std::exception);
+    EXPECT_THROW({ gen_datastore(); }, std::exception);
 }
 
 TEST_F(log_dir_test, reject_directory_with_broken_manifest_file) {
     create_file(boost::filesystem::path(location) / "epoch", epoch_0_str);
     create_file(manifest_path, "broken");
 
-    gen_datastore();
-    EXPECT_THROW({ limestone::internal::check_and_migrate_logdir_format(location); }, std::exception);
+    EXPECT_THROW({ gen_datastore(); }, std::exception);
 }
 
 TEST_F(log_dir_test, reject_directory_only_broken_manifest_file) {
     create_file(manifest_path, "broken");
 
-    gen_datastore();
-    EXPECT_THROW({ limestone::internal::check_and_migrate_logdir_format(location); }, std::exception);
+    EXPECT_THROW({ gen_datastore(); }, std::exception);
 }
 
 TEST_F(log_dir_test, reject_directory_only_broken_manifest_file2) {
     create_file(manifest_path, "{ \"answer\": 42 }");
 
-    gen_datastore();
-    EXPECT_THROW({ limestone::internal::check_and_migrate_logdir_format(location); }, std::exception);
+    EXPECT_THROW({ gen_datastore(); }, std::exception);
 }
 
 TEST_F(log_dir_test, accept_directory_with_correct_manifest_file) {
     create_file(boost::filesystem::path(location) / "epoch", epoch_0_str);
     create_mainfest_file();
 
-    gen_datastore();
-    limestone::internal::check_and_migrate_logdir_format(location);  // success
+    gen_datastore();  // success
 }
 
 TEST_F(log_dir_test, accept_directory_only_correct_manifest_file) {
     create_mainfest_file();
 
-    gen_datastore();
-    limestone::internal::check_and_migrate_logdir_format(location);  // success
+    gen_datastore();  // success
 }
 
 TEST_F(log_dir_test, reject_directory_of_different_version) {
     create_mainfest_file(222);
 
-    gen_datastore();
-    EXPECT_THROW({ limestone::internal::check_and_migrate_logdir_format(location); }, std::exception);
+    EXPECT_THROW({ gen_datastore(); }, std::exception);
 }
 
 TEST_F(log_dir_test, rotate_old_ok_v1_dir) {

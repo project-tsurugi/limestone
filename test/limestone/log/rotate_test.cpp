@@ -316,8 +316,10 @@ TEST_F(rotate_test, restore_prusik_all_abs) { // NOLINT
 
     auto& backup = datastore_->begin_backup();  // const function
     auto files = backup.files();
-#if LOGFORMAT_VER >=1
+#if LOGFORMAT_VER ==1
     int manifest_file_num = 1;
+#elif LOGFORMAT_VER >= 2
+    int manifest_file_num = 2;
 #else
     int manifest_file_num = 0;
 #endif
@@ -366,8 +368,10 @@ TEST_F(rotate_test, restore_prusik_all_rel) { // NOLINT
 
     auto& backup = datastore_->begin_backup();  // const function
     auto files = backup.files();
-#if LOGFORMAT_VER >=1
+#if LOGFORMAT_VER == 1
     int manifest_file_num = 1;
+#elif LOGFORMAT_VER >= 2
+    int manifest_file_num = 2;
 #else
     int manifest_file_num = 0;
 #endif
