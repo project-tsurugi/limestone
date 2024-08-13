@@ -90,7 +90,12 @@ datastore::datastore(configuration const& conf) : location_(conf.data_locations_
     VLOG_LP(log_debug) << "datastore is created, location = " << location_.string();
 }
 
-datastore::~datastore() noexcept = default;
+datastore::~datastore() {
+    if (online_compaction_worker_future_.valid()) {
+        online_compaction_worker_future_.wait();
+    }
+}
+
 
 void datastore::recover() const noexcept {
     check_before_ready(static_cast<const char*>(__func__));
@@ -98,6 +103,7 @@ void datastore::recover() const noexcept {
 
 void datastore::ready() {
     create_snapshot();
+    online_compaction_worker_future_ = std::async(std::launch::async, &datastore::online_compaction_worker, this);
     state_ = state::ready;
 }
 
@@ -218,6 +224,16 @@ void datastore::add_snapshot_callback(std::function<void(write_version_type)> ca
 std::future<void> datastore::shutdown() noexcept {
     VLOG_LP(log_info) << "start";
     state_ = state::shutdown;
+
+    stop_online_compaction_worker_.store(true);
+    if (!online_compaction_worker_future_.valid()) {
+        VLOG(log_info) << "Compaction task is not running. Skipping task shutdown.";
+    } else {
+        VLOG(log_info) << "shutdown: waiting for compaction task to stop";
+        online_compaction_worker_future_.wait();
+        VLOG(log_info) << "Compaction task has been stopped.";
+    }
+
     return std::async(std::launch::async, []{
         std::this_thread::sleep_for(std::chrono::microseconds(100000));
         VLOG(log_info) << "/:limestone:datastore:shutdown end";
@@ -394,9 +410,14 @@ int64_t datastore::current_unix_epoch_in_millis() {
     return std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::system_clock::now().time_since_epoch()).count();
 }
 
-void datastore::compact_online() {
-    rotation_result result =  rotate_log_files();
-
+void datastore::online_compaction_worker() {
+    std::cout << "Compaction task started..." << std::endl;
+    while (!stop_online_compaction_worker_) {
+        // 模擬的なコンパクション処理をここに記述
+        std::this_thread::sleep_for(std::chrono::seconds(1));
+        std::cout << "Compaction task running..." << std::endl;
+    }
+    std::cout << "Compaction task stopped." << std::endl;
 }
 
 } // namespace limestone::api

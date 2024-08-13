@@ -257,6 +257,12 @@ private:
 
     std::atomic_uint64_t log_channel_id_{};
 
+    std::future<void> online_compaction_worker_future_;
+
+    std::atomic<bool> stop_online_compaction_worker_;
+
+    void online_compaction_worker();
+
     // used for backup
     //   (old) full backup :   target is entire <files_>
     //   (new/prusik) backup : target is rotated files, i.e. <files_> minus active log files
@@ -308,6 +314,7 @@ private:
     void rotate_epoch_file();
 
     int64_t current_unix_epoch_in_millis();
+    
 };
 
 } // namespace limestone::api
