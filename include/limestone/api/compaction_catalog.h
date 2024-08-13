@@ -132,12 +132,9 @@ public:
     [[nodiscard]] epoch_id_type get_max_epoch_id() const;
 
     /**
-     * @brief Gets the set of migrated PWALs from the catalog.
-     *
-     * PWAL is not compacted directly but migrated for other purposes.
-     * This method retrieves the set of PWALs that have been moved for further use after compaction.
-     *
-     * @return const std::set<std::string>& Reference to the set of migrated PWALs.
+     * @brief Get the set of compacted file information.
+     * 
+     * @return const std::set<compacted_file_info>& The set of compacted file information.
      */
     [[nodiscard]] const std::set<compacted_file_info> &get_compacted_files() const;
 
@@ -166,11 +163,19 @@ private:
     static constexpr const char *MAX_EPOCH_ID_KEY = "MAX_EPOCH_ID"; ///< Key for maximum epoch ID in the catalog file
 
     // Member variables
-    boost::filesystem::path catalog_file_path_; ///< Path of the compaction catalog file
-    boost::filesystem::path backup_file_path_; ///< Path of the backup file
     std::set<compacted_file_info> compacted_files_{}; ///< Set of compacted files
     std::set<std::string> migrated_pwals_{}; ///< Set of migrated PWALs
     epoch_id_type max_epoch_id_ = 0; ///< Maximum epoch ID included in the compacted files
+
+    // Set of filenames for compacted files.
+    // Compacted files are those with filenames starting with "cmpct",
+    // and they contain deduplicated data from PWAL files.
+    boost::filesystem::path catalog_file_path_;
+
+    // Set of filenames for compacted PWAL files.
+    // PWAL files in this set have been compacted and are no longer
+    // needed for database startup or recovery, and can be safely deleted.
+    boost::filesystem::path backup_file_path_;
 
     // Helper methods
     void load_catalog_file(const boost::filesystem::path &directory_path);

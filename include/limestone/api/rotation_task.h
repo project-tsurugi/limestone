@@ -39,7 +39,6 @@ private:
 };
 
 
-// rotation_taskクラスの宣言
 class rotation_task {
 public:
     void rotate();
@@ -65,7 +64,6 @@ public:
     static size_t queue_size(); // for testing
 
 
-    // 新しいタスクを生成してキューに追加するヘルパーメソッド
     static std::shared_ptr<rotation_task> create_and_enqueue_task(datastore& envelope) {
         auto task = std::shared_ptr<rotation_task>(new rotation_task(envelope));
         enqueue_task(task);
