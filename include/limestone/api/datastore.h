@@ -250,6 +250,10 @@ private:
 
     std::future<void> online_compaction_worker_future_;
 
+    std::mutex mtx_online_compaction_worker_{};
+
+    std::condition_variable cv_online_compaction_worker_{};
+
     std::atomic<bool> stop_online_compaction_worker_{false};
 
     std::optional<compaction_catalog> compaction_catalog_; // std::optionalを使用
@@ -257,6 +261,8 @@ private:
     void online_compaction_worker();
 
     void do_online_compaction();
+
+    void stop_online_compaction_worker();
 
     // used for backup
     //   (old) full backup :   target is entire <files_>

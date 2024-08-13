@@ -12,6 +12,7 @@
 
 using namespace std::literals;
 using dblog_scan = limestone::internal::dblog_scan;
+using compaction_catalog = limestone::api::compaction_catalog;
 
 namespace limestone::testing {
 
@@ -55,6 +56,10 @@ const boost::filesystem::path compaction_catalog_path = boost::filesystem::path(
 
     void create_mainfest_file(int persistent_format_version = 1) {
         create_file(manifest_path, data_manifest(persistent_format_version));
+        if (persistent_format_version > 1) {
+            compaction_catalog catalog{location};
+            catalog.update_catalog_file(0, {}, {});
+        }
     }
 
 protected:

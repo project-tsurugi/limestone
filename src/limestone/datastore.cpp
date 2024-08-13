@@ -66,7 +66,7 @@ datastore::datastore(configuration const& conf) : location_(conf.data_locations_
     }
     internal::check_and_migrate_logdir_format(location_);
     add_file(compaction_catalog_path);
-    compaction_catalog_ = compaction_catalog::from_catalog_file(compaction_catalog_path);
+    compaction_catalog_ = compaction_catalog::from_catalog_file(location_);
 
     // XXX: prusik era
     // TODO: read rotated epoch files if main epoch file does not exist
@@ -92,6 +92,7 @@ datastore::datastore(configuration const& conf) : location_(conf.data_locations_
 }
 
 datastore::~datastore() {
+    stop_online_compaction_worker();
     if (online_compaction_worker_future_.valid()) {
         online_compaction_worker_future_.wait();
     }
@@ -226,7 +227,7 @@ std::future<void> datastore::shutdown() noexcept {
     VLOG_LP(log_info) << "start";
     state_ = state::shutdown;
 
-    stop_online_compaction_worker_.store(true);
+    stop_online_compaction_worker();
     if (!online_compaction_worker_future_.valid()) {
         VLOG(log_info) << "Compaction task is not running. Skipping task shutdown.";
     } else {
@@ -424,6 +425,7 @@ void datastore::online_compaction_worker() {
         } 
     }
 
+    std::unique_lock<std::mutex> lock(mtx_online_compaction_worker_);
 
     while (!stop_online_compaction_worker_.load()) {
         if (boost::filesystem::exists(start_file)) {
@@ -431,11 +433,21 @@ void datastore::online_compaction_worker() {
                 VLOG(log_error) << "Failed to remove file: " << start_file.string();
                 return;
             }
-           // Define the do_compaction function here
-           do_online_compaction();
+            // Define the do_compaction function here
+            do_online_compaction();
         }
-        std::this_thread::sleep_for(std::chrono::seconds(1));
+        cv_online_compaction_worker_.wait_for(lock, std::chrono::seconds(1), [this]() {
+            return stop_online_compaction_worker_.load();
+        });
     }
+}
+
+void datastore::stop_online_compaction_worker() {
+    {
+        std::lock_guard<std::mutex> lock(mtx_online_compaction_worker_);
+        stop_online_compaction_worker_.store(true);
+    }
+    cv_online_compaction_worker_.notify_all();
 }
 
 void datastore::do_online_compaction() {
