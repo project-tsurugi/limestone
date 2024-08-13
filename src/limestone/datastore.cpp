@@ -452,7 +452,31 @@ void datastore::stop_online_compaction_worker() {
 
 void datastore::do_online_compaction() {
     rotation_result result = rotate_log_files();
-    auto files = get_files();
+    std::set<std::string> migrated_pwals = compaction_catalog_->get_migrated_pwals();
+    
+
+    // コンパクション対象のPWALを選択する
+    std::set<std::string> need_compaction_filenames;
+    for(const boost::filesystem::path& path : result.get_rotation_end_files()) {
+        std::string filename = path.filename().string();
+        
+        // ファイル名が"pwal"で始まり、長さが10文字以上であるか確認
+        if (filename.substr(0, 4) == "pwal" && filename.length() >= 10) {
+            // migrated_pwalsに含まれないファイル名をneed_compaction_pwalsに追加
+            if (migrated_pwals.find(filename) == migrated_pwals.end()) {
+                need_compaction_filenames.insert(filename);
+            }
+        }
+    }
+
+    // コンパクション済みファイルを取得
+    for(const compacted_file_info& info : compaction_catalog_->get_compacted_files()) {
+        need_compaction_filenames.insert(info.get_file_name());
+    }
+
+
+
+
 }
 
 
