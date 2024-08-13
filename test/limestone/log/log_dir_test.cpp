@@ -2,7 +2,7 @@
 #include <boost/filesystem.hpp>
 
 #include <limestone/logging.h>
-#include "compaction_catalog.h"
+#include <limestone/api/compaction_catalog.h>
 
 #include "dblog_scan.h"
 #include "internal.h"

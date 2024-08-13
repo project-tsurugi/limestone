@@ -8,11 +8,11 @@
 #include <boost/filesystem.hpp>
 
 
-#include "compaction_catalog.h"
+#include <limestone/api/compaction_catalog.h>
 #include "logging_helper.h"
-#include "limestone/api/epoch_id_type.h"
+#include <limestone/api/epoch_id_type.h>
 
-namespace limestone::internal {
+namespace limestone::api {
 
 using limestone::api::epoch_id_type;
 

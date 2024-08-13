@@ -1,10 +1,12 @@
 #include <gtest/gtest.h>
 #include <boost/filesystem.hpp>
-#include "compaction_catalog.h"
+#include <limestone/api/compaction_catalog.h>
 
-namespace limestone::internal {
+namespace limestone::testing {
 
 using limestone::api::epoch_id_type;
+using limestone::api::compacted_file_info;
+using limestone::api::compaction_catalog;
 class compaction_catalog_test : public ::testing::Test {
 protected:
     void SetUp() override {
@@ -39,7 +41,7 @@ TEST_F(compaction_catalog_test, CreateCatalog) {
 TEST_F(compaction_catalog_test, UpdateCatalog) {
     compaction_catalog catalog(test_dir);
 
-    limestone::internal::epoch_id_type max_epoch_id = 123;
+    epoch_id_type max_epoch_id = 123;
     std::set<compacted_file_info> compacted_files = {
         {"file1", 1},
         {"file2", 2}
@@ -102,4 +104,4 @@ TEST_F(compaction_catalog_test, LoadFromBackup) {
     EXPECT_EQ(loaded_catalog.get_migrated_pwals().size(), 2);
 }
 
-}  // namespace limestone::internal
+}  // namespace limestone::testing

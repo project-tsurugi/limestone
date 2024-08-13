@@ -3,12 +3,17 @@
 #include <limestone/api/datastore.h>
 #include "test_root.h"
 
-namespace limestone::api {
+namespace limestone::testing {
 
 constexpr const char* data_location = "/tmp/rotation_task_test/data_location";
 constexpr const char* metadata_location = "/tmp/rotation_task_test/metadata_location";
 
 const boost::filesystem::path epoch_path{std::string(data_location) + "/epoch"};
+
+using limestone::api::log_channel;
+using limestone::api::rotation_task;
+using limestone::api::rotation_result;
+using limestone::api::rotation_task_helper;
 
 class rotation_task_test : public ::testing::Test {
 protected:
@@ -128,4 +133,4 @@ TEST_F(rotation_task_test, no_task_execution_when_queue_is_empty) {
     SUCCEED();
 }
 
-}  // namespace limestone::api
+}  // namespace limestone::testing

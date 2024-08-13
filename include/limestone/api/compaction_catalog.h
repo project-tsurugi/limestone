@@ -8,10 +8,7 @@
 
 #include "limestone/api/epoch_id_type.h"
 
-namespace limestone::internal {
-
-using limestone::api::epoch_id_type;
-
+namespace limestone::api {
 
 /**
  * @brief Structure to hold information about compacted files.
@@ -94,39 +91,10 @@ public:
      */
     explicit compaction_catalog(const boost::filesystem::path &directory_path);
 
-    /**
-     * @brief Move constructor.
-     * 
-     * Transfers ownership of the catalog data from another compaction_catalog object.
-     * 
-     * @param other Another compaction_catalog object to move data from.
-     */
-    compaction_catalog(compaction_catalog&& other) noexcept;
-
-    /**
-     * @brief Deleted copy constructor.
-     * 
-     * Copying compaction_catalog objects is not allowed.
-     */
+    compaction_catalog(compaction_catalog&& other) noexcept = default;
     compaction_catalog(const compaction_catalog& other) = delete;
-
-    /**
-     * @brief Deleted copy assignment operator.
-     * 
-     * Copying compaction_catalog objects is not allowed.
-     * 
-     * @return compaction_catalog& 
-     */
     compaction_catalog& operator=(compaction_catalog const& other) = delete;
-
-    /**
-     * @brief Deleted move assignment operator.
-     * 
-     * Moving compaction_catalog objects is allowed during construction but not through assignment.
-     * 
-     * @return compaction_catalog& 
-     */
-    compaction_catalog& operator=(compaction_catalog&& other) noexcept = delete;
+    compaction_catalog& operator=(compaction_catalog&& other) noexcept = default;
 
     /**
      * @brief Destroys the compaction_catalog object.

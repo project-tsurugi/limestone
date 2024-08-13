@@ -27,7 +27,7 @@
 
 #include <limestone/api/datastore.h>
 #include "internal.h"
-#include "compaction_catalog.h"
+#include <limestone/api/compaction_catalog.h>
 #include <limestone/api/rotation_task.h>
 #include "log_entry.h"
 
@@ -66,6 +66,7 @@ datastore::datastore(configuration const& conf) : location_(conf.data_locations_
     }
     internal::check_and_migrate_logdir_format(location_);
     add_file(compaction_catalog_path);
+    compaction_catalog_ = compaction_catalog::from_catalog_file(compaction_catalog_path);
 
     // XXX: prusik era
     // TODO: read rotated epoch files if main epoch file does not exist
@@ -411,13 +412,36 @@ int64_t datastore::current_unix_epoch_in_millis() {
 }
 
 void datastore::online_compaction_worker() {
-    std::cout << "Compaction task started..." << std::endl;
-    while (!stop_online_compaction_worker_) {
-        // 模擬的なコンパクション処理をここに記述
-        std::this_thread::sleep_for(std::chrono::seconds(1));
-        std::cout << "Compaction task running..." << std::endl;
+    std::cout << "Online compaction worker started..." << std::endl;
+
+    boost::filesystem::path ctrl_dir = location_ / "ctrl";
+    boost::filesystem::path start_file = ctrl_dir / "start_compaction";
+
+    if (!boost::filesystem::exists(ctrl_dir)) {
+        if (!boost::filesystem::create_directory(ctrl_dir)) {
+            VLOG(log_error) << "Failed to create directory: " << ctrl_dir.string();
+            return;
+        } 
     }
-    std::cout << "Compaction task stopped." << std::endl;
+
+
+    while (!stop_online_compaction_worker_.load()) {
+        if (boost::filesystem::exists(start_file)) {
+            if (!boost::filesystem::remove(start_file)) {
+                VLOG(log_error) << "Failed to remove file: " << start_file.string();
+                return;
+            }
+           // Define the do_compaction function here
+           do_online_compaction();
+        }
+        std::this_thread::sleep_for(std::chrono::seconds(1));
+    }
 }
+
+void datastore::do_online_compaction() {
+    rotation_result result = rotate_log_files();
+    auto files = get_files();
+}
+
 
 } // namespace limestone::api
