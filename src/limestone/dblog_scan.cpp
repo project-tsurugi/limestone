@@ -140,6 +140,11 @@ epoch_id_type dblog_scan::scan_pwal_files(  // NOLINT(readability-function-cogni
     std::atomic<dblog_scan::parse_error::code> max_error_value{dblog_scan::parse_error::code::ok};
     auto process_file = [&](const boost::filesystem::path& p) {  // NOLINT(readability-function-cognitive-complexity)
         if (is_wal(p)) {
+            auto filename = p.filename().string();
+            if (excluded_sort_targets_.find(filename) != excluded_sort_targets_.end()) {
+                VLOG(30) << "skipping excluded files: " << p;
+                return;  // Skip this file as it's in the excluded targets set
+            }
             parse_error ec;
             auto rc = scan_one_pwal_file(p, ld_epoch, add_entry, report_error, ec);
             epoch_id_type max_epoch_of_file = rc;
@@ -194,43 +199,32 @@ epoch_id_type dblog_scan::scan_pwal_files(  // NOLINT(readability-function-cogni
             }
         }
     };
-
-    std::list<boost::filesystem::path> file_list;
-    std::mutex list_mtx;
-    std::condition_variable cv;
-    std::exception_ptr ex_ptr{};
-    bool done = false;
-    
-    // ディレクトリ内のファイルパスをリストに追加
-    for (boost::filesystem::directory_iterator it(dblogdir_), end; it != end; ++it) {
-        file_list.push_back(it->path());
-    }
-
-    // スレッドの作成
+    std::mutex dir_mtx;
+    auto dir_begin = boost::filesystem::directory_iterator(dblogdir_);
+    auto dir_end = boost::filesystem::directory_iterator();
     std::vector<std::thread> workers;
+    std::mutex ex_mtx;
+    std::exception_ptr ex_ptr{};
     workers.reserve(thread_num_);
     for (int i = 0; i < thread_num_; i++) {
         workers.emplace_back(std::thread([&](){
             for (;;) {
                 boost::filesystem::path p;
                 {
-                    std::lock_guard<std::mutex> lock(list_mtx);
-                    if (file_list.empty() || done) break;  // リストが空の場合、スレッドを終了する
-                    p = file_list.front();
-                    file_list.pop_front();
+                    std::lock_guard<std::mutex> g{dir_mtx};
+                    if (dir_begin == dir_end) break;
+                    p = *dir_begin++;
                 }
-
                 try {
                     process_file(p);
                 } catch (std::runtime_error& ex) {
                     VLOG(log_info) << "/:limestone catch runtime_error(" << ex.what() << ")";
-                    {
-                        std::lock_guard<std::mutex> lock(list_mtx);
-                        if (!ex_ptr) {  // only save one
-                            ex_ptr = std::current_exception();
-                        }
-                        done = true;
+                    std::lock_guard<std::mutex> g2{ex_mtx};
+                    if (!ex_ptr) {  // only save one
+                        ex_ptr = std::current_exception();
                     }
+                    std::lock_guard<std::mutex> g{dir_mtx};
+                    dir_begin = dir_end;  // skip all unprocessed files
                     break;
                 }
             }

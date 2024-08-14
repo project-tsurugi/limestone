@@ -83,8 +83,12 @@ public:
 
     using error_report_func_t = std::function<bool(log_entry::read_error&)>;
 
-    explicit dblog_scan(const boost::filesystem::path& logdir) : dblogdir_(logdir) { }
-    explicit dblog_scan(boost::filesystem::path&& logdir) : dblogdir_(std::move(logdir)) { }
+public:
+    explicit dblog_scan(const boost::filesystem::path& logdir, const std::set<std::string>& excluded_sort_targets = {})
+        : dblogdir_(logdir), excluded_sort_targets_(excluded_sort_targets) { }
+
+    explicit dblog_scan(boost::filesystem::path&& logdir, std::set<std::string>&& excluded_sort_targets = {})
+        : dblogdir_(std::move(logdir)), excluded_sort_targets_(std::move(excluded_sort_targets)) { }
 
     const boost::filesystem::path& get_dblogdir() { return dblogdir_; }
     void set_thread_num(int thread_num) noexcept { thread_num_ = thread_num; }
@@ -147,6 +151,7 @@ public:
 
 private:
     boost::filesystem::path dblogdir_;
+    std::set<std::string> excluded_sort_targets_;
     int thread_num_{1};
     bool fail_fast_{false};
 
