@@ -92,7 +92,8 @@ public:
      *
      * @param logdir The path to the directory containing the files to be processed.
      */
-    explicit dblog_scan(const boost::filesystem::path& logdir);
+
+    explicit dblog_scan(const boost::filesystem::path& logdir) : dblogdir_(logdir) { rescan_directory_paths(); }
 
     /**
      * @brief Constructor that initializes the dblog_scan with the specified log directory.
@@ -103,7 +104,7 @@ public:
      *
      * @param logdir The path to the directory containing the files to be processed.
      */
-    explicit dblog_scan(boost::filesystem::path&& logdir);
+    explicit dblog_scan(boost::filesystem::path&& logdir) : dblogdir_(std::move(logdir)) { rescan_directory_paths(); }
 
     /**
      * @brief Constructor that initializes the dblog_scan with the specified log directory and file names.
@@ -115,7 +116,11 @@ public:
      * @param logdir The path to the directory containing the files to be processed.
      * @param file_names The set of file names within `logdir` to be processed.
      */
-    explicit dblog_scan(const boost::filesystem::path& logdir, const std::set<std::string>& file_names);
+    explicit dblog_scan(const boost::filesystem::path& logdir, const std::set<std::string>& file_names) : dblogdir_(logdir) {
+        for (const auto& file_name : file_names) {
+            path_list_.emplace_back(dblogdir_ / file_name);
+        }
+    }
 
     /**
      * @brief Constructor that initializes the dblog_scan with the specified log directory and file names.
@@ -127,7 +132,11 @@ public:
      * @param logdir The path to the directory containing the files to be processed.
      * @param file_names The set of file names within `logdir` to be processed.
      */
-    explicit dblog_scan(boost::filesystem::path&& logdir, const std::set<std::string>& file_names);
+    explicit dblog_scan(boost::filesystem::path&& logdir, const std::set<std::string>& file_names) : dblogdir_(std::move(logdir)) {
+        for (const auto& file_name : file_names) {
+            path_list_.emplace_back(dblogdir_ / file_name);
+        }
+    }
 
     const boost::filesystem::path& get_dblogdir() { return dblogdir_; }
     void set_thread_num(int thread_num) noexcept { thread_num_ = thread_num; }
