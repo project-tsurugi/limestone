@@ -91,7 +91,7 @@ datastore::datastore(configuration const& conf) : location_(conf.data_locations_
     VLOG_LP(log_debug) << "datastore is created, location = " << location_.string();
 }
 
-datastore::~datastore() {
+datastore::~datastore() noexcept{
     stop_online_compaction_worker();
     if (online_compaction_worker_future_.valid()) {
         online_compaction_worker_future_.wait();
