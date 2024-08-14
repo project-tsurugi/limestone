@@ -83,13 +83,51 @@ public:
 
     using error_report_func_t = std::function<bool(log_entry::read_error&)>;
 
-    explicit dblog_scan(const boost::filesystem::path& logdir) : dblogdir_(logdir) {
-        rescan_directory_paths();
-    }
+    /**
+     * @brief Constructor that initializes the dblog_scan with the specified log directory.
+     *
+     * This constructor uses the initial content of the `logdir` to determine the target files for processing.
+     * If the contents of `logdir` change during processing, you must call the `rescan_directory_paths()` method
+     * to update the target files accordingly.
+     *
+     * @param logdir The path to the directory containing the files to be processed.
+     */
+    explicit dblog_scan(const boost::filesystem::path& logdir);
 
-    explicit dblog_scan(boost::filesystem::path&& logdir) : dblogdir_(std::move(logdir)) {
-        rescan_directory_paths();
-    }
+    /**
+     * @brief Constructor that initializes the dblog_scan with the specified log directory.
+     *
+     * This constructor uses the initial content of the `logdir` to determine the target files for processing.
+     * If the contents of `logdir` change during processing, you must call the `rescan_directory_paths()` method
+     * to update the target files accordingly.
+     *
+     * @param logdir The path to the directory containing the files to be processed.
+     */
+    explicit dblog_scan(boost::filesystem::path&& logdir);
+
+    /**
+     * @brief Constructor that initializes the dblog_scan with the specified log directory and file names.
+     *
+     * This constructor processes only the files specified in the `file_names` set within the `logdir`.
+     * It is used when you do not want the target files to change even if the contents of `logdir` are modified after
+     * determining the target files.
+     *
+     * @param logdir The path to the directory containing the files to be processed.
+     * @param file_names The set of file names within `logdir` to be processed.
+     */
+    explicit dblog_scan(const boost::filesystem::path& logdir, const std::set<std::string>& file_names);
+
+    /**
+     * @brief Constructor that initializes the dblog_scan with the specified log directory and file names.
+     *
+     * This constructor processes only the files specified in the `file_names` set within the `logdir`.
+     * It is used when you do not want the target files to change even if the contents of `logdir` are modified after
+     * determining the target files.
+     *
+     * @param logdir The path to the directory containing the files to be processed.
+     * @param file_names The set of file names within `logdir` to be processed.
+     */
+    explicit dblog_scan(boost::filesystem::path&& logdir, const std::set<std::string>& file_names);
 
     const boost::filesystem::path& get_dblogdir() { return dblogdir_; }
     void set_thread_num(int thread_num) noexcept { thread_num_ = thread_num; }

@@ -30,6 +30,28 @@
 namespace limestone::internal {
 using namespace limestone::api;
 
+dblog_scan::dblog_scan(const boost::filesystem::path& logdir) : dblogdir_(logdir) {
+    rescan_directory_paths();
+}
+
+dblog_scan::dblog_scan(boost::filesystem::path&& logdir) : dblogdir_(std::move(logdir)) {
+    rescan_directory_paths();
+}
+
+dblog_scan::dblog_scan(const boost::filesystem::path& logdir, const std::set<std::string>& file_names)
+    : dblogdir_(logdir) {
+    for (const auto& file_name : file_names) {
+        path_list_.emplace_back(dblogdir_ / file_name);
+    }
+}
+
+dblog_scan::dblog_scan(boost::filesystem::path&& logdir, const std::set<std::string>& file_names)
+    : dblogdir_(std::move(logdir)) {
+    for (const auto& file_name : file_names) {
+        path_list_.emplace_back(dblogdir_ / file_name);
+    }
+}
+
 // return max epoch in file.
 std::optional<epoch_id_type> last_durable_epoch(const boost::filesystem::path& file) {
     std::optional<epoch_id_type> rv;
