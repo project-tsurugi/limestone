@@ -218,11 +218,10 @@ epoch_id_type dblog_scan::scan_pwal_files(  // NOLINT(readability-function-cogni
     };
 
     std::mutex list_mtx;
-    std::condition_variable cv;
     std::exception_ptr ex_ptr{};
     bool done = false;
     
-    // スレッドの作成
+    auto temp_list = path_list_;
     std::vector<std::thread> workers;
     workers.reserve(thread_num_);
     for (int i = 0; i < thread_num_; i++) {
@@ -231,9 +230,9 @@ epoch_id_type dblog_scan::scan_pwal_files(  // NOLINT(readability-function-cogni
                 boost::filesystem::path p;
                 {
                     std::lock_guard<std::mutex> lock(list_mtx);
-                    if (path_list_.empty() || done) break;  // リストが空の場合、スレッドを終了する
-                    p = path_list_.front();
-                    path_list_.pop_front();
+                    if (temp_list.empty() || done) break; 
+                    p = temp_list.front();
+                    temp_list.pop_front();
                 }
 
                 try {
