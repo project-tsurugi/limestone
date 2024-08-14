@@ -250,4 +250,13 @@ epoch_id_type dblog_scan::scan_pwal_files_throws(epoch_id_type ld_epoch, const s
     return scan_pwal_files(ld_epoch, add_entry, log_error_and_throw);
 }
 
+void dblog_scan::rescan_directory_paths() {
+    path_list_.clear();
+    if (boost::filesystem::exists(dblogdir_) && boost::filesystem::is_directory(dblogdir_)) {
+        for (boost::filesystem::directory_iterator it(dblogdir_), end; it != end; ++it) {
+            path_list_.push_back(it->path());
+        }
+    }
 }
+
+} // namespace limestone::internal

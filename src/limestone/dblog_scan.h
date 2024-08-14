@@ -84,19 +84,11 @@ public:
     using error_report_func_t = std::function<bool(log_entry::read_error&)>;
 
     explicit dblog_scan(const boost::filesystem::path& logdir) : dblogdir_(logdir) {
-        if (boost::filesystem::exists(dblogdir_) && boost::filesystem::is_directory(dblogdir_)) {
-            for (boost::filesystem::directory_iterator it(dblogdir_), end; it != end; ++it) {
-                path_list_.push_back(it->path());
-            }
-        }
+        rescan_directory_paths();
     }
 
     explicit dblog_scan(boost::filesystem::path&& logdir) : dblogdir_(std::move(logdir)) {
-        if (boost::filesystem::exists(dblogdir_) && boost::filesystem::is_directory(dblogdir_)) {
-            for (boost::filesystem::directory_iterator it(dblogdir_), end; it != end; ++it) {
-                path_list_.push_back(it->path());
-            }
-        }
+        rescan_directory_paths();
     }
 
     const boost::filesystem::path& get_dblogdir() { return dblogdir_; }
@@ -154,9 +146,18 @@ public:
 
     static bool is_wal(const boost::filesystem::path& p) { return p.filename().string().rfind(pwal_prefix, 0) == 0; }
     static bool is_detached_wal(const boost::filesystem::path& p) {
+        std::cerr << "is_detached_wal: " << p << std::endl;
         auto filename = p.filename().string();
         return (filename.length() > 9 && filename.rfind(pwal_prefix, 0) == 0);
     }
+
+    /**
+     * @brief Rescans the directory and updates the path list.
+     *
+     * This function clears the current path list and rescans the specified
+     * directory, adding all file paths in the directory to the path list.
+     */
+    void rescan_directory_paths();
 
 private:
     boost::filesystem::path dblogdir_;

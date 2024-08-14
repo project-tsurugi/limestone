@@ -133,6 +133,7 @@ void repair(dblog_scan &ds, std::optional<epoch_id_type> epoch) {
 
     VLOG(30) << "detach all pwal files";
     ds.detach_wal_files();
+    ds.rescan_directory_paths();
     std::atomic_size_t count_wal_entry = 0;
     dblog_scan::parse_error::code max_ec{};
     ds.scan_pwal_files(ld_epoch, [&count_wal_entry](log_entry&){ count_wal_entry++; }, [](log_entry::read_error& e) -> bool {
