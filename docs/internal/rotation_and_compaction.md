@@ -369,7 +369,7 @@ static std::pair<epoch_id_type, std::unique_ptr<sortdb_wrapper>> create_sortdb_f
 * オンラインコンパクションでは、ログディレクトリに直接書き込むので不要な処理。あっても問題ない。
 
 ```
-    boost::filesystem::path snapshot_file = to_dir / boost::filesystem::path("pwal_0000.compacted");
+    boost::filesystem::path snapshot_file = to_dir / boost::filesystem::path("..compacted");
     VLOG_LP(log_info) << "generating compacted pwal file: " << snapshot_file;
     FILE* ostrm = fopen(snapshot_file.c_str(), "w");  // NOLINT(*-owning-memory)
     if (!ostrm) {
@@ -414,7 +414,7 @@ static std::pair<epoch_id_type, std::unique_ptr<sortdb_wrapper>> create_sortdb_f
 * sortdbから取り出したエントリを書き込むのに使用している。
 * rewind = falseの場合は、無条件でエントリを書き込んでいる。
 * rewaind = trueの場合は、先頭16バイトをクリアしている。
-  * TODO: 先頭16バイトの内容
+  * => エポックID+バージョン番号
 * オンラインコンパクションでも同じ処理でOKだと思うが、rewaind = trueの部分について要調査
 
 ```
@@ -444,7 +444,7 @@ TODO: dblog_scan::is_wal()がコンパクション済みファイルをWALとし
 
 ### sortdb_foreach
 
-このメソッドないで、次のメソッドを呼び出している。
+このメソッド内で、次のメソッドを呼び出している。
 
 ```
     void each(const std::function<void(std::string_view, std::string_view)>& fun) {
@@ -477,13 +477,49 @@ TODO: dblog_scan::is_wal()がコンパクション済みファイルをWALとし
 
 ## LOG 0.6対応方針その2
 
-* create_comapct_pwalとほぼ同内容の別のの関数を作成して使用する。
+* create_comapct_pwal()に、処理対象のPWALを指定可能にするように省略可能な引数を追加する。
+  * create_sortdb_from_wals()とほぼ、同様の変更。
+* オンラインコンパクション時の動作
+  * オンラインコンパクション用のテンポラリディレクトリ(以下temp)を作成する
+  * create_comapct_pwalを呼び出し、tempにコンパクション済みファイル、pwal_0000.compactedを作成する
+  * ログディレクトリにpwal_0000.compactedが存在する場合、 pwal_0000.compactedを pwal_0000.compacted.prevにリネームする。
+  * pwal_0000.compacted.prevがすでに存在して、pwal_0000.compacted.prevにリネームできない場合はエラー
+  * tempのpwal_0000.compactedをログディレクトリに移動する
+  * コンパクションカタログを更新する。
+  * pwal_0000.compacted.prevを削除
+
+* 一連の動作の途中で失敗した場合のために、起動時に以下の処理を行う。
+  * 起動時のコンパクションカタログをバックアップから戻したのか、そうでないのかによって処理を分ける。
+  * バックアップから戻した場合
+    * ログディレクトリに、pwal_0000.compactedと pwal_0000.compacted.prevの両方が存在する場合は、pwal_0000.compactedを削除、pwal_0000.compacted.prevをpwal_0000.compactedに戻す
+    * それ以外の場合、想定外の状態なのでエラーにする。
+  * バックアップから戻さなかった場合
+    * ログディレクトリに、pwal_0000.compactedと pwal_0000.compacted.prevの両方が存在する場合は、pwal_0000.compacted.prevを削除、
+    * ログディレクトリにpwal_0000.compactedが存在せず、pwal_0000.compactedが存在する場合
+      * pwal_0000.compacted.prevをpwal_0000.compactedにリネームする。pwal_0000.compacted.prevが存在しない場合エラー
+  * 以上の処理の結果、コンパクションカタログにあるコンパクション済みファイルが、ログディレクトリに存在しない場合はエラー
+  * 以上の処理終了後にtempをクリア
+
+
+* dblogutilの修正について
+  * 処理開始時にコンパクションの途中で処理が中断していないかを調べ、途中で中断している場合エラーにする(リペアコマンドを除く)
+  * 途中で処理が中断している場合は、専用のリペアコマンドで起動時と同様の処理を実行し修復可能にする。
+  * オフラインコンパクション実行時にフォーマットバージョンを調べ、Version2の場合エラーにする。
+    * どこかで、エラーにならないようにする。
+
+
+
+
+## メモ
+
 * 相違点は以下の通り
   * コンパクション対象のファイルを指定する。
   * コンパクション済みファイルのファイル名を指定可能にする。
 * その他の要変更点
   * dblog_scan::is_wal()で、コンパクションの対象かどうかのチェックを行っているが、オンラインコンパクションの場合だけ、
     コンパクション済みファイルも処理対象になるようにしなければならない。
+    => これまで規定した仕様を変更することになるが、コンパクション済みファイルのファイル名をpwal_0000.compacted固定にすれば解決する。
+    => オフラインコンパクションは、テンポラリファイルに書き込み、pwal_0000.compactedにリネームする。
 
 * 以下の点は、議論が必要だが現状のコンパクション済みファイルの仕様に合わせる。
   * エントリのエポックの情報と、バージョン情報が削除される
