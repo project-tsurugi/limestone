@@ -318,6 +318,180 @@ LOG-0.6では、dblog_scanの処理対象が変更になる。
 ※ 処理の効率化のためにコンパクション済みファイルを処理対象にせずに、利用時に既存のコンパクション済みファイルと、新規に作成したコンパクション済みファイルをマージする方法が考えられるが、現時点では実装しない。
 
 
-* dblog_scanのコンストラクタで、ソート対象外のファイルのファイル名を指定可能にする。
+* dblog_scanのコンストラクタで、ソート対象外のファイルのファイル名を指定可能にする。 => Done
+* dblog_scan::scan_pwal_filesで、ソート対象外のファイルをスキップする処理を追加する。 => Done
+* `std::pair<epoch_id_type, std::unique_ptr<sortdb_wrapper>> create_sortdb_from_wals`に引数を追加し、処理対象のファイルを指定できるようにした。引数が省略されたときは従来どおり、ディレクトリにあるファイルから処理対象ファイルを選択、処理対象ファイルを指定したときは、処理対象ファイルからsortdbを作成する。 => done
 
-* dblog_scan::scan_pwal_filesで、ソート対象外のファイルをスキップする処理を追加する。
+
+### オンラインコンパクションロジックの作成
+
+dblogutilのWALのコンパクションを参考にする
+
+compaction(dblogutil.cpp)
+
+->
+
+create_comapct_pwal(const boost::filesystem::path& from_dir, const boost::filesystem::path& to_dir, int num_worker)
+
+-> 
+
+static std::pair<epoch_id_type, std::unique_ptr<sortdb_wrapper>> create_sortdb_from_wals(
+    const boost::filesystem::path& from_dir,
+    int num_worker,
+    const std::set<std::string>& file_names = std::set<std::string>()) {
+
+という処理順なので、create_comapct_pwalをオンラインコンパクションでも使用できるように
+改造するのか、同等機能を作成すればよい。
+
+### create_comapct_pwal
+
+* void create_comapct_pwal(const boost::filesystem::path& from_dir, const boost::filesystem::path& to_dir, int num_worker)
+ のコードと、それに対するコメントをつらつら書く
+
+```
+    auto [max_appeared_epoch, sortdb] = create_sortdb_from_wals(from_dir, num_worker);
+```
+* sortdbを作成する。ここは、そのままで良いはず。
+
+```
+    boost::system::error_code error;
+    const bool result_check = boost::filesystem::exists(to_dir, error);
+    if (!result_check || error) {
+        const bool result_mkdir = boost::filesystem::create_directory(to_dir, error);
+        if (!result_mkdir || error) {
+            LOG_LP(ERROR) << "fail to create directory " << to_dir;
+            throw std::runtime_error("I/O error");
+        }
+    }
+```
+
+* コンパクション済みファイルの書き込み先ディレクトリのチェックと、必要に応じて作成、およびエラー処理
+* オンラインコンパクションでは、ログディレクトリに直接書き込むので不要な処理。あっても問題ない。
+
+```
+    boost::filesystem::path snapshot_file = to_dir / boost::filesystem::path("pwal_0000.compacted");
+    VLOG_LP(log_info) << "generating compacted pwal file: " << snapshot_file;
+    FILE* ostrm = fopen(snapshot_file.c_str(), "w");  // NOLINT(*-owning-memory)
+    if (!ostrm) {
+        LOG_LP(ERROR) << "cannot create snapshot file (" << snapshot_file << ")";
+        throw std::runtime_error("I/O error");
+    }
+    setvbuf(ostrm, nullptr, _IOFBF, 128L * 1024L);  // NOLINT, NB. glibc may ignore size when _IOFBF and buffer=NULL
+```
+
+* コンパクション済みファイルを書き込み用にオープンする。ファイル名が pwal_0000.compacted 固定なので、
+オンラインコンパクション用にそのままでは適用できない。
+
+
+```
+    bool rewind = true;  // TODO: change by flag
+    epoch_id_type epoch = rewind ? 0 : max_appeared_epoch;
+```
+
+* 後で使用する変数の初期化
+
+```
+    log_entry::begin_session(ostrm, epoch);
+```
+
+* セッション開始のエントリをostreamに書き込む。epochは当該セッションのエポックID
+
+
+```
+    auto write_snapshot_entry = [&ostrm, &rewind](std::string_view key_stid, std::string_view value_etc) {
+        if (rewind) {
+            static std::string value{};
+            value = value_etc;
+            std::memset(value.data(), 0, 16);
+            log_entry::write(ostrm, key_stid, value);
+        } else {
+            log_entry::write(ostrm, key_stid, value_etc);
+        }
+    };
+```
+
+* 後で使用するラムダ関数
+* sortdbから取り出したエントリを書き込むのに使用している。
+* rewind = falseの場合は、無条件でエントリを書き込んでいる。
+* rewaind = trueの場合は、先頭16バイトをクリアしている。
+  * TODO: 先頭16バイトの内容
+* オンラインコンパクションでも同じ処理でOKだと思うが、rewaind = trueの部分について要調査
+
+```
+    sortdb_foreach(sortdb.get(), write_snapshot_entry);
+```
+
+* ソートDBの要素を取り出して、write_snapshot_entryを使用して順次書き込んでいる。
+  * sortdb_foreach の処理内容については後述。
+
+```
+    if (fclose(ostrm) != 0) {  // NOLINT(*-owning-memory)
+        LOG_LP(ERROR) << "cannot close snapshot file (" << snapshot_file << "), errno = " << errno;
+        throw std::runtime_error("I/O error");
+    }
+```
+
+* ストリームのクローズ
+* オンラインコンパクションの場合、flushとsyncをしたほうがよいかも。
+* fcloseを呼べば自動的にflushされるのなら、flushは不要。
+
+
+
+TODO: dblog_scan::is_wal()がコンパクション済みファイルをWALとして認識しないのをどうすべきか。
+=> コンパクション済みファイルもWALとする or is_コンパクション済みファイルのようなメソッドを
+用意し、is_walを使用している箇所でorでつなげて使用する。
+
+
+### sortdb_foreach
+
+このメソッドないで、次のメソッドを呼び出している。
+
+```
+    void each(const std::function<void(std::string_view, std::string_view)>& fun) {
+        std::unique_ptr<Iterator> it{sortdb_->NewIterator(ReadOptions())};
+        for (it->SeekToFirst(); it->Valid(); it->Next()) {
+            Slice key = it->key();
+            Slice value = it->value();
+            fun(std::string_view(key.data(), key.size()), std::string_view(value.data(), value.size()));
+        }
+        if (!it->status().ok()) {
+            LOG_LP(ERROR) << "sortdb iterator invalidated, status: " << it->status().ToString();
+            throw std::runtime_error("error in sortdb read iteration");
+        }
+    }
+```
+* このメソッドを称して、sortdbの全エントリを処理している。
+* イテレーターを作成して、順次処理している。
+* イテレータから、キーとバリューを取り出し、キーとバリューを std::string_view としてラップし、渡された fun 関数を呼び出す。std::string_view は、メモリコピーを行わずに既存の文字列データを参照する軽量なクラス。
+*  fun は、2つの std::string_view 型の引数を受け取り、戻り値が void である任意の関数、ラムダ式、あるいは関数オブジェクト
+* ifdefで、funの内容を切り替えている。
+
+* SORT_METHOD_PUT_ONLYが指定されている場合
+  * 同一キーのうち最大バージョンのエントリを書き込む
+* SORT_METHOD_PUT_ONLYが指定されていない場合
+  * 順次エントリを書き込む
+* どちらの場合もnormal entryは書き込むが、remove entryは書き込まない
+* SORT_METHOD_PUT_ONLYの場合、sordbに書き込まれたキー値のうち、先頭の16バイト(エポックとバージョンそれぞれ8バイト分)のデータを取り除いたキーをキーとし、先頭のエントリのみ処理し、同一のキーの他のデータは処理しない。書き込むvalue値は、sortdbのキー値の先頭16バイトと、sortdbのvalueのうち、エントリタイプの1バイトを取り除いた値をmemcopyでコピーして生成している。
+
+
+
+## LOG 0.6対応方針その2
+
+* create_comapct_pwalとほぼ同内容の別のの関数を作成して使用する。
+* 相違点は以下の通り
+  * コンパクション対象のファイルを指定する。
+  * コンパクション済みファイルのファイル名を指定可能にする。
+* その他の要変更点
+  * dblog_scan::is_wal()で、コンパクションの対象かどうかのチェックを行っているが、オンラインコンパクションの場合だけ、
+    コンパクション済みファイルも処理対象になるようにしなければならない。
+
+* 以下の点は、議論が必要だが現状のコンパクション済みファイルの仕様に合わせる。
+  * エントリのエポックの情報と、バージョン情報が削除される
+  * 削除エントリが記録されない。
+  => いちおう動作に問題ないが、コンパクション済みファイルを誤って、コンパクションしたときにデータが壊れる。
+  => コンパクション済みのPWALファイルのリストをもって、再度コンパクションの対象にしているが、リペアを行うと、
+  コンパクションの対象から外れるという問題がある。 => リペア時にコンパクションカタログのアップデートすれば、
+  一応問題はなくなる。
+    * 安全性を考えれば、削除エントリもエポック、バージョン、情報も残すべきでないか。
+
+ 
