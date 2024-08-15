@@ -85,13 +85,16 @@ static void insert_twisted_entry(sortdb_wrapper* sortdb, log_entry& e) {
     sortdb->put(db_key, db_value);
 }
 
-static std::pair<epoch_id_type, std::unique_ptr<sortdb_wrapper>> create_sortdb_from_wals(const boost::filesystem::path& from_dir, int num_worker) {
+static std::pair<epoch_id_type, std::unique_ptr<sortdb_wrapper>> create_sortdb_from_wals(
+    const boost::filesystem::path& from_dir,
+    int num_worker,
+    const std::set<std::string>& file_names = std::set<std::string>()) {
 #if defined SORT_METHOD_PUT_ONLY
     auto sortdb = std::make_unique<sortdb_wrapper>(from_dir, comp_twisted_key);
 #else
     auto sortdb = std::make_unique<sortdb_wrapper>(from_dir);
 #endif
-    dblog_scan logscan{from_dir};
+    dblog_scan logscan = file_names.empty() ? dblog_scan{from_dir} : dblog_scan{from_dir, file_names};
 
     epoch_id_type ld_epoch = logscan.last_durable_epoch_in_dir();
 
