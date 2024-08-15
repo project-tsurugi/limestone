@@ -169,8 +169,12 @@ static void sortdb_foreach(sortdb_wrapper *sortdb, std::function<void(const std:
 #endif
 }
 
-void create_comapct_pwal(const boost::filesystem::path& from_dir, const boost::filesystem::path& to_dir, int num_worker) {
-    auto [max_appeared_epoch, sortdb] = create_sortdb_from_wals(from_dir, num_worker);
+void create_compact_pwal(
+    const boost::filesystem::path& from_dir, 
+    const boost::filesystem::path& to_dir, 
+    int num_worker,
+    const std::set<std::string>& file_names) {
+    auto [max_appeared_epoch, sortdb] = create_sortdb_from_wals(from_dir, num_worker, file_names);
 
     boost::system::error_code error;
     const bool result_check = boost::filesystem::exists(to_dir, error);

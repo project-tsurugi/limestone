@@ -53,6 +53,10 @@ status purge_dir(const boost::filesystem::path& dir);
 
 // from datastore_snapshot.cpp
 
-void create_comapct_pwal(const boost::filesystem::path& from_dir, const boost::filesystem::path& to_dir, int num_worker);
+void create_compact_pwal(
+    const boost::filesystem::path& from_dir, 
+    const boost::filesystem::path& to_dir, 
+    int num_worker,
+    const std::set<std::string>& file_names = std::set<std::string>());
 
 }

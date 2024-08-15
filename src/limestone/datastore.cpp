@@ -321,8 +321,6 @@ std::unique_ptr<backup_detail> datastore::begin_backup(backup_type btype) {  // 
             case 'c': {
                 if (filename == compaction_catalog::get_catalog_filename()) {
                     entries.emplace_back(ent.string(), dst, false, false);
-                } else if(filename.find("mpct", 1) == 1) {
-                    entries.emplace_back(ent.string(), dst, false, false);
                 }
                 break;
             }
@@ -450,34 +448,120 @@ void datastore::stop_online_compaction_worker() {
     cv_online_compaction_worker_.notify_all();
 }
 
+// TODO: move this function to a separate file
+static void safe_rename(const boost::filesystem::path& from, const boost::filesystem::path& to) {
+    boost::system::error_code error;
+    boost::filesystem::rename(from, to, error);
+    if (error) {
+        LOG_LP(ERROR) << "fail to rename file: error_code: " << error << ", from: " << from << ", to: " << to;
+        throw std::runtime_error("fail to rename the file");
+    }
+}
+
+
 void datastore::do_online_compaction() {
     rotation_result result = rotate_log_files();
     std::set<std::string> migrated_pwals = compaction_catalog_->get_migrated_pwals();
-    
 
-    // コンパクション対象のPWALを選択する
+    // Select files to be compacted
     std::set<std::string> need_compaction_filenames;
     for(const boost::filesystem::path& path : result.get_rotation_end_files()) {
         std::string filename = path.filename().string();
         
-        // ファイル名が"pwal"で始まり、長さが10文字以上であるか確認
-        if (filename.substr(0, 4) == "pwal" && filename.length() >= 10) {
-            // migrated_pwalsに含まれないファイル名をneed_compaction_pwalsに追加
+        // Choose only pwal files
+        if (filename.substr(0, 4) == "pwal" && filename.length() > 9) {
+            // Exclude files that have already been migrated
             if (migrated_pwals.find(filename) == migrated_pwals.end()) {
                 need_compaction_filenames.insert(filename);
+                migrated_pwals.insert(filename);
             }
         }
     }
 
-    // コンパクション済みファイルを取得
-    for(const compacted_file_info& info : compaction_catalog_->get_compacted_files()) {
-        need_compaction_filenames.insert(info.get_file_name());
+    // Include existing compacted files in the set of files to be compacted
+    for(const compacted_file_info& info: compaction_catalog_->get_compacted_files()) {
+        need_compaction_filenames.erase(info.get_file_name());
     }
 
+    /// オンラインコンパクション用の一時ディレクトリの作成
+    boost::filesystem::path compaction_temp_dir = location_ / std::string(compaction_catalog::get_compaction_temp_dirname());
+    if (boost::filesystem::exists(compaction_temp_dir)) {
+        if (!boost::filesystem::is_directory(compaction_temp_dir)) {
+            LOG_LP(ERROR) << "The path exists but is not a directory: " << compaction_temp_dir;
+            throw std::runtime_error("The path exists but is not a directory: " + compaction_temp_dir.string());
+        }
+    } else {
+        boost::system::error_code error;
+        const bool result_mkdir = boost::filesystem::create_directory(compaction_temp_dir, error);
+        if (!result_mkdir || error) {
+            LOG_LP(ERROR) << "fail to create directory: result_mkdir: " << result_mkdir << ", error_code: " << error << ", path: " << compaction_temp_dir;
+            throw std::runtime_error("fail to create the compaction_temp_dir directory");
+        }
+    }
 
+    // create a compacted file
 
+    create_compact_pwal(location_, compaction_temp_dir, recover_max_parallelism_, need_compaction_filenames);
 
+    // Move the compacted file to the log directory
+    for (const boost::filesystem::path& path : boost::filesystem::directory_iterator(compaction_temp_dir)) {
+        boost::filesystem::path new_path = location_ / path.filename();
+        safe_rename(path, new_path);
+        add_file(new_path);
+    }
+
+    // ログディレクトリにpwal_0000.compactedが存在する場合、 pwal_0000.compactedを pwal_0000.compacted.prevにリネームする。
+    // pwal_0000.compacted.prevがすでに存在して、pwal_0000.compacted.prevにリネームできない場合はエラー
+
+    boost::filesystem::path compacted_file = location_ / compaction_catalog::get_compacted_filename();
+    boost::filesystem::path compacted_prev_file = location_ / compaction_catalog::get_compacted_backup_filename();
+
+    if (boost::filesystem::exists(compacted_file)) {
+        if (boost::filesystem::exists(compacted_prev_file)) {
+            LOG_LP(ERROR) << "The file already exists: " << compacted_prev_file;
+            throw std::runtime_error("The file already exists: " + compacted_prev_file.string());
+        }
+        safe_rename(compacted_file, compacted_prev_file);
+    }
+
+    // tempのpwal_0000.compactedをログディレクトリに移動する
+
+    boost::filesystem::path temp_compacted_file = compaction_temp_dir / compaction_catalog::get_compacted_filename();
+    safe_rename(temp_compacted_file, compacted_file);
+
+    // Get a set of all files in the location_ directory
+    std::set<std::string> files_in_location;
+    for (const auto& entry : boost::filesystem::directory_iterator(location_)) {
+        if (boost::filesystem::is_regular_file(entry.path())) {
+            files_in_location.insert(entry.path().filename().string());
+        }
+    }
+
+    // Check if migrated_pwals exist in location_
+    for (auto it = migrated_pwals.begin(); it != migrated_pwals.end();) {
+        if (files_in_location.find(*it) == files_in_location.end()) {
+            LOG_LP(WARNING) << "File " << *it << " does not exist in location_ and will be removed from migrated_pwals.";
+            it = migrated_pwals.erase(it);  // Erase and move to the next iterator
+        } else {
+            ++it;  // Move to the next iterator
+        }
+    }
+
+    // コンパクションカタログを更新する。
+
+    compacted_file_info compacted_file_info{compacted_file.filename().string(), 1};
+    compaction_catalog_->update_catalog_file(result.get_epoch_id().value(), {compacted_file_info}, migrated_pwals);
+
+    // pwal_0000.compacted.prevを削除
+    boost::system::error_code error;
+    boost::filesystem::remove(compacted_prev_file, error);
+    if (error) {
+        LOG_LP(ERROR) << "fail to remove file: error_code: " << error << ", path: " << compacted_prev_file;
+        throw std::runtime_error("fail to remove the file");
+    }
 }
 
 
+
 } // namespace limestone::api
+

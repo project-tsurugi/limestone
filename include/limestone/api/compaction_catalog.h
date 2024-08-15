@@ -147,25 +147,49 @@ public:
 
     /**
      * @brief Returns the filename of the compaction catalog.
-     * 
+     *
      * @return The filename of the compaction catalog.
      */
-    [[nodiscard]] static inline std::string_view get_catalog_filename() { return COMPACTION_CATALOG_FILENAME; }
+    [[nodiscard]] static inline std::string get_catalog_filename() { return COMPACTION_CATALOG_FILENAME; }
+
+    /**
+     * @brief Retrieves the name of the compaction temporary directory.
+     *
+     * @return A string containing the name of the compaction temporary directory.
+     */
+    [[nodiscard]] static inline std::string get_compaction_temp_dirname() { return COMPACTION_TEMP_DIRNAME; }
+
+    /**
+     * @brief Retrieves the filename of the compacted file.
+     *
+     * @return A string containing the compacted filename.
+     */
+    [[nodiscard]] static inline std::string get_compacted_filename() { return COMPACTED_FILENAME; }
+
+    /**
+     * @brief Retrieves the filename of the compacted file's backup.
+     *
+     * @return A string containing the filename of the compacted file's backup.
+     */
+    [[nodiscard]] static inline std::string get_compacted_backup_filename() { return COMPACTED_BACKUP_FILENAME; }
 
 private:
     // Constants
-    static constexpr const char *COMPACTION_CATALOG_FILENAME = "compaction_catalog"; ///< Name of the catalog file
-    static constexpr const char *COMPACTION_CATALOG_BACKUP_FILENAME = "compaction_catalog.back"; ///< Name of the backup catalog file
-    static constexpr const char *HEADER_LINE = "COMPACTION_CATALOG_HEADER"; ///< Header identifier for the catalog file
-    static constexpr const char *FOOTER_LINE = "COMPACTION_CATALOG_FOOTER"; ///< Footer identifier for the catalog file
-    static constexpr const char *COMPACTED_FILE_KEY = "COMPACTED_FILE"; ///< Key for compacted files in the catalog file
-    static constexpr const char *MIGRATED_PWAL_KEY = "MIGRATED_PWAL"; ///< Key for migrated PWALs in the catalog file
-    static constexpr const char *MAX_EPOCH_ID_KEY = "MAX_EPOCH_ID"; ///< Key for maximum epoch ID in the catalog file
+    static constexpr const char *COMPACTION_CATALOG_FILENAME = "compaction_catalog";              ///< Name of the catalog file
+    static constexpr const char *COMPACTION_CATALOG_BACKUP_FILENAME = "compaction_catalog.back";  ///< Name of the backup catalog file
+    static constexpr const char *HEADER_LINE = "COMPACTION_CATALOG_HEADER";                       ///< Header identifier for the catalog file
+    static constexpr const char *FOOTER_LINE = "COMPACTION_CATALOG_FOOTER";                       ///< Footer identifier for the catalog file
+    static constexpr const char *COMPACTED_FILE_KEY = "COMPACTED_FILE";                           ///< Key for compacted files in the catalog file
+    static constexpr const char *MIGRATED_PWAL_KEY = "MIGRATED_PWAL";                             ///< Key for migrated PWALs in the catalog file
+    static constexpr const char *MAX_EPOCH_ID_KEY = "MAX_EPOCH_ID";                               ///< Key for maximum epoch ID in the catalog file
+    static constexpr const char *COMPACTION_TEMP_DIRNAME = "compaction_temp";                     ///< Name of the temporary directory for compaction
+    static constexpr const char *COMPACTED_FILENAME = "pwal_0000.compacted";                      ///< Prefix for temporary compaction files
+    static constexpr const char *COMPACTED_BACKUP_FILENAME = "pwal_0000.compacted.prev";          ///< Extension for temporary compaction files
 
     // Member variables
-    std::set<compacted_file_info> compacted_files_{}; ///< Set of compacted files
-    std::set<std::string> migrated_pwals_{}; ///< Set of migrated PWALs
-    epoch_id_type max_epoch_id_ = 0; ///< Maximum epoch ID included in the compacted files
+    std::set<compacted_file_info> compacted_files_{};  ///< Set of compacted files
+    std::set<std::string> migrated_pwals_{};           ///< Set of migrated PWALs
+    epoch_id_type max_epoch_id_ = 0;                   ///< Maximum epoch ID included in the compacted files
 
     // Set of filenames for compacted files.
     // Compacted files are those with filenames starting with "cmpct",
