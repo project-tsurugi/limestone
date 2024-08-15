@@ -41,7 +41,7 @@ datastore::datastore(configuration const& conf) : location_(conf.data_locations_
     boost::system::error_code error;
     const bool result_check = boost::filesystem::exists(location_, error);
     boost::filesystem::path manifest_path = boost::filesystem::path(location_) / std::string(internal::manifest_file_name);
-    boost::filesystem::path compaction_catalog_path= boost::filesystem::path(location_) / std::string(compaction_catalog::get_catalog_filename());
+    boost::filesystem::path compaction_catalog_path= boost::filesystem::path(location_) / compaction_catalog::get_catalog_filename();
     if (!result_check || error) {
         const bool result_mkdir = boost::filesystem::create_directory(location_, error);
         if (!result_mkdir || error) {
@@ -484,7 +484,7 @@ void datastore::do_online_compaction() {
     }
 
     /// オンラインコンパクション用の一時ディレクトリの作成
-    boost::filesystem::path compaction_temp_dir = location_ / std::string(compaction_catalog::get_compaction_temp_dirname());
+    boost::filesystem::path compaction_temp_dir = location_ / compaction_catalog::get_compaction_temp_dirname();
     if (boost::filesystem::exists(compaction_temp_dir)) {
         if (!boost::filesystem::is_directory(compaction_temp_dir)) {
             LOG_LP(ERROR) << "The path exists but is not a directory: " << compaction_temp_dir;
