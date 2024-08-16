@@ -53,7 +53,6 @@ protected:
     }
 
     void TearDown() override {
-        // テスト後にキューをクリアする
         rotation_task_helper::clear_tasks();
     }
 
@@ -70,7 +69,6 @@ protected:
 
 };
 
-// ファイル名の前方一致をチェックする関数
 void check_rotated_file(const std::set<std::string>& actual_files, const std::string& expected_filename) {
     auto starts_with = [](const std::string& full_string, const std::string& prefix) {
         return full_string.find(prefix) == 0;

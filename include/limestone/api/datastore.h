@@ -219,6 +219,11 @@ public:
      */
     void recover(const epoch_tag&) const noexcept;
 
+    /**
+     * Performs online compaction of the datastore.
+     */
+    void compact_with_online();
+
 protected:  // for tests
     auto& log_channels_for_tests() const noexcept { return log_channels_; }
     auto epoch_id_informed_for_tests() const noexcept { return epoch_id_informed_.load(); }
@@ -259,8 +264,6 @@ private:
     std::optional<compaction_catalog> compaction_catalog_; // std::optionalを使用
 
     void online_compaction_worker();
-
-    void do_online_compaction();
 
     void stop_online_compaction_worker();
 

@@ -432,7 +432,7 @@ void datastore::online_compaction_worker() {
                 return;
             }
             // Define the do_compaction function here
-            do_online_compaction();
+            compact_with_online();
         }
         cv_online_compaction_worker_.wait_for(lock, std::chrono::seconds(1), [this]() {
             return stop_online_compaction_worker_.load();
@@ -459,7 +459,7 @@ static void safe_rename(const boost::filesystem::path& from, const boost::filesy
 }
 
 
-void datastore::do_online_compaction() {
+void datastore::compact_with_online() {
     rotation_result result = rotate_log_files();
     std::set<std::string> migrated_pwals = compaction_catalog_->get_migrated_pwals();
 
@@ -481,6 +481,11 @@ void datastore::do_online_compaction() {
     // Include existing compacted files in the set of files to be compacted
     for(const compacted_file_info& info: compaction_catalog_->get_compacted_files()) {
         need_compaction_filenames.erase(info.get_file_name());
+    }
+
+    if (need_compaction_filenames.empty()) {
+        LOG_LP(INFO) << "No files to compact";
+        return;
     }
 
     /// オンラインコンパクション用の一時ディレクトリの作成
