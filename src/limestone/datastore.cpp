@@ -104,10 +104,36 @@ void datastore::recover() const noexcept {
 }
 
 void datastore::ready() {
-    create_snapshot();
+    // create finame set for snapshot
+    std::set<std::string> migrated_pwals = compaction_catalog_->get_migrated_pwals();
+
+    std::set<std::string> filename_set;
+    boost::system::error_code error;
+    boost::filesystem::directory_iterator it(location_, error);
+    boost::filesystem::directory_iterator end;
+    if (error) {
+        LOG_LP(ERROR) << "Failed to initialize directory iterator: error_code: " << error.message() << ", path: " << location_;
+        throw std::runtime_error("Failed to initialize directory iterator");
+    }
+    for (; it != end; it.increment(error)) {
+        if (error) {
+            LOG_LP(ERROR) << "Failed to access directory entry: error_code: " << error.message() << ", path: " << location_;
+            throw std::runtime_error("Failed to iterate over the directory entries");
+        }
+        if (boost::filesystem::is_regular_file(it->path())) {
+            std::string filename = it->path().filename().string();
+            // migrated_pwals に含まれていない場合のみ、filename_set に追加
+            if (migrated_pwals.find(filename) == migrated_pwals.end()) {
+                filename_set.insert(filename);
+            }
+        }
+    }
+
+    create_snapshot(filename_set);
     online_compaction_worker_future_ = std::async(std::launch::async, &datastore::online_compaction_worker, this);
     state_ = state::ready;
 }
+
 
 std::unique_ptr<snapshot> datastore::get_snapshot() const {
     check_after_ready(static_cast<const char*>(__func__));
@@ -481,12 +507,9 @@ void datastore::compact_with_online() {
         }
     }
 
-    // Include existing compacted files in the set of files to be compacted
-    for(const compacted_file_info& info: compaction_catalog_->get_compacted_files()) {
-        need_compaction_filenames.erase(info.get_file_name());
-    }
-
-    if (need_compaction_filenames.empty()) {
+    if (need_compaction_filenames.empty() ||
+        (need_compaction_filenames.size() == 1 &&
+         need_compaction_filenames.find(compaction_catalog::get_compacted_filename()) != need_compaction_filenames.end())) {
         LOG_LP(INFO) << "No files to compact";
         return;
     }
@@ -551,7 +574,10 @@ void datastore::compact_with_online() {
     // コンパクションカタログを更新する。
 
     compacted_file_info compacted_file_info{compacted_file.filename().string(), 1};
-    compaction_catalog_->update_catalog_file(result.get_epoch_id().value(), {compacted_file_info}, migrated_pwals);
+    migrated_pwals.erase(compacted_file.filename().string());
+
+    
+    compaction_catalog_->update_catalog_file(result.get_epoch_id().value_or(0), {compacted_file_info}, migrated_pwals);
 
     // pwal_0000.compacted.prevを削除
     boost::system::error_code error;

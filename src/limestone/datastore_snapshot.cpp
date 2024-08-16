@@ -220,9 +220,9 @@ void create_compact_pwal(
 namespace limestone::api {
 using namespace limestone::internal;
 
-void datastore::create_snapshot() {
+void datastore::create_snapshot(const std::set<std::string>& file_names) {
     const auto& from_dir = location_;
-    auto [max_appeared_epoch, sortdb] = create_sortdb_from_wals(from_dir, recover_max_parallelism_);
+    auto [max_appeared_epoch, sortdb] = create_sortdb_from_wals(from_dir, recover_max_parallelism_, file_names);
     epoch_id_switched_.store(max_appeared_epoch);
     epoch_id_informed_.store(max_appeared_epoch);
 
