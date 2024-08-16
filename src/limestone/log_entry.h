@@ -333,10 +333,10 @@ public:
         memcpy(static_cast<void*>(&storage_id), key_sid_.data(), sizeof(storage_id_type));
         return storage_id;
     }
-    void value(std::string& buf) {
+    void value(std::string& buf) const {
         buf = value_etc_.substr(sizeof(epoch_id_type) + sizeof(std::uint64_t));
     }
-    void key(std::string& buf) {
+    void key(std::string& buf) const {
         buf = key_sid_.substr(sizeof(storage_id_type));
     }
     [[nodiscard]] entry_type type() const {
@@ -350,7 +350,13 @@ public:
     std::string& value_etc() {
         return value_etc_;
     }
+    [[nodiscard]] const std::string& value_etc() const {
+        return value_etc_;
+    }
     std::string& key_sid() {
+        return key_sid_;
+    }
+    [[nodiscard]] const std::string& key_sid() const {
         return key_sid_;
     }
     static epoch_id_type write_version_epoch_number(std::string_view value_etc) {
