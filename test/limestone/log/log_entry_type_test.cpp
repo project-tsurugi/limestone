@@ -1,5 +1,5 @@
 /*
- * Copyright 2022-2023 Project Tsurugi.
+ * Copyright 2022-2024 Project Tsurugi.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -90,7 +90,7 @@ TEST_F(log_entry_type_test, write_and_read) {
 
     limestone::api::write_version_type buf_version;
     log_entry_normal_.write_version(buf_version);
-    EXPECT_TRUE(buf_version == write_version);
+    EXPECT_EQ(buf_version, write_version);
 
     EXPECT_EQ(log_entry_end_.type(), limestone::api::log_entry::entry_type::marker_end);
     EXPECT_EQ(log_entry_end_.epoch_id(), epoch_id + 1);
@@ -139,7 +139,7 @@ TEST_F(log_entry_type_test, write_and_read_and_write_and_read) {
 
     limestone::api::write_version_type buf_version;
     log_entry_normal_.write_version(buf_version);
-    EXPECT_TRUE(buf_version == write_version);
+    EXPECT_EQ(buf_version, write_version);
 
     EXPECT_EQ(log_entry_end_.type(), limestone::api::log_entry::entry_type::marker_end);
     EXPECT_EQ(log_entry_end_.epoch_id(), epoch_id + 1);
