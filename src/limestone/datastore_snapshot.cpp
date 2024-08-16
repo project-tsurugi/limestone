@@ -53,7 +53,7 @@ static int comp_twisted_key(const std::string_view& a, const std::string_view& b
 }
 
 [[maybe_unused]]
-static void insert_entry_or_update_to_max(sortdb_wrapper* sortdb, log_entry& e) {
+static void insert_entry_or_update_to_max(sortdb_wrapper* sortdb, const log_entry& e) {
     bool need_write = true;
     // skip older entry than already inserted
     std::string value;
@@ -73,7 +73,7 @@ static void insert_entry_or_update_to_max(sortdb_wrapper* sortdb, log_entry& e) 
 }
 
 [[maybe_unused]]
-static void insert_twisted_entry(sortdb_wrapper* sortdb, log_entry& e) {
+static void insert_twisted_entry(sortdb_wrapper* sortdb, const log_entry& e) {
     // key_sid: storage_id[8] key[*], value_etc: epoch[8]LE minor_version[8]LE value[*], type: type[1]
     // db_key: epoch[8]BE minor_version[8]BE storage_id[8] key[*], db_value: type[1] value[*]
     std::string db_key(write_version_size + e.key_sid().size(), '\0');
@@ -105,7 +105,7 @@ static std::pair<epoch_id_type, std::unique_ptr<sortdb_wrapper>> create_sortdb_f
     const auto add_entry_to_point = insert_entry_or_update_to_max;
     bool works_with_multi_thread = false;
 #endif
-    auto add_entry = [&sortdb, &add_entry_to_point](log_entry& e){
+    auto add_entry = [&sortdb, &add_entry_to_point](const log_entry& e){
         switch (e.type()) {
         case log_entry::entry_type::normal_entry:
         case log_entry::entry_type::remove_entry:
