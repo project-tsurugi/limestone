@@ -161,6 +161,8 @@ private:
 
     std::atomic_uint64_t finished_epoch_id_{0};
 
+    std::atomic<epoch_id_type> latest_ession_epoch_id_{0};
+
     std::mutex session_mutex_;
 
     std::condition_variable session_cv_;

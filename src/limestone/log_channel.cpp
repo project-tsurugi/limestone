@@ -41,6 +41,7 @@ void log_channel::begin_session() {
         current_epoch_id_.store(envelope_.epoch_id_switched_.load());
         std::atomic_thread_fence(std::memory_order_acq_rel);
     } while (current_epoch_id_.load() != envelope_.epoch_id_switched_.load());
+    latest_ession_epoch_id_.store(static_cast<epoch_id_type>(current_epoch_id_.load()));
 
     auto log_file = file_path();
     strm_ = fopen(log_file.c_str(), "a");  // NOLINT(*-owning-memory)
@@ -54,6 +55,10 @@ void log_channel::begin_session() {
         registered_ = true;
     }
     log_entry::begin_session(strm_, static_cast<epoch_id_type>(current_epoch_id_.load()));
+    {
+        std::lock_guard<std::mutex> lock(session_mutex_);
+        waiting_epoch_ids_.insert(latest_ession_epoch_id_);
+    }
 }
 
 void log_channel::end_session() {
@@ -77,7 +82,7 @@ void log_channel::end_session() {
     // Remove current_epoch_id_ from waiting_epoch_ids_
     {
         std::lock_guard<std::mutex> lock(session_mutex_);
-        waiting_epoch_ids_.erase(finished_epoch_id_.load());
+        waiting_epoch_ids_.erase(latest_ession_epoch_id_.load());
         // Notify waiting threads
         session_cv_.notify_all();
     }
@@ -138,22 +143,8 @@ rotation_result log_channel::do_rotate_file(epoch_id_type epoch) {
     registered_ = false;
     envelope_.subtract_file(location_ / file_);
 
-    auto c = current_epoch_id_.load();
-    if (c != UINT64_MAX) {  // Session is active
-        // Add current_epoch_id_ to waiting_epoch_ids_ to track the active session
-        {
-            std::lock_guard<std::mutex> lock(session_mutex_);
-            waiting_epoch_ids_.insert(c);  // Insert the current epoch ID into the waiting set
-        }
-        // Create a rotation result with the current epoch ID
-        rotation_result result(new_name, c);
-        return result;
-    }
-
-    // Session is inactive
-    // When the session is inactive, current_epoch_id_ does not hold a valid value.
-    // Therefore, we use epoch_id_switched_ as a fallback value in place of current_epoch_id_.
-    rotation_result result(new_name, envelope_.epoch_id_switched_.load());
+    // Create a rotation result with the current epoch ID
+    rotation_result result(new_name, latest_ession_epoch_id_);
     return result;
 }
 
@@ -162,9 +153,9 @@ void log_channel::wait_for_end_session(epoch_id_type epoch) {
 
     // Wait until the specified epoch_id is removed from waiting_epoch_ids_
     session_cv_.wait(lock, [this, epoch]() {
-        return waiting_epoch_ids_.find(epoch) == waiting_epoch_ids_.end();
+        // Ensure that no ID less than or equal to the specified epoch exists in waiting_epoch_ids_
+        return waiting_epoch_ids_.empty() || *waiting_epoch_ids_.begin() > epoch;
     });
 }
-
 
 } // namespace limestone::api

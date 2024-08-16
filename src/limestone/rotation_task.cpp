@@ -32,12 +32,13 @@ const std::set<boost::filesystem::path>& rotation_result::get_rotation_end_files
 void rotation_result::add_rotation_result(const rotation_result& other) {
     latest_rotated_files_.insert(other.latest_rotated_files_.begin(), other.latest_rotated_files_.end());
 
-    // epoch_id_が未設定の場合、otherのepoch_id_を設定
-    if (!epoch_id_.has_value()) {
-        epoch_id_ = other.epoch_id_;
-    } else if (other.epoch_id_.has_value() && epoch_id_ != other.epoch_id_) {
-        // 既に設定されているepoch_id_と異なる場合は例外を投げる
-        throw std::runtime_error("Conflicting epoch_id in rotation results");
+    // 自分とotherのepoch_id_のどちらか大きい方を設定
+    if (other.epoch_id_.has_value()) {
+        if (!epoch_id_.has_value()) {
+            epoch_id_ = other.epoch_id_;
+        } else {
+            epoch_id_ = std::max(epoch_id_.value(), other.epoch_id_.value());
+        }
     }
 }
 

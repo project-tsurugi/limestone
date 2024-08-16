@@ -348,8 +348,11 @@ rotation_result datastore::rotate_log_files() {
     rotation_result result = task->wait_for_result();
 
     // Wait for all log channels to complete the session with the specified session ID.
-    for(auto& lc: log_channels_) {
-        lc->wait_for_end_session(result.get_epoch_id().value());
+    auto epoch_id = result.get_epoch_id();
+    if (epoch_id.has_value()) {
+        for (auto& lc : log_channels_) {
+            lc->wait_for_end_session(epoch_id.value());
+        }
     }
     return result;
 }
@@ -507,13 +510,6 @@ void datastore::compact_with_online() {
     // create a compacted file
 
     create_compact_pwal(location_, compaction_temp_dir, recover_max_parallelism_, need_compaction_filenames);
-
-    // Move the compacted file to the log directory
-    for (const boost::filesystem::path& path : boost::filesystem::directory_iterator(compaction_temp_dir)) {
-        boost::filesystem::path new_path = location_ / path.filename();
-        safe_rename(path, new_path);
-        add_file(new_path);
-    }
 
     // ログディレクトリにpwal_0000.compactedが存在する場合、 pwal_0000.compactedを pwal_0000.compacted.prevにリネームする。
     // pwal_0000.compacted.prevがすでに存在して、pwal_0000.compacted.prevにリネームできない場合はエラー
