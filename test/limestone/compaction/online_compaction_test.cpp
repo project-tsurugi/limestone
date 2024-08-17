@@ -225,6 +225,7 @@ TEST_F(online_compaction_test, scenario01) {
     EXPECT_EQ(catalog.get_compacted_files().size(), 0);
     EXPECT_EQ(catalog.get_migrated_pwals().size(), 0);
 
+    // first compaction
     run_compact_with_epoch_switch(2);
 
     catalog = compaction_catalog::from_catalog_file(location);
@@ -242,19 +243,9 @@ TEST_F(online_compaction_test, scenario01) {
     EXPECT_EQ(kv_list[1].first, "k2");
     EXPECT_EQ(kv_list[1].second, "v3");
 
-    // remove migraded pwals and only compacted files be read
-    std::system(("rm " + std::string(location) + "/pwal_000?.0*").c_str());
-    kv_list = restart_datastore_and_read_snapshot();
-    ASSERT_EQ(kv_list.size(), 2);
-    EXPECT_EQ(kv_list[0].first, "k1");
-    EXPECT_EQ(kv_list[0].second, "v1");
-    EXPECT_EQ(kv_list[1].first, "k2");
-    EXPECT_EQ(kv_list[1].second, "v3");
-
-    // compact withoout any pwal changed
+    // fompaction without no pwal changed
     run_compact_with_epoch_switch(3);
 
-    // no new pwal and no compaction
     catalog = compaction_catalog::from_catalog_file(location);
     EXPECT_EQ(catalog.get_max_epoch_id(), 1);
     EXPECT_EQ(catalog.get_compacted_files().size(), 1);
@@ -270,63 +261,153 @@ TEST_F(online_compaction_test, scenario01) {
     EXPECT_EQ(kv_list[1].first, "k2");
     EXPECT_EQ(kv_list[1].second, "v3");
 
-
-    // add a new pwal
-    lc2_->begin_session();
-    lc2_->add_entry(1, "k1", "v5", {3, 0});
-    lc2_->end_session();
+    // remove migraded pwals and only compacted files be read
+    std::system(("rm " + std::string(location) + "/pwal_000?.0*").c_str());
+    kv_list = restart_datastore_and_read_snapshot();
 
     run_compact_with_epoch_switch(4);
+
     catalog = compaction_catalog::from_catalog_file(location);
     EXPECT_EQ(catalog.get_max_epoch_id(), 1);
     EXPECT_EQ(catalog.get_compacted_files().size(), 1);
     EXPECT_PRED_FORMAT3(ContainsCompactedFileInfo, catalog.get_compacted_files(), compacted_filename, 1);
-    EXPECT_EQ(catalog.get_migrated_pwals().size(), 1);
-    EXPECT_PRED_FORMAT3(ContainsPrefix, catalog.get_migrated_pwals(), "pwal_0002.", 1);
+    EXPECT_EQ(catalog.get_migrated_pwals().size(), 2);
+    EXPECT_PRED_FORMAT3(ContainsPrefix, catalog.get_migrated_pwals(), "pwal_0000.", 1);
+    EXPECT_PRED_FORMAT3(ContainsPrefix, catalog.get_migrated_pwals(), "pwal_0001.", 1);
 
     kv_list = restart_datastore_and_read_snapshot();
     ASSERT_EQ(kv_list.size(), 2);
     EXPECT_EQ(kv_list[0].first, "k1");
-    EXPECT_EQ(kv_list[0].second, "v5");
+    EXPECT_EQ(kv_list[0].second, "v1");
     EXPECT_EQ(kv_list[1].first, "k2");
     EXPECT_EQ(kv_list[1].second, "v3");
+
+    // add a new pwal
+    lc0_->begin_session();
+    lc0_->add_entry(1, "k1", "v11", {3, 4});
+    lc0_->end_session();
+    lc1_->begin_session();
+    lc1_->add_entry(1, "k2", "v12", {3, 4});
+    lc1_->end_session();
+    lc2_->begin_session();
+    lc2_->add_entry(1, "k3", "v13", {3, 4});
+    lc2_->end_session();
+
+    run_compact_with_epoch_switch(5);
+    catalog = compaction_catalog::from_catalog_file(location);
+    EXPECT_EQ(catalog.get_max_epoch_id(), 1);
+    EXPECT_EQ(catalog.get_compacted_files().size(), 1);
+    EXPECT_PRED_FORMAT3(ContainsCompactedFileInfo, catalog.get_compacted_files(), compacted_filename, 1);
+    EXPECT_EQ(catalog.get_migrated_pwals().size(), 3);
+    EXPECT_PRED_FORMAT3(ContainsPrefix, catalog.get_migrated_pwals(), "pwal_0000.", 1);
+    EXPECT_PRED_FORMAT3(ContainsPrefix, catalog.get_migrated_pwals(), "pwal_0001.", 1);
+    EXPECT_PRED_FORMAT3(ContainsPrefix, catalog.get_migrated_pwals(), "pwal_0002.", 1);
+
+    kv_list = restart_datastore_and_read_snapshot();
+    ASSERT_EQ(kv_list.size(), 3);
+    EXPECT_EQ(kv_list[0].first, "k1");
+    EXPECT_EQ(kv_list[0].second, "v11");
+    EXPECT_EQ(kv_list[1].first, "k2");
+    EXPECT_EQ(kv_list[1].second, "v12");
+    EXPECT_EQ(kv_list[2].first, "k3");
+    EXPECT_EQ(kv_list[2].second, "v13");
 
     // delete some migrated pwals
     std::system(("rm " + std::string(location) + "/pwal_000[12].*").c_str());
 
-    // いくつかのコンパクション済みのpwalが削除されても、起動時に作成されるスナップショットの値は変わらない
-
     kv_list = restart_datastore_and_read_snapshot();
-    ASSERT_EQ(kv_list.size(), 2);
+    ASSERT_EQ(kv_list.size(), 3);
     EXPECT_EQ(kv_list[0].first, "k1");
-    EXPECT_EQ(kv_list[0].second, "v5");
+    EXPECT_EQ(kv_list[0].second, "v11");
     EXPECT_EQ(kv_list[1].first, "k2");
-    EXPECT_EQ(kv_list[1].second, "v3");
+    EXPECT_EQ(kv_list[1].second, "v12");
+    EXPECT_EQ(kv_list[2].first, "k3");
+    EXPECT_EQ(kv_list[2].second, "v13");
 
-
-    // add a new pwal
+    // some pwals are newly created
     lc0_->begin_session();
-    lc0_->add_entry(1, "k1", "v2", {4, 0});
+    lc0_->add_entry(1, "k3", "v23", {5, 0});
     lc0_->end_session();
 
-    // いくつかのコンパクション済みのpwalが削除されても、コンパクションの結果が欠落しない
-    run_compact_with_epoch_switch(5);
+    // reboot without rotation
+    kv_list = restart_datastore_and_read_snapshot();
+    ASSERT_EQ(kv_list.size(), 3);
+    EXPECT_EQ(kv_list[0].first, "k1");
+    EXPECT_EQ(kv_list[0].second, "v11");
+    EXPECT_EQ(kv_list[1].first, "k2");
+    EXPECT_EQ(kv_list[1].second, "v12");
+    EXPECT_EQ(kv_list[2].first, "k3");
+    EXPECT_EQ(kv_list[2].second, "v23");
+
+    // rotate and no data changed
+    run_compact_with_epoch_switch(6);
+
     catalog = compaction_catalog::from_catalog_file(location);
-    EXPECT_EQ(catalog.get_max_epoch_id(), 3);
+    EXPECT_EQ(catalog.get_max_epoch_id(), 0); 
     EXPECT_EQ(catalog.get_compacted_files().size(), 1);
     EXPECT_PRED_FORMAT3(ContainsCompactedFileInfo, catalog.get_compacted_files(), compacted_filename, 1);
     EXPECT_EQ(catalog.get_migrated_pwals().size(), 2);
     EXPECT_PRED_FORMAT3(ContainsPrefix, catalog.get_migrated_pwals(), "pwal_0000.", 2);
 
     kv_list = restart_datastore_and_read_snapshot();
-    ASSERT_EQ(kv_list.size(), 2);
+    ASSERT_EQ(kv_list.size(), 3);
     EXPECT_EQ(kv_list[0].first, "k1");
-    EXPECT_EQ(kv_list[0].second, "v5");
+    EXPECT_EQ(kv_list[0].second, "v11");
     EXPECT_EQ(kv_list[1].first, "k2");
-    EXPECT_EQ(kv_list[1].second, "v3");
-    // EXPECT_EQ(kv_list[2].first, "k3");
-    // EXPECT_EQ(kv_list[2].second, "v2");
+    EXPECT_EQ(kv_list[1].second, "v12");
+    EXPECT_EQ(kv_list[2].first, "k3");
+    EXPECT_EQ(kv_list[2].second, "v23");
 
+    // some pwals are newly create or update
+    datastore_->switch_epoch(7);
+    lc0_->begin_session();
+    lc0_->add_entry(1, "k4", "v33", {6, 0});
+    lc0_->end_session();
+    lc1_->begin_session();
+    lc1_->add_entry(1, "k1", "v33", {6, 0});
+    lc1_->end_session();
+
+    // rotate 
+    run_compact_with_epoch_switch(8);
+
+    catalog = compaction_catalog::from_catalog_file(location);
+    EXPECT_EQ(catalog.get_max_epoch_id(), 7); 
+    EXPECT_EQ(catalog.get_compacted_files().size(), 1);
+    EXPECT_PRED_FORMAT3(ContainsCompactedFileInfo, catalog.get_compacted_files(), compacted_filename, 1);
+    EXPECT_EQ(catalog.get_migrated_pwals().size(), 4);
+    EXPECT_PRED_FORMAT3(ContainsPrefix, catalog.get_migrated_pwals(), "pwal_0000.", 3);
+    EXPECT_PRED_FORMAT3(ContainsPrefix, catalog.get_migrated_pwals(), "pwal_0001.", 1);
+
+
+    lc1_->begin_session();
+    lc1_->add_entry(1, "k1", "v33", {8, 0});
+    lc1_->end_session();
+    lc2_->begin_session();
+    lc2_->add_entry(1, "k2", "v43", {8, 0});
+    lc2_->end_session();
+
+    // rotate witoout reboot
+
+    run_compact_with_epoch_switch(9);
+    catalog = compaction_catalog::from_catalog_file(location);
+    EXPECT_EQ(catalog.get_max_epoch_id(), 8); 
+    EXPECT_EQ(catalog.get_compacted_files().size(), 1);
+    EXPECT_PRED_FORMAT3(ContainsCompactedFileInfo, catalog.get_compacted_files(), compacted_filename, 1);
+    EXPECT_EQ(catalog.get_migrated_pwals().size(), 6);
+    EXPECT_PRED_FORMAT3(ContainsPrefix, catalog.get_migrated_pwals(), "pwal_0000.", 3);
+    EXPECT_PRED_FORMAT3(ContainsPrefix, catalog.get_migrated_pwals(), "pwal_0001.", 2);
+    EXPECT_PRED_FORMAT3(ContainsPrefix, catalog.get_migrated_pwals(), "pwal_0002.", 1);
+
+    kv_list = restart_datastore_and_read_snapshot();
+    ASSERT_EQ(kv_list.size(), 4);
+    EXPECT_EQ(kv_list[0].first, "k1");
+    EXPECT_EQ(kv_list[0].second, "v33");
+    EXPECT_EQ(kv_list[1].first, "k2");
+    EXPECT_EQ(kv_list[1].second, "v43");
+    EXPECT_EQ(kv_list[2].first, "k3");
+    EXPECT_EQ(kv_list[2].second, "v23");
+    EXPECT_EQ(kv_list[3].first, "k4");
+    EXPECT_EQ(kv_list[3].second, "v33");
  }
 
 } // namespace limestone::testing

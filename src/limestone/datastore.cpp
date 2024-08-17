@@ -122,7 +122,6 @@ void datastore::ready() {
         }
         if (boost::filesystem::is_regular_file(it->path())) {
             std::string filename = it->path().filename().string();
-            // migrated_pwals に含まれていない場合のみ、filename_set に追加
             if (migrated_pwals.find(filename) == migrated_pwals.end()) {
                 filename_set.insert(filename);
             }
