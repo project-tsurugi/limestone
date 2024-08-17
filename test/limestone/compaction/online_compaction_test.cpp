@@ -1,4 +1,3 @@
-
 #include <thread>
 
 #include <boost/filesystem.hpp>
@@ -28,7 +27,7 @@ extern const std::string_view data_nondurable;
 
 class online_compaction_test : public ::testing::Test {
 public:
-static constexpr const char* location = "/tmp/online_compaction_test";
+    static constexpr const char* location = "/tmp/online_compaction_test";
     const boost::filesystem::path manifest_path = boost::filesystem::path(location) / std::string(limestone::internal::manifest_file_name);
     const boost::filesystem::path compaction_catalog_path = boost::filesystem::path(location) / "compaction_catalog";
     const std::string compacted_filename = compaction_catalog::get_compacted_filename();
@@ -136,43 +135,43 @@ protected:
         return kv_list;
     }
     
-::testing::AssertionResult ContainsPrefix(const char* files_expr, const char* prefix_expr, const char* expected_count_expr,
-                                          const std::set<std::string>& files, const std::string& prefix, int expected_count) {
-    int match_count = 0;
+    ::testing::AssertionResult ContainsPrefix(const char* files_expr, const char* prefix_expr, const char* expected_count_expr,
+                                              const std::set<std::string>& files, const std::string& prefix, int expected_count) {
+        int match_count = 0;
 
-    for (const auto& file : files) {
-        if (file.rfind(prefix, 0) == 0) { // prefixで始まるかどうかをチェック
-            match_count++;
+        for (const auto& file : files) {
+            if (file.rfind(prefix, 0) == 0) { // prefixで始まるかどうかをチェック
+                match_count++;
+            }
+        }
+
+        if (match_count == expected_count) {
+            return ::testing::AssertionSuccess();
+        } else {
+            std::ostringstream oss;
+            oss << files_expr << " which is " << ::testing::PrintToString(files)
+                << ", contains " << match_count << " strings starting with " << prefix_expr
+                << " which is \"" << prefix << "\", but expected " << expected_count_expr
+                << " which is " << expected_count << ".";
+            return ::testing::AssertionFailure() << oss.str();
         }
     }
 
-    if (match_count == expected_count) {
-        return ::testing::AssertionSuccess();
-    } else {
-        std::ostringstream oss;
-        oss << files_expr << " which is " << ::testing::PrintToString(files)
-            << ", contains " << match_count << " strings starting with " << prefix_expr
-            << " which is \"" << prefix << "\", but expected " << expected_count_expr
-            << " which is " << expected_count << ".";
-        return ::testing::AssertionFailure() << oss.str();
-    }
-}
-
 
     ::testing::AssertionResult ContainsString(const char* files_expr, const char* target_expr,
-                                          const std::set<std::string>& files, const std::string& target) {
-    if (files.find(target) != files.end()) {
-        return ::testing::AssertionSuccess();
-    }
-    return ::testing::AssertionFailure()
-        << files_expr << " (which is " << ::testing::PrintToString(files)
-        << ") does not contain the string " << target_expr
-        << " (which is \"" << target << "\").";
+                                              const std::set<std::string>& files, const std::string& target) {
+        if (files.find(target) != files.end()) {
+            return ::testing::AssertionSuccess();
+        }
+        return ::testing::AssertionFailure()
+            << files_expr << " (which is " << ::testing::PrintToString(files)
+            << ") does not contain the string " << target_expr
+            << " (which is \"" << target << "\").";
     }
 
     ::testing::AssertionResult ContainsCompactedFileInfo(const char* files_expr, const char* file_name_expr,
-                                                        const char* version_expr, const std::set<compacted_file_info>& files,
-                                                        const std::string& file_name, int version) {
+                                                         const char* version_expr, const std::set<compacted_file_info>& files,
+                                                         const std::string& file_name, int version) {
         compacted_file_info target(file_name, version);
         if (files.find(target) != files.end()) {
             return ::testing::AssertionSuccess();
@@ -194,19 +193,19 @@ protected:
 TEST_F(online_compaction_test, no_pwals) {
     gen_datastore();
     
-    compaction_catalog catalog =compaction_catalog::from_catalog_file(location); 
+    compaction_catalog catalog = compaction_catalog::from_catalog_file(location); 
     EXPECT_EQ(catalog.get_max_epoch_id(), 0);
     EXPECT_EQ(catalog.get_compacted_files().size(), 0);
-    EXPECT_EQ(catalog.get_migrated_pwals().size(), 0);   
+    EXPECT_EQ(catalog.get_detached_pwals().size(), 0);   
 
     datastore_->switch_epoch(1);
     run_compact_with_epoch_switch(2);
 
-    // no pwals, catalog should not be updated
+    // No PWALs are present, so the catalog should not be updated.
     catalog = compaction_catalog::from_catalog_file(location); 
     EXPECT_EQ(catalog.get_max_epoch_id(), 0);
     EXPECT_EQ(catalog.get_compacted_files().size(), 0);
-    EXPECT_EQ(catalog.get_migrated_pwals().size(), 0);   
+    EXPECT_EQ(catalog.get_detached_pwals().size(), 0);   
 }
 
 TEST_F(online_compaction_test, scenario01) {
@@ -223,18 +222,18 @@ TEST_F(online_compaction_test, scenario01) {
     compaction_catalog catalog = compaction_catalog::from_catalog_file(location);
     EXPECT_EQ(catalog.get_max_epoch_id(), 0);
     EXPECT_EQ(catalog.get_compacted_files().size(), 0);
-    EXPECT_EQ(catalog.get_migrated_pwals().size(), 0);
+    EXPECT_EQ(catalog.get_detached_pwals().size(), 0);
 
-    // first compaction
+    // First compaction.
     run_compact_with_epoch_switch(2);
 
     catalog = compaction_catalog::from_catalog_file(location);
     EXPECT_EQ(catalog.get_max_epoch_id(), 1);
     EXPECT_EQ(catalog.get_compacted_files().size(), 1);
     EXPECT_PRED_FORMAT3(ContainsCompactedFileInfo, catalog.get_compacted_files(), compacted_filename, 1);
-    EXPECT_EQ(catalog.get_migrated_pwals().size(), 2);
-    EXPECT_PRED_FORMAT3(ContainsPrefix, catalog.get_migrated_pwals(), "pwal_0000.", 1);
-    EXPECT_PRED_FORMAT3(ContainsPrefix, catalog.get_migrated_pwals(), "pwal_0001.", 1);
+    EXPECT_EQ(catalog.get_detached_pwals().size(), 2);
+    EXPECT_PRED_FORMAT3(ContainsPrefix, catalog.get_detached_pwals(), "pwal_0000.", 1);
+    EXPECT_PRED_FORMAT3(ContainsPrefix, catalog.get_detached_pwals(), "pwal_0001.", 1);
 
     std::vector<std::pair<std::string, std::string>> kv_list = restart_datastore_and_read_snapshot();
     ASSERT_EQ(kv_list.size(), 2);
@@ -243,16 +242,16 @@ TEST_F(online_compaction_test, scenario01) {
     EXPECT_EQ(kv_list[1].first, "k2");
     EXPECT_EQ(kv_list[1].second, "v3");
 
-    // fompaction without no pwal changed
+    // Compaction run without any changes to PWALs.
     run_compact_with_epoch_switch(3);
 
     catalog = compaction_catalog::from_catalog_file(location);
     EXPECT_EQ(catalog.get_max_epoch_id(), 1);
     EXPECT_EQ(catalog.get_compacted_files().size(), 1);
     EXPECT_PRED_FORMAT3(ContainsCompactedFileInfo, catalog.get_compacted_files(), compacted_filename, 1);
-    EXPECT_EQ(catalog.get_migrated_pwals().size(), 2);
-    EXPECT_PRED_FORMAT3(ContainsPrefix, catalog.get_migrated_pwals(), "pwal_0000.", 1);
-    EXPECT_PRED_FORMAT3(ContainsPrefix, catalog.get_migrated_pwals(), "pwal_0001.", 1);
+    EXPECT_EQ(catalog.get_detached_pwals().size(), 2);
+    EXPECT_PRED_FORMAT3(ContainsPrefix, catalog.get_detached_pwals(), "pwal_0000.", 1);
+    EXPECT_PRED_FORMAT3(ContainsPrefix, catalog.get_detached_pwals(), "pwal_0001.", 1);
 
     kv_list = restart_datastore_and_read_snapshot();
     ASSERT_EQ(kv_list.size(), 2);
@@ -261,7 +260,7 @@ TEST_F(online_compaction_test, scenario01) {
     EXPECT_EQ(kv_list[1].first, "k2");
     EXPECT_EQ(kv_list[1].second, "v3");
 
-    // remove migraded pwals and only compacted files be read
+    // Remove detached PWALs to ensure that only compacted files are read.
     std::system(("rm " + std::string(location) + "/pwal_000?.0*").c_str());
     kv_list = restart_datastore_and_read_snapshot();
 
@@ -271,9 +270,9 @@ TEST_F(online_compaction_test, scenario01) {
     EXPECT_EQ(catalog.get_max_epoch_id(), 1);
     EXPECT_EQ(catalog.get_compacted_files().size(), 1);
     EXPECT_PRED_FORMAT3(ContainsCompactedFileInfo, catalog.get_compacted_files(), compacted_filename, 1);
-    EXPECT_EQ(catalog.get_migrated_pwals().size(), 2);
-    EXPECT_PRED_FORMAT3(ContainsPrefix, catalog.get_migrated_pwals(), "pwal_0000.", 1);
-    EXPECT_PRED_FORMAT3(ContainsPrefix, catalog.get_migrated_pwals(), "pwal_0001.", 1);
+    EXPECT_EQ(catalog.get_detached_pwals().size(), 2);
+    EXPECT_PRED_FORMAT3(ContainsPrefix, catalog.get_detached_pwals(), "pwal_0000.", 1);
+    EXPECT_PRED_FORMAT3(ContainsPrefix, catalog.get_detached_pwals(), "pwal_0001.", 1);
 
     kv_list = restart_datastore_and_read_snapshot();
     ASSERT_EQ(kv_list.size(), 2);
@@ -282,7 +281,7 @@ TEST_F(online_compaction_test, scenario01) {
     EXPECT_EQ(kv_list[1].first, "k2");
     EXPECT_EQ(kv_list[1].second, "v3");
 
-    // add a new pwal
+    // Add a new PWALs.
     lc0_->begin_session();
     lc0_->add_entry(1, "k1", "v11", {3, 4});
     lc0_->end_session();
@@ -298,10 +297,10 @@ TEST_F(online_compaction_test, scenario01) {
     EXPECT_EQ(catalog.get_max_epoch_id(), 1);
     EXPECT_EQ(catalog.get_compacted_files().size(), 1);
     EXPECT_PRED_FORMAT3(ContainsCompactedFileInfo, catalog.get_compacted_files(), compacted_filename, 1);
-    EXPECT_EQ(catalog.get_migrated_pwals().size(), 3);
-    EXPECT_PRED_FORMAT3(ContainsPrefix, catalog.get_migrated_pwals(), "pwal_0000.", 1);
-    EXPECT_PRED_FORMAT3(ContainsPrefix, catalog.get_migrated_pwals(), "pwal_0001.", 1);
-    EXPECT_PRED_FORMAT3(ContainsPrefix, catalog.get_migrated_pwals(), "pwal_0002.", 1);
+    EXPECT_EQ(catalog.get_detached_pwals().size(), 3);
+    EXPECT_PRED_FORMAT3(ContainsPrefix, catalog.get_detached_pwals(), "pwal_0000.", 1);
+    EXPECT_PRED_FORMAT3(ContainsPrefix, catalog.get_detached_pwals(), "pwal_0001.", 1);
+    EXPECT_PRED_FORMAT3(ContainsPrefix, catalog.get_detached_pwals(), "pwal_0002.", 1);
 
     kv_list = restart_datastore_and_read_snapshot();
     ASSERT_EQ(kv_list.size(), 3);
@@ -312,7 +311,7 @@ TEST_F(online_compaction_test, scenario01) {
     EXPECT_EQ(kv_list[2].first, "k3");
     EXPECT_EQ(kv_list[2].second, "v13");
 
-    // delete some migrated pwals
+    // Delete some detached PWALs.
     std::system(("rm " + std::string(location) + "/pwal_000[12].*").c_str());
 
     kv_list = restart_datastore_and_read_snapshot();
@@ -324,12 +323,12 @@ TEST_F(online_compaction_test, scenario01) {
     EXPECT_EQ(kv_list[2].first, "k3");
     EXPECT_EQ(kv_list[2].second, "v13");
 
-    // some pwals are newly created
+    // Some PWALs are newly created.
     lc0_->begin_session();
     lc0_->add_entry(1, "k3", "v23", {5, 0});
     lc0_->end_session();
 
-    // reboot without rotation
+    // Reboot without rotation.
     kv_list = restart_datastore_and_read_snapshot();
     ASSERT_EQ(kv_list.size(), 3);
     EXPECT_EQ(kv_list[0].first, "k1");
@@ -339,15 +338,15 @@ TEST_F(online_compaction_test, scenario01) {
     EXPECT_EQ(kv_list[2].first, "k3");
     EXPECT_EQ(kv_list[2].second, "v23");
 
-    // rotate and no data changed
+    // Rotate without any data changes.
     run_compact_with_epoch_switch(6);
 
     catalog = compaction_catalog::from_catalog_file(location);
     EXPECT_EQ(catalog.get_max_epoch_id(), 0); 
     EXPECT_EQ(catalog.get_compacted_files().size(), 1);
     EXPECT_PRED_FORMAT3(ContainsCompactedFileInfo, catalog.get_compacted_files(), compacted_filename, 1);
-    EXPECT_EQ(catalog.get_migrated_pwals().size(), 2);
-    EXPECT_PRED_FORMAT3(ContainsPrefix, catalog.get_migrated_pwals(), "pwal_0000.", 2);
+    EXPECT_EQ(catalog.get_detached_pwals().size(), 2);
+    EXPECT_PRED_FORMAT3(ContainsPrefix, catalog.get_detached_pwals(), "pwal_0000.", 2);
 
     kv_list = restart_datastore_and_read_snapshot();
     ASSERT_EQ(kv_list.size(), 3);
@@ -358,7 +357,7 @@ TEST_F(online_compaction_test, scenario01) {
     EXPECT_EQ(kv_list[2].first, "k3");
     EXPECT_EQ(kv_list[2].second, "v23");
 
-    // some pwals are newly create or update
+    // Some PWALs are newly created or updated.
     datastore_->switch_epoch(7);
     lc0_->begin_session();
     lc0_->add_entry(1, "k4", "v33", {6, 0});
@@ -367,16 +366,16 @@ TEST_F(online_compaction_test, scenario01) {
     lc1_->add_entry(1, "k1", "v33", {6, 0});
     lc1_->end_session();
 
-    // rotate 
+    // Rotate.
     run_compact_with_epoch_switch(8);
 
     catalog = compaction_catalog::from_catalog_file(location);
     EXPECT_EQ(catalog.get_max_epoch_id(), 7); 
     EXPECT_EQ(catalog.get_compacted_files().size(), 1);
     EXPECT_PRED_FORMAT3(ContainsCompactedFileInfo, catalog.get_compacted_files(), compacted_filename, 1);
-    EXPECT_EQ(catalog.get_migrated_pwals().size(), 4);
-    EXPECT_PRED_FORMAT3(ContainsPrefix, catalog.get_migrated_pwals(), "pwal_0000.", 3);
-    EXPECT_PRED_FORMAT3(ContainsPrefix, catalog.get_migrated_pwals(), "pwal_0001.", 1);
+    EXPECT_EQ(catalog.get_detached_pwals().size(), 4);
+    EXPECT_PRED_FORMAT3(ContainsPrefix, catalog.get_detached_pwals(), "pwal_0000.", 3);
+    EXPECT_PRED_FORMAT3(ContainsPrefix, catalog.get_detached_pwals(), "pwal_0001.", 1);
 
 
     lc1_->begin_session();
@@ -386,17 +385,16 @@ TEST_F(online_compaction_test, scenario01) {
     lc2_->add_entry(1, "k2", "v43", {8, 0});
     lc2_->end_session();
 
-    // rotate witoout reboot
-
+    // Rotate without reboot.
     run_compact_with_epoch_switch(9);
     catalog = compaction_catalog::from_catalog_file(location);
     EXPECT_EQ(catalog.get_max_epoch_id(), 8); 
     EXPECT_EQ(catalog.get_compacted_files().size(), 1);
     EXPECT_PRED_FORMAT3(ContainsCompactedFileInfo, catalog.get_compacted_files(), compacted_filename, 1);
-    EXPECT_EQ(catalog.get_migrated_pwals().size(), 6);
-    EXPECT_PRED_FORMAT3(ContainsPrefix, catalog.get_migrated_pwals(), "pwal_0000.", 3);
-    EXPECT_PRED_FORMAT3(ContainsPrefix, catalog.get_migrated_pwals(), "pwal_0001.", 2);
-    EXPECT_PRED_FORMAT3(ContainsPrefix, catalog.get_migrated_pwals(), "pwal_0002.", 1);
+    EXPECT_EQ(catalog.get_detached_pwals().size(), 6);
+    EXPECT_PRED_FORMAT3(ContainsPrefix, catalog.get_detached_pwals(), "pwal_0000.", 3);
+    EXPECT_PRED_FORMAT3(ContainsPrefix, catalog.get_detached_pwals(), "pwal_0001.", 2);
+    EXPECT_PRED_FORMAT3(ContainsPrefix, catalog.get_detached_pwals(), "pwal_0002.", 1);
 
     kv_list = restart_datastore_and_read_snapshot();
     ASSERT_EQ(kv_list.size(), 4);

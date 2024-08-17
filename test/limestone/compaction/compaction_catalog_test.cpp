@@ -35,7 +35,7 @@ TEST_F(compaction_catalog_test, CreateCatalog) {
 
     EXPECT_EQ(catalog.get_max_epoch_id(), 0);
     EXPECT_TRUE(catalog.get_compacted_files().empty());
-    EXPECT_TRUE(catalog.get_migrated_pwals().empty());
+    EXPECT_TRUE(catalog.get_detached_pwals().empty());
 }
 
 TEST_F(compaction_catalog_test, UpdateCatalog) {
@@ -46,13 +46,13 @@ TEST_F(compaction_catalog_test, UpdateCatalog) {
         {"file1", 1},
         {"file2", 2}
     };
-    std::set<std::string> migrated_pwals = {"pwal1", "pwal2"};
+    std::set<std::string> detached_pwals = {"pwal1", "pwal2"};
 
-    catalog.update_catalog_file(max_epoch_id, compacted_files, migrated_pwals);
+    catalog.update_catalog_file(max_epoch_id, compacted_files, detached_pwals);
 
     EXPECT_EQ(catalog.get_max_epoch_id(), max_epoch_id);
     EXPECT_EQ(catalog.get_compacted_files(), compacted_files);
-    EXPECT_EQ(catalog.get_migrated_pwals(), migrated_pwals);
+    EXPECT_EQ(catalog.get_detached_pwals(), detached_pwals);
 }
 
 TEST_F(compaction_catalog_test, UpdateAndLoadCatalogFile) {
@@ -63,15 +63,15 @@ TEST_F(compaction_catalog_test, UpdateAndLoadCatalogFile) {
         {"file1", 1},
         {"file2", 2}
     };
-    std::set<std::string> migrated_pwals = {"pwal1", "pwal2"};
+    std::set<std::string> detached_pwals = {"pwal1", "pwal2"};
 
-    catalog.update_catalog_file(max_epoch_id, compacted_files, migrated_pwals);
+    catalog.update_catalog_file(max_epoch_id, compacted_files, detached_pwals);
 
     compaction_catalog loaded_catalog = compaction_catalog::from_catalog_file(test_dir);
 
     EXPECT_EQ(loaded_catalog.get_max_epoch_id(), max_epoch_id);
     EXPECT_EQ(loaded_catalog.get_compacted_files(), compacted_files);
-    EXPECT_EQ(loaded_catalog.get_migrated_pwals(), migrated_pwals);
+    EXPECT_EQ(loaded_catalog.get_detached_pwals(), detached_pwals);
 }
 
 TEST_F(compaction_catalog_test, LoadFromBackup) {
@@ -84,9 +84,9 @@ TEST_F(compaction_catalog_test, LoadFromBackup) {
             {"file1", 1},
             {"file2", 2}
         };
-        std::set<std::string> migrated_pwals = {"pwal1", "pwal2"};
+        std::set<std::string> detached_pwals = {"pwal1", "pwal2"};
 
-        catalog.update_catalog_file(max_epoch_id, compacted_files, migrated_pwals);
+        catalog.update_catalog_file(max_epoch_id, compacted_files, detached_pwals);
 
     }
 
@@ -101,7 +101,7 @@ TEST_F(compaction_catalog_test, LoadFromBackup) {
 
     EXPECT_EQ(loaded_catalog.get_max_epoch_id(), 123);
     EXPECT_EQ(loaded_catalog.get_compacted_files().size(), 2);
-    EXPECT_EQ(loaded_catalog.get_migrated_pwals().size(), 2);
+    EXPECT_EQ(loaded_catalog.get_detached_pwals().size(), 2);
 }
 
 }  // namespace limestone::testing

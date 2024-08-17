@@ -100,12 +100,12 @@ void compaction_catalog::parse_catalog_entry(const std::string& line, bool& max_
         } else {
             throw std::runtime_error("Invalid format for " + std::string(COMPACTED_FILE_KEY) + ": " + line);
         }
-    } else if (type == MIGRATED_PWAL_KEY) {
+    } else if (type == DETACHED_PWAL_KEY) {
         std::string pwal;
         if (iss >> pwal) {
-            migrated_pwals_.insert(pwal);
+            detached_pwals_.insert(pwal);
         } else {
-            throw std::runtime_error("Invalid format for " + std::string(MIGRATED_PWAL_KEY) + ": " + line);
+            throw std::runtime_error("Invalid format for " + std::string(DETACHED_PWAL_KEY) + ": " + line);
         }
     } else if (type == MAX_EPOCH_ID_KEY) {
         size_t epoch_id = 0; 
@@ -121,11 +121,11 @@ void compaction_catalog::parse_catalog_entry(const std::string& line, bool& max_
 }
 
 // Method to update the compaction catalog
-void compaction_catalog::update_catalog_file(epoch_id_type max_epoch_id, const std::set<compacted_file_info>& compacted_files, const std::set<std::string>& migrated_pwals) {
+void compaction_catalog::update_catalog_file(epoch_id_type max_epoch_id, const std::set<compacted_file_info>& compacted_files, const std::set<std::string>& detached_pwals) {
     // Update internal state
     max_epoch_id_ = max_epoch_id;
     compacted_files_ = compacted_files;
-    migrated_pwals_ = migrated_pwals;
+    detached_pwals_ = detached_pwals;
 
     // Create the catalog using std::string
     std::string catalog = create_catalog_content();
@@ -210,8 +210,8 @@ std::string compaction_catalog::create_catalog_content() const {
         catalog += "\n";
     }
 
-    for (const auto &pwal : migrated_pwals_) {
-        catalog += MIGRATED_PWAL_KEY;
+    for (const auto &pwal : detached_pwals_) {
+        catalog += DETACHED_PWAL_KEY;
         catalog += " " + pwal;
         catalog += "\n";
     }
@@ -236,8 +236,8 @@ const std::set<compacted_file_info>& compaction_catalog::get_compacted_files() c
     return compacted_files_;
 }
 
-const std::set<std::string>& compaction_catalog::get_migrated_pwals() const {
-    return migrated_pwals_;
+const std::set<std::string>& compaction_catalog::get_detached_pwals() const {
+    return detached_pwals_;
 }
 
 } // namespace limestone::api

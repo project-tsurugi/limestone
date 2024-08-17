@@ -114,15 +114,15 @@ public:
     /**
      * @brief Updates the compaction catalog and writes the changes to a file.
      * 
-     * This method updates the catalog with new compacted files, migrated PWALs, and the maximum epoch ID,
+     * This method updates the catalog with new compacted files, detached PWALs, and the maximum epoch ID,
      * then writes the updated catalog to a file.
      * 
      * @param max_epoch_id The maximum epoch ID to be recorded in the catalog.
      * @param compacted_files Set of compacted files to be included in the catalog.
-     * @param migrated_pwals Set of migrated PWALs to be included in the catalog.
+     * @param detached_pwals Set of detached PWALs to be included in the catalog.
      */
     void update_catalog_file(epoch_id_type max_epoch_id, const std::set<compacted_file_info> &compacted_files,
-                        const std::set<std::string> &migrated_pwals);
+                        const std::set<std::string> &detached_pwals);
 
     /**
      * @brief Gets the maximum epoch ID from the catalog.
@@ -139,11 +139,11 @@ public:
     [[nodiscard]] const std::set<compacted_file_info> &get_compacted_files() const;
 
     /**
-     * @brief Gets the set of migrated PWALs from the catalog.
+     * @brief Gets the set of detached PWALs from the catalog.
      * 
-     * @return const std::set<std::string>& Reference to the set of migrated PWALs.
+     * @return const std::set<std::string>& Reference to the set of detached PWALs.
      */
-    [[nodiscard]] const std::set<std::string> &get_migrated_pwals() const;
+    [[nodiscard]] const std::set<std::string> &get_detached_pwals() const;
 
     /**
      * @brief Returns the filename of the compaction catalog.
@@ -180,7 +180,7 @@ private:
     static constexpr const char *HEADER_LINE = "COMPACTION_CATALOG_HEADER";                       ///< Header identifier for the catalog file
     static constexpr const char *FOOTER_LINE = "COMPACTION_CATALOG_FOOTER";                       ///< Footer identifier for the catalog file
     static constexpr const char *COMPACTED_FILE_KEY = "COMPACTED_FILE";                           ///< Key for compacted files in the catalog file
-    static constexpr const char *MIGRATED_PWAL_KEY = "MIGRATED_PWAL";                             ///< Key for migrated PWALs in the catalog file
+    static constexpr const char *DETACHED_PWAL_KEY = "DETACHED_PWAL";                             ///< Key for detached PWALs in the catalog file
     static constexpr const char *MAX_EPOCH_ID_KEY = "MAX_EPOCH_ID";                               ///< Key for maximum epoch ID in the catalog file
     static constexpr const char *COMPACTION_TEMP_DIRNAME = "compaction_temp";                     ///< Name of the temporary directory for compaction
     static constexpr const char *COMPACTED_FILENAME = "pwal_0000.compacted";                      ///< Prefix for temporary compaction files
@@ -188,7 +188,7 @@ private:
 
     // Member variables
     std::set<compacted_file_info> compacted_files_{};  ///< Set of compacted files
-    std::set<std::string> migrated_pwals_{};           ///< Set of migrated PWALs
+    std::set<std::string> detached_pwals_{};           ///< Set of detached PWALs
     epoch_id_type max_epoch_id_ = 0;                   ///< Maximum epoch ID included in the compacted files
 
     // Set of filenames for compacted files.
