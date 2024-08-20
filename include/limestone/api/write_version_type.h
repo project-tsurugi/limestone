@@ -1,5 +1,5 @@
 /*
- * Copyright 2022-2023 Project Tsurugi.
+ * Copyright 2022-2024 Project Tsurugi.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -17,6 +17,7 @@
 
 #include <string>
 #include <cstdint>
+#include <ostream>
 
 #include <limestone/api/epoch_id_type.h>
 
@@ -43,6 +44,10 @@ public:
             return this->minor_write_version_ < value.minor_write_version_;
         }
         return this->epoch_number_ < value.epoch_number_;
+    }
+
+    friend std::ostream& operator<<(std::ostream& out, const write_version_type& wv) {
+        return out << std::string{"wv{"} << wv.epoch_number_ << "," << wv.minor_write_version_ << "}";
     }
 
 private:
