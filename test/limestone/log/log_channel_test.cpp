@@ -1,5 +1,5 @@
 /*
- * Copyright 2022-2023 Project Tsurugi.
+ * Copyright 2022-2024 Project Tsurugi.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -165,6 +165,55 @@ TEST_F(log_channel_test, skip_storage_add_remove) {
 
     auto m = read_all_from_cursor(cursor.get());
     EXPECT_EQ(m.size(), 0);
+}
+
+TEST_F(log_channel_test, remove_storage) {
+    limestone::api::log_channel& channel = datastore_->create_channel(boost::filesystem::path(location));
+
+    channel.begin_session();
+    channel.add_storage(42, {90, 4});
+    channel.add_entry(42, "42-100", "v1", {100, 4});
+    channel.add_entry(43, "43-100", "v2", {100, 4});
+    channel.end_session();
+
+    channel.begin_session();
+    channel.remove_storage(42, {110, 4});
+    channel.end_session();
+
+    datastore_->ready();
+    auto ss = datastore_->get_snapshot();
+    auto cursor = ss->get_cursor();
+
+    auto m = read_all_from_cursor(cursor.get());
+    EXPECT_EQ(m.size(), 1);
+    EXPECT_EQ(m["43-100"], "v2");  // in another storage
+}
+
+TEST_F(log_channel_test, truncate_storage) {
+    limestone::api::log_channel& channel = datastore_->create_channel(boost::filesystem::path(location));
+
+    channel.begin_session();
+    channel.add_storage(42, {90, 4});
+    channel.add_entry(42, "42-100", "v1", {100, 4});
+    channel.add_entry(43, "43-100", "v2", {100, 4});
+    channel.end_session();
+
+    channel.begin_session();
+    channel.truncate_storage(42, {110, 4});
+    channel.end_session();
+
+    channel.begin_session();
+    channel.add_entry(42, "42-120", "v3", {120, 4});
+    channel.end_session();
+
+    datastore_->ready();
+    auto ss = datastore_->get_snapshot();
+    auto cursor = ss->get_cursor();
+
+    auto m = read_all_from_cursor(cursor.get());
+    EXPECT_EQ(m.size(), 2);
+    EXPECT_EQ(m["43-100"], "v2");  // in another storage
+    EXPECT_EQ(m["42-120"], "v3");  // after truncate
 }
 
 }  // namespace limestone::testing
