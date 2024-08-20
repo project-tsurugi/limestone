@@ -96,19 +96,19 @@ void log_channel::remove_entry(storage_id_type storage_id, std::string_view key,
     write_version_ = write_version;
 }
 
-void log_channel::add_storage([[maybe_unused]] storage_id_type storage_id, [[maybe_unused]] write_version_type write_version) {
-    LOG_LP(ERROR) << "not implemented";
-    throw std::runtime_error("not implemented");  // FIXME
+void log_channel::add_storage(storage_id_type storage_id, write_version_type write_version) {
+    log_entry::write_add_storage(strm_, storage_id, write_version);
+    write_version_ = write_version;
 }
 
-void log_channel::remove_storage([[maybe_unused]] storage_id_type storage_id, [[maybe_unused]] write_version_type write_version) {
-    LOG_LP(ERROR) << "not implemented";
-    throw std::runtime_error("not implemented");  // FIXME
+void log_channel::remove_storage(storage_id_type storage_id, write_version_type write_version) {
+    log_entry::write_remove_storage(strm_, storage_id, write_version);
+    write_version_ = write_version;
 }
 
-void log_channel::truncate_storage([[maybe_unused]] storage_id_type storage_id, [[maybe_unused]] write_version_type write_version) {
-    LOG_LP(ERROR) << "not implemented";
-    throw std::runtime_error("not implemented");  // FIXME
+void log_channel::truncate_storage(storage_id_type storage_id, write_version_type write_version) {
+    log_entry::write_clear_storage(strm_, storage_id, write_version);
+    write_version_ = write_version;
 }
 
 boost::filesystem::path log_channel::file_path() const noexcept {

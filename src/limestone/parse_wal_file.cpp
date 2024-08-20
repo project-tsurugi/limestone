@@ -55,6 +55,9 @@ void invalidate_epoch_snippet(boost::filesystem::fstream& strm, std::streampos f
 //                                 | (empty)
 //   log_entry                     = normal_entry
 //                                 | remove_entry
+//                                 | clear_storage
+//                                 | add_storage
+//                                 | remove_storage
 //   snippet_footer                = (empty)
 
 //  parser rule (with error-handle)
@@ -72,8 +75,14 @@ void invalidate_epoch_snippet(boost::filesystem::fstream& strm, std::streampos f
 //                                 | (empty)
 //   log_entry                     = normal_entry             { if (valid) process-entry }
 //                                 | remove_entry             { if (valid) process-entry }
+//                                 | clear_storage            { if (valid) process-entry }
+//                                 | add_storage              { if (valid) process-entry }
+//                                 | remove_storage           { if (valid) process-entry }
 //                                 | SHORT_normal_entry       { if (valid) error-truncated }  // TAIL
 //                                 | SHORT_remove_entry       { if (valid) error-truncated }  // TAIL
+//                                 | SHORT_clear_storage      { if (valid) error-truncated }  // TAIL
+//                                 | SHORT_add_storage        { if (valid) error-truncated }  // TAIL
+//                                 | SHORT_remove_storage     { if (valid) error-truncated }  // TAIL
 //                                 | UNKNOWN_TYPE_entry       { if (valid) error-damaged-entry }  // TAIL
 //   snippet_footer                = (empty)
 
@@ -84,6 +93,9 @@ void invalidate_epoch_snippet(boost::filesystem::fstream& strm, std::streampos f
 //   remove_entry                  = 0x05 key_length storage_id key(key_length) writer_version_major writer_version_minor
 //   marker_durable                = 0x04 epoch
 //   marker_end                    = 0x03 epoch
+//   clear_storage                 = 0x07 storage_id write_version_major write_version_minor
+//   add_storage                   = 0x08 storage_id write_version_major write_version_minor
+//   remove_storage                = 0x09 storage_id write_version_major write_version_minor
 //   epoch                         = int64le
 //   key_length                    = int32le
 //   value_length                  = int32le
@@ -101,6 +113,9 @@ void invalidate_epoch_snippet(boost::filesystem::fstream& strm, std::streampos f
 //                                 = 0x05 byte(0-11)
 //   SHORT_marker_durable          = 0x04 byte(0-7)
 //   SHORT_marker_end              = 0x03 byte(0-7)
+//   SHORT_clear_storage           = 0x07 byte(0-23)
+//   SHORT_add_storage             = 0x08 byte(0-23)
+//   SHORT_remove_storage          = 0x09 byte(0-23)
 //   UNKNOWN_TYPE_entry            = 0x00 byte(0-)
 //                                 | 0x07-0xff byte(0-)
 //   // marker_durable and marker_end are not used in pWAL file
@@ -110,7 +125,9 @@ void invalidate_epoch_snippet(boost::filesystem::fstream& strm, std::streampos f
         enum class token_type {
             eof,
             normal_entry = 1, marker_begin, marker_end, marker_durable, remove_entry, marker_invalidated_begin,
+            clear_storage, add_storage, remove_storage,
             SHORT_normal_entry = 101, SHORT_marker_begin, SHORT_marker_end, SHORT_marker_durable, SHORT_remove_entry, SHORT_marker_inv_begin,
+            SHORT_clear_storage, SHORT_add_storage, SHORT_remove_storage,
             UNKNOWN_TYPE_entry = 1001,
         };
 
@@ -128,6 +145,9 @@ void invalidate_epoch_snippet(boost::filesystem::fstream& strm, std::streampos f
                 case log_entry::entry_type::marker_durable:           value_ = token_type::marker_durable; break;
                 case log_entry::entry_type::remove_entry:             value_ = token_type::remove_entry; break;
                 case log_entry::entry_type::marker_invalidated_begin: value_ = token_type::marker_invalidated_begin; break;
+                case log_entry::entry_type::clear_storage:            value_ = token_type::clear_storage; break;
+                case log_entry::entry_type::add_storage:              value_ = token_type::add_storage; break;
+                case log_entry::entry_type::remove_storage:           value_ = token_type::remove_storage; break;
                 default: assert(false);
                 }
             } else if (ec.value() == log_entry::read_error::short_entry) {
@@ -138,6 +158,9 @@ void invalidate_epoch_snippet(boost::filesystem::fstream& strm, std::streampos f
                 case log_entry::entry_type::marker_durable:           value_ = token_type::SHORT_marker_durable; break;
                 case log_entry::entry_type::remove_entry:             value_ = token_type::SHORT_remove_entry; break;
                 case log_entry::entry_type::marker_invalidated_begin: value_ = token_type::SHORT_marker_inv_begin; break;
+                case log_entry::entry_type::clear_storage:            value_ = token_type::SHORT_clear_storage; break;
+                case log_entry::entry_type::add_storage:              value_ = token_type::SHORT_add_storage; break;
+                case log_entry::entry_type::remove_storage:           value_ = token_type::SHORT_remove_storage; break;
                 default: assert(false);
                 }
             } else if (ec.value() == log_entry::read_error::unknown_type) {
@@ -164,11 +187,17 @@ void invalidate_epoch_snippet(boost::filesystem::fstream& strm, std::streampos f
 //  loop:
 //    normal_entry               : { if (valid) process-entry } -> loop
 //    remove_entry               : { if (valid) process-entry } -> loop
+//    clear_storage              : { if (valid) process-entry } -> loop
+//    add_storage                : { if (valid) process-entry } -> loop
+//    remove_storage             : { if (valid) process-entry } -> loop
 //    eof                        : {} -> END
 //    marker_begin               : { head_pos := ...; max-epoch := max(...); if (epoch <= ld) { valid := true } else { valid := false, error-nondurable } } -> loop
 //    marker_invalidated_begin   : { head_pos := ...; max-epoch := max(...); valid := false } -> loop
 //    SHORT_normal_entry         : { if (valid) error-truncated } -> END
 //    SHORT_remove_entry         : { if (valid) error-truncated } -> END
+//    SHORT_clear_storage        : { if (valid) error-truncated } -> END
+//    SHORT_add_storage          : { if (valid) error-truncated } -> END
+//    SHORT_remove_storage       : { if (valid) error-truncated } -> END
 //    SHORT_marker_begin         : { head_pos := ...; error-truncated } -> END
 //    SHORT_marker_inv_begin     : { head_pos := ... } -> END
 //    UNKNOWN_TYPE_entry         : { if (valid) error-damaged-entry } -> END
@@ -216,7 +245,10 @@ epoch_id_type dblog_scan::scan_one_pwal_file(  // NOLINT(readability-function-co
         switch (tok.value()) {
         case lex_token::token_type::normal_entry:
         case lex_token::token_type::remove_entry:
-// normal_entry | remove_entry : (not 1st) { if (valid) process-entry } -> loop
+        case lex_token::token_type::clear_storage:
+        case lex_token::token_type::add_storage:
+        case lex_token::token_type::remove_storage:
+// normal_entry | remove_entry | clear_storage | add_storage | remove_storage : (not 1st) { if (valid) process-entry } -> loop
             if (!first) {
                 if (valid) {
                     add_entry(e);
@@ -281,8 +313,11 @@ epoch_id_type dblog_scan::scan_one_pwal_file(  // NOLINT(readability-function-co
             break;
         }
         case lex_token::token_type::SHORT_normal_entry:
-        case lex_token::token_type::SHORT_remove_entry: {
-// SHORT_normal_entry | SHORT_remove_entry : (not 1st) { if (valid) error-truncated } -> END
+        case lex_token::token_type::SHORT_remove_entry:
+        case lex_token::token_type::SHORT_clear_storage:
+        case lex_token::token_type::SHORT_add_storage:
+        case lex_token::token_type::SHORT_remove_storage: {
+// SHORT_normal_entry | SHORT_remove_entry | SHORT_clear_storage | SHORT_add_storage | SHORT_remove_storage : (not 1st) { if (valid) error-truncated } -> END
             if (first) {
                 err_unexpected();
                 pe = parse_error(parse_error::unexpected, fpos_before_read_entry);

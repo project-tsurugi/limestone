@@ -97,6 +97,18 @@ TEST_F(log_channel_test, number_and_backup) {
     EXPECT_EQ(files.at(i++).string(), std::string(location) + "/pwal_0003");
 }
 
+static std::map<std::string, std::string> read_all_from_cursor(limestone::api::cursor* cursor) {
+    std::map<std::string, std::string> m;
+    while (cursor->next()) {
+        std::string key;
+        std::string value;
+        cursor->key(key);
+        cursor->value(value);
+        m[key] = value;
+    }
+    return m;
+}
+
 TEST_F(log_channel_test, remove) {
     limestone::api::log_channel& channel = datastore_->create_channel(boost::filesystem::path(location));
 
@@ -115,17 +127,40 @@ TEST_F(log_channel_test, remove) {
     auto cursor = ss->get_cursor();
 
     // expect: datastore has {k1:v1, k3:v3}, not required to be sorted
-    std::map<std::string, std::string> m;
-    while (cursor->next()) {
-        std::string key;
-        std::string value;
-        cursor->key(key);
-        cursor->value(value);
-        m[key] = value;
-    }
+    auto m = read_all_from_cursor(cursor.get());
     EXPECT_EQ(m.size(), 2);
     EXPECT_EQ(m["k1"], "v1");
     EXPECT_EQ(m["k3"], "v3");
+}
+
+TEST_F(log_channel_test, skip_storage_add_remove) {
+    // write log entry but not use at the moment...
+    // (purpose of this test: check not to abort as unimplemented)
+    limestone::api::log_channel& channel = datastore_->create_channel(boost::filesystem::path(location));
+
+    channel.begin_session();
+    channel.add_storage(42, {90, 4});
+    channel.add_entry(42, "k1", "v1", {100, 4});
+    channel.add_entry(42, "k2", "v2", {100, 4});
+    channel.end_session();
+
+    channel.begin_session();
+    channel.remove_entry(42, "k1", {110, 0});
+    channel.remove_entry(42, "k2", {110, 0});
+    channel.end_session();
+
+    channel.begin_session();
+    channel.truncate_storage(42, {120, 4});
+    channel.remove_storage(42, {120, 4});
+    channel.end_session();
+
+    datastore_->ready();
+    auto ss = datastore_->get_snapshot();
+    auto cursor = ss->get_cursor();
+
+    // expect: datastore has {k1:v1, k3:v3}, not required to be sorted
+    auto m = read_all_from_cursor(cursor.get());
+    EXPECT_EQ(m.size(), 0);
 }
 
 }  // namespace limestone::testing

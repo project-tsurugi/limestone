@@ -96,12 +96,27 @@ static std::pair<epoch_id_type, std::unique_ptr<sortdb_wrapper>> create_sortdb_f
     epoch_id_type ld_epoch = logscan.last_durable_epoch_in_dir();
 
 #if defined SORT_METHOD_PUT_ONLY
-    auto add_entry = [&sortdb](log_entry& e){insert_twisted_entry(sortdb.get(), e);};
+    const auto add_entry_to_point = insert_twisted_entry;
     bool works_with_multi_thread = true;
 #else
-    auto add_entry = [&sortdb](log_entry& e){insert_entry_or_update_to_max(sortdb.get(), e);};
+    const auto add_entry_to_point = insert_entry_or_update_to_max;
     bool works_with_multi_thread = false;
 #endif
+    auto add_entry = [&sortdb, &add_entry_to_point](log_entry& e){
+        switch (e.type()) {
+        case log_entry::entry_type::normal_entry:
+        case log_entry::entry_type::remove_entry:
+            add_entry_to_point(sortdb.get(), e);
+            break;
+        case log_entry::entry_type::clear_storage:
+        case log_entry::entry_type::remove_storage:
+            break;  // TODO: implement
+        case log_entry::entry_type::add_storage:
+            break;  // ignore
+        default:
+            assert(false);
+        }
+    };
 
     if (!works_with_multi_thread && num_worker > 1) {
         LOG(INFO) << "/:limestone:config:datastore this sort method does not work correctly with multi-thread, so force the number of recover process thread = 1";
