@@ -35,6 +35,46 @@ namespace limestone::internal {
 constexpr std::size_t write_version_size = sizeof(epoch_id_type) + sizeof(std::uint64_t);
 static_assert(write_version_size == 16);
 
+class sorting_context {
+public:
+    sorting_context(sorting_context&& obj) noexcept : sortdb(std::move(obj.sortdb)) {
+        std::unique_lock lk{obj.mtx_clear_storage};
+        clear_storage = std::move(obj.clear_storage);  // NOLINT(*-prefer-member-initializer): need lock
+    }
+    sorting_context(const sorting_context&) = delete;
+    sorting_context& operator=(const sorting_context&) = delete;
+    sorting_context& operator=(sorting_context&&) = delete;
+    sorting_context() = default;
+    ~sorting_context() = default;
+    explicit sorting_context(std::unique_ptr<sortdb_wrapper>&& s) noexcept : sortdb(std::move(s)) {
+    }
+
+    // point entries
+private:
+    std::unique_ptr<sortdb_wrapper> sortdb;
+public:
+    sortdb_wrapper* get_sortdb() { return sortdb.get(); }
+
+    // range delete entries
+private:
+    std::mutex mtx_clear_storage;
+    std::map<storage_id_type, write_version_type> clear_storage;
+public:
+    void clear_storage_update(const storage_id_type sid, const write_version_type wv) {
+        std::unique_lock lk{mtx_clear_storage};
+        if (auto [it, inserted] = clear_storage.emplace(sid, wv);
+            !inserted) {
+            it->second = std::max(it->second, wv);
+        }
+    }
+    std::optional<write_version_type> clear_storage_find(const storage_id_type sid) {
+        // no need to lock, for now
+        auto itr = clear_storage.find(sid);
+        if (itr == clear_storage.end()) return {};
+        return {itr->second};
+    }
+};
+
 [[maybe_unused]]
 static void store_bswap64_value(void *dest, const void *src) {
     auto* p64_dest = reinterpret_cast<std::uint64_t*>(dest);  // NOLINT(*-reinterpret-cast)
@@ -85,14 +125,14 @@ static void insert_twisted_entry(sortdb_wrapper* sortdb, const log_entry& e) {
     sortdb->put(db_key, db_value);
 }
 
-static std::pair<epoch_id_type, std::unique_ptr<sortdb_wrapper>> create_sortdb_from_wals(
+static std::pair<epoch_id_type, sorting_context> create_sorted_from_wals(
     const boost::filesystem::path& from_dir,
     int num_worker,
     const std::set<std::string>& file_names = std::set<std::string>()) {
 #if defined SORT_METHOD_PUT_ONLY
-    auto sortdb = std::make_unique<sortdb_wrapper>(from_dir, comp_twisted_key);
+    sorting_context sctx{std::make_unique<sortdb_wrapper>(from_dir, comp_twisted_key)};
 #else
-    auto sortdb = std::make_unique<sortdb_wrapper>(from_dir);
+    sorting_context sctx{std::make_unique<sortdb_wrapper>(from_dir)};
 #endif
     dblog_scan logscan = file_names.empty() ? dblog_scan{from_dir} : dblog_scan{from_dir, file_names};
 
@@ -105,15 +145,20 @@ static std::pair<epoch_id_type, std::unique_ptr<sortdb_wrapper>> create_sortdb_f
     const auto add_entry_to_point = insert_entry_or_update_to_max;
     bool works_with_multi_thread = false;
 #endif
-    auto add_entry = [&sortdb, &add_entry_to_point](const log_entry& e){
+    auto add_entry = [&sctx, &add_entry_to_point](const log_entry& e){
         switch (e.type()) {
         case log_entry::entry_type::normal_entry:
         case log_entry::entry_type::remove_entry:
-            add_entry_to_point(sortdb.get(), e);
+            add_entry_to_point(sctx.get_sortdb(), e);
             break;
         case log_entry::entry_type::clear_storage:
-        case log_entry::entry_type::remove_storage:
-            break;  // TODO: implement
+        case log_entry::entry_type::remove_storage: {  // remove_storage is treated as clear_storage
+            // clear_storage[st] = max(clear_storage[st], wv)
+            write_version_type wv;
+            e.write_version(wv);
+            sctx.clear_storage_update(e.storage(), wv);
+            return;
+        }
         case log_entry::entry_type::add_storage:
             break;  // ignore
         default:
@@ -128,7 +173,7 @@ static std::pair<epoch_id_type, std::unique_ptr<sortdb_wrapper>> create_sortdb_f
     logscan.set_thread_num(num_worker);
     try {
         epoch_id_type max_appeared_epoch = logscan.scan_pwal_files_throws(ld_epoch, add_entry);
-        return {max_appeared_epoch, std::move(sortdb)};
+        return {max_appeared_epoch, std::move(sctx)};
     } catch (std::runtime_error& e) {
         VLOG_LP(log_info) << "failed to scan pwal files: " << e.what();
         LOG(ERROR) << "/:limestone recover process failed. (cause: corruption detected in transaction log data directory), "
@@ -138,10 +183,10 @@ static std::pair<epoch_id_type, std::unique_ptr<sortdb_wrapper>> create_sortdb_f
     }
 }
 
-static void sortdb_foreach(sortdb_wrapper *sortdb, std::function<void(const std::string_view key, const std::string_view value)> write_snapshot_entry) {
+static void sortdb_foreach(sorting_context& sctx, std::function<void(const std::string_view key, const std::string_view value)> write_snapshot_entry) {
     static_assert(sizeof(log_entry::entry_type) == 1);
 #if defined SORT_METHOD_PUT_ONLY
-    sortdb->each([write_snapshot_entry, last_key = std::string{}](const std::string_view db_key, const std::string_view db_value) mutable {
+    sctx.get_sortdb()->each([&sctx, write_snapshot_entry, last_key = std::string{}](const std::string_view db_key, const std::string_view db_value) mutable {
         // using the first entry in GROUP BY (original-)key
         // NB: max versions comes first (by the custom-comparator)
         std::string_view key(db_key.data() + write_version_size, db_key.size() - write_version_size);
@@ -149,6 +194,20 @@ static void sortdb_foreach(sortdb_wrapper *sortdb, std::function<void(const std:
             return; // skip
         }
         last_key.assign(key);
+        storage_id_type st_bytes{};
+        memcpy(static_cast<void*>(&st_bytes), key.data(), sizeof(storage_id_type));
+        storage_id_type st = le64toh(st_bytes);
+        if (auto ret = sctx.clear_storage_find(st); ret) {
+            // check range delete
+            write_version_type range_ver = ret.value();
+            std::string wv(write_version_size, '\0');
+            store_bswap64_value(&wv[0], &db_key[0]);
+            store_bswap64_value(&wv[8], &db_key[8]);
+            write_version_type point_ver{wv};
+            if (point_ver < range_ver) {
+                return;  // skip
+            }
+        }
 
         auto entry_type = static_cast<log_entry::entry_type>(db_value[0]);
         switch (entry_type) {
@@ -168,7 +227,18 @@ static void sortdb_foreach(sortdb_wrapper *sortdb, std::function<void(const std:
         }
     });
 #else
-    sortdb->each([&write_snapshot_entry](const std::string_view db_key, const std::string_view db_value) {
+    sctx.get_sortdb()->each([&sctx, &write_snapshot_entry](const std::string_view db_key, const std::string_view db_value) {
+        storage_id_type st_bytes{};
+        memcpy(static_cast<void*>(&st_bytes), db_key.data(), sizeof(storage_id_type));
+        storage_id_type st = le64toh(st_bytes);
+        if (auto ret = sctx.clear_storage_find(st); ret) {
+            // check range delete
+            write_version_type range_ver = ret.value();
+            write_version_type point_ver{db_value.substr(1)};
+            if (point_ver < range_ver) {
+                return;  // skip
+            }
+        }
         auto entry_type = static_cast<log_entry::entry_type>(db_value[0]);
         switch (entry_type) {
         case log_entry::entry_type::normal_entry:
@@ -189,7 +259,7 @@ void create_compact_pwal(
     const boost::filesystem::path& to_dir, 
     int num_worker,
     const std::set<std::string>& file_names) {
-    auto [max_appeared_epoch, sortdb] = create_sortdb_from_wals(from_dir, num_worker, file_names);
+    auto [max_appeared_epoch, sctx] = create_sorted_from_wals(from_dir, num_worker, file_names);
 
     boost::system::error_code error;
     const bool result_check = boost::filesystem::exists(to_dir, error);
@@ -222,7 +292,7 @@ void create_compact_pwal(
             log_entry::write(ostrm, key_stid, value_etc);
         }
     };
-    sortdb_foreach(sortdb.get(), write_snapshot_entry);
+    sortdb_foreach(sctx, write_snapshot_entry);
     //log_entry::end_session(ostrm, epoch);
     if (fclose(ostrm) != 0) {  // NOLINT(*-owning-memory)
         LOG_LP(ERROR) << "cannot close snapshot file (" << snapshot_file << "), errno = " << errno;
@@ -237,7 +307,7 @@ using namespace limestone::internal;
 
 void datastore::create_snapshot(const std::set<std::string>& file_names) {
     const auto& from_dir = location_;
-    auto [max_appeared_epoch, sortdb] = create_sortdb_from_wals(from_dir, recover_max_parallelism_, file_names);
+    auto [max_appeared_epoch, sctx] = create_sorted_from_wals(from_dir, recover_max_parallelism_, file_names);
     epoch_id_switched_.store(max_appeared_epoch);
     epoch_id_informed_.store(max_appeared_epoch);
 
@@ -261,7 +331,7 @@ void datastore::create_snapshot(const std::set<std::string>& file_names) {
     }
     setvbuf(ostrm, nullptr, _IOFBF, 128L * 1024L);  // NOLINT, NB. glibc may ignore size when _IOFBF and buffer=NULL
     auto write_snapshot_entry = [&ostrm](std::string_view key, std::string_view value){log_entry::write(ostrm, key, value);};
-    sortdb_foreach(sortdb.get(), write_snapshot_entry);
+    sortdb_foreach(sctx, write_snapshot_entry);
     if (fclose(ostrm) != 0) {  // NOLINT(*-owning-memory)
         LOG_LP(ERROR) << "cannot close snapshot file (" << snapshot_file << "), errno = " << errno;
         throw std::runtime_error("I/O error");
