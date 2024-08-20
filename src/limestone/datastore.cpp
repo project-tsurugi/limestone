@@ -104,7 +104,7 @@ void datastore::recover() const noexcept {
 }
 
 void datastore::ready() {
-    // create finame set for snapshot
+    // create filname set for snapshot
     std::set<std::string> detached_pwals = compaction_catalog_->get_detached_pwals();
 
     std::set<std::string> filename_set;
