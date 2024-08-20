@@ -254,11 +254,11 @@ std::future<void> datastore::shutdown() noexcept {
 
     stop_online_compaction_worker();
     if (!online_compaction_worker_future_.valid()) {
-        VLOG(log_info) << "Compaction task is not running. Skipping task shutdown.";
+        VLOG(log_info) << "/:limestone:datastore:shutdown compaction task is not running. skipping task shutdown.";
     } else {
-        VLOG(log_info) << "shutdown: waiting for compaction task to stop";
+        VLOG(log_info) << "/:limestone:datastore:shutdown shutdown: waiting for compaction task to stop";
         online_compaction_worker_future_.wait();
-        VLOG(log_info) << "Compaction task has been stopped.";
+        VLOG(log_info) << "/:limestone:datastore:shutdown compaction task has been stopped.";
     }
 
     return std::async(std::launch::async, []{
@@ -439,14 +439,14 @@ int64_t datastore::current_unix_epoch_in_millis() {
 }
 
 void datastore::online_compaction_worker() {
-    std::cout << "Online compaction worker started..." << std::endl;
+    VLOG(log_info) << "/:limestone:datastore:online_compaction_worker online compaction worker started..." << std::endl;
 
     boost::filesystem::path ctrl_dir = location_ / "ctrl";
     boost::filesystem::path start_file = ctrl_dir / "start_compaction";
 
     if (!boost::filesystem::exists(ctrl_dir)) {
         if (!boost::filesystem::create_directory(ctrl_dir)) {
-            VLOG(log_error) << "Failed to create directory: " << ctrl_dir.string();
+            VLOG(log_error) << "/:limestone:datastore:online_compaction_worker failed to create directory: " << ctrl_dir.string();
             return;
         } 
     }
@@ -456,7 +456,7 @@ void datastore::online_compaction_worker() {
     while (!stop_online_compaction_worker_.load()) {
         if (boost::filesystem::exists(start_file)) {
             if (!boost::filesystem::remove(start_file)) {
-                VLOG(log_error) << "Failed to remove file: " << start_file.string();
+                VLOG(log_error) << "/:limestone:datastore:online_compaction_worker failed to remove file: " << start_file.string();
                 return;
             }
             // Define the do_compaction function here
@@ -481,7 +481,7 @@ static void safe_rename(const boost::filesystem::path& from, const boost::filesy
     boost::system::error_code error;
     boost::filesystem::rename(from, to, error);
     if (error) {
-        LOG_LP(ERROR) << "fail to rename file: error_code: " << error << ", from: " << from << ", to: " << to;
+        LOG_LP(ERROR) << "/:limestone:datastore:safe_rename fail to rename file: error_code: " << error << ", from: " << from << ", to: " << to;
         throw std::runtime_error("fail to rename the file");
     }
 }
@@ -503,14 +503,14 @@ static std::set<std::string> select_files_for_compaction(const std::set<boost::f
 static void ensure_directory_exists(const boost::filesystem::path& dir) {
     if (boost::filesystem::exists(dir)) {
         if (!boost::filesystem::is_directory(dir)) {
-            LOG_LP(ERROR) << "The path exists but is not a directory: " << dir;
+            LOG_LP(ERROR) << "/:limestone:datastore:ensure_directory_exists the path exists but is not a directory: " << dir;
             throw std::runtime_error("The path exists but is not a directory: " + dir.string());
         }
     } else {
         boost::system::error_code error;
         const bool result_mkdir = boost::filesystem::create_directory(dir, error);
         if (!result_mkdir || error) {
-            LOG_LP(ERROR) << "Failed to create directory: result_mkdir: " << result_mkdir << ", error_code: " << error << ", path: " << dir;
+            LOG_LP(ERROR) << "/:limestone:datastore:ensure_directory_exists failed to create directory: result_mkdir: " << result_mkdir << ", error_code: " << error << ", path: " << dir;
             throw std::runtime_error("Failed to create the directory");
         }
     }
@@ -522,7 +522,7 @@ static void handle_existing_compacted_file(const boost::filesystem::path& locati
 
     if (boost::filesystem::exists(compacted_file)) {
         if (boost::filesystem::exists(compacted_prev_file)) {
-            LOG_LP(ERROR) << "The file already exists: " << compacted_prev_file;
+            LOG_LP(ERROR) << "/:limestone:datastore:handle_existing_compacted_file the file already exists: " << compacted_prev_file;
             throw std::runtime_error("The file already exists: " + compacted_prev_file.string());
         }
         safe_rename(compacted_file, compacted_prev_file);
@@ -542,7 +542,7 @@ static std::set<std::string> get_files_in_directory(const boost::filesystem::pat
 static void remove_nonexistent_files_from_detached_pwals(std::set<std::string>& detached_pwals, const std::set<std::string>& files_in_location) {
     for (auto it = detached_pwals.begin(); it != detached_pwals.end();) {
         if (files_in_location.find(*it) == files_in_location.end()) {
-            LOG_LP(WARNING) << "File " << *it << " does not exist in the directory and will be removed from detached_pwals.";
+            LOG_LP(WARNING) << "/:limestone:datastore:remove_nonexistent_files_from_detached_pwals File " << *it << " does not exist in the directory and will be removed from detached_pwals.";
             it = detached_pwals.erase(it);  // Erase and move to the next iterator
         } else {
             ++it;  // Move to the next iterator
@@ -554,7 +554,7 @@ static void remove_file_safely(const boost::filesystem::path& file) {
     boost::system::error_code error;
     boost::filesystem::remove(file, error);
     if (error) {
-        LOG_LP(ERROR) << "Failed to remove file: error_code: " << error << ", path: " << file;
+        LOG_LP(ERROR) << "/:limestone:datastore:remove_file_safely failed to remove file: error_code: " << error << ", path: " << file;
         throw std::runtime_error("Failed to remove the file");
     }
 }
@@ -567,7 +567,7 @@ void datastore::compact_with_online() {
     if (need_compaction_filenames.empty() ||
         (need_compaction_filenames.size() == 1 &&
          need_compaction_filenames.find(compaction_catalog::get_compacted_filename()) != need_compaction_filenames.end())) {
-        LOG_LP(INFO) << "No files to compact";
+        LOG_LP(INFO) << "/:limestone:datastore:compact_with_online no files to compact";
         return;
     }
 
