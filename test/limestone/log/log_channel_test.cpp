@@ -158,7 +158,6 @@ TEST_F(log_channel_test, skip_storage_add_remove) {
     auto ss = datastore_->get_snapshot();
     auto cursor = ss->get_cursor();
 
-    // expect: datastore has {k1:v1, k3:v3}, not required to be sorted
     auto m = read_all_from_cursor(cursor.get());
     EXPECT_EQ(m.size(), 0);
 }
