@@ -46,6 +46,8 @@ std::optional<epoch_id_type> last_durable_epoch(const boost::filesystem::path& f
 
 inline constexpr const std::string_view manifest_file_name = "limestone-manifest.json";
 
+inline constexpr const int current_persistent_format_version = 2;
+
 void setup_initial_logdir(const boost::filesystem::path& logdir);
 
 /**

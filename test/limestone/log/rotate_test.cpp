@@ -50,7 +50,7 @@ protected:
 };
 
 extern void create_file(const boost::filesystem::path& path, std::string_view content);
-extern std::string data_manifest(int persistent_format_version = 1);
+extern std::string data_manifest(int persistent_format_version = limestone::internal::current_persistent_format_version);
 
 TEST_F(rotate_test, log_is_rotated) { // NOLINT
     using namespace limestone::api;
@@ -249,7 +249,7 @@ TEST_F(rotate_test, restore_prusik_all_abs) { // NOLINT
     auto conffn = std::string(limestone::internal::manifest_file_name);
     auto confd = location_path / "bk0";
     boost::filesystem::create_directories(confd);
-    create_file(confd / conffn, data_manifest(1));
+    create_file(confd / conffn, data_manifest(limestone::internal::current_persistent_format_version));
     data.emplace_back(confd / conffn, conffn, false);
 #endif
 
@@ -299,7 +299,7 @@ TEST_F(rotate_test, restore_prusik_all_rel) { // NOLINT
     std::string conffn(limestone::internal::manifest_file_name);
     auto confd = location_path / "bk0";
     boost::filesystem::create_directories(confd);
-    create_file(confd / conffn, data_manifest(1));
+    create_file(confd / conffn, data_manifest(limestone::internal::current_persistent_format_version));
     data.emplace_back("bk0/" + conffn, conffn, false);
 #endif
 

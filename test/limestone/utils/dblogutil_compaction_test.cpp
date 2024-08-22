@@ -19,7 +19,7 @@ using namespace limestone::internal;
 
 extern void create_file(const boost::filesystem::path& path, std::string_view content);
 extern std::string read_entire_file(const boost::filesystem::path& path);
-extern std::string data_manifest(int persistent_format_version = 1);
+extern std::string data_manifest(int persistent_format_version = limestone::internal::current_persistent_format_version);
 
 extern const std::string_view epoch_0x100_str;
 

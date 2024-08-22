@@ -102,7 +102,7 @@ extern constexpr const std::string_view data_allzero =
     "\x00\x00\x00\x00\x00\x00\x00\x00\x00"  // UNKNOWN_TYPE_entry
     ""sv;
 
-std::string data_manifest(int persistent_format_version = 1) {
+std::string data_manifest(int persistent_format_version = limestone::internal::current_persistent_format_version) {
     std::ostringstream ss;
     ss << "{ \"format_version\": \"1.0\", \"persistent_format_version\": " << persistent_format_version << " }";
     return ss.str();

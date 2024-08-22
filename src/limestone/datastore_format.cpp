@@ -1,5 +1,5 @@
 /*
- * Copyright 2023-2023 Project Tsurugi.
+ * Copyright 2023-2024 Project Tsurugi.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -31,9 +31,9 @@ using namespace limestone::api;
 
 // setup log-dir with no data
 void setup_initial_logdir(const boost::filesystem::path& logdir) {
-    nlohmann::json manifest_v1 = {
+    nlohmann::json manifest_current = {
         { "format_version", "1.0" },
-        { "persistent_format_version", 1 }
+        { "persistent_format_version", current_persistent_format_version }
     };
     boost::filesystem::path config = logdir / std::string(manifest_file_name);
     FILE* strm = fopen(config.c_str(), "w");  // NOLINT(*-owning-memory)
@@ -41,7 +41,7 @@ void setup_initial_logdir(const boost::filesystem::path& logdir) {
         LOG_LP(ERROR) << "fopen for write failed, errno = " << errno;
         throw std::runtime_error("I/O error");
     }
-    std::string manifest_str = manifest_v1.dump(4);
+    std::string manifest_str = manifest_current.dump(4);
     auto ret = fwrite(manifest_str.c_str(), manifest_str.length(), 1, strm);
     if (ret != 1) {
         LOG_LP(ERROR) << "fwrite failed, errno = " << errno;
@@ -75,10 +75,13 @@ int is_supported_version(const boost::filesystem::path& manifest_path, std::stri
         istrm >> manifest;
         auto version = manifest["persistent_format_version"];
         if (version.is_number_integer()) {
-            if (version == 1) {
+            if (version == current_persistent_format_version) {
                 return 1;  // supported
             }
-            errmsg = "version mismatch: version " + version.dump() + ", server supports version 1";
+            // if versions other than current_persistent_format_version are supported, add here
+
+            // unsupported
+            errmsg = "version mismatch: version " + version.dump() + ", server supports version " + std::to_string(current_persistent_format_version);
             return 0;
         }
         errmsg = "invalid manifest file, invalid persistent_format_version: " + version.dump();
@@ -94,7 +97,7 @@ void check_logdir_format(const boost::filesystem::path& logdir) {
     boost::filesystem::path manifest_path = logdir / std::string(manifest_file_name);
     if (!boost::filesystem::exists(manifest_path)) {
         VLOG_LP(log_info) << "no manifest file in logdir, maybe v0";
-        LOG(ERROR) << version_error_prefix << " (version mismatch: version 0, server supports version 1)";
+        LOG(ERROR) << version_error_prefix << " (version mismatch: version 0, server supports version " << current_persistent_format_version << ")";
         throw std::runtime_error("logdir version mismatch");
     }
     std::string errmsg;

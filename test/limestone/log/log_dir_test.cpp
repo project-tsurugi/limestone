@@ -17,7 +17,7 @@ namespace limestone::testing {
 extern void create_file(const boost::filesystem::path& path, std::string_view content);
 extern const std::string_view epoch_0_str;
 extern const std::string_view epoch_0x100_str;
-extern std::string data_manifest(int persistent_format_version = 1);
+extern std::string data_manifest(int persistent_format_version = limestone::internal::current_persistent_format_version);
 extern const std::string_view data_normal;
 extern const std::string_view data_nondurable;
 
@@ -51,7 +51,7 @@ const boost::filesystem::path manifest_path = boost::filesystem::path(location) 
     static bool is_pwal(const boost::filesystem::path& p) { return starts_with(p.filename().string(), "pwal"); }
     static void ignore_entry(limestone::api::log_entry&) {}
 
-    void create_mainfest_file(int persistent_format_version = 1) {
+    void create_mainfest_file(int persistent_format_version = limestone::internal::current_persistent_format_version) {
         create_file(manifest_path, data_manifest(persistent_format_version));
     }
 
@@ -112,20 +112,21 @@ TEST_F(log_dir_test, accept_directory_only_correct_manifest_file) {
 }
 
 TEST_F(log_dir_test, reject_directory_of_different_version) {
-    create_mainfest_file(222);
+    create_mainfest_file(limestone::internal::current_persistent_format_version + 222);
 
     gen_datastore();
     EXPECT_THROW({ limestone::internal::check_logdir_format(location); }, std::exception);
 }
 
-TEST_F(log_dir_test, rotate_old_ok_v1_dir) {
+TEST_F(log_dir_test, rotate_old_ok_current_ver_dir) {
     // setup backups
     boost::filesystem::path bk_path = boost::filesystem::path(location) / "bk";
     if (!boost::filesystem::create_directory(bk_path)) {
         LOG(FATAL) << "cannot make directory";
     }
     create_file(bk_path / "epoch", epoch_0_str);
-    create_file(bk_path / std::string(limestone::internal::manifest_file_name), data_manifest(1));
+    create_file(bk_path / std::string(limestone::internal::manifest_file_name),
+                data_manifest(limestone::internal::current_persistent_format_version));
 
     gen_datastore();
 
@@ -139,7 +140,8 @@ TEST_F(log_dir_test, rotate_old_rejects_unsupported_data) {
         LOG(FATAL) << "cannot make directory";
     }
     create_file(bk_path / "epoch", epoch_0_str);
-    create_file(bk_path / std::string(limestone::internal::manifest_file_name), data_manifest(2));
+    create_file(bk_path / std::string(limestone::internal::manifest_file_name),
+                data_manifest(limestone::internal::current_persistent_format_version + 222));
 
     gen_datastore();
 
@@ -174,14 +176,14 @@ TEST_F(log_dir_test, rotate_old_rejects_corrupted_dir) {
     EXPECT_EQ(datastore_->restore(bk_path.string(), true), limestone::status::err_broken_data);
 }
 
-TEST_F(log_dir_test, rotate_prusik_ok_v1_dir) {
+TEST_F(log_dir_test, rotate_prusik_ok_current_ver_dir) {
     // setup backups
     boost::filesystem::path bk_path = boost::filesystem::path(location) / "bk";
     if (!boost::filesystem::create_directory(bk_path)) {
         LOG(FATAL) << "cannot make directory";
     }
     create_file(bk_path / "epoch", epoch_0_str);
-    create_file(bk_path / std::string(limestone::internal::manifest_file_name), data_manifest(1));
+    create_file(bk_path / std::string(limestone::internal::manifest_file_name), data_manifest(limestone::internal::current_persistent_format_version));
     // setup entries
     std::vector<limestone::api::file_set_entry> entries;
     entries.emplace_back("epoch", "epoch", false);
@@ -199,7 +201,7 @@ TEST_F(log_dir_test, rotate_prusik_rejects_unsupported_data) {
         LOG(FATAL) << "cannot make directory";
     }
     create_file(bk_path / "epoch", epoch_0_str);
-    create_file(bk_path / std::string(limestone::internal::manifest_file_name), data_manifest(2));
+    create_file(bk_path / std::string(limestone::internal::manifest_file_name), data_manifest(limestone::internal::current_persistent_format_version + 222));
     // setup entries
     std::vector<limestone::api::file_set_entry> entries;
     entries.emplace_back("epoch", "epoch", false);
