@@ -300,3 +300,61 @@ MAX_EPOCH_ID 0
 
 
 
+## 対応状況
+
+### 未対応
+
+* おそらくdetached pwalがオフラインコンパクションの対象になっている。
+  * たんにローテーションしただけのPWALはオフラインコンパクションの対象
+  * コンパクション済みのPWALは、コンパクションの対象外
+    * オフラインコンパクションが遅くなる
+    * 一部のファイルだけデタッチしている場合に、データが破損する可能性がある。
+  * オフラインコンパクションの対象外にすべき
+  * inspectについては、議論の余地がある。
+    * 現在の使用だと、detached pwalは対象外にすべき
+    * detached pwalの破損を調べられないのは、制限事項とする。
+* inspectで表示される、persistent-format-version:が不正 => マニフェストファイルを見ていないのではないか
+
+
+* コンパクションにより、エポックIDが0になることに起因する問題。
+  * => 実際には、オフラインコンパクションを行うとコンパクションカタログのエポックIDが0になるという問題だった。
+  * オフラインコンパクションを行ったときに、コピー先にepcho_idが0のコンパクションカタログが生成される。
+    * その後、コンパクションカタログに対する操作が行われずに、残っていた。
+  * 必要な対応 
+    * from ディレクトリの version確認
+    * version2の場合、コンパクションカタログを読み、コンパクション対象がファイルを取得
+    * コンパクション対象外ファイルをコンパクションする
+    * コンパクションカタログをアップデートする。
+
+* tglogutilsを用いたとき、ターゲットディレクトリを無条件にv1からv2にアップグレードしてしまう。
+
+
+
+### LOG-0.6では対応しない
+
+* ローテート済みのPWALとコンパクション済みのPWALがrepairの対象にならない
+  * こららのファイルが破損したときに修復ができない
+
+
+### 終了済み
+
+* 意図したファイルがローテーションされたかtsurugidbのログで確認できない。
+  * 現状でも次のログが出ているので確認可能
+
+```
+I0822 18:41:39.092664 161657 parse_wal_file.cpp:212] /:limestone:internal:dblog_scan:scan_one_pwal_file processing pwal file: pwal_0000.01724319699070.0
+I0822 18:41:39.092842 161656 parse_wal_file.cpp:212] /:limestone:internal:dblog_scan:scan_one_pwal_file processing pwal file: pwal_0001.01724319699070.0
+I0822 18:41:39.092876 161658 parse_wal_file.cpp:212] /:limestone:internal:dblog_scan:scan_one_pwal_file processing pwal file: pwal_0002.01724319699070.0
+I0822 18:41:39.092902 161659 parse_wal_file.cpp:212] /:limestone:internal:dblog_scan:scan_one_pwal_file processing pwal file: pwal_0003.01724319699070.0
+I0822 18:41:39.139019 161659 parse_wal_file.cpp:477] /:limestone:internal:dblog_scan:scan_one_pwal_file fixed: 0
+I0822 18:41:39.139031 161659 dblog_scan.cpp:138] OK: "/home/umegane/tsurugi/tsurugi/var/data/log/pwal_0003.01724319699070.0"
+I0822 18:41:39.257598 161658 parse_wal_file.cpp:477] /:limestone:internal:dblog_scan:scan_one_pwal_file fixed: 0
+I0822 18:41:39.257611 161658 dblog_scan.cpp:138] OK: "/home/umegane/tsurugi/tsurugi/var/data/log/pwal_0002.01724319699070.0"
+I0822 18:41:39.264319 161656 parse_wal_file.cpp:477] /:limestone:internal:dblog_scan:scan_one_pwal_file fixed: 0
+I0822 18:41:39.264328 161656 dblog_scan.cpp:138] OK: "/home/umegane/tsurugi/tsurugi/var/data/log/pwal_0001.01724319699070.0"
+I0822 18:41:39.265872 161657 parse_wal_file.cpp:477] /:limestone:internal:dblog_scan:scan_one_pwal_file fixed: 0
+I0822 18:41:39.265877 161657 dblog_scan.cpp:138] OK: "/home/umegane/tsurugi/tsurugi/var/data/log/pwal_0000.01724319699070.0"
+I0822 18:41:39.266139 160984 datastore_snapshot.cpp:205] /:limestone:internal:create_compact_pwal generating compacted pwal file: "/home/umegane/tsurugi/tsurugi/var/data/log/compaction_temp/pwal_0000.compacted"
+```
+
+
