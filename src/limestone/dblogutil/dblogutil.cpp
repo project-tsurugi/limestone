@@ -60,7 +60,7 @@ void log_and_exit(int error) {
 namespace limestone {
 
 void inspect(dblog_scan &ds, std::optional<epoch_id_type> epoch) {
-    std::cout << "persistent-format-version: 1" << std::endl;
+    std::cout << "persistent-format-version: 2" << std::endl;
     epoch_id_type ld_epoch{};
     try {
         ld_epoch = ds.last_durable_epoch_in_dir();
