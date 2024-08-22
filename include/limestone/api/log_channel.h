@@ -1,5 +1,5 @@
 /*
- * Copyright 2022-2023 Project Tsurugi.
+ * Copyright 2022-2024 Project Tsurugi.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -42,11 +42,6 @@ class rotation_result;
  */
 class log_channel {
     friend class rotation_task;
-
-    /**
-     * @brief prefix of pwal file name
-     */
-    static constexpr const std::string_view prefix = "pwal_";
 
 public:
     /**

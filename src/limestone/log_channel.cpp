@@ -1,5 +1,5 @@
 /*
- * Copyright 2022-2023 Project Tsurugi.
+ * Copyright 2022-2024 Project Tsurugi.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -24,6 +24,7 @@
 
 #include <limestone/api/log_channel.h>
 #include <limestone/api/datastore.h>
+#include "internal.h"
 #include "log_entry.h"
 
 namespace limestone::api {
@@ -32,7 +33,7 @@ log_channel::log_channel(boost::filesystem::path location, std::size_t id, datas
     : envelope_(envelope), location_(std::move(location)), id_(id)
 {
     std::stringstream ss;
-    ss << prefix << std::setw(4) << std::setfill('0') << std::dec << id_;
+    ss << limestone::internal::log_channel_prefix << std::setw(4) << std::setfill('0') << std::dec << id_;
     file_ = ss.str();
 }
 
@@ -109,19 +110,19 @@ void log_channel::remove_entry(storage_id_type storage_id, std::string_view key,
     write_version_ = write_version;
 }
 
-void log_channel::add_storage([[maybe_unused]] storage_id_type storage_id, [[maybe_unused]] write_version_type write_version) {
-    LOG_LP(ERROR) << "not implemented";
-    throw std::runtime_error("not implemented");  // FIXME
+void log_channel::add_storage(storage_id_type storage_id, write_version_type write_version) {
+    log_entry::write_add_storage(strm_, storage_id, write_version);
+    write_version_ = write_version;
 }
 
-void log_channel::remove_storage([[maybe_unused]] storage_id_type storage_id, [[maybe_unused]] write_version_type write_version) {
-    LOG_LP(ERROR) << "not implemented";
-    throw std::runtime_error("not implemented");  // FIXME
+void log_channel::remove_storage(storage_id_type storage_id, write_version_type write_version) {
+    log_entry::write_remove_storage(strm_, storage_id, write_version);
+    write_version_ = write_version;
 }
 
-void log_channel::truncate_storage([[maybe_unused]] storage_id_type storage_id, [[maybe_unused]] write_version_type write_version) {
-    LOG_LP(ERROR) << "not implemented";
-    throw std::runtime_error("not implemented");  // FIXME
+void log_channel::truncate_storage(storage_id_type storage_id, write_version_type write_version) {
+    log_entry::write_clear_storage(strm_, storage_id, write_version);
+    write_version_ = write_version;
 }
 
 boost::filesystem::path log_channel::file_path() const noexcept {

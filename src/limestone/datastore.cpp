@@ -1,5 +1,5 @@
 /*
- * Copyright 2022-2023 Project Tsurugi.
+ * Copyright 2022-2024 Project Tsurugi.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -70,7 +70,7 @@ datastore::datastore(configuration const& conf) : location_(conf.data_locations_
 
     // XXX: prusik era
     // TODO: read rotated epoch files if main epoch file does not exist
-    epoch_file_path_ = location_ / boost::filesystem::path(std::string(epoch_file_name));
+    epoch_file_path_ = location_ / boost::filesystem::path(std::string(limestone::internal::epoch_file_name));
     const bool result = boost::filesystem::exists(epoch_file_path_, error);
     if (!result || error) {
         FILE* strm = fopen(epoch_file_path_.c_str(), "a");  // NOLINT(*-owning-memory)

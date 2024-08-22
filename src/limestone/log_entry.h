@@ -44,6 +44,9 @@ public:
         marker_durable = 4,
         remove_entry = 5,
         marker_invalidated_begin = 6,
+        clear_storage = 7,
+        add_storage = 8,
+        remove_storage = 9,
     };
     class read_error {
     public:
@@ -129,6 +132,15 @@ public:
         case entry_type::marker_invalidated_begin:
             invalidated_begin(strm, epoch_id_);
             break;
+        case entry_type::clear_storage:
+            write_clear_storage(strm, key_sid_, value_etc_);
+            break;
+        case entry_type::add_storage:
+            write_add_storage(strm, key_sid_, value_etc_);
+            break;
+        case entry_type::remove_storage:
+            write_remove_storage(strm, key_sid_, value_etc_);
+            break;
         case entry_type::this_id_is_not_used:
             break;
         }
@@ -197,6 +209,43 @@ public:
         write_bytes(strm, value_etc.data(), value_etc.length());
     }
 
+    static inline void write_ope_storage_common(FILE* strm, entry_type type, storage_id_type storage_id, write_version_type write_version) {
+        write_uint8(strm, static_cast<std::uint8_t>(type));
+        write_uint64le(strm, static_cast<std::uint64_t>(storage_id));
+        write_uint64le(strm, static_cast<std::uint64_t>(write_version.epoch_number_));
+        write_uint64le(strm, static_cast<std::uint64_t>(write_version.minor_write_version_));
+    }
+
+    static inline void write_ope_storage_common(FILE* strm, entry_type type, std::string_view key_sid, std::string_view value_etc) {
+        write_uint8(strm, static_cast<std::uint8_t>(type));
+        write_bytes(strm, key_sid.data(), key_sid.length());
+        write_bytes(strm, value_etc.data(), value_etc.length());
+    }
+
+    static void write_clear_storage(FILE* strm, storage_id_type storage_id, write_version_type write_version) {
+        write_ope_storage_common(strm, entry_type::clear_storage, storage_id, write_version);
+    }
+
+    static void write_clear_storage(FILE* strm, std::string_view key_sid, std::string_view value_etc) {
+        write_ope_storage_common(strm, entry_type::clear_storage, key_sid, value_etc);
+    }
+
+    static void write_add_storage(FILE* strm, storage_id_type storage_id, write_version_type write_version) {
+        write_ope_storage_common(strm, entry_type::add_storage, storage_id, write_version);
+    }
+
+    static void write_add_storage(FILE* strm, std::string_view key_sid, std::string_view value_etc) {
+        write_ope_storage_common(strm, entry_type::add_storage, key_sid, value_etc);
+    }
+
+    static void write_remove_storage(FILE* strm, storage_id_type storage_id, write_version_type write_version) {
+        write_ope_storage_common(strm, entry_type::remove_storage, storage_id, write_version);
+    }
+
+    static void write_remove_storage(FILE* strm, std::string_view key_sid, std::string_view value_etc) {
+        write_ope_storage_common(strm, entry_type::remove_storage, key_sid, value_etc);
+    }
+
 // for reader
     bool read(std::istream& strm) {
         read_error ec{};
@@ -240,6 +289,18 @@ public:
             if (ec) return false;
 
             key_sid_.resize(key_len + sizeof(storage_id_type));
+            read_bytes(strm, key_sid_.data(), static_cast<std::streamsize>(key_sid_.length()), ec);
+            if (ec) return false;
+            value_etc_.resize(sizeof(epoch_id_type) + sizeof(std::uint64_t));
+            read_bytes(strm, value_etc_.data(), static_cast<std::streamsize>(value_etc_.length()), ec);
+            if (ec) return false;
+            break;
+        }
+        case entry_type::clear_storage:
+        case entry_type::add_storage:
+        case entry_type::remove_storage:
+        {
+            key_sid_.resize(sizeof(storage_id_type));
             read_bytes(strm, key_sid_.data(), static_cast<std::streamsize>(key_sid_.length()), ec);
             if (ec) return false;
             value_etc_.resize(sizeof(epoch_id_type) + sizeof(std::uint64_t));

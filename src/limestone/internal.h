@@ -25,13 +25,22 @@
 namespace limestone::internal {
 using namespace limestone::api;
 
+// moved from datastore.h
+/**
+ * @brief name of a file to record durable epoch
+ */
+static constexpr const std::string_view epoch_file_name = "epoch";
+
+// moved from log_channel.h
+/**
+ * @brief prefix of pwal file name
+ */
+static constexpr const std::string_view log_channel_prefix = "pwal_";
+
 // from dblog_scan.cpp
 
 // return max epoch in file.
 std::optional<epoch_id_type> last_durable_epoch(const boost::filesystem::path& file);
-
-// deprecated, to be removed
-epoch_id_type scan_one_pwal_file(const boost::filesystem::path& pwal, epoch_id_type ld_epoch, const std::function<void(log_entry&)>& add_entry);
 
 // from datastore_format.cpp
 

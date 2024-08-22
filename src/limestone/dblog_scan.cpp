@@ -94,18 +94,6 @@ static bool log_error_and_throw(log_entry::read_error& e) {
     throw std::runtime_error("pwal file read error");
 }
 
-// deprecated, to be removed
-epoch_id_type scan_one_pwal_file(const boost::filesystem::path& p, epoch_id_type ld_epoch, const std::function<void(log_entry&)>& add_entry) {
-    dblog_scan ds{""};  // dummy
-    dblog_scan::parse_error ec;
-    ds.set_fail_fast(true);
-    ds.set_process_at_nondurable_epoch_snippet(dblog_scan::process_at_nondurable::repair_by_mark);
-    ds.set_process_at_truncated_epoch_snippet(dblog_scan::process_at_truncated::report);
-    ds.set_process_at_damaged_epoch_snippet(dblog_scan::process_at_damaged::report);
-    auto rc = ds.scan_one_pwal_file(p, ld_epoch, add_entry, log_error_and_throw, ec);
-    return rc;
-}
-
 void dblog_scan::detach_wal_files(bool skip_empty_files) {
     // rotate_attached_wal_files
     std::vector<boost::filesystem::path> attached_files;

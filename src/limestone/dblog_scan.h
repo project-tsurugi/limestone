@@ -24,18 +24,6 @@ namespace limestone::internal {
 // accessing dblogdir before db start
 class dblog_scan {
 
-    // XXX: copied from datastore.h, resolve dup
-    /**
-     * @brief name of a file to record durable epoch
-     */
-    static constexpr const std::string_view epoch_file_name = "epoch";  /* datastore::epoch_file_name */
-
-    // XXX: copied from log_channel.h, resolve dup
-    /**
-     * @brief prefix of pwal file name
-     */
-    static constexpr const std::string_view pwal_prefix = "pwal_";  /* log_channel::prefix */
-
 public:
     class parse_error {
     public:
@@ -191,11 +179,11 @@ public:
         const error_report_func_t& report_error,
         parse_error& pe);
 
-    static bool is_wal(const boost::filesystem::path& p) { return p.filename().string().rfind(pwal_prefix, 0) == 0; }
+    static bool is_wal(const boost::filesystem::path& p) { return p.filename().string().rfind(log_channel_prefix, 0) == 0; }
     static bool is_detached_wal(const boost::filesystem::path& p) {
         std::cerr << "is_detached_wal: " << p << std::endl;
         auto filename = p.filename().string();
-        return (filename.length() > 9 && filename.rfind(pwal_prefix, 0) == 0);
+        return (filename.length() > 9 && filename.rfind(log_channel_prefix, 0) == 0);
     }
 
     /**
