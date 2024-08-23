@@ -71,8 +71,60 @@ public:
 
     using error_report_func_t = std::function<bool(log_entry::read_error&)>;
 
-    explicit dblog_scan(const boost::filesystem::path& logdir) : dblogdir_(logdir) { }
-    explicit dblog_scan(boost::filesystem::path&& logdir) : dblogdir_(std::move(logdir)) { }
+    /**
+     * @brief Constructor that initializes the dblog_scan with the specified log directory.
+     *
+     * This constructor uses the initial content of the `logdir` to determine the target files for processing.
+     * If the contents of `logdir` change during processing, you must call the `rescan_directory_paths()` method
+     * to update the target files accordingly.
+     *
+     * @param logdir The path to the directory containing the files to be processed.
+     */
+
+    explicit dblog_scan(const boost::filesystem::path& logdir) : dblogdir_(logdir) { rescan_directory_paths(); }
+
+    /**
+     * @brief Constructor that initializes the dblog_scan with the specified log directory.
+     *
+     * This constructor uses the initial content of the `logdir` to determine the target files for processing.
+     * If the contents of `logdir` change during processing, you must call the `rescan_directory_paths()` method
+     * to update the target files accordingly.
+     *
+     * @param logdir The path to the directory containing the files to be processed.
+     */
+    explicit dblog_scan(boost::filesystem::path&& logdir) : dblogdir_(std::move(logdir)) { rescan_directory_paths(); }
+
+    /**
+     * @brief Constructor that initializes the dblog_scan with the specified log directory and file names.
+     *
+     * This constructor processes only the files specified in the `file_names` set within the `logdir`.
+     * It is used when you do not want the target files to change even if the contents of `logdir` are modified after
+     * determining the target files.
+     *
+     * @param logdir The path to the directory containing the files to be processed.
+     * @param file_names The set of file names within `logdir` to be processed.
+     */
+    explicit dblog_scan(const boost::filesystem::path& logdir, const std::set<std::string>& file_names) : dblogdir_(logdir) {
+        for (const auto& file_name : file_names) {
+            path_list_.emplace_back(dblogdir_ / file_name);
+        }
+    }
+
+    /**
+     * @brief Constructor that initializes the dblog_scan with the specified log directory and file names.
+     *
+     * This constructor processes only the files specified in the `file_names` set within the `logdir`.
+     * It is used when you do not want the target files to change even if the contents of `logdir` are modified after
+     * determining the target files.
+     *
+     * @param logdir The path to the directory containing the files to be processed.
+     * @param file_names The set of file names within `logdir` to be processed.
+     */
+    explicit dblog_scan(boost::filesystem::path&& logdir, const std::set<std::string>& file_names) : dblogdir_(std::move(logdir)) {
+        for (const auto& file_name : file_names) {
+            path_list_.emplace_back(dblogdir_ / file_name);
+        }
+    }
 
     const boost::filesystem::path& get_dblogdir() { return dblogdir_; }
     void set_thread_num(int thread_num) noexcept { thread_num_ = thread_num; }
@@ -129,12 +181,23 @@ public:
 
     static bool is_wal(const boost::filesystem::path& p) { return p.filename().string().rfind(log_channel_prefix, 0) == 0; }
     static bool is_detached_wal(const boost::filesystem::path& p) {
+        std::cerr << "is_detached_wal: " << p << std::endl;
         auto filename = p.filename().string();
         return (filename.length() > 9 && filename.rfind(log_channel_prefix, 0) == 0);
     }
 
+    /**
+     * @brief Rescans the directory and updates the path list.
+     *
+     * This function clears the current path list and rescans the specified
+     * directory, adding all file paths in the directory to the path list.
+     */
+    void rescan_directory_paths();
+
 private:
     boost::filesystem::path dblogdir_;
+    std::list<boost::filesystem::path> path_list_;
+
     int thread_num_{1};
     bool fail_fast_{false};
 

@@ -22,6 +22,7 @@
 #include <vector>
 #include <set>
 #include <mutex>
+#include <queue>
 
 #include <boost/filesystem.hpp>
 
@@ -36,6 +37,8 @@
 #include <limestone/api/write_version_type.h>
 #include <limestone/api/tag_repository.h>
 #include <limestone/api/restore_progress.h>
+#include <limestone/api/rotation_task.h>
+#include <limestone/api/compaction_catalog.h>
 
 namespace limestone::api {
 
@@ -45,6 +48,7 @@ namespace limestone::api {
  */
 class datastore {
     friend class log_channel;
+    friend class rotation_task;
 
     enum class state : std::int64_t {
         not_ready = 0,
@@ -210,6 +214,11 @@ public:
      */
     void recover(const epoch_tag&) const noexcept;
 
+    /**
+     * Performs online compaction of the datastore.
+     */
+    void compact_with_online();
+
 protected:  // for tests
     auto& log_channels_for_tests() const noexcept { return log_channels_; }
     auto epoch_id_informed_for_tests() const noexcept { return epoch_id_informed_.load(); }
@@ -239,6 +248,20 @@ private:
 
     std::atomic_uint64_t log_channel_id_{};
 
+    std::future<void> online_compaction_worker_future_;
+
+    std::mutex mtx_online_compaction_worker_{};
+
+    std::condition_variable cv_online_compaction_worker_{};
+
+    std::atomic<bool> stop_online_compaction_worker_{false};
+
+    std::optional<compaction_catalog> compaction_catalog_;
+
+    void online_compaction_worker();
+
+    void stop_online_compaction_worker();
+
     // used for backup
     //   (old) full backup :   target is entire <files_>
     //   (new/prusik) backup : target is rotated files, i.e. <files_> minus active log files
@@ -259,6 +282,8 @@ private:
     // opposite of add_file
     void subtract_file(const boost::filesystem::path& file);
 
+    std::set<boost::filesystem::path> get_files();
+
     epoch_id_type search_max_durable_epock_id() noexcept;
 
     void update_min_epoch_id(bool from_switch_epoch = false);
@@ -273,14 +298,14 @@ private:
      * @param from the location of log files
      * @attention this function is not thread-safe.
      */
-    void create_snapshot();
+    void create_snapshot(const std::set<std::string>& file_names);
 
     epoch_id_type last_durable_epoch_in_dir();
 
     /**
      * @brief requests the data store to rotate log files
      */
-    epoch_id_type rotate_log_files();
+    rotation_result rotate_log_files();
 
     /**
      * @brief rotate epoch file
@@ -288,6 +313,7 @@ private:
     void rotate_epoch_file();
 
     int64_t current_unix_epoch_in_millis();
+    
 };
 
 } // namespace limestone::api

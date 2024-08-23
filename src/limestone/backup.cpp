@@ -17,7 +17,7 @@
 
 namespace limestone::api {
 
-backup::backup(std::set<boost::filesystem::path>& files) noexcept {
+backup::backup(const std::set<boost::filesystem::path>& files) noexcept {
     for(auto& e : files) {
         files_.emplace_back(e);
     }

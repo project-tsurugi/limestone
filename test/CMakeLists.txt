@@ -33,6 +33,7 @@ file(GLOB SRCS
         "limestone/log/*.cpp"
         "limestone/epoch/*.cpp"
         "limestone/utils/*.cpp"
+        "limestone/compaction/*.cpp"
         )
 
 foreach(file ${SRCS})

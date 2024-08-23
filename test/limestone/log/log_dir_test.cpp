@@ -2,6 +2,7 @@
 #include <boost/filesystem.hpp>
 
 #include <limestone/logging.h>
+#include <limestone/api/compaction_catalog.h>
 
 #include "dblog_scan.h"
 #include "internal.h"
@@ -11,6 +12,7 @@
 
 using namespace std::literals;
 using dblog_scan = limestone::internal::dblog_scan;
+using compaction_catalog = limestone::api::compaction_catalog;
 
 namespace limestone::testing {
 
@@ -25,6 +27,7 @@ class log_dir_test : public ::testing::Test {
 public:
 static constexpr const char* location = "/tmp/log_dir_test";
 const boost::filesystem::path manifest_path = boost::filesystem::path(location) / std::string(limestone::internal::manifest_file_name);
+const boost::filesystem::path compaction_catalog_path = boost::filesystem::path(location) / "compaction_catalog";
 
     void SetUp() {
         boost::filesystem::remove_all(location);
@@ -53,6 +56,10 @@ const boost::filesystem::path manifest_path = boost::filesystem::path(location) 
 
     void create_mainfest_file(int persistent_format_version = 1) {
         create_file(manifest_path, data_manifest(persistent_format_version));
+        if (persistent_format_version > 1) {
+            compaction_catalog catalog{location};
+            catalog.update_catalog_file(0, {}, {});
+        }
     }
 
 protected:
@@ -62,60 +69,68 @@ protected:
 
 TEST_F(log_dir_test, newly_created_directory_contains_manifest_file) {
     gen_datastore();
-    limestone::internal::check_logdir_format(location);
 
     EXPECT_TRUE(boost::filesystem::exists(manifest_path));
+    EXPECT_TRUE(boost::filesystem::exists(compaction_catalog_path));
 }
 
 TEST_F(log_dir_test, reject_directory_without_manifest_file) {
     create_file(boost::filesystem::path(location) / "epoch", epoch_0_str);
 
-    gen_datastore();
-    EXPECT_THROW({ limestone::internal::check_logdir_format(location); }, std::exception);
+    EXPECT_THROW({ gen_datastore(); }, std::exception);
 }
 
 TEST_F(log_dir_test, reject_directory_with_broken_manifest_file) {
     create_file(boost::filesystem::path(location) / "epoch", epoch_0_str);
     create_file(manifest_path, "broken");
 
-    gen_datastore();
-    EXPECT_THROW({ limestone::internal::check_logdir_format(location); }, std::exception);
+    EXPECT_THROW({ gen_datastore(); }, std::exception);
 }
 
 TEST_F(log_dir_test, reject_directory_only_broken_manifest_file) {
     create_file(manifest_path, "broken");
 
-    gen_datastore();
-    EXPECT_THROW({ limestone::internal::check_logdir_format(location); }, std::exception);
+    EXPECT_THROW({ gen_datastore(); }, std::exception);
 }
 
 TEST_F(log_dir_test, reject_directory_only_broken_manifest_file2) {
     create_file(manifest_path, "{ \"answer\": 42 }");
 
-    gen_datastore();
-    EXPECT_THROW({ limestone::internal::check_logdir_format(location); }, std::exception);
+    EXPECT_THROW({ gen_datastore(); }, std::exception);
 }
 
 TEST_F(log_dir_test, accept_directory_with_correct_manifest_file) {
     create_file(boost::filesystem::path(location) / "epoch", epoch_0_str);
     create_mainfest_file();
 
-    gen_datastore();
-    limestone::internal::check_logdir_format(location);  // success
+    gen_datastore();  // success
 }
 
 TEST_F(log_dir_test, accept_directory_only_correct_manifest_file) {
     create_mainfest_file();
 
-    gen_datastore();
-    limestone::internal::check_logdir_format(location);  // success
+    gen_datastore();  // success
 }
 
 TEST_F(log_dir_test, reject_directory_of_different_version) {
     create_mainfest_file(222);
 
-    gen_datastore();
-    EXPECT_THROW({ limestone::internal::check_logdir_format(location); }, std::exception);
+    EXPECT_THROW({ gen_datastore(); }, std::exception);
+}
+
+TEST_F(log_dir_test, accept__manifest_version_v1) {
+    create_mainfest_file(1);
+    gen_datastore();   // success
+}
+
+TEST_F(log_dir_test, accept__manifest_version_v2) {
+    create_mainfest_file(2);
+    gen_datastore();   // success
+}
+
+TEST_F(log_dir_test, reject_manifest_version_v3) {
+    create_mainfest_file(3);
+    EXPECT_THROW({ gen_datastore(); }, std::exception);
 }
 
 TEST_F(log_dir_test, rotate_old_ok_v1_dir) {
@@ -139,7 +154,7 @@ TEST_F(log_dir_test, rotate_old_rejects_unsupported_data) {
         LOG(FATAL) << "cannot make directory";
     }
     create_file(bk_path / "epoch", epoch_0_str);
-    create_file(bk_path / std::string(limestone::internal::manifest_file_name), data_manifest(2));
+    create_file(bk_path / std::string(limestone::internal::manifest_file_name), data_manifest(3));
 
     gen_datastore();
 
@@ -199,7 +214,7 @@ TEST_F(log_dir_test, rotate_prusik_rejects_unsupported_data) {
         LOG(FATAL) << "cannot make directory";
     }
     create_file(bk_path / "epoch", epoch_0_str);
-    create_file(bk_path / std::string(limestone::internal::manifest_file_name), data_manifest(2));
+    create_file(bk_path / std::string(limestone::internal::manifest_file_name), data_manifest(3));
     // setup entries
     std::vector<limestone::api::file_set_entry> entries;
     entries.emplace_back("epoch", "epoch", false);

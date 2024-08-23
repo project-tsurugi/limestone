@@ -133,6 +133,7 @@ void repair(dblog_scan &ds, std::optional<epoch_id_type> epoch) {
 
     VLOG(30) << "detach all pwal files";
     ds.detach_wal_files();
+    ds.rescan_directory_paths();
     std::atomic_size_t count_wal_entry = 0;
     dblog_scan::parse_error::code max_ec{};
     ds.scan_pwal_files(ld_epoch, [&count_wal_entry](log_entry&){ count_wal_entry++; }, [](log_entry::read_error& e) -> bool {
@@ -217,7 +218,7 @@ void compaction(dblog_scan &ds, std::optional<epoch_id_type> epoch) {
     setup_initial_logdir(tmp);
 
     VLOG_LP(log_info) << "making compact pwal file to " << tmp;
-    create_comapct_pwal(from_dir, tmp, FLAGS_thread_num);
+    create_compact_pwal(from_dir, tmp, FLAGS_thread_num);
 
     // epoch file
     VLOG_LP(log_info) << "making compact epoch file to " << tmp;
@@ -291,7 +292,7 @@ int main(char *dir, subcommand mode) {  // NOLINT
         log_and_exit(64);
     }
     try {
-        check_logdir_format(p);
+        check_and_migrate_logdir_format(p);
         dblog_scan ds(p);
         ds.set_thread_num(FLAGS_thread_num);
         if (mode == cmd_inspect) inspect(ds, opt_epoch);
