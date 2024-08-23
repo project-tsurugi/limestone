@@ -56,6 +56,7 @@ void log_channel::begin_session() {
         registered_ = true;
     }
     log_entry::begin_session(strm_, static_cast<epoch_id_type>(current_epoch_id_.load()));
+    VLOG_LP(log_debug) << "current_epoch_id " << current_epoch_id_;
 }
 
 void log_channel::end_session() {
