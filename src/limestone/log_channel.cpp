@@ -60,6 +60,7 @@ void log_channel::begin_session() {
         std::lock_guard<std::mutex> lock(session_mutex_);
         waiting_epoch_ids_.insert(latest_ession_epoch_id_);
     }
+    VLOG_LP(log_debug) << "current_epoch_id " << current_epoch_id_;
 }
 
 void log_channel::end_session() {

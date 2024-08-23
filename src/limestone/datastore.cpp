@@ -214,6 +214,7 @@ void datastore::update_min_epoch_id(bool from_switch_epoch) {  // NOLINT(readabi
                 LOG_LP(ERROR) << "fclose failed, errno = " << errno;
                 throw std::runtime_error("I/O error");
             }
+            VLOG_LP(log_debug) << "wrote epoch " << to_be_epoch;
             break;
         }
     }
