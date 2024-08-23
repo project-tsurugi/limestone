@@ -18,18 +18,13 @@ using limestone::api::rotation_task_helper;
 class rotation_task_test : public ::testing::Test {
 protected:
     void SetUp() override {
-        // 既存のディレクトリやファイルを削除
         if (system("rm -rf /tmp/rotation_task_test") != 0) {
             std::cerr << "cannot remove directory" << std::endl;
         }
-        // 必要なディレクトリを作成
         if (system("mkdir -p /tmp/rotation_task_test/data_location /tmp/rotation_task_test/metadata_location") != 0) {
             std::cerr << "cannot make directory" << std::endl;
         }
 
-        // pwal3は存在しない
-
-        // データストアのセットアップ
         limestone::api::configuration conf({data_location}, metadata_location);
         datastore_ = std::make_unique<limestone::api::datastore_test>(conf);
         datastore_->switch_epoch(123);
@@ -39,12 +34,9 @@ protected:
         lc2_ = &datastore_->create_channel(location_path);
         lc3_ = &datastore_->create_channel(location_path);
 
-        // Add entries to each log channel
         write_to_channel(lc0_);
         write_to_channel(lc1_);
         write_to_channel(lc2_);
-        // No entries for lc3
-
     }
     void write_to_channel(log_channel* channel) {
         channel->begin_session();

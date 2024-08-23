@@ -571,33 +571,33 @@ void datastore::compact_with_online() {
         return;
     }
 
-    // オンラインコンパクション用の一時ディレクトリの作成
+    // create a temporary directory for online compaction
     boost::filesystem::path compaction_temp_dir = location_ / compaction_catalog::get_compaction_temp_dirname();
     ensure_directory_exists(compaction_temp_dir);
 
     // create a compacted file
     create_compact_pwal(location_, compaction_temp_dir, recover_max_parallelism_, need_compaction_filenames);
 
-    // ログディレクトリに既存のコンパクションファイルがある場合の処理
+    // handle existing compacted file
     handle_existing_compacted_file(location_);
 
-    // tempのpwal_0000.compactedをログディレクトリに移動する
+    // move pwal_0000.compacted from the temp directory to the log directory
     boost::filesystem::path compacted_file = location_ / compaction_catalog::get_compacted_filename();
     boost::filesystem::path temp_compacted_file = compaction_temp_dir / compaction_catalog::get_compacted_filename();
     safe_rename(temp_compacted_file, compacted_file);
 
-    // Get a set of all files in the location_ directory
+    // get a set of all files in the location_ directory
     std::set<std::string> files_in_location = get_files_in_directory(location_);
 
-    // Check if detached_pwals exist in location_
+    // check if detached_pwals exist in location_
     remove_nonexistent_files_from_detached_pwals(detached_pwals, files_in_location);
 
-    // コンパクションカタログを更新する
+    // update compaction catalog
     compacted_file_info compacted_file_info{compacted_file.filename().string(), 1};
     detached_pwals.erase(compacted_file.filename().string());
     compaction_catalog_->update_catalog_file(result.get_epoch_id().value_or(0), {compacted_file_info}, detached_pwals);
 
-    // pwal_0000.compacted.prevを削除
+    // remove pwal_0000.compacted.prev
     remove_file_safely(location_ / compaction_catalog::get_compacted_backup_filename());
 }
 

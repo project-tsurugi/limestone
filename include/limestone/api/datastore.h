@@ -256,7 +256,7 @@ private:
 
     std::atomic<bool> stop_online_compaction_worker_{false};
 
-    std::optional<compaction_catalog> compaction_catalog_; // std::optionalを使用
+    std::optional<compaction_catalog> compaction_catalog_;
 
     void online_compaction_worker();
 
