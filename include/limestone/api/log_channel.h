@@ -43,11 +43,6 @@ class rotation_result;
 class log_channel {
     friend class rotation_task;
 
-    /**
-     * @brief prefix of pwal file name
-     */
-    static constexpr const std::string_view prefix = "pwal_";
-
 public:
     /**
      * @brief join a persistence session for the current epoch in this channel

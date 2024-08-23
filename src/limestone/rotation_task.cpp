@@ -3,10 +3,8 @@
 
 namespace limestone::api {
 
-// デフォルトコンストラクタ
 rotation_result::rotation_result() = default;
 
-// ファイル名とepoch_idを引数に取るコンストラクタ
 rotation_result::rotation_result(std::string file, epoch_id_type epoch) : epoch_id_(epoch) {
     latest_rotated_files_.emplace(std::move(file));
 }
@@ -28,11 +26,11 @@ const std::set<boost::filesystem::path>& rotation_result::get_rotation_end_files
     return rotation_end_files;
 }
 
-// 他のrotation_resultを追加するメソッド
+// merge another rotation_result
 void rotation_result::add_rotation_result(const rotation_result& other) {
     latest_rotated_files_.insert(other.latest_rotated_files_.begin(), other.latest_rotated_files_.end());
 
-    // 自分とotherのepoch_id_のどちらか大きい方を設定
+    // set the maximum of the two epoch_ids
     if (other.epoch_id_.has_value()) {
         if (!epoch_id_.has_value()) {
             epoch_id_ = other.epoch_id_;
@@ -68,7 +66,7 @@ void rotation_task::rotate() {
     }
     envelope_.rotate_epoch_file();
     final_result.set_rotation_end_files(envelope_.get_files());
-    // 結果をセット
+
     result_promise_.set_value(final_result);
 }
 

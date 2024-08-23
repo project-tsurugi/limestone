@@ -10,21 +10,17 @@ using limestone::api::compaction_catalog;
 class compaction_catalog_test : public ::testing::Test {
 protected:
     void SetUp() override {
-        // テスト用のディレクトリを作成
         test_dir = boost::filesystem::temp_directory_path() / boost::filesystem::unique_path();
         boost::filesystem::create_directory(test_dir);
 
-        // テスト用のファイルパスを設定
         catalog_file_path = test_dir / "compaction_catalog";
         backup_file_path = test_dir / "compaction_catalog.back";
     }
 
     void TearDown() override {
-        // テスト用のディレクトリを削除
         boost::filesystem::remove_all(test_dir);
     }
 
-    // テスト用のディレクトリパス
     boost::filesystem::path test_dir;
     boost::filesystem::path catalog_file_path;
     boost::filesystem::path backup_file_path;
@@ -75,7 +71,6 @@ TEST_F(compaction_catalog_test, UpdateAndLoadCatalogFile) {
 }
 
 TEST_F(compaction_catalog_test, LoadFromBackup) {
-    // まずカタログファイルを作成
     {
         compaction_catalog catalog(test_dir);
 
@@ -90,13 +85,10 @@ TEST_F(compaction_catalog_test, LoadFromBackup) {
 
     }
 
-    // バックアップを作成
     boost::filesystem::rename(catalog_file_path, backup_file_path);
 
-    // カタログファイルを削除
     boost::filesystem::remove(catalog_file_path);
 
-    // バックアップから読み込み
     compaction_catalog loaded_catalog = compaction_catalog::from_catalog_file(test_dir);
 
     EXPECT_EQ(loaded_catalog.get_max_epoch_id(), 123);

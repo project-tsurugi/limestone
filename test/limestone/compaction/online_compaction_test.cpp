@@ -140,7 +140,7 @@ protected:
         int match_count = 0;
 
         for (const auto& file : files) {
-            if (file.rfind(prefix, 0) == 0) { // prefixで始まるかどうかをチェック
+            if (file.rfind(prefix, 0) == 0) {
                 match_count++;
             }
         }
