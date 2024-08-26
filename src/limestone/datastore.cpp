@@ -539,17 +539,6 @@ static std::set<std::string> get_files_in_directory(const boost::filesystem::pat
     return files;
 }
 
-static void remove_nonexistent_files_from_detached_pwals(std::set<std::string>& detached_pwals, const std::set<std::string>& files_in_location) {
-    for (auto it = detached_pwals.begin(); it != detached_pwals.end();) {
-        if (files_in_location.find(*it) == files_in_location.end()) {
-            LOG_LP(WARNING) << "/:limestone:datastore:remove_nonexistent_files_from_detached_pwals File " << *it << " does not exist in the directory and will be removed from detached_pwals.";
-            it = detached_pwals.erase(it);  // Erase and move to the next iterator
-        } else {
-            ++it;  // Move to the next iterator
-        }
-    }
-}
-
 static void remove_file_safely(const boost::filesystem::path& file) {
     boost::system::error_code error;
     boost::filesystem::remove(file, error);
@@ -560,8 +549,17 @@ static void remove_file_safely(const boost::filesystem::path& file) {
 }
 
 void datastore::compact_with_online() {
+    // rotate first
     rotation_result result = rotate_log_files();
+
+    // select files for compaction
     std::set<std::string> detached_pwals = compaction_catalog_->get_detached_pwals();
+
+    LOG_LP(INFO) << "/:limestone:datastore:compact_with_online detached_pwals:";
+    for (const auto& filename : detached_pwals) {
+        LOG_LP(INFO) << filename;
+    }
+
 
     std::set<std::string> need_compaction_filenames = select_files_for_compaction(result.get_rotation_end_files(), detached_pwals);
     if (need_compaction_filenames.empty() ||
@@ -569,6 +567,11 @@ void datastore::compact_with_online() {
          need_compaction_filenames.find(compaction_catalog::get_compacted_filename()) != need_compaction_filenames.end())) {
         LOG_LP(INFO) << "/:limestone:datastore:compact_with_online no files to compact";
         return;
+    }
+
+    LOG_LP(INFO) << "/:limestone:datastore:compact_with_online compacting files: ";
+    for (const auto& filename : need_compaction_filenames) {
+        LOG_LP(INFO) << "/:limestone:datastore:compact_with_online " << filename;
     }
 
     // create a temporary directory for online compaction
@@ -590,7 +593,16 @@ void datastore::compact_with_online() {
     std::set<std::string> files_in_location = get_files_in_directory(location_);
 
     // check if detached_pwals exist in location_
-    remove_nonexistent_files_from_detached_pwals(detached_pwals, files_in_location);
+    for (auto it = detached_pwals.begin(); it != detached_pwals.end();) {
+        if (files_in_location.find(*it) == files_in_location.end()) {
+            LOG_LP(WARNING) << "/:limestone:datastore:remove_nonexistent_files_from_detached_pwals File " << *it << " does not exist in the directory and will be removed from detached_pwals.";
+            auto p = location_ / *it;
+            it = detached_pwals.erase(it);  // Erase and move to the next iterator
+        } else {
+            ++it;  // Move to the next iterator
+        }
+    }
+
 
     // update compaction catalog
     compacted_file_info compacted_file_info{compacted_file.filename().string(), 1};
@@ -599,6 +611,8 @@ void datastore::compact_with_online() {
 
     // remove pwal_0000.compacted.prev
     remove_file_safely(location_ / compaction_catalog::get_compacted_backup_filename());
+
+    LOG_LP(INFO) << "/:limestone:datastore:compact_with_online compaction finished";
 }
 
 } // namespace limestone::api
