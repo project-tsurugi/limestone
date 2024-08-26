@@ -181,6 +181,7 @@ public:
 
     static bool is_wal(const boost::filesystem::path& p) { return p.filename().string().rfind(log_channel_prefix, 0) == 0; }
     static bool is_detached_wal(const boost::filesystem::path& p) {
+        std::cerr << "is_detached_wal: " << p << std::endl;
         auto filename = p.filename().string();
         return (filename.length() > 9 && filename.rfind(log_channel_prefix, 0) == 0);
     }

@@ -25,7 +25,6 @@
 #include "internal.h"
 #include "log_entry.h"
 
-
 using namespace limestone::api;
 using namespace limestone::internal;
 
@@ -60,7 +59,7 @@ void log_and_exit(int error) {
 namespace limestone {
 
 void inspect(dblog_scan &ds, std::optional<epoch_id_type> epoch) {
-    std::cout << "persistent-format-version: 2" << std::endl;
+    std::cout << "persistent-format-version: 1" << std::endl;
     epoch_id_type ld_epoch{};
     try {
         ld_epoch = ds.last_durable_epoch_in_dir();
@@ -182,7 +181,7 @@ static boost::filesystem::path make_backup_dir_next_to(const boost::filesystem::
     return make_tmp_dir_next_to(target_dir, ".backup_XXXXXX");
 }
 
-void compaction(dblog_scan &ds, std::optional<epoch_id_type> epoch, compaction_catalog &catalog) {
+void compaction(dblog_scan &ds, std::optional<epoch_id_type> epoch) {
     epoch_id_type ld_epoch{};
     if (epoch.has_value()) {
         ld_epoch = epoch.value();
@@ -261,9 +260,6 @@ void compaction(dblog_scan &ds, std::optional<epoch_id_type> epoch, compaction_c
     VLOG_LP(log_info) << "renaming " << tmp << " to " << from_dir;
     boost::filesystem::rename(tmp, from_dir);
 
-    std::set<compacted_file_info> compacted_files = {compacted_file_info(catalog.get_compacted_filename(), 1)};
-    std::set<std::string> detached_pwals;
-    catalog.update_catalog_file(ld_epoch, compacted_files, detached_pwals);
     std::cout << "compaction was successfully completed: " << from_dir << std::endl;
 }
 
@@ -297,20 +293,11 @@ int main(char *dir, subcommand mode) {  // NOLINT
     }
     try {
         check_and_migrate_logdir_format(p);
-        compaction_catalog catalog = compaction_catalog::from_catalog_file(p);
-        const auto& detached_pwals = catalog.get_detached_pwals();
-        std::set<std::string> non_detached_files;
-        for (const auto& entry : boost::filesystem::directory_iterator(p)) {
-            auto file_name = entry.path().filename().string();
-            if (detached_pwals.find(file_name) == detached_pwals.end()) {
-                non_detached_files.insert(file_name);
-            }
-        }
-        dblog_scan ds(p, non_detached_files);
+        dblog_scan ds(p);
         ds.set_thread_num(FLAGS_thread_num);
         if (mode == cmd_inspect) inspect(ds, opt_epoch);
         if (mode == cmd_repair) repair(ds, opt_epoch);
-        if (mode == cmd_compaction) compaction(ds, opt_epoch, catalog);
+        if (mode == cmd_compaction) compaction(ds, opt_epoch);
     } catch (std::runtime_error& e) {
         LOG(ERROR) << e.what();
         log_and_exit(64);
