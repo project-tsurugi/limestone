@@ -120,6 +120,19 @@ install(
         COMPONENT Runtime
 )
 
+
+set(SCRIPT_DIR "${CMAKE_SOURCE_DIR}/scripts")
+set(SCRIPTS
+    "${SCRIPT_DIR}/tgcmpct_logs.sh"
+    "${SCRIPT_DIR}/tgdel_logs.sh"
+)
+
+install(
+    FILES ${SCRIPTS}
+    DESTINATION ${CMAKE_INSTALL_BINDIR}
+    PERMISSIONS OWNER_EXECUTE OWNER_WRITE OWNER_READ GROUP_EXECUTE GROUP_READ WORLD_EXECUTE WORLD_READ
+)
+
 install(
     DIRECTORY include/
     DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/${export_name}"
