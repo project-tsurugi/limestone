@@ -18,6 +18,7 @@
 #include <boost/filesystem/fstream.hpp>
 #include <cstdlib>
 #include <cstring>
+#include <map>
 #include <mutex>
 
 #include <glog/logging.h>
