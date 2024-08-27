@@ -1,7 +1,6 @@
 #include <thread>
 
 #include <boost/filesystem.hpp>
-#include <boost/stacktrace.hpp>
 
 #include <limestone/logging.h>
 #include <limestone/api/compaction_catalog.h>
@@ -92,7 +91,7 @@ protected:
             datastore_->compact_with_online();
         } catch (const std::exception& e) {
             std::cerr << "Exception caught: " << e.what() << std::endl;
-            std::cerr << "Stacktrace: " << std::endl << boost::stacktrace::stacktrace() << std::endl;
+            // std::cerr << "Stacktrace: " << std::endl << boost::stacktrace::stacktrace() << std::endl;
 
             compaction_completed.store(true);
             if (switch_epoch_thread.joinable()) {
@@ -101,7 +100,7 @@ protected:
             throw;  // Rethrow the exception to be handled by the caller
         } catch (...) {
             std::cerr << "Unknown exception caught" << std::endl;
-            std::cerr << "Stacktrace: " << std::endl << boost::stacktrace::stacktrace() << std::endl;
+            // std::cerr << "Stacktrace: " << std::endl << boost::stacktrace::stacktrace() << std::endl;
 
             compaction_completed.store(true);
             if (switch_epoch_thread.joinable()) {
