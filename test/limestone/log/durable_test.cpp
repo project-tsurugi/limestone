@@ -164,10 +164,10 @@ std::tuple<limestone::api::log_entry::read_error, limestone::api::epoch_id_type,
     std::vector<log_entry> entries;
     limestone::api::epoch_id_type durable_epoch = UINT64_MAX;
     try {
-        durable_epoch = ds.scan_one_pwal_file(p, ld_epoch, [&entries](log_entry& e){ entries.emplace_back(e); }, [&err](log_entry::read_error& e) -> bool {
+        durable_epoch = ds.scan_one_pwal_file(p, ld_epoch, [&entries](void*, log_entry& e){ entries.emplace_back(e); }, [&err](log_entry::read_error& e) -> bool {
             err = e;
             throw std::runtime_error("pwal file read error");
-        }, ec);
+        }, ec, 0);
     } catch (std::runtime_error& re) {
     }
     return {err, durable_epoch, std::move(entries)};

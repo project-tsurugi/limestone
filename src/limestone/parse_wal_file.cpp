@@ -206,9 +206,9 @@ void invalidate_epoch_snippet(boost::filesystem::fstream& strm, std::streampos f
 // scan the file, and check max epoch number in this file
 epoch_id_type dblog_scan::scan_one_pwal_file(  // NOLINT(readability-function-cognitive-complexity)
         const boost::filesystem::path& p, epoch_id_type ld_epoch,
-        const std::function<void(log_entry&)>& add_entry,
+        const std::function<void(void*, log_entry&)>& add_entry,
         const error_report_func_t& report_error,
-        parse_error& pe) {
+        parse_error& pe, void* tc) {
     VLOG_LP(log_info) << "processing pwal file: " << p.filename().string();
     epoch_id_type current_epoch{UINT64_MAX};
     epoch_id_type max_epoch_of_file{0};
@@ -251,7 +251,7 @@ epoch_id_type dblog_scan::scan_one_pwal_file(  // NOLINT(readability-function-co
 // normal_entry | remove_entry | clear_storage | add_storage | remove_storage : (not 1st) { if (valid) process-entry } -> loop
             if (!first) {
                 if (valid) {
-                    add_entry(e);
+                    add_entry(tc, e);
                 }
             } else {
                 err_unexpected();

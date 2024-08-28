@@ -122,15 +122,16 @@ void dblog_scan::detach_wal_files(bool skip_empty_files) {
 }
 
 epoch_id_type dblog_scan::scan_pwal_files(  // NOLINT(readability-function-cognitive-complexity)
-        epoch_id_type ld_epoch, const std::function<void(log_entry&)>& add_entry,
+        epoch_id_type ld_epoch, const std::function<void(void*, log_entry&)>& add_entry,
+        thread_context_base* tcb,
         const error_report_func_t& report_error, dblog_scan::parse_error::code* max_parse_error_value) {
     std::atomic<epoch_id_type> max_appeared_epoch{ld_epoch};
     if (max_parse_error_value) { *max_parse_error_value = dblog_scan::parse_error::failed; }
     std::atomic<dblog_scan::parse_error::code> max_error_value{dblog_scan::parse_error::code::ok};
-    auto process_file = [&](const boost::filesystem::path& p) {  // NOLINT(readability-function-cognitive-complexity)
+    auto process_file = [&](void* tc, const boost::filesystem::path& p) {  // NOLINT(readability-function-cognitive-complexity)
         if (is_wal(p)) {
             parse_error ec;
-            auto rc = scan_one_pwal_file(p, ld_epoch, add_entry, report_error, ec);
+            auto rc = scan_one_pwal_file(p, ld_epoch, add_entry, report_error, ec, tc);
             epoch_id_type max_epoch_of_file = rc;
             auto ec_value = ec.value();
             switch (ec_value) {
@@ -193,6 +194,8 @@ epoch_id_type dblog_scan::scan_pwal_files(  // NOLINT(readability-function-cogni
     workers.reserve(thread_num_);
     for (int i = 0; i < thread_num_; i++) {
         workers.emplace_back(std::thread([&](){
+            void * tc = nullptr;
+            if (tcb) { tc = tcb->thread_start(); }
             for (;;) {
                 boost::filesystem::path p;
                 {
@@ -203,7 +206,7 @@ epoch_id_type dblog_scan::scan_pwal_files(  // NOLINT(readability-function-cogni
                 }
 
                 try {
-                    process_file(p);
+                    process_file(tc, p);
                 } catch (std::runtime_error& ex) {
                     VLOG(log_info) << "/:limestone catch runtime_error(" << ex.what() << ")";
                     {
@@ -216,6 +219,7 @@ epoch_id_type dblog_scan::scan_pwal_files(  // NOLINT(readability-function-cogni
                     break;
                 }
             }
+            if (tcb) { tcb->thread_end(tc); }
         }));
     }
     for (int i = 0; i < thread_num_; i++) {
@@ -230,12 +234,12 @@ epoch_id_type dblog_scan::scan_pwal_files(  // NOLINT(readability-function-cogni
 
 // called from datastore::create_snapshot
 // db_startup mode
-epoch_id_type dblog_scan::scan_pwal_files_throws(epoch_id_type ld_epoch, const std::function<void(log_entry&)>& add_entry) {
+epoch_id_type dblog_scan::scan_pwal_files_throws(epoch_id_type ld_epoch, const std::function<void(void*, log_entry&)>& add_entry, thread_context_base* tcb) {
     set_fail_fast(true);
     set_process_at_nondurable_epoch_snippet(process_at_nondurable::repair_by_mark);
     set_process_at_truncated_epoch_snippet(process_at_truncated::report);
     set_process_at_damaged_epoch_snippet(process_at_damaged::report);
-    return scan_pwal_files(ld_epoch, add_entry, log_error_and_throw);
+    return scan_pwal_files(ld_epoch, add_entry, tcb, log_error_and_throw);
 }
 
 void dblog_scan::rescan_directory_paths() {

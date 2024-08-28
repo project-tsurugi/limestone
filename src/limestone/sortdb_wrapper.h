@@ -85,6 +85,44 @@ public:
         throw std::runtime_error("error in sortdb put");
     }
 
+    using batch = WriteBatch;
+    batch* batch_start() {
+        return new WriteBatch();
+    }
+
+    void batch_end(batch* batch) {
+        if (batch->Count() != 0) {
+            LOG_LP(ERROR) << "programming error, unflushed batch count = " << batch->Count();
+            throw std::runtime_error("error in sortdb batch_end");
+        }
+        delete batch;
+    }
+
+    void batch_put(batch* batch, const std::string& key, const std::string& value) {
+        auto status = batch->Put(key, value);
+        if (!status.ok()) {
+            LOG_LP(ERROR) << "sortdb batch put error, status: " << status.ToString();
+            throw std::runtime_error("error in sortdb batch put");
+        }
+        if (batch->Count() >= 256) {
+            flush(batch);
+        }
+    }
+
+    void flush(batch* batch) {
+        if (batch->Count() != 0) {
+            LOG_LP(INFO) << batch->Count();
+            WriteOptions write_options{};
+            auto status = sortdb_->Write(write_options, batch);
+            if (!status.ok()) {
+                LOG_LP(ERROR) << "sortdb flush error, status: " << status.ToString();
+                throw std::runtime_error("error in sortdb flush");
+            }
+            LOG_LP(INFO) << batch->Count();
+            batch->Clear();
+        }
+    }
+
     bool get(const std::string& key, std::string* value) {
         ReadOptions read_options{};
         auto status = sortdb_->Get(read_options, key, value);

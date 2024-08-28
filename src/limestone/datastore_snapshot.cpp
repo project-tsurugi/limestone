@@ -94,7 +94,11 @@ static int comp_twisted_key(const std::string_view& a, const std::string_view& b
 }
 
 [[maybe_unused]]
-static void insert_entry_or_update_to_max(sortdb_wrapper* sortdb, const log_entry& e) {
+static void insert_entry_or_update_to_max(sortdb_wrapper* sortdb, sortdb_wrapper::batch* b, const log_entry& e) {
+    (void)b;
+    // not using batch mode;
+    // 1. this mode is RMW; so need WBWI
+    // 2. this mode is works_with_multi_thread = false, so less need for batch
     bool need_write = true;
     // skip older entry than already inserted
     std::string value;
@@ -114,7 +118,7 @@ static void insert_entry_or_update_to_max(sortdb_wrapper* sortdb, const log_entr
 }
 
 [[maybe_unused]]
-static void insert_twisted_entry(sortdb_wrapper* sortdb, const log_entry& e) {
+static void insert_twisted_entry(sortdb_wrapper* sortdb, sortdb_wrapper::batch* b, const log_entry& e) {
     // key_sid: storage_id[8] key[*], value_etc: epoch[8]LE minor_version[8]LE value[*], type: type[1]
     // db_key: epoch[8]BE minor_version[8]BE storage_id[8] key[*], db_value: type[1] value[*]
     std::string db_key(write_version_size + e.key_sid().size(), '\0');
@@ -123,8 +127,23 @@ static void insert_twisted_entry(sortdb_wrapper* sortdb, const log_entry& e) {
     std::memcpy(&db_key[write_version_size], e.key_sid().data(), e.key_sid().size());
     std::string db_value(1, static_cast<char>(e.type()));
     db_value.append(e.value_etc().substr(write_version_size));
-    sortdb->put(db_key, db_value);
+    sortdb->batch_put(b, db_key, db_value);
 }
+
+class sortdb_batch_context : public dblog_scan::thread_context_base {
+    sortdb_wrapper* sw;
+public:
+    sortdb_batch_context(sortdb_wrapper* sw0) : sw(sw0) {}
+    void* thread_start() override {
+        return sw->batch_start();
+    }
+
+    void thread_end(void*p) override {
+        auto* b = (sortdb_wrapper::batch*)p;
+        sw->flush(b);
+        sw->batch_end(b);
+    }
+};
 
 static std::pair<epoch_id_type, sorting_context> create_sorted_from_wals(
     const boost::filesystem::path& from_dir,
@@ -146,11 +165,12 @@ static std::pair<epoch_id_type, sorting_context> create_sorted_from_wals(
     const auto add_entry_to_point = insert_entry_or_update_to_max;
     bool works_with_multi_thread = false;
 #endif
-    auto add_entry = [&sctx, &add_entry_to_point](const log_entry& e){
+    auto add_entry = [&sctx, &add_entry_to_point](void* thread_context, const log_entry& e){
+        (void)thread_context;
         switch (e.type()) {
         case log_entry::entry_type::normal_entry:
         case log_entry::entry_type::remove_entry:
-            add_entry_to_point(sctx.get_sortdb(), e);
+            add_entry_to_point(sctx.get_sortdb(), (sortdb_wrapper::batch*)thread_context, e);
             break;
         case log_entry::entry_type::clear_storage:
         case log_entry::entry_type::remove_storage: {  // remove_storage is treated as clear_storage
@@ -172,8 +192,9 @@ static std::pair<epoch_id_type, sorting_context> create_sorted_from_wals(
         num_worker = 1;
     }
     logscan.set_thread_num(num_worker);
+    sortdb_batch_context bc(sctx.get_sortdb());
     try {
-        epoch_id_type max_appeared_epoch = logscan.scan_pwal_files_throws(ld_epoch, add_entry);
+        epoch_id_type max_appeared_epoch = logscan.scan_pwal_files_throws(ld_epoch, add_entry, &bc);
         return {max_appeared_epoch, std::move(sctx)};
     } catch (std::runtime_error& e) {
         VLOG_LP(log_info) << "failed to scan pwal files: " << e.what();

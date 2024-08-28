@@ -163,21 +163,29 @@ public:
 
     epoch_id_type last_durable_epoch_in_dir();
 
+class thread_context_base {
+public:
+    virtual void* thread_start() = 0;
+    virtual void thread_end(void*) = 0;
+};
+
     /**
      * @returns max epoch value in directory
      * @throws exception on error
      */
-    epoch_id_type scan_pwal_files_throws(epoch_id_type ld_epoch, const std::function<void(log_entry&)>& add_entry);
+    epoch_id_type scan_pwal_files_throws(epoch_id_type ld_epoch, const std::function<void(void*, log_entry&)>& add_entry, thread_context_base *tcb = nullptr);
+
     /**
      * @returns max epoch value in directory
      */
-    epoch_id_type scan_pwal_files(epoch_id_type ld_epoch, const std::function<void(log_entry&)>& add_entry,
+    epoch_id_type scan_pwal_files(epoch_id_type ld_epoch, const std::function<void(void*, log_entry&)>& add_entry,
+        thread_context_base* tcb,
         const error_report_func_t& report_error, dblog_scan::parse_error::code* max_parse_error_value = nullptr);
 
     epoch_id_type scan_one_pwal_file(const boost::filesystem::path& p, epoch_id_type ld_epoch,
-        const std::function<void(log_entry&)>& add_entry,
+        const std::function<void(void*, log_entry&)>& add_entry,
         const error_report_func_t& report_error,
-        parse_error& pe);
+        parse_error& pe, void*);
 
     static bool is_wal(const boost::filesystem::path& p) { return p.filename().string().rfind(log_channel_prefix, 0) == 0; }
     static bool is_detached_wal(const boost::filesystem::path& p) {

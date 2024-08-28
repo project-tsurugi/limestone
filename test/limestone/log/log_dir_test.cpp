@@ -52,7 +52,7 @@ const boost::filesystem::path compaction_catalog_path = boost::filesystem::path(
 
     static bool starts_with(std::string a, std::string b) { return a.substr(0, b.length()) == b; }
     static bool is_pwal(const boost::filesystem::path& p) { return starts_with(p.filename().string(), "pwal"); }
-    static void ignore_entry(limestone::api::log_entry&) {}
+    static void ignore_entry(void*, limestone::api::log_entry&) {}
 
     void create_mainfest_file(int persistent_format_version = 1) {
         create_file(manifest_path, data_manifest(persistent_format_version));
@@ -281,7 +281,7 @@ TEST_F(log_dir_test, scan_pwal_files_in_dir_returns_max_epoch_nondurable) {
     // EXPECT_EQ(limestone::internal::scan_pwal_files_in_dir(location, 2, is_pwal, 0x100, ignore_entry), 0x101);
     limestone::internal::dblog_scan ds{boost::filesystem::path(location)};
     ds.set_thread_num(2);
-    EXPECT_EQ(ds.scan_pwal_files(0x100, ignore_entry, [](limestone::api::log_entry::read_error&){return false;}), 0x101);
+    EXPECT_EQ(ds.scan_pwal_files(0x100, ignore_entry, nullptr, [](limestone::api::log_entry::read_error&){return false;}), 0x101);
 }
 
 TEST_F(log_dir_test, scan_pwal_files_in_dir_rejects_unexpected_EOF) {

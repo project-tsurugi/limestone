@@ -75,7 +75,7 @@ void inspect(dblog_scan &ds, std::optional<epoch_id_type> epoch) {
     ds.set_process_at_damaged_epoch_snippet(dblog_scan::process_at_damaged::report);
     ds.set_fail_fast(false);
     dblog_scan::parse_error::code max_ec{};
-    epoch_id_type max_appeared_epoch = ds.scan_pwal_files(epoch.value_or(ld_epoch), [&](log_entry& e){
+    epoch_id_type max_appeared_epoch = ds.scan_pwal_files(epoch.value_or(ld_epoch), [&](void*, log_entry& e){
         if (e.type() == log_entry::entry_type::normal_entry) {
             VLOG(50) << "normal";
             count_normal_entry++;
@@ -85,7 +85,7 @@ void inspect(dblog_scan &ds, std::optional<epoch_id_type> epoch) {
         } else {
             LOG(ERROR) << static_cast<int>(e.type());
         }
-    }, [](log_entry::read_error& ec){
+    }, nullptr, [](log_entry::read_error& ec){
         VLOG(30) << "ERROR " << ec.value() << " : " << ec.message();
         return false;
     }, &max_ec);
@@ -136,7 +136,7 @@ void repair(dblog_scan &ds, std::optional<epoch_id_type> epoch) {
     ds.rescan_directory_paths();
     std::atomic_size_t count_wal_entry = 0;
     dblog_scan::parse_error::code max_ec{};
-    ds.scan_pwal_files(ld_epoch, [&count_wal_entry](log_entry&){ count_wal_entry++; }, [](log_entry::read_error& e) -> bool {
+    ds.scan_pwal_files(ld_epoch, [&count_wal_entry](void*, log_entry&){ count_wal_entry++; }, nullptr, [](log_entry::read_error& e) -> bool {
         LOG_LP(ERROR) << "this pwal file is broken: " << e.message();
         return false;
     }, &max_ec);

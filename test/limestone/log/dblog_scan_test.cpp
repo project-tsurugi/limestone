@@ -76,13 +76,13 @@ static constexpr const char* location = "/tmp/dblog_scan_test";
         dblog_scan::parse_error pe;
         std::vector<log_entry::read_error> errors;
 
-        epoch_id_type max_epoch = ds.scan_one_pwal_file(p, 0x100, [](const log_entry& e){
+        epoch_id_type max_epoch = ds.scan_one_pwal_file(p, 0x100, [](void*, const log_entry& e){
             VLOG(30) << static_cast<int>(e.type());
         }, [&errors](const log_entry::read_error& re){
             VLOG(30) << re.message();
             errors.emplace_back(re);
             return false;
-        }, pe);
+        }, pe, 0);
 
         check(p, max_epoch, errors, pe);
         EXPECT_EQ(boost::filesystem::file_size(p), data.size());  // no size change
@@ -99,13 +99,13 @@ static constexpr const char* location = "/tmp/dblog_scan_test";
         dblog_scan::parse_error pe;
         std::vector<log_entry::read_error> errors;
 
-        epoch_id_type max_epoch = ds.scan_one_pwal_file(p, 0x100, [](const log_entry& e){
+        epoch_id_type max_epoch = ds.scan_one_pwal_file(p, 0x100, [](void*, const log_entry& e){
             VLOG(30) << static_cast<int>(e.type());
         }, [&errors](const log_entry::read_error& re){
             VLOG(30) << re.message();
             errors.emplace_back(re);
             return false;
-        }, pe);
+        }, pe, 0);
 
         check(p, max_epoch, errors, pe);
         EXPECT_EQ(boost::filesystem::file_size(p), data.size());  // no size change
@@ -122,13 +122,13 @@ static constexpr const char* location = "/tmp/dblog_scan_test";
         dblog_scan::parse_error pe;
         std::vector<log_entry::read_error> errors;
 
-        epoch_id_type max_epoch = ds.scan_one_pwal_file(p, 0x100, [](const log_entry& e){
+        epoch_id_type max_epoch = ds.scan_one_pwal_file(p, 0x100, [](void*, const log_entry& e){
             VLOG(30) << static_cast<int>(e.type());
         }, [&errors](const log_entry::read_error& re){
             VLOG(30) << re.message();
             errors.emplace_back(re);
             return false;
-        }, pe);
+        }, pe, 0);
 
         check(p, max_epoch, errors, pe);
     }
