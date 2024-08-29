@@ -138,7 +138,16 @@ rotation_result log_channel::do_rotate_file(epoch_id_type epoch) {
        << "." << epoch;
     std::string new_name = ss.str();
     boost::filesystem::path new_file = location_ / new_name;
-    boost::filesystem::rename(file_path(), new_file);
+
+    // Rename the file and handle any errors
+    boost::system::error_code error;
+    boost::filesystem::rename(file_path(), new_file, error);
+    if (error) {
+        LOG_LP(ERROR) << "Failed to rename file: " << file_path() << " to " << new_file 
+                      << ", error_code: " << error.message();
+        throw std::runtime_error("Failed to rename file: " + file_path().string());
+    }
+
     envelope_.add_file(new_file);
 
     registered_ = false;

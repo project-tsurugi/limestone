@@ -13,6 +13,11 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
+#include <limestone/logging.h>
+
+#include <glog/logging.h>
+#include <limestone/logging.h>
+#include "logging_helper.h"
 
 #include <limestone/api/rotation_task.h>
 #include <limestone/api/datastore.h>
@@ -59,14 +64,18 @@ void rotation_result::add_rotation_result(const rotation_result& other) {
 rotation_task::rotation_task(datastore& envelope) 
     : envelope_(envelope),  result_future_(result_promise_.get_future()) {}
 
-
 void rotation_task::rotate() {
     rotation_result final_result;
     for (const auto& lc : envelope_.log_channels_) {
         boost::system::error_code error;
         bool result = boost::filesystem::exists(lc->file_path(), error);
-        if (!result || error) {
-            continue;  // skip if not exists
+        if (error) {
+            LOG_LP(ERROR) << "Failed to check if file exists: " << lc->file_path() << ", error_code: " << error.message();
+            throw std::runtime_error("Failed to check if file exists: " + lc->file_path().string());
+        }
+        if (!result) {
+            LOG_LP(INFO) << "File does not exist, skipping: " << lc->file_path();
+            continue;  // skip if file does not exist
         }
         // The following code may seem necessary at first glance, but there is a possibility
         // that files could be appended to before the rotation is complete.
