@@ -16,7 +16,6 @@
 #include <limestone/logging.h>
 
 #include <glog/logging.h>
-#include <limestone/logging.h>
 #include "logging_helper.h"
 
 #include <limestone/api/rotation_task.h>
@@ -73,11 +72,10 @@ void rotation_task::rotate() {
             if (error == boost::system::errc::no_such_file_or_directory || !result) {
                 LOG_LP(INFO) << "File does not exist, skipping: " << lc->file_path();
                 continue;
-            } else {
-                // For any other errors
-                LOG_LP(ERROR) << "Failed to check if file exists: " << lc->file_path() << ", error_code: " << error.message();
-                throw std::runtime_error("Failed to check if file exists: " + lc->file_path().string());
             }
+            // For any other errors
+            LOG_LP(ERROR) << "Failed to check if file exists: " << lc->file_path() << ", error_code: " << error.message();
+            throw std::runtime_error("Failed to check if file exists: " + lc->file_path().string());
         }
 
         // The following code may seem necessary at first glance, but there is a possibility
