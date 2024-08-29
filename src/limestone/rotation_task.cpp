@@ -70,13 +70,16 @@ void rotation_task::rotate() {
         boost::system::error_code error;
         bool result = boost::filesystem::exists(lc->file_path(), error);
         if (error) {
-            LOG_LP(ERROR) << "Failed to check if file exists: " << lc->file_path() << ", error_code: " << error.message();
-            throw std::runtime_error("Failed to check if file exists: " + lc->file_path().string());
+            if (error == boost::system::errc::no_such_file_or_directory || !result) {
+                LOG_LP(INFO) << "File does not exist, skipping: " << lc->file_path();
+                continue;
+            } else {
+                // For any other errors
+                LOG_LP(ERROR) << "Failed to check if file exists: " << lc->file_path() << ", error_code: " << error.message();
+                throw std::runtime_error("Failed to check if file exists: " + lc->file_path().string());
+            }
         }
-        if (!result) {
-            LOG_LP(INFO) << "File does not exist, skipping: " << lc->file_path();
-            continue;  // skip if file does not exist
-        }
+
         // The following code may seem necessary at first glance, but there is a possibility
         // that files could be appended to before the rotation is complete.
         // In that case, skipping them could result in missing files that should be processed.
