@@ -324,8 +324,8 @@ TEST_F(online_compaction_test, scenario01) {
     ASSERT_PRED_FORMAT3(ContainsPrefix, pwals, "pwal_0001.", 1);
 
     // Remove detached PWALs to ensure that only compacted files are read.
-    std::system(("rm " + std::string(location) + "/pwal_000?.0*").c_str());
-    
+    [[maybe_unused]] int result = std::system(("rm " + std::string(location) + "/pwal_000?.0*").c_str());
+
     pwals = extract_pwal_files_from_datastore();
     EXPECT_EQ(pwals.size(), 3);
     ASSERT_PRED_FORMAT3(ContainsPrefix, pwals, "pwal_0000.", 2); // pwal_0000.xxx and pwal_0000.compacted
@@ -414,7 +414,7 @@ TEST_F(online_compaction_test, scenario01) {
     ASSERT_PRED_FORMAT3(ContainsPrefix, pwals, "pwal_0002.", 1);
 
     // Delete some detached PWALs.
-    std::system(("rm " + std::string(location) + "/pwal_000[12].*").c_str());
+    [[maybe_unused]] int result2 = std::system(("rm " + std::string(location) + "/pwal_000[12].*").c_str());
 
     pwals = extract_pwal_files_from_datastore();
     EXPECT_EQ(pwals.size(), 4);
@@ -649,7 +649,7 @@ TEST_F(online_compaction_test, scenario02) {
     ASSERT_PRED_FORMAT3(ContainsPrefix, pwals, "pwal_0001.", 1);
 
     // Remove detached PWALs to ensure that only compacted files are read.
-    std::system(("rm " + std::string(location) + "/pwal_000?.0*").c_str());
+    [[maybe_unused]] int result = std::system(("rm " + std::string(location) + "/pwal_000?.0*").c_str());
 
     pwals = extract_pwal_files_from_datastore();  
     EXPECT_EQ(pwals.size(), 3); // Not yet detected that it has been deleted
@@ -708,7 +708,7 @@ TEST_F(online_compaction_test, scenario02) {
     ASSERT_PRED_FORMAT3(ContainsPrefix, pwals, "pwal_0002.", 1);
 
     // Delete some detached PWALs.
-    std::system(("rm " + std::string(location) + "/pwal_000[12].*").c_str());
+    [[maybe_unused]] int result2 = std::system(("rm " + std::string(location) + "/pwal_000[12].*").c_str());
 
     pwals = extract_pwal_files_from_datastore();
     EXPECT_EQ(pwals.size(), 4); // Not yet detected that it has been deleted
