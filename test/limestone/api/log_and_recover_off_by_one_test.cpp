@@ -101,7 +101,7 @@ TEST_F(log_and_recover_off_by_one_test, log_and_recovery) {
 
     cursor->key(buf);
     auto it1 = expectation.find(buf);
-    ASSERT_FALSE(it1 == expectation.end());
+    ASSERT_NE(it1, expectation.end());
     cursor->value(buf);
     ASSERT_EQ(buf, it1->second);
     ASSERT_EQ(cursor->storage(), st);
@@ -110,7 +110,7 @@ TEST_F(log_and_recover_off_by_one_test, log_and_recovery) {
 
     cursor->key(buf);
     auto it2 = expectation.find(buf);
-    ASSERT_FALSE(it2 == expectation.end());
+    ASSERT_NE(it2, expectation.end());
     cursor->value(buf);
     ASSERT_EQ(buf, it2->second);
     ASSERT_EQ(cursor->storage(), st);

@@ -121,7 +121,7 @@ TEST_F(multiple_recover_test, two_recovery) {
         std::string buf{};
         cursor->key(buf);
         auto it = expectation.find(buf);
-        ASSERT_FALSE(it == expectation.end());
+        ASSERT_NE(it,  expectation.end());
         cursor->value(buf);
         ASSERT_EQ(buf, it->second.second);
         ASSERT_EQ(cursor->storage(), it->second.first);
