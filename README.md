@@ -42,7 +42,6 @@ available options:
 * `-DBUILD_TESTS=OFF` - don't build test programs
 * `-DBUILD_DOCUMENTS=OFF` - don't build documents by doxygen
 * `-DINSTALL_EXAMPLES=ON` - install example applications
-* `-DFORCE_INSTALL_RPATH=ON` - automatically configure `INSTALL_RPATH` for non-default library paths
 * `-DRECOVERY_SORTER_KVSLIB=<library>` - select the eKVS library using at recovery process. (`LEVELDB` (default) or `ROCKSDB`, case-insensitive)
 * `-DRECOVERY_SORTER_PUT_ONLY=ON` - using put-only method at recovery process (faster)
 * for debugging only
@@ -51,8 +50,8 @@ available options:
   * `-DENABLE_COVERAGE=ON` - enable code coverage analysis (requires `-DCMAKE_BUILD_TYPE=Debug`)
   * `-DTRACY_ENABLE=ON` - enable tracy profiler for multi-thread debugging. See section below.
   * `-DLIKWID_ENABLE=ON` - enable LIKWID for performance metrics. See section below.
-    
-### install 
+
+### install
 
 ```sh
 cmake --build . --target install
