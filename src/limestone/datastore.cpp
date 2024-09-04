@@ -27,10 +27,11 @@
 
 #include <limestone/api/datastore.h>
 #include "internal.h"
-#include <limestone/api/compaction_catalog.h>
+
 #include <limestone/api/rotation_task.h>
 #include "log_entry.h"
 #include "online_compaction.h"
+#include "compaction_catalog.h"
 
 namespace limestone::api {
 using namespace limestone::internal;
@@ -67,7 +68,7 @@ datastore::datastore(configuration const& conf) : location_(conf.data_locations_
     }
     internal::check_and_migrate_logdir_format(location_);
     add_file(compaction_catalog_path);
-    compaction_catalog_ = compaction_catalog::from_catalog_file(location_);
+    compaction_catalog_ = std::make_unique<compaction_catalog>(compaction_catalog::from_catalog_file(location_));
 
     // XXX: prusik era
     // TODO: read rotated epoch files if main epoch file does not exist

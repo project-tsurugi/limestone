@@ -22,8 +22,8 @@
 #include "logging_helper.h"
 
 #include <limestone/api/datastore.h>
-#include <limestone/api/compaction_catalog.h>
 
+#include "compaction_catalog.h"
 #include "internal.h"
 #include "log_entry.h"
 

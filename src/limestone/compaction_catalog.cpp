@@ -24,11 +24,11 @@
 #include <boost/filesystem.hpp>
 
 
-#include <limestone/api/compaction_catalog.h>
+#include "compaction_catalog.h"
 #include "logging_helper.h"
-#include <limestone/api/epoch_id_type.h>
+#include "limestone/api/epoch_id_type.h"
 
-namespace limestone::api {
+namespace limestone::internal {
 
 using limestone::api::epoch_id_type;
 
@@ -256,4 +256,4 @@ const std::set<std::string>& compaction_catalog::get_detached_pwals() const {
     return detached_pwals_;
 }
 
-} // namespace limestone::api
+} // namespace limestone::internal

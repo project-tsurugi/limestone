@@ -38,8 +38,10 @@
 #include <limestone/api/tag_repository.h>
 #include <limestone/api/restore_progress.h>
 #include <limestone/api/rotation_task.h>
-#include <limestone/api/compaction_catalog.h>
 
+namespace limestone::internal {
+    class compaction_catalog; 
+}
 namespace limestone::api {
 
 /**
@@ -256,7 +258,7 @@ private:
 
     std::atomic<bool> stop_online_compaction_worker_{false};
 
-    std::optional<compaction_catalog> compaction_catalog_;
+    std::unique_ptr<limestone::internal::compaction_catalog> compaction_catalog_;
 
     void online_compaction_worker();
 

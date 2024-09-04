@@ -17,11 +17,11 @@
 #include "online_compaction.h"
 
 #include <glog/logging.h>
-#include <limestone/api/compaction_catalog.h>
 #include <limestone/logging.h>
 
 #include <boost/filesystem.hpp>
 #include "logging_helper.h"
+#include "compaction_catalog.h"
 
 namespace limestone::internal {
 

@@ -16,13 +16,13 @@
 
 #include <gtest/gtest.h>
 #include <boost/filesystem.hpp>
-#include <limestone/api/compaction_catalog.h>
+#include "compaction_catalog.h"
 
 namespace limestone::testing {
 
 using limestone::api::epoch_id_type;
-using limestone::api::compacted_file_info;
-using limestone::api::compaction_catalog;
+using limestone::internal::compacted_file_info;
+using limestone::internal::compaction_catalog;
 class compaction_catalog_test : public ::testing::Test {
 protected:
     void SetUp() override {

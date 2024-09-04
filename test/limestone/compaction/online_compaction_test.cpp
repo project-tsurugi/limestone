@@ -20,13 +20,13 @@
 #include <boost/filesystem.hpp>
 
 #include <limestone/logging.h>
-#include <limestone/api/compaction_catalog.h>
 #include <limestone/api/datastore.h>
 
 #include "dblog_scan.h"
 #include "internal.h"
 #include "log_entry.h"
 #include "online_compaction.h"
+#include "compaction_catalog.h"
 
 #include "test_root.h"
 

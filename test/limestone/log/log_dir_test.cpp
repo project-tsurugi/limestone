@@ -2,17 +2,17 @@
 #include <boost/filesystem.hpp>
 
 #include <limestone/logging.h>
-#include <limestone/api/compaction_catalog.h>
 
 #include "dblog_scan.h"
 #include "internal.h"
 #include "log_entry.h"
+#include "compaction_catalog.h"
 
 #include "test_root.h"
 
 using namespace std::literals;
 using dblog_scan = limestone::internal::dblog_scan;
-using compaction_catalog = limestone::api::compaction_catalog;
+using compaction_catalog = limestone::internal::compaction_catalog;
 
 namespace limestone::testing {
 

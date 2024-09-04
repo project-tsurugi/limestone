@@ -24,7 +24,9 @@
 
 #include "limestone/api/epoch_id_type.h"
 
-namespace limestone::api {
+namespace limestone::internal {
+
+using namespace limestone::api;
 
 /**
  * @brief Structure to hold information about compacted files.
@@ -208,8 +210,6 @@ private:
     epoch_id_type max_epoch_id_ = 0;                   ///< Maximum epoch ID included in the compacted files
 
     // Set of filenames for compacted files.
-    // Compacted files are those with filenames starting with "cmpct",
-    // and they contain deduplicated data from PWAL files.
     boost::filesystem::path catalog_file_path_;
 
     // Set of filenames for compacted PWAL files.
@@ -223,6 +223,6 @@ private:
     [[nodiscard]] std::string create_catalog_content() const;
 };
 
-} // namespace limestone::api
+} // namespace limestone::internal
 
 #endif // COMPACTION_CATALOG_H
