@@ -6,9 +6,11 @@ add_library(${package_name}
         ${SOURCES}
 )
 
-set_target_properties(${package_name} PROPERTIES
-        OUTPUT_NAME ${export_name}
-        )
+set_target_properties(${package_name}
+        PROPERTIES
+                INSTALL_RPATH "\$ORIGIN/../lib"
+                OUTPUT_NAME ${export_name}
+)
 
 if(${RECOVERY_SORTER_KVSLIB_UPPERCASE} STREQUAL "ROCKSDB")
     set(sort_lib RocksDB::RocksDB)
@@ -70,5 +72,9 @@ target_include_directories(dblogutil
         PRIVATE ./limestone
         )
 target_link_libraries(dblogutil PRIVATE limestone-impl PRIVATE glog::glog gflags::gflags)
-set_target_properties(dblogutil PROPERTIES RUNTIME_OUTPUT_NAME "tglogutil")
+set_target_properties(dblogutil
+        PROPERTIES
+                INSTALL_RPATH "\$ORIGIN/../lib"
+                RUNTIME_OUTPUT_NAME "tglogutil"
+)
 install_custom(dblogutil dblogutil)

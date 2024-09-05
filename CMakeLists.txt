@@ -38,6 +38,10 @@ option(PERFORMANCE_TOOLS "Enable tooling to measure engine performance" OFF)
 option(TRACY_ENABLE "enable tracy profiler" OFF)
 option(ENABLE_ALTIMETER "enable altimeter logging" OFF)
 
+if (FORCE_INSTALL_RPATH)
+    message(DEPRECATION "FORCE_INSTALL_RPATH is obsoleted")
+endif (FORCE_INSTALL_RPATH)
+
 if (ENABLE_GOOGLE_PERFTOOLS)
     set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -DENABLE_GOOGLE_PERFTOOLS")
 endif()
@@ -139,7 +143,7 @@ install(
     COMPONENT Development
     FILES_MATCHING PATTERN "*.h"
 )
-  
+
 configure_file(
         ${CMAKE_CURRENT_SOURCE_DIR}/cmake/Config.cmake.in
         ${CMAKE_CURRENT_BINARY_DIR}/${package_name}-config.cmake
