@@ -28,7 +28,7 @@
 #include <limestone/api/datastore.h>
 #include "internal.h"
 
-#include <limestone/api/rotation_task.h>
+#include "rotation_task.h"
 #include "log_entry.h"
 #include "online_compaction.h"
 #include "compaction_catalog.h"

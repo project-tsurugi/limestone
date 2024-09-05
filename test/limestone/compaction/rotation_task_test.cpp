@@ -14,11 +14,11 @@
  * limitations under the License.
  */
 
-#include <limestone/api/rotation_task.h>
+
 #include <gtest/gtest.h>
 #include <limestone/api/datastore.h>
 #include "test_root.h"
-
+#include "rotation_task.h"
 namespace limestone::testing {
 
 constexpr const char* data_location = "/tmp/rotation_task_test/data_location";

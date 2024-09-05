@@ -26,6 +26,7 @@
 #include <limestone/api/datastore.h>
 #include "internal.h"
 #include "log_entry.h"
+#include "rotation_task.h"
 
 namespace limestone::api {
 

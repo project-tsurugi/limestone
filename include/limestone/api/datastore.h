@@ -37,7 +37,6 @@
 #include <limestone/api/write_version_type.h>
 #include <limestone/api/tag_repository.h>
 #include <limestone/api/restore_progress.h>
-#include <limestone/api/rotation_task.h>
 
 namespace limestone::internal {
     class compaction_catalog; 
