@@ -19,6 +19,7 @@
 #include <cerrno>    // for errno
 #include <cstring>   // for strerror
 #include <sstream>   // for std::stringstream
+#include <array>     // for std::array
 #include <limestone/api/limestone_exception.h>
 
 namespace limestone::internal {
@@ -26,7 +27,7 @@ namespace limestone::internal {
 using namespace limestone::api;
 
 FILE* real_file_operations::open_file(const char* filename, const char* mode) {
-    return ::fopen(filename, mode);
+    return ::fopen(filename, mode); // NOLINT(cppcoreguidelines-owning-memory)
 }
 
 size_t real_file_operations::write_file(const void* ptr, size_t size, size_t count, FILE* stream) {
@@ -38,7 +39,7 @@ int real_file_operations::flush_file(FILE* stream) {
 }
 
 int real_file_operations::close_file(FILE* stream) {
-    return ::fclose(stream);
+    return ::fclose(stream); // NOLINT(cppcoreguidelines-owning-memory)
 }
 
 int real_file_operations::sync_file(int fd) {
@@ -59,19 +60,19 @@ bool real_file_operations::is_eof(FILE* stream) {
 
 std::string real_file_operations::read_line(FILE* stream, int& error_code) {
     std::string line;
-    char buffer[1024];
+    std::array<char, 1024> buffer = {};
 
     while (true) {
-        char* result = fgets(buffer, sizeof(buffer), stream);
+        char* result = fgets(buffer.data(), buffer.size(), stream);
         int ret = errno;
         if (result) {
-            std::string chunk(buffer);
+            std::string chunk(buffer.data());
 
             // Append the chunk to the line
             line += chunk;
 
             // Check if the chunk contains a newline character
-            size_t pos;
+            size_t pos = std::string::npos;
             if ((pos = line.find('\n')) != std::string::npos) {
                 // Handle CRLF case
                 if (pos > 0 && line[pos - 1] == '\r') {
