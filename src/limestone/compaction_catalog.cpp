@@ -91,10 +91,11 @@ void compaction_catalog::load_catalog_file(const boost::filesystem::path& path) 
 
     std::string line;
     if (!std::getline(file, line)) {
+        int error_num = errno;
         if (file.eof()) {
             THROW_LIMESTONE_EXCEPTION("Unexpected end of file while reading header line");
-        } else if (file.fail()) {
-            int error_num = errno;
+        } 
+        if (file.fail()) {
             THROW_LIMESTONE_IO_EXCEPTION("Failed to read line from file", error_num);
         }
     }
@@ -105,16 +106,15 @@ void compaction_catalog::load_catalog_file(const boost::filesystem::path& path) 
     bool max_epoch_id_found = false;
     while (true) {
         if (!std::getline(file, line)) {
+            int error_num = errno;
             if (file.eof()) {
                 break;
-            } else {
-                int error_num = errno;
-                THROW_LIMESTONE_IO_EXCEPTION("Failed to read line from file", error_num);
             }
+            THROW_LIMESTONE_IO_EXCEPTION("Failed to read line from file", error_num);
         }
         if (line == FOOTER_LINE) {
             if (!max_epoch_id_found) {
-                THROW_LIMESTONE_EXCEPTION("MAX_EPOCH_ID entry not found"); 
+                THROW_LIMESTONE_EXCEPTION("MAX_EPOCH_ID entry not found");
             }
             return;  // Footer found, exit successfully
         }
@@ -173,80 +173,70 @@ void compaction_catalog::update_catalog_file(epoch_id_type max_epoch_id, const s
     std::string catalog = create_catalog_content();
 
     // Rename the current catalog file to a backup if it exists
-
     boost::system::error_code ec;
-
     if (boost::filesystem::exists(catalog_file_path_, ec)) {
         if (rename(catalog_file_path_.c_str(), backup_file_path_.c_str()) != 0) {
             int error_num = errno;
-            THROW_LIMESTONE_IO_EXCEPTION("Failed to rename catalog file: " + catalog_file_path_.string() + " to backup file: " + backup_file_path_.string(),
-                                         error_num);
+            THROW_LIMESTONE_IO_EXCEPTION("Failed to rename catalog file: " + catalog_file_path_.string() + " to backup file: " + backup_file_path_.string(), error_num);
         }
     }
     if (ec && ec != boost::system::errc::no_such_file_or_directory) {
         THROW_LIMESTONE_IO_EXCEPTION("Error checking catalog file existence", ec.value());
     }
 
-    // Open the new catalog file using fopen
-    FILE *file = fopen(catalog_file_path_.c_str(), "w"); // NOLINT(*-owning-memory)
+    // Open the new catalog file using fopen and manage it with std::unique_ptr
+    auto file_closer = [](FILE* file) {
+        // NOLINTNEXTLINE(cppcoreguidelines-owning-memory)
+        if (file && fclose(file) != 0) {
+            int error_num = errno;
+            LOG_LP(ERROR) << "fclose failed for file, errno = " << error_num;
+        }
+    };
+    std::unique_ptr<FILE, decltype(file_closer)> file_ptr(fopen(catalog_file_path_.c_str(), "w"), file_closer);
 
-    if (!file) {
+    if (!file_ptr) {
         int error_num = errno;
         THROW_LIMESTONE_IO_EXCEPTION("Failed to open compaction catalog file: " + catalog_file_path_.string(), error_num);
     }
 
-    try {
-        // Write the data to the file using fwrite
-        size_t total_written = 0;
-        size_t catalog_size = catalog.size();
-        const char* data_ptr = catalog.data();
-        while (total_written < catalog_size) {
-            size_t written = fwrite(data_ptr + total_written, 1, catalog_size - total_written, file);
-            int error_num = errno;
-            if (written == 0) {
-                if (ferror(file)) {
-                    THROW_LIMESTONE_IO_EXCEPTION("Failed to write complete data to compaction catalog file '" + catalog_file_path_.string() + "'", error_num);
-                }
-                // Although this case is unlikely, we throw an exception to prevent an infinite loop if fwrite fails without setting an error.
-                THROW_LIMESTONE_EXCEPTION("Failed to write complete data to compaction catalog file '" + catalog_file_path_.string() + "'");
-            }
-            total_written += written;
-        }
-
-        // Perform fflush to ensure all data is written to the file
-        if (fflush(file) != 0) {
-            int error_num = errno;
-            THROW_LIMESTONE_IO_EXCEPTION("Failed to flush the output buffer to file '" + catalog_file_path_.string() + "'", error_num);
-        }
-
-        // Perform fsync to ensure data is written to disk
-        int fd = fileno(file);
-        if (fd == -1) {
-            int error_num = errno;
-            THROW_LIMESTONE_IO_EXCEPTION("Failed to get file descriptor for file '" + catalog_file_path_.string() + "'", error_num);
-        }
-        if (fsync(fd) != 0) {
-            int error_num = errno;
-            THROW_LIMESTONE_IO_EXCEPTION("Failed to fsync compaction catalog file '" + catalog_file_path_.string() + "'", error_num);
-        }
-
-    } catch (...) {
-       // Ensure the file is closed
-        if (fclose(file) != 0) {  // NOLINT(*-owning-memory)
-            int error_num = errno;
-            LOG_LP(ERROR) << "fclose failed for file '" << catalog_file_path_.string() << "', errno = " << error_num;
-            // Do not throw a new exception, just log the error and continue rethrowing the original exception
-        }
-        // Re-throw the original exception
-        throw;
-    }
-
-    // Ensure the file is closed even if no exception occurred
-    if (fclose(file) != 0) {
+    // Write the data to the file using fwrite
+    size_t total_written = 0;
+    size_t catalog_size = catalog.size();
+    while (total_written < catalog_size) {
+        size_t remaining_size = catalog_size - total_written;
+        std::string chunk = catalog.substr(total_written, remaining_size);  
+        size_t written = fwrite(chunk.data(), 1, remaining_size, file_ptr.get());
         int error_num = errno;
-        THROW_LIMESTONE_IO_EXCEPTION("Failed to close file '" + catalog_file_path_.string() + "'", error_num);
+        if (written == 0) {
+            if (ferror(file_ptr.get()) != 0) {
+                THROW_LIMESTONE_IO_EXCEPTION("Failed to write complete data to compaction catalog file '" + catalog_file_path_.string() + "'", error_num);
+            }
+            THROW_LIMESTONE_EXCEPTION("Failed to write complete data to compaction catalog file '" + catalog_file_path_.string() + "'");
+        }
+        total_written += written;
     }
+
+    // Perform fflush to ensure all data is written to the file
+    if (fflush(file_ptr.get()) != 0) {
+        int error_num = errno;
+        THROW_LIMESTONE_IO_EXCEPTION("Failed to flush the output buffer to file '" + catalog_file_path_.string() + "'", error_num);
+    }
+
+    // Perform fsync to ensure data is written to disk
+    int fd = fileno(file_ptr.get());
+    if (fd == -1) {
+        int error_num = errno;
+        THROW_LIMESTONE_IO_EXCEPTION("Failed to get file descriptor for file '" + catalog_file_path_.string() + "'", error_num);
+    }
+    if (fsync(fd) != 0) {
+        int error_num = errno;
+        THROW_LIMESTONE_IO_EXCEPTION("Failed to fsync compaction catalog file '" + catalog_file_path_.string() + "'", error_num);
+    }
+
+    // The file will be automatically closed by unique_ptr when going out of scope
 }
+
+
 
 // Helper function to create the catalog content from instance fields
 std::string compaction_catalog::create_catalog_content() const {
