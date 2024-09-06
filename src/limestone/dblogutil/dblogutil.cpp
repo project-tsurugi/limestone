@@ -164,7 +164,17 @@ void repair(dblog_scan &ds, std::optional<epoch_id_type> epoch) {
 }
 
 static boost::filesystem::path make_tmp_dir_next_to(const boost::filesystem::path& target_dir, const char* suffix) {
-    auto tmpdirname = boost::filesystem::canonical(target_dir).string() + suffix;
+    auto canonicalpath = boost::filesystem::canonical(target_dir);
+    // some versions of boost::filesystem::canonical do not remove trailing directory-separators ('/')
+    std::string targetdirstring = canonicalpath.string();
+    std::size_t prev_len{};
+    do {
+        prev_len = targetdirstring.size();
+        canonicalpath.remove_trailing_separator();  // remove only one char
+        targetdirstring = canonicalpath.string();
+    } while (targetdirstring.size() < prev_len);
+
+    auto tmpdirname = targetdirstring + suffix;
     if (::mkdtemp(tmpdirname.data()) == nullptr) {
         LOG_LP(ERROR) << "mkdtemp failed, errno = " << errno;
         throw std::runtime_error("I/O error");
