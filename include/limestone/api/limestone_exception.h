@@ -40,20 +40,25 @@ private:
 class limestone_io_exception : public limestone_exception {
 public:
     // Constructor that takes an error message and errno as arguments
-    explicit limestone_io_exception(const std::string& message, int error_num)
-        : limestone_exception(format_message(message, error_num), error_num) {}
+    explicit limestone_io_exception(const std::string& message, int error_code)
+        : limestone_exception(format_message(message, error_code), error_code) {}
 
 private:
     // Helper function to format the error message
-    static std::string format_message(const std::string& message, int error_num) {
+    static std::string format_message(const std::string& message, int error_code) {
         // Retrieve the system error message corresponding to errno
-        std::string errno_str = std::strerror(error_num);
+        std::string errno_str = std::strerror(error_code);
 
         // Format the complete error message
-        return "I/O Error (" + errno_str + "): " + message + " (errno = " + std::to_string(error_num) + ")";
-
+        return "I/O Error (" + errno_str + "): " + message + " (errno = " + std::to_string(error_code) + ")";
     }
 };
 
+// Macro to throw exceptions with file and line information
+#define THROW_LIMESTONE_EXCEPTION(message) \
+    throw limestone_exception(std::string(message) + " (at " + __FILE__ + ":" + std::to_string(__LINE__) + ")")
+
+#define THROW_LIMESTONE_IO_EXCEPTION(message, error_code) \
+    throw limestone_io_exception(std::string(message) + " (at " + __FILE__ + ":" + std::to_string(__LINE__) + ")", error_code)
 
 } // namespace limestone::api
