@@ -17,7 +17,8 @@
 
 #include <cstdio>
 #include <string> 
-
+#include <boost/filesystem.hpp>
+#include <boost/system/error_code.hpp>
 namespace limestone::internal {
 
 /**
@@ -41,51 +42,71 @@ class file_operations {
 public:
     virtual ~file_operations() = default;
 
+    // -----------------------------------------
+    // C-style file operations
+    // -----------------------------------------
+
     // Opens a file and returns a FILE pointer
-    virtual FILE* open(const char* filename, const char* mode) = 0;
+    virtual FILE* fopen(const char* filename, const char* mode) = 0;
 
     // Writes data to a file
-    virtual size_t write(const void* ptr, size_t size, size_t count, FILE* stream) = 0;
+    virtual size_t fwrite(const void* ptr, size_t size, size_t count, FILE* stream) = 0;
 
     // Flushes the output buffer of a file
-    virtual int flush(FILE* stream) = 0;
+    virtual int fflush(FILE* stream) = 0;
 
     // Closes a file
-    virtual int close(FILE* stream) = 0;
+    virtual int fclose(FILE* stream) = 0;
 
     // Synchronizes a file's state with storage
-    virtual int sync(int fd) = 0;
+    virtual int fsync(int fd) = 0;
 
-    // Reads a line from a file with a specific buffer size
-    virtual char* read_line(char* buffer, int size, FILE* stream) = 0;
+    // Renames a file
+    virtual int rename(const char* oldname, const char* newname) = 0;
 
-    // Checks if there is an error in the file stream
-    virtual bool has_error(FILE* stream) = 0;
+    // Unlinks (deletes) a file
+    virtual int unlink(const char* filename) = 0;
 
-    // Checks if the file stream has reached end-of-file
-    virtual bool is_eof(FILE* stream) = 0;
+    // -----------------------------------------
+    // C++-style file operations
+    // -----------------------------------------
 
-    // Reads a line from a file with dynamic buffer handling
-    virtual std::string read_line(FILE* stream, int& error_code) = 0;
+    // Opens an input file stream
+    virtual std::unique_ptr<std::ifstream> open_ifstream(const std::string& path) = 0;
 
-    // Reads a line from a file (fgets wrapper)
-    virtual char* fgets(char* buffer, int size, FILE* stream) = 0;
+    // Reads a line from an input file stream
+    virtual bool read_line(std::ifstream& file, std::string& line) = 0;
+
+    // Checks if the file stream reached EOF
+    virtual bool is_eof(std::ifstream& file) = 0;
+
+    // Checks if there's an error in the file stream
+    virtual bool has_error(std::ifstream& file) = 0;
+
+    // -----------------------------------------
+    // Boost filesystem operations
+    // -----------------------------------------
+
+    // Checks if a file or directory exists (Boost)
+    virtual bool exists(const boost::filesystem::path& p, boost::system::error_code& ec) = 0;
 };
 
 class real_file_operations : public file_operations {
 public:
-    FILE* open(const char* filename, const char* mode) override;
-    size_t write(const void* ptr, size_t size, size_t count, FILE* stream) override;
-    int flush(FILE* stream) override;
-    int close(FILE* stream) override;
-    int sync(int fd) override;
-    
-    char* read_line(char* buffer, int size, FILE* stream) override;
-    bool has_error(FILE* stream) override;
-    bool is_eof(FILE* stream) override;
+    FILE* fopen(const char* filename, const char* mode) override;
+    size_t fwrite(const void* ptr, size_t size, size_t count, FILE* stream) override;
+    int fflush(FILE* stream) override;
+    int fclose(FILE* stream) override;
+    int fsync(int fd) override;
+    int rename(const char* oldname, const char* newname) override;
+    int unlink(const char* filename) override;
 
-    std::string read_line(FILE* stream, int& error_code) override;
-    char* fgets(char* buffer, int size, FILE* stream) override;
+    std::unique_ptr<std::ifstream> open_ifstream(const std::string& path) override;
+    bool read_line(std::ifstream& file, std::string& line) override;
+    bool is_eof(std::ifstream& file) override;
+    bool has_error(std::ifstream& file) override;
+
+    bool exists(const boost::filesystem::path& p, boost::system::error_code& ec) override;
 };
 
 }  // namespace limestone::internal

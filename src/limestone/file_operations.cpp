@@ -26,82 +26,66 @@ namespace limestone::internal {
 
 using namespace limestone::api;
 
-FILE* real_file_operations::open(const char* filename, const char* mode) {
+// -----------------------------------------
+// C-style file operations
+// -----------------------------------------
+
+FILE* real_file_operations::fopen(const char* filename, const char* mode) {
     return ::fopen(filename, mode); // NOLINT(cppcoreguidelines-owning-memory)
 }
 
-size_t real_file_operations::write(const void* ptr, size_t size, size_t count, FILE* stream) {
+size_t real_file_operations::fwrite(const void* ptr, size_t size, size_t count, FILE* stream) {
     return ::fwrite(ptr, size, count, stream);
 }
 
-int real_file_operations::flush(FILE* stream) {
+int real_file_operations::fflush(FILE* stream) {
     return ::fflush(stream);
 }
 
-int real_file_operations::close(FILE* stream) {
+int real_file_operations::fclose(FILE* stream) {
     return ::fclose(stream); // NOLINT(cppcoreguidelines-owning-memory)
 }
 
-int real_file_operations::sync(int fd) {
+int real_file_operations::fsync(int fd) {
     return ::fsync(fd);
 }
 
-char* real_file_operations::read_line(char* buffer, int size, FILE* stream) {
-    return ::fgets(buffer, size, stream);
+int real_file_operations::rename(const char* oldname, const char* newname) {
+    return ::rename(oldname, newname);
 }
 
-bool real_file_operations::has_error(FILE* stream) {
-    return ::ferror(stream) != 0;
+int real_file_operations::unlink(const char* filename) {
+    return ::unlink(filename);
 }
 
-bool real_file_operations::is_eof(FILE* stream) {
-    return ::feof(stream) != 0;
+// -----------------------------------------
+// C++-style file operations
+// -----------------------------------------
+
+std::unique_ptr<std::ifstream> real_file_operations::open_ifstream(const std::string& filename) {
+    return std::make_unique<std::ifstream>(filename);
 }
 
-std::string real_file_operations::read_line(FILE* stream, int& error_code) {
-    std::string line;
-    std::array<char, 1024> buffer = {};
+bool real_file_operations::read_line(std::ifstream& file, std::string& line) {
+    return static_cast<bool>(std::getline(file, line));
+}
 
-    while (true) {
-        char* result = fgets(buffer.data(), buffer.size(), stream);
-        int ret = errno;
-        if (result) {
-            std::string chunk(buffer.data());
+bool real_file_operations::has_error(std::ifstream& file) {
+    return file.fail();
+}
 
-            // Append the chunk to the line
-            line += chunk;
-
-            // Check if the chunk contains a newline character
-            size_t pos = std::string::npos;
-            if ((pos = line.find('\n')) != std::string::npos) {
-                // Handle CRLF case
-                if (pos > 0 && line[pos - 1] == '\r') {
-                    line.erase(pos - 1); // Remove the trailing '\r'
-                } else {
-                    line.erase(pos); // Remove the trailing '\n'
-                }
-                break; // Exit the loop after finding a newline
-            }
-        } else {
-            // Handle end of file or error
-            if (is_eof(stream)) {
-                // If no newline was found and the line is empty, return the line
-                if (line.empty()) {
-                    return line;
-                }
-                break;
-            }
-            // Set the error code and throw an exception
-            error_code = ret;
-            return ""; // Return an empty string on error
-        }
-    }
-    return line;
+bool real_file_operations::is_eof(std::ifstream& file) {
+    return file.eof();
 }
 
 
-char* real_file_operations::fgets(char* buffer, int size, FILE* stream) {
-    return ::fgets(buffer, size, stream);
+// -----------------------------------------
+// Boost filesystem operations
+// -----------------------------------------
+
+
+bool real_file_operations::exists(const boost::filesystem::path& p, boost::system::error_code& ec) {
+    return boost::filesystem::exists(p, ec);
 }
 
 }  // namespace limestone::internal
