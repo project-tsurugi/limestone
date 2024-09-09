@@ -62,8 +62,8 @@ int real_file_operations::unlink(const char* filename) {
 // C++-style file operations
 // -----------------------------------------
 
-std::unique_ptr<std::ifstream> real_file_operations::open_ifstream(const std::string& filename) {
-    return std::make_unique<std::ifstream>(filename);
+std::unique_ptr<std::ifstream> real_file_operations::open_ifstream(const std::string& path) {
+    return std::make_unique<std::ifstream>(path);
 }
 
 bool real_file_operations::read_line(std::ifstream& file, std::string& line) {

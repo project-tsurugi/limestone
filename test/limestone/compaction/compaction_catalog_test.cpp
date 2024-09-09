@@ -26,7 +26,7 @@ using limestone::internal::compaction_catalog;
 class compaction_catalog_test : public ::testing::Test {
 protected:
     void SetUp() override {
-        test_dir = boost::filesystem::temp_directory_path() / boost::filesystem::unique_path();
+        test_dir = boost::filesystem::path("/tmp/comapction_catalog");
         boost::filesystem::create_directory(test_dir);
 
         catalog_file_path = test_dir / "compaction_catalog";

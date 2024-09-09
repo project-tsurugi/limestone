@@ -41,32 +41,38 @@ compaction_catalog::compaction_catalog(const boost::filesystem::path &directory_
 // Static method to create a compaction_catalog from a catalog file
 compaction_catalog compaction_catalog::from_catalog_file(const boost::filesystem::path& directory_path) {
     compaction_catalog catalog(directory_path);
+    catalog.load();
+    return catalog;
+}
+
+void compaction_catalog::load() {
     try {
-        catalog.load_catalog_file(catalog.catalog_file_path_);
+        // Load the main catalog file
+        load_catalog_file(catalog_file_path_);
     } catch (const limestone_exception& e) {
         // Handle error and attempt to restore from backup
         boost::system::error_code ec;
 
         // Check if the backup file exists
-        if (file_ops_->exists(catalog.backup_file_path_, ec)) {
+        if (file_ops_->exists(backup_file_path_, ec)) {
             try {
                 // Load the backup file
-                catalog.load_catalog_file(catalog.backup_file_path_);
+                load_catalog_file(backup_file_path_);
 
                 // Restore the backup file as the main catalog file
-                if (file_ops_->exists(catalog.catalog_file_path_, ec)) {
-                    if (file_ops_->unlink(catalog.catalog_file_path_.c_str()) != 0) {
+                if (file_ops_->exists(catalog_file_path_, ec)) {
+                    if (file_ops_->unlink(catalog_file_path_.c_str()) != 0) {
                         int error_num = errno;
-                        THROW_LIMESTONE_IO_EXCEPTION("Failed to remove existing catalog file: " + catalog.catalog_file_path_.string(), error_num);
+                        THROW_LIMESTONE_IO_EXCEPTION("Failed to remove existing catalog file: " + catalog_file_path_.string(), error_num);
                     }
                 } else if (ec && ec != boost::system::errc::no_such_file_or_directory) {
                     THROW_LIMESTONE_IO_EXCEPTION("Error checking catalog file existence", ec.value());
                 }
 
                 // Rename the backup file to catalog file
-                if (file_ops_->rename(catalog.backup_file_path_.c_str(), catalog.catalog_file_path_.c_str()) != 0) {
+                if (file_ops_->rename(backup_file_path_.c_str(), catalog_file_path_.c_str()) != 0) {
                     int error_num = errno;
-                    THROW_LIMESTONE_IO_EXCEPTION("Failed to rename backup file: " + catalog.backup_file_path_.string() + " to catalog file: " + catalog.catalog_file_path_.string(), error_num);
+                    THROW_LIMESTONE_IO_EXCEPTION("Failed to rename backup file: " + backup_file_path_.string() + " to catalog file: " + catalog_file_path_.string(), error_num);
                 }
             } catch (const limestone_exception& backup_error) {
                 THROW_LIMESTONE_EXCEPTION("Failed to restore from backup compaction catalog file: " + std::string(backup_error.what()));
@@ -77,7 +83,6 @@ compaction_catalog compaction_catalog::from_catalog_file(const boost::filesystem
             THROW_LIMESTONE_EXCEPTION("Failed to load compaction catalog file and no backup available.");
         }
     }
-    return catalog;
 }
 
 
@@ -188,7 +193,7 @@ void compaction_catalog::update_catalog_file(epoch_id_type max_epoch_id, const s
     }
 
     // Open the new catalog file using fopen and manage it with std::unique_ptr
-    auto file_closer = [](FILE* file) {
+    auto file_closer = [this](FILE* file) {
         // NOLINTNEXTLINE(cppcoreguidelines-owning-memory)
         if (file && file_ops_->fclose(file) != 0) {
             int error_num = errno;
@@ -293,8 +298,5 @@ void compaction_catalog::set_file_operations(std::unique_ptr<file_operations> fi
 void compaction_catalog::reset_file_operations() {
     file_ops_ = std::make_unique<real_file_operations>();
 }
-
-// Initialize the static file_ops_ variable
-std::unique_ptr<file_operations> compaction_catalog::file_ops_ = std::make_unique<real_file_operations>();
 
 } // namespace limestone::internal
