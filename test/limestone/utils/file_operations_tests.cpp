@@ -27,11 +27,11 @@ using namespace limestone::internal;
 // Helper function to write data to a file
 void write_to_file(const char* filename, const char* data) {
     real_file_operations file_ops;
-    FILE* file = file_ops.open_file(filename, "w+");
+    FILE* file = file_ops.open(filename, "w+");
     ASSERT_NE(file, nullptr);
-    file_ops.write_file(data, std::strlen(data), 1, file);
-    file_ops.flush_file(file);
-    file_ops.close_file(file);
+    file_ops.write(data, std::strlen(data), 1, file);
+    file_ops.flush(file);
+    file_ops.close(file);
 }
 
 TEST(real_file_operations_test, read_line_no_newline) {
@@ -41,7 +41,7 @@ TEST(real_file_operations_test, read_line_no_newline) {
 
     real_file_operations file_ops;
     int error_code = 0;
-    FILE* file = file_ops.open_file(filename, "r");
+    FILE* file = file_ops.open(filename, "r");
     ASSERT_NE(file, nullptr);
 
     std::string line = file_ops.read_line(file, error_code);
@@ -56,7 +56,7 @@ TEST(real_file_operations_test, read_line_crlf) {
 
     real_file_operations file_ops;
     int error_code = 0;
-    FILE* file = file_ops.open_file(filename, "r");
+    FILE* file = file_ops.open(filename, "r");
     ASSERT_NE(file, nullptr);
 
     std::string line = file_ops.read_line(file, error_code);
@@ -75,7 +75,7 @@ TEST(real_file_operations_test, read_line_lf) {
 
     real_file_operations file_ops;
     int error_code = 0;
-    FILE* file = file_ops.open_file(filename, "r");
+    FILE* file = file_ops.open(filename, "r");
     ASSERT_NE(file, nullptr);
 
     std::string line = file_ops.read_line(file, error_code);
@@ -95,7 +95,7 @@ TEST(real_file_operations_test, read_line_empty_file) {
 
     real_file_operations file_ops;
     int error_code = 0;
-    FILE* file = file_ops.open_file(filename, "r");
+    FILE* file = file_ops.open(filename, "r");
     ASSERT_NE(file, nullptr);
 
     std::string line = file_ops.read_line(file, error_code);
@@ -111,7 +111,7 @@ TEST(real_file_operations_test, read_line_mixed_crlf_lf) {
 
     real_file_operations file_ops;
     int error_code = 0;
-    FILE* file = file_ops.open_file(filename, "r");
+    FILE* file = file_ops.open(filename, "r");
     ASSERT_NE(file, nullptr);
 
     std::string line = file_ops.read_line(file, error_code);
@@ -135,7 +135,7 @@ TEST(real_file_operations_test, read_line_empty_line_crlf) {
 
     real_file_operations file_ops;
     int error_code = 0;
-    FILE* file = file_ops.open_file(filename, "r");
+    FILE* file = file_ops.open(filename, "r");
     ASSERT_NE(file, nullptr);
 
     std::string line = file_ops.read_line(file, error_code);
@@ -159,7 +159,7 @@ TEST(real_file_operations_test, read_line_empty_line_lf) {
 
     real_file_operations file_ops;
     int error_code = 0;
-    FILE* file = file_ops.open_file(filename, "r");
+    FILE* file = file_ops.open(filename, "r");
     ASSERT_NE(file, nullptr);
 
     std::string line = file_ops.read_line(file, error_code);
@@ -182,7 +182,7 @@ TEST(real_file_operations_test, read_long_line_5000_chars) {
 
     real_file_operations file_ops;
     int error_code = 0;
-    FILE* file = file_ops.open_file(filename, "r");
+    FILE* file = file_ops.open(filename, "r");
     ASSERT_NE(file, nullptr);
 
     std::string line = file_ops.read_line(file, error_code);
@@ -190,7 +190,7 @@ TEST(real_file_operations_test, read_long_line_5000_chars) {
     ASSERT_EQ(line, long_line);
     ASSERT_EQ(error_code, 0);
 
-    file_ops.close_file(file);
+    file_ops.close(file);
 }
 
 // Test for lines of length buffer_size-3 to buffer_size+3
@@ -199,21 +199,21 @@ constexpr size_t buffer_size = 1024;
 TEST(real_file_operations_test, read_line_various_lengths) {
     const char* filename = "test_file_various_lengths.txt";
     real_file_operations file_ops;
-    FILE* file = file_ops.open_file(filename, "w+");
+    FILE* file = file_ops.open(filename, "w+");
     ASSERT_NE(file, nullptr);
 
     // Test cases for different line lengths
     for (int i = -3; i <= 3; ++i) {
         size_t line_length = buffer_size + i;
         std::string line(line_length, 'b'); // Create a line with 'b' characters
-        file_ops.write_file(line.c_str(), line.size(), 1, file);
-        file_ops.write_file("\n", 1, 1, file); // Append newline
+        file_ops.write(line.c_str(), line.size(), 1, file);
+        file_ops.write("\n", 1, 1, file); // Append newline
     }
-    file_ops.flush_file(file);
-    file_ops.close_file(file);
+    file_ops.flush(file);
+    file_ops.close(file);
 
     // Reopen file and verify each line length
-    file = file_ops.open_file(filename, "r");
+    file = file_ops.open(filename, "r");
     ASSERT_NE(file, nullptr);
 
     for (int i = -3; i <= 3; ++i) {
@@ -225,7 +225,7 @@ TEST(real_file_operations_test, read_line_various_lengths) {
         ASSERT_EQ(error_code, 0);
     }
 
-    file_ops.close_file(file);
+    file_ops.close(file);
 }
 
 class mock_file_operations : public real_file_operations {
@@ -254,14 +254,14 @@ TEST(real_file_operations_test, first_fgets_error) {
 
     mock_file_operations file_ops(1);
     int error_code = 0;
-    FILE* file = file_ops.open_file(filename, "r");
+    FILE* file = file_ops.open(filename, "r");
     ASSERT_NE(file, nullptr);
 
     std::string line = file_ops.read_line(file, error_code);
     ASSERT_TRUE(line.empty()); // Expecting empty line due to fgets failure
     ASSERT_EQ(error_code, EIO); // Expecting EIO error code
 
-    file_ops.close_file(file);
+    file_ops.close(file);
 }
 
 TEST(real_file_operations_test, second_fgets_error) {
@@ -271,7 +271,7 @@ TEST(real_file_operations_test, second_fgets_error) {
 
     mock_file_operations file_ops(2);
     int error_code = 0;
-    FILE* file = file_ops.open_file(filename, "r");
+    FILE* file = file_ops.open(filename, "r");
     ASSERT_NE(file, nullptr);
 
     // First call should succeed
@@ -284,7 +284,7 @@ TEST(real_file_operations_test, second_fgets_error) {
     ASSERT_TRUE(line.empty()); // Expecting empty line due to fgets failure
     ASSERT_EQ(error_code, EIO); // Expecting EIO error code
 
-    file_ops.close_file(file);
+    file_ops.close(file);
 }
 
 // Test case where the first fgets reads part of a very long line and the second fgets fails
@@ -296,7 +296,7 @@ TEST(real_file_operations_test, long_line_fgets_error_on_second_call) {
 
     mock_file_operations file_ops(2); // Simulate error on the second fgets call
     int error_code = 0;
-    FILE* file = file_ops.open_file(filename, "r");
+    FILE* file = file_ops.open(filename, "r");
     ASSERT_NE(file, nullptr);
 
     // First call should succeed and read the long line (part of it)
@@ -304,7 +304,7 @@ TEST(real_file_operations_test, long_line_fgets_error_on_second_call) {
     ASSERT_TRUE(line.empty()); // Expecting empty line due to fgets failure
     ASSERT_EQ(error_code, EIO); // Expecting EIO error code
 
-    file_ops.close_file(file);
+    file_ops.close(file);
 }
 
 

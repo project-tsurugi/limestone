@@ -42,19 +42,19 @@ public:
     virtual ~file_operations() = default;
 
     // Opens a file and returns a FILE pointer
-    virtual FILE* open_file(const char* filename, const char* mode) = 0;
+    virtual FILE* open(const char* filename, const char* mode) = 0;
 
     // Writes data to a file
-    virtual size_t write_file(const void* ptr, size_t size, size_t count, FILE* stream) = 0;
+    virtual size_t write(const void* ptr, size_t size, size_t count, FILE* stream) = 0;
 
     // Flushes the output buffer of a file
-    virtual int flush_file(FILE* stream) = 0;
+    virtual int flush(FILE* stream) = 0;
 
     // Closes a file
-    virtual int close_file(FILE* stream) = 0;
+    virtual int close(FILE* stream) = 0;
 
     // Synchronizes a file's state with storage
-    virtual int sync_file(int fd) = 0;
+    virtual int sync(int fd) = 0;
 
     // Reads a line from a file with a specific buffer size
     virtual char* read_line(char* buffer, int size, FILE* stream) = 0;
@@ -74,11 +74,11 @@ public:
 
 class real_file_operations : public file_operations {
 public:
-    FILE* open_file(const char* filename, const char* mode) override;
-    size_t write_file(const void* ptr, size_t size, size_t count, FILE* stream) override;
-    int flush_file(FILE* stream) override;
-    int close_file(FILE* stream) override;
-    int sync_file(int fd) override;
+    FILE* open(const char* filename, const char* mode) override;
+    size_t write(const void* ptr, size_t size, size_t count, FILE* stream) override;
+    int flush(FILE* stream) override;
+    int close(FILE* stream) override;
+    int sync(int fd) override;
     
     char* read_line(char* buffer, int size, FILE* stream) override;
     bool has_error(FILE* stream) override;

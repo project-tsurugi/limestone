@@ -26,23 +26,23 @@ namespace limestone::internal {
 
 using namespace limestone::api;
 
-FILE* real_file_operations::open_file(const char* filename, const char* mode) {
+FILE* real_file_operations::open(const char* filename, const char* mode) {
     return ::fopen(filename, mode); // NOLINT(cppcoreguidelines-owning-memory)
 }
 
-size_t real_file_operations::write_file(const void* ptr, size_t size, size_t count, FILE* stream) {
+size_t real_file_operations::write(const void* ptr, size_t size, size_t count, FILE* stream) {
     return ::fwrite(ptr, size, count, stream);
 }
 
-int real_file_operations::flush_file(FILE* stream) {
+int real_file_operations::flush(FILE* stream) {
     return ::fflush(stream);
 }
 
-int real_file_operations::close_file(FILE* stream) {
+int real_file_operations::close(FILE* stream) {
     return ::fclose(stream); // NOLINT(cppcoreguidelines-owning-memory)
 }
 
-int real_file_operations::sync_file(int fd) {
+int real_file_operations::sync(int fd) {
     return ::fsync(fd);
 }
 
