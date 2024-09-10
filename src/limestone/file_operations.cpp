@@ -46,6 +46,14 @@ int real_file_operations::fclose(FILE* stream) {
     return ::fclose(stream); // NOLINT(cppcoreguidelines-owning-memory)
 }
 
+int real_file_operations::ferror(FILE* stream) {
+    return ::ferror(stream);
+}
+
+int real_file_operations::fileno(FILE* stream) {
+    return ::fileno(stream);
+}
+
 int real_file_operations::fsync(int fd) {
     return ::fsync(fd);
 }
@@ -66,7 +74,7 @@ std::unique_ptr<std::ifstream> real_file_operations::open_ifstream(const std::st
     return std::make_unique<std::ifstream>(path);
 }
 
-bool real_file_operations::read_line(std::ifstream& file, std::string& line) {
+bool real_file_operations::getline(std::ifstream& file, std::string& line) {
     return static_cast<bool>(std::getline(file, line));
 }
 

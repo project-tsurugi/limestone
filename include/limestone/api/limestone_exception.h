@@ -20,6 +20,7 @@
 #include <stdexcept>
 #include <string>
 #include <iostream>
+#include <filesystem>
 
 namespace limestone::api {
 
@@ -43,8 +44,7 @@ public:
     explicit limestone_io_exception(const std::string& message, int error_code)
         : limestone_exception(format_message(message, error_code), error_code) {}
 
-private:
-    // Helper function to format the error message
+    // Helper function to format the error message (made public)
     static std::string format_message(const std::string& message, int error_code) {
         // Retrieve the system error message corresponding to errno
         std::string errno_str = std::strerror(error_code);
@@ -55,10 +55,25 @@ private:
 };
 
 // Macro to throw exceptions with file and line information
+
 #define THROW_LIMESTONE_EXCEPTION(message) \
-    throw limestone_exception(std::string(message) + " (at " + __FILE__ + ":" + std::to_string(__LINE__) + ")")
+    throw limestone_exception(std::string(message) + " (at " + std::filesystem::path(__FILE__).filename().string() + ":" + std::to_string(__LINE__) + ")")
 
 #define THROW_LIMESTONE_IO_EXCEPTION(message, error_code) \
-    throw limestone_io_exception(std::string(message) + " (at " + __FILE__ + ":" + std::to_string(__LINE__) + ")", error_code)
+    throw limestone_io_exception(std::string(message) + " (at " + std::filesystem::path(__FILE__).filename().string() + ":" + std::to_string(__LINE__) + ")", error_code)
+
+#define LOG_AND_THROW_EXCEPTION(message) \
+    { \
+        LOG_LP(ERROR) << message; \
+        THROW_LIMESTONE_EXCEPTION(message); \
+    }
+
+#define LOG_AND_THROW_IO_EXCEPTION(message, error_code) \
+    { \
+        std::string full_message = limestone_io_exception::format_message(message, error_code); \
+        LOG_LP(ERROR) << full_message; \
+        THROW_LIMESTONE_IO_EXCEPTION(message, error_code); \
+    }
+
 
 } // namespace limestone::api

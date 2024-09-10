@@ -58,6 +58,12 @@ public:
     // Closes a file
     virtual int fclose(FILE* stream) = 0;
 
+    // Gets the error number for a file stream
+    virtual int ferror(FILE* stream) = 0;
+
+    // Gets the file descriptor for a file stream
+    virtual int fileno(FILE* stream) = 0;
+
     // Synchronizes a file's state with storage
     virtual int fsync(int fd) = 0;
 
@@ -75,7 +81,7 @@ public:
     virtual std::unique_ptr<std::ifstream> open_ifstream(const std::string& path) = 0;
 
     // Reads a line from an input file stream
-    virtual bool read_line(std::ifstream& file, std::string& line) = 0;
+    virtual bool getline(std::ifstream& file, std::string& line) = 0;
 
     // Checks if the file stream reached EOF
     virtual bool is_eof(std::ifstream& file) = 0;
@@ -97,12 +103,14 @@ public:
     size_t fwrite(const void* ptr, size_t size, size_t count, FILE* stream) override;
     int fflush(FILE* stream) override;
     int fclose(FILE* stream) override;
+    int ferror(FILE* stream) override;
+    int fileno(FILE* stream) override;
     int fsync(int fd) override;
     int rename(const char* oldname, const char* newname) override;
     int unlink(const char* filename) override;
 
     std::unique_ptr<std::ifstream> open_ifstream(const std::string& path) override;
-    bool read_line(std::ifstream& file, std::string& line) override;
+    bool getline(std::ifstream& file, std::string& line) override;
     bool is_eof(std::ifstream& file) override;
     bool has_error(std::ifstream& file) override;
 
