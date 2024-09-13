@@ -226,12 +226,13 @@ private:
     // Helper methods 
 protected:    
     void load();
+    void restore_from_backup();
     void load_catalog_file(const boost::filesystem::path &directory_path);
     void parse_catalog_entry(const std::string& line, bool& max_epoch_id_found);
     [[nodiscard]] std::string create_catalog_content() const;
 
     // for only testing
-public:    
+protected:    
     void set_file_operations(std::unique_ptr<file_operations> file_ops);
     void reset_file_operations();
 };

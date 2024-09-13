@@ -24,6 +24,7 @@ namespace limestone::testing {
 using limestone::api::epoch_id_type;
 using limestone::api::limestone_io_exception;
 using limestone::api::limestone_exception;
+using limestone::internal::file_operations;
 using limestone::internal::compacted_file_info;
 using limestone::internal::compaction_catalog;
 
@@ -79,23 +80,19 @@ COMPACTION_CATALOG_FOOTER
 
 
 
+static const boost::filesystem::path test_dir = "/tmp/comapction_catalog";
+static const boost::filesystem::path catalog_file_path = test_dir / "compaction_catalog";
+static const boost::filesystem::path backup_file_path = test_dir / "compaction_catalog.back";
+
 class compaction_catalog_test : public ::testing::Test {
 protected:
     void SetUp() override {
-        test_dir = boost::filesystem::path("/tmp/comapction_catalog");
         boost::filesystem::create_directory(test_dir);
-
-        catalog_file_path = test_dir / "compaction_catalog";
-        backup_file_path = test_dir / "compaction_catalog.back";
     }
 
     void TearDown() override {
         boost::filesystem::remove_all(test_dir);
     }
-
-    boost::filesystem::path test_dir;
-    boost::filesystem::path catalog_file_path;
-    boost::filesystem::path backup_file_path;
 };
 
 
@@ -114,13 +111,12 @@ public:
         return *this;
     }
 
-    
     void clear() {
-        std::ofstream file(file_path_, std::ios::trunc); 
+        std::ofstream file(file_path_, std::ios::trunc);
         if (!file.is_open()) {
             throw std::runtime_error("Failed to open file: " + file_path_);
         }
-        file.close(); 
+        file.close();
     }
 
 private:
@@ -136,18 +132,13 @@ public:
     explicit testable_compaction_catalog(const boost::filesystem::path& directory_path)
         : compaction_catalog(directory_path) {}
 
-    // Public methods to access protected members
-    void load_catalog_file_for_testing(const boost::filesystem::path& directory_path) {
-        load_catalog_file(directory_path);
-    }
-
-    void parse_catalog_entry_for_testing(const std::string& line, bool& max_epoch_id_found) {
-        parse_catalog_entry(line, max_epoch_id_found);
-    }
-
-    [[nodiscard]] std::string create_catalog_content_for_testing() const {
-        return create_catalog_content();
-    }
+    using compaction_catalog::create_catalog_content;    
+    using compaction_catalog::load;
+    using compaction_catalog::load_catalog_file;
+    using compaction_catalog::restore_from_backup;
+    using compaction_catalog::parse_catalog_entry;
+    using compaction_catalog::set_file_operations;
+    using compaction_catalog::reset_file_operations;
 };
 
 TEST_F(compaction_catalog_test, create_catalog) {
@@ -161,7 +152,7 @@ TEST_F(compaction_catalog_test, create_catalog) {
 
 
 TEST_F(compaction_catalog_test, update_catalog) {
-    compaction_catalog catalog(test_dir);
+    testable_compaction_catalog catalog(test_dir);
 
     epoch_id_type max_epoch_id = 123;
     std::set<compacted_file_info> compacted_files = {
@@ -367,7 +358,7 @@ TEST_F(compaction_catalog_test, update_catalog) {
 }
 
 TEST_F(compaction_catalog_test, update_and_load_catalog_file) {
-    compaction_catalog catalog(test_dir);
+    testable_compaction_catalog catalog(test_dir);
 
     epoch_id_type max_epoch_id = 123;
     std::set<compacted_file_info> compacted_files = {
@@ -426,7 +417,7 @@ TEST_F(compaction_catalog_test, load_catalog_file) {
     };
     std::set<std::string> detached_pwals = {"pwal1", "pwal2"};
 
-    catalog.load_catalog_file_for_testing(catalog_file_path);
+    catalog.load_catalog_file(catalog_file_path);
     EXPECT_EQ(catalog.get_max_epoch_id(), max_epoch_id);
     EXPECT_EQ(catalog.get_compacted_files(), compacted_files);
     EXPECT_EQ(catalog.get_detached_pwals(), detached_pwals);
@@ -434,7 +425,7 @@ TEST_F(compaction_catalog_test, load_catalog_file) {
     // testing skip empty line
     writer.clear();
     writer << COMPACTION_CATALOG_CONTENT_WITH_EMPTY_LINES;
-    catalog.load_catalog_file_for_testing(catalog_file_path);
+    catalog.load_catalog_file(catalog_file_path);
     EXPECT_EQ(catalog.get_max_epoch_id(), max_epoch_id);
     EXPECT_EQ(catalog.get_compacted_files(), compacted_files);
     EXPECT_EQ(catalog.get_detached_pwals(), detached_pwals);
@@ -444,7 +435,7 @@ TEST_F(compaction_catalog_test, load_catalog_file) {
     EXPECT_THROW(
         {
             try {
-                catalog.load_catalog_file_for_testing(catalog_file_path);
+                catalog.load_catalog_file(catalog_file_path);
             } catch (const limestone_exception& e) {
                 EXPECT_EQ(e.error_code(), 0);
                 EXPECT_TRUE(std::string(e.what()).find("Unexpected end of file while reading header line") != std::string::npos)
@@ -460,7 +451,7 @@ TEST_F(compaction_catalog_test, load_catalog_file) {
     EXPECT_THROW(
         {
             try {
-                catalog.load_catalog_file_for_testing(catalog_file_path);
+                catalog.load_catalog_file(catalog_file_path);
             } catch (const limestone_exception& e) {
                 EXPECT_EQ(e.error_code(), 0);
                 EXPECT_TRUE(std::string(e.what()).find("Invalid header line:") != std::string::npos)
@@ -475,7 +466,7 @@ TEST_F(compaction_catalog_test, load_catalog_file) {
     EXPECT_THROW(
         {
             try {
-                catalog.load_catalog_file_for_testing(catalog_file_path);
+                catalog.load_catalog_file(catalog_file_path);
             } catch (const limestone_exception& e) {
                 EXPECT_EQ(e.error_code(), 0);
                 EXPECT_TRUE(std::string(e.what()).find("Missing footer line") != std::string::npos) << "Actual message: " << e.what();
@@ -489,7 +480,7 @@ TEST_F(compaction_catalog_test, load_catalog_file) {
     EXPECT_THROW(
         {
             try {
-                catalog.load_catalog_file_for_testing(catalog_file_path);
+                catalog.load_catalog_file(catalog_file_path);
             } catch (const limestone_exception& e) {
                 EXPECT_EQ(e.error_code(), 0);
                 EXPECT_TRUE(std::string(e.what()).find("MAX_EPOCH_ID entry not found") != std::string::npos) << "Actual message: " << e.what();
@@ -520,7 +511,7 @@ TEST_F(compaction_catalog_test, load_catalog_file) {
     EXPECT_THROW(
         {
             try {
-                catalog.load_catalog_file_for_testing(catalog_file_path);
+                catalog.load_catalog_file(catalog_file_path);
             } catch (const limestone_io_exception& e) {
                 EXPECT_EQ(e.error_code(), ENOSPC);
                 EXPECT_TRUE(std::string(e.what()).find("Failed to read line from file") != std::string::npos) << "Actual message: " << e.what();
@@ -551,7 +542,7 @@ TEST_F(compaction_catalog_test, load_catalog_file) {
     EXPECT_THROW(
         {
             try {
-                catalog.load_catalog_file_for_testing(catalog_file_path);
+                catalog.load_catalog_file(catalog_file_path);
             } catch (const limestone_io_exception& e) {
                 EXPECT_EQ(e.error_code(), ENOSPC);
                 EXPECT_TRUE(std::string(e.what()).find("Failed to read line from file") != std::string::npos) << "Actual message: " << e.what();
@@ -560,6 +551,34 @@ TEST_F(compaction_catalog_test, load_catalog_file) {
         },
         limestone_io_exception);
     
+    // error in is_open
+    class mock_is_open_error : public limestone::internal::real_file_operations {
+    public:
+        std::unique_ptr<std::ifstream> open_ifstream(const std::string& path) override {
+            errno = EIO;
+            return nullptr;
+        }
+        bool is_open(std::ifstream& file) override {
+            errno = 0;
+            return false;
+        }
+    };
+    writer.clear();
+    catalog.set_file_operations(std::make_unique<mock_is_open_error>());
+    EXPECT_THROW(
+        {
+            try {
+                catalog.load_catalog_file(catalog_file_path);
+            } catch (const limestone_exception& e) {
+                EXPECT_EQ(e.error_code(), EIO);
+                EXPECT_TRUE(std::string(e.what()).find("Failed to open compaction catalog file") != std::string::npos) << "Actual message: " << e.what();
+                throw;
+            }
+        },
+        limestone_exception);
+
+
+
     catalog.reset_file_operations();
 }
 
@@ -589,4 +608,260 @@ TEST_F(compaction_catalog_test, load_from_backup) {
     EXPECT_EQ(loaded_catalog.get_detached_pwals().size(), 2);
 }
 
+TEST_F(compaction_catalog_test, parse_catalog_entry) {
+
+    // Test valid COMPACTED_FILE entry
+    {
+        std::string compacted_file_entry = "COMPACTED_FILE file1 1";
+        bool max_epoch_id_found = false;
+        testable_compaction_catalog catalog(test_dir);
+        catalog.parse_catalog_entry(compacted_file_entry, max_epoch_id_found);
+        EXPECT_EQ(catalog.get_compacted_files().size(), 1);
+        EXPECT_EQ(catalog.get_compacted_files().begin()->get_file_name(), "file1");
+        EXPECT_EQ(catalog.get_compacted_files().begin()->get_version(), 1);
+        EXPECT_FALSE(max_epoch_id_found);
+    }
+
+    // Test valid DETACHED_PWAL entry
+    {
+        std::string detached_pwal_entry = "DETACHED_PWAL pwal1";
+        bool max_epoch_id_found = false;
+        testable_compaction_catalog catalog(test_dir);
+        catalog.parse_catalog_entry(detached_pwal_entry, max_epoch_id_found);
+        EXPECT_EQ(catalog.get_detached_pwals().size(), 1);
+        EXPECT_EQ(*catalog.get_detached_pwals().begin(), "pwal1");
+        EXPECT_FALSE(max_epoch_id_found);
+    }
+
+    // Test valid MAX_EPOCH_ID entry
+    {
+        std::string max_epoch_id_entry = "MAX_EPOCH_ID 123";
+        bool max_epoch_id_found = false;
+        testable_compaction_catalog catalog(test_dir);
+        catalog.parse_catalog_entry(max_epoch_id_entry, max_epoch_id_found);
+        EXPECT_EQ(catalog.get_max_epoch_id(), 123);
+        EXPECT_TRUE(max_epoch_id_found);
+    }
+
+    // Test empty line
+    {
+        std::string empty_line = "";
+        bool max_epoch_id_found = false;
+        testable_compaction_catalog catalog(test_dir);
+        catalog.parse_catalog_entry(empty_line, max_epoch_id_found);
+        EXPECT_EQ(catalog.get_compacted_files().size(), 0);
+        EXPECT_EQ(catalog.get_detached_pwals().size(), 0);
+        EXPECT_EQ(catalog.get_max_epoch_id(), 0);
+        EXPECT_FALSE(max_epoch_id_found);
+    }
+
+    // Test line with only whitespace
+    {
+        std::string whitespace_line = "   ";
+        bool max_epoch_id_found = false;
+        testable_compaction_catalog catalog(test_dir);
+        catalog.parse_catalog_entry(whitespace_line, max_epoch_id_found);
+        EXPECT_EQ(catalog.get_compacted_files().size(), 0);
+        EXPECT_EQ(catalog.get_detached_pwals().size(), 0);
+        EXPECT_EQ(catalog.get_max_epoch_id(), 0);
+        EXPECT_FALSE(max_epoch_id_found);
+    }
+
+    // Test invalid COMPACTED_FILE entry
+    std::string invalid_compacted_file_entry = "COMPACTED_FILE file1";
+    EXPECT_THROW(
+        {
+            try {
+                bool max_epoch_id_found = false;
+                testable_compaction_catalog catalog(test_dir);
+                catalog.parse_catalog_entry(invalid_compacted_file_entry, max_epoch_id_found);
+            } catch (const limestone_exception& e) {
+                EXPECT_TRUE(std::string(e.what()).find("Invalid format for COMPACTED_FILE:") != std::string::npos);
+                throw;
+            }
+        },
+        limestone_exception);
+
+    // Test invalid DETACHED_PWAL entry
+    std::string invalid_detached_pwal_entry = "DETACHED_PWAL";
+    EXPECT_THROW(
+        {
+            try {
+                bool max_epoch_id_found = false;
+                testable_compaction_catalog catalog(test_dir);
+                catalog.parse_catalog_entry(invalid_detached_pwal_entry, max_epoch_id_found);
+            } catch (const limestone_exception& e) {
+                EXPECT_TRUE(std::string(e.what()).find("Invalid format for DETACHED_PWAL:") != std::string::npos);
+                throw;
+            }
+        },
+        limestone_exception);
+
+    // Test invalid MAX_EPOCH_ID entry
+    std::string invalid_max_epoch_id_entry = "MAX_EPOCH_ID";
+    EXPECT_THROW(
+        {
+            try {
+                bool max_epoch_id_found = false;
+                testable_compaction_catalog catalog(test_dir);
+                catalog.parse_catalog_entry(invalid_max_epoch_id_entry, max_epoch_id_found);
+            } catch (const limestone_exception& e) {
+                EXPECT_TRUE(std::string(e.what()).find("Invalid format for MAX_EPOCH_ID:") != std::string::npos);
+                throw;
+            }
+        },
+        limestone_exception);
+
+    // Test unknown entry type
+    std::string unknown_entry = "UNKNOWN_ENTRY_TYPE data";
+    EXPECT_THROW(
+        {
+            try {
+                bool max_epoch_id_found = false;
+                testable_compaction_catalog catalog(test_dir);
+                catalog.parse_catalog_entry(unknown_entry, max_epoch_id_found);
+            } catch (const limestone_exception& e) {
+                EXPECT_TRUE(std::string(e.what()).find("Unknown entry type:") != std::string::npos);
+                throw;
+            }
+        },
+        limestone_exception);
+}
+
+TEST_F(compaction_catalog_test, restore_from_backup_exceptions) {
+    test_file_writer writer(backup_file_path.string());
+    testable_compaction_catalog catalog(test_dir);
+
+    // Normal case
+    writer.clear();
+    writer << COMPACTION_CATALOG_CONTENT;
+    catalog.reset_file_operations();
+    catalog.restore_from_backup();
+    epoch_id_type max_epoch_id = 123;
+    std::set<compacted_file_info> compacted_files = {
+        {"file1", 1},
+        {"file2", 2}
+    };
+    std::set<std::string> detached_pwals = {"pwal1", "pwal2"};
+    EXPECT_EQ(catalog.get_max_epoch_id(), max_epoch_id);
+    EXPECT_EQ(catalog.get_compacted_files(), compacted_files);
+    EXPECT_EQ(catalog.get_detached_pwals(), detached_pwals);
+
+
+    // Backup file does not exist
+    boost::filesystem::remove(backup_file_path);
+    EXPECT_THROW(
+        {
+            try {
+                catalog.restore_from_backup();
+            } catch (const limestone_exception& e) {
+                EXPECT_TRUE(std::string(e.what()).find("Failed to load compaction catalog file and no backup available.") != std::string::npos);
+                throw;
+            }
+        },
+        limestone_exception);
+
+    // Error in rename backup file
+    class mock_rename_error : public limestone::internal::real_file_operations {
+    public:
+        int rename(const char* oldname, const char* newname) override {
+            errno = EACCES;
+            return -1;
+        }
+    };
+    writer.clear();
+    writer << COMPACTION_CATALOG_CONTENT;
+    catalog.set_file_operations(std::make_unique<mock_rename_error>());
+    EXPECT_THROW(
+        {
+            try {
+                catalog.restore_from_backup();
+            } catch (const limestone_io_exception& e) {
+                EXPECT_EQ(e.error_code(), EACCES);
+                EXPECT_TRUE(std::string(e.what()).find("Failed to rename backup file") != std::string::npos);
+                throw;
+            }
+        },
+        limestone_io_exception);
+
+    // Error in remove existing catalog file
+    class mock_remove_error : public limestone::internal::real_file_operations {
+    public:
+        int unlink(const char* pathname) override {
+            errno = EACCES;
+            return -1;
+        }
+    };
+    writer.clear();
+    writer << COMPACTION_CATALOG_CONTENT;
+    boost::filesystem::copy_file(backup_file_path, catalog_file_path);
+    catalog.set_file_operations(std::make_unique<mock_remove_error>());
+    EXPECT_THROW(
+        {
+            try {
+                catalog.restore_from_backup();
+            } catch (const limestone_io_exception& e) {
+                EXPECT_EQ(e.error_code(), EACCES);
+                EXPECT_TRUE(std::string(e.what()).find("Failed to remove existing catalog file") != std::string::npos);
+                throw;
+            }
+        },
+    limestone_io_exception);
+
+    // Error in checking exists backup file
+    class mock_exists_backup_error : public limestone::internal::real_file_operations {
+    public:
+        bool exists(const boost::filesystem::path& p, boost::system::error_code& ec) override {
+            if (p == backup_file_path) {
+                return real_file_operations::exists(p, ec);
+            }
+            ec = make_error_code(boost::system::errc::permission_denied);
+            return false;
+        }
+    };
+    writer.clear();
+    writer << COMPACTION_CATALOG_CONTENT;
+    catalog.set_file_operations(std::make_unique<mock_exists_backup_error>());
+    EXPECT_THROW(
+        {
+            try {
+                catalog.restore_from_backup();
+            } catch (const limestone_io_exception& e) {
+                EXPECT_EQ(e.error_code(), EACCES);
+                EXPECT_TRUE(std::string(e.what()).find("Error checking catalog file existence") != std::string::npos);
+                throw;
+            }
+        },
+        limestone_io_exception);
+
+    // Error in checking exists backup file        
+    class mock_exists_catalog_error : public limestone::internal::real_file_operations {
+    public:
+        bool exists(const boost::filesystem::path& p, boost::system::error_code& ec) override {
+            if (p == catalog_file_path) {
+                return real_file_operations::exists(p, ec);
+            }
+            ec = make_error_code(boost::system::errc::permission_denied);
+            return false;
+        }
+    };
+    writer.clear();
+    writer << COMPACTION_CATALOG_CONTENT;
+    catalog.set_file_operations(std::make_unique<mock_exists_catalog_error>());
+    EXPECT_THROW(
+        {
+            try {
+                catalog.restore_from_backup();
+            } catch (const limestone_io_exception& e) {
+                EXPECT_EQ(e.error_code(), EACCES);
+                EXPECT_TRUE(std::string(e.what()).find("Error checking backup file existence") != std::string::npos);
+                throw;
+            }
+        },
+        limestone_io_exception);
+}
+
+
+
 }  // namespace limestone::testing
+

@@ -86,8 +86,12 @@ public:
     // Checks if the file stream reached EOF
     virtual bool is_eof(std::ifstream& file) = 0;
 
+    // Checks if the file stream is open
+    virtual bool is_open(std::ifstream& file) = 0;
+
     // Checks if there's an error in the file stream
     virtual bool has_error(std::ifstream& file) = 0;
+
 
     // -----------------------------------------
     // Boost filesystem operations
@@ -112,6 +116,7 @@ public:
     std::unique_ptr<std::ifstream> open_ifstream(const std::string& path) override;
     bool getline(std::ifstream& file, std::string& line) override;
     bool is_eof(std::ifstream& file) override;
+    bool is_open(std::ifstream& file) override;
     bool has_error(std::ifstream& file) override;
 
     bool exists(const boost::filesystem::path& p, boost::system::error_code& ec) override;

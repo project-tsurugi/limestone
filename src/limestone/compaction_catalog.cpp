@@ -50,58 +50,58 @@ void compaction_catalog::load() {
         // Load the main catalog file
         load_catalog_file(catalog_file_path_);
     } catch (const limestone_exception& e) {
-        // Handle error and attempt to restore from backup
-        boost::system::error_code ec;
+        // Handle error by trying to restore from backup
+        restore_from_backup();
+    }
+}
 
-        // Check if the backup file exists
-        if (file_ops_->exists(backup_file_path_, ec)) {
-            try {
-                // Load the backup file
-                load_catalog_file(backup_file_path_);
+void compaction_catalog::restore_from_backup() {
+    boost::system::error_code ec;
 
-                // Restore the backup file as the main catalog file
-                if (file_ops_->exists(catalog_file_path_, ec)) {
-                    if (file_ops_->unlink(catalog_file_path_.c_str()) != 0) {
-                        int error_num = errno;
-                        LOG_AND_THROW_IO_EXCEPTION("Failed to remove existing catalog file: " + catalog_file_path_.string(), error_num);
-                    }
-                } else if (ec && ec != boost::system::errc::no_such_file_or_directory) {
-                    LOG_AND_THROW_IO_EXCEPTION("Error checking catalog file existence", ec.value());
-                }
+    // Check if the backup file exists
+    if (file_ops_->exists(backup_file_path_, ec)) {
+        // Load the backup file
+        load_catalog_file(backup_file_path_);
 
-                // Rename the backup file to catalog file
-                if (file_ops_->rename(backup_file_path_.c_str(), catalog_file_path_.c_str()) != 0) {
-                    int error_num = errno;
-                    LOG_AND_THROW_IO_EXCEPTION("Failed to rename backup file: " + backup_file_path_.string() + " to catalog file: " + catalog_file_path_.string(), error_num);
-                }
-            } catch (const limestone_exception& backup_error) {
-                LOG_AND_THROW_EXCEPTION("Failed to restore from backup compaction catalog file: " + std::string(backup_error.what()));
+        // Restore the backup file as the main catalog file
+        if (file_ops_->exists(catalog_file_path_, ec)) {
+            if (file_ops_->unlink(catalog_file_path_.c_str()) != 0) {
+                int error_num = errno;
+                LOG_AND_THROW_IO_EXCEPTION("Failed to remove existing catalog file: " + catalog_file_path_.string(), error_num);
             }
         } else if (ec && ec != boost::system::errc::no_such_file_or_directory) {
-            LOG_AND_THROW_IO_EXCEPTION("Error checking backup file existence", ec.value());
-        } else {
-            LOG_AND_THROW_EXCEPTION("Failed to load compaction catalog file and no backup available.");
+            LOG_AND_THROW_IO_EXCEPTION("Error checking catalog file existence", ec.value());
         }
+
+        // Rename the backup file to catalog file
+        if (file_ops_->rename(backup_file_path_.c_str(), catalog_file_path_.c_str()) != 0) {
+            int error_num = errno;
+            LOG_AND_THROW_IO_EXCEPTION("Failed to rename backup file: " + backup_file_path_.string() + " to catalog file: " + catalog_file_path_.string(),
+                                       error_num);
+        }
+    } else if (ec && ec != boost::system::errc::no_such_file_or_directory) {
+        LOG_AND_THROW_IO_EXCEPTION("Error checking backup file existence", ec.value());
+    } else {
+        LOG_AND_THROW_EXCEPTION("Failed to load compaction catalog file and no backup available.");
     }
 }
 
 
 // Helper method to load the catalog file
 void compaction_catalog::load_catalog_file(const boost::filesystem::path& path) {
-    // file_operations を使って ifstream を開く
-    auto file = file_ops_->open_ifstream(path.string());
+    auto strm = file_ops_->open_ifstream(path.string());
     int error_num = errno;
-    if (!file->is_open()) {
+    if (!file_ops_->is_open(*strm)) {
         LOG_AND_THROW_IO_EXCEPTION("Failed to open compaction catalog file: " + path.string(), error_num);
     }
 
     std::string line;
-    if (!file_ops_->getline(*file, line)) {
+    if (!file_ops_->getline(*strm, line)) {
         error_num = errno;
-        if (file_ops_->is_eof(*file)) {
+        if (file_ops_->is_eof(*strm)) {
             LOG_AND_THROW_EXCEPTION("Unexpected end of file while reading header line");
         } 
-        if (file_ops_->has_error(*file)) {
+        if (file_ops_->has_error(*strm)) {
             LOG_AND_THROW_IO_EXCEPTION("Failed to read line from file", error_num);
         }
     }
@@ -112,9 +112,9 @@ void compaction_catalog::load_catalog_file(const boost::filesystem::path& path) 
 
     bool max_epoch_id_found = false;
     while (true) {
-        if (!file_ops_->getline(*file, line)) {
+        if (!file_ops_->getline(*strm, line)) {
             error_num = errno;
-            if (file_ops_->is_eof(*file)) {
+            if (file_ops_->is_eof(*strm)) {
                 break;
             }
             LOG_AND_THROW_IO_EXCEPTION("Failed to read line from file", error_num);

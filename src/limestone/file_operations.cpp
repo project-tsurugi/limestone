@@ -59,7 +59,8 @@ int real_file_operations::fsync(int fd) {
 }
 
 int real_file_operations::rename(const char* oldname, const char* newname) {
-    return ::rename(oldname, newname);
+    int ret = ::rename(oldname, newname);
+    return ret;
 }
 
 int real_file_operations::unlink(const char* filename) {
@@ -84,6 +85,10 @@ bool real_file_operations::has_error(std::ifstream& file) {
 
 bool real_file_operations::is_eof(std::ifstream& file) {
     return file.eof();
+}
+
+bool real_file_operations::is_open(std::ifstream& file) {
+    return file.is_open();
 }
 
 
