@@ -27,6 +27,58 @@ using limestone::api::limestone_exception;
 using limestone::internal::compacted_file_info;
 using limestone::internal::compaction_catalog;
 
+
+
+constexpr const char* COMPACTION_CATALOG_CONTENT = R"(COMPACTION_CATALOG_HEADER
+COMPACTED_FILE file1 1
+COMPACTED_FILE file2 2
+DETACHED_PWAL pwal1
+DETACHED_PWAL pwal2
+MAX_EPOCH_ID 123
+COMPACTION_CATALOG_FOOTER
+)";
+
+
+constexpr const char* COMPACTION_CATALOG_CONTENT_WITH_EMPTY_LINES = R"(COMPACTION_CATALOG_HEADER
+COMPACTED_FILE file1 1
+COMPACTED_FILE file2 2
+DETACHED_PWAL pwal1
+
+DETACHED_PWAL pwal2
+MAX_EPOCH_ID 123
+
+COMPACTION_CATALOG_FOOTER
+
+)";
+
+constexpr const char* COMPACTION_CATALOG_MISSING_FOOTER = R"(COMPACTION_CATALOG_HEADER
+COMPACTED_FILE file1 1
+COMPACTED_FILE file2 2
+DETACHED_PWAL pwal1
+DETACHED_PWAL pwal2
+MAX_EPOCH_ID 123
+)";
+
+
+constexpr const char* COMPACTION_CATALOG_MISSING_MAX_EPOCH_ID = R"(COMPACTION_CATALOG_HEADER
+COMPACTED_FILE file1 1
+COMPACTED_FILE file2 2
+DETACHED_PWAL pwal1
+DETACHED_PWAL pwal2
+COMPACTION_CATALOG_FOOTER
+)";
+
+constexpr const char* COMPACTION_CATALOG_INVALID_HEADER = R"(Wrong Header
+COMPACTED_FILE file1 1
+COMPACTED_FILE file2 2
+DETACHED_PWAL pwal1
+DETACHED_PWAL pwal2
+MAX_EPOCH_ID 123
+COMPACTION_CATALOG_FOOTER
+)";
+
+
+
 class compaction_catalog_test : public ::testing::Test {
 protected:
     void SetUp() override {
@@ -366,14 +418,7 @@ TEST_F(compaction_catalog_test, load_catalog_file) {
 
     // normal case
     writer.clear();
-    writer << "COMPACTION_CATALOG_HEADER\n"
-           << "COMPACTED_FILE file1 1\n"
-           << "COMPACTED_FILE file2 2\n"
-           << "DETACHED_PWAL pwal1\n"
-           << "DETACHED_PWAL pwal2\n"
-           << "MAX_EPOCH_ID 123\n"
-           << "COMPACTION_CATALOG_FOOTER\n";
-
+    writer << COMPACTION_CATALOG_CONTENT;
     epoch_id_type max_epoch_id = 123;
     std::set<compacted_file_info> compacted_files = {
         {"file1", 1},
@@ -388,14 +433,7 @@ TEST_F(compaction_catalog_test, load_catalog_file) {
 
     // testing skip empty line
     writer.clear();
-    writer << "COMPACTION_CATALOG_HEADER\n"
-           << "COMPACTED_FILE file1 1\n"
-           << "COMPACTED_FILE file2 2\n"
-           << "DETACHED_PWAL pwal1\n\n"
-           << "DETACHED_PWAL pwal2\n"
-           << "MAX_EPOCH_ID 123\n\n"
-           << "COMPACTION_CATALOG_FOOTER\n\n";
-
+    writer << COMPACTION_CATALOG_CONTENT_WITH_EMPTY_LINES;
     catalog.load_catalog_file_for_testing(catalog_file_path);
     EXPECT_EQ(catalog.get_max_epoch_id(), max_epoch_id);
     EXPECT_EQ(catalog.get_compacted_files(), compacted_files);
@@ -432,32 +470,22 @@ TEST_F(compaction_catalog_test, load_catalog_file) {
         },
         limestone_exception);
 
-writer.clear();
-writer << "COMPACTION_CATALOG_HEADER\n"
-       << "COMPACTED_FILE file1 1\n"
-       << "COMPACTED_FILE file2 2\n"
-       << "DETACHED_PWAL pwal1\n"
-       << "DETACHED_PWAL pwal2\n"
-       << "MAX_EPOCH_ID 123\n";
-EXPECT_THROW(
-    {
-        try {
-            catalog.load_catalog_file_for_testing(catalog_file_path);
-        } catch (const limestone_exception& e) {
-            EXPECT_EQ(e.error_code(), 0);
-            EXPECT_TRUE(std::string(e.what()).find("Missing footer line") != std::string::npos) << "Actual message: " << e.what();
-            throw;
-        }
-    },
-    limestone_exception);
+    writer.clear();
+    writer << COMPACTION_CATALOG_MISSING_FOOTER;
+    EXPECT_THROW(
+        {
+            try {
+                catalog.load_catalog_file_for_testing(catalog_file_path);
+            } catch (const limestone_exception& e) {
+                EXPECT_EQ(e.error_code(), 0);
+                EXPECT_TRUE(std::string(e.what()).find("Missing footer line") != std::string::npos) << "Actual message: " << e.what();
+                throw;
+            }
+        },
+        limestone_exception);
 
     writer.clear();
-    writer << "COMPACTION_CATALOG_HEADER\n"
-           << "COMPACTED_FILE file1 1\n"
-           << "COMPACTED_FILE file2 2\n"
-           << "DETACHED_PWAL pwal1\n"
-           << "DETACHED_PWAL pwal2\n"
-           << "COMPACTION_CATALOG_FOOTER\n";
+    writer << COMPACTION_CATALOG_MISSING_MAX_EPOCH_ID;
     EXPECT_THROW(
         {
             try {
