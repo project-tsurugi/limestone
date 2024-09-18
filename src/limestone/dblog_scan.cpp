@@ -20,6 +20,7 @@
 #include <glog/logging.h>
 #include <limestone/logging.h>
 #include "logging_helper.h"
+#include "limestone_exception_helper.h"
 
 #include <limestone/api/datastore.h>
 #include "internal.h"
@@ -40,13 +41,11 @@ std::optional<epoch_id_type> last_durable_epoch(const boost::filesystem::path& f
     // ASSERT: file exists
     istrm.open(file, std::ios_base::in | std::ios_base::binary);
     if (!istrm) {  // permission?
-        LOG_LP(ERROR) << "cannot read epoch file: " << file;
-        throw std::runtime_error("cannot read epoch file");
+        THROW_LIMESTONE_IO_EXCEPTION("cannot read epoch file: " + file.string(), errno);
     }
     while (e.read(istrm)) {
         if (e.type() != log_entry::entry_type::marker_durable) {
-            LOG_LP(ERROR) << "this epoch file is broken: unexpected log_entry type: " << static_cast<int>(e.type());
-            throw std::runtime_error("unexpected log_entry type for epoch file");
+            LOG_AND_THROW_EXCEPTION("this epoch file is broken: unexpected log_entry type: " + std::to_string(static_cast<int>(e.type())));
         }
         if (!rv.has_value() || e.epoch_id() > rv) {
             rv = e.epoch_id();
@@ -63,8 +62,7 @@ epoch_id_type dblog_scan::last_durable_epoch_in_dir() {
     if (!boost::filesystem::exists(main_epoch_file)) {
         // datastore operations (ctor and rotate) ensure that the main epoch file exists.
         // so it may directory called from outside of datastore
-        LOG_LP(ERROR) << "epoch file does not exist: " << main_epoch_file;
-        throw std::runtime_error("epoch file does not exist");
+        LOG_AND_THROW_EXCEPTION("epoch file does not exist: " + main_epoch_file.string());
     }
     std::optional<epoch_id_type> ld_epoch = last_durable_epoch(main_epoch_file);
     if (ld_epoch.has_value()) {
@@ -90,8 +88,8 @@ epoch_id_type dblog_scan::last_durable_epoch_in_dir() {
 }
 
 static bool log_error_and_throw(log_entry::read_error& e) {
-    LOG_LP(ERROR) << "this pwal file is broken: " << e.message();
-    throw std::runtime_error("pwal file read error");
+    LOG_AND_THROW_EXCEPTION("this pwal file is broken: " + e.message());
+    return false;
 }
 
 void dblog_scan::detach_wal_files(bool skip_empty_files) {
@@ -144,7 +142,7 @@ epoch_id_type dblog_scan::scan_pwal_files(  // NOLINT(readability-function-cogni
                 if (!is_detached_wal(p)) {
                     VLOG(30) << "MARKED BUT TAIL IS BROKEN (NOT DETACHED): " << p;
                     if (fail_fast_) {
-                        throw std::runtime_error("the end of non-detached file is broken");
+                        THROW_LIMESTONE_EXCEPTION("the end of non-detached file is broken");
                     }
                 } else {
                     VLOG(30) << "MARKED BUT TAIL IS BROKEN (DETACHED): " << p;
@@ -155,7 +153,7 @@ epoch_id_type dblog_scan::scan_pwal_files(  // NOLINT(readability-function-cogni
                 VLOG(30) << "TAIL IS BROKEN: " << p;
                 if (!is_detached_wal(p)) {
                     if (fail_fast_) {
-                        throw std::runtime_error("the end of non-detached file is broken");
+                        THROW_LIMESTONE_EXCEPTION("the end of non-detached file is broken");
                     }
                 }
                 break;
@@ -166,7 +164,7 @@ epoch_id_type dblog_scan::scan_pwal_files(  // NOLINT(readability-function-cogni
             case parse_error::failed:
                 VLOG(30) << "ERROR: " << p;
                 if (fail_fast_) {
-                    throw std::runtime_error(ec.message());
+                    THROW_LIMESTONE_EXCEPTION(ec.message());
                 }
                 break;
             case parse_error::broken_after_tobe_cut: assert(false);
@@ -204,7 +202,7 @@ epoch_id_type dblog_scan::scan_pwal_files(  // NOLINT(readability-function-cogni
 
                 try {
                     process_file(p);
-                } catch (std::runtime_error& ex) {
+                } catch (limestone_exception& ex) {
                     VLOG(log_info) << "/:limestone catch runtime_error(" << ex.what() << ")";
                     {
                         std::lock_guard<std::mutex> lock(list_mtx);

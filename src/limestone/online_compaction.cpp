@@ -20,6 +20,7 @@
 #include <limestone/logging.h>
 
 #include <boost/filesystem.hpp>
+#include "limestone_exception_helper.h"
 #include "logging_helper.h"
 #include "compaction_catalog.h"
 
@@ -31,8 +32,7 @@ void safe_rename(const boost::filesystem::path& from, const boost::filesystem::p
     boost::system::error_code error;
     boost::filesystem::rename(from, to, error);
     if (error) {
-        LOG_LP(ERROR) << "fail to rename file: error_code: " << error << ", from: " << from << ", to: " << to;
-        throw std::runtime_error("fail to rename the file");
+        LOG_AND_THROW_IO_EXCEPTION("fail to rename the file from: " + from.string() + ", to: " + to.string() , error);
     }
 }
 
@@ -57,15 +57,13 @@ std::set<std::string> select_files_for_compaction(const std::set<boost::filesyst
 void ensure_directory_exists(const boost::filesystem::path& dir) {
     if (boost::filesystem::exists(dir)) {
         if (!boost::filesystem::is_directory(dir)) {
-            LOG_LP(ERROR) << "the path exists but is not a directory: " << dir;
-            throw std::runtime_error("The path exists but is not a directory: " + dir.string());
+            LOG_AND_THROW_EXCEPTION("The path exists but is not a directory: " + dir.string());
         }
     } else {
         boost::system::error_code error;
         const bool result_mkdir = boost::filesystem::create_directory(dir, error);
         if (!result_mkdir || error) {
-            LOG_LP(ERROR) << "failed to create directory: result_mkdir: " << result_mkdir << ", error_code: " << error << ", path: " << dir;
-            throw std::runtime_error("Failed to create the directory");
+            LOG_AND_THROW_IO_EXCEPTION("failed to create directory: " + dir.string(), error);
         }
     }
 }
@@ -76,8 +74,7 @@ void handle_existing_compacted_file(const boost::filesystem::path& location) {
 
     if (boost::filesystem::exists(compacted_file)) {
         if (boost::filesystem::exists(compacted_prev_file)) {
-            LOG_LP(ERROR) << "the file already exists: " << compacted_prev_file;
-            throw std::runtime_error("The file already exists: " + compacted_prev_file.string());
+            LOG_AND_THROW_EXCEPTION("the file already exists: " + compacted_prev_file.string());
         }
         safe_rename(compacted_file, compacted_prev_file);
     }
@@ -88,13 +85,11 @@ std::set<std::string> get_files_in_directory(const boost::filesystem::path& dire
     boost::system::error_code error; 
 
     if (!boost::filesystem::exists(directory, error)) {
-        LOG_LP(ERROR) << "Directory does not exist: " << directory << ", error_code: " << error.message();
-        throw std::runtime_error("Directory does not exist: " + directory.string());
+        LOG_AND_THROW_IO_EXCEPTION("Directory does not exist: " + directory.string(), error);
     }
 
     if (!boost::filesystem::is_directory(directory, error)) {
-        LOG_LP(ERROR) << "The path exists but is not a directory: " << directory << ", error_code: " << error.message();
-        throw std::runtime_error("The path exists but is not a directory: " + directory.string());
+        LOG_AND_THROW_IO_EXCEPTION("The path exists but is not a directory: " + directory.string(), error.value());
     }
 
     for (boost::filesystem::directory_iterator it(directory, error), end; it != end && !error; it.increment(error)) {
@@ -104,8 +99,7 @@ std::set<std::string> get_files_in_directory(const boost::filesystem::path& dire
     }
 
     if (error) {
-        LOG_LP(ERROR) << "Error while iterating directory: " << directory << ", error_code: " << error.message();
-        throw std::runtime_error("Error while iterating directory: " + directory.string());
+        LOG_AND_THROW_IO_EXCEPTION("Error while iterating directory: " + directory.string(), error.value());
     }
 
     return files;
@@ -116,8 +110,7 @@ void remove_file_safely(const boost::filesystem::path& file) {
     boost::system::error_code error;
     boost::filesystem::remove(file, error);
     if (error) {
-        LOG_LP(ERROR) << "failed to remove file: error_code: " << error << ", path: " << file;
-        throw std::runtime_error("Failed to remove the file");
+        LOG_AND_THROW_IO_EXCEPTION("Failed to remove the file", error);
     }
 }
 

@@ -23,6 +23,7 @@
 
 #include <limestone/api/datastore.h>
 
+#include "limestone_exception_helper.h"
 #include "compaction_catalog.h"
 #include "internal.h"
 #include "log_entry.h"
@@ -43,31 +44,26 @@ void setup_initial_logdir(const boost::filesystem::path& logdir) {
     boost::filesystem::path config = logdir / std::string(manifest_file_name);
     FILE* strm = fopen(config.c_str(), "w");  // NOLINT(*-owning-memory)
     if (!strm) {
-        std::string err_msg = "Failed to open file for writing: " + config.string() + ". errno = " + std::to_string(errno);
-        LOG_LP(ERROR) << err_msg;
-        throw std::runtime_error(err_msg);
+        std::string err_msg = "Failed to open file for writing: " + config.string();
+        LOG_AND_THROW_IO_EXCEPTION(err_msg, errno);
     }
     std::string manifest_str = manifest_v2.dump(4);
     auto ret = fwrite(manifest_str.c_str(), manifest_str.length(), 1, strm);
     if (ret != 1) {
-        std::string err_msg = "Failed to write to file: " + config.string() + ". errno = " + std::to_string(errno);
-        LOG_LP(ERROR) << err_msg;
-        throw std::runtime_error(err_msg);
+        std::string err_msg = "Failed to write to file: " + config.string();
+        LOG_AND_THROW_IO_EXCEPTION(err_msg, errno);
     }
     if (fflush(strm) != 0) {
-        std::string err_msg = "Failed to flush file buffer: " + config.string() + ". errno = " + std::to_string(errno);
-        LOG_LP(ERROR) << err_msg;
-        throw std::runtime_error(err_msg);
+        std::string err_msg = "Failed to flush file buffer: " + config.string();
+        LOG_AND_THROW_IO_EXCEPTION(err_msg, errno);
     }
     if (fsync(fileno(strm)) != 0) {
-        std::string err_msg = "Failed to sync file to disk: " + config.string() + ". errno = " + std::to_string(errno);
-        LOG_LP(ERROR) << err_msg;
-        throw std::runtime_error(err_msg);
+        std::string err_msg = "Failed to sync file to disk: " + config.string();
+        LOG_AND_THROW_IO_EXCEPTION(err_msg, errno);
     }
     if (fclose(strm) != 0) {  // NOLINT(*-owning-memory)
-        std::string err_msg = "Failed to close file: " + config.string() + ". errno = " + std::to_string(errno);
-        LOG_LP(ERROR) << err_msg;
-        throw std::runtime_error(err_msg);
+        std::string err_msg = "Failed to close file: " + config.string();
+        LOG_AND_THROW_IO_EXCEPTION(err_msg, errno);
     }
     // Create compaction catalog file
     compaction_catalog catalog(logdir);
@@ -105,48 +101,56 @@ int is_supported_version(const boost::filesystem::path& manifest_path, std::stri
     }
 }
 
+bool exists_path(const boost::filesystem::path& path) {
+    boost::system::error_code ec;
+    bool ret = boost::filesystem::exists(path, ec);
+    if (!ret && ec != boost::system::errc::no_such_file_or_directory) {
+        std::string err_msg = "Failed to check if file exists: " + path.string();
+        LOG_AND_THROW_IO_EXCEPTION(err_msg, ec);
+    }
+    return ret;
+}
+
+
 void check_and_migrate_logdir_format(const boost::filesystem::path& logdir) {
     boost::filesystem::path manifest_path = logdir / std::string(manifest_file_name);
     boost::filesystem::path manifest_backup_path = logdir / std::string(manifest_file_backup_name);
     boost::system::error_code ec;
 
-    if (!boost::filesystem::exists(manifest_path) && boost::filesystem::exists(manifest_backup_path)) {
+    if (!exists_path(manifest_path) && exists_path(manifest_backup_path)) {
         VLOG_LP(log_info) << "Manifest file is missing, but a backup file exists at " << manifest_backup_path.string()
                           << ". Using the backup file as the manifest by renaming it to " << manifest_path.string();
         boost::filesystem::rename(manifest_backup_path, manifest_path, ec);
         if (ec) {
             std::string err_msg =
-                "Failed to rename manifest backup from " + manifest_backup_path.string() + " to " + manifest_path.string() + ". Error: " + ec.message();
-            LOG(ERROR) << err_msg;
-            throw std::runtime_error(err_msg);
+                "Failed to rename manifest backup from " + manifest_backup_path.string() + " to " + manifest_path.string();
+            LOG_AND_THROW_IO_EXCEPTION(err_msg, ec);
         }
     }
 
-    if (boost::filesystem::exists(manifest_path) && boost::filesystem::exists(manifest_backup_path)) {
+    if (exists_path(manifest_path) && exists_path(manifest_backup_path)) {
         VLOG_LP(log_info) << "both manifest and backup manifest file exists, removing backup manifest file";
         boost::filesystem::remove(manifest_backup_path, ec);
         if (ec) {
-            std::string err_msg = "Failed to remove backup manifest file: " + manifest_backup_path.string() + ". Error: " + ec.message();
-            LOG(ERROR) << err_msg;
-            throw std::runtime_error(err_msg);
+            std::string err_msg = "Failed to remove backup manifest file: " + manifest_backup_path.string();
+            LOG_AND_THROW_IO_EXCEPTION(err_msg, ec);
         }
     }
 
-    if (!boost::filesystem::exists(manifest_path)) {
+    if (!exists_path(manifest_path)) {
         VLOG_LP(log_info) << "no manifest file in logdir, maybe v0";
-        LOG(ERROR) << version_error_prefix << " (version mismatch: version 0, server supports version 1)";
-        throw std::runtime_error("logdir version mismatch");
+        THROW_LIMESTONE_EXCEPTION(std::string(version_error_prefix) + " (version mismatch: version 0, server supports version 1)");
     }
     std::string errmsg;
     int vc = is_supported_version(manifest_path, errmsg);
     if (vc == 0) {
         LOG(ERROR) << version_error_prefix << " (" << errmsg << ")";
-        throw std::runtime_error("logdir version mismatch");
+        THROW_LIMESTONE_EXCEPTION("logdir version mismatch");
     }
     if (vc < 0) {
         VLOG_LP(log_info) << errmsg;
         LOG(ERROR) << "/:limestone dbdir is corrupted, can not use.";
-        throw std::runtime_error("logdir corrupted");
+        THROW_LIMESTONE_EXCEPTION("logdir corrupted");
     }
     if (vc == 1) {
         // migrate to version 2
@@ -154,16 +158,14 @@ void check_and_migrate_logdir_format(const boost::filesystem::path& logdir) {
         boost::filesystem::rename(manifest_path, manifest_backup_path, ec);
         if (ec) {
             std::string err_msg = "Failed to rename manifest file: " + manifest_path.string() + " to " + manifest_backup_path.string() + ". Error: " + ec.message();
-            LOG(ERROR) << err_msg;
-            throw std::runtime_error(err_msg);
+            LOG_AND_THROW_IO_EXCEPTION(err_msg, ec);
         }
         setup_initial_logdir(logdir);
         VLOG_LP(log_info) << "migration done";
         boost::filesystem::remove(manifest_backup_path, ec);
         if (ec) {
             std::string err_msg = "Failed to remove backup manifest file: " + manifest_backup_path.string() + ". Error: " + ec.message();
-            LOG(ERROR) << err_msg;
-            throw std::runtime_error(err_msg);
+            LOG_AND_THROW_IO_EXCEPTION(err_msg, ec);
         }
     }
 }

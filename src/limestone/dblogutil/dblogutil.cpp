@@ -24,6 +24,7 @@
 #include "dblog_scan.h"
 #include "internal.h"
 #include "log_entry.h"
+#include "limestone_exception_helper.h"
 
 using namespace limestone::api;
 using namespace limestone::internal;
@@ -63,7 +64,7 @@ void inspect(dblog_scan &ds, std::optional<epoch_id_type> epoch) {
     epoch_id_type ld_epoch{};
     try {
         ld_epoch = ds.last_durable_epoch_in_dir();
-    } catch (std::runtime_error& ex) {
+    } catch (limestone_exception& ex) {
         LOG(ERROR) << "reading epoch file is failed: " << ex.what();
         log_and_exit(64);
     }
@@ -120,7 +121,7 @@ void repair(dblog_scan &ds, std::optional<epoch_id_type> epoch) {
     } else {
         try {
             ld_epoch = ds.last_durable_epoch_in_dir();
-        } catch (std::runtime_error& ex) {
+        } catch (limestone_exception& ex) {
             LOG(ERROR) << "reading epoch file is failed: " << ex.what();
             log_and_exit(64);
         }
@@ -166,8 +167,7 @@ void repair(dblog_scan &ds, std::optional<epoch_id_type> epoch) {
 static boost::filesystem::path make_tmp_dir_next_to(const boost::filesystem::path& target_dir, const char* suffix) {
     auto tmpdirname = boost::filesystem::canonical(target_dir).string() + suffix;
     if (::mkdtemp(tmpdirname.data()) == nullptr) {
-        LOG_LP(ERROR) << "mkdtemp failed, errno = " << errno;
-        throw std::runtime_error("I/O error");
+        THROW_LIMESTONE_IO_EXCEPTION("mkdtemp failed", errno);
     }
     return {tmpdirname};
 }
@@ -188,7 +188,7 @@ void compaction(dblog_scan &ds, std::optional<epoch_id_type> epoch) {
     } else {
         try {
             ld_epoch = ds.last_durable_epoch_in_dir();
-        } catch (std::runtime_error& ex) {
+        } catch (limestone_exception& ex) {
             LOG(ERROR) << "reading epoch file is failed: " << ex.what();
             log_and_exit(64);
         }
@@ -224,22 +224,18 @@ void compaction(dblog_scan &ds, std::optional<epoch_id_type> epoch) {
     VLOG_LP(log_info) << "making compact epoch file to " << tmp;
     FILE* strm = fopen((tmp / "epoch").c_str(), "a");  // NOLINT(*-owning-memory)
     if (!strm) {
-        LOG_LP(ERROR) << "fopen failed, errno = " << errno;
-        throw std::runtime_error("I/O error");
+        LOG_AND_THROW_IO_EXCEPTION("fopen failed", errno);
     }
     // TODO: if to-flat mode, set ld_epoch := 1
     log_entry::durable_epoch(strm, ld_epoch);
     if (fflush(strm) != 0) {
-        LOG_LP(ERROR) << "fflush failed, errno = " << errno;
-        throw std::runtime_error("I/O error");
+        LOG_AND_THROW_IO_EXCEPTION("fflush failed", errno);
     }
     if (fsync(fileno(strm)) != 0) {
-        LOG_LP(ERROR) << "fsync failed, errno = " << errno;
-        throw std::runtime_error("I/O error");
+        LOG_AND_THROW_IO_EXCEPTION("fsync failed", errno);
     }
     if (fclose(strm) != 0) {  // NOLINT(*-owning-memory)
-        LOG_LP(ERROR) << "fclose failed, errno = " << errno;
-        throw std::runtime_error("I/O error");
+        LOG_AND_THROW_IO_EXCEPTION("fclose failed", errno);
     }
 
     if (FLAGS_dry_run) {
@@ -298,7 +294,7 @@ int main(char *dir, subcommand mode) {  // NOLINT
         if (mode == cmd_inspect) inspect(ds, opt_epoch);
         if (mode == cmd_repair) repair(ds, opt_epoch);
         if (mode == cmd_compaction) compaction(ds, opt_epoch);
-    } catch (std::runtime_error& e) {
+    } catch (limestone_exception& e) {
         LOG(ERROR) << e.what();
         log_and_exit(64);
     }

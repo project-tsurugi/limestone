@@ -24,6 +24,7 @@
 #include <glog/logging.h>
 #include <limestone/logging.h>
 #include "logging_helper.h"
+#include "limestone_exception_helper.h"
 
 #include <limestone/api/datastore.h>
 #include "internal.h"
@@ -47,8 +48,7 @@ datastore::datastore(configuration const& conf) : location_(conf.data_locations_
     if (!result_check || error) {
         const bool result_mkdir = boost::filesystem::create_directory(location_, error);
         if (!result_mkdir || error) {
-            LOG_LP(ERROR) << "fail to create directory: result_mkdir: " << result_mkdir << ", error_code: " << error << ", path: " << location_;
-            throw std::runtime_error("fail to create the log_location directory");
+            LOG_AND_THROW_IO_EXCEPTION("fail to create directory: result_mkdir: " + location_.string(), error);
         }
         internal::setup_initial_logdir(location_);
         add_file(manifest_path);
@@ -77,12 +77,10 @@ datastore::datastore(configuration const& conf) : location_(conf.data_locations_
     if (!result || error) {
         FILE* strm = fopen(epoch_file_path_.c_str(), "a");  // NOLINT(*-owning-memory)
         if (!strm) {
-            LOG_LP(ERROR) << "does not have write permission for the log_location directory, path: " <<  location_;
-            throw std::runtime_error("does not have write permission for the log_location directory");
+            LOG_AND_THROW_IO_EXCEPTION("does not have write permission for the log_location directory, path: " + location_.string(), errno);
         }
         if (fclose(strm) != 0) {  // NOLINT(*-owning-memory)
-            LOG_LP(ERROR) << "fclose failed, errno = " << errno;
-            throw std::runtime_error("I/O error");
+            LOG_AND_THROW_IO_EXCEPTION("fclose failed", errno);
         }
         add_file(epoch_file_path_);
     }
@@ -114,13 +112,11 @@ void datastore::ready() {
     boost::filesystem::directory_iterator it(location_, error);
     boost::filesystem::directory_iterator end;
     if (error) {
-        LOG_LP(ERROR) << "Failed to initialize directory iterator: error_code: " << error.message() << ", path: " << location_;
-        throw std::runtime_error("Failed to initialize directory iterator");
+        LOG_AND_THROW_IO_EXCEPTION("Failed to initialize directory iterator, path: " + location_.string(), error);
     }
     for (; it != end; it.increment(error)) {
         if (error) {
-            LOG_LP(ERROR) << "Failed to access directory entry: error_code: " << error.message() << ", path: " << location_;
-            throw std::runtime_error("Failed to iterate over the directory entries");
+            LOG_AND_THROW_IO_EXCEPTION("Failed to access directory entry: , path: " + location_.string(), error);
         }
         if (boost::filesystem::is_regular_file(it->path())) {
             std::string filename = it->path().filename().string();
@@ -200,21 +196,17 @@ void datastore::update_min_epoch_id(bool from_switch_epoch) {  // NOLINT(readabi
 
             FILE* strm = fopen(epoch_file_path_.c_str(), "a");  // NOLINT(*-owning-memory)
             if (!strm) {
-                LOG_LP(ERROR) << "fopen failed, errno = " << errno;
-                throw std::runtime_error("I/O error");
+                LOG_AND_THROW_IO_EXCEPTION("fopen failed", errno);
             }
             log_entry::durable_epoch(strm, static_cast<epoch_id_type>(epoch_id_recorded_.load()));
             if (fflush(strm) != 0) {
-                LOG_LP(ERROR) << "fflush failed, errno = " << errno;
-                throw std::runtime_error("I/O error");
+                LOG_AND_THROW_IO_EXCEPTION("fflush failed", errno);
             }
             if (fsync(fileno(strm)) != 0) {
-                LOG_LP(ERROR) << "fsync failed, errno = " << errno;
-                throw std::runtime_error("I/O error");
+                LOG_AND_THROW_IO_EXCEPTION("fsync failed", errno);
             }
             if (fclose(strm) != 0) {  // NOLINT(*-owning-memory)
-                LOG_LP(ERROR) << "fclose failed, errno = " << errno;
-                throw std::runtime_error("I/O error");
+                LOG_AND_THROW_IO_EXCEPTION("fclose failed", errno);
             }
             break;
         }
@@ -400,8 +392,7 @@ void datastore::rotate_epoch_file() {
     boost::filesystem::ofstream strm{};
     strm.open(epoch_file_path_, std::ios_base::out | std::ios_base::app | std::ios_base::binary);
     if(!strm || !strm.is_open() || strm.bad() || strm.fail()){
-        LOG_LP(ERROR) << "does not have write permission for the log_location directory, path: " <<  location_;
-        throw std::runtime_error("does not have write permission for the log_location directory");
+        THROW_LIMESTONE_IO_EXCEPTION("does not have write permission for the log_location directory, path: " + location_.string(), errno);
     }
     strm.close();
 }

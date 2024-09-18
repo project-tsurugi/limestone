@@ -16,8 +16,9 @@
 
 #include <glog/logging.h>
 #include <limestone/logging.h>
-#include "logging_helper.h"
+#include <boost/filesystem.hpp>
 
+#include "logging_helper.h"
 #include <limestone/api/limestone_exception.h>
 
 #pragma once
@@ -35,6 +36,10 @@ inline void throw_limestone_io_exception(const std::string& message, int error_c
     throw limestone_io_exception(message + " (at " + std::filesystem::path(file).filename().string() + ":" + std::to_string(line) + ")", error_code);
 }
 
+inline void throw_limestone_io_exception(const std::string& message, const boost::system::error_code& error_code, const char* file, int line) {
+    throw limestone_io_exception(message + " (at " + std::filesystem::path(file).filename().string() + ":" + std::to_string(line) + ")", error_code.value());
+}
+
 inline void log_and_throw_exception(const std::string& message, const char* file, int line) {
     LOG_LP(ERROR) << message;
     throw_limestone_exception(message, file, line);
@@ -42,6 +47,12 @@ inline void log_and_throw_exception(const std::string& message, const char* file
 
 inline void log_and_throw_io_exception(const std::string& message, int error_code, const char* file, int line) {
     std::string full_message = limestone_io_exception::format_message(message, error_code);
+    LOG_LP(ERROR) << full_message;
+    throw_limestone_io_exception(message, error_code, file, line);
+}
+
+inline void log_and_throw_io_exception(const std::string& message, const boost::system::error_code& error_code, const char* file, int line) {
+    std::string full_message = limestone_io_exception::format_message(message, error_code.value());
     LOG_LP(ERROR) << full_message;
     throw_limestone_io_exception(message, error_code, file, line);
 }

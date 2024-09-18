@@ -20,6 +20,7 @@
 #include <glog/logging.h>
 #include <limestone/logging.h>
 #include "logging_helper.h"
+#include "limestone_exception_helper.h"
 
 #include <limestone/api/datastore.h>
 #include "dblog_scan.h"
@@ -225,8 +226,7 @@ epoch_id_type dblog_scan::scan_one_pwal_file(  // NOLINT(readability-function-co
     boost::filesystem::fstream strm;
     strm.open(p, std::ios_base::in | std::ios_base::out | std::ios_base::binary);
     if (!strm) {
-        LOG_LP(ERROR) << "cannot open pwal file: " << p;
-        throw std::runtime_error("cannot open pwal file");
+        LOG_AND_THROW_IO_EXCEPTION("cannot open pwal file: " + p.string(), errno);
     }
     bool valid = true;  // scanning in the normal (not-invalidated) epoch snippet
     [[maybe_unused]]
@@ -287,8 +287,8 @@ epoch_id_type dblog_scan::scan_one_pwal_file(  // NOLINT(readability-function-co
                         pe = parse_error(parse_error::repaired);
                     }
                     break;
-                // case process_at_nondurable::repair_by_cut:
-                //     throw std::runtime_error("unimplemented repair method");
+                //  case process_at_nondurable::repair_by_cut:
+                //      THROW_LIMESTONE_EXCEPTION("unimplemented repair method");
                 case process_at_nondurable::report:
                     invalidated_wrote = false;
                     log_entry::read_error nondurable(log_entry::read_error::nondurable_snippet);
