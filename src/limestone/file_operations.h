@@ -17,6 +17,9 @@
 
 #include <cstdio>
 #include <string> 
+#include <memory>
+#include <fstream>
+
 #include <boost/filesystem.hpp>
 #include <boost/system/error_code.hpp>
 namespace limestone::internal {
