@@ -223,8 +223,8 @@ private:
     // needed for database startup or recovery, and can be safely deleted.
     boost::filesystem::path backup_file_path_;
 
-    // Helper methods 
 protected:    
+    // Helper methods 
     void load();
     void restore_from_backup();
     void load_catalog_file(const boost::filesystem::path &directory_path);
@@ -232,7 +232,6 @@ protected:
     [[nodiscard]] std::string create_catalog_content() const;
 
     // for only testing
-protected:    
     void set_file_operations(std::unique_ptr<file_operations> file_ops);
     void reset_file_operations();
 };

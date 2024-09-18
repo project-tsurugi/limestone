@@ -27,7 +27,7 @@
 #include "compaction_catalog.h"
 #include "logging_helper.h"
 #include "limestone/api/epoch_id_type.h"
-#include "limestone/api/limestone_exception.h"
+#include "limestone_exception_helper.h"
 
 namespace limestone::internal {
 

@@ -22,25 +22,27 @@
 namespace limestone::internal {
 
 /**
- * @brief Interface and implementation for file operations abstraction.
+ * @brief Abstract interface for mocking file operations in test environments.
  *
- * This header defines the abstract interface `file_operations` for handling file
- * operations such as opening, writing, flushing, closing, and syncing files.
- * It also provides a concrete class `real_file_operations`, which uses the C standard
- * library functions (e.g., fopen, fwrite, fflush, fclose, and fsync) to perform
- * actual file operations.
+ * This interface abstracts file operations to simulate file handling through mocking 
+ * in test environments. It provides unified methods for handling both C-style file 
+ * operations (e.g., fopen, fwrite, fflush) and C++-style file operations 
+ * (e.g., std::ifstream).
  *
- * The purpose of this abstraction is to enable dependency injection for file operations,
- * allowing easier testing and mocking in various parts of the system.
- * For instance, in tests, a mock implementation of this interface can be used to simulate
- * file operations without actually interacting with the file system.
+ * Implementing classes like `real_file_operations` use the C standard library and 
+ * C++ iostreams to perform actual file operations.
  *
- * Note: This file is intended to be used in multiple parts of the project, and it
- * should be placed alongside other source files for consistency.
+ * It also supports Boost filesystem operations, allowing for the mocking of 
+ * cross-platform file system paths and error code handling.
  */
 class file_operations {
 public:
     virtual ~file_operations() = default;
+    file_operations() = default;
+    file_operations(const file_operations&) = delete;
+    file_operations& operator=(const file_operations&) = delete;
+    file_operations(file_operations&&) = delete;
+    file_operations& operator=(file_operations&&) = delete;
 
     // -----------------------------------------
     // C-style file operations
