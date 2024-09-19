@@ -48,6 +48,8 @@ public:
      * @brief join a persistence session for the current epoch in this channel
      * @attention this function is not thread-safe.
      * @note the current epoch is the last epoch specified by datastore::switch_epoch()
+     * @note datastore::switch_epoch() and this function can be called simultaneously. 
+     * If these functions invocation overwrap, the current epoch that the session joins depends on timing. 
      */
     void begin_session();
 
