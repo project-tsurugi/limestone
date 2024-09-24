@@ -11,6 +11,10 @@
 #include "internal.h"
 
 #include "test_root.h"
+#include "limestone/api/limestone_exception.h"
+
+using limestone::api::limestone_exception;
+#include "rotation_task.h"
 
 #define LOGFORMAT_VER 2
 
@@ -59,13 +63,24 @@ protected:
         // Repeatally call switch_epoch until backup is completed in another thread
         std::thread switch_epoch_thread([&]() {
             while (!backup_completed.load()) {
-                datastore_->switch_epoch(epoch_value++);
+                    datastore_->switch_epoch(epoch_value++);
                 std::this_thread::sleep_for(std::chrono::milliseconds(1));
             }
         });
 
         // Begin backup and wait for completion in main thread
-        std::unique_ptr<limestone::api::backup_detail> bd = datastore_->begin_backup(type);
+        std::unique_ptr<limestone::api::backup_detail> bd;
+
+        try {
+            // Begin backup and wait for completion in main thread
+            bd = datastore_->begin_backup(type);
+        } catch (const std::exception& e) {
+            // Ensure the thread is joined even in case of an exception
+            std::cerr << "Exception during backup: " << e.what() << std::endl;
+            backup_completed.store(true);  
+            switch_epoch_thread.join();    
+            throw;                        
+        }
 
         // Set flag to notify backup completion
         backup_completed.store(true);
@@ -79,6 +94,44 @@ protected:
 
 extern void create_file(const boost::filesystem::path& path, std::string_view content);
 extern std::string data_manifest(int persistent_format_version = 1);
+
+
+TEST_F(rotate_test, rotate_fails_with_io_error) {
+    using namespace limestone::api;
+    
+    log_channel& channel = datastore_->create_channel(boost::filesystem::path(location));
+    log_channel& unused_channel = datastore_->create_channel(boost::filesystem::path(location));
+    datastore_->switch_epoch(42);
+    channel.begin_session();
+    channel.add_entry(42, "k1", "v1", {100, 4});
+    channel.end_session();
+    datastore_->switch_epoch(43);
+
+    // Force an exception to be thrown by removing the directory
+    if (system("rm -rf /tmp/rotate_test") != 0) {
+        std::cerr << "Cannot remove directory" << std::endl;
+    }
+
+    // Check that an exception is thrown and verify its details
+    try {
+        run_backup_with_epoch_switch(backup_type::standard, 44);
+        FAIL() << "Expected limestone_exception to be thrown";  // Fails the test if no exception is thrown
+    } catch (const limestone_exception& e) {
+        // Verify the exception details
+        std::cerr << "Caught exception: " << e.what() << std::endl;
+        EXPECT_TRUE(std::string(e.what()).rfind("I/O Error (No such file or directory): Failed to rename epoch_file from /tmp", 0) == 0);
+        EXPECT_EQ(e.error_code(), ENOENT);
+    } catch (const std::exception& e) {
+        // Handle non-limestone_exception std::exception types
+        std::cerr << "Caught exception: " << e.what() << std::endl;
+        FAIL() << "Expected limestone_exception but caught a different std: " << e.what();
+    } catch (...) {
+        // Handle unknown exception types
+        FAIL() << "Expected limestone_exception but caught an unknown exception type.";
+    }
+
+}
+
 
 TEST_F(rotate_test, log_is_rotated) { // NOLINT
     using namespace limestone::api;

@@ -43,17 +43,16 @@ class limestone_io_exception : public limestone_exception {
 public:
     // Constructor that takes an error message and errno as arguments (int)
     explicit limestone_io_exception(const std::string& message, int error_code)
-        : limestone_exception(format_message(message, error_code), error_code) {}
+        : limestone_exception(message, error_code) {}
 
     // Constructor that takes an error message and boost::system::error_code as arguments
     explicit limestone_io_exception(const std::string& message, const boost::system::error_code& error_code)
-        : limestone_exception(format_message(message, error_code), error_code.value()) {}
+        : limestone_exception(message, error_code.value()) {}
 
     // Helper function to format the error message for int error_code
     static std::string format_message(const std::string& message, int error_code) {
         // Retrieve the system error message corresponding to errno
         std::string errno_str = std::strerror(error_code);
-
         // Format the complete error message
         return "I/O Error (" + errno_str + "): " + message + " (errno = " + std::to_string(error_code) + ")";
     }

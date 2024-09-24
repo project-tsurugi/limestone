@@ -19,6 +19,7 @@
 #include <limestone/api/datastore.h>
 #include "test_root.h"
 #include "rotation_task.h"
+#include "limestone/api/limestone_exception.h"
 namespace limestone::testing {
 
 constexpr const char* data_location = "/tmp/rotation_task_test/data_location";
@@ -30,6 +31,7 @@ using limestone::api::log_channel;
 using limestone::api::rotation_task;
 using limestone::api::rotation_result;
 using limestone::api::rotation_task_helper;
+using limestone::api::limestone_exception;
 
 class rotation_task_test : public ::testing::Test {
 protected:
@@ -137,6 +139,37 @@ TEST_F(rotation_task_test, no_task_execution_when_queue_is_empty) {
     rotation_task_helper::attempt_task_execution_from_queue();
 
     SUCCEED();
+}
+
+
+TEST_F(rotation_task_test, task_throws_exception) {
+    auto task = rotation_task_helper::create_and_enqueue_task(*datastore_);
+
+    // Force an exception to be thrown by removing the directory
+    if (system("rm -rf /tmp/rotation_task_test") != 0) {
+        std::cerr << "Cannot remove directory" << std::endl;
+    }
+
+    // Since the exception is caught in task->rotate(), no exception should be thrown here
+    task->rotate();
+
+    // Check that an exception is thrown and verify its details
+    try {
+        rotation_result result = task->wait_for_result();
+        FAIL() << "Expected limestone_exception to be thrown";  // Fails the test if no exception is thrown
+    } catch (const limestone_exception& e) {
+        // Verify the exception details
+        std::cerr << "Caught exception: " << e.what() << std::endl;
+        EXPECT_TRUE(std::string(e.what()).rfind("I/O Error (No such file or directory): Failed to rename epoch_file from /tmp/rotation_task_test/data_location/epoch", 0) == 0);
+        EXPECT_EQ(e.error_code(), ENOENT);
+    } catch (const std::exception& e) {
+        // Handle non-limestone_exception std::exception types
+        std::cerr << "Caught exception: " << e.what() << std::endl;
+        FAIL() << "Expected limestone_exception but caught a different std: " << e.what();
+    } catch (...) {
+        // Handle unknown exception types
+        FAIL() << "Expected limestone_exception but caught an unknown exception type.";
+    }
 }
 
 }  // namespace limestone::testing

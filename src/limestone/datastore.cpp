@@ -385,7 +385,12 @@ void datastore::rotate_epoch_file() {
        << "." << epoch_id_switched_.load();
     std::string new_name = ss.str();
     boost::filesystem::path new_file = location_ / new_name;
-    boost::filesystem::rename(epoch_file_path_, new_file);
+    boost::system::error_code ec;
+    boost::filesystem::rename(epoch_file_path_, new_file, ec);
+    if (ec) {
+        std::string err_msg = "Failed to rename epoch_file from " + epoch_file_path_.string() + " to " + new_file.string();
+        LOG_AND_THROW_IO_EXCEPTION(err_msg, ec);
+    }
     add_file(new_file);
 
     // create new one
