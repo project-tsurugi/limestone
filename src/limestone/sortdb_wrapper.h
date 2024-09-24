@@ -59,7 +59,8 @@ public:
             options.comparator = comp_.get();
         }
         if (Status status = DB::Open(options, workdir_path_.string(), &sortdb_); !status.ok()) {
-            LOG_AND_THROW_EXCEPTION("Unable to open/create database working files, status = " + status.ToString());
+            LOG_LP(ERROR) << "Unable to open/create database working files, status = " << status.ToString();
+            std::abort();
         }
     }
 
@@ -130,7 +131,8 @@ private:
             if (boost::filesystem::is_directory(workdir_path_)) {
                 boost::filesystem::remove_all(workdir_path_);
             } else {
-                THROW_LIMESTONE_EXCEPTION(workdir_path_.string() + " is not a directory");
+                LOG_LP(ERROR) << workdir_path_.string() << " is not a directory";
+                std::abort();
             }
         }
     }

@@ -80,7 +80,7 @@ private:
     std::unique_ptr<log_entry> log_entry_;
     std::vector<large_object_view> large_objects_{};
 
-    explicit cursor(const boost::filesystem::path& file);
+    explicit cursor(const boost::filesystem::path& file) noexcept;
  
     friend class snapshot;
 };
