@@ -48,7 +48,7 @@ datastore::datastore(configuration const& conf) : location_(conf.data_locations_
     if (!result_check || error) {
         const bool result_mkdir = boost::filesystem::create_directory(location_, error);
         if (!result_mkdir || error) {
-            LOG_AND_THROW_IO_EXCEPTION("fail to create directory: result_mkdir: " + location_.string(), error);
+            LOG_AND_THROW_IO_EXCEPTION("fail to create directory: " + location_.string(), error);
         }
         internal::setup_initial_logdir(location_);
         add_file(manifest_path);
