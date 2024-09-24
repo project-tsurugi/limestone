@@ -28,45 +28,33 @@ namespace limestone {
 using limestone::api::limestone_exception;
 using limestone::api::limestone_io_exception;    
 
-inline void throw_limestone_exception(const std::string& message, const char* file, int line) {
-    throw limestone_exception(message + " (at " + std::filesystem::path(file).filename().string() + ":" + std::to_string(line) + ")");
-}
+#define THROW_LIMESTONE_EXCEPTION(message) \
+    { \
+        LOG(ERROR) << message; \
+        throw limestone_exception(std::string(message) + " (at " + std::string(__FILE__) + ":" + std::to_string(__LINE__) + ")"); \
+    }
 
-inline void throw_limestone_io_exception(const std::string& message, int error_code, const char* file, int line) {
-    throw limestone_io_exception(message + " (at " + std::filesystem::path(file).filename().string() + ":" + std::to_string(line) + ")", error_code);
-}
+#define THROW_LIMESTONE_IO_EXCEPTION(message, error_code) \
+    { \
+        std::string full_message = limestone_io_exception::format_message(message, error_code); \
+        LOG(ERROR) << full_message; \
+        throw limestone_io_exception(full_message + " (at " + std::string(__FILE__) + ":" + std::to_string(__LINE__) + ")", error_code); \
+    }
 
-inline void throw_limestone_io_exception(const std::string& message, const boost::system::error_code& error_code, const char* file, int line) {
-    throw limestone_io_exception(message + " (at " + std::filesystem::path(file).filename().string() + ":" + std::to_string(line) + ")", error_code.value());
-}
+#define LOG_AND_THROW_EXCEPTION(message) \
+    { \
+        LOG(ERROR) << message; \
+        throw limestone_exception(std::string(message) + " (at " + std::string(__FILE__) + ":" + std::to_string(__LINE__) + ")"); \
+    }
 
-inline void log_and_throw_exception(const std::string& message, const char* file, int line) {
-    LOG_LP(ERROR) << message;
-    throw_limestone_exception(message, file, line);
-}
+#define LOG_AND_THROW_IO_EXCEPTION(message, error_code) \
+    { \
+        std::string full_message = limestone_io_exception::format_message(message, error_code); \
+        LOG(ERROR) << full_message; \
+        throw limestone_io_exception(full_message + " (at " + std::string(__FILE__) + ":" + std::to_string(__LINE__) + ")", error_code); \
+    }
 
-inline void log_and_throw_io_exception(const std::string& message, int error_code, const char* file, int line) {
-    std::string full_message = limestone_io_exception::format_message(message, error_code);
-    LOG_LP(ERROR) << full_message;
-    throw_limestone_io_exception(message, error_code, file, line);
-}
 
-inline void log_and_throw_io_exception(const std::string& message, const boost::system::error_code& error_code, const char* file, int line) {
-    std::string full_message = limestone_io_exception::format_message(message, error_code.value());
-    LOG_LP(ERROR) << full_message;
-    throw_limestone_io_exception(message, error_code, file, line);
-}
 
-// NOLINTNEXTLINE
-#define THROW_LIMESTONE_EXCEPTION(message) throw_limestone_exception(message, __FILE__, __LINE__)
-
-// NOLINTNEXTLINE
-#define THROW_LIMESTONE_IO_EXCEPTION(message, error_code) throw_limestone_io_exception(message, error_code, __FILE__, __LINE__)
-
-// NOLINTNEXTLINE
-#define LOG_AND_THROW_EXCEPTION(message) log_and_throw_exception(message, __FILE__, __LINE__)
-
-// NOLINTNEXTLINE
-#define LOG_AND_THROW_IO_EXCEPTION(message, error_code) log_and_throw_io_exception(message, error_code, __FILE__, __LINE__)
 
 } // namespace limestone
