@@ -455,13 +455,13 @@ void datastore::online_compaction_worker() {
     while (!stop_online_compaction_worker_.load()) {
         if (boost::filesystem::exists(start_file)) {
             if (!boost::filesystem::remove(start_file)) {
-                VLOG(log_error) << "failed to remove file: " << start_file.string();
+                LOG_LP(ERROR) << "failed to remove file: " << start_file.string();
                 return;
             }
             try {
                 compact_with_online();
             } catch (const limestone_exception& e) {
-                VLOG(log_error) << "failed to compact with online: " << e.what();
+                LOG_LP(ERROR) << "failed to compact with online: " << e.what();
             }
         }
         cv_online_compaction_worker_.wait_for(lock, std::chrono::seconds(1), [this]() {
