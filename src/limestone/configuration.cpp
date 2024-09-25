@@ -17,7 +17,7 @@
 
 namespace limestone::api {
 
-configuration::configuration() = default;
+configuration::configuration() noexcept = default;
 
 configuration::configuration(const std::vector<boost::filesystem::path>& data_locations, boost::filesystem::path metadata_location) noexcept
     : metadata_location_(std::move(metadata_location)) {

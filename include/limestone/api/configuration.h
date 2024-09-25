@@ -36,7 +36,7 @@ public:
     /**
      * @brief create empty object
      */
-    configuration();
+    configuration() noexcept;
 
     /**
      * @brief create a object
@@ -56,7 +56,7 @@ public:
      * @brief setter for recover_max_parallelism
      * @param recover_max_parallelism  the number of recover_max_parallelism
      */
-    void set_recover_max_parallelism(int recover_max_parallelism) {
+    void set_recover_max_parallelism(int recover_max_parallelism) noexcept{
         recover_max_parallelism_ = recover_max_parallelism;
     }
 

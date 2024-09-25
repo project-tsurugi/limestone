@@ -131,7 +131,6 @@ void datastore::ready() {
     state_ = state::ready;
 }
 
-
 std::unique_ptr<snapshot> datastore::get_snapshot() const {
     check_after_ready(static_cast<const char*>(__func__));
     return std::unique_ptr<snapshot>(new snapshot(location_));
@@ -142,7 +141,7 @@ std::shared_ptr<snapshot> datastore::shared_snapshot() const {
     return std::shared_ptr<snapshot>(new snapshot(location_));
 }
 
-log_channel& datastore::create_channel(const boost::filesystem::path& location) {
+log_channel& datastore::create_channel(const boost::filesystem::path& location) noexcept{
     check_before_ready(static_cast<const char*>(__func__));
     
     std::lock_guard<std::mutex> lock(mtx_channel_);
@@ -477,6 +476,8 @@ void datastore::stop_online_compaction_worker() {
 }
 
 void datastore::compact_with_online() {
+    check_after_ready(static_cast<const char*>(__func__));
+
     // rotate first
     rotation_result result = rotate_log_files();
 

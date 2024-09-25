@@ -57,13 +57,13 @@ public:
          * @param is_detached Indicates whether the target file can be moved.
          *                    If true, the command may or may not move this file.
          */
-        entry(boost::filesystem::path source_path, boost::filesystem::path destination_path, bool is_mutable, bool is_detached)
+        entry(boost::filesystem::path source_path, boost::filesystem::path destination_path, bool is_mutable, bool is_detached) noexcept
             : source_path_(std::move(source_path)), destination_path_(std::move(destination_path)), is_mutable_(is_mutable), is_detached_(is_detached) {}
 
-        [[nodiscard]] boost::filesystem::path source_path() const { return source_path_; }
-        [[nodiscard]] boost::filesystem::path destination_path() const { return destination_path_; }
-        [[nodiscard]] bool is_mutable() const { return is_mutable_; }
-        [[nodiscard]] bool is_detached() const { return is_detached_; }
+        [[nodiscard]] boost::filesystem::path source_path() const noexcept { return source_path_; }
+        [[nodiscard]] boost::filesystem::path destination_path() const noexcept { return destination_path_; }
+        [[nodiscard]] bool is_mutable() const noexcept { return is_mutable_; }
+        [[nodiscard]] bool is_detached() const noexcept { return is_detached_; }
     private:
         boost::filesystem::path source_path_ {};
         boost::filesystem::path destination_path_ {};
@@ -71,7 +71,7 @@ public:
         bool is_detached_ {};
     };
 
-    std::string_view configuration_id() {
+    std::string_view configuration_id() noexcept {
         return configuration_id_;
     }
 
@@ -79,24 +79,24 @@ public:
      * @brief returns minimum epoch of log files
      * @note for LOG-0, always returns 0
      */
-    [[nodiscard]] epoch_id_type log_start() const {
+    [[nodiscard]] epoch_id_type log_start() const noexcept{
         return 0;
     }
 
     /**
      * @brief returns maximum epoch of log files
      */
-    [[nodiscard]] epoch_id_type log_finish() const;
+    [[nodiscard]] epoch_id_type log_finish() const noexcept;
 
     /**
      * @brief returns maximum epoch that is included in dataabase image
      * @note for LOG-0, always returns nullopt of std::optional
      */
-    [[nodiscard]] std::optional<epoch_id_type> image_finish() const {
+    [[nodiscard]] std::optional<epoch_id_type> image_finish() const noexcept{
         return std::nullopt;
     }
 
-    const std::vector<backup_detail::entry>& entries() {
+    const std::vector<backup_detail::entry>& entries() noexcept {
         return entries_;
     }
 
