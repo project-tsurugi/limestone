@@ -141,7 +141,7 @@ std::shared_ptr<snapshot> datastore::shared_snapshot() const {
     return std::shared_ptr<snapshot>(new snapshot(location_));
 }
 
-log_channel& datastore::create_channel(const boost::filesystem::path& location) noexcept{
+log_channel& datastore::create_channel(const boost::filesystem::path& location) {
     check_before_ready(static_cast<const char*>(__func__));
     
     std::lock_guard<std::mutex> lock(mtx_channel_);

@@ -138,7 +138,7 @@ public:
      * @return the reference of the log_channel
      * @attention this function should be called before the ready() is called.
      */
-    log_channel& create_channel(const boost::filesystem::path& location) noexcept;
+    log_channel& create_channel(const boost::filesystem::path& location);
 
     /**
      * @brief provide the largest epoch ID
