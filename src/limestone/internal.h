@@ -68,4 +68,8 @@ void create_compact_pwal(
     int num_worker,
     const std::set<std::string>& file_names = std::set<std::string>());
 
+// filepath.cpp
+
+boost::filesystem::path make_tmp_dir_next_to(const boost::filesystem::path& target_dir, const char* suffix);
+
 }

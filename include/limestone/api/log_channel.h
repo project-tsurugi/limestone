@@ -49,6 +49,9 @@ public:
      * @attention this function is not thread-safe.
      * @exception limestone_exception if I/O error occurs
      * @note the current epoch is the last epoch specified by datastore::switch_epoch()
+     * @note datastore::switch_epoch() and this function can be called simultaneously.
+     * If these functions are invoked at the same time, the result will be as if one of them was called first, 
+     * but it is indeterminate which one will take precedence.
      */
     void begin_session();
 

@@ -164,14 +164,6 @@ void repair(dblog_scan &ds, std::optional<epoch_id_type> epoch) {
     }
 }
 
-static boost::filesystem::path make_tmp_dir_next_to(const boost::filesystem::path& target_dir, const char* suffix) {
-    auto tmpdirname = boost::filesystem::canonical(target_dir).string() + suffix;
-    if (::mkdtemp(tmpdirname.data()) == nullptr) {
-        THROW_LIMESTONE_IO_EXCEPTION("mkdtemp failed", errno);
-    }
-    return {tmpdirname};
-}
-
 static boost::filesystem::path make_work_dir_next_to(const boost::filesystem::path& target_dir) {
     // assume: already checked existence and is_dir
     return make_tmp_dir_next_to(target_dir, ".work_XXXXXX");
