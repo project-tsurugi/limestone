@@ -87,7 +87,6 @@ void rotation_task::rotate() {
     result_promise_.set_value(final_result);
     } catch (const std::exception& e) {
         auto ex_ptr = std::current_exception();
-        std::cerr << "Setting exception in promise" << std::endl;
         result_promise_.set_exception(ex_ptr);
     }
 }

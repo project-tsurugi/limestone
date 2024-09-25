@@ -50,6 +50,9 @@ public:
     const std::string compacted_filename = compaction_catalog::get_compacted_filename();
 
     void SetUp() {
+        if (boost::filesystem::exists(location)) {
+            boost::filesystem::permissions(location, boost::filesystem::owner_all);
+        }
         boost::filesystem::remove_all(location);
         if (!boost::filesystem::create_directory(location)) {
             std::cerr << "cannot make directory" << std::endl;
@@ -72,6 +75,9 @@ public:
 
     void TearDown() {
         datastore_ = nullptr;
+        if (boost::filesystem::exists(location)) {
+            boost::filesystem::permissions(location, boost::filesystem::owner_all);
+        }
         boost::filesystem::remove_all(location);
     }
 
@@ -819,6 +825,38 @@ TEST_F(online_compaction_test, scenario02) {
     ASSERT_PRED_FORMAT3(ContainsPrefix, pwals, "pwal_0001.", 2);
     ASSERT_PRED_FORMAT3(ContainsPrefix, pwals, "pwal_0002.", 1);
 }
+
+
+TEST_F(online_compaction_test, fail_compact_with_io_error) {
+    gen_datastore();
+    datastore_->switch_epoch(1);
+    auto pwals = extract_pwal_files_from_datastore();
+    EXPECT_TRUE(pwals.empty());
+
+    lc0_->begin_session();
+    lc0_->add_entry(1, "k1", "v1", {1, 0});
+    lc0_->end_session();
+    lc1_->begin_session();
+    lc1_->add_entry(1, "k2", "v3", {1, 0});
+    lc1_->end_session();
+
+    compaction_catalog catalog = compaction_catalog::from_catalog_file(location);
+    EXPECT_EQ(catalog.get_max_epoch_id(), 0);
+    EXPECT_EQ(catalog.get_compacted_files().size(), 0);
+    EXPECT_EQ(catalog.get_detached_pwals().size(), 0);
+
+    pwals = extract_pwal_files_from_datastore();
+    EXPECT_EQ(pwals.size(), 2);
+    ASSERT_PRED_FORMAT2(ContainsString, pwals, "pwal_0000");
+    ASSERT_PRED_FORMAT2(ContainsString, pwals, "pwal_0001");
+
+    // remove the file to cause an I/O error
+    [[maybe_unused]] int result = std::system(("chmod 0500 " + std::string(location)).c_str());
+
+    // First compaction.
+    ASSERT_THROW(run_compact_with_epoch_switch(2), limestone_exception);
+}
+
 
 TEST_F(online_compaction_test, safe_rename_success) {
     boost::filesystem::path from = boost::filesystem::path(location) / "test_file.txt";
