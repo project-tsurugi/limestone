@@ -23,6 +23,7 @@
 #include <utility>
 
 #include "limestone/api/epoch_id_type.h"
+#include "file_operations.h"
 
 namespace limestone::internal {
 
@@ -204,10 +205,15 @@ private:
     static constexpr const char *COMPACTED_FILENAME = "pwal_0000.compacted";                      ///< Prefix for temporary compaction files
     static constexpr const char *COMPACTED_BACKUP_FILENAME = "pwal_0000.compacted.prev";          ///< Extension for temporary compaction files
 
+    // Static variables
+
     // Member variables
     std::set<compacted_file_info> compacted_files_{};  ///< Set of compacted files
     std::set<std::string> detached_pwals_{};           ///< Set of detached PWALs
     epoch_id_type max_epoch_id_ = 0;                   ///< Maximum epoch ID included in the compacted files
+
+    // Static pointer to file operations interface
+    std::unique_ptr<file_operations> file_ops_ = std::make_unique<real_file_operations>();
 
     // Set of filenames for compacted files.
     boost::filesystem::path catalog_file_path_;
@@ -217,10 +223,17 @@ private:
     // needed for database startup or recovery, and can be safely deleted.
     boost::filesystem::path backup_file_path_;
 
-    // Helper methods
+protected:    
+    // Helper methods 
+    void load();
+    void restore_from_backup();
     void load_catalog_file(const boost::filesystem::path &directory_path);
     void parse_catalog_entry(const std::string& line, bool& max_epoch_id_found);
     [[nodiscard]] std::string create_catalog_content() const;
+
+    // for only testing
+    void set_file_operations(std::unique_ptr<file_operations> file_ops);
+    void reset_file_operations();
 };
 
 } // namespace limestone::internal

@@ -37,9 +37,9 @@ public:
     file_set_entry(boost::filesystem::path source_path, boost::filesystem::path destination_path, bool is_detached)
     : source_path_(std::move(source_path)), destination_path_(std::move(destination_path)), is_detached_(is_detached) {}
 
-    [[nodiscard]] boost::filesystem::path source_path() const { return source_path_; }
-    [[nodiscard]] boost::filesystem::path destination_path() const { return destination_path_; }
-    [[nodiscard]] bool is_detached() const { return is_detached_; }
+    [[nodiscard]] boost::filesystem::path source_path() const noexcept { return source_path_; }
+    [[nodiscard]] boost::filesystem::path destination_path() const noexcept { return destination_path_; }
+    [[nodiscard]] bool is_detached() const noexcept { return is_detached_; }
 
 private:
     boost::filesystem::path source_path_ {};

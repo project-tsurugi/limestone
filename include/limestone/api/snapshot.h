@@ -45,6 +45,7 @@ public:
      * @brief create a cursor to read the entire contents of the snapshot and returns it
      * @details the returned cursor points to the first element by calling cursor::next().
      * @attention this function is thread-safe.
+     * @exception limestone_exception if the file stream of the cursor is not good.
      * @return unique pointer of the cursor
      */
     [[nodiscard]] std::unique_ptr<cursor> get_cursor() const;

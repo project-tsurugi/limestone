@@ -24,6 +24,7 @@
 #include <glog/logging.h>
 #include <limestone/logging.h>
 #include "logging_helper.h"
+#include "limestone_exception_helper.h"
 
 #include <limestone/api/datastore.h>
 #include "internal.h"
@@ -47,8 +48,7 @@ datastore::datastore(configuration const& conf) : location_(conf.data_locations_
     if (!result_check || error) {
         const bool result_mkdir = boost::filesystem::create_directory(location_, error);
         if (!result_mkdir || error) {
-            LOG_LP(ERROR) << "fail to create directory: result_mkdir: " << result_mkdir << ", error_code: " << error << ", path: " << location_;
-            throw std::runtime_error("fail to create the log_location directory");
+            LOG_AND_THROW_IO_EXCEPTION("fail to create directory: " + location_.string(), error);
         }
         internal::setup_initial_logdir(location_);
         add_file(manifest_path);
@@ -77,12 +77,10 @@ datastore::datastore(configuration const& conf) : location_(conf.data_locations_
     if (!result || error) {
         FILE* strm = fopen(epoch_file_path_.c_str(), "a");  // NOLINT(*-owning-memory)
         if (!strm) {
-            LOG_LP(ERROR) << "does not have write permission for the log_location directory, path: " <<  location_;
-            throw std::runtime_error("does not have write permission for the log_location directory");
+            LOG_AND_THROW_IO_EXCEPTION("does not have write permission for the log_location directory, path: " + location_.string(), errno);
         }
         if (fclose(strm) != 0) {  // NOLINT(*-owning-memory)
-            LOG_LP(ERROR) << "fclose failed, errno = " << errno;
-            throw std::runtime_error("I/O error");
+            LOG_AND_THROW_IO_EXCEPTION("fclose failed", errno);
         }
         add_file(epoch_file_path_);
     }
@@ -114,13 +112,11 @@ void datastore::ready() {
     boost::filesystem::directory_iterator it(location_, error);
     boost::filesystem::directory_iterator end;
     if (error) {
-        LOG_LP(ERROR) << "Failed to initialize directory iterator: error_code: " << error.message() << ", path: " << location_;
-        throw std::runtime_error("Failed to initialize directory iterator");
+        LOG_AND_THROW_IO_EXCEPTION("Failed to initialize directory iterator, path: " + location_.string(), error);
     }
     for (; it != end; it.increment(error)) {
         if (error) {
-            LOG_LP(ERROR) << "Failed to access directory entry: error_code: " << error.message() << ", path: " << location_;
-            throw std::runtime_error("Failed to iterate over the directory entries");
+            LOG_AND_THROW_IO_EXCEPTION("Failed to access directory entry: , path: " + location_.string(), error);
         }
         if (boost::filesystem::is_regular_file(it->path())) {
             std::string filename = it->path().filename().string();
@@ -134,7 +130,6 @@ void datastore::ready() {
     online_compaction_worker_future_ = std::async(std::launch::async, &datastore::online_compaction_worker, this);
     state_ = state::ready;
 }
-
 
 std::unique_ptr<snapshot> datastore::get_snapshot() const {
     check_after_ready(static_cast<const char*>(__func__));
@@ -200,21 +195,17 @@ void datastore::update_min_epoch_id(bool from_switch_epoch) {  // NOLINT(readabi
 
             FILE* strm = fopen(epoch_file_path_.c_str(), "a");  // NOLINT(*-owning-memory)
             if (!strm) {
-                LOG_LP(ERROR) << "fopen failed, errno = " << errno;
-                throw std::runtime_error("I/O error");
+                LOG_AND_THROW_IO_EXCEPTION("fopen failed", errno);
             }
             log_entry::durable_epoch(strm, static_cast<epoch_id_type>(epoch_id_recorded_.load()));
             if (fflush(strm) != 0) {
-                LOG_LP(ERROR) << "fflush failed, errno = " << errno;
-                throw std::runtime_error("I/O error");
+                LOG_AND_THROW_IO_EXCEPTION("fflush failed", errno);
             }
             if (fsync(fileno(strm)) != 0) {
-                LOG_LP(ERROR) << "fsync failed, errno = " << errno;
-                throw std::runtime_error("I/O error");
+                LOG_AND_THROW_IO_EXCEPTION("fsync failed", errno);
             }
             if (fclose(strm) != 0) {  // NOLINT(*-owning-memory)
-                LOG_LP(ERROR) << "fclose failed, errno = " << errno;
-                throw std::runtime_error("I/O error");
+                LOG_AND_THROW_IO_EXCEPTION("fclose failed", errno);
             }
             break;
         }
@@ -393,15 +384,19 @@ void datastore::rotate_epoch_file() {
        << "." << epoch_id_switched_.load();
     std::string new_name = ss.str();
     boost::filesystem::path new_file = location_ / new_name;
-    boost::filesystem::rename(epoch_file_path_, new_file);
+    boost::system::error_code ec;
+    boost::filesystem::rename(epoch_file_path_, new_file, ec);
+    if (ec) {
+        std::string err_msg = "Failed to rename epoch_file from " + epoch_file_path_.string() + " to " + new_file.string();
+        LOG_AND_THROW_IO_EXCEPTION(err_msg, ec);
+    }
     add_file(new_file);
 
     // create new one
     boost::filesystem::ofstream strm{};
     strm.open(epoch_file_path_, std::ios_base::out | std::ios_base::app | std::ios_base::binary);
     if(!strm || !strm.is_open() || strm.bad() || strm.fail()){
-        LOG_LP(ERROR) << "does not have write permission for the log_location directory, path: " <<  location_;
-        throw std::runtime_error("does not have write permission for the log_location directory");
+        THROW_LIMESTONE_IO_EXCEPTION("does not have write permission for the log_location directory, path: " + location_.string(), errno);
     }
     strm.close();
 }
@@ -460,11 +455,14 @@ void datastore::online_compaction_worker() {
     while (!stop_online_compaction_worker_.load()) {
         if (boost::filesystem::exists(start_file)) {
             if (!boost::filesystem::remove(start_file)) {
-                VLOG(log_error) << "failed to remove file: " << start_file.string();
+                LOG_LP(ERROR) << "failed to remove file: " << start_file.string();
                 return;
             }
-            // Define the do_compaction function here
-            compact_with_online();
+            try {
+                compact_with_online();
+            } catch (const limestone_exception& e) {
+                LOG_LP(ERROR) << "failed to compact with online: " << e.what();
+            }
         }
         cv_online_compaction_worker_.wait_for(lock, std::chrono::seconds(1), [this]() {
             return stop_online_compaction_worker_.load();
@@ -481,6 +479,8 @@ void datastore::stop_online_compaction_worker() {
 }
 
 void datastore::compact_with_online() {
+    check_after_ready(static_cast<const char*>(__func__));
+
     // rotate first
     rotation_result result = rotate_log_files();
 

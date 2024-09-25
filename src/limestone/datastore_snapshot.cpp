@@ -26,6 +26,7 @@
 #include "logging_helper.h"
 
 #include <limestone/api/datastore.h>
+#include "limestone_exception_helper.h"
 #include "dblog_scan.h"
 #include "internal.h"
 #include "log_entry.h"
@@ -175,12 +176,12 @@ static std::pair<epoch_id_type, sorting_context> create_sorted_from_wals(
     try {
         epoch_id_type max_appeared_epoch = logscan.scan_pwal_files_throws(ld_epoch, add_entry);
         return {max_appeared_epoch, std::move(sctx)};
-    } catch (std::runtime_error& e) {
+    } catch (limestone_exception& e) {
         VLOG_LP(log_info) << "failed to scan pwal files: " << e.what();
         LOG(ERROR) << "/:limestone recover process failed. (cause: corruption detected in transaction log data directory), "
                    << "see https://github.com/project-tsurugi/tsurugidb/blob/master/docs/troubleshooting-guide.md";
         LOG(ERROR) << "/:limestone dblogdir (transaction log directory): " << from_dir;
-        throw std::runtime_error("dblogdir is corrupted");
+        throw limestone_exception("dblogdir is corrupted");
     }
 }
 
@@ -267,8 +268,7 @@ void create_compact_pwal(
     if (!result_check || error) {
         const bool result_mkdir = boost::filesystem::create_directory(to_dir, error);
         if (!result_mkdir || error) {
-            LOG_LP(ERROR) << "fail to create directory " << to_dir;
-            throw std::runtime_error("I/O error");
+            LOG_AND_THROW_IO_EXCEPTION("fail to create directory " + to_dir.string(), error);
         }
     }
 
@@ -276,8 +276,7 @@ void create_compact_pwal(
     VLOG_LP(log_info) << "generating compacted pwal file: " << snapshot_file;
     FILE* ostrm = fopen(snapshot_file.c_str(), "w");  // NOLINT(*-owning-memory)
     if (!ostrm) {
-        LOG_LP(ERROR) << "cannot create snapshot file (" << snapshot_file << ")";
-        throw std::runtime_error("I/O error");
+        LOG_AND_THROW_IO_EXCEPTION("cannot create snapshot file (" + snapshot_file.string() + ")", errno);
     }
     setvbuf(ostrm, nullptr, _IOFBF, 128L * 1024L);  // NOLINT, NB. glibc may ignore size when _IOFBF and buffer=NULL
     bool rewind = true;  // TODO: change by flag
@@ -296,8 +295,7 @@ void create_compact_pwal(
     sortdb_foreach(sctx, write_snapshot_entry);
     //log_entry::end_session(ostrm, epoch);
     if (fclose(ostrm) != 0) {  // NOLINT(*-owning-memory)
-        LOG_LP(ERROR) << "cannot close snapshot file (" << snapshot_file << "), errno = " << errno;
-        throw std::runtime_error("I/O error");
+        LOG_AND_THROW_IO_EXCEPTION("cannot close snapshot file (" + snapshot_file.string() + ")", errno);
     }
 }
 
@@ -318,8 +316,7 @@ void datastore::create_snapshot(const std::set<std::string>& file_names) {
     if (!result_check || error) {
         const bool result_mkdir = boost::filesystem::create_directory(sub_dir, error);
         if (!result_mkdir || error) {
-            LOG_LP(ERROR) << "fail to create directory";
-            throw std::runtime_error("I/O error");
+            LOG_AND_THROW_IO_EXCEPTION("fail to create directory", error);
         }
     }
 
@@ -327,15 +324,13 @@ void datastore::create_snapshot(const std::set<std::string>& file_names) {
     VLOG_LP(log_info) << "generating snapshot file: " << snapshot_file;
     FILE* ostrm = fopen(snapshot_file.c_str(), "w");  // NOLINT(*-owning-memory)
     if (!ostrm) {
-        LOG_LP(ERROR) << "cannot create snapshot file (" << snapshot_file << ")";
-        throw std::runtime_error("I/O error");
+        LOG_AND_THROW_IO_EXCEPTION("cannot create snapshot file", errno);
     }
     setvbuf(ostrm, nullptr, _IOFBF, 128L * 1024L);  // NOLINT, NB. glibc may ignore size when _IOFBF and buffer=NULL
     auto write_snapshot_entry = [&ostrm](std::string_view key, std::string_view value){log_entry::write(ostrm, key, value);};
     sortdb_foreach(sctx, write_snapshot_entry);
     if (fclose(ostrm) != 0) {  // NOLINT(*-owning-memory)
-        LOG_LP(ERROR) << "cannot close snapshot file (" << snapshot_file << "), errno = " << errno;
-        throw std::runtime_error("I/O error");
+        LOG_AND_THROW_IO_EXCEPTION("cannot close snapshot file (" + snapshot_file.string() + ")", errno);
     }
 }
 

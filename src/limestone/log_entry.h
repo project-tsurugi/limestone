@@ -29,6 +29,7 @@
 #include <limestone/api/write_version_type.h>
 #include <limestone/logging.h>
 #include "logging_helper.h"
+#include "limestone_exception_helper.h"
 
 namespace limestone::api {
 
@@ -251,8 +252,7 @@ public:
         read_error ec{};
         bool rc = read_entry_from(strm, ec);
         if (ec) {
-            LOG_LP(ERROR) << "this log_entry is broken: " << ec.message();
-            throw std::runtime_error(ec.message());
+            LOG_AND_THROW_EXCEPTION("this log_entry is broken: " + ec.message());
         }
         return rc;
     }
@@ -380,8 +380,7 @@ private:
     static void write_uint8(FILE* out, const std::uint8_t value) {
         int ret = fputc(value, out);
         if (ret == EOF) {
-            LOG_LP(ERROR) << "fputc failed, errno = " << errno;
-            throw std::runtime_error("I/O error");
+            LOG_AND_THROW_IO_EXCEPTION("fputc failed", errno);
         }
     }
     static void write_uint32le(FILE* out, const std::uint32_t value) {
@@ -406,8 +405,7 @@ private:
         if (len == 0) return;  // nothing to write
         auto ret = fwrite(buf, len, 1, out);
         if (ret != 1) {
-            LOG_LP(ERROR) << "fwrite failed, errno = " << errno;
-            throw std::runtime_error("I/O error");
+            LOG_AND_THROW_IO_EXCEPTION("fwrite failed", errno);
         }
     }
     static void read_bytes(std::istream& in, void* buf, std::streamsize len, read_error& ec) {

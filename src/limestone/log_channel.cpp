@@ -21,6 +21,7 @@
 #include <glog/logging.h>
 #include <limestone/logging.h>
 #include "logging_helper.h"
+#include "limestone_exception_helper.h"
 
 #include <limestone/api/log_channel.h>
 #include <limestone/api/datastore.h>
@@ -48,8 +49,7 @@ void log_channel::begin_session() {
     auto log_file = file_path();
     strm_ = fopen(log_file.c_str(), "a");  // NOLINT(*-owning-memory)
     if (!strm_) {
-        LOG_LP(ERROR) << "I/O error, cannot make file on " <<  location_ << ", errno = " << errno;
-        throw std::runtime_error("I/O error");
+        LOG_AND_THROW_IO_EXCEPTION("cannot make file on " + location_.string(), errno);
     }
     setvbuf(strm_, nullptr, _IOFBF, 128L * 1024L);  // NOLINT, NB. glibc may ignore size when _IOFBF and buffer=NULL
     if (!registered_) {
@@ -65,20 +65,17 @@ void log_channel::begin_session() {
 
 void log_channel::end_session() {
     if (fflush(strm_) != 0) {
-        LOG_LP(ERROR) << "fflush failed, errno = " << errno;
-        throw std::runtime_error("I/O error");
+        LOG_AND_THROW_IO_EXCEPTION("fflush failed", errno);
     }
     if (fsync(fileno(strm_)) != 0) {
-        LOG_LP(ERROR) << "fsync failed, errno = " << errno;
-        throw std::runtime_error("I/O error");
+        LOG_AND_THROW_IO_EXCEPTION("fsync failed", errno);
     }
     finished_epoch_id_.store(current_epoch_id_.load());
     current_epoch_id_.store(UINT64_MAX);
     envelope_.update_min_epoch_id();
 
     if (fclose(strm_) != 0) {  // NOLINT(*-owning-memory)
-        LOG_LP(ERROR) << "fclose failed, errno = " << errno;
-        throw std::runtime_error("I/O error");
+        LOG_AND_THROW_IO_EXCEPTION("fclose failed", errno);
     }
 
     // Remove current_epoch_id_ from waiting_epoch_ids_
@@ -102,8 +99,7 @@ void log_channel::add_entry(storage_id_type storage_id, std::string_view key, st
 }
 
 void log_channel::add_entry([[maybe_unused]] storage_id_type storage_id, [[maybe_unused]] std::string_view key, [[maybe_unused]] std::string_view value, [[maybe_unused]] write_version_type write_version, [[maybe_unused]] const std::vector<large_object_input>& large_objects) {
-    LOG_LP(ERROR) << "not implemented";
-    throw std::runtime_error("not implemented");  // FIXME
+    LOG_AND_THROW_EXCEPTION("not implemented");// FIXME
 };
 
 void log_channel::remove_entry(storage_id_type storage_id, std::string_view key, write_version_type write_version) {
@@ -139,7 +135,12 @@ rotation_result log_channel::do_rotate_file(epoch_id_type epoch) {
        << "." << epoch;
     std::string new_name = ss.str();
     boost::filesystem::path new_file = location_ / new_name;
-    boost::filesystem::rename(file_path(), new_file);
+    boost::system::error_code ec;
+    boost::filesystem::rename(file_path(), new_file, ec);
+    if (ec) {
+        std::string err_msg = "Failed to rename file from " + file_path().string() + " to " + new_file.string() + ". Error: " + ec.message();
+        LOG_AND_THROW_IO_EXCEPTION(err_msg, ec);
+    }
     envelope_.add_file(new_file);
 
     registered_ = false;

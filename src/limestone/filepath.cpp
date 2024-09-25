@@ -17,7 +17,7 @@
 #include <glog/logging.h>
 #include <limestone/logging.h>
 #include "logging_helper.h"
-
+#include "limestone_exception_helper.h"
 #include "internal.h"
 
 namespace limestone::internal {
@@ -35,8 +35,7 @@ boost::filesystem::path make_tmp_dir_next_to(const boost::filesystem::path& targ
 
     auto tmpdirname = targetdirstring + suffix;
     if (::mkdtemp(tmpdirname.data()) == nullptr) {
-        LOG_LP(ERROR) << "mkdtemp failed, errno = " << errno;
-        throw std::runtime_error("I/O error");
+        LOG_AND_THROW_IO_EXCEPTION("mkdtemp failed", errno);
     }
     return {tmpdirname};
 }

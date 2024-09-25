@@ -47,6 +47,7 @@ public:
     /**
      * @brief change the current cursor to point to the next entry
      * @attention this function is not thread-safe.
+     * @exception limestone_exception if an error occurs while reading the log entry
      * @return true if the next entry exists, false otherwise
      */
     bool next();
@@ -80,7 +81,7 @@ private:
     std::unique_ptr<log_entry> log_entry_;
     std::vector<large_object_view> large_objects_{};
 
-    explicit cursor(const boost::filesystem::path& file) noexcept;
+    explicit cursor(const boost::filesystem::path& file);
  
     friend class snapshot;
 };

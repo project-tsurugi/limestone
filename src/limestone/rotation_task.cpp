@@ -61,6 +61,7 @@ rotation_task::rotation_task(datastore& envelope)
 
 
 void rotation_task::rotate() {
+    try {
     rotation_result final_result;
     for (const auto& lc : envelope_.log_channels_) {
         boost::system::error_code error;
@@ -84,6 +85,10 @@ void rotation_task::rotate() {
     final_result.set_rotation_end_files(envelope_.get_files());
 
     result_promise_.set_value(final_result);
+    } catch (const std::exception& e) {
+        auto ex_ptr = std::current_exception();
+        result_promise_.set_exception(ex_ptr);
+    }
 }
 
 rotation_result rotation_task::wait_for_result() {

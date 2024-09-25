@@ -67,6 +67,7 @@ public:
     /**
      * @brief create an object with the given configuration
      * @param conf a reference to a configuration object used in the object construction
+     * @exception limestone_exception if an I/O error occurs during construction
      */
     explicit datastore(configuration const& conf);
 
@@ -99,7 +100,7 @@ public:
     status restore(std::string_view from, bool keep_backup) const noexcept;
 
     // restore (prusik era)
-    status restore(std::string_view from, std::vector<file_set_entry>& entries);
+    status restore(std::string_view from, std::vector<file_set_entry>& entries) noexcept;
 
     /**
      * @brief returns the status of the restore process that is currently in progress or that has finished immediately before
@@ -111,6 +112,7 @@ public:
     /**
      * @brief transition this object to an operational state
      * @details after this method is called, create_channel() can be invoked.
+     * @exception limestone_io_exception Thrown if an I/O error occurs.
      * @attention this function is not thread-safe, and the from directory must not contain any files other than log files.
      */
     void ready();
@@ -149,6 +151,7 @@ public:
     /**
      * @brief change the current epoch ID
      * @param new epoch id which must be greater than current epoch ID.
+     * @exception limestone_io_exception Thrown if an I/O error occurs.
      * @attention this function should be called after the ready() is called.
      */
     void switch_epoch(epoch_id_type epoch_id);
@@ -189,6 +192,7 @@ public:
     /**
      * @brief start backup operation
      * @detail a backup object is created, which contains a list of log files.
+     * @exception limestone_io_exception Thrown if an I/O error occurs.
      * @return a reference to the backup object.
      */
     backup& begin_backup();
@@ -197,6 +201,7 @@ public:
     /**
      * @brief start backup operation
      * @detail a backup_detail object is created, which contains a list of log entry.
+     * @exception limestone_io_exception Thrown if an I/O error occurs.
      * @return a reference to the backup_detail object.
      */
     std::unique_ptr<backup_detail> begin_backup(backup_type btype);
@@ -216,7 +221,12 @@ public:
     void recover(const epoch_tag&) const noexcept;
 
     /**
-     * Performs online compaction of the datastore.
+     * @brief Performs online log file compaction.
+     *
+     * This function compacts log files that have been rotated and are no longer subject to new entries.
+     *
+     * @exception limestone_exception Thrown if an I/O error occurs during the compaction process.
+     * @attention this function should be called before the ready() is called.
      */
     void compact_with_online();
 

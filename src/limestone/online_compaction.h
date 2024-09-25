@@ -31,7 +31,7 @@ namespace limestone::internal {
  * 
  * @param from The current path of the file or directory.
  * @param to The new path to rename the file or directory to.
- * @throws std::runtime_error if the renaming operation fails.
+ * @throws limestone_exception if the renaming operation fails.
  */
 void safe_rename(const boost::filesystem::path& from, const boost::filesystem::path& to);
 
@@ -56,7 +56,7 @@ std::set<std::string> select_files_for_compaction(const std::set<boost::filesyst
  * directory creation fails, the function logs an error and throws an exception.
  * 
  * @param dir The path of the directory to check or create.
- * @throws std::runtime_error if the path exists but is not a directory, or if directory creation fails.
+ * @throws limestone_exception if the path exists but is not a directory, or if directory creation fails.
  */
 void ensure_directory_exists(const boost::filesystem::path& dir);
 
@@ -68,7 +68,7 @@ void ensure_directory_exists(const boost::filesystem::path& dir);
  * name. If both files exist, it logs an error and throws an exception.
  * 
  * @param location The directory path where the compacted file is located.
- * @throws std::runtime_error if both the compacted file and backup file already exist.
+ * @throws limestone_exception if both the compacted file and backup file already exist.
  */
 void handle_existing_compacted_file(const boost::filesystem::path& location);
 
@@ -90,7 +90,7 @@ std::set<std::string> get_files_in_directory(const boost::filesystem::path& dire
  * an error message and throws a runtime exception.
  * 
  * @param file The path of the file to be removed.
- * @throws std::runtime_error if the file removal operation fails.
+ * @throws limestone_exception if the file removal operation fails.
  */
 void remove_file_safely(const boost::filesystem::path& file);
 

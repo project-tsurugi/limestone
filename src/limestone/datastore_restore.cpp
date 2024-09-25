@@ -28,15 +28,20 @@ static constexpr const char *version_error_prefix = "/:limestone unsupported bac
     "see https://github.com/project-tsurugi/tsurugidb/blob/master/docs/upgrade-guide.md";
 
 status purge_dir(const boost::filesystem::path& dir) {
-    for (const boost::filesystem::path& p : boost::filesystem::directory_iterator(dir)) {
-        if (!boost::filesystem::is_directory(p)) {
-            try {
-                boost::filesystem::remove(p);
-            } catch (boost::filesystem::filesystem_error& ex) {
-                LOG_LP(ERROR) << ex.what() << " file = " << p.string();
-                return status::err_permission_error;
+    try {
+        for (const boost::filesystem::path& p : boost::filesystem::directory_iterator(dir)) {
+            if (!boost::filesystem::is_directory(p)) {
+                try {
+                    boost::filesystem::remove(p);
+                } catch (const boost::filesystem::filesystem_error& ex) {
+                    LOG_LP(ERROR) << ex.what() << " file = " << p.string();
+                    return status::err_permission_error;
+                }
             }
         }
+    } catch (const boost::filesystem::filesystem_error& ex) {
+        LOG_LP(ERROR) << "Failed to iterate directory: " << ex.what() << " dir = " << dir.string();
+        return status::err_permission_error;
     }
     return status::ok;
 }
@@ -66,39 +71,52 @@ status datastore::restore(std::string_view from, bool keep_backup) const noexcep
 
     // log_dir version check
     boost::filesystem::path manifest_path = from_dir / std::string(internal::manifest_file_name);
-    if (!boost::filesystem::exists(manifest_path)) {
-        VLOG_LP(log_info) << "no manifest file in backup";
-        LOG(ERROR) << internal::version_error_prefix << " (version mismatch: version 0, server supports version 1)";
-        return status::err_broken_data;
+    try {
+        if (!boost::filesystem::exists(manifest_path)) {
+            VLOG_LP(log_info) << "no manifest file in backup";
+            LOG(ERROR) << internal::version_error_prefix << " (version mismatch: version 0, server supports version 1)";
+            return status::err_broken_data;
+        }
+    } catch (const boost::filesystem::filesystem_error& ex) {
+        LOG_LP(ERROR) << "Filesystem error: " << ex.what() << " file = " << manifest_path.string();
+        return status::err_permission_error;
     }
     if (auto rc = internal::check_manifest(manifest_path); rc != status::ok) { return rc; }
 
     if (auto rc = internal::purge_dir(location_); rc != status::ok) { return rc; }
 
-    for (const boost::filesystem::path& p : boost::filesystem::directory_iterator(from_dir)) {
-        try {
-            boost::filesystem::copy_file(p, location_ / p.filename());
-        }
-        catch (boost::filesystem::filesystem_error& ex) {
-            LOG_LP(ERROR) << ex.what() << " file = " << p.string();
-            return status::err_permission_error;
-        }
-    }
-    if (!keep_backup) {
+    try {
         for (const boost::filesystem::path& p : boost::filesystem::directory_iterator(from_dir)) {
             try {
-                boost::filesystem::remove(p);
-            }
-            catch (boost::filesystem::filesystem_error& ex) {
-                LOG_LP(WARNING) << ex.what() << " file = " << p.string();
+                boost::filesystem::copy_file(p, location_ / p.filename());
+            } catch (boost::filesystem::filesystem_error& ex) {
+                LOG_LP(ERROR) << ex.what() << " file = " << p.string();
+                return status::err_permission_error;
             }
         }
+    } catch (const boost::filesystem::filesystem_error& ex) {
+        LOG_LP(ERROR) << "Failed to iterate directory: " << ex.what();
+        return status::err_permission_error;
+    }
+    try {
+        if (!keep_backup) {
+            for (const boost::filesystem::path& p : boost::filesystem::directory_iterator(from_dir)) {
+                try {
+                    boost::filesystem::remove(p);
+                } catch (boost::filesystem::filesystem_error& ex) {
+                    LOG_LP(WARNING) << ex.what() << " file = " << p.string();
+                }
+            }
+        }
+    } catch (const boost::filesystem::filesystem_error& ex) {
+        LOG_LP(ERROR) << "Failed to iterate directory: " << ex.what();
+        return status::err_permission_error;
     }
     return status::ok;
 }
 
 // prusik era
-status datastore::restore(std::string_view from, std::vector<file_set_entry>& entries) {
+status datastore::restore(std::string_view from, std::vector<file_set_entry>& entries) noexcept{
     VLOG_LP(log_debug) << "restore (from prusik) begin, from directory = " << from;
     auto from_dir = boost::filesystem::path(std::string(from));
 
@@ -114,11 +132,18 @@ status datastore::restore(std::string_view from, std::vector<file_set_entry>& en
         } else {
             src = from_dir / src;
         }
-        if (!boost::filesystem::exists(src) || !boost::filesystem::is_regular_file(src)) {
-            LOG_LP(ERROR) << "file not found : file = " << src.string();
-            return status::err_not_found;
+        try {
+            if (!boost::filesystem::exists(src) || !boost::filesystem::is_regular_file(src)) {
+                LOG_LP(ERROR) << "File not found or not a regular file: " << src.string();
+                return status::err_not_found;
+            }
+        } catch (const boost::filesystem::filesystem_error& ex) {
+            LOG_LP(ERROR) << "Filesystem error: " << ex.what() << " file = " << src.string();
+            return status::err_permission_error;
         }
-        if (auto rc = internal::check_manifest(src); rc != status::ok) { return rc; }
+        if (auto rc = internal::check_manifest(src); rc != status::ok) {
+            return rc;
+        }
         manifest_count++;
     }
     if (manifest_count < 1) {  // XXX: change to != 1 ??

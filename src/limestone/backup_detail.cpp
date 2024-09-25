@@ -20,8 +20,8 @@
 namespace limestone::api {
 
 // for LOG-0
-epoch_id_type backup_detail::log_finish() const {
-    return log_finish_;
+epoch_id_type backup_detail::log_finish() const noexcept { 
+    return log_finish_; 
 }
 
 // restriction of current implementation:

@@ -27,6 +27,7 @@
 #include <glog/logging.h>
 
 #include <limestone/logging.h>
+#include "limestone_exception_helper.h"
 
 namespace limestone::api {
 #ifdef SORT_METHOD_USE_ROCKSDB
@@ -81,8 +82,7 @@ public:
         WriteOptions write_options{};
         auto status = sortdb_->Put(write_options, key, value);
         if (status.ok()) { return; }
-        LOG_LP(ERROR) << "sortdb put error, status: " << status.ToString();
-        throw std::runtime_error("error in sortdb put");
+        LOG_AND_THROW_EXCEPTION("sortdb put error, status: " + status.ToString());
     }
 
     bool get(const std::string& key, std::string* value) {
@@ -90,8 +90,8 @@ public:
         auto status = sortdb_->Get(read_options, key, value);
         if (status.ok()) { return true; }
         if (status.IsNotFound()) { return false; }
-        LOG_LP(ERROR) << "sortdb get error, status: " << status.ToString();
-        throw std::runtime_error("error in sortdb get");
+        LOG_AND_THROW_EXCEPTION("sortdb get error, status: " + status.ToString());
+        return false; // Added return statement to ensure function always returns a value
     }
 
     void each(const std::function<void(std::string_view, std::string_view)>& fun) {
@@ -102,8 +102,7 @@ public:
             fun(std::string_view(key.data(), key.size()), std::string_view(value.data(), value.size()));
         }
         if (!it->status().ok()) {
-            LOG_LP(ERROR) << "sortdb iterator invalidated, status: " << it->status().ToString();
-            throw std::runtime_error("error in sortdb read iteration");
+            LOG_AND_THROW_EXCEPTION("sortdb iterator invalidated, status: " + it->status().ToString());
         }
     }
     
