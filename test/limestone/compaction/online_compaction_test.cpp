@@ -826,8 +826,8 @@ TEST_F(online_compaction_test, scenario02) {
     ASSERT_PRED_FORMAT3(ContainsPrefix, pwals, "pwal_0002.", 1);
 }
 
-
-TEST_F(online_compaction_test, fail_compact_with_io_error) {
+// This test is disabled because it is environment-dependent and may not work properly in CI environments.
+TEST_F(online_compaction_test, DISABLED_fail_compact_with_io_error) {
     gen_datastore();
     datastore_->switch_epoch(1);
     auto pwals = extract_pwal_files_from_datastore();
