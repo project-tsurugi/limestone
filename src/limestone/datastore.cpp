@@ -458,8 +458,11 @@ void datastore::online_compaction_worker() {
                 VLOG(log_error) << "failed to remove file: " << start_file.string();
                 return;
             }
-            // Define the do_compaction function here
-            compact_with_online();
+            try {
+                compact_with_online();
+            } catch (const limestone_exception& e) {
+                VLOG(log_error) << "failed to compact with online: " << e.what();
+            }
         }
         cv_online_compaction_worker_.wait_for(lock, std::chrono::seconds(1), [this]() {
             return stop_online_compaction_worker_.load();
