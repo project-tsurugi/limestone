@@ -171,4 +171,28 @@ TEST_F(dblogutil_compaction_test, nondblogdir) {
     EXPECT_TRUE(contains(out, "unsupport"));
 }
 
+TEST_F(dblogutil_compaction_test, rejects_symlink) {
+    // setup normal logdir as same as case1
+    boost::filesystem::path dir{location};
+    dir /= "log";
+    boost::filesystem::create_directory(dir);
+    create_file(dir / "epoch", data_case1_epoch);
+    create_file(dir / std::string(manifest_file_name), data_manifest());
+    create_file(dir / "pwal_0000", data_case1_pwal0);
+    create_file(dir / "pwal_0001", data_case1_pwal1);
+
+    // make symlink to data
+    boost::filesystem::path symlink{location};
+    symlink /= "symbolic_link";
+    boost::filesystem::create_directory_symlink(dir, symlink);
+
+    std::string command;
+    command = UTIL_COMMAND " compaction --force " + symlink.string() + " 2>&1";
+    std::string out;
+    int rc = invoke(command, out);
+    EXPECT_GE(rc, 64 << 8);
+    EXPECT_TRUE(contains_line_starts_with(out, "E"));  // LOG(ERROR)
+    EXPECT_TRUE(contains(out, "must not be symlink"));
+}
+
 }  // namespace limestone::testing

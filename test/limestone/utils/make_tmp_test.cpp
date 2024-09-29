@@ -32,6 +32,23 @@ static constexpr const char* location = "/tmp/make_tmp_test";
 
 };
 
+TEST_F(make_tmp_test, remove_trailing_dir_separators) {
+    boost::filesystem::path p0{"/tmp/nonexist/0"};
+    remove_trailing_dir_separators(p0);
+    ASSERT_EQ(p0.string(), "/tmp/nonexist/0");
+    ASSERT_EQ(p0.filename().string(), "0");
+
+    boost::filesystem::path p1{"/tmp/nonexist/1/"};
+    remove_trailing_dir_separators(p1);
+    ASSERT_EQ(p1.string(), "/tmp/nonexist/1");
+    ASSERT_EQ(p1.filename().string(), "1");
+
+    boost::filesystem::path p2{"/tmp/nonexist/2//"};
+    remove_trailing_dir_separators(p2);
+    ASSERT_EQ(p2.string(), "/tmp/nonexist/2");
+    ASSERT_EQ(p2.filename().string(), "2");
+}
+
 TEST_F(make_tmp_test, make_tmp_dir_next_to_0slash) {
     std::string p = std::string(location) + "/test0";
     boost::filesystem::create_directory(p);
