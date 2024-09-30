@@ -17,6 +17,7 @@
 
 #include <memory>
 #include <vector>
+#include <optional> 
 
 #include <boost/filesystem.hpp>
 #include <boost/filesystem/fstream.hpp>
@@ -28,6 +29,7 @@ namespace limestone::api {
 
 class log_entry;
 class snapshot;
+class snapshot_tracker;
 
 /**
  * @brief a cursor to scan entries on the snapshot
@@ -77,12 +79,13 @@ public:
     std::vector<large_object_view>& large_objects() noexcept;
 
 private:
-    boost::filesystem::ifstream istrm_{};
-    std::unique_ptr<log_entry> log_entry_;
+    std::unique_ptr<snapshot_tracker> log_entry_tracker_;
+
     std::vector<large_object_view> large_objects_{};
 
-    explicit cursor(const boost::filesystem::path& file);
- 
+    explicit cursor(const boost::filesystem::path& snapshot_file);
+    explicit cursor(const boost::filesystem::path& snapshot_file, const boost::filesystem::path& compacted_file);
+
     friend class snapshot;
 };
 
