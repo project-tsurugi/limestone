@@ -186,10 +186,11 @@ static std::pair<epoch_id_type, sorting_context> create_sorted_from_wals(
     }
 }
 
-static void sortdb_foreach(sorting_context& sctx, std::function<void(const std::string_view key, const std::string_view value)> write_snapshot_entry) {
+static void sortdb_foreach(sorting_context& sctx, std::function<void(const std::string_view key, const std::string_view value)> write_snapshot_entry,
+                           bool skip_remove_entry) {
     static_assert(sizeof(log_entry::entry_type) == 1);
 #if defined SORT_METHOD_PUT_ONLY
-    sctx.get_sortdb()->each([&sctx, write_snapshot_entry, last_key = std::string{}](const std::string_view db_key, const std::string_view db_value) mutable {
+    sctx.get_sortdb()->each([&sctx, write_snapshot_entry, skip_remove_entry, last_key = std::string{}](const std::string_view db_key, const std::string_view db_value) mutable {
         // using the first entry in GROUP BY (original-)key
         // NB: max versions comes first (by the custom-comparator)
         std::string_view key(db_key.data() + write_version_size, db_key.size() - write_version_size);
@@ -223,14 +224,17 @@ static void sortdb_foreach(sorting_context& sctx, std::function<void(const std::
             break;
         }
         case log_entry::entry_type::remove_entry:
-            break;  // skip
+            if (!skip_remove_entry) {
+                write_snapshot_entry(key, "remove_entry");
+            }
+            break;
         default:
             LOG(ERROR) << "never reach " << static_cast<int>(entry_type);
             std::abort();
         }
     });
 #else
-    sctx.get_sortdb()->each([&sctx, &write_snapshot_entry](const std::string_view db_key, const std::string_view db_value) {
+    sctx.get_sortdb()->each([&sctx, &write_snapshot_entry, skip_remove_entry](const std::string_view db_key, const std::string_view db_value) {
         storage_id_type st_bytes{};
         memcpy(static_cast<void*>(&st_bytes), db_key.data(), sizeof(storage_id_type));
         storage_id_type st = le64toh(st_bytes);
@@ -248,7 +252,10 @@ static void sortdb_foreach(sorting_context& sctx, std::function<void(const std::
             write_snapshot_entry(db_key, db_value.substr(1));
             break;
         case log_entry::entry_type::remove_entry:
-            break;  // skip
+            if (!skip_remove_entry) {
+                write_snapshot_entry(db_key, "remove_entry");
+            }
+            break;
         default:
             LOG(ERROR) << "never reach " << static_cast<int>(entry_type);
             std::abort();
@@ -293,7 +300,7 @@ void create_compact_pwal(
             log_entry::write(ostrm, key_stid, value_etc);
         }
     };
-    sortdb_foreach(sctx, write_snapshot_entry);
+    sortdb_foreach(sctx, write_snapshot_entry, true);
     //log_entry::end_session(ostrm, epoch);
     if (fclose(ostrm) != 0) {  // NOLINT(*-owning-memory)
         LOG_AND_THROW_IO_EXCEPTION("cannot close snapshot file (" + snapshot_file.string() + ")", errno);
@@ -358,7 +365,7 @@ void datastore::create_snapshot() {
     }
     setvbuf(ostrm, nullptr, _IOFBF, 128L * 1024L);  // NOLINT, NB. glibc may ignore size when _IOFBF and buffer=NULL
     auto write_snapshot_entry = [&ostrm](std::string_view key, std::string_view value){log_entry::write(ostrm, key, value);};
-    sortdb_foreach(sctx, write_snapshot_entry);
+    sortdb_foreach(sctx, write_snapshot_entry, true);
     if (fclose(ostrm) != 0) {  // NOLINT(*-owning-memory)
         LOG_AND_THROW_IO_EXCEPTION("cannot close snapshot file (" + snapshot_file.string() + ")", errno);
     }
