@@ -309,7 +309,7 @@ private:
      * @param from the location of log files
      * @attention this function is not thread-safe.
      */
-    void create_snapshot(const std::set<std::string>& file_names);
+    void create_snapshot();
 
     epoch_id_type last_durable_epoch_in_dir();
 

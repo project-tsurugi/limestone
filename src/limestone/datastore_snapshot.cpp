@@ -27,6 +27,7 @@
 
 #include <limestone/api/datastore.h>
 #include "limestone_exception_helper.h"
+#include "compaction_catalog.h"
 #include "dblog_scan.h"
 #include "internal.h"
 #include "log_entry.h"
@@ -299,13 +300,42 @@ void create_compact_pwal(
     }
 }
 
+std::set<std::string> assemble_snapshot_input_filenames(
+    const std::unique_ptr<compaction_catalog>& compaction_catalog,
+    const boost::filesystem::path& location) {
+    std::set<std::string> detached_pwals = compaction_catalog->get_detached_pwals();
+
+    std::set<std::string> filename_set;
+    boost::system::error_code error;
+    boost::filesystem::directory_iterator it(location, error);
+    boost::filesystem::directory_iterator end;
+    if (error) {
+        LOG_AND_THROW_IO_EXCEPTION("Failed to initialize directory iterator, path: " + location.string(), error);
+    }
+    for (; it != end; it.increment(error)) {
+        if (error) {
+            LOG_AND_THROW_IO_EXCEPTION("Failed to access directory entry, path: " + location.string(), error);
+        }
+        if (boost::filesystem::is_regular_file(it->path())) {
+            std::string filename = it->path().filename().string();
+//            if (detached_pwals.find(filename) == detached_pwals.end() && filename != compaction_catalog::get_compacted_filename()) {
+            if (detached_pwals.find(filename) == detached_pwals.end()) {
+                filename_set.insert(filename);
+            }
+        }
+    }
+
+    return filename_set;
+}
+
 }
 
 namespace limestone::api {
 using namespace limestone::internal;
 
-void datastore::create_snapshot(const std::set<std::string>& file_names) {
+void datastore::create_snapshot() {
     const auto& from_dir = location_;
+    std::set<std::string> file_names = assemble_snapshot_input_filenames(compaction_catalog_, from_dir);
     auto [max_appeared_epoch, sctx] = create_sorted_from_wals(from_dir, recover_max_parallelism_, file_names);
     epoch_id_switched_.store(max_appeared_epoch);
     epoch_id_informed_.store(max_appeared_epoch);
