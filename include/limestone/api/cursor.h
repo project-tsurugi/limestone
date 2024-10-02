@@ -58,7 +58,7 @@ public:
      * @brief returns the storage ID of the entry at the current cursor position
      * @return the storage ID of the current entry
      */
-    storage_id_type storage() const noexcept;
+    [[nodiscard]] storage_id_type storage() const noexcept;
 
     /**
      * @brief returns the key byte string of the entry at the current cursor position

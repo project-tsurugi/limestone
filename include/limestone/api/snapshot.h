@@ -73,11 +73,9 @@ public:
     [[nodiscard]] std::unique_ptr<cursor> scan(storage_id_type storage_id, std::string_view entry_key, bool inclusive) const noexcept;
 
 private:
-    boost::filesystem::path dir_{};
+    boost::filesystem::path location_{};
 
-    [[nodiscard]] boost::filesystem::path file_path() const noexcept;
-
-    explicit snapshot(const boost::filesystem::path& location) noexcept;
+    explicit snapshot(boost::filesystem::path location) noexcept;
 
     friend class datastore;
 };

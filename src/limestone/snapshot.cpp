@@ -17,15 +17,21 @@
 
 #include <glog/logging.h>
 #include <limestone/logging.h>
+#include "compaction_catalog.h"
 #include "logging_helper.h"
 
 namespace limestone::api {  // FIXME fill implementation
 
-snapshot::snapshot(const boost::filesystem::path& location) noexcept : dir_(location / boost::filesystem::path(std::string(subdirectory_name_))) {
-}
+snapshot::snapshot(boost::filesystem::path location) noexcept : location_(std::move(location)) {}
 
 std::unique_ptr<cursor> snapshot::get_cursor() const {
-    return std::unique_ptr<cursor>(new cursor(file_path()));
+    boost::filesystem::path compacted_file = location_ / limestone::internal::compaction_catalog::get_compacted_filename();
+    boost::filesystem::path snapshot_file = location_ / std::string(subdirectory_name_) / std::string(file_name_);
+
+    if (boost::filesystem::exists(compacted_file)) {
+        return std::unique_ptr<cursor>(new cursor(snapshot_file, compacted_file));
+    }
+    return std::unique_ptr<cursor>(new cursor(snapshot_file));
 }
 
 std::unique_ptr<cursor> snapshot::find([[maybe_unused]] storage_id_type storage_id, [[maybe_unused]] std::string_view entry_key) const noexcept {
@@ -36,10 +42,6 @@ std::unique_ptr<cursor> snapshot::find([[maybe_unused]] storage_id_type storage_
 std::unique_ptr<cursor> snapshot::scan([[maybe_unused]] storage_id_type storage_id, [[maybe_unused]] std::string_view entry_key, [[maybe_unused]] bool inclusive) const noexcept {
     LOG_LP(ERROR) << "not implemented";
     std::abort();  // FIXME should implement
-}
-
-boost::filesystem::path snapshot::file_path() const noexcept {
-    return dir_ / boost::filesystem::path(std::string(file_name_));
 }
 
 } // namespace limestone::api

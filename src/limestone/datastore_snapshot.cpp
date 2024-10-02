@@ -325,8 +325,7 @@ std::set<std::string> assemble_snapshot_input_filenames(
         }
         if (boost::filesystem::is_regular_file(it->path())) {
             std::string filename = it->path().filename().string();
-//            if (detached_pwals.find(filename) == detached_pwals.end() && filename != compaction_catalog::get_compacted_filename()) {
-            if (detached_pwals.find(filename) == detached_pwals.end()) {
+            if (detached_pwals.find(filename) == detached_pwals.end() && filename != compaction_catalog::get_compacted_filename()) {
                 filename_set.insert(filename);
             }
         }
@@ -365,7 +364,9 @@ void datastore::create_snapshot() {
     }
     setvbuf(ostrm, nullptr, _IOFBF, 128L * 1024L);  // NOLINT, NB. glibc may ignore size when _IOFBF and buffer=NULL
     auto write_snapshot_entry = [&ostrm](std::string_view key, std::string_view value){log_entry::write(ostrm, key, value);};
-    sortdb_foreach(sctx, write_snapshot_entry, true);
+
+    bool skip_remove_entry = compaction_catalog_->get_compacted_files().empty();
+    sortdb_foreach(sctx, write_snapshot_entry, skip_remove_entry);
     if (fclose(ostrm) != 0) {  // NOLINT(*-owning-memory)
         LOG_AND_THROW_IO_EXCEPTION("cannot close snapshot file (" + snapshot_file.string() + ")", errno);
     }

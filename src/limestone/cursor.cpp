@@ -170,9 +170,9 @@ cursor::~cursor() noexcept {
 }
 
 bool cursor::next() {
-    // Keep calling next() until we find a non-remove_entry, or no more entries
+    // Keep calling next() until we find a noraml_entry, or no more entries
     while (log_entry_tracker_->next()) {
-        if (log_entry_tracker_->type() != log_entry::entry_type::remove_entry) {
+        if (log_entry_tracker_->type() == limestone::api::log_entry::entry_type::normal_entry) {
             return true;  
         }
     }
