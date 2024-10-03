@@ -84,6 +84,17 @@
   * 現在の実装を確認し、それに合わせてロジックを組み込む必要がある。
 
 
+## テストケースの作成
+
+どのコミットの変更に対するテストケース作成が終わったか
+
+* b01068c (origin/wip/log-0.7) cleanup: clang-tidy
+* aed365d Make cursor class handle two streams
+* 68480e0 Add flag to snapshot creation to skip entry removal
+* 1a48442 Refactor to isolate testable units for easier testing => 完了
+
+
+
 ## 2024/10/03
 
 なんとか動き始めたので、性能改善度合いを測定してみる。
