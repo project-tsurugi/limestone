@@ -82,6 +82,14 @@
     * assemble_snapshot_input_filenamesのテストがないので作成する。
 * drop table, truncate table時に作成されるログエントリに対する処理が実装されてていない。
   * 現在の実装を確認し、それに合わせてロジックを組み込む必要がある。
+  * pwal_0000.compacted => すでに存在するコンパクション済みファイル, snapshot => 起動時に作成するスナップショットファイル、pwal_0000.compactedのエントリを含まない。
+  * pwal_0000.compacted にtruncate, drop tableのエントリが存在する場合
+    * pwal_0000.compacted作成時に、truncate, drop tableの結果消えるエントリは、すでに削除済みなので、cursortアクセスで特に問題ない。
+  * snapshot作成時に、truncate, drop tableのエントリが存在する場合
+    * snapshot作成時に、消す必要があるエントリを削除しているので、snapshotに対するcursorのアクセスは特に問題ない。
+    * pwal_0000.compacted にcurosrがアクセスする場合、truncate, drop tableにより削除すべエントリが存在する可能性があるので、それを発見したときにスキップする必要がある。
+    * snapshot作成時に、削除したストレージのストレージIDのセットを作成しておき、cursorでpwal_0000.compactedアクセスじに、当該エントリのIDが見つかったらスキップする処理を追加する。
+    * 
 
 
 ## テストケースの作成

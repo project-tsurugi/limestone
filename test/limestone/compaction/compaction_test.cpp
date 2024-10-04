@@ -149,7 +149,105 @@ protected:
         }
         return kv_list;
     }
-    
+
+    void print_log_entry(const log_entry& entry) {
+        std::string key;
+        storage_id_type storage_id = entry.storage();
+        log_entry::entry_type type = entry.type();
+
+        if (type == log_entry::entry_type::normal_entry || type == log_entry::entry_type::remove_entry) {
+            entry.key(key);
+        }
+
+        switch (type) {
+            case log_entry::entry_type::normal_entry: {
+                std::string value;
+                entry.value(value);
+                std::cout << "Entry Type: normal_entry, Storage ID: " << storage_id
+                        << ", Key: " << key << ", Value: " << value
+                        << ", Write Version: Epoch: " << log_entry::write_version_epoch_number(entry.value_etc())
+                        << ", Minor: " << log_entry::write_version_minor_write_version(entry.value_etc())
+                        << std::endl;
+                break;
+            }
+            case log_entry::entry_type::remove_entry: {
+                std::cout << "Entry Type: remove_entry, Storage ID: " << storage_id << ", Key: " << key
+                        << ", Write Version: Epoch: " << log_entry::write_version_epoch_number(entry.value_etc())
+                        << ", Minor: " << log_entry::write_version_minor_write_version(entry.value_etc())
+                        << std::endl;
+                break;
+            }
+            case log_entry::entry_type::clear_storage:
+            case log_entry::entry_type::add_storage:
+            case log_entry::entry_type::remove_storage: {
+                write_version_type write_version;
+                entry.write_version(write_version);
+                std::cout << "Entry Type: " << static_cast<int>(type) << ", Storage ID: " << storage_id
+                        << ", Write Version: Epoch: " << log_entry::write_version_epoch_number(entry.value_etc())
+                        << ", Minor: " << log_entry::write_version_minor_write_version(entry.value_etc())
+                        << std::endl;
+                break;
+            }
+            case log_entry::entry_type::marker_begin:
+                std::cout << "Entry Type: marker_begin, Epoch ID: " << entry.epoch_id() << std::endl;
+                break;
+            case log_entry::entry_type::marker_end:
+                std::cout << "Entry Type: marker_end, Epoch ID: " << entry.epoch_id() << std::endl;
+                break;
+            case log_entry::entry_type::marker_durable:
+                std::cout << "Entry Type: marker_durable, Epoch ID: " << entry.epoch_id() << std::endl;
+                break;
+            case log_entry::entry_type::marker_invalidated_begin:
+                std::cout << "Entry Type: marker_invalidated_begin, Epoch ID: " << entry.epoch_id() << std::endl;
+                break;
+            default:
+                std::cout << "Entry Type: unknown" << std::endl;
+                break;
+        }
+    }
+
+
+
+
+    /**
+     * @brief Reads a specified log file (PWAL, compacted_file, snapshot) and returns a list of log entries.
+     * @param log_file The path to the log file to be scanned.
+     * @return A vector of log_entry objects read from the log file.
+     */
+    std::vector<log_entry> read_log_file(const std::string& log_file, const boost::filesystem::path& log_dir) {
+        boost::filesystem::path log_path = log_dir / log_file;
+
+        std::vector<log_entry> log_entries;
+        limestone::internal::dblog_scan::parse_error pe;
+
+        // Define a lambda function to capture and store log entries
+        auto add_entry = [&](log_entry& e) { log_entries.push_back(e); };
+
+        // Error reporting function, returning bool as expected by error_report_func_t
+        auto report_error = [](log_entry::read_error& error) -> bool {
+            std::cerr << "Error during log file scan: " << error.message() << std::endl;
+            return false;  // Return false to indicate an error occurred
+        };
+
+        // Initialize a dblog_scan instance with the log directory
+        limestone::internal::dblog_scan scanner(log_dir);
+
+        // Scan the specified log file
+        epoch_id_type max_epoch = scanner.scan_one_pwal_file(log_path, UINT64_MAX, add_entry, report_error, pe);
+
+        if (pe.value() != limestone::internal::dblog_scan::parse_error::ok) {
+            std::cerr << "Parse error occurred while reading the log file: " << log_path.string() << std::endl;
+        }
+
+        // Iterate over the log entries and print relevant information
+        std::cout << std::endl << "Log entries read from " << log_path.string() << ":" << std::endl;
+        for (const auto& entry : log_entries) {
+            print_log_entry(entry); 
+        }
+
+        return log_entries;
+    }
+
     ::testing::AssertionResult ContainsPrefix(const char* files_expr, const char* prefix_expr, const char* expected_count_expr,
                                               const std::set<std::string>& files, const std::string& prefix, int expected_count) {
         int match_count = 0;
@@ -223,6 +321,67 @@ protected:
         }
 
         return pwal_file_names;
+    }
+
+    ::testing::AssertionResult AssertLogEntry(const log_entry& entry, const std::optional<storage_id_type>& expected_storage_id,
+                                              const std::optional<std::string>& expected_key, const std::optional<std::string>& expected_value,
+                                              const std::optional<epoch_id_type>& expected_epoch_number, const std::optional<std::uint64_t>& expected_minor_version, 
+                                              log_entry::entry_type expected_type) {
+        // Check the entry type
+        if (entry.type() != expected_type) {
+            return ::testing::AssertionFailure()
+                << "Expected entry type: " << static_cast<int>(expected_type)
+                << ", but got: " << static_cast<int>(entry.type());
+        }
+
+        // Check the storage ID if it exists
+        if (expected_storage_id.has_value()) {
+            if (entry.storage() != expected_storage_id.value()) {
+                return ::testing::AssertionFailure()
+                    << "Expected storage ID: " << expected_storage_id.value()
+                    << ", but got: " << entry.storage();
+            }
+        }
+
+        // Check the key if it exists
+        if (expected_key.has_value()) {
+            std::string actual_key;
+            entry.key(actual_key);
+            if (actual_key != expected_key.value()) {
+                return ::testing::AssertionFailure()
+                    << "Expected key: " << expected_key.value()
+                    << ", but got: " << actual_key;
+            }
+        }
+
+        // Check the value if it exists
+        if (expected_value.has_value()) {
+            std::string actual_value;
+            entry.value(actual_value);
+            if (actual_value != expected_value.value()) {
+                return ::testing::AssertionFailure()
+                    << "Expected value: " << expected_value.value()
+                    << ", but got: " << actual_value;
+            }
+        }
+
+        // Check the write version if it exists
+        if (expected_epoch_number.has_value() && expected_minor_version.has_value()) {
+            epoch_id_type actual_epoch_number = log_entry::write_version_epoch_number(entry.value_etc());
+            std::uint64_t actual_minor_version = log_entry::write_version_minor_write_version(entry.value_etc());
+            
+            if (actual_epoch_number != expected_epoch_number.value() ||
+                actual_minor_version != expected_minor_version.value()) {
+                return ::testing::AssertionFailure()
+                    << "Expected write version (epoch_number: " << expected_epoch_number.value()
+                    << ", minor_write_version: " << expected_minor_version.value()
+                    << "), but got (epoch_number: " << actual_epoch_number
+                    << ", minor_write_version: " << actual_minor_version << ")";
+            }
+        }
+
+        // If all checks pass, return success
+        return ::testing::AssertionSuccess();
     }
 };
 
@@ -825,6 +984,161 @@ TEST_F(compaction_test, scenario02) {
     ASSERT_PRED_FORMAT3(ContainsPrefix, pwals, "pwal_0001.", 2);
     ASSERT_PRED_FORMAT3(ContainsPrefix, pwals, "pwal_0002.", 1);
 }
+
+// This test case verifies the correct behavior of `remove_entry`.
+TEST_F(compaction_test, scenario03) {
+    FLAGS_v = 50;  // set VLOG level to 50
+
+    // 1. Create multiple PWALs using two different storage IDs
+    gen_datastore();
+    datastore_->switch_epoch(1);
+
+    // Storage ID 1: key1 added, then removed
+    lc0_->begin_session();
+    lc0_->add_entry(1, "key1", "value1", {1, 0});
+    lc0_->remove_entry(1, "key1", {1, 1});  // use remove_entry
+    lc0_->end_session();
+
+    // Storage ID 2: key2 added, no removal
+    lc1_->begin_session();
+    lc1_->add_entry(2, "key2", "value2", {1, 0});
+    lc1_->end_session();
+
+    // Storage ID 1: key3 removed first, then added
+    lc2_->begin_session();
+    lc2_->remove_entry(1, "key3", {1, 0});
+    lc2_->add_entry(1, "key3", "value3", {1, 3});
+    lc2_->end_session();
+
+    // Storeage ID 1: key4 deleted witout adding
+    lc0_->begin_session();
+    lc0_->remove_entry(1, "key4", {1, 0});
+    lc0_->end_session();
+
+    datastore_->switch_epoch(2);
+
+    // Check the created PWAL files
+    auto pwals = extract_pwal_files_from_datastore();
+    EXPECT_EQ(pwals.size(), 3);
+    ASSERT_PRED_FORMAT2(ContainsString, pwals, "pwal_0000");
+    ASSERT_PRED_FORMAT2(ContainsString, pwals, "pwal_0001");
+    ASSERT_PRED_FORMAT2(ContainsString, pwals, "pwal_0002");
+
+    auto log_entries = read_log_file("pwal_0000", location);
+    ASSERT_EQ(log_entries.size(), 3);  // Ensure that there are log entries
+    EXPECT_TRUE(AssertLogEntry(log_entries[0], 1, "key1", "value1", 1, 0, log_entry::entry_type::normal_entry));
+    EXPECT_TRUE(AssertLogEntry(log_entries[1], 1, "key1", std::nullopt, 1, 1, log_entry::entry_type::remove_entry));
+    EXPECT_TRUE(AssertLogEntry(log_entries[2], 1, "key4", std::nullopt, 1, 0, log_entry::entry_type::remove_entry));
+    log_entries = read_log_file("pwal_0001", location);
+    ASSERT_EQ(log_entries.size(), 1);  // Ensure that there are log entries
+    EXPECT_TRUE(AssertLogEntry(log_entries[0], 2, "key2", "value2", 1, 0, log_entry::entry_type::normal_entry));
+    log_entries = read_log_file("pwal_0002", location);
+    ASSERT_EQ(log_entries.size(), 2);  // Ensure that there are log entries
+    EXPECT_TRUE(AssertLogEntry(log_entries[0], 1, "key3", std::nullopt, 1, 0,log_entry ::entry_type::remove_entry));
+    EXPECT_TRUE(AssertLogEntry(log_entries[1], 1, "key3", "value3", 1, 3, log_entry::entry_type::normal_entry));
+
+    // 2. Execute compaction
+    run_compact_with_epoch_switch(2);
+
+    // Check the catalog and PWALs after compaction
+    compaction_catalog catalog = compaction_catalog::from_catalog_file(location);
+    EXPECT_EQ(catalog.get_max_epoch_id(), 1);
+    EXPECT_EQ(catalog.get_compacted_files().size(), 1);
+    EXPECT_EQ(catalog.get_detached_pwals().size(), 3);
+
+    pwals = extract_pwal_files_from_datastore();
+    EXPECT_EQ(pwals.size(), 4);  // Includes the compacted file
+    ASSERT_PRED_FORMAT2(ContainsString, pwals, "pwal_0000.compacted");
+
+    log_entries = read_log_file("pwal_0000.compacted", location);
+    ASSERT_EQ(log_entries.size(), 2);  // Ensure that there are log entries
+    EXPECT_TRUE(AssertLogEntry(log_entries[0], 1, "key3", "value3", 0, 0, log_entry::entry_type::normal_entry));  // write version changed to 0
+    EXPECT_TRUE(AssertLogEntry(log_entries[1], 2, "key2", "value2", 0, 0, log_entry::entry_type::normal_entry));  // write version changed to 0
+
+    // 3. Add/Update PWALs (include remove_entry again)
+    
+    // Storage ID 1: key1 added, then removed
+    lc0_->begin_session();
+    lc0_->add_entry(1, "key11", "value1", {2, 0});
+    lc0_->remove_entry(1, "key11", {2, 1});  // use remove_entry
+    lc0_->end_session();
+
+    // Storage ID 2: key2 added, no removal
+    lc1_->begin_session();
+    lc1_->add_entry(2, "key21", "value2", {2, 0});
+    lc1_->end_session();
+
+    // Storage ID 1: key3 removed first, then added
+    lc2_->begin_session();
+    lc2_->remove_entry(1, "key31", {2, 0});
+    lc2_->add_entry(1, "key31", "value3", {2, 3});
+    lc2_->end_session();
+
+    // Storeage ID 1: key4 deleted witout adding
+    lc0_->begin_session();
+    lc0_->remove_entry(1, "key41", {2, 0});
+    lc0_->end_session();
+
+    datastore_->switch_epoch(3);
+    pwals = extract_pwal_files_from_datastore();
+
+    // Check the created PWAL files
+    pwals = extract_pwal_files_from_datastore();
+    EXPECT_EQ(pwals.size(), 7);  // 3 new pwals and 3 rotaed pwals and 1 compacted file
+    ASSERT_PRED_FORMAT2(ContainsString, pwals, "pwal_0000");
+    ASSERT_PRED_FORMAT2(ContainsString, pwals, "pwal_0001");
+    ASSERT_PRED_FORMAT2(ContainsString, pwals, "pwal_0002");
+
+    log_entries = read_log_file("pwal_0000", location);
+    ASSERT_EQ(log_entries.size(), 3);  // Ensure that there are log entries
+    EXPECT_TRUE(AssertLogEntry(log_entries[0], 1, "key11", "value1", 2, 0, log_entry::entry_type::normal_entry));
+    EXPECT_TRUE(AssertLogEntry(log_entries[1], 1, "key11", std::nullopt, 2, 1, log_entry::entry_type::remove_entry));
+    EXPECT_TRUE(AssertLogEntry(log_entries[2], 1, "key41", std::nullopt, 2, 0, log_entry::entry_type::remove_entry));
+    log_entries = read_log_file("pwal_0001", location);
+    ASSERT_EQ(log_entries.size(), 1);  // Ensure that there are log entries
+    EXPECT_TRUE(AssertLogEntry(log_entries[0], 2, "key21", "value2", 2, 0, log_entry::entry_type::normal_entry));
+    log_entries = read_log_file("pwal_0002", location);
+    ASSERT_EQ(log_entries.size(), 2);  // Ensure that there are log entries
+    EXPECT_TRUE(AssertLogEntry(log_entries[0], 1, "key31", std::nullopt, 2, 0, log_entry::entry_type::remove_entry));
+    EXPECT_TRUE(AssertLogEntry(log_entries[1], 1, "key31", "value3", 2, 3, log_entry::entry_type::normal_entry));
+
+    // 4. Restart the datastore
+    datastore_->shutdown();
+    datastore_ = nullptr;
+    gen_datastore();  // Regenerate datastore after restart
+
+    // 5. check the compacted file and snapshot creating at the boot time
+    log_entries = read_log_file("pwal_0000.compacted", location);
+    ASSERT_EQ(log_entries.size(), 2);  // Ensure that there are log entries
+    EXPECT_TRUE(AssertLogEntry(log_entries[0], 1, "key3", "value3", 0, 0, log_entry::entry_type::normal_entry));  // write version changed to 0
+    EXPECT_TRUE(AssertLogEntry(log_entries[1], 2, "key2", "value2", 0, 0, log_entry::entry_type::normal_entry));  // write version changed to 0
+
+    log_entries = read_log_file("data/snapshot", location);
+    ASSERT_EQ(log_entries.size(), 4);  // Ensure that there are log entries
+    EXPECT_TRUE(AssertLogEntry(log_entries[0], 1, "key11", std::nullopt, 2, 1, log_entry::entry_type::remove_entry));
+    EXPECT_TRUE(AssertLogEntry(log_entries[1], 1, "key31", "value3", 2, 3, log_entry::entry_type::normal_entry));
+    EXPECT_TRUE(AssertLogEntry(log_entries[2], 1, "key41", std::nullopt, 2, 0, log_entry::entry_type::remove_entry));
+    EXPECT_TRUE(AssertLogEntry(log_entries[3], 2, "key21", "value2", 2, 0, log_entry::entry_type::normal_entry));
+
+    // 5. Verify the snapshot contents after restart
+    std::vector<std::pair<std::string, std::string>> kv_list = restart_datastore_and_read_snapshot();
+    
+    // key1 should exist with its updated value, key2 and key3 should be removed
+    ASSERT_EQ(kv_list.size(), 4);
+    EXPECT_EQ(kv_list[0].first, "key3");
+    EXPECT_EQ(kv_list[0].second, "value3");
+    EXPECT_EQ(kv_list[1].first, "key31");
+    EXPECT_EQ(kv_list[1].second, "value3");
+    EXPECT_EQ(kv_list[2].first, "key2");
+    EXPECT_EQ(kv_list[2].second, "value2");
+    EXPECT_EQ(kv_list[3].first, "key21");
+    EXPECT_EQ(kv_list[3].second, "value2");
+}
+
+
+
+
+
 
 // This test is disabled because it is environment-dependent and may not work properly in CI environments.
 TEST_F(compaction_test, DISABLED_fail_compact_with_io_error) {
