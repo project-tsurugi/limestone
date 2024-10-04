@@ -42,9 +42,9 @@ extern std::string data_manifest(int persistent_format_version = 1);
 extern const std::string_view data_normal;
 extern const std::string_view data_nondurable;
 
-class online_compaction_test : public ::testing::Test {
+class compaction_test : public ::testing::Test {
 public:
-    static constexpr const char* location = "/tmp/online_compaction_test";
+    static constexpr const char* location = "/tmp/compaction_test";
     const boost::filesystem::path manifest_path = boost::filesystem::path(location) / std::string(limestone::internal::manifest_file_name);
     const boost::filesystem::path compaction_catalog_path = boost::filesystem::path(location) / "compaction_catalog";
     const std::string compacted_filename = compaction_catalog::get_compacted_filename();
@@ -226,7 +226,7 @@ protected:
     }
 };
 
-TEST_F(online_compaction_test, no_pwals) {
+TEST_F(compaction_test, no_pwals) {
     gen_datastore();
     auto pwals = extract_pwal_files_from_datastore();
     EXPECT_TRUE(pwals.empty());
@@ -248,7 +248,7 @@ TEST_F(online_compaction_test, no_pwals) {
     EXPECT_TRUE(pwals.empty());
 }
 
-TEST_F(online_compaction_test, scenario01) {
+TEST_F(compaction_test, scenario01) {
     gen_datastore();
     datastore_->switch_epoch(1);
     auto pwals = extract_pwal_files_from_datastore();
@@ -598,7 +598,7 @@ TEST_F(online_compaction_test, scenario01) {
 // is not restarted, the timing of when the set of PWAL files maintained
 // by the datastore is updated differs from scenario01, and therefore the
 // test expectations have been changed.
-TEST_F(online_compaction_test, scenario02) {
+TEST_F(compaction_test, scenario02) {
     gen_datastore();
     datastore_->switch_epoch(1);
     auto pwals = extract_pwal_files_from_datastore();
@@ -827,7 +827,7 @@ TEST_F(online_compaction_test, scenario02) {
 }
 
 // This test is disabled because it is environment-dependent and may not work properly in CI environments.
-TEST_F(online_compaction_test, DISABLED_fail_compact_with_io_error) {
+TEST_F(compaction_test, DISABLED_fail_compact_with_io_error) {
     gen_datastore();
     datastore_->switch_epoch(1);
     auto pwals = extract_pwal_files_from_datastore();
@@ -858,7 +858,7 @@ TEST_F(online_compaction_test, DISABLED_fail_compact_with_io_error) {
 }
 
 
-TEST_F(online_compaction_test, safe_rename_success) {
+TEST_F(compaction_test, safe_rename_success) {
     boost::filesystem::path from = boost::filesystem::path(location) / "test_file.txt";
     boost::filesystem::path to = boost::filesystem::path(location) / "renamed_file.txt";
     
@@ -873,14 +873,14 @@ TEST_F(online_compaction_test, safe_rename_success) {
     boost::filesystem::remove(to);
 }
 
-TEST_F(online_compaction_test, safe_rename_throws_exception) {
+TEST_F(compaction_test, safe_rename_throws_exception) {
     boost::filesystem::path from = boost::filesystem::path(location) / "non_existent_file.txt";
     boost::filesystem::path to = boost::filesystem::path(location) / "renamed_file.txt";
     
     ASSERT_THROW(safe_rename(from, to), std::runtime_error);
 }
 
-TEST_F(online_compaction_test, select_files_for_compaction) {
+TEST_F(compaction_test, select_files_for_compaction) {
     std::set<boost::filesystem::path> rotation_end_files = {
         boost::filesystem::path(location) / "pwal_0001.0123456",
         boost::filesystem::path(location) / "pwal_0002.0123456",
@@ -895,21 +895,21 @@ TEST_F(online_compaction_test, select_files_for_compaction) {
 }
 
 
-TEST_F(online_compaction_test, ensure_directory_exists_directory_exists) {
+TEST_F(compaction_test, ensure_directory_exists_directory_exists) {
     boost::filesystem::path dir = boost::filesystem::path(location) / "test_dir";
     boost::filesystem::create_directory(dir);
     
     ASSERT_NO_THROW(ensure_directory_exists(dir));
 }
 
-TEST_F(online_compaction_test, ensure_directory_exists_directory_created) {
+TEST_F(compaction_test, ensure_directory_exists_directory_created) {
     boost::filesystem::path dir = boost::filesystem::path(location) / "test_dir";
     
     ASSERT_NO_THROW(ensure_directory_exists(dir));
     ASSERT_TRUE(boost::filesystem::exists(dir));
 }
 
-TEST_F(online_compaction_test, ensure_directory_exists_throws_exception) {
+TEST_F(compaction_test, ensure_directory_exists_throws_exception) {
     boost::filesystem::path file = boost::filesystem::path(location) / "test_file.txt";
     
     boost::filesystem::ofstream ofs(file);
@@ -918,19 +918,19 @@ TEST_F(online_compaction_test, ensure_directory_exists_throws_exception) {
     ASSERT_THROW(ensure_directory_exists(file), std::runtime_error);
 }
 
-TEST_F(online_compaction_test, ensure_directory_exists_parent_directory_missing) {
+TEST_F(compaction_test, ensure_directory_exists_parent_directory_missing) {
     boost::filesystem::path dir = boost::filesystem::path(location) / "nonexistent_parent/test_dir";
     ASSERT_THROW(ensure_directory_exists(dir), std::runtime_error);
 }
 
 
-TEST_F(online_compaction_test, handle_existing_compacted_file_no_existing_files) {
+TEST_F(compaction_test, handle_existing_compacted_file_no_existing_files) {
     boost::filesystem::path location_path = boost::filesystem::path(location);
     
     ASSERT_NO_THROW(handle_existing_compacted_file(location_path));
 }
 
-TEST_F(online_compaction_test, handle_existing_compacted_file_with_existing_file) {
+TEST_F(compaction_test, handle_existing_compacted_file_with_existing_file) {
     boost::filesystem::path location_path = boost::filesystem::path(location);
     boost::filesystem::path compacted_file = location_path / "pwal_0000.compacted";
     boost::filesystem::ofstream ofs(compacted_file);
@@ -940,7 +940,7 @@ TEST_F(online_compaction_test, handle_existing_compacted_file_with_existing_file
     ASSERT_TRUE(boost::filesystem::exists(location_path / "pwal_0000.compacted.prev"));
 }
 
-TEST_F(online_compaction_test, handle_existing_compacted_file_throws_exception) {
+TEST_F(compaction_test, handle_existing_compacted_file_throws_exception) {
     boost::filesystem::path location_path = boost::filesystem::path(location);
     boost::filesystem::path compacted_file = location_path / "pwal_0000.compacted";
     boost::filesystem::path compacted_prev_file = location_path / "pwal_0000.compacted.prev";
@@ -952,7 +952,7 @@ TEST_F(online_compaction_test, handle_existing_compacted_file_throws_exception) 
     ASSERT_THROW(handle_existing_compacted_file(location_path), std::runtime_error);
 }
 
-TEST_F(online_compaction_test, get_files_in_directory) {
+TEST_F(compaction_test, get_files_in_directory) {
     boost::filesystem::path test_dir = boost::filesystem::path(location);
     boost::filesystem::path file1 = test_dir / "file1.txt";
     boost::filesystem::path file2 = test_dir / "file2.txt";
@@ -967,12 +967,12 @@ TEST_F(online_compaction_test, get_files_in_directory) {
     EXPECT_EQ(files, expected_files);
 }
 
-TEST_F(online_compaction_test, get_files_in_directory_directory_not_exists) {
+TEST_F(compaction_test, get_files_in_directory_directory_not_exists) {
     boost::filesystem::path non_existent_dir = boost::filesystem::path(location) / "non_existent_dir";
     ASSERT_THROW(get_files_in_directory(non_existent_dir), std::runtime_error);
 }
 
-TEST_F(online_compaction_test, get_files_in_directory_not_a_directory) {
+TEST_F(compaction_test, get_files_in_directory_not_a_directory) {
     boost::filesystem::path file_path = boost::filesystem::path(location) / "test_file.txt";
     boost::filesystem::ofstream ofs(file_path);
     ofs.close();
@@ -980,7 +980,7 @@ TEST_F(online_compaction_test, get_files_in_directory_not_a_directory) {
     ASSERT_THROW(get_files_in_directory(file_path), std::runtime_error);
 }
 
-TEST_F(online_compaction_test, get_files_in_directory_with_files) {
+TEST_F(compaction_test, get_files_in_directory_with_files) {
     boost::filesystem::path test_dir = boost::filesystem::path(location) / "test_dir";
     boost::filesystem::create_directory(test_dir);
 
@@ -995,7 +995,7 @@ TEST_F(online_compaction_test, get_files_in_directory_with_files) {
     EXPECT_EQ(files, expected_files);
 }
 
-TEST_F(online_compaction_test, get_files_in_directory_empty_directory) {
+TEST_F(compaction_test, get_files_in_directory_empty_directory) {
     boost::filesystem::path empty_dir = boost::filesystem::path(location) / "empty_test_dir";
     boost::filesystem::create_directory(empty_dir);
 
@@ -1004,7 +1004,7 @@ TEST_F(online_compaction_test, get_files_in_directory_empty_directory) {
 }
 
 
-TEST_F(online_compaction_test, remove_file_safely_success) {
+TEST_F(compaction_test, remove_file_safely_success) {
     boost::filesystem::path file = boost::filesystem::path(location) / "test_file_to_remove.txt";
 
     {
@@ -1017,14 +1017,14 @@ TEST_F(online_compaction_test, remove_file_safely_success) {
     ASSERT_FALSE(boost::filesystem::exists(file));
 }
 
-TEST_F(online_compaction_test, remove_file_safely_no_exception_for_nonexistent_file) {
+TEST_F(compaction_test, remove_file_safely_no_exception_for_nonexistent_file) {
     boost::filesystem::path file = boost::filesystem::path(location) / "non_existent_file.txt";
     ASSERT_NO_THROW(remove_file_safely(file));
 }
 
 
 // This test is disabled because it is environment-dependent and may not work properly in CI environments.
-TEST_F(online_compaction_test, DISABLED_remove_file_safely_fails_to_remove_file) {
+TEST_F(compaction_test, DISABLED_remove_file_safely_fails_to_remove_file) {
     boost::filesystem::path test_dir = boost::filesystem::path(location);
     boost::filesystem::path file = test_dir / "protected_file.txt";
 
