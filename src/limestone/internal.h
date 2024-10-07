@@ -70,6 +70,7 @@ void create_compact_pwal(
 
 // filepath.cpp
 
+void remove_trailing_dir_separators(boost::filesystem::path& p);
 boost::filesystem::path make_tmp_dir_next_to(const boost::filesystem::path& target_dir, const char* suffix);
 
 }
