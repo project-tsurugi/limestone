@@ -20,6 +20,8 @@
 
 namespace limestone::internal {
 
+using limestone::api::log_entry;    
+
 snapshot_tracker::snapshot_tracker(const boost::filesystem::path& snapshot_file) 
     : compacted_istrm_(std::nullopt) {
     open(snapshot_file, snapshot_istrm_);
@@ -32,7 +34,7 @@ snapshot_tracker::snapshot_tracker(const boost::filesystem::path& snapshot_file,
 
 void snapshot_tracker::open(const boost::filesystem::path& file, std::optional<boost::filesystem::ifstream>& stream) {
     stream.emplace(file, std::ios_base::in | std::ios_base::binary);
-    if (!stream->good()) {
+    if (!stream->is_open() || !stream->good()) {
         LOG_AND_THROW_EXCEPTION("Failed to open file: " + file.string());
     }
 }
@@ -43,7 +45,7 @@ void snapshot_tracker::close() {
 }
 
 void snapshot_tracker::validate_and_read_stream(std::optional<boost::filesystem::ifstream>& stream, const std::string& stream_name,
-                                                std::optional<limestone::api::log_entry>& log_entry, std::string& previous_key_sid) {
+                                                std::optional<log_entry>& log_entry, std::string& previous_key_sid) {
     if (stream) {
         if (!stream->good()) {
             DVLOG_LP(log_trace) << stream_name << " stream is not good, closing it.";
@@ -78,45 +80,51 @@ void snapshot_tracker::validate_and_read_stream(std::optional<boost::filesystem:
 }
 
 bool snapshot_tracker::next() {
-    // Only read from snapshot stream if snapshot_log_entry_ is empty, with key_sid check
-    if (!snapshot_log_entry_) {
-        validate_and_read_stream(snapshot_istrm_, "Snapshot", snapshot_log_entry_, previous_snapshot_key_sid);
-    }
+    while (true) {
+        // Only read from snapshot stream if snapshot_log_entry_ is empty, with key_sid check
+        if (!snapshot_log_entry_) {
+            validate_and_read_stream(snapshot_istrm_, "Snapshot", snapshot_log_entry_, previous_snapshot_key_sid);
+        }
 
-    // Only read from compacted stream if compacted_log_entry_ is empty, with key_sid check
-    if (!compacted_log_entry_) {
-        validate_and_read_stream(compacted_istrm_, "Compacted", compacted_log_entry_, previous_compacted_key_sid);
-    }
+        // Only read from compacted stream if compacted_log_entry_ is empty, with key_sid check
+        if (!compacted_log_entry_) {
+            validate_and_read_stream(compacted_istrm_, "Compacted", compacted_log_entry_, previous_compacted_key_sid);
+        }
 
-    // Case 1: Both snapshot and compacted are empty, return false
-    if (!snapshot_log_entry_ && !compacted_log_entry_) {
-        DVLOG_LP(log_trace) << "Both snapshot and compacted streams are closed";
-        return false;
-    }
+        // Case 1: Both snapshot and compacted are empty, return false
+        if (!snapshot_log_entry_ && !compacted_log_entry_) {
+            DVLOG_LP(log_trace) << "Both snapshot and compacted streams are closed";
+            return false;
+        }
 
-    // Case 2: Either snapshot or compacted has a value, use the one that is not empty
-    if (snapshot_log_entry_ && !compacted_log_entry_) {
-        log_entry_ = std::move(snapshot_log_entry_.value());
-        snapshot_log_entry_ = std::nullopt;
-    } else if (!snapshot_log_entry_ && compacted_log_entry_) {
-        log_entry_ = std::move(compacted_log_entry_.value());
-        compacted_log_entry_ = std::nullopt;
-    } else {
-        // Case 3: Both snapshot and compacted have values
-        if (snapshot_log_entry_->key_sid() < compacted_log_entry_->key_sid()) {
+        // Case 2: Either snapshot or compacted has a value, use the one that is not empty
+        if (snapshot_log_entry_ && !compacted_log_entry_) {
             log_entry_ = std::move(snapshot_log_entry_.value());
             snapshot_log_entry_ = std::nullopt;
-        } else if (snapshot_log_entry_->key_sid() > compacted_log_entry_->key_sid()) {
+        } else if (!snapshot_log_entry_ && compacted_log_entry_) {
             log_entry_ = std::move(compacted_log_entry_.value());
             compacted_log_entry_ = std::nullopt;
         } else {
-            // If key_sid is equal, use snapshot_log_entry_, but reset both entries
-            log_entry_ = std::move(snapshot_log_entry_.value());
-            snapshot_log_entry_ = std::nullopt;
-            compacted_log_entry_ = std::nullopt;
+            // Case 3: Both snapshot and compacted have values
+            if (snapshot_log_entry_->key_sid() < compacted_log_entry_->key_sid()) {
+                log_entry_ = std::move(snapshot_log_entry_.value());
+                snapshot_log_entry_ = std::nullopt;
+            } else if (snapshot_log_entry_->key_sid() > compacted_log_entry_->key_sid()) {
+                log_entry_ = std::move(compacted_log_entry_.value());
+                compacted_log_entry_ = std::nullopt;
+            } else {
+                // If key_sid is equal, use snapshot_log_entry_, but reset both entries
+                log_entry_ = std::move(snapshot_log_entry_.value());
+                snapshot_log_entry_ = std::nullopt;
+                compacted_log_entry_ = std::nullopt;
+            }
         }
+        // Check if the current log_entry_ is a normal entry
+        if (log_entry_.type() == log_entry::entry_type::normal_entry) {
+            return true;
+        }
+        // If it's not a normal entry, continue the loop to skip it and read the next entry
     }
-    return true;
 }
 
 limestone::api::storage_id_type snapshot_tracker::storage() const noexcept {
@@ -131,7 +139,7 @@ void snapshot_tracker::value(std::string& buf) const noexcept {
     log_entry_.value(buf);
 }
 
-limestone::api::log_entry::entry_type snapshot_tracker::type() const {
+log_entry::entry_type snapshot_tracker::type() const {
     return log_entry_.type();
 }
 

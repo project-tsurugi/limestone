@@ -38,13 +38,7 @@ cursor::~cursor() noexcept {
 }
 
 bool cursor::next() {
-    // Keep calling next() until we find a noraml_entry, or no more entries
-    while (log_entry_tracker_->next()) {
-        if (log_entry_tracker_->type() == log_entry::entry_type::normal_entry) {
-            return true;  
-        }
-    }
-    return false;
+    return log_entry_tracker_->next();
 }
 
 storage_id_type cursor::storage() const noexcept {

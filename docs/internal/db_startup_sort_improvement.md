@@ -96,9 +96,19 @@
 
 どのコミットの変更に対するテストケース作成が終わったか
 
+* 605844e Add test cases
+  * このコミット自体がテストケースの追加
+* c5b067f Refactor: Rename test file and class for compaction functionality
+  * テストケースの修正のみなので必要なし
+* 0146118 Add test cases
+  * このコミット自体がテストケースの追加
+* 8b8b8d6 Update an internal document
+  * ドキュメントの追加のみなので必要なし
 * b01068c (origin/wip/log-0.7) cleanup: clang-tidy
+  * 新規にテストをつくる必要はなさそう
 * aed365d Make cursor class handle two streams
-* 68480e0 Add flag to snapshot creation to skip entry removal
+  * cusor.cpp, cursor.hの変更 => 完了
+* 68480e0 Add flag to snapshot creation to skip entry removal => 完了
 * 1a48442 Refactor to isolate testable units for easier testing => 完了
 
 

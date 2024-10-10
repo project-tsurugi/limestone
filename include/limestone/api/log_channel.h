@@ -41,7 +41,6 @@ class rotation_result;
  * @details this object is not thread-safe, assuming each thread uses its own log_channel
  */
 class log_channel {
-    friend class rotation_task;
 
 public:
     /**
@@ -180,6 +179,7 @@ private:
     rotation_result do_rotate_file(epoch_id_type epoch = 0);
 
     friend class datastore;
+    friend class rotation_task;
 };
 
 } // namespace limestone::api
