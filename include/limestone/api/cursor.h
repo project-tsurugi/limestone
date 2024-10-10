@@ -25,11 +25,16 @@
 #include <limestone/api/storage_id_type.h>
 #include <limestone/api/large_object_view.h>
 
+
+namespace limestone::internal {
+    class snapshot_tracker;  
+}
+
 namespace limestone::api {
 
 class log_entry;
 class snapshot;
-class snapshot_tracker;
+
 
 /**
  * @brief a cursor to scan entries on the snapshot
@@ -79,7 +84,7 @@ public:
     std::vector<large_object_view>& large_objects() noexcept;
 
 private:
-    std::unique_ptr<snapshot_tracker> log_entry_tracker_;
+    std::unique_ptr<limestone::internal::snapshot_tracker> log_entry_tracker_;
 
     std::vector<large_object_view> large_objects_{};
 
