@@ -25,7 +25,14 @@
 
 namespace limestone::internal {
 
+using limestone::api::cursor;    
 class cursor_impl {
+public:
+    explicit cursor_impl(const boost::filesystem::path& snapshot_file);
+    explicit cursor_impl(const boost::filesystem::path& snapshot_file, const boost::filesystem::path& compacted_file);
+
+    static std::unique_ptr<cursor> create_cursor(const boost::filesystem::path& snapshot_file);
+    static std::unique_ptr<cursor> create_cursor(const boost::filesystem::path& snapshot_file, const boost::filesystem::path& compacted_file);
 
 private:
     limestone::api::log_entry log_entry_;
@@ -35,10 +42,6 @@ private:
     std::optional<boost::filesystem::ifstream> compacted_istrm_;
     std::string previous_snapshot_key_sid;
     std::string previous_compacted_key_sid;
-
-public:
-    explicit cursor_impl(const boost::filesystem::path& snapshot_file);
-    explicit cursor_impl(const boost::filesystem::path& snapshot_file, const boost::filesystem::path& compacted_file);
 
 protected:
     void open(const boost::filesystem::path& file, std::optional<boost::filesystem::ifstream>& stream);

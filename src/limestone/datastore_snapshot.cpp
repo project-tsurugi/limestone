@@ -32,6 +32,7 @@
 #include "internal.h"
 #include "log_entry.h"
 #include "sortdb_wrapper.h"
+#include "snapshot_impl.h"
 
 namespace limestone::internal {
 
@@ -358,6 +359,8 @@ std::set<std::string> assemble_snapshot_input_filenames(
 
 namespace limestone::api {
 using namespace limestone::internal;
+ 
+snapshot::~snapshot() = default;
 
 void datastore::create_snapshot() {
     const auto& from_dir = location_;

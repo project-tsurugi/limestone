@@ -19,19 +19,17 @@
 #include <limestone/logging.h>
 #include "compaction_catalog.h"
 #include "logging_helper.h"
+#include "snapshot_impl.h"
 
 namespace limestone::api {  // FIXME fill implementation
 
-snapshot::snapshot(boost::filesystem::path location) noexcept : location_(std::move(location)) {}
+using limestone::internal::snapshot_impl;
+
+snapshot::snapshot(boost::filesystem::path location) noexcept 
+    : pimpl(std::make_unique<snapshot_impl>(std::move(location))) {}
 
 std::unique_ptr<cursor> snapshot::get_cursor() const {
-    boost::filesystem::path compacted_file = location_ / limestone::internal::compaction_catalog::get_compacted_filename();
-    boost::filesystem::path snapshot_file = location_ / std::string(subdirectory_name_) / std::string(file_name_);
-
-    if (boost::filesystem::exists(compacted_file)) {
-        return std::unique_ptr<cursor>(new cursor(snapshot_file, compacted_file));
-    }
-    return std::unique_ptr<cursor>(new cursor(snapshot_file));
+    return pimpl->get_cursor();
 }
 
 std::unique_ptr<cursor> snapshot::find([[maybe_unused]] storage_id_type storage_id, [[maybe_unused]] std::string_view entry_key) const noexcept {

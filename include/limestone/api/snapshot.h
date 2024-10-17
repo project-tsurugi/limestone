@@ -22,6 +22,10 @@
 
 #include <limestone/api/cursor.h>
 
+namespace limestone::internal {
+    class snapshot_impl;  
+}
+
 namespace limestone::api {
 
 /**
@@ -29,7 +33,9 @@ namespace limestone::api {
  */
 class snapshot {
 public:
+public:
     snapshot() noexcept = delete;
+    ~snapshot(); 
 
     /**
      * @brief directory name of a snapshot
@@ -73,7 +79,7 @@ public:
     [[nodiscard]] std::unique_ptr<cursor> scan(storage_id_type storage_id, std::string_view entry_key, bool inclusive) const noexcept;
 
 private:
-    boost::filesystem::path location_{};
+    std::unique_ptr<internal::snapshot_impl> pimpl;
 
     explicit snapshot(boost::filesystem::path location) noexcept;
 

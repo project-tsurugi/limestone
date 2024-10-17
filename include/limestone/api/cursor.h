@@ -84,14 +84,14 @@ public:
     std::vector<large_object_view>& large_objects() noexcept;
 
 private:
-    std::unique_ptr<limestone::internal::cursor_impl> pimpl;
+    std::unique_ptr<internal::cursor_impl> pimpl;
 
     std::vector<large_object_view> large_objects_{};
 
     explicit cursor(const boost::filesystem::path& snapshot_file);
     explicit cursor(const boost::filesystem::path& snapshot_file, const boost::filesystem::path& compacted_file);
 
-    friend class snapshot;
+    friend class internal::cursor_impl;
 };
 
 } // namespace limestone::api

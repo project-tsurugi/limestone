@@ -28,8 +28,8 @@ using limestone::api::log_channel;
 
 class cursor_impl_testable : public  limestone::internal::cursor_impl {
 public:
-    using cursor_impl::cursor_impl;  
-    using cursor_impl::next;            
+    using cursor_impl::cursor_impl;
+    using cursor_impl::next;
     using cursor_impl::validate_and_read_stream;
     using cursor_impl::open;
     using cursor_impl::close;
@@ -142,8 +142,8 @@ TEST_F(cursor_impl_test, snapshot_only) {
     create_log_file("snapshot", entry_maker_.get_default_entries());
     boost::filesystem::path snapshot_file = boost::filesystem::path(location) / "snapshot";
 
-    cursor_impl_testable tracker(snapshot_file);
-    EXPECT_TRUE(tracker.next()) << "Should be able to read the snapshot";
+    cursor_impl_testable cursor(snapshot_file);
+    EXPECT_TRUE(cursor.next()) << "Should be able to read the snapshot";
 }
 
 // Test case 2: Both Snapshot and Compacted files exist
@@ -154,8 +154,8 @@ TEST_F(cursor_impl_test, snapshot_and_compacted) {
     boost::filesystem::path snapshot_file = boost::filesystem::path(location) / "snapshot";
     boost::filesystem::path compacted_file = boost::filesystem::path(location) / "compacted";
 
-    cursor_impl_testable tracker(snapshot_file, compacted_file);
-    EXPECT_TRUE(tracker.next()) << "Should be able to read both snapshot and compacted files";
+    cursor_impl_testable cursor(snapshot_file, compacted_file);
+    EXPECT_TRUE(cursor.next()) << "Should be able to read both snapshot and compacted files";
 }
 
 // Test case 3: Error cases
@@ -163,14 +163,14 @@ TEST_F(cursor_impl_test, error_case) {
     // No files exist, should throw limestone_exception
     boost::filesystem::path snapshot_file = boost::filesystem::path(location) / "not_existing_snapshot";
     EXPECT_THROW({
-        cursor_impl_testable tracker{boost::filesystem::path(snapshot_file)}; 
+        cursor_impl_testable cursor{boost::filesystem::path(snapshot_file)}; 
     }, limestone::limestone_exception) << "No files should result in a limestone_exception being thrown";
 
     // Expect the next() method to throw a limestone_exception
     {    
-        cursor_impl_testable tracker{boost::filesystem::path(location)}; 
+        cursor_impl_testable cursor{boost::filesystem::path(location)}; 
         EXPECT_THROW({
-            tracker.next();
+            cursor.next();
         }, limestone::limestone_exception) << "No files should result in a limestone_exception being thrown";
     }
     // invalid sort order
@@ -181,9 +181,9 @@ TEST_F(cursor_impl_test, error_case) {
             .add_entry(1, "key3", "value3", {1, 2});
         boost::filesystem::path snapshot_file = boost::filesystem::path(location) / "snapshot";
         create_log_file("snapshot", entry_maker_.get_entries());
-        cursor_impl_testable tracker{boost::filesystem::path(snapshot_file)}; 
+        cursor_impl_testable cursor{boost::filesystem::path(snapshot_file)}; 
         EXPECT_THROW({
-            while (tracker.next());
+            while (cursor.next());
         }, limestone::limestone_exception) << "No files should result in a limestone_exception being thrown";
     }
 }
@@ -195,48 +195,48 @@ TEST_F(cursor_impl_test, verify_entry_methods) {
     boost::filesystem::path snapshot_file = boost::filesystem::path(location) / "snapshot";
 
     // Use cursor_impl_testable to read the file
-    cursor_impl_testable tracker(snapshot_file);
+    cursor_impl_testable cursor(snapshot_file);
 
     // Verify the first entry
-    ASSERT_TRUE(tracker.next()) << "First entry should be read";
+    ASSERT_TRUE(cursor.next()) << "First entry should be read";
 
     // Verify storage() method
-    EXPECT_EQ(tracker.storage(), 1) << "Storage ID should be 1";
+    EXPECT_EQ(cursor.storage(), 1) << "Storage ID should be 1";
 
     // Verify key() method
     std::string key;
-    tracker.key(key);
+    cursor.key(key);
     EXPECT_EQ(key, "key1") << "First key should be 'key1'";
 
     // Verify value() method
     std::string value;
-    tracker.value(value);
+    cursor.value(value);
     EXPECT_EQ(value, "value1") << "First value should be 'value1'";
 
     // Verify type() method
-    EXPECT_EQ(tracker.type(), limestone::api::log_entry::entry_type::normal_entry)
+    EXPECT_EQ(cursor.type(), limestone::api::log_entry::entry_type::normal_entry)
         << "First entry type should be normal_entry";
 
     // Verify the second entry
-    ASSERT_TRUE(tracker.next()) << "Second entry should be read";
+    ASSERT_TRUE(cursor.next()) << "Second entry should be read";
 
     // Verify storage() method for the second entry
-    EXPECT_EQ(tracker.storage(), 1) << "Storage ID should be 1";
+    EXPECT_EQ(cursor.storage(), 1) << "Storage ID should be 1";
 
     // Verify key() method for the second entry
-    tracker.key(key);
+    cursor.key(key);
     EXPECT_EQ(key, "key2") << "Second key should be 'key2'";
 
     // Verify value() method for the second entry
-    tracker.value(value);
+    cursor.value(value);
     EXPECT_EQ(value, "value2") << "Second value should be 'value2'";
 
     // Verify type() method for the second entry
-    EXPECT_EQ(tracker.type(), limestone::api::log_entry::entry_type::normal_entry)
+    EXPECT_EQ(cursor.type(), limestone::api::log_entry::entry_type::normal_entry)
         << "Second entry type should be normal_entry";
 
     // Verify that next() returns false when no more entries are available
-    EXPECT_FALSE(tracker.next()) << "No more entries should be available, next() should return false";
+    EXPECT_FALSE(cursor.next()) << "No more entries should be available, next() should return false";
 }
 
 

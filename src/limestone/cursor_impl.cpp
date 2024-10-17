@@ -20,7 +20,15 @@
 
 namespace limestone::internal {
 
-using limestone::api::log_entry;    
+using limestone::api::log_entry;
+
+std::unique_ptr<cursor> cursor_impl::create_cursor(const boost::filesystem::path& snapshot_file) {
+    return std::unique_ptr<cursor>(new cursor(snapshot_file));
+}
+
+std::unique_ptr<cursor> cursor_impl::create_cursor(const boost::filesystem::path& snapshot_file, const boost::filesystem::path& compacted_file) {
+    return std::unique_ptr<cursor>(new cursor(snapshot_file, compacted_file));
+}
 
 cursor_impl::cursor_impl(const boost::filesystem::path& snapshot_file) 
     : compacted_istrm_(std::nullopt) {
