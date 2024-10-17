@@ -44,4 +44,8 @@ std::optional<write_version_type> sorting_context::clear_storage_find(const stor
     return {itr->second};
 }
 
+std::map<storage_id_type, write_version_type> sorting_context::get_clear_storage() const {
+    return clear_storage;              
+}
+
 } // namespace limestone::internal

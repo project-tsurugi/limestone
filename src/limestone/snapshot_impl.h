@@ -21,19 +21,22 @@
 #include <string_view>
 #include <boost/filesystem.hpp>
 #include <limestone/api/cursor.h>
+#include <limestone/api/write_version_type.h>
 
 namespace limestone::internal {
 
 using limestone::api::cursor;
 using limestone::api::storage_id_type;    
+using limestone::api::write_version_type;
 
 class snapshot_impl {
 public:
-    explicit snapshot_impl(boost::filesystem::path location) noexcept;
+    explicit snapshot_impl(boost::filesystem::path location, std::map<storage_id_type, write_version_type> clear_storage) noexcept;
     [[nodiscard]] std::unique_ptr<cursor> get_cursor() const;
 
 private:
     boost::filesystem::path location_;
+    std::map<storage_id_type, write_version_type> clear_storage;    
 };
 
 } // namespace limestone::internal

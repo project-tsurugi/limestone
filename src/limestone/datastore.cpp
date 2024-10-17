@@ -109,17 +109,14 @@ void datastore::ready() {
     state_ = state::ready;
 }
 
-
-
-
 std::unique_ptr<snapshot> datastore::get_snapshot() const {
     check_after_ready(static_cast<const char*>(__func__));
-    return std::unique_ptr<snapshot>(new snapshot(location_));
+    return std::unique_ptr<snapshot>(new snapshot(location_, clear_storage));
 }
 
 std::shared_ptr<snapshot> datastore::shared_snapshot() const {
     check_after_ready(static_cast<const char*>(__func__));
-    return std::shared_ptr<snapshot>(new snapshot(location_));
+    return std::shared_ptr<snapshot>(new snapshot(location_, clear_storage));
 }
 
 log_channel& datastore::create_channel(const boost::filesystem::path& location) {

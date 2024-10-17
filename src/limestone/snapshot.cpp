@@ -25,9 +25,11 @@ namespace limestone::api {  // FIXME fill implementation
 
 using limestone::internal::snapshot_impl;
 
-snapshot::snapshot(boost::filesystem::path location) noexcept 
-    : pimpl(std::make_unique<snapshot_impl>(std::move(location))) {}
+snapshot::snapshot(boost::filesystem::path location, 
+                   std::map<storage_id_type, write_version_type> clear_storage) noexcept
+    : pimpl(std::make_unique<snapshot_impl>(std::move(location), std::move(clear_storage))) {
 
+}
 std::unique_ptr<cursor> snapshot::get_cursor() const {
     return pimpl->get_cursor();
 }

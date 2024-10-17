@@ -21,6 +21,7 @@
 #include <boost/filesystem.hpp>
 
 #include <limestone/api/cursor.h>
+#include <limestone/api/write_version_type.h>
 
 namespace limestone::internal {
     class snapshot_impl;  
@@ -81,7 +82,7 @@ public:
 private:
     std::unique_ptr<internal::snapshot_impl> pimpl;
 
-    explicit snapshot(boost::filesystem::path location) noexcept;
+    explicit snapshot(boost::filesystem::path location, std::map<storage_id_type, write_version_type> clear_storage) noexcept;
 
     friend class datastore;
 };

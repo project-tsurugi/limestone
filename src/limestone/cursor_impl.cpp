@@ -22,12 +22,18 @@ namespace limestone::internal {
 
 using limestone::api::log_entry;
 
-std::unique_ptr<cursor> cursor_impl::create_cursor(const boost::filesystem::path& snapshot_file) {
-    return std::unique_ptr<cursor>(new cursor(snapshot_file));
+std::unique_ptr<cursor> cursor_impl::create_cursor(const boost::filesystem::path& snapshot_file,
+                                                    const std::map<limestone::api::storage_id_type, limestone::api::write_version_type>& clear_storage) {
+    auto cursor_instance = std::unique_ptr<cursor>(new cursor(snapshot_file)); 
+    cursor_instance->pimpl->set_clear_storage(clear_storage); 
+    return cursor_instance; 
 }
 
-std::unique_ptr<cursor> cursor_impl::create_cursor(const boost::filesystem::path& snapshot_file, const boost::filesystem::path& compacted_file) {
-    return std::unique_ptr<cursor>(new cursor(snapshot_file, compacted_file));
+std::unique_ptr<cursor> cursor_impl::create_cursor(const boost::filesystem::path& snapshot_file, const boost::filesystem::path& compacted_file,
+                                                    const std::map<limestone::api::storage_id_type, limestone::api::write_version_type>& clear_storage) {
+    auto cursor_instance = std::unique_ptr<cursor>(new cursor(snapshot_file, compacted_file));
+    cursor_instance->pimpl->set_clear_storage(clear_storage);
+    return cursor_instance;
 }
 
 cursor_impl::cursor_impl(const boost::filesystem::path& snapshot_file) 
@@ -149,6 +155,10 @@ void cursor_impl::value(std::string& buf) const noexcept {
 
 log_entry::entry_type cursor_impl::type() const {
     return log_entry_.type();
+}
+
+void cursor_impl::set_clear_storage(const std::map<limestone::api::storage_id_type, limestone::api::write_version_type>& clear_storage) {
+    clear_storage_ = clear_storage;
 }
 
 } // namespace limestone::internal

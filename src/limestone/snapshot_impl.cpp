@@ -24,16 +24,19 @@
 
 namespace limestone::internal {
 
-snapshot_impl::snapshot_impl(boost::filesystem::path location) noexcept : location_(std::move(location)) {}
+snapshot_impl::snapshot_impl(boost::filesystem::path location, 
+                             std::map<storage_id_type, write_version_type> clear_storage) noexcept
+    : location_(std::move(location)), clear_storage(std::move(clear_storage)) {
+}
 
 std::unique_ptr<cursor> snapshot_impl::get_cursor() const {
     boost::filesystem::path compacted_file = location_ / limestone::internal::compaction_catalog::get_compacted_filename();
     boost::filesystem::path snapshot_file = location_ / std::string(snapshot::subdirectory_name_) / std::string(snapshot::file_name_);
 
     if (boost::filesystem::exists(compacted_file)) {
-        return cursor_impl::create_cursor(snapshot_file, compacted_file);
+        return cursor_impl::create_cursor(snapshot_file, compacted_file, clear_storage);
     }
-    return cursor_impl::create_cursor(snapshot_file);  
+    return cursor_impl::create_cursor(snapshot_file, clear_storage);  
 }
 
 

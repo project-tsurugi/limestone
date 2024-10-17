@@ -362,6 +362,8 @@ void datastore::create_snapshot() {
     if (fclose(ostrm) != 0) {  // NOLINT(*-owning-memory)
         LOG_AND_THROW_IO_EXCEPTION("cannot close snapshot file (" + snapshot_file.string() + ")", errno);
     }
+
+    clear_storage = sctx.get_clear_storage();
 }
 
 } // namespace limestone::api

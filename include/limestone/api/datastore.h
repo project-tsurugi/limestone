@@ -324,7 +324,8 @@ private:
     void rotate_epoch_file();
 
     int64_t current_unix_epoch_in_millis();
-    
+
+    std::map<storage_id_type, write_version_type> clear_storage;  
 };
 
 } // namespace limestone::api
