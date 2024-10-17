@@ -23,6 +23,7 @@
 #include <set>
 #include <mutex>
 #include <queue>
+#include <map>
 
 #include <boost/filesystem.hpp>
 

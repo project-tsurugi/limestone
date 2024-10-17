@@ -13,6 +13,7 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
+#include <map>
 #include "sorting_context.h"
 #include <algorithm> 
 
@@ -30,7 +31,7 @@ sortdb_wrapper* sorting_context::get_sortdb() {
     return sortdb.get();
 }
 
-void sorting_context::clear_storage_update(const storage_id_type sid, const write_version_type wv) {
+void sorting_context::clear_storage_update(storage_id_type sid, write_version_type wv) {
     std::unique_lock lk{mtx_clear_storage};
     if (auto [it, inserted] = clear_storage.emplace(sid, wv);
         !inserted) {
@@ -38,14 +39,14 @@ void sorting_context::clear_storage_update(const storage_id_type sid, const writ
     }
 }
 
-std::optional<write_version_type> sorting_context::clear_storage_find(const storage_id_type sid) {
+std::optional<write_version_type> sorting_context::clear_storage_find(storage_id_type sid) {
     auto itr = clear_storage.find(sid);
     if (itr == clear_storage.end()) return {};
     return {itr->second};
 }
 
 std::map<storage_id_type, write_version_type> sorting_context::get_clear_storage() const {
-    return clear_storage;              
+    return clear_storage;
 }
 
 } // namespace limestone::internal

@@ -14,7 +14,7 @@
  * limitations under the License.
  */
 #include <limestone/api/snapshot.h>
-
+#include <map>
 #include <glog/logging.h>
 #include <limestone/logging.h>
 #include "compaction_catalog.h"

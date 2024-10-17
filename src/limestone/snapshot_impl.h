@@ -16,7 +16,7 @@
 
 #pragma once
 
-
+#include <map>
 #include <memory>
 #include <string_view>
 #include <boost/filesystem.hpp>

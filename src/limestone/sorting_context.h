@@ -42,9 +42,9 @@ public:
     sortdb_wrapper* get_sortdb();
 
     // clear_storage methods
-    void clear_storage_update(const storage_id_type sid, const write_version_type wv);
-    std::optional<write_version_type> clear_storage_find(const storage_id_type sid);
-    std::map<storage_id_type, write_version_type> get_clear_storage() const;
+    [[nodiscard]] std::map<storage_id_type, write_version_type> get_clear_storage() const;
+    std::optional<write_version_type> clear_storage_find(storage_id_type sid);
+    void clear_storage_update(storage_id_type sid, write_version_type wv);
 
 private:
     std::unique_ptr<sortdb_wrapper> sortdb;

@@ -17,7 +17,7 @@
 
 #include <memory>
 #include <string_view>
-
+#include <map>
 #include <boost/filesystem.hpp>
 
 #include <limestone/api/cursor.h>
@@ -33,10 +33,14 @@ namespace limestone::api {
  * @brief a snapshot of the data at a point in time on the data store
  */
 class snapshot {
-public:
+
 public:
     snapshot() noexcept = delete;
-    ~snapshot(); 
+    snapshot(const snapshot&) = delete;
+    snapshot& operator=(const snapshot&) = delete;
+    snapshot(snapshot&&) noexcept = delete;
+    snapshot& operator=(snapshot&&) noexcept = delete;
+    ~snapshot();
 
     /**
      * @brief directory name of a snapshot

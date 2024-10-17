@@ -15,7 +15,7 @@
  */
 
 #pragma once
-
+#include <map>
 #include <optional>
 #include <boost/filesystem.hpp>
 #include <boost/filesystem/fstream.hpp>
