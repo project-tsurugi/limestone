@@ -33,51 +33,12 @@
 #include "log_entry.h"
 #include "sortdb_wrapper.h"
 #include "snapshot_impl.h"
+#include "sorting_context.h"
 
 namespace limestone::internal {
 
 constexpr std::size_t write_version_size = sizeof(epoch_id_type) + sizeof(std::uint64_t);
 static_assert(write_version_size == 16);
-
-class sorting_context {
-public:
-    sorting_context(sorting_context&& obj) noexcept : sortdb(std::move(obj.sortdb)) {
-        std::unique_lock lk{obj.mtx_clear_storage};
-        clear_storage = std::move(obj.clear_storage);  // NOLINT(*-prefer-member-initializer): need lock
-    }
-    sorting_context(const sorting_context&) = delete;
-    sorting_context& operator=(const sorting_context&) = delete;
-    sorting_context& operator=(sorting_context&&) = delete;
-    sorting_context() = default;
-    ~sorting_context() = default;
-    explicit sorting_context(std::unique_ptr<sortdb_wrapper>&& s) noexcept : sortdb(std::move(s)) {
-    }
-
-    // point entries
-private:
-    std::unique_ptr<sortdb_wrapper> sortdb;
-public:
-    sortdb_wrapper* get_sortdb() { return sortdb.get(); }
-
-    // range delete entries
-private:
-    std::mutex mtx_clear_storage;
-    std::map<storage_id_type, write_version_type> clear_storage;
-public:
-    void clear_storage_update(const storage_id_type sid, const write_version_type wv) {
-        std::unique_lock lk{mtx_clear_storage};
-        if (auto [it, inserted] = clear_storage.emplace(sid, wv);
-            !inserted) {
-            it->second = std::max(it->second, wv);
-        }
-    }
-    std::optional<write_version_type> clear_storage_find(const storage_id_type sid) {
-        // no need to lock, for now
-        auto itr = clear_storage.find(sid);
-        if (itr == clear_storage.end()) return {};
-        return {itr->second};
-    }
-};
 
 [[maybe_unused]]
 static void store_bswap64_value(void *dest, const void *src) {
