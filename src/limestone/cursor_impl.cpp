@@ -14,7 +14,7 @@
  * limitations under the License.
  */
 
-#include "snapshot_tracker.h"
+#include "cursor_impl.h"
 #include <glog/logging.h>
 #include "limestone_exception_helper.h"
 
@@ -22,29 +22,29 @@ namespace limestone::internal {
 
 using limestone::api::log_entry;    
 
-snapshot_tracker::snapshot_tracker(const boost::filesystem::path& snapshot_file) 
+cursor_impl::cursor_impl(const boost::filesystem::path& snapshot_file) 
     : compacted_istrm_(std::nullopt) {
     open(snapshot_file, snapshot_istrm_);
 }
 
-snapshot_tracker::snapshot_tracker(const boost::filesystem::path& snapshot_file, const boost::filesystem::path& compacted_file) {
+cursor_impl::cursor_impl(const boost::filesystem::path& snapshot_file, const boost::filesystem::path& compacted_file) {
     open(snapshot_file, snapshot_istrm_);
     open(compacted_file, compacted_istrm_);
 }
 
-void snapshot_tracker::open(const boost::filesystem::path& file, std::optional<boost::filesystem::ifstream>& stream) {
+void cursor_impl::open(const boost::filesystem::path& file, std::optional<boost::filesystem::ifstream>& stream) {
     stream.emplace(file, std::ios_base::in | std::ios_base::binary);
     if (!stream->is_open() || !stream->good()) {
         LOG_AND_THROW_EXCEPTION("Failed to open file: " + file.string());
     }
 }
 
-void snapshot_tracker::close() {
+void cursor_impl::close() {
     if (snapshot_istrm_) snapshot_istrm_->close();
     if (compacted_istrm_) compacted_istrm_->close();
 }
 
-void snapshot_tracker::validate_and_read_stream(std::optional<boost::filesystem::ifstream>& stream, const std::string& stream_name,
+void cursor_impl::validate_and_read_stream(std::optional<boost::filesystem::ifstream>& stream, const std::string& stream_name,
                                                 std::optional<log_entry>& log_entry, std::string& previous_key_sid) {
     if (stream) {
         if (!stream->good()) {
@@ -79,7 +79,7 @@ void snapshot_tracker::validate_and_read_stream(std::optional<boost::filesystem:
     }
 }
 
-bool snapshot_tracker::next() {
+bool cursor_impl::next() {
     while (true) {
         // Only read from snapshot stream if snapshot_log_entry_ is empty, with key_sid check
         if (!snapshot_log_entry_) {
@@ -127,19 +127,19 @@ bool snapshot_tracker::next() {
     }
 }
 
-limestone::api::storage_id_type snapshot_tracker::storage() const noexcept {
+limestone::api::storage_id_type cursor_impl::storage() const noexcept {
     return log_entry_.storage();
 }
 
-void snapshot_tracker::key(std::string& buf) const noexcept {
+void cursor_impl::key(std::string& buf) const noexcept {
     log_entry_.key(buf);
 }
 
-void snapshot_tracker::value(std::string& buf) const noexcept {
+void cursor_impl::value(std::string& buf) const noexcept {
     log_entry_.value(buf);
 }
 
-log_entry::entry_type snapshot_tracker::type() const {
+log_entry::entry_type cursor_impl::type() const {
     return log_entry_.type();
 }
 

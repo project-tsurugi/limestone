@@ -27,7 +27,7 @@
 
 
 namespace limestone::internal {
-    class snapshot_tracker;  
+    class cursor_impl;  
 }
 
 namespace limestone::api {
@@ -84,7 +84,7 @@ public:
     std::vector<large_object_view>& large_objects() noexcept;
 
 private:
-    std::unique_ptr<limestone::internal::snapshot_tracker> log_entry_tracker_;
+    std::unique_ptr<limestone::internal::cursor_impl> pimpl;
 
     std::vector<large_object_view> large_objects_{};
 

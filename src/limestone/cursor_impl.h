@@ -25,9 +25,7 @@
 
 namespace limestone::internal {
 
-// snapshot_tracker handles the retrieval and comparison of log entries from snapshot and compacted streams.
-// It ensures that the entries are read in the correct order and manages the state of both streams.
-class snapshot_tracker {
+class cursor_impl {
 
 private:
     limestone::api::log_entry log_entry_;
@@ -39,8 +37,8 @@ private:
     std::string previous_compacted_key_sid;
 
 public:
-    explicit snapshot_tracker(const boost::filesystem::path& snapshot_file);
-    explicit snapshot_tracker(const boost::filesystem::path& snapshot_file, const boost::filesystem::path& compacted_file);
+    explicit cursor_impl(const boost::filesystem::path& snapshot_file);
+    explicit cursor_impl(const boost::filesystem::path& snapshot_file, const boost::filesystem::path& compacted_file);
 
 protected:
     void open(const boost::filesystem::path& file, std::optional<boost::filesystem::ifstream>& stream);

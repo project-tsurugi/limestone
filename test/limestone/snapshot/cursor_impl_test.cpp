@@ -16,9 +16,9 @@
 
 #include <gtest/gtest.h>
 #include <boost/filesystem.hpp>
-#include "snapshot_tracker.h"
+#include "cursor_impl.h"
 
-class snapshot_tracker;  // Forward declaration if needed
+
 #include "test_root.h"
 #include "limestone/api/log_channel.h"
 
@@ -26,19 +26,19 @@ namespace limestone::testing {
 
 using limestone::api::log_channel;
 
-class snapshot_tracker_testable : public  limestone::internal::snapshot_tracker {
+class cursor_impl_testable : public  limestone::internal::cursor_impl {
 public:
-    using snapshot_tracker::snapshot_tracker;  
-    using snapshot_tracker::next;            
-    using snapshot_tracker::validate_and_read_stream;
-    using snapshot_tracker::open;
-    using snapshot_tracker::close;
-    using snapshot_tracker::storage;
-    using snapshot_tracker::key;    
-    using snapshot_tracker::value;  
-    using snapshot_tracker::type;     
+    using cursor_impl::cursor_impl;  
+    using cursor_impl::next;            
+    using cursor_impl::validate_and_read_stream;
+    using cursor_impl::open;
+    using cursor_impl::close;
+    using cursor_impl::storage;
+    using cursor_impl::key;    
+    using cursor_impl::value;  
+    using cursor_impl::type;     
 
-    ~snapshot_tracker_testable() {
+    ~cursor_impl_testable() {
         // Ensure that the close() method is called to release resources.
         // Normally, resources would be released explicitly, but for this test, we ensure that close()
         // is always called by invoking it in the destructor. This is important to avoid resource leaks
@@ -74,9 +74,9 @@ private:
     std::vector<std::tuple<limestone::api::storage_id_type, std::string, std::string, limestone::api::write_version_type>> entries_;
 };
 
-class snapshot_tracker_test : public ::testing::Test {
+class cursor_impl_test : public ::testing::Test {
 protected:
-    static constexpr const char* location = "/tmp/snapshot_tracker_test";
+    static constexpr const char* location = "/tmp/cursor_impl_test";
     std::unique_ptr<limestone::api::datastore_test> datastore_;
     log_channel* lc0_{};
     entry_maker entry_maker_;
@@ -138,37 +138,37 @@ protected:
 
 
 // Test case 1: Only Snapshot exists
-TEST_F(snapshot_tracker_test, snapshot_only) {
+TEST_F(cursor_impl_test, snapshot_only) {
     create_log_file("snapshot", entry_maker_.get_default_entries());
     boost::filesystem::path snapshot_file = boost::filesystem::path(location) / "snapshot";
 
-    snapshot_tracker_testable tracker(snapshot_file);
+    cursor_impl_testable tracker(snapshot_file);
     EXPECT_TRUE(tracker.next()) << "Should be able to read the snapshot";
 }
 
 // Test case 2: Both Snapshot and Compacted files exist
-TEST_F(snapshot_tracker_test, snapshot_and_compacted) {
+TEST_F(cursor_impl_test, snapshot_and_compacted) {
     create_log_file("snapshot", entry_maker_.get_default_entries());
     create_log_file("compacted", entry_maker_.get_default_entries());
 
     boost::filesystem::path snapshot_file = boost::filesystem::path(location) / "snapshot";
     boost::filesystem::path compacted_file = boost::filesystem::path(location) / "compacted";
 
-    snapshot_tracker_testable tracker(snapshot_file, compacted_file);
+    cursor_impl_testable tracker(snapshot_file, compacted_file);
     EXPECT_TRUE(tracker.next()) << "Should be able to read both snapshot and compacted files";
 }
 
 // Test case 3: Error cases
-TEST_F(snapshot_tracker_test, error_case) {
+TEST_F(cursor_impl_test, error_case) {
     // No files exist, should throw limestone_exception
     boost::filesystem::path snapshot_file = boost::filesystem::path(location) / "not_existing_snapshot";
     EXPECT_THROW({
-        snapshot_tracker_testable tracker{boost::filesystem::path(snapshot_file)}; 
+        cursor_impl_testable tracker{boost::filesystem::path(snapshot_file)}; 
     }, limestone::limestone_exception) << "No files should result in a limestone_exception being thrown";
 
     // Expect the next() method to throw a limestone_exception
     {    
-        snapshot_tracker_testable tracker{boost::filesystem::path(location)}; 
+        cursor_impl_testable tracker{boost::filesystem::path(location)}; 
         EXPECT_THROW({
             tracker.next();
         }, limestone::limestone_exception) << "No files should result in a limestone_exception being thrown";
@@ -181,7 +181,7 @@ TEST_F(snapshot_tracker_test, error_case) {
             .add_entry(1, "key3", "value3", {1, 2});
         boost::filesystem::path snapshot_file = boost::filesystem::path(location) / "snapshot";
         create_log_file("snapshot", entry_maker_.get_entries());
-        snapshot_tracker_testable tracker{boost::filesystem::path(snapshot_file)}; 
+        cursor_impl_testable tracker{boost::filesystem::path(snapshot_file)}; 
         EXPECT_THROW({
             while (tracker.next());
         }, limestone::limestone_exception) << "No files should result in a limestone_exception being thrown";
@@ -189,13 +189,13 @@ TEST_F(snapshot_tracker_test, error_case) {
 }
 
 // Test Case 4: Verify the entry methods after reading from a snapshot file
-TEST_F(snapshot_tracker_test, verify_entry_methods) {
+TEST_F(cursor_impl_test, verify_entry_methods) {
     // Create a snapshot file with default entries
     create_log_file("snapshot", entry_maker_.get_default_entries());
     boost::filesystem::path snapshot_file = boost::filesystem::path(location) / "snapshot";
 
-    // Use snapshot_tracker_testable to read the file
-    snapshot_tracker_testable tracker(snapshot_file);
+    // Use cursor_impl_testable to read the file
+    cursor_impl_testable tracker(snapshot_file);
 
     // Verify the first entry
     ASSERT_TRUE(tracker.next()) << "First entry should be read";

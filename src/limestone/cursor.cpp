@@ -20,37 +20,37 @@
 #include "logging_helper.h"
 #include "limestone_exception_helper.h"
 #include "log_entry.h"
-#include "snapshot_tracker.h"
+#include "cursor_impl.h"
 
 
 namespace limestone::api {
 
 
 cursor::cursor(const boost::filesystem::path& snapshot_file)
-    : log_entry_tracker_(std::make_unique<limestone::internal::snapshot_tracker>(snapshot_file)) {}
+    : pimpl(std::make_unique<limestone::internal::cursor_impl>(snapshot_file)) {}
 
 cursor::cursor(const boost::filesystem::path& snapshot_file, const boost::filesystem::path& compacted_file)
-    : log_entry_tracker_(std::make_unique<limestone::internal::snapshot_tracker>(snapshot_file, compacted_file)) {}
+    : pimpl(std::make_unique<limestone::internal::cursor_impl>(snapshot_file, compacted_file)) {}
 
 cursor::~cursor() noexcept {
     // TODO: handle close failure
-    log_entry_tracker_->close();
+    pimpl->close();
 }
 
 bool cursor::next() {
-    return log_entry_tracker_->next();
+    return pimpl->next();
 }
 
 storage_id_type cursor::storage() const noexcept {
-    return log_entry_tracker_->storage();
+    return pimpl->storage();
 }
 
 void cursor::key(std::string& buf) const noexcept {
-    log_entry_tracker_->key(buf);
+    pimpl->key(buf);
 }
 
 void cursor::value(std::string& buf) const noexcept {
-    log_entry_tracker_->value(buf);
+    pimpl->value(buf);
 }
 
 std::vector<large_object_view>& cursor::large_objects() noexcept {
