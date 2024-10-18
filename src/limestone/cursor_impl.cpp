@@ -44,7 +44,7 @@ cursor_impl::cursor_impl(const boost::filesystem::path& snapshot_file)
 
 cursor_impl::cursor_impl(const boost::filesystem::path& snapshot_file, const boost::filesystem::path& compacted_file) {
     open(snapshot_file, snapshot_istrm_);
-    open(compacted_file, compacted_istrm_);
+    open(compacted_file, compacted_istrm_); 
 }
 
 void cursor_impl::open(const boost::filesystem::path& file, std::optional<boost::filesystem::ifstream>& stream) {
@@ -60,8 +60,7 @@ void cursor_impl::close() {
 }
 
 void cursor_impl::validate_and_read_stream(std::optional<boost::filesystem::ifstream>& stream, const std::string& stream_name,
-                                           std::optional<log_entry>& log_entry, std::string& previous_key_sid,
-                                           std::function<bool(const limestone::api::log_entry&)> is_valid_entry) {
+                                           std::optional<log_entry>& log_entry, std::string& previous_key_sid) {
     while (stream) {
         // If the stream is not in good condition, close it and exit
         if (!stream->good()) {
@@ -105,7 +104,7 @@ void cursor_impl::validate_and_read_stream(std::optional<boost::filesystem::ifst
         }
 
         // Check the validity of the entry using the lambda function
-        if (is_valid_entry(log_entry.value())) {
+        if (is_relevant_entry(log_entry.value())) {
             // If a valid entry is found, return
             return;
         }
@@ -115,10 +114,7 @@ void cursor_impl::validate_and_read_stream(std::optional<boost::filesystem::ifst
     }
 }
 
-
-bool cursor_impl::next() {
-    // Lambda for snapshot to allow both normal_entry and remove_entry
-    auto is_relevant_snapshot_entry = [this](const limestone::api::log_entry& entry) -> bool {
+bool cursor_impl::is_relevant_entry(const limestone::api::log_entry& entry) {
         // Step 1: Check if the entry is either normal_entry or remove_entry
         if (entry.type() != limestone::api::log_entry::entry_type::normal_entry &&
             entry.type() != limestone::api::log_entry::entry_type::remove_entry) {
@@ -127,7 +123,6 @@ bool cursor_impl::next() {
 
         // Step 2: Get the storage ID from log_entry
         auto storage_id = entry.storage();  // Assuming storage() returns the storage ID
-
         // Step 3: Check if clear_storage_ contains the same storage ID
         auto it = clear_storage_.find(storage_id);
         if (it != clear_storage_.end()) {
@@ -146,22 +141,18 @@ bool cursor_impl::next() {
 
         // If everything is valid, return true
         return true;
-    };
+}
 
-    // Lambda for compacted to allow only normal_entry
-    auto is_relevant_compacted_entry = [](const limestone::api::log_entry& entry) -> bool {
-        return entry.type() == limestone::api::log_entry::entry_type::normal_entry;
-    };
-
+bool cursor_impl::next() {
     while (true) {
-    // Read from the snapshot stream if the snapshot_log_entry_ is empty
+        // Read from the snapshot stream if the snapshot_log_entry_ is empty
         if (!snapshot_log_entry_) {
-            validate_and_read_stream(snapshot_istrm_, "Snapshot", snapshot_log_entry_, previous_snapshot_key_sid, is_relevant_snapshot_entry);
+            validate_and_read_stream(snapshot_istrm_, "Snapshot", snapshot_log_entry_, previous_snapshot_key_sid);
         }
 
         // Read from the compacted stream if the compacted_log_entry_ is empty
         if (!compacted_log_entry_) {
-            validate_and_read_stream(compacted_istrm_, "Compacted", compacted_log_entry_, previous_compacted_key_sid, is_relevant_compacted_entry);
+            validate_and_read_stream(compacted_istrm_, "Compacted", compacted_log_entry_, previous_compacted_key_sid);
         }
 
         // Case 1: Both snapshot and compacted are empty, return false

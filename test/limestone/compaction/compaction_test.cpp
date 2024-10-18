@@ -1135,6 +1135,200 @@ TEST_F(compaction_test, scenario03) {
     EXPECT_EQ(kv_list[3].second, "value2");
 }
 
+// This test case verifies the correct behavior of `remove_storage`.
+// This test case verifies the correct behavior of `remove_storage`.
+TEST_F(compaction_test, scenario04) {
+    FLAGS_v = 50;  // set VLOG level to 50
+
+    gen_datastore();
+    datastore_->switch_epoch(1);
+
+    // Storage ID 1: Add normal entries
+    lc0_->begin_session();
+    lc0_->add_entry(1, "key1", "value1", {1, 0});
+    lc0_->add_entry(1, "key2", "value2", {1, 1});
+    lc0_->end_session();
+
+    // Storage ID 2: Add normal entries
+    lc1_->begin_session();
+    lc1_->add_entry(2, "key3", "value3", {1, 0});
+    lc1_->add_entry(2, "key4", "value4", {1, 1});
+    lc1_->end_session();
+
+    // Storage ID 1: Add more normal entries
+    lc2_->begin_session();
+    lc2_->add_entry(1, "key5", "value5", {1, 2});
+    lc2_->add_entry(1, "key6", "value6", {1, 3});
+    lc2_->end_session();
+
+    // Advance the epoch to 2
+    datastore_->switch_epoch(2);
+
+    // Remove storage for Storage ID 2
+    lc1_->begin_session();
+    lc1_->remove_storage(2, {2, 0});  // Removes the storage with ID 2
+    lc1_->end_session();
+
+    // Advance the epoch to 3
+    datastore_->switch_epoch(3);
+
+    // Add an entry to Storage ID 1
+    lc0_->begin_session();
+    lc0_->add_entry(1, "key7", "value7", {3, 0});
+    lc0_->end_session();
+
+    // Add an entry to Storage ID 2
+    lc1_->begin_session();
+    lc1_->add_entry(2, "key8", "value8", {3, 0});
+    lc1_->end_session();
+
+    // Chek PWALs before compaction
+    auto pwals = extract_pwal_files_from_datastore();
+    EXPECT_EQ(pwals.size(), 3);
+
+    std::vector<log_entry> log_entries = read_log_file("pwal_0000", location);
+    ASSERT_EQ(log_entries.size(), 3);  
+    EXPECT_TRUE(AssertLogEntry(log_entries[0], 1, "key1", "value1", 1, 0, log_entry::entry_type::normal_entry)); 
+    EXPECT_TRUE(AssertLogEntry(log_entries[1], 1, "key2", "value2", 1, 1, log_entry::entry_type::normal_entry)); 
+    EXPECT_TRUE(AssertLogEntry(log_entries[2], 1, "key7", "value7", 3, 0, log_entry::entry_type::normal_entry)); 
+
+    log_entries = read_log_file("pwal_0001", location);
+    ASSERT_EQ(log_entries.size(), 4);  
+    EXPECT_TRUE(AssertLogEntry(log_entries[0], 2, "key3", "value3", 1, 0, log_entry::entry_type::normal_entry)); 
+    EXPECT_TRUE(AssertLogEntry(log_entries[1], 2, "key4", "value4", 1, 1, log_entry::entry_type::normal_entry)); 
+    EXPECT_TRUE(AssertLogEntry(log_entries[2], 2, "", "", 2, 0, log_entry::entry_type::remove_storage)); 
+    EXPECT_TRUE(AssertLogEntry(log_entries[3], 2, "key8", "value8", 3, 0, log_entry::entry_type::normal_entry)); 
+
+    log_entries = read_log_file("pwal_0002", location);
+    ASSERT_EQ(log_entries.size(), 2);  
+    EXPECT_TRUE(AssertLogEntry(log_entries[0], 1, "key5", "value5", 1, 2, log_entry::entry_type::normal_entry)); 
+    EXPECT_TRUE(AssertLogEntry(log_entries[1], 1, "key6", "value6", 1, 3, log_entry::entry_type::normal_entry)); 
+
+    // online compaction
+    run_compact_with_epoch_switch(4);
+
+    // Check PWALs after compaction
+    pwals = extract_pwal_files_from_datastore();
+    EXPECT_EQ(pwals.size(), 4);
+    ASSERT_PRED_FORMAT2(ContainsString, pwals, "pwal_0000.compacted");
+    ASSERT_PRED_FORMAT3(ContainsPrefix, pwals, "pwal_0000.", 2);
+    ASSERT_PRED_FORMAT3(ContainsPrefix, pwals, "pwal_0001.", 1);
+    ASSERT_PRED_FORMAT3(ContainsPrefix, pwals, "pwal_0002.", 1);
+
+    log_entries = read_log_file("pwal_0000.compacted", location);
+    ASSERT_EQ(log_entries.size(), 6);  
+    EXPECT_TRUE(AssertLogEntry(log_entries[0], 1, "key1", "value1", 0, 0, log_entry::entry_type::normal_entry)); 
+    EXPECT_TRUE(AssertLogEntry(log_entries[1], 1, "key2", "value2", 0, 0, log_entry::entry_type::normal_entry)); 
+    EXPECT_TRUE(AssertLogEntry(log_entries[2], 1, "key5", "value5", 0, 0, log_entry::entry_type::normal_entry)); 
+    EXPECT_TRUE(AssertLogEntry(log_entries[3], 1, "key6", "value6", 0, 0, log_entry::entry_type::normal_entry)); 
+    EXPECT_TRUE(AssertLogEntry(log_entries[4], 1, "key7", "value7", 0, 0, log_entry::entry_type::normal_entry)); 
+    EXPECT_TRUE(AssertLogEntry(log_entries[5], 2, "key8", "value8", 0, 0, log_entry::entry_type::normal_entry)); 
+
+
+    // Storage ID 1: Add normal entries
+    lc0_->begin_session();
+    lc0_->add_entry(1, "key11", "value1", {4, 0});
+    lc0_->add_entry(1, "key12", "value2", {4, 1});
+    lc0_->end_session();
+
+    // Storage ID 2: Add normal entries
+    lc1_->begin_session();
+    lc1_->add_entry(2, "key13", "value3", {4, 0});
+    lc1_->add_entry(2, "key14", "value4", {4, 1});
+    lc1_->end_session();
+
+    // Storage ID 1: Add more normal entries
+    lc2_->begin_session();
+    lc2_->add_entry(1, "key15", "value5", {4, 2});
+    lc2_->add_entry(1, "key16", "value6", {4, 3});
+    lc2_->end_session();
+
+    // Advance the epoch to 5
+    datastore_->switch_epoch(5);
+
+    // Remove storage for Storage ID 1
+    lc1_->begin_session();
+    lc1_->remove_storage(1, {5, 0});  // Removes the storage with ID 2
+    lc1_->end_session();
+
+    // Advance the epoch to 6
+    datastore_->switch_epoch(6);
+
+    // Add an entry to Storage ID 1
+    lc0_->begin_session();
+    lc0_->add_entry(1, "key17", "value7", {6, 0});
+    lc0_->end_session();
+
+    // Add an entry to Storage ID 2
+    lc1_->begin_session();
+    lc1_->add_entry(2, "key18", "value8", {6, 0});
+    lc1_->end_session();
+
+    // Advance the epoch to 6
+    datastore_->switch_epoch(7);
+
+    // Chek newly created PWALs 
+    pwals = extract_pwal_files_from_datastore();
+    EXPECT_EQ(pwals.size(), 7);
+    ASSERT_PRED_FORMAT2(ContainsString, pwals, "pwal_0000.compacted");
+    ASSERT_PRED_FORMAT3(ContainsPrefix, pwals, "pwal_0000.", 2);
+    ASSERT_PRED_FORMAT3(ContainsPrefix, pwals, "pwal_0001.", 1);
+    ASSERT_PRED_FORMAT3(ContainsPrefix, pwals, "pwal_0002.", 1);
+
+    log_entries = read_log_file("pwal_0000", location);
+    ASSERT_EQ(log_entries.size(), 3);  
+    EXPECT_TRUE(AssertLogEntry(log_entries[0], 1, "key11", "value1", 4, 0, log_entry::entry_type::normal_entry)); 
+    EXPECT_TRUE(AssertLogEntry(log_entries[1], 1, "key12", "value2", 4, 1, log_entry::entry_type::normal_entry)); 
+    EXPECT_TRUE(AssertLogEntry(log_entries[2], 1, "key17", "value7", 6, 0, log_entry::entry_type::normal_entry)); 
+
+    log_entries = read_log_file("pwal_0001", location);
+    ASSERT_EQ(log_entries.size(), 4);  
+    EXPECT_TRUE(AssertLogEntry(log_entries[0], 2, "key13", "value3", 4, 0, log_entry::entry_type::normal_entry)); 
+    EXPECT_TRUE(AssertLogEntry(log_entries[1], 2, "key14", "value4", 4, 1, log_entry::entry_type::normal_entry)); 
+    EXPECT_TRUE(AssertLogEntry(log_entries[2], 1, "", "", 5, 0, log_entry::entry_type::remove_storage)); 
+    EXPECT_TRUE(AssertLogEntry(log_entries[3], 2, "key18", "value8", 6, 0, log_entry::entry_type::normal_entry)); 
+
+    log_entries = read_log_file("pwal_0002", location);
+    ASSERT_EQ(log_entries.size(), 2);  
+    EXPECT_TRUE(AssertLogEntry(log_entries[0], 1, "key15", "value5", 4, 2, log_entry::entry_type::normal_entry)); 
+    EXPECT_TRUE(AssertLogEntry(log_entries[1], 1, "key16", "value6", 4, 3, log_entry::entry_type::normal_entry)); 
+
+    // Restart the datastore
+
+    std::vector<std::pair<std::string, std::string>> kv_list = restart_datastore_and_read_snapshot();
+
+    // check the compacted file and snapshot creating at the boot time
+    log_entries = read_log_file("pwal_0000.compacted", location);
+    ASSERT_EQ(log_entries.size(), 6);  
+    EXPECT_TRUE(AssertLogEntry(log_entries[0], 1, "key1", "value1", 0, 0, log_entry::entry_type::normal_entry)); 
+    EXPECT_TRUE(AssertLogEntry(log_entries[1], 1, "key2", "value2", 0, 0, log_entry::entry_type::normal_entry)); 
+    EXPECT_TRUE(AssertLogEntry(log_entries[2], 1, "key5", "value5", 0, 0, log_entry::entry_type::normal_entry)); 
+    EXPECT_TRUE(AssertLogEntry(log_entries[3], 1, "key6", "value6", 0, 0, log_entry::entry_type::normal_entry)); 
+    EXPECT_TRUE(AssertLogEntry(log_entries[4], 1, "key7", "value7", 0, 0, log_entry::entry_type::normal_entry)); 
+    EXPECT_TRUE(AssertLogEntry(log_entries[5], 2, "key8", "value8", 0, 0, log_entry::entry_type::normal_entry)); 
+
+    log_entries = read_log_file("data/snapshot", location);
+    ASSERT_EQ(log_entries.size(), 4);
+    EXPECT_TRUE(AssertLogEntry(log_entries[0], 1, "key17", "value7", 6, 0, log_entry::entry_type::normal_entry)); 
+    EXPECT_TRUE(AssertLogEntry(log_entries[1], 2, "key13", "value3", 4, 0, log_entry::entry_type::normal_entry)); 
+    EXPECT_TRUE(AssertLogEntry(log_entries[2], 2, "key14", "value4", 4, 1, log_entry::entry_type::normal_entry)); 
+    EXPECT_TRUE(AssertLogEntry(log_entries[3], 2, "key18", "value8", 6, 0, log_entry::entry_type::normal_entry)); 
+
+    // 5. Verify the snapshot contents after restart
+    
+    // key1 should exist with its updated value, key2 and key3 should be removed
+    ASSERT_EQ(kv_list.size(), 5);
+    EXPECT_EQ(kv_list[0].first, "key17");
+    EXPECT_EQ(kv_list[0].second, "value7");
+    EXPECT_EQ(kv_list[1].first, "key13");
+    EXPECT_EQ(kv_list[1].second, "value3");
+    EXPECT_EQ(kv_list[2].first, "key14");
+    EXPECT_EQ(kv_list[2].second, "value4");
+    EXPECT_EQ(kv_list[3].first, "key18");
+    EXPECT_EQ(kv_list[3].second, "value8");
+    EXPECT_EQ(kv_list[4].first, "key8");
+    EXPECT_EQ(kv_list[4].second, "value8");
+}
 
 
 

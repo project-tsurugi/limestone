@@ -54,14 +54,13 @@ protected:
 
     bool next();
     void validate_and_read_stream(std::optional<boost::filesystem::ifstream>& stream, const std::string& stream_name, 
-                                  std::optional<limestone::api::log_entry>& log_entry, std::string& previous_key_sid,
-                                  std::function<bool(const limestone::api::log_entry&)> is_valid_entry);
+                                  std::optional<limestone::api::log_entry>& log_entry, std::string& previous_key_sid);
 
     [[nodiscard]] limestone::api::storage_id_type storage() const noexcept;
     void key(std::string& buf) const noexcept;
     void value(std::string& buf) const noexcept;
     [[nodiscard]] limestone::api::log_entry::entry_type type() const;
-
+    bool is_relevant_entry(const limestone::api::log_entry& entry);
     // Making the cursor class a friend so that it can access protected members
     friend class limestone::api::cursor;
 };
