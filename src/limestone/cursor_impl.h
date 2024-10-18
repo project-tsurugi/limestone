@@ -54,7 +54,8 @@ protected:
 
     bool next();
     void validate_and_read_stream(std::optional<boost::filesystem::ifstream>& stream, const std::string& stream_name, 
-                                  std::optional<limestone::api::log_entry>& log_entry, std::string& previous_key_sid);
+                                  std::optional<limestone::api::log_entry>& log_entry, std::string& previous_key_sid,
+                                  std::function<bool(const limestone::api::log_entry&)> is_valid_entry);
 
     [[nodiscard]] limestone::api::storage_id_type storage() const noexcept;
     void key(std::string& buf) const noexcept;
