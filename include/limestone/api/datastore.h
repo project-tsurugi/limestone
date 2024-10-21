@@ -23,6 +23,7 @@
 #include <set>
 #include <mutex>
 #include <queue>
+#include <map>
 
 #include <boost/filesystem.hpp>
 
@@ -309,7 +310,7 @@ private:
      * @param from the location of log files
      * @attention this function is not thread-safe.
      */
-    void create_snapshot(const std::set<std::string>& file_names);
+    void create_snapshot();
 
     epoch_id_type last_durable_epoch_in_dir();
 
@@ -324,7 +325,8 @@ private:
     void rotate_epoch_file();
 
     int64_t current_unix_epoch_in_millis();
-    
+
+    std::map<storage_id_type, write_version_type> clear_storage;  
 };
 
 } // namespace limestone::api

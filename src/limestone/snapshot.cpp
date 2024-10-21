@@ -14,18 +14,24 @@
  * limitations under the License.
  */
 #include <limestone/api/snapshot.h>
-
+#include <map>
 #include <glog/logging.h>
 #include <limestone/logging.h>
+#include "compaction_catalog.h"
 #include "logging_helper.h"
+#include "snapshot_impl.h"
 
 namespace limestone::api {  // FIXME fill implementation
 
-snapshot::snapshot(const boost::filesystem::path& location) noexcept : dir_(location / boost::filesystem::path(std::string(subdirectory_name_))) {
-}
+using limestone::internal::snapshot_impl;
 
+snapshot::snapshot(boost::filesystem::path location, 
+                   std::map<storage_id_type, write_version_type> clear_storage) noexcept
+    : pimpl(std::make_unique<snapshot_impl>(std::move(location), std::move(clear_storage))) {
+
+}
 std::unique_ptr<cursor> snapshot::get_cursor() const {
-    return std::unique_ptr<cursor>(new cursor(file_path()));
+    return pimpl->get_cursor();
 }
 
 std::unique_ptr<cursor> snapshot::find([[maybe_unused]] storage_id_type storage_id, [[maybe_unused]] std::string_view entry_key) const noexcept {
@@ -36,10 +42,6 @@ std::unique_ptr<cursor> snapshot::find([[maybe_unused]] storage_id_type storage_
 std::unique_ptr<cursor> snapshot::scan([[maybe_unused]] storage_id_type storage_id, [[maybe_unused]] std::string_view entry_key, [[maybe_unused]] bool inclusive) const noexcept {
     LOG_LP(ERROR) << "not implemented";
     std::abort();  // FIXME should implement
-}
-
-boost::filesystem::path snapshot::file_path() const noexcept {
-    return dir_ / boost::filesystem::path(std::string(file_name_));
 }
 
 } // namespace limestone::api

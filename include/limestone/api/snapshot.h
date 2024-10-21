@@ -17,10 +17,15 @@
 
 #include <memory>
 #include <string_view>
-
+#include <map>
 #include <boost/filesystem.hpp>
 
 #include <limestone/api/cursor.h>
+#include <limestone/api/write_version_type.h>
+
+namespace limestone::internal {
+    class snapshot_impl;  
+}
 
 namespace limestone::api {
 
@@ -28,8 +33,14 @@ namespace limestone::api {
  * @brief a snapshot of the data at a point in time on the data store
  */
 class snapshot {
+
 public:
     snapshot() noexcept = delete;
+    snapshot(const snapshot&) = delete;
+    snapshot& operator=(const snapshot&) = delete;
+    snapshot(snapshot&&) noexcept = delete;
+    snapshot& operator=(snapshot&&) noexcept = delete;
+    ~snapshot();
 
     /**
      * @brief directory name of a snapshot
@@ -73,11 +84,9 @@ public:
     [[nodiscard]] std::unique_ptr<cursor> scan(storage_id_type storage_id, std::string_view entry_key, bool inclusive) const noexcept;
 
 private:
-    boost::filesystem::path dir_{};
+    std::unique_ptr<internal::snapshot_impl> pimpl;
 
-    [[nodiscard]] boost::filesystem::path file_path() const noexcept;
-
-    explicit snapshot(const boost::filesystem::path& location) noexcept;
+    explicit snapshot(boost::filesystem::path location, std::map<storage_id_type, write_version_type> clear_storage) noexcept;
 
     friend class datastore;
 };
