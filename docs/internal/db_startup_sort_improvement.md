@@ -225,3 +225,15 @@ real	0m14.807s
 user	0m0.010s
 sys	0m0.016s
 ```
+
+## trucate, drop tabl対応
+
+* compacted_pwal => trucate, droptableにより削除されるべきエントリは削除されている。
+* snapshost => truncate, droptableにより削除すべき情報が残っている可能性がある。
+  * cursorアクセス時に削除すべきエントリを削除する必要がある。
+    * この処理に必要な情報はdatastore::create_snapshot()の中でsortdb_foreach()で、sorting_context　sctxにセットされる。
+    * 実際に必要なのは、この中のsutorege_idと、write_versionを記録しているmapなので。このmapを、datastoreのプライベートフィールド、clear_storageに保存する。
+    * datastoreのどこかにsctxを保存しておく
+* snapshot, cursorがclear_storagをどうやってうけとるのかも問題。
+  * snapshotのコンストラクタが受け取る。
+  * snapshotがcursortのオブジェクト作成時に、セットする。
