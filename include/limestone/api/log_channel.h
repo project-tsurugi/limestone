@@ -47,6 +47,9 @@ public:
      * @brief join a persistence session for the current epoch in this channel
      * @attention this function is not thread-safe.
      * @exception limestone_exception if I/O error occurs
+     * @note Currently, this function does not throw an exception but logs the error and aborts the process.
+     *       However, throwing an exception is the intended behavior, and this will be restored in future versions.
+     *       Therefore, callers of this API must handle the exception properly as per the original design.
      * @note the current epoch is the last epoch specified by datastore::switch_epoch()
      * @note datastore::switch_epoch() and this function can be called simultaneously.
      * If these functions are invoked at the same time, the result will be as if one of them was called first, 
@@ -58,6 +61,9 @@ public:
      * @brief notifies the completion of an operation in this channel for the current persistent session the channel is participating in
      * @attention this function is not thread-safe.
      * @exception limestone_exception if I/O error occurs
+     * @note Currently, this function does not throw an exception but logs the error and aborts the process.
+     *       However, throwing an exception is the intended behavior, and this will be restored in future versions.
+     *       Therefore, callers of this API must handle the exception properly as per the original design.
      * @note when all channels that have participated in the current persistent session call end_session() and the current epoch is
      * greater than the session's epoch, the persistent session itself is complete
      */
@@ -76,6 +82,9 @@ public:
      * @param value the value byte string for the entry to be added
      * @param write_version (optional) the write version of the entry to be added. If omitted, the default value is used
      * @exception limestone_exception if I/O error occurs
+     * @note Currently, this function does not throw an exception but logs the error and aborts the process.
+     *       However, throwing an exception is the intended behavior, and this will be restored in future versions.
+     *       Therefore, callers of this API must handle the exception properly as per the original design.
      * @attention this function is not thread-safe.
      */
     void add_entry(storage_id_type storage_id, std::string_view key, std::string_view value, write_version_type write_version);
@@ -88,6 +97,9 @@ public:
      * @param write_version (optional) the write version of the entry to be added. If omitted, the default value is used
      * @param large_objects (optional) the list of large objects associated with the entry to be added
      * @exception limestone_exception if I/O error occurs
+     * @note Currently, this function does not throw an exception but logs the error and aborts the process.
+     *       However, throwing an exception is the intended behavior, and this will be restored in future versions.
+     *       Therefore, callers of this API must handle the exception properly as per the original design.
      * @attention this function is not thread-safe.
      */
     void add_entry(storage_id_type storage_id, std::string_view key, std::string_view value, write_version_type write_version, const std::vector<large_object_input>& large_objects);
@@ -98,6 +110,9 @@ public:
      * @param key the key byte string for the entry to be deleted
      * @param write_version the write version of the entry to be removed
      * @exception limestone_exception if I/O error occurs
+     * @note Currently, this function does not throw an exception but logs the error and aborts the process.
+     *       However, throwing an exception is the intended behavior, and this will be restored in future versions.
+     *       Therefore, callers of this API must handle the exception properly as per the original design.
      * @attention this function is not thread-safe.
      * @note no deletion operation is performed on the entry that has been added to the current persistent session, instead,
      * the entries to be deleted are treated as if they do not exist in a recover() operation from a log stored in the current persistent session
@@ -109,6 +124,9 @@ public:
      * @param storage_id the storage ID of the entry to be added
      * @param write_version the write version of the entry to be added
      * @exception limestone_exception if I/O error occurs
+     * @note Currently, this function does not throw an exception but logs the error and aborts the process.
+     *       However, throwing an exception is the intended behavior, and this will be restored in future versions.
+     *       Therefore, callers of this API must handle the exception properly as per the original design.
      * @attention this function is not thread-safe.
      * @impl this operation may be ignored.
      */
@@ -119,6 +137,9 @@ public:
      * @param storage_id the storage ID of the entry to be removed
      * @param write_version the write version of the entry to be removed
      * @exception limestone_exception if I/O error occurs
+     * @note Currently, this function does not throw an exception but logs the error and aborts the process.
+     *       However, throwing an exception is the intended behavior, and this will be restored in future versions.
+     *       Therefore, callers of this API must handle the exception properly as per the original design.
      * @attention this function is not thread-safe.
      * @note no deletion operation is performed on the entry that has been added to the current persistent session, instead,
      * the target entries are treated as if they do not exist in the recover() operation from the log stored in the current persistent session.
@@ -130,6 +151,9 @@ public:
      * @param storage_id the storage ID of the entry to be removed
      * @param write_version the write version of the entry to be removed
      * @exception limestone_exception if I/O error occurs
+     * @note Currently, this function does not throw an exception but logs the error and aborts the process.
+     *       However, throwing an exception is the intended behavior, and this will be restored in future versions.
+     *       Therefore, callers of this API must handle the exception properly as per the original design.
      * @attention this function is not thread-safe.
      * @note no deletion operation is performed on the entry that has been added to the current persistent session, instead,
      * the target entries are treated as if they do not exist in the recover() operation from the log stored in the current persistent session.

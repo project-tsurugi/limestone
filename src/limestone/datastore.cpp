@@ -40,55 +40,59 @@ using namespace limestone::internal;
 datastore::datastore() noexcept = default;
 
 datastore::datastore(configuration const& conf) : location_(conf.data_locations_.at(0)) {
-    LOG(INFO) << "/:limestone:config:datastore setting log location = " << location_.string();
-    boost::system::error_code error;
-    const bool result_check = boost::filesystem::exists(location_, error);
-    boost::filesystem::path manifest_path = boost::filesystem::path(location_) / std::string(internal::manifest_file_name);
-    boost::filesystem::path compaction_catalog_path= boost::filesystem::path(location_) / compaction_catalog::get_catalog_filename();
-    if (!result_check || error) {
-        const bool result_mkdir = boost::filesystem::create_directory(location_, error);
-        if (!result_mkdir || error) {
-            LOG_AND_THROW_IO_EXCEPTION("fail to create directory: " + location_.string(), error);
-        }
-        internal::setup_initial_logdir(location_);
-        add_file(manifest_path);
-    } else {
-        int count = 0;
-        // use existing log-dir
-        for (const boost::filesystem::path& p : boost::filesystem::directory_iterator(location_)) {
-            if (!boost::filesystem::is_directory(p)) {
-                count++;
-                add_file(p);
+    try {
+        LOG(INFO) << "/:limestone:config:datastore setting log location = " << location_.string();
+        boost::system::error_code error;
+        const bool result_check = boost::filesystem::exists(location_, error);
+        boost::filesystem::path manifest_path = boost::filesystem::path(location_) / std::string(internal::manifest_file_name);
+        boost::filesystem::path compaction_catalog_path= boost::filesystem::path(location_) / compaction_catalog::get_catalog_filename();
+        if (!result_check || error) {
+            const bool result_mkdir = boost::filesystem::create_directory(location_, error);
+            if (!result_mkdir || error) {
+                LOG_AND_THROW_IO_EXCEPTION("fail to create directory: " + location_.string(), error);
             }
-        }
-        if (count == 0) {
             internal::setup_initial_logdir(location_);
             add_file(manifest_path);
+        } else {
+            int count = 0;
+            // use existing log-dir
+            for (const boost::filesystem::path& p : boost::filesystem::directory_iterator(location_)) {
+                if (!boost::filesystem::is_directory(p)) {
+                    count++;
+                    add_file(p);
+                }
+            }
+            if (count == 0) {
+                internal::setup_initial_logdir(location_);
+                add_file(manifest_path);
+            }
         }
+        internal::check_and_migrate_logdir_format(location_);
+        add_file(compaction_catalog_path);
+        compaction_catalog_ = std::make_unique<compaction_catalog>(compaction_catalog::from_catalog_file(location_));
+
+        // XXX: prusik era
+        // TODO: read rotated epoch files if main epoch file does not exist
+        epoch_file_path_ = location_ / boost::filesystem::path(std::string(limestone::internal::epoch_file_name));
+        const bool result = boost::filesystem::exists(epoch_file_path_, error);
+        if (!result || error) {
+            FILE* strm = fopen(epoch_file_path_.c_str(), "a");  // NOLINT(*-owning-memory)
+            if (!strm) {
+                LOG_AND_THROW_IO_EXCEPTION("does not have write permission for the log_location directory, path: " + location_.string(), errno);
+            }
+            if (fclose(strm) != 0) {  // NOLINT(*-owning-memory)
+                LOG_AND_THROW_IO_EXCEPTION("fclose failed", errno);
+            }
+            add_file(epoch_file_path_);
+        }
+
+        recover_max_parallelism_ = conf.recover_max_parallelism_;
+        LOG(INFO) << "/:limestone:config:datastore setting the number of recover process thread = " << recover_max_parallelism_;
+
+        VLOG_LP(log_debug) << "datastore is created, location = " << location_.string();
+    } catch (...) {
+        HANDLE_EXCEPTION_AND_ABORT();
     }
-    internal::check_and_migrate_logdir_format(location_);
-    add_file(compaction_catalog_path);
-    compaction_catalog_ = std::make_unique<compaction_catalog>(compaction_catalog::from_catalog_file(location_));
-
-    // XXX: prusik era
-    // TODO: read rotated epoch files if main epoch file does not exist
-    epoch_file_path_ = location_ / boost::filesystem::path(std::string(limestone::internal::epoch_file_name));
-    const bool result = boost::filesystem::exists(epoch_file_path_, error);
-    if (!result || error) {
-        FILE* strm = fopen(epoch_file_path_.c_str(), "a");  // NOLINT(*-owning-memory)
-        if (!strm) {
-            LOG_AND_THROW_IO_EXCEPTION("does not have write permission for the log_location directory, path: " + location_.string(), errno);
-        }
-        if (fclose(strm) != 0) {  // NOLINT(*-owning-memory)
-            LOG_AND_THROW_IO_EXCEPTION("fclose failed", errno);
-        }
-        add_file(epoch_file_path_);
-    }
-
-    recover_max_parallelism_ = conf.recover_max_parallelism_;
-    LOG(INFO) << "/:limestone:config:datastore setting the number of recover process thread = " << recover_max_parallelism_;
-
-    VLOG_LP(log_debug) << "datastore is created, location = " << location_.string();
 }
 
 datastore::~datastore() noexcept{
@@ -104,9 +108,13 @@ void datastore::recover() const noexcept {
 }
 
 void datastore::ready() {
-    create_snapshot();
-    online_compaction_worker_future_ = std::async(std::launch::async, &datastore::online_compaction_worker, this);
-    state_ = state::ready;
+    try {
+        create_snapshot();
+        online_compaction_worker_future_ = std::async(std::launch::async, &datastore::online_compaction_worker, this);
+        state_ = state::ready;
+    } catch (...) {
+        HANDLE_EXCEPTION_AND_ABORT();
+    }
 }
 
 std::unique_ptr<snapshot> datastore::get_snapshot() const {
@@ -132,15 +140,19 @@ log_channel& datastore::create_channel(const boost::filesystem::path& location) 
 epoch_id_type datastore::last_epoch() const noexcept { return static_cast<epoch_id_type>(epoch_id_informed_.load()); }
 
 void datastore::switch_epoch(epoch_id_type new_epoch_id) {
-    check_after_ready(static_cast<const char*>(__func__));
-    rotation_task_helper::attempt_task_execution_from_queue(); 
-    auto neid = static_cast<std::uint64_t>(new_epoch_id);
-    if (auto switched = epoch_id_switched_.load(); neid <= switched) {
-        LOG_LP(WARNING) << "switch to epoch_id_type of " << neid << " (<=" << switched << ") is curious";
-    }
+    try {
+        check_after_ready(static_cast<const char*>(__func__));
+        rotation_task_helper::attempt_task_execution_from_queue(); 
+        auto neid = static_cast<std::uint64_t>(new_epoch_id);
+        if (auto switched = epoch_id_switched_.load(); neid <= switched) {
+            LOG_LP(WARNING) << "switch to epoch_id_type of " << neid << " (<=" << switched << ") is curious";
+        }
 
-    epoch_id_switched_.store(neid);
-    update_min_epoch_id(true);
+        epoch_id_switched_.store(neid);
+        update_min_epoch_id(true);
+    } catch (...) {
+        HANDLE_EXCEPTION_AND_ABORT();
+    }
 }
 
 void datastore::update_min_epoch_id(bool from_switch_epoch) {  // NOLINT(readability-function-cognitive-complexity)
@@ -240,92 +252,102 @@ std::future<void> datastore::shutdown() noexcept {
 
 // old interface
 backup& datastore::begin_backup() {
-    auto tmp_files = get_files();
-    backup_ = std::unique_ptr<backup>(new backup(tmp_files));
-    return *backup_;
+    try {
+        auto tmp_files = get_files();
+        backup_ = std::unique_ptr<backup>(new backup(tmp_files));
+        return *backup_;
+    } catch (...) {
+        HANDLE_EXCEPTION_AND_ABORT();
+    }
+    return *backup_; // Required to satisfy the compiler
 }
 
 std::unique_ptr<backup_detail> datastore::begin_backup(backup_type btype) {  // NOLINT(readability-function-cognitive-complexity)
-   rotation_result result = rotate_log_files();
+try {
+    rotation_result result = rotate_log_files();
 
-    // LOG-0: all files are log file, so all files are selected in both standard/transaction mode.
-    (void) btype;
+        // LOG-0: all files are log file, so all files are selected in both standard/transaction mode.
+        (void) btype;
 
-    // calculate files_ minus active-files
-    std::set<boost::filesystem::path> inactive_files(result.get_rotation_end_files());
-    inactive_files.erase(epoch_file_path_);
-    for (const auto& lc : log_channels_) {
-        if (lc->registered_) {
-            inactive_files.erase(lc->file_path());
+        // calculate files_ minus active-files
+        std::set<boost::filesystem::path> inactive_files(result.get_rotation_end_files());
+        inactive_files.erase(epoch_file_path_);
+        for (const auto& lc : log_channels_) {
+            if (lc->registered_) {
+                inactive_files.erase(lc->file_path());
+            }
         }
-    }
 
-    // build entries
-    std::vector<backup_detail::entry> entries;
-    for (auto & ent : inactive_files) {
-        // LOG-0: assume files are located flat in logdir.
-        std::string filename = ent.filename().string();
-        auto dst = filename;
-        switch (filename[0]) {
-            case 'p': {
-                if (filename.find("wal", 1) == 1) {
-                    // "pwal"
-                    // pwal files are type:logfile, detached
+        // build entries
+        std::vector<backup_detail::entry> entries;
+        for (auto & ent : inactive_files) {
+            // LOG-0: assume files are located flat in logdir.
+            std::string filename = ent.filename().string();
+            auto dst = filename;
+            switch (filename[0]) {
+                case 'p': {
+                    if (filename.find("wal", 1) == 1) {
+                        // "pwal"
+                        // pwal files are type:logfile, detached
 
-                    // skip an "inactive" file with the name of active file,
-                    // it will cause some trouble if a file (that has the name of mutable files) is saved as immutable file.
-                    // but, by skip, backup files may be imcomplete.
-                    if (filename.length() == 9) {  // FIXME: too adohoc check
-                        boost::system::error_code error;
-                        bool result = boost::filesystem::is_empty(ent, error);
-                        if (!error && !result) {
-                            LOG_LP(ERROR) << "skip the file with the name like active files: " << filename;
+                        // skip an "inactive" file with the name of active file,
+                        // it will cause some trouble if a file (that has the name of mutable files) is saved as immutable file.
+                        // but, by skip, backup files may be imcomplete.
+                        if (filename.length() == 9) {  // FIXME: too adohoc check
+                            boost::system::error_code error;
+                            bool result = boost::filesystem::is_empty(ent, error);
+                            if (!error && !result) {
+                                LOG_LP(ERROR) << "skip the file with the name like active files: " << filename;
+                            }
+                            continue;
                         }
-                        continue;
+                        entries.emplace_back(ent.string(), dst, false, false);
+                    } else {
+                        // unknown type
                     }
-                    entries.emplace_back(ent.string(), dst, false, false);
-                } else {
-                    // unknown type
+                    break;
                 }
-                break;
-            }
-            case 'e': {
-                if (filename.find("poch", 1) == 1) {
-                    // "epoch"
-                    // epoch file(s) are type:logfile, the last rotated file is non-detached
+                case 'e': {
+                    if (filename.find("poch", 1) == 1) {
+                        // "epoch"
+                        // epoch file(s) are type:logfile, the last rotated file is non-detached
 
-                    // skip active file
-                    if (filename.length() == 5) {  // FIXME: too adohoc check
-                        continue;
+                        // skip active file
+                        if (filename.length() == 5) {  // FIXME: too adohoc check
+                            continue;
+                        }
+
+                        // TODO: only last epoch file is not-detached
+                        entries.emplace_back(ent.string(), dst, false, false);
+                    } else {
+                        // unknown type
                     }
-
-                    // TODO: only last epoch file is not-detached
-                    entries.emplace_back(ent.string(), dst, false, false);
-                } else {
+                    break;
+                }
+                case 'l': {
+                    if (filename == internal::manifest_file_name) {
+                        entries.emplace_back(ent.string(), dst, true, false);
+                    } else {
+                        // unknown type
+                    }
+                    break;
+                }
+                case 'c': {
+                    if (filename == compaction_catalog::get_catalog_filename()) {
+                        entries.emplace_back(ent.string(), dst, false, false);
+                    }
+                    break;
+                }
+                default: {
                     // unknown type
                 }
-                break;
-            }
-            case 'l': {
-                if (filename == internal::manifest_file_name) {
-                    entries.emplace_back(ent.string(), dst, true, false);
-                } else {
-                    // unknown type
-                }
-                break;
-            }
-            case 'c': {
-                if (filename == compaction_catalog::get_catalog_filename()) {
-                    entries.emplace_back(ent.string(), dst, false, false);
-                }
-                break;
-            }
-            default: {
-                // unknown type
             }
         }
+        return std::unique_ptr<backup_detail>(new backup_detail(entries, epoch_id_switched_.load()));
+    } catch (...) {
+        HANDLE_EXCEPTION_AND_ABORT();
+        throw; // Unreachable, but required to satisfy the compiler
     }
-    return std::unique_ptr<backup_detail>(new backup_detail(entries, epoch_id_switched_.load()));
 }
 
 tag_repository& datastore::epoch_tag_repository() noexcept {

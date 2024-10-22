@@ -49,3 +49,28 @@ Limnestoneの処理の中で、I/Oエラーが発生すると、std::runtime_err
  * datastore::recover()
  * datastore::shutdown()
 
+## 暫定対処
+
+**対応1**
+
+現在API呼び出し側で、limestone_exceptionをキャッチする仕組みが未実装である。
+このままだと、I/Oエラーが発生した場合に、プロセスがストールしてしまうことが
+あるため、limestone_exceptionをスローする可能性があるAPIについて、
+limestone_exceptionをスローするのではなく、FATALのログを出力して
+abortする対応をする。
+
+また、APIのDoxygenコメントに以下の記述を追加する。
+
+```
+ * @note Currently, this function does not throw an exception but logs the error and aborts the process. 
+ *       However, throwing an exception is the intended behavior, and this will be restored in future versions.
+ *       Therefore, callers of this API must handle the exception properly as per the original design.
+```
+
+**対応2**
+
+現在デストラクタを`std::abort`を呼んでいるコードがあるが、これも
+FATALのログを出力してabortするように変更する。
+
+
+

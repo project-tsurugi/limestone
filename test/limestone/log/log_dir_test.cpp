@@ -30,6 +30,7 @@ const boost::filesystem::path manifest_path = boost::filesystem::path(location) 
 const boost::filesystem::path compaction_catalog_path = boost::filesystem::path(location) / "compaction_catalog";
 
     void SetUp() {
+        limestone::testing::enable_exception_throwing = true;
         boost::filesystem::remove_all(location);
         if (!boost::filesystem::create_directory(location)) {
             std::cerr << "cannot make directory" << std::endl;
@@ -46,6 +47,7 @@ const boost::filesystem::path compaction_catalog_path = boost::filesystem::path(
     }
 
     void TearDown() {
+        limestone::testing::enable_exception_throwing = false;
         datastore_ = nullptr;
         boost::filesystem::remove_all(location);
     }
