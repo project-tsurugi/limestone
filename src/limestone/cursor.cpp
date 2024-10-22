@@ -20,43 +20,37 @@
 #include "logging_helper.h"
 #include "limestone_exception_helper.h"
 #include "log_entry.h"
+#include "cursor_impl.h"
+
 
 namespace limestone::api {
 
-cursor::cursor(const boost::filesystem::path& file) : log_entry_(std::make_unique<log_entry>()) {
-    istrm_.open(file, std::ios_base::in | std::ios_base::binary );
-    if (!istrm_.good()) {
-        LOG_AND_THROW_EXCEPTION("file stream of the cursor is not good (" + file.string() + ")");
-    }
-}
+
+cursor::cursor(const boost::filesystem::path& snapshot_file)
+    : pimpl(std::make_unique<limestone::internal::cursor_impl>(snapshot_file)) {}
+
+cursor::cursor(const boost::filesystem::path& snapshot_file, const boost::filesystem::path& compacted_file)
+    : pimpl(std::make_unique<limestone::internal::cursor_impl>(snapshot_file, compacted_file)) {}
+
 cursor::~cursor() noexcept {
-    istrm_.close();
+    // TODO: handle close failure
+    pimpl->close();
 }
 
 bool cursor::next() {
-    if (!istrm_.good()) {
-        DVLOG_LP(log_trace) << "file stream of the cursor is not good";
-        return false;
-    }
-    if (istrm_.eof()) {
-        DVLOG_LP(log_trace) << "already detected eof of the cursor";
-        return false;
-    }
-    auto rv = log_entry_->read(istrm_);
-    DVLOG_LP(log_trace) << (rv ? "read an entry from the cursor" : "detect eof of the cursor");
-    return rv;
+    return pimpl->next();
 }
 
 storage_id_type cursor::storage() const noexcept {
-    return log_entry_->storage();
+    return pimpl->storage();
 }
 
 void cursor::key(std::string& buf) const noexcept {
-    log_entry_->key(buf);
+    pimpl->key(buf);
 }
 
 void cursor::value(std::string& buf) const noexcept {
-    log_entry_->value(buf);
+    pimpl->value(buf);
 }
 
 std::vector<large_object_view>& cursor::large_objects() noexcept {

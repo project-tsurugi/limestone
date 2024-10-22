@@ -101,6 +101,11 @@ bool real_file_operations::exists(const boost::filesystem::path& p, boost::syste
     return boost::filesystem::exists(p, ec);
 }
 
+void real_file_operations::directory_iterator_next(boost::filesystem::directory_iterator& it, boost::system::error_code& ec) {
+    it.increment(ec);
+}
+
+
 }  // namespace limestone::internal
 
 

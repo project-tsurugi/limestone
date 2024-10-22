@@ -17,6 +17,7 @@
 
 #include <memory>
 #include <vector>
+#include <optional> 
 
 #include <boost/filesystem.hpp>
 #include <boost/filesystem/fstream.hpp>
@@ -24,10 +25,16 @@
 #include <limestone/api/storage_id_type.h>
 #include <limestone/api/large_object_view.h>
 
+
+namespace limestone::internal {
+    class cursor_impl;  
+}
+
 namespace limestone::api {
 
 class log_entry;
 class snapshot;
+
 
 /**
  * @brief a cursor to scan entries on the snapshot
@@ -56,7 +63,7 @@ public:
      * @brief returns the storage ID of the entry at the current cursor position
      * @return the storage ID of the current entry
      */
-    storage_id_type storage() const noexcept;
+    [[nodiscard]] storage_id_type storage() const noexcept;
 
     /**
      * @brief returns the key byte string of the entry at the current cursor position
@@ -77,13 +84,14 @@ public:
     std::vector<large_object_view>& large_objects() noexcept;
 
 private:
-    boost::filesystem::ifstream istrm_{};
-    std::unique_ptr<log_entry> log_entry_;
+    std::unique_ptr<internal::cursor_impl> pimpl;
+
     std::vector<large_object_view> large_objects_{};
 
-    explicit cursor(const boost::filesystem::path& file);
- 
-    friend class snapshot;
+    explicit cursor(const boost::filesystem::path& snapshot_file);
+    explicit cursor(const boost::filesystem::path& snapshot_file, const boost::filesystem::path& compacted_file);
+
+    friend class internal::cursor_impl;
 };
 
 } // namespace limestone::api

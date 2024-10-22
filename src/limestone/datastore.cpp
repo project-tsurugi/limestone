@@ -104,41 +104,19 @@ void datastore::recover() const noexcept {
 }
 
 void datastore::ready() {
-    // create filename set for snapshot
-    std::set<std::string> detached_pwals = compaction_catalog_->get_detached_pwals();
-
-    std::set<std::string> filename_set;
-    boost::system::error_code error;
-    boost::filesystem::directory_iterator it(location_, error);
-    boost::filesystem::directory_iterator end;
-    if (error) {
-        LOG_AND_THROW_IO_EXCEPTION("Failed to initialize directory iterator, path: " + location_.string(), error);
-    }
-    for (; it != end; it.increment(error)) {
-        if (error) {
-            LOG_AND_THROW_IO_EXCEPTION("Failed to access directory entry: , path: " + location_.string(), error);
-        }
-        if (boost::filesystem::is_regular_file(it->path())) {
-            std::string filename = it->path().filename().string();
-            if (detached_pwals.find(filename) == detached_pwals.end()) {
-                filename_set.insert(filename);
-            }
-        }
-    }
-
-    create_snapshot(filename_set);
+    create_snapshot();
     online_compaction_worker_future_ = std::async(std::launch::async, &datastore::online_compaction_worker, this);
     state_ = state::ready;
 }
 
 std::unique_ptr<snapshot> datastore::get_snapshot() const {
     check_after_ready(static_cast<const char*>(__func__));
-    return std::unique_ptr<snapshot>(new snapshot(location_));
+    return std::unique_ptr<snapshot>(new snapshot(location_, clear_storage));
 }
 
 std::shared_ptr<snapshot> datastore::shared_snapshot() const {
     check_after_ready(static_cast<const char*>(__func__));
-    return std::shared_ptr<snapshot>(new snapshot(location_));
+    return std::shared_ptr<snapshot>(new snapshot(location_, clear_storage));
 }
 
 log_channel& datastore::create_channel(const boost::filesystem::path& location) {

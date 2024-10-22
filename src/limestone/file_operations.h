@@ -104,6 +104,9 @@ public:
 
     // Checks if a file or directory exists (Boost)
     virtual bool exists(const boost::filesystem::path& p, boost::system::error_code& ec) = 0;
+
+    // call directory_iterator::increment
+    virtual void directory_iterator_next(boost::filesystem::directory_iterator& it, boost::system::error_code& ec) = 0;
 };
 
 class real_file_operations : public file_operations {
@@ -125,6 +128,7 @@ public:
     bool has_error(std::ifstream& file) override;
 
     bool exists(const boost::filesystem::path& p, boost::system::error_code& ec) override;
+    void directory_iterator_next(boost::filesystem::directory_iterator& it, boost::system::error_code& ec) override;
 };
 
 }  // namespace limestone::internal

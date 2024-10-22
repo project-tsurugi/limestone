@@ -187,6 +187,14 @@ void compaction(dblog_scan &ds, std::optional<epoch_id_type> epoch) {
         std::cout << "durable-epoch: " << ld_epoch << std::endl;
     }
     auto from_dir = ds.get_dblogdir();
+    {
+        auto p = from_dir;  // make copy
+        remove_trailing_dir_separators(p);
+        if (boost::filesystem::is_symlink(p)) {
+            LOG(ERROR) << "dblogdir is symlink; compaction target must not be symlink";
+            log_and_exit(64);
+        }
+    }
     boost::filesystem::path tmp;
     if (!FLAGS_working_dir.empty()) {
         tmp = FLAGS_working_dir;
