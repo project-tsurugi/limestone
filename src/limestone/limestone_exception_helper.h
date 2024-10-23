@@ -24,9 +24,10 @@
 #pragma once
 
  namespace limestone::testing {
-     // This flag controls whether exceptions are thrown in tests or the process is aborted
+    // This flag controls whether exceptions are thrown in tests or the process is aborted
+    // NOLINTNEXTLINE: non-const global variable is intentional
     extern bool enable_exception_throwing;
- }
+ } 
 
 namespace limestone {
 
@@ -93,6 +94,7 @@ inline void handle_exception_and_abort(std::string_view func_name) {
 }
 
 // macro to handle exceptions and abort
+// NOLINTNEXTLINE(cppcoreguidelines-macro-usage)
 #define HANDLE_EXCEPTION_AND_ABORT() handle_exception_and_abort(static_cast<const char*>(__func__))
 
 } // namespace limestone
