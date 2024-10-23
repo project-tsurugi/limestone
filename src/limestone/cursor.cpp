@@ -38,7 +38,12 @@ cursor::~cursor() noexcept {
 }
 
 bool cursor::next() {
-    return pimpl->next();
+    try {
+        return pimpl->next();
+    } catch (...) {
+        HANDLE_EXCEPTION_AND_ABORT();
+        throw; // Unreachable, but required to satisfy the compiler
+    }
 }
 
 storage_id_type cursor::storage() const noexcept {

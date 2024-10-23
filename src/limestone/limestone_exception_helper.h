@@ -23,6 +23,12 @@
 
 #pragma once
 
+ namespace limestone::testing {
+    // This flag controls whether exceptions are thrown in tests or the process is aborted
+    // NOLINTNEXTLINE: non-const global variable is intentional
+    extern bool enable_exception_throwing;
+ } 
+
 namespace limestone {
 
 using limestone::api::limestone_exception;
@@ -65,7 +71,30 @@ inline std::string extract_filename(const std::string& path) {
         throw limestone_io_exception(full_message + " (at " + extract_filename(__FILE__) + ":" + std::to_string(__LINE__) + ")", (error_code)); \
     }
 
+// helper function to handle exceptions and abort
+inline void handle_exception_and_abort(std::string_view func_name) {
+    try {
+        throw;
+    } catch (const limestone_exception& e) {
+        if (limestone::testing::enable_exception_throwing) {
+            throw;  
+        }
+        VLOG_LP(google::FATAL) << "Fatal error in " << func_name << ": " << e.what();
+        std::abort();  // Safety measure: this should never be reached due to VLOG_LP(google::FATAL)
+    } catch (const std::runtime_error& e) {
+        VLOG_LP(google::FATAL) << "Runtime error in " << func_name << ": " << e.what();
+        std::abort();  // Safety measure: this should never be reached due to VLOG_LP(google::FATAL)
+    } catch (const std::exception& e) {
+        VLOG_LP(google::FATAL) << "Unexpected exception in " << func_name << ": " << e.what();
+        std::abort();  // Safety measure: this should never be reached due to VLOG_LP(google::FATAL)
+    } catch (...) {
+        VLOG_LP(google::FATAL) << "Unknown exception in " << func_name;
+        std::abort();  // Safety measure: this should never be reached due to VLOG_LP(google::FATAL)
+    }
+}
 
-
+// macro to handle exceptions and abort
+// NOLINTNEXTLINE(cppcoreguidelines-macro-usage)
+#define HANDLE_EXCEPTION_AND_ABORT() handle_exception_and_abort(static_cast<const char*>(__func__))
 
 } // namespace limestone

@@ -69,6 +69,9 @@ public:
      * @brief create an object with the given configuration
      * @param conf a reference to a configuration object used in the object construction
      * @exception limestone_exception if an I/O error occurs during construction
+     * @note Currently, this function does not throw an exception but logs the error and aborts the process.
+     *       However, throwing an exception is the intended behavior, and this will be restored in future versions.
+     *       Therefore, callers of this API must handle the exception properly as per the original design.
      */
     explicit datastore(configuration const& conf);
 
@@ -114,6 +117,9 @@ public:
      * @brief transition this object to an operational state
      * @details after this method is called, create_channel() can be invoked.
      * @exception limestone_io_exception Thrown if an I/O error occurs.
+     * @note Currently, this function does not throw an exception but logs the error and aborts the process.
+     *       However, throwing an exception is the intended behavior, and this will be restored in future versions.
+     *       Therefore, callers of this API must handle the exception properly as per the original design.
      * @attention this function is not thread-safe, and the from directory must not contain any files other than log files.
      */
     void ready();
@@ -153,6 +159,9 @@ public:
      * @brief change the current epoch ID
      * @param new epoch id which must be greater than current epoch ID.
      * @exception limestone_io_exception Thrown if an I/O error occurs.
+     * @note Currently, this function does not throw an exception but logs the error and aborts the process.
+     *       However, throwing an exception is the intended behavior, and this will be restored in future versions.
+     *       Therefore, callers of this API must handle the exception properly as per the original design.
      * @attention this function should be called after the ready() is called.
      */
     void switch_epoch(epoch_id_type epoch_id);
@@ -194,6 +203,9 @@ public:
      * @brief start backup operation
      * @detail a backup object is created, which contains a list of log files.
      * @exception limestone_io_exception Thrown if an I/O error occurs.
+     * @note Currently, this function does not throw an exception but logs the error and aborts the process.
+     *       However, throwing an exception is the intended behavior, and this will be restored in future versions.
+     *       Therefore, callers of this API must handle the exception properly as per the original design.
      * @return a reference to the backup object.
      */
     backup& begin_backup();
@@ -203,6 +215,9 @@ public:
      * @brief start backup operation
      * @detail a backup_detail object is created, which contains a list of log entry.
      * @exception limestone_io_exception Thrown if an I/O error occurs.
+     * @note Currently, this function does not throw an exception but logs the error and aborts the process.
+     *       However, throwing an exception is the intended behavior, and this will be restored in future versions.
+     *       Therefore, callers of this API must handle the exception properly as per the original design.
      * @return a reference to the backup_detail object.
      */
     std::unique_ptr<backup_detail> begin_backup(backup_type btype);

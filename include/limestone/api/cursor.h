@@ -55,6 +55,9 @@ public:
      * @brief change the current cursor to point to the next entry
      * @attention this function is not thread-safe.
      * @exception limestone_exception if an error occurs while reading the log entry
+     * @note Currently, this function does not throw an exception but logs the error and aborts the process.
+     *       However, throwing an exception is the intended behavior, and this will be restored in future versions.
+     *       Therefore, callers of this API must handle the exception properly as per the original design.
      * @return true if the next entry exists, false otherwise
      */
     bool next();
