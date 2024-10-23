@@ -51,8 +51,6 @@ Limnestoneの処理の中で、I/Oエラーが発生すると、std::runtime_err
 
 ## 暫定対処
 
-**対応1**
-
 現在API呼び出し側で、limestone_exceptionをキャッチする仕組みが未実装である。
 このままだと、I/Oエラーが発生した場合に、プロセスがストールしてしまうことが
 あるため、limestone_exceptionをスローする可能性があるAPIについて、
@@ -67,10 +65,7 @@ abortする対応をする。
  *       Therefore, callers of this API must handle the exception properly as per the original design.
 ```
 
-**対応2**
 
-現在デストラクタを`std::abort`を呼んでいるコードがあるが、これも
-FATALのログを出力してabortするように変更する。
 
 
 
