@@ -436,7 +436,7 @@ int64_t datastore::current_unix_epoch_in_millis() {
 }
 
 void datastore::online_compaction_worker() {
-    VLOG(log_info) << "online compaction worker started..." << std::endl;
+    LOG_LP(INFO) << "online compaction worker started..." << std::endl;
 
     boost::filesystem::path ctrl_dir = location_ / "ctrl";
     boost::filesystem::path start_file = ctrl_dir / "start_compaction";
@@ -445,7 +445,7 @@ void datastore::online_compaction_worker() {
     ensure_directory_exists(ctrl_dir);
     if (!boost::filesystem::exists(ctrl_dir)) {
         if (!boost::filesystem::create_directory(ctrl_dir)) {
-            VLOG(log_error) << "failed to create directory: " << ctrl_dir.string();
+            LOG_LP(INFO) << "failed to create directory: " << ctrl_dir.string();
             return;
         } 
     }
