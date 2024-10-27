@@ -39,7 +39,7 @@ log_channel::log_channel(boost::filesystem::path location, std::size_t id, datas
     file_ = ss.str();
 }
 
-void log_channel::begin_session() {
+epoch_id_type log_channel::begin_session() {
     try {
         do {
             current_epoch_id_.store(envelope_.epoch_id_switched_.load());
@@ -65,6 +65,7 @@ void log_channel::begin_session() {
     } catch (...) {
         HANDLE_EXCEPTION_AND_ABORT();
     }
+    return current_epoch_id_.load();
 }
 
 void log_channel::end_session() {

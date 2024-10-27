@@ -54,8 +54,9 @@ public:
      * @note datastore::switch_epoch() and this function can be called simultaneously.
      * If these functions are invoked at the same time, the result will be as if one of them was called first, 
      * but it is indeterminate which one will take precedence.
+     * @return the epoch number in which this session joined
      */
-    void begin_session();
+    epoch_id_type begin_session();
 
     /**
      * @brief notifies the completion of an operation in this channel for the current persistent session the channel is participating in
