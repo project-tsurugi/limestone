@@ -12,6 +12,7 @@
 
 #include "test_root.h"
 #include "limestone/api/limestone_exception.h"
+#include "limestone_exception_helper.h"
 
 using limestone::api::limestone_exception;
 #include "rotation_task.h"
@@ -26,6 +27,7 @@ inline constexpr const char* location = "/tmp/rotate_test";
 class rotate_test : public ::testing::Test {
 public:
     void SetUp() {
+        limestone::testing::enable_exception_throwing = true;
         boost::filesystem::remove_all(location);
         if (!boost::filesystem::create_directory(location)) {
             std::cerr << "cannot make directory" << std::endl;
@@ -47,6 +49,7 @@ public:
     }
 
     void TearDown() {
+        limestone::testing::enable_exception_throwing = false;
         datastore_ = nullptr;
         boost::filesystem::remove_all(location);
     }

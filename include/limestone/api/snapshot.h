@@ -57,6 +57,9 @@ public:
      * @details the returned cursor points to the first element by calling cursor::next().
      * @attention this function is thread-safe.
      * @exception limestone_exception if the file stream of the cursor is not good.
+     * @note Currently, this function does not throw an exception but logs the error and aborts the process.
+     *       However, throwing an exception is the intended behavior, and this will be restored in future versions.
+     *       Therefore, callers of this API must handle the exception properly as per the original design.
      * @return unique pointer of the cursor
      */
     [[nodiscard]] std::unique_ptr<cursor> get_cursor() const;

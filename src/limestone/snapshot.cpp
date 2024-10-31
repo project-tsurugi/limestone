@@ -20,6 +20,7 @@
 #include "compaction_catalog.h"
 #include "logging_helper.h"
 #include "snapshot_impl.h"
+#include "limestone_exception_helper.h"
 
 namespace limestone::api {  // FIXME fill implementation
 
@@ -30,8 +31,14 @@ snapshot::snapshot(boost::filesystem::path location,
     : pimpl(std::make_unique<snapshot_impl>(std::move(location), std::move(clear_storage))) {
 
 }
+
 std::unique_ptr<cursor> snapshot::get_cursor() const {
-    return pimpl->get_cursor();
+    try {
+        return pimpl->get_cursor();
+    } catch (...) {
+        HANDLE_EXCEPTION_AND_ABORT();
+        throw;  // Unreachable, but required to satisfy the compiler
+    }
 }
 
 std::unique_ptr<cursor> snapshot::find([[maybe_unused]] storage_id_type storage_id, [[maybe_unused]] std::string_view entry_key) const noexcept {
