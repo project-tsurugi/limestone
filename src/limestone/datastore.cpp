@@ -182,7 +182,9 @@ void datastore::update_min_epoch_id(bool from_switch_epoch) {  // NOLINT(readabi
         }
         if (epoch_id_recorded_.compare_exchange_strong(old_epoch_id, to_be_epoch)) {
             std::lock_guard<std::mutex> lock(mtx_epoch_file_);
-
+            if (to_be_epoch < epoch_id_recorded_.load()) {
+                break;
+            }
             FILE* strm = fopen(epoch_file_path_.c_str(), "a");  // NOLINT(*-owning-memory)
             if (!strm) {
                 LOG_AND_THROW_IO_EXCEPTION("fopen failed", errno);
@@ -203,12 +205,19 @@ void datastore::update_min_epoch_id(bool from_switch_epoch) {  // NOLINT(readabi
 
     // update informed_epoch_
     to_be_epoch = upper_limit;
+    if (from_switch_epoch && (to_be_epoch > static_cast<std::uint64_t>(max_finished_epoch))) {
+        to_be_epoch = static_cast<std::uint64_t>(max_finished_epoch);
+    }
     old_epoch_id = epoch_id_informed_.load();
     while (true) {
         if (old_epoch_id >= to_be_epoch) {
             break;
         }
         if (epoch_id_informed_.compare_exchange_strong(old_epoch_id, to_be_epoch)) {
+            std::lock_guard<std::mutex> lock(mtx_epoch_persistent_callback_);
+            if (to_be_epoch < epoch_id_informed_.load()) {
+                break;
+            }
             if (persistent_callback_) {
                 persistent_callback_(to_be_epoch);
             }

@@ -302,6 +302,8 @@ private:
 
     std::mutex mtx_epoch_file_{};
 
+    std::mutex mtx_epoch_persistent_callback_{};
+
     state state_{};
 
     void add_file(const boost::filesystem::path& file) noexcept;
