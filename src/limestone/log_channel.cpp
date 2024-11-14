@@ -41,10 +41,25 @@ log_channel::log_channel(boost::filesystem::path location, std::size_t id, datas
 
 void log_channel::begin_session() {
     try {
+        // Synchronize `current_epoch_id_` with `epoch_id_switched_`.
+        // This loop is necessary to prevent inconsistencies in `current_epoch_id_`
+        // that could occur if `epoch_id_switched_` changes at a specific timing.
+        //
+        // Case where inconsistency occurs:
+        // 1. This thread (L) loads `epoch_id_switched_` and reads 10.
+        // 2. Another thread (S) immediately updates `epoch_id_switched_` to 11.
+        // 3. If the other thread (S) reads `current_epoch_id_` at this point,
+        //    it expects `current_epoch_id_` to be consistent with the latest
+        //    `epoch_id_switched_` value (11), but `current_epoch_id_` may still
+        //    hold the outdated value, causing an inconsistency.
+        //
+        // This loop detects such inconsistencies and repeats until `current_epoch_id_`
+        // matches the latest value of `epoch_id_switched_`, ensuring consistency.
         do {
             current_epoch_id_.store(envelope_.epoch_id_switched_.load());
             std::atomic_thread_fence(std::memory_order_acq_rel);
         } while (current_epoch_id_.load() != envelope_.epoch_id_switched_.load());
+
         latest_session_epoch_id_.store(static_cast<epoch_id_type>(current_epoch_id_.load()));
 
         auto log_file = file_path();
