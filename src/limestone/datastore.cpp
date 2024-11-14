@@ -156,12 +156,16 @@ void datastore::switch_epoch(epoch_id_type new_epoch_id) {
 }
 
 void datastore::update_min_epoch_id(bool from_switch_epoch) {  // NOLINT(readability-function-cognitive-complexity)
-    auto upper_limit = epoch_id_switched_.load() - 1;
+    auto upper_limit = epoch_id_switched_.load();
+    if (upper_limit == 0) {
+        return; // If epoch_id_switched_ is zero, it means no epoch has been switched, so updating epoch_id_recorded_ and epoch_id_informed_ is unnecessary.
+    }
+    upper_limit--;
     epoch_id_type max_finished_epoch = 0;
 
     for (const auto& e : log_channels_) {
         auto working_epoch = static_cast<epoch_id_type>(e->current_epoch_id_.load());
-        if ((working_epoch - 1) < upper_limit) {
+        if ((working_epoch - 1) < upper_limit && working_epoch != UINT64_MAX) {
             upper_limit = working_epoch - 1;
         }
         auto finished_epoch = e->finished_epoch_id_.load();
@@ -205,9 +209,9 @@ void datastore::update_min_epoch_id(bool from_switch_epoch) {  // NOLINT(readabi
 
     // update informed_epoch_
     to_be_epoch = upper_limit;
-    if (from_switch_epoch && (to_be_epoch > static_cast<std::uint64_t>(max_finished_epoch))) {
-        to_be_epoch = static_cast<std::uint64_t>(max_finished_epoch);
-    }
+    // In `informed_epoch_`, the update restriction based on the `from_switch_epoch` condition is intentionally omitted.
+    // Due to the interface specifications of Shirakami, it is necessary to advance the epoch even if the log channel
+    // is not updated. This behavior differs from `recorded_epoch_` and should be maintained as such.
     old_epoch_id = epoch_id_informed_.load();
     while (true) {
         if (old_epoch_id >= to_be_epoch) {
