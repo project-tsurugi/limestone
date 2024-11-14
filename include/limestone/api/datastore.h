@@ -250,7 +250,9 @@ protected:  // for tests
     auto& log_channels_for_tests() const noexcept { return log_channels_; }
     auto epoch_id_informed_for_tests() const noexcept { return epoch_id_informed_.load(); }
     auto epoch_id_recorded_for_tests() const noexcept { return epoch_id_recorded_.load(); }
+    auto epoch_id_switched_for_tests() const noexcept { return epoch_id_switched_.load(); }
     auto& files_for_tests() const noexcept { return files_; }
+    void rotate_epoch_file_for_tests() { rotate_epoch_file(); }
     
 private:
     std::vector<std::unique_ptr<log_channel>> log_channels_;
