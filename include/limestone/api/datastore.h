@@ -331,7 +331,6 @@ private:
      */
     void create_snapshot();
 
-    epoch_id_type last_durable_epoch_in_dir();
 
     /**
      * @brief requests the data store to rotate log files
@@ -346,6 +345,9 @@ private:
     int64_t current_unix_epoch_in_millis();
 
     std::map<storage_id_type, write_version_type> clear_storage;  
+
+    // File descriptor for file lock (flock) on the manifest file
+    int fd_for_flock_{-1};
 };
 
 } // namespace limestone::api

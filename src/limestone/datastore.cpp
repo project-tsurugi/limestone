@@ -68,6 +68,19 @@ datastore::datastore(configuration const& conf) : location_(conf.data_locations_
             }
         }
         internal::check_and_migrate_logdir_format(location_);
+
+        // acquire lock for manifest file
+        fd_for_flock_ = internal::acquire_manifest_lock(location_);
+        if (fd_for_flock_ == -1) {
+            if (errno == EWOULDBLOCK) {
+                std::string err_msg = "Another process is using the log directory: " + location_.string() + ". Terminate the conflicting process and restart this process.";
+                LOG_AND_THROW_IO_EXCEPTION(err_msg, errno);
+            } else {
+                std::string err_msg = "Failed to acquire lock for manifest in directory: " + location_.string();
+                LOG_AND_THROW_IO_EXCEPTION(err_msg, errno);
+            }
+        }
+
         add_file(compaction_catalog_path);
         compaction_catalog_ = std::make_unique<compaction_catalog>(compaction_catalog::from_catalog_file(location_));
 
@@ -257,7 +270,15 @@ std::future<void> datastore::shutdown() noexcept {
         VLOG(log_info) << "/:limestone:datastore:shutdown compaction task has been stopped.";
     }
 
-    return std::async(std::launch::async, []{
+    if (fd_for_flock_ != -1) {
+        if (::close(fd_for_flock_) == -1) {
+            VLOG(log_error) << "Failed to close lock file descriptor: " << strerror(errno);
+        } else {
+            fd_for_flock_ = -1;
+        }
+    }
+
+    return std::async(std::launch::async, [] {
         std::this_thread::sleep_for(std::chrono::microseconds(100000));
         VLOG(log_info) << "/:limestone:datastore:shutdown end";
     });

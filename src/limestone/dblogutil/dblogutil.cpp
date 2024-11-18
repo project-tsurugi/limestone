@@ -289,11 +289,19 @@ int main(char *dir, subcommand mode) {  // NOLINT
     }
     try {
         check_and_migrate_logdir_format(p);
+        int lock_fd = acquire_manifest_lock(p);
+        if (lock_fd == -1) {
+        LOG(ERROR) << "Another process is using the log directory: " << p
+                << ". Terminate the conflicting process and re-execute the command. "
+                << "Error: " << strerror(errno);
+                    log_and_exit(64);
+        }
         dblog_scan ds(p);
         ds.set_thread_num(FLAGS_thread_num);
         if (mode == cmd_inspect) inspect(ds, opt_epoch);
         if (mode == cmd_repair) repair(ds, opt_epoch);
         if (mode == cmd_compaction) compaction(ds, opt_epoch);
+        close(lock_fd);
     } catch (limestone_exception& e) {
         LOG(ERROR) << e.what();
         log_and_exit(64);

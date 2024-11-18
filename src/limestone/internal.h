@@ -54,7 +54,14 @@ void setup_initial_logdir(const boost::filesystem::path& logdir);
  */
 int is_supported_version(const boost::filesystem::path& manifest_path, std::string& errmsg);
 
+// Validates the manifest file in the specified log directory and performs repair or migration if necessary.
 void check_and_migrate_logdir_format(const boost::filesystem::path& logdir);
+
+// Acquires an exclusive lock on the manifest file.
+// Returns the file descriptor on success, or -1 on failure.
+// Note: This function does not log errors or handle them internally.
+//       The caller must check the return value and use errno for error handling.
+int acquire_manifest_lock(const boost::filesystem::path& logdir);
 
 // from datastore_restore.cpp
 
