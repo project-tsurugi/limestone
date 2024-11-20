@@ -79,16 +79,16 @@ inline void handle_exception_and_abort(std::string_view func_name) {
         if (limestone::testing::enable_exception_throwing) {
             throw;  
         }
-        VLOG_LP(google::FATAL) << "Fatal error in " << func_name << ": " << e.what();
+        LOG_LP(FATAL) << "Fatal error in " << func_name << ": " << e.what();
         std::abort();  // Safety measure: this should never be reached due to VLOG_LP(google::FATAL)
     } catch (const std::runtime_error& e) {
-        VLOG_LP(google::FATAL) << "Runtime error in " << func_name << ": " << e.what();
+        LOG_LP(FATAL) << "Runtime error in " << func_name << ": " << e.what();
         std::abort();  // Safety measure: this should never be reached due to VLOG_LP(google::FATAL)
     } catch (const std::exception& e) {
-        VLOG_LP(google::FATAL) << "Unexpected exception in " << func_name << ": " << e.what();
+        LOG_LP(FATAL) << "Unexpected exception in " << func_name << ": " << e.what();
         std::abort();  // Safety measure: this should never be reached due to VLOG_LP(google::FATAL)
     } catch (...) {
-        VLOG_LP(google::FATAL) << "Unknown exception in " << func_name;
+        LOG_LP(FATAL) << "Unknown exception in " << func_name;
         std::abort();  // Safety measure: this should never be reached due to VLOG_LP(google::FATAL)
     }
 }
