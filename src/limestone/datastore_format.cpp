@@ -176,7 +176,7 @@ void check_and_migrate_logdir_format(const boost::filesystem::path& logdir) {
 int acquire_manifest_lock(const boost::filesystem::path& logdir) {
     boost::filesystem::path manifest_path = logdir / std::string(manifest_file_name);
 
-    int fd = ::open(manifest_path.string().c_str(), O_RDWR); // NOLINT(cppcoreguidelines-pro-type-vararg)
+    int fd = ::open(manifest_path.string().c_str(), O_RDWR); // NOLINT(hicpp-vararg, cppcoreguidelines-pro-type-vararg)
     if (fd == -1) {
         return -1;
     }
