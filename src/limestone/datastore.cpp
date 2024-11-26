@@ -156,6 +156,7 @@ void datastore::switch_epoch(epoch_id_type new_epoch_id) {
 }
 
 void datastore::update_min_epoch_id(bool from_switch_epoch) {  // NOLINT(readability-function-cognitive-complexity)
+    VLOG_LP(log_info) << "start update_min_epoch_id() with from_switch_epoch=" << from_switch_epoch;
     auto upper_limit = epoch_id_switched_.load() - 1;
     epoch_id_type max_finished_epoch = 0;
 
@@ -170,6 +171,8 @@ void datastore::update_min_epoch_id(bool from_switch_epoch) {  // NOLINT(readabi
         }
     }
 
+    VLOG_LP(log_info) << "epoch_id_switched_ = " << epoch_id_switched_.load() << ", upper_limit = " << upper_limit << ", max_finished_epoch = " << max_finished_epoch;
+
     // update recorded_epoch_
     auto to_be_epoch = upper_limit;
     if (from_switch_epoch && (to_be_epoch > static_cast<std::uint64_t>(max_finished_epoch))) {
@@ -181,6 +184,7 @@ void datastore::update_min_epoch_id(bool from_switch_epoch) {  // NOLINT(readabi
             break;
         }
         if (epoch_id_recorded_.compare_exchange_strong(old_epoch_id, to_be_epoch)) {
+            VLOG_LP(log_info) << "start update epooch file to " << to_be_epoch;
             std::lock_guard<std::mutex> lock(mtx_epoch_file_);
 
             FILE* strm = fopen(epoch_file_path_.c_str(), "a");  // NOLINT(*-owning-memory)
@@ -197,6 +201,7 @@ void datastore::update_min_epoch_id(bool from_switch_epoch) {  // NOLINT(readabi
             if (fclose(strm) != 0) {  // NOLINT(*-owning-memory)
                 LOG_AND_THROW_IO_EXCEPTION("fclose failed", errno);
             }
+            VLOG_LP(log_info) << "end update epooch file to " << to_be_epoch;
             break;
         }
     }
@@ -210,7 +215,9 @@ void datastore::update_min_epoch_id(bool from_switch_epoch) {  // NOLINT(readabi
         }
         if (epoch_id_informed_.compare_exchange_strong(old_epoch_id, to_be_epoch)) {
             if (persistent_callback_) {
+                VLOG_LP(log_info) << "start calling persistent callback to " << to_be_epoch;
                 persistent_callback_(to_be_epoch);
+                VLOG_LP(log_info) << "end calling persistent callback to " << to_be_epoch;
             }
             break;
         }

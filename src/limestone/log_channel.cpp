@@ -45,6 +45,7 @@ void log_channel::begin_session() {
             current_epoch_id_.store(envelope_.epoch_id_switched_.load());
             std::atomic_thread_fence(std::memory_order_acq_rel);
         } while (current_epoch_id_.load() != envelope_.epoch_id_switched_.load());
+        VLOG_LP(log_info) << "start begin_session() with current_epoch_id_=" << current_epoch_id_.load();
         latest_ession_epoch_id_.store(static_cast<epoch_id_type>(current_epoch_id_.load()));
 
         auto log_file = file_path();
@@ -62,6 +63,7 @@ void log_channel::begin_session() {
             std::lock_guard<std::mutex> lock(session_mutex_);
             waiting_epoch_ids_.insert(latest_ession_epoch_id_);
         }
+        VLOG_LP(log_info) << "end begin_session() with current_epoch_id_=" << current_epoch_id_.load();
     } catch (...) {
         HANDLE_EXCEPTION_AND_ABORT();
     }
@@ -69,6 +71,7 @@ void log_channel::begin_session() {
 
 void log_channel::end_session() {
     try {
+        VLOG_LP(log_info) << "start end_session() with current_epoch_id_=" << current_epoch_id_.load();
         if (fflush(strm_) != 0) {
             LOG_AND_THROW_IO_EXCEPTION("fflush failed", errno);
         }
@@ -90,6 +93,7 @@ void log_channel::end_session() {
             // Notify waiting threads
             session_cv_.notify_all();
         }
+        VLOG_LP(log_info) << "end end_session() with current_epoch_id_=" << current_epoch_id_.load();
     } catch (...) {
         HANDLE_EXCEPTION_AND_ABORT();
     }

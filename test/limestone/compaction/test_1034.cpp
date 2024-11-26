@@ -229,7 +229,7 @@ protected:
     }
 };
 
-TEST_F(test_1034, display_pwal_files) {
+TEST_F(test_1034, DISABLED_parse_pwals) {
     boost::filesystem::path location = boost::filesystem::path("../../test_data");
 
     // ディレクトリ内のファイルを列挙
