@@ -162,13 +162,13 @@ void datastore::switch_epoch(epoch_id_type new_epoch_id) {
         }
 
         epoch_id_switched_.store(neid);
-        update_min_epoch_id(true);
+        update_min_epoch_id();
     } catch (...) {
         HANDLE_EXCEPTION_AND_ABORT();
     }
 }
 
-void datastore::update_min_epoch_id(bool from_switch_epoch) {  // NOLINT(readability-function-cognitive-complexity)
+void datastore::update_min_epoch_id(log_channel* caller) {  // NOLINT(readability-function-cognitive-complexity)
     auto upper_limit = epoch_id_switched_.load();
     if (upper_limit == 0) {
         return; // If epoch_id_switched_ is zero, it means no epoch has been switched, so updating epoch_id_recorded_ and epoch_id_informed_ is unnecessary.
@@ -177,9 +177,11 @@ void datastore::update_min_epoch_id(bool from_switch_epoch) {  // NOLINT(readabi
     epoch_id_type max_finished_epoch = 0;
 
     for (const auto& e : log_channels_) {
-        auto working_epoch = static_cast<epoch_id_type>(e->current_epoch_id_.load());
-        if ((working_epoch - 1) < upper_limit && working_epoch != UINT64_MAX) {
-            upper_limit = working_epoch - 1;
+        if (e.get() != caller) {
+            auto working_epoch = static_cast<epoch_id_type>(e->current_epoch_id_.load());
+            if ((working_epoch - 1) < upper_limit && working_epoch != UINT64_MAX) {
+                upper_limit = working_epoch - 1;
+            }
         }
         auto finished_epoch = e->finished_epoch_id_.load();
         if (max_finished_epoch < finished_epoch) {
@@ -189,7 +191,7 @@ void datastore::update_min_epoch_id(bool from_switch_epoch) {  // NOLINT(readabi
 
     // update recorded_epoch_
     auto to_be_epoch = upper_limit;
-    if (from_switch_epoch && (to_be_epoch > static_cast<std::uint64_t>(max_finished_epoch))) {
+    if (!caller && (to_be_epoch > static_cast<std::uint64_t>(max_finished_epoch))) {
         to_be_epoch = static_cast<std::uint64_t>(max_finished_epoch);
     }
     auto old_epoch_id = epoch_id_recorded_.load();
