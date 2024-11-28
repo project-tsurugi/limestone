@@ -68,6 +68,19 @@ datastore::datastore(configuration const& conf) : location_(conf.data_locations_
             }
         }
         internal::check_and_migrate_logdir_format(location_);
+
+        // acquire lock for manifest file
+        fd_for_flock_ = internal::acquire_manifest_lock(location_);
+        if (fd_for_flock_ == -1) {
+            if (errno == EWOULDBLOCK) {
+                std::string err_msg = "Another process is using the log directory: " + location_.string() + ". Terminate the conflicting process and restart this process.";
+                LOG_AND_THROW_IO_EXCEPTION(err_msg, errno);
+            } else {
+                std::string err_msg = "Failed to acquire lock for manifest in directory: " + location_.string();
+                LOG_AND_THROW_IO_EXCEPTION(err_msg, errno);
+            }
+        }
+
         add_file(compaction_catalog_path);
         compaction_catalog_ = std::make_unique<compaction_catalog>(compaction_catalog::from_catalog_file(location_));
 
@@ -149,22 +162,30 @@ void datastore::switch_epoch(epoch_id_type new_epoch_id) {
         }
 
         epoch_id_switched_.store(neid);
-        update_min_epoch_id(true);
+        if (state_ != state::not_ready) {
+            update_min_epoch_id(true);
+        }
     } catch (...) {
         HANDLE_EXCEPTION_AND_ABORT();
     }
 }
 
 void datastore::update_min_epoch_id(bool from_switch_epoch) {  // NOLINT(readability-function-cognitive-complexity)
-    auto upper_limit = epoch_id_switched_.load() - 1;
+    auto upper_limit = epoch_id_switched_.load();
+    if (upper_limit == 0) {
+        return; // If epoch_id_switched_ is zero, it means no epoch has been switched, so updating epoch_id_to_be_recorded_ and epoch_id_informed_ is unnecessary.
+    }
+    upper_limit--;
     epoch_id_type max_finished_epoch = 0;
 
     for (const auto& e : log_channels_) {
-        auto working_epoch = static_cast<epoch_id_type>(e->current_epoch_id_.load());
-        if ((working_epoch - 1) < upper_limit) {
-            upper_limit = working_epoch - 1;
-        }
+        auto working_epoch = e->current_epoch_id_.load();
         auto finished_epoch = e->finished_epoch_id_.load();
+        if (working_epoch > finished_epoch && working_epoch != UINT64_MAX) {
+            if ((working_epoch - 1) < upper_limit) {
+                upper_limit = working_epoch - 1;
+            }
+        }
         if (max_finished_epoch < finished_epoch) {
             max_finished_epoch = finished_epoch;
         }
@@ -175,19 +196,21 @@ void datastore::update_min_epoch_id(bool from_switch_epoch) {  // NOLINT(readabi
     if (from_switch_epoch && (to_be_epoch > static_cast<std::uint64_t>(max_finished_epoch))) {
         to_be_epoch = static_cast<std::uint64_t>(max_finished_epoch);
     }
-    auto old_epoch_id = epoch_id_recorded_.load();
+    auto old_epoch_id = epoch_id_to_be_recorded_.load();
     while (true) {
         if (old_epoch_id >= to_be_epoch) {
             break;
         }
-        if (epoch_id_recorded_.compare_exchange_strong(old_epoch_id, to_be_epoch)) {
+        if (epoch_id_to_be_recorded_.compare_exchange_strong(old_epoch_id, to_be_epoch)) {
             std::lock_guard<std::mutex> lock(mtx_epoch_file_);
-
+            if (to_be_epoch < epoch_id_to_be_recorded_.load()) {
+                break;
+            }
             FILE* strm = fopen(epoch_file_path_.c_str(), "a");  // NOLINT(*-owning-memory)
             if (!strm) {
                 LOG_AND_THROW_IO_EXCEPTION("fopen failed", errno);
             }
-            log_entry::durable_epoch(strm, static_cast<epoch_id_type>(epoch_id_recorded_.load()));
+            log_entry::durable_epoch(strm, static_cast<epoch_id_type>(epoch_id_to_be_recorded_.load()));
             if (fflush(strm) != 0) {
                 LOG_AND_THROW_IO_EXCEPTION("fflush failed", errno);
             }
@@ -197,18 +220,29 @@ void datastore::update_min_epoch_id(bool from_switch_epoch) {  // NOLINT(readabi
             if (fclose(strm) != 0) {  // NOLINT(*-owning-memory)
                 LOG_AND_THROW_IO_EXCEPTION("fclose failed", errno);
             }
+            epoch_id_record_finished_.store(epoch_id_to_be_recorded_.load());
             break;
         }
+    }
+    if (to_be_epoch > epoch_id_record_finished_.load()) {
+        return;
     }
 
     // update informed_epoch_
     to_be_epoch = upper_limit;
+    // In `informed_epoch_`, the update restriction based on the `from_switch_epoch` condition is intentionally omitted.
+    // Due to the interface specifications of Shirakami, it is necessary to advance the epoch even if the log channel
+    // is not updated. This behavior differs from `recorded_epoch_` and should be maintained as such.
     old_epoch_id = epoch_id_informed_.load();
     while (true) {
         if (old_epoch_id >= to_be_epoch) {
             break;
         }
         if (epoch_id_informed_.compare_exchange_strong(old_epoch_id, to_be_epoch)) {
+            std::lock_guard<std::mutex> lock(mtx_epoch_persistent_callback_);
+            if (to_be_epoch < epoch_id_informed_.load()) {
+                break;
+            }
             if (persistent_callback_) {
                 persistent_callback_(to_be_epoch);
             }
@@ -244,7 +278,15 @@ std::future<void> datastore::shutdown() noexcept {
         VLOG(log_info) << "/:limestone:datastore:shutdown compaction task has been stopped.";
     }
 
-    return std::async(std::launch::async, []{
+    if (fd_for_flock_ != -1) {
+        if (::close(fd_for_flock_) == -1) {
+            VLOG(log_error) << "Failed to close lock file descriptor: " << strerror(errno);
+        } else {
+            fd_for_flock_ = -1;
+        }
+    }
+
+    return std::async(std::launch::async, [] {
         std::this_thread::sleep_for(std::chrono::microseconds(100000));
         VLOG(log_info) << "/:limestone:datastore:shutdown end";
     });

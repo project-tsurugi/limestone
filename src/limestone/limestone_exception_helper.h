@@ -80,16 +80,16 @@ inline void handle_exception_and_abort(std::string_view func_name) {
             throw;  
         }
         LOG_LP(FATAL) << "Fatal error in " << func_name << ": " << e.what();
-        std::abort();  // Safety measure: this should never be reached due to VLOG_LP(google::FATAL)
+        std::abort();  // Safety measure: this should never be reached due to LOG_LP(FATAL)
     } catch (const std::runtime_error& e) {
         LOG_LP(FATAL) << "Runtime error in " << func_name << ": " << e.what();
-        std::abort();  // Safety measure: this should never be reached due to VLOG_LP(google::FATAL)
+        std::abort();  // Safety measure: this should never be reached due to LOG_LP(FATAL)
     } catch (const std::exception& e) {
         LOG_LP(FATAL) << "Unexpected exception in " << func_name << ": " << e.what();
-        std::abort();  // Safety measure: this should never be reached due to VLOG_LP(google::FATAL)
+        std::abort();  // Safety measure: this should never be reached due to LOG_LP(FATAL)
     } catch (...) {
         LOG_LP(FATAL) << "Unknown exception in " << func_name;
-        std::abort();  // Safety measure: this should never be reached due to VLOG_LP(google::FATAL)
+        std::abort();  // Safety measure: this should never be reached due to LOG_LP(FATAL)
     }
 }
 

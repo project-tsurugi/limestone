@@ -133,10 +133,32 @@ TEST_F(datastore_test, add_persistent_callback_test) { // NOLINT
 
 }
 
+TEST_F(datastore_test, prevent_double_start_test) { // NOLINT
+    if (system("rm -rf /tmp/datastore_test") != 0) {
+        std::cerr << "cannot remove directory" << std::endl;
+    }
+    if (system("mkdir -p /tmp/datastore_test/data_location /tmp/datastore_test/metadata_location") != 0) {
+        std::cerr << "cannot make directory" << std::endl;
+    }
 
+    std::vector<boost::filesystem::path> data_locations{};
+    data_locations.emplace_back(data_location);
+    boost::filesystem::path metadata_location_path{metadata_location};
+    limestone::api::configuration conf(data_locations, metadata_location_path);
 
+    auto ds1 = std::make_unique<limestone::api::datastore_test>(conf);
+    ds1->ready();
 
+    // another process is using the log directory
+    ASSERT_DEATH({
+        auto ds2 = std::make_unique<limestone::api::datastore_test>(conf);
+    }, "Another process is using the log directory");
 
-
+    // Ather datastore is created after the first one is destroyed
+    ds1->shutdown();
+    auto ds3 = std::make_unique<limestone::api::datastore_test>(conf);
+    ds3->ready();
+    ds3->shutdown();
+}
 
 }  // namespace limestone::testing

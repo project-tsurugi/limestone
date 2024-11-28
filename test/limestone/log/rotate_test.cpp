@@ -261,6 +261,7 @@ TEST_F(rotate_test, inactive_files_are_also_backed_up) { // NOLINT
         channel1_1.add_entry(2, "k1", "v1", {42, 4});
         channel1_1.end_session();
         datastore_->switch_epoch(43);
+        datastore_->shutdown();
     }
     regen_datastore();
     {
@@ -273,6 +274,7 @@ TEST_F(rotate_test, inactive_files_are_also_backed_up) { // NOLINT
         channel2_0.add_entry(2, "k3", "v3", {44, 4});
         channel2_0.end_session();
         datastore_->switch_epoch(45);
+        datastore_->shutdown();
     }
 
     // setup done

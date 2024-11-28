@@ -13,6 +13,9 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
+#include <sys/file.h>
+#include <fcntl.h>
+#include <unistd.h>
 
 #include <boost/filesystem.hpp>
 #include <nlohmann/json.hpp>
@@ -168,6 +171,22 @@ void check_and_migrate_logdir_format(const boost::filesystem::path& logdir) {
             LOG_AND_THROW_IO_EXCEPTION(err_msg, ec);
         }
     }
+}
+
+int acquire_manifest_lock(const boost::filesystem::path& logdir) {
+    boost::filesystem::path manifest_path = logdir / std::string(manifest_file_name);
+
+    int fd = ::open(manifest_path.string().c_str(), O_RDWR); // NOLINT(hicpp-vararg, cppcoreguidelines-pro-type-vararg)
+    if (fd == -1) {
+        return -1;
+    }
+
+    if (::flock(fd, LOCK_EX | LOCK_NB) == -1) {
+        ::close(fd);
+        return -1;
+    }
+    VLOG_LP(log_info) << "acquired lock on manifest file: " << manifest_path.string();
+    return fd;
 }
 
 } // namespace limestone::internal

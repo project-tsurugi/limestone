@@ -53,6 +53,7 @@ int invoke(const std::string& command, std::string& out) {
 class dblogutil_test : public ::testing::Test {
 public:
 static constexpr const char* location = "/tmp/dblogutil_test";
+static constexpr const char* metadata_location = "/tmp/dblogutil_test/metadata";
 
     void SetUp() {
         boost::filesystem::remove_all(location);
@@ -565,4 +566,31 @@ TEST_F(dblogutil_test, invalid_epoch_option3) {
     EXPECT_TRUE(contains(out, "invalid"));
 }
 
-}  // namespace limestone::testing
+TEST_F(dblogutil_test, execution_fails_while_active_datastore) {
+    // Inactive datastore
+    auto [rc, out] = inspect("pwal_0000", data_normal);
+    EXPECT_EQ(rc, 0);
+    EXPECT_NE(out.find("\n" "status: OK"), out.npos);
+
+    // Activate datastore
+    std::vector<boost::filesystem::path> data_locations{};
+    data_locations.emplace_back(location);
+    boost::filesystem::path metadata_location_path{metadata_location};
+    limestone::api::configuration conf(data_locations, metadata_location_path);
+    auto ds1 = std::make_unique<limestone::api::datastore_test>(conf);
+    ds1->ready();
+
+    // Attempt to run inspect while datastore is active
+    auto [rc_active, out_active] = inspect("pwal_0000", data_normal);
+    EXPECT_NE(rc_active, 0);
+    EXPECT_TRUE(contains(out_active, "Another process is using the log directory:"));
+
+    // Inactive datastore
+    ds1->shutdown();
+    ds1 = nullptr;
+    auto [rc_inactive, out_inacive] = inspect("pwal_0000", data_normal);
+    EXPECT_EQ(rc_inactive, 0);
+    EXPECT_NE(out_inacive.find("\n" "status: OK"), out.npos);
+}
+
+} // namespace limestone::testing

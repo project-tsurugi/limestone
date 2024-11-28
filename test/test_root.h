@@ -1,5 +1,5 @@
 /*
- * Copyright 2019-2023 Project Tsurugi.
+ * Copyright 2019-2024 Project Tsurugi.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -29,7 +29,9 @@ public:
     auto& log_channels() const noexcept { return log_channels_for_tests(); }
     auto epoch_id_informed() const noexcept { return epoch_id_informed_for_tests(); }
     auto epoch_id_recorded() const noexcept { return epoch_id_recorded_for_tests(); }
+    auto epoch_id_switched() const noexcept { return epoch_id_switched_for_tests(); }
     auto& files() const noexcept { return files_for_tests(); }
+    void rotate_epoch_file() { rotate_epoch_file_for_tests(); }
 };
 
 } // namespace limestone::api

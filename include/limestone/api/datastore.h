@@ -249,8 +249,10 @@ public:
 protected:  // for tests
     auto& log_channels_for_tests() const noexcept { return log_channels_; }
     auto epoch_id_informed_for_tests() const noexcept { return epoch_id_informed_.load(); }
-    auto epoch_id_recorded_for_tests() const noexcept { return epoch_id_recorded_.load(); }
+    auto epoch_id_recorded_for_tests() const noexcept { return epoch_id_to_be_recorded_.load(); }
+    auto epoch_id_switched_for_tests() const noexcept { return epoch_id_switched_.load(); }
     auto& files_for_tests() const noexcept { return files_; }
+    void rotate_epoch_file_for_tests() { rotate_epoch_file(); }
     
 private:
     std::vector<std::unique_ptr<log_channel>> log_channels_;
@@ -261,7 +263,8 @@ private:
 
     std::atomic_uint64_t epoch_id_informed_{};
 
-    std::atomic_uint64_t epoch_id_recorded_{};
+    std::atomic_uint64_t epoch_id_to_be_recorded_{};
+    std::atomic_uint64_t epoch_id_record_finished_{};
 
     std::unique_ptr<backup> backup_{};
 
@@ -302,6 +305,8 @@ private:
 
     std::mutex mtx_epoch_file_{};
 
+    std::mutex mtx_epoch_persistent_callback_{};
+
     state state_{};
 
     void add_file(const boost::filesystem::path& file) noexcept;
@@ -327,7 +332,6 @@ private:
      */
     void create_snapshot();
 
-    epoch_id_type last_durable_epoch_in_dir();
 
     /**
      * @brief requests the data store to rotate log files
@@ -342,6 +346,9 @@ private:
     int64_t current_unix_epoch_in_millis();
 
     std::map<storage_id_type, write_version_type> clear_storage;  
+
+    // File descriptor for file lock (flock) on the manifest file
+    int fd_for_flock_{-1};
 };
 
 } // namespace limestone::api
