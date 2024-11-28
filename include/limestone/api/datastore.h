@@ -317,7 +317,7 @@ private:
 
     epoch_id_type search_max_durable_epock_id() noexcept;
 
-    void update_min_epoch_id(log_channel* caller = nullptr);
+    void update_min_epoch_id(bool from_switch_epoch = false);
     
     void check_after_ready(std::string_view func) const noexcept;
 

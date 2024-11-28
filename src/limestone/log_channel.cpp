@@ -91,7 +91,7 @@ void log_channel::end_session() {
             LOG_AND_THROW_IO_EXCEPTION("fsync failed", errno);
         }
         finished_epoch_id_.store(current_epoch_id_.load());
-        envelope_.update_min_epoch_id(this);
+        envelope_.update_min_epoch_id();
         current_epoch_id_.store(UINT64_MAX);
 
         if (fclose(strm_) != 0) {  // NOLINT(*-owning-memory)
