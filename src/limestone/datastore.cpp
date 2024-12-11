@@ -28,8 +28,7 @@
 
 #include <limestone/api/datastore.h>
 #include "internal.h"
-
-#include "rotation_task.h"
+#include "rotation_result.h"
 #include "log_entry.h"
 #include "online_compaction.h"
 #include "compaction_catalog.h"
@@ -154,7 +153,6 @@ epoch_id_type datastore::last_epoch() const noexcept { return static_cast<epoch_
 void datastore::switch_epoch(epoch_id_type new_epoch_id) {
     try {
         check_after_ready(static_cast<const char*>(__func__));
-        rotation_task_helper::attempt_task_execution_from_queue(); 
         auto neid = static_cast<std::uint64_t>(new_epoch_id);
         if (auto switched = epoch_id_switched_.load(); neid <= switched) {
             LOG_LP(WARNING) << "switch to epoch_id_type of " << neid << " (<=" << switched << ") is curious";
@@ -238,12 +236,19 @@ void datastore::update_min_epoch_id(bool from_switch_epoch) {  // NOLINT(readabi
             break;
         }
         if (epoch_id_informed_.compare_exchange_strong(old_epoch_id, to_be_epoch)) {
-            std::lock_guard<std::mutex> lock(mtx_epoch_persistent_callback_);
-            if (to_be_epoch < epoch_id_informed_.load()) {
-                break;
+            {
+                std::lock_guard<std::mutex> lock(mtx_epoch_persistent_callback_);
+                if (to_be_epoch < epoch_id_informed_.load()) {
+                    break;
+                }
+                if (persistent_callback_) {
+                    persistent_callback_(to_be_epoch);
+                }
             }
-            if (persistent_callback_) {
-                persistent_callback_(to_be_epoch);
+            {
+                // Notify waiting threads in rotate_log_files() about the update to epoch_id_informed_
+                std::lock_guard<std::mutex> lock(informed_mutex);
+                cv_epoch_informed.notify_all();  
             }
             break;
         }
@@ -304,8 +309,9 @@ backup& datastore::begin_backup() {
 }
 
 std::unique_ptr<backup_detail> datastore::begin_backup(backup_type btype) {  // NOLINT(readability-function-cognitive-complexity)
-try {
-    rotation_result result = rotate_log_files();
+    try {
+        rotate_epoch_file();
+        rotation_result result = rotate_log_files();
 
         // LOG-0: all files are log file, so all files are selected in both standard/transaction mode.
         (void) btype;
@@ -400,19 +406,35 @@ void datastore::recover([[maybe_unused]] const epoch_tag& tag) const noexcept {
 }
 
 rotation_result datastore::rotate_log_files() {
-    // Create and enqueue a rotation task.
-    // Rotation task is executed when switch_epoch() is called.
-    // Wait for the result of the rotation task.
-    auto task = rotation_task_helper::create_and_enqueue_task(*this);
-    rotation_result result = task->wait_for_result();
-
-    // Wait for all log channels to complete the session with the specified session ID.
-    auto epoch_id = result.get_epoch_id();
-    if (epoch_id.has_value()) {
-        for (auto& lc : log_channels_) {
-            lc->wait_for_end_session(epoch_id.value());
+    VLOG(50) << "start rotate_log_files()";
+    std::lock_guard<std::mutex> lock(rotate_mutex); 
+    VLOG(50) << "start rotate_log_files() critical section";
+    auto epoch_id = epoch_id_switched_.load();
+    if (epoch_id == 0) {
+        LOG_AND_THROW_EXCEPTION("rotation requires epoch_id > 0, but got epoch_id = 0");
+    }
+    VLOG(50) << "epoch_id = " << epoch_id;
+    {
+        on_wait1();
+        // Wait until epoch_id_informed_ is less than rotated_epoch_id to ensure safe rotation.
+        std::unique_lock<std::mutex> ul(informed_mutex);
+        while (epoch_id_informed_.load() < epoch_id) {
+            cv_epoch_informed.wait(ul);  
         }
     }
+    VLOG(50) << "end waiting for epoch_id_informed_ to catch up";
+    rotation_result result(epoch_id);
+    for (const auto& lc : log_channels_) {
+        boost::system::error_code error;
+        bool ret = boost::filesystem::exists(lc->file_path(), error);
+        if (!ret || error) {
+            continue;  // skip if not exists
+        }
+        std::string rotated_file = lc->do_rotate_file();
+        result.add_rotated_file(rotated_file);
+    }
+    result.set_rotation_end_files(get_files());
+    VLOG(50) << "end rotate_log_files()";
     return result;
 }
 
@@ -520,6 +542,7 @@ void datastore::stop_online_compaction_worker() {
 }
 
 void datastore::compact_with_online() {
+    VLOG(50) << "start compact_with_online()";   
     check_after_ready(static_cast<const char*>(__func__));
 
     // rotate first
@@ -539,6 +562,7 @@ void datastore::compact_with_online() {
         (need_compaction_filenames.size() == 1 &&
          need_compaction_filenames.find(compaction_catalog::get_compacted_filename()) != need_compaction_filenames.end())) {
         LOG_LP(INFO) << "no files to compact";
+        VLOG(50) << "return compact_with_online() without compaction";
         return;
     }
 
@@ -563,7 +587,7 @@ void datastore::compact_with_online() {
 
     // get a set of all files in the location_ directory
     std::set<std::string> files_in_location = get_files_in_directory(location_);
-
+    
     // check if detached_pwals exist in location_
     for (auto it = detached_pwals.begin(); it != detached_pwals.end();) {
         if (files_in_location.find(*it) == files_in_location.end()) {
@@ -580,13 +604,14 @@ void datastore::compact_with_online() {
     // update compaction catalog
     compacted_file_info compacted_file_info{compacted_file.filename().string(), 1};
     detached_pwals.erase(compacted_file.filename().string());
-    compaction_catalog_->update_catalog_file(result.get_epoch_id().value_or(0), {compacted_file_info}, detached_pwals);
+    compaction_catalog_->update_catalog_file(result.get_epoch_id(), {compacted_file_info}, detached_pwals);
     add_file(compacted_file);
 
     // remove pwal_0000.compacted.prev
     remove_file_safely(location_ / compaction_catalog::get_compacted_backup_filename());
 
     LOG_LP(INFO) << "compaction finished";
+    VLOG(50) << "end compact_with_online()";
 }
 
 } // namespace limestone::api

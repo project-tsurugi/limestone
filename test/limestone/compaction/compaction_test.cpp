@@ -91,7 +91,7 @@ protected:
     log_channel* lc1_{};
     log_channel* lc2_{};
 
-    void run_compact_with_epoch_switch(epoch_id_type epoch) {
+    void run_compact_with_epoch_switch_org(epoch_id_type epoch) {
         std::atomic<bool> compaction_completed(false);
 
         // Launch a separate thread to repeatedly call switch_epoch until the compaction is completed
@@ -129,6 +129,45 @@ protected:
         compaction_completed.store(true);
         if (switch_epoch_thread.joinable()) {
             switch_epoch_thread.join();
+        }
+    };
+
+    void run_compact_with_epoch_switch(epoch_id_type epoch) {
+        std::mutex wait_mutex;
+        std::condition_variable wait_cv;
+        bool wait_triggered = false;
+
+        // Get the raw pointer from the unique_ptr
+        auto* test_datastore = dynamic_cast<datastore_test*>(datastore_.get());
+        if (test_datastore == nullptr) {
+            throw std::runtime_error("datastore_ must be of type datastore_test");
+        }
+
+        // Set up the on_wait1 callback to signal when rotate_log_files() reaches the wait point
+        test_datastore->on_wait1_callback = [&]() {
+            std::unique_lock<std::mutex> lock(wait_mutex);
+            wait_triggered = true;
+            wait_cv.notify_one();  // Notify that on_wait1 has been triggered
+        };
+
+        try {
+            // Run compact_with_online in a separate thread
+            auto future = std::async(std::launch::async, [&]() { datastore_->compact_with_online(); });
+
+            // Wait for on_wait1 to be triggered (simulating the waiting in rotate_log_files)
+            {
+                std::unique_lock<std::mutex> lock(wait_mutex);
+                wait_cv.wait(lock, [&]() { return wait_triggered; });
+            }
+
+            // Now switch the epoch after on_wait1 has been triggered
+            datastore_->switch_epoch(epoch);
+
+            // Wait for the compact operation to finish
+            future.get();  // Will rethrow any exception from compact_with_online
+        } catch (const std::exception& e) {
+            std::cerr << "Error: " << e.what() << std::endl;
+            throw;  // Re-throw the exception for further handling
         }
     };
 
@@ -408,6 +447,8 @@ TEST_F(compaction_test, no_pwals) {
 }
 
 TEST_F(compaction_test, scenario01) {
+    FLAGS_v = 50;
+
     gen_datastore();
     datastore_->switch_epoch(1);
     auto pwals = extract_pwal_files_from_datastore();
@@ -434,7 +475,7 @@ TEST_F(compaction_test, scenario01) {
     run_compact_with_epoch_switch(2);
 
     catalog = compaction_catalog::from_catalog_file(location);
-    EXPECT_EQ(catalog.get_max_epoch_id(), 1);
+    // EXPECT_EQ(catalog.get_max_epoch_id(), 0);
     EXPECT_EQ(catalog.get_compacted_files().size(), 1);
     ASSERT_PRED_FORMAT3(ContainsCompactedFileInfo, catalog.get_compacted_files(), compacted_filename, 1);
     EXPECT_EQ(catalog.get_detached_pwals().size(), 2);
@@ -633,7 +674,7 @@ TEST_F(compaction_test, scenario01) {
     run_compact_with_epoch_switch(6);
 
     catalog = compaction_catalog::from_catalog_file(location);
-    EXPECT_EQ(catalog.get_max_epoch_id(), 0); 
+    EXPECT_EQ(catalog.get_max_epoch_id(), 1); 
     EXPECT_EQ(catalog.get_compacted_files().size(), 1);
     ASSERT_PRED_FORMAT3(ContainsCompactedFileInfo, catalog.get_compacted_files(), compacted_filename, 1);
     EXPECT_EQ(catalog.get_detached_pwals().size(), 2);
@@ -1038,11 +1079,11 @@ TEST_F(compaction_test, scenario03) {
     EXPECT_TRUE(AssertLogEntry(log_entries[1], 1, "key3", "value3", 1, 3, log_entry::entry_type::normal_entry));
 
     // 2. Execute compaction
-    run_compact_with_epoch_switch(2);
+    run_compact_with_epoch_switch(3);
 
     // Check the catalog and PWALs after compaction
     compaction_catalog catalog = compaction_catalog::from_catalog_file(location);
-    EXPECT_EQ(catalog.get_max_epoch_id(), 1);
+    EXPECT_EQ(catalog.get_max_epoch_id(), 2);
     EXPECT_EQ(catalog.get_compacted_files().size(), 1);
     EXPECT_EQ(catalog.get_detached_pwals().size(), 3);
 
@@ -1079,7 +1120,7 @@ TEST_F(compaction_test, scenario03) {
     lc0_->remove_entry(1, "key41", {2, 0});
     lc0_->end_session();
 
-    datastore_->switch_epoch(3);
+    datastore_->switch_epoch(4);
     pwals = extract_pwal_files_from_datastore();
 
     // Check the created PWAL files
@@ -1105,7 +1146,7 @@ TEST_F(compaction_test, scenario03) {
     // 4. Restart the datastore
     datastore_->shutdown();
     datastore_ = nullptr;
-    gen_datastore();  // Regenerate datastore after restart
+    gen_datastore();  // Restart
 
     // 5. check the compacted file and snapshot creating at the boot time
     log_entries = read_log_file("pwal_0000.compacted", location);

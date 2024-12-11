@@ -27,7 +27,7 @@
 #include <limestone/api/datastore.h>
 #include "internal.h"
 #include "log_entry.h"
-#include "rotation_task.h"
+#include "rotation_result.h"
 
 namespace limestone::api {
 
@@ -60,8 +60,6 @@ void log_channel::begin_session() {
             std::atomic_thread_fence(std::memory_order_acq_rel);
         } while (current_epoch_id_.load() != envelope_.epoch_id_switched_.load());
 
-        latest_session_epoch_id_.store(static_cast<epoch_id_type>(current_epoch_id_.load()));
-
         auto log_file = file_path();
         strm_ = fopen(log_file.c_str(), "a");  // NOLINT(*-owning-memory)
         if (!strm_) {
@@ -73,10 +71,6 @@ void log_channel::begin_session() {
             registered_ = true;
         }
         log_entry::begin_session(strm_, static_cast<epoch_id_type>(current_epoch_id_.load()));
-        {
-            std::lock_guard<std::mutex> lock(session_mutex_);
-            waiting_epoch_ids_.insert(latest_session_epoch_id_);
-        }
     } catch (...) {
         HANDLE_EXCEPTION_AND_ABORT();
     }
@@ -96,14 +90,6 @@ void log_channel::end_session() {
 
         if (fclose(strm_) != 0) {  // NOLINT(*-owning-memory)
             LOG_AND_THROW_IO_EXCEPTION("fclose failed", errno);
-        }
-
-        // Remove current_epoch_id_ from waiting_epoch_ids_
-        {
-            std::lock_guard<std::mutex> lock(session_mutex_);
-            waiting_epoch_ids_.erase(latest_session_epoch_id_.load());
-            // Notify waiting threads
-            session_cv_.notify_all();
         }
     } catch (...) {
         HANDLE_EXCEPTION_AND_ABORT();
@@ -174,7 +160,7 @@ boost::filesystem::path log_channel::file_path() const noexcept {
 
 // DO rotate without condition check.
 //  use this after your check
-rotation_result log_channel::do_rotate_file(epoch_id_type epoch) {
+std::string log_channel::do_rotate_file(epoch_id_type epoch) {
     std::stringstream ss;
     ss << file_.string() << "."
        << std::setw(14) << std::setfill('0') << envelope_.current_unix_epoch_in_millis()
@@ -192,19 +178,7 @@ rotation_result log_channel::do_rotate_file(epoch_id_type epoch) {
     registered_ = false;
     envelope_.subtract_file(location_ / file_);
 
-    // Create a rotation result with the current epoch ID
-    rotation_result result(new_name, latest_session_epoch_id_);
-    return result;
-}
-
-void log_channel::wait_for_end_session(epoch_id_type epoch) {
-    std::unique_lock<std::mutex> lock(session_mutex_);
-
-    // Wait until the specified epoch_id is removed from waiting_epoch_ids_
-    session_cv_.wait(lock, [this, epoch]() {
-        // Ensure that no ID less than or equal to the specified epoch exists in waiting_epoch_ids_
-        return waiting_epoch_ids_.empty() || *waiting_epoch_ids_.begin() > epoch;
-    });
+    return new_name;
 }
 
 } // namespace limestone::api

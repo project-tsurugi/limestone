@@ -30,7 +30,6 @@
 #include <limestone/api/write_version_type.h>
 #include <limestone/api/large_object_input.h>
 
-
 namespace limestone::api {
 
 class datastore;
@@ -166,12 +165,6 @@ public:
     [[nodiscard]] boost::filesystem::path file_path() const noexcept;
 
 private:
-    /**
-     * @brief Waits until the specified epoch's session is completed and the epoch ID is removed from waiting_epoch_ids_.
-     * @param epoch The epoch ID associated with the session to wait for.
-     */
-    void wait_for_end_session(epoch_id_type epoch);
-
     datastore& envelope_;
 
     boost::filesystem::path location_;
@@ -190,17 +183,9 @@ private:
 
     std::atomic_uint64_t finished_epoch_id_{0};
 
-    std::atomic<epoch_id_type> latest_session_epoch_id_{0};
-
-    std::mutex session_mutex_;
-
-    std::condition_variable session_cv_;
-
-    std::set<epoch_id_type> waiting_epoch_ids_{};
-
     log_channel(boost::filesystem::path location, std::size_t id, datastore& envelope) noexcept;
 
-    rotation_result do_rotate_file(epoch_id_type epoch = 0);
+    std::string do_rotate_file(epoch_id_type epoch = 0);
 
     friend class datastore;
     friend class rotation_task;

@@ -50,7 +50,6 @@ namespace limestone::api {
  */
 class datastore {
     friend class log_channel;
-    friend class rotation_task;
 
     enum class state : std::int64_t {
         not_ready = 0,
@@ -253,7 +252,16 @@ protected:  // for tests
     auto epoch_id_switched_for_tests() const noexcept { return epoch_id_switched_.load(); }
     auto& files_for_tests() const noexcept { return files_; }
     void rotate_epoch_file_for_tests() { rotate_epoch_file(); }
-    
+
+    // These virtual methods are hooks for testing thread synchronization.
+    // They allow derived classes to inject custom behavior or notifications
+    // at specific wait points during the execution of the datastore class.
+    // The default implementation does nothing, ensuring no impact on production code.
+    virtual void on_wait1() {}
+    virtual void on_wait2() {}
+    virtual void on_wait3() {}
+    virtual void on_wait4() {}
+
 private:
     std::vector<std::unique_ptr<log_channel>> log_channels_;
 
@@ -337,6 +345,13 @@ private:
      * @brief requests the data store to rotate log files
      */
     rotation_result rotate_log_files();
+
+    // Mutex to protect rotate_log_files from concurrent access
+    std::mutex rotate_mutex;
+
+    // Mutex and condition variable for synchronizing epoch_id_informed_ updates.
+    std::mutex informed_mutex;
+    std::condition_variable cv_epoch_informed;
 
     /**
      * @brief rotate epoch file
