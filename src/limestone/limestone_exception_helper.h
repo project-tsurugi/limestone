@@ -33,6 +33,7 @@ namespace limestone {
 
 using limestone::api::limestone_exception;
 using limestone::api::limestone_io_exception; 
+using limestone::api::exception_type;
 
 
 inline std::string extract_filename(const std::string& path) {
@@ -45,7 +46,7 @@ inline std::string extract_filename(const std::string& path) {
 #define THROW_LIMESTONE_EXCEPTION(message) \
     { \
         LOG_LP(ERROR) << (message); \
-        throw limestone_exception(std::string((message)) + " (at " + extract_filename(__FILE__) + ":" + std::to_string(__LINE__) + ")"); \
+        throw limestone_exception(exception_type::fatal_error, std::string((message)) + " (at " + extract_filename(__FILE__) + ":" + std::to_string(__LINE__) + ")"); \
     }
 
 // NOLINTNEXTLINE(cppcoreguidelines-macro-usage)
@@ -53,14 +54,14 @@ inline std::string extract_filename(const std::string& path) {
     { \
         std::string full_message = limestone_io_exception::format_message((message), (error_code)); \
         LOG_LP(ERROR) << full_message; \
-        throw limestone_io_exception(full_message + " (at " + extract_filename(__FILE__) + ":" + std::to_string(__LINE__) + ")", (error_code)); \
+        throw limestone_io_exception(exception_type::fatal_error, full_message + " (at " + extract_filename(__FILE__) + ":" + std::to_string(__LINE__) + ")", (error_code)); \
     }
 
 // NOLINTNEXTLINE(cppcoreguidelines-macro-usage)
 #define LOG_AND_THROW_EXCEPTION(message) \
     { \
         LOG_LP(ERROR) << (message); \
-        throw limestone_exception(std::string((message)) + " (at " + extract_filename(__FILE__) + ":" + std::to_string(__LINE__) + ")"); \
+        throw limestone_exception(exception_type::fatal_error, std::string((message)) + " (at " + extract_filename(__FILE__) + ":" + std::to_string(__LINE__) + ")"); \
     }
 
 // NOLINTNEXTLINE(cppcoreguidelines-macro-usage)
@@ -68,7 +69,7 @@ inline std::string extract_filename(const std::string& path) {
     { \
         std::string full_message = limestone_io_exception::format_message((message), (error_code)); \
         LOG_LP(ERROR) << full_message; \
-        throw limestone_io_exception(full_message + " (at " + extract_filename(__FILE__) + ":" + std::to_string(__LINE__) + ")", (error_code)); \
+        throw limestone_io_exception(exception_type::fatal_error, full_message + " (at " + extract_filename(__FILE__) + ":" + std::to_string(__LINE__) + ")", (error_code)); \
     }
 
 // helper function to handle exceptions and abort
@@ -79,8 +80,16 @@ inline void handle_exception_and_abort(std::string_view func_name) {
         if (limestone::testing::enable_exception_throwing) {
             throw;  
         }
-        LOG_LP(FATAL) << "Fatal error in " << func_name << ": " << e.what();
-        std::abort();  // Safety measure: this should never be reached due to LOG_LP(FATAL)
+        switch (e.type()) {
+            case exception_type::fatal_error:
+                LOG_LP(FATAL) << "Fatal error in " << func_name << ": " << e.what();
+                std::abort();  // Safety measure: this should never be reached due to LOG_LP(FATAL)
+                break;
+            case exception_type::initialization_failure:
+                LOG(ERROR) << "Initialization failed. The process will now terminate: " << e.what();
+                std::abort();  
+                break;
+        }
     } catch (const std::runtime_error& e) {
         LOG_LP(FATAL) << "Runtime error in " << func_name << ": " << e.what();
         std::abort();  // Safety measure: this should never be reached due to LOG_LP(FATAL)

@@ -583,6 +583,7 @@ TEST_F(dblogutil_test, execution_fails_while_active_datastore) {
     // Attempt to run inspect while datastore is active
     auto [rc_active, out_active] = inspect("pwal_0000", data_normal);
     EXPECT_NE(rc_active, 0);
+    std::cerr << out_active << std::endl;
     EXPECT_TRUE(contains(out_active, "Another process is using the log directory:"));
 
     // Inactive datastore

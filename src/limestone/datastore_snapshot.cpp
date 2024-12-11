@@ -144,7 +144,7 @@ static std::pair<epoch_id_type, sorting_context> create_sorted_from_wals(
         LOG(ERROR) << "/:limestone recover process failed. (cause: corruption detected in transaction log data directory), "
                    << "see https://github.com/project-tsurugi/tsurugidb/blob/master/docs/troubleshooting-guide.md";
         LOG(ERROR) << "/:limestone dblogdir (transaction log directory): " << from_dir;
-        throw limestone_exception("dblogdir is corrupted");
+        THROW_LIMESTONE_EXCEPTION("dblogdir is corrupted");
     }
 }
 

@@ -292,8 +292,7 @@ int main(char *dir, subcommand mode) {  // NOLINT
         int lock_fd = acquire_manifest_lock(p);
         if (lock_fd == -1) {
         LOG(ERROR) << "Another process is using the log directory: " << p
-                << ". Terminate the conflicting process and re-execute the command. "
-                << "Error: " << strerror(errno);
+                   << ". Command execution aborted.";
                     log_and_exit(64);
         }
         dblog_scan ds(p);
