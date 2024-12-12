@@ -32,13 +32,13 @@ namespace limestone::api {
 
 class rotation_result {
 public:
-    rotation_result(epoch_id_type epoch) : epoch_id_(epoch) {}
+    explicit rotation_result(epoch_id_type epoch) : epoch_id_(epoch) {}
     
     [[nodiscard]] epoch_id_type get_epoch_id() const;
     [[nodiscard]] const std::set<boost::filesystem::path>& get_rotation_end_files() const;
     void set_rotation_end_files(const std::set<boost::filesystem::path>& files);
+    void add_rotated_file(const std::string& filename);
 
-    void add_rotated_file(std::string);
 private:
     // A set of filenames that were rotated in this rotation process.
     std::set<std::string> latest_rotated_files_;

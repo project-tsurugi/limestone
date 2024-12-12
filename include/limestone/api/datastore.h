@@ -77,7 +77,7 @@ public:
     /**
      * @brief destruct the object
      */
-    ~datastore() noexcept;
+    virtual ~datastore() noexcept;
 
     datastore(datastore const& other) = delete;
     datastore& operator=(datastore const& other) = delete;

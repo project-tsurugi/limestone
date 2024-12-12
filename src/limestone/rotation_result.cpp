@@ -31,9 +31,8 @@ const std::set<boost::filesystem::path>& rotation_result::get_rotation_end_files
     return rotation_end_files;
 }
 
-void rotation_result::add_rotated_file(const std::string filename) {
+void rotation_result::add_rotated_file(const std::string& filename) {
     latest_rotated_files_.insert(filename);
-
 }
 
 } // namespace limestone::api
