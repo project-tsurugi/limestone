@@ -21,6 +21,7 @@
 #include <boost/filesystem.hpp>
 
 #include <limestone/api/datastore.h>
+#include "file_operations.h"
 
 namespace limestone::internal {
 using namespace limestone::api;
@@ -31,11 +32,24 @@ using namespace limestone::api;
  */
 static constexpr const std::string_view epoch_file_name = "epoch";
 
+static constexpr const std::string_view tmp_epoch_file_name = ".epoch.tmp";
+
+
 // moved from log_channel.h
 /**
  * @brief prefix of pwal file name
  */
 static constexpr const std::string_view log_channel_prefix = "pwal_";
+
+
+/**
+ * @brief The maximum number of entries allowed in an epoch file.
+ * 
+ * This constant defines the upper limit for the number of entries that can be stored
+ * in a single epoch file. It is used to ensure that the file does not grow too large,
+ * which could impact performance and manageability.
+ */
+static constexpr const int max_entries_in_epoch_file = 100;
 
 // from dblog_scan.cpp
 
@@ -74,6 +88,21 @@ void create_compact_pwal(
     const boost::filesystem::path& to_dir, 
     int num_worker,
     const std::set<std::string>& file_names = std::set<std::string>());
+
+std::set<boost::filesystem::path> filter_epoch_files(
+    const boost::filesystem::path& directory);
+
+std::set<std::string> assemble_snapshot_input_filenames(
+    const std::unique_ptr<compaction_catalog>& compaction_catalog,
+    const boost::filesystem::path& location,
+    file_operations& file_ops);
+
+std::set<std::string> assemble_snapshot_input_filenames(
+    const std::unique_ptr<compaction_catalog>& compaction_catalog,
+    const boost::filesystem::path& location);
+
+void cleanup_rotated_epoch_files(
+    const boost::filesystem::path& directory);
 
 // filepath.cpp
 

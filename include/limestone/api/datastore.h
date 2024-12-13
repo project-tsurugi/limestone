@@ -282,6 +282,8 @@ private:
 
     boost::filesystem::path epoch_file_path_{};
 
+    boost::filesystem::path tmp_epoch_file_path_{};
+
     tag_repository tag_repository_{};
 
     std::atomic_uint64_t log_channel_id_{};
@@ -364,6 +366,10 @@ private:
 
     // File descriptor for file lock (flock) on the manifest file
     int fd_for_flock_{-1};
+
+    void write_epoch_to_file(epoch_id_type epoch_id);
+
+    int epoch_write_counter = 0;
 };
 
 } // namespace limestone::api

@@ -38,7 +38,7 @@ using namespace limestone::internal;
 
 datastore::datastore() noexcept = default;
 
-datastore::datastore(configuration const& conf) : location_(conf.data_locations_.at(0)) {
+datastore::datastore(configuration const& conf) : location_(conf.data_locations_.at(0)) { // NOLINT(readability-function-cognitive-complexity)
     try {
         LOG(INFO) << "/:limestone:config:datastore setting log location = " << location_.string();
         boost::system::error_code error;
@@ -82,9 +82,8 @@ datastore::datastore(configuration const& conf) : location_(conf.data_locations_
         add_file(compaction_catalog_path);
         compaction_catalog_ = std::make_unique<compaction_catalog>(compaction_catalog::from_catalog_file(location_));
 
-        // XXX: prusik era
-        // TODO: read rotated epoch files if main epoch file does not exist
-        epoch_file_path_ = location_ / boost::filesystem::path(std::string(limestone::internal::epoch_file_name));
+        epoch_file_path_ = location_ / std::string(limestone::internal::epoch_file_name);
+        tmp_epoch_file_path_ = location_ / std::string(limestone::internal::tmp_epoch_file_name);
         const bool result = boost::filesystem::exists(epoch_file_path_, error);
         if (!result || error) {
             FILE* strm = fopen(epoch_file_path_.c_str(), "a");  // NOLINT(*-owning-memory)
@@ -95,6 +94,14 @@ datastore::datastore(configuration const& conf) : location_(conf.data_locations_
                 LOG_AND_THROW_IO_EXCEPTION("fclose failed", errno);
             }
             add_file(epoch_file_path_);
+        }
+
+        const bool exists = boost::filesystem::exists(tmp_epoch_file_path_, error);        
+        if (exists) {
+            const bool result_remove = boost::filesystem::remove(tmp_epoch_file_path_, error);
+            if (!result_remove || error) {
+                LOG_AND_THROW_IO_EXCEPTION("fail to remove temporary epoch file, path: " + tmp_epoch_file_path_.string(), errno);
+            }
         }
 
         recover_max_parallelism_ = conf.recover_max_parallelism_;
@@ -118,10 +125,62 @@ void datastore::recover() const noexcept {
     check_before_ready(static_cast<const char*>(__func__));
 }
 
+enum class file_write_mode {
+    append,
+    overwrite
+};
+
+static void write_epoch_to_file_internal(const std::string& file_path, epoch_id_type epoch_id, file_write_mode mode) {
+    const char* fopen_mode = (mode == file_write_mode::append) ? "a" : "w";
+    std::unique_ptr<FILE, void (*)(FILE*)> file_ptr(fopen(file_path.c_str(), fopen_mode), [](FILE* fp) {
+        if (fp) {
+            if (fclose(fp) != 0) { // NOLINT(cppcoreguidelines-owning-memory)
+                LOG_AND_THROW_IO_EXCEPTION("fclose failed", errno);
+            }
+        }
+    });  
+    if (!file_ptr) {
+        LOG_AND_THROW_IO_EXCEPTION("fopen failed for file: " + file_path, errno);
+    }
+
+    log_entry::durable_epoch(file_ptr.get(), epoch_id);
+
+    if (fflush(file_ptr.get()) != 0) {
+        LOG_AND_THROW_IO_EXCEPTION("fflush failed for file: " + file_path, errno);
+    }
+    if (fsync(fileno(file_ptr.get())) != 0) {
+        LOG_AND_THROW_IO_EXCEPTION("fsync failed for file: " + file_path, errno);
+    }
+}
+
+void datastore::write_epoch_to_file(epoch_id_type epoch_id) {
+    if (++epoch_write_counter >= max_entries_in_epoch_file) {
+        write_epoch_to_file_internal(tmp_epoch_file_path_.string(), epoch_id, file_write_mode::overwrite);
+
+        boost::system::error_code ec;
+        if (::rename(tmp_epoch_file_path_.c_str(), epoch_file_path_.c_str()) != 0) {
+            LOG_AND_THROW_IO_EXCEPTION("Failed to rename temp file: " + tmp_epoch_file_path_.string() + " to " + epoch_file_path_.string(), errno);
+        }
+        boost::filesystem::remove(tmp_epoch_file_path_, ec);
+        if (ec) {
+            LOG_AND_THROW_IO_EXCEPTION("Failed to remove temp file: " + tmp_epoch_file_path_.string(), ec);
+        }
+        epoch_write_counter = 0;
+    } else {
+        write_epoch_to_file_internal(epoch_file_path_.string(), epoch_id, file_write_mode::append);
+    }
+}
+
+
+
 void datastore::ready() {
     try {
         create_snapshot();
         online_compaction_worker_future_ = std::async(std::launch::async, &datastore::online_compaction_worker, this);
+        if (epoch_id_switched_.load() != 0) {
+            write_epoch_to_file(epoch_id_informed_.load());
+        }
+        cleanup_rotated_epoch_files(location_);
         state_ = state::ready;
     } catch (...) {
         HANDLE_EXCEPTION_AND_ABORT();
@@ -151,6 +210,7 @@ log_channel& datastore::create_channel(const boost::filesystem::path& location) 
 epoch_id_type datastore::last_epoch() const noexcept { return static_cast<epoch_id_type>(epoch_id_informed_.load()); }
 
 void datastore::switch_epoch(epoch_id_type new_epoch_id) {
+    VLOG(30) << "switch_epoch: " << new_epoch_id;
     try {
         check_after_ready(static_cast<const char*>(__func__));
         auto neid = static_cast<std::uint64_t>(new_epoch_id);
@@ -200,23 +260,7 @@ void datastore::update_min_epoch_id(bool from_switch_epoch) {  // NOLINT(readabi
         }
         if (epoch_id_to_be_recorded_.compare_exchange_strong(old_epoch_id, to_be_epoch)) {
             std::lock_guard<std::mutex> lock(mtx_epoch_file_);
-            if (to_be_epoch < epoch_id_to_be_recorded_.load()) {
-                break;
-            }
-            FILE* strm = fopen(epoch_file_path_.c_str(), "a");  // NOLINT(*-owning-memory)
-            if (!strm) {
-                LOG_AND_THROW_IO_EXCEPTION("fopen failed", errno);
-            }
-            log_entry::durable_epoch(strm, static_cast<epoch_id_type>(epoch_id_to_be_recorded_.load()));
-            if (fflush(strm) != 0) {
-                LOG_AND_THROW_IO_EXCEPTION("fflush failed", errno);
-            }
-            if (fsync(fileno(strm)) != 0) {
-                LOG_AND_THROW_IO_EXCEPTION("fsync failed", errno);
-            }
-            if (fclose(strm) != 0) {  // NOLINT(*-owning-memory)
-                LOG_AND_THROW_IO_EXCEPTION("fclose failed", errno);
-            }
+            write_epoch_to_file(static_cast<epoch_id_type>(to_be_epoch));
             epoch_id_record_finished_.store(epoch_id_to_be_recorded_.load());
             break;
         }
@@ -254,6 +298,7 @@ void datastore::update_min_epoch_id(bool from_switch_epoch) {  // NOLINT(readabi
         }
     }
 }
+
 
 void datastore::add_persistent_callback(std::function<void(epoch_id_type)> callback) noexcept {
     check_before_ready(static_cast<const char*>(__func__));

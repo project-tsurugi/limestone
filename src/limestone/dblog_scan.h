@@ -194,10 +194,18 @@ public:
      */
     void rescan_directory_paths();
 
+    /**
+     * @brief Cleans up unnecessary epoch files in the log directory.
+     *
+     * This method identifies and removes unnecessary epoch files in the log directory.
+     * Only the main epoch file is retained, and all rotated epoch files are deleted.
+     * If the main epoch file does not exist among the identified files, an exception is thrown.
+     */
+    void cleanup_rotated_epoch_files();
+
 private:
     boost::filesystem::path dblogdir_;
     std::list<boost::filesystem::path> path_list_;
-
     int thread_num_{1};
     bool fail_fast_{false};
 

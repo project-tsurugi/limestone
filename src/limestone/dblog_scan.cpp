@@ -15,6 +15,7 @@
  */
 
 #include <iomanip>
+#include <set>
 #include <boost/filesystem.hpp>
 
 #include <glog/logging.h>
@@ -55,6 +56,8 @@ std::optional<epoch_id_type> last_durable_epoch(const boost::filesystem::path& f
     return rv;
 }
 
+
+
 epoch_id_type dblog_scan::last_durable_epoch_in_dir() {
     auto& from_dir = dblogdir_;
     // read main epoch file first
@@ -74,21 +77,20 @@ epoch_id_type dblog_scan::last_durable_epoch_in_dir() {
     // main epoch file is empty or does not contain a valid epoch,
     // read all rotated-epoch files
     std::optional<epoch_id_type> ld_epoch;
-    for (const boost::filesystem::path& p : boost::filesystem::directory_iterator(from_dir)) {
-        if (p.filename().string().rfind(epoch_file_name, 0) == 0) {  // starts_with(epoch_file_name)
-            // this is epoch file (main one or rotated)
-            std::optional<epoch_id_type> epoch = last_durable_epoch(p);
-            if (!epoch.has_value()) {
-                continue;  // file is empty
-            }
-            // ld_epoch = max(ld_epoch, epoch)
-            if (!ld_epoch.has_value() || *ld_epoch < *epoch) {
-                ld_epoch = epoch;
-            }
+    auto epoch_files = filter_epoch_files(from_dir);
+    for (const boost::filesystem::path& p : epoch_files) {
+        std::optional<epoch_id_type> epoch = last_durable_epoch(p);
+        if (!epoch.has_value()) {
+            continue;  // file is empty
+        }
+        if (!ld_epoch.has_value() || *ld_epoch < *epoch) {
+            ld_epoch = epoch;
         }
     }
     return ld_epoch.value_or(0);  // 0 = minimum epoch
 }
+
+
 
 static bool log_error_and_throw(log_entry::read_error& e) {
     LOG_AND_THROW_EXCEPTION("this pwal file is broken: " + e.message());

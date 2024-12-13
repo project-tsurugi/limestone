@@ -314,7 +314,41 @@ std::set<std::string> assemble_snapshot_input_filenames(
     return assemble_snapshot_input_filenames(compaction_catalog, location, file_ops);
 }
 
+std::set<boost::filesystem::path> filter_epoch_files(const boost::filesystem::path& directory) {
+    std::set<boost::filesystem::path> epoch_files;
+    for (const auto& entry : boost::filesystem::directory_iterator(directory)) {
+        if (entry.path().filename().string().rfind(epoch_file_name, 0) == 0) { 
+            epoch_files.insert(entry.path());
+        }
+    }
+    return epoch_files;
+}
 
+void cleanup_rotated_epoch_files(const boost::filesystem::path& directory) {
+    // Retrieve all epoch files in the directory
+    std::set<boost::filesystem::path> epoch_files = filter_epoch_files(directory);
+
+    // Define the main epoch file path
+    boost::filesystem::path main_epoch_file = directory / std::string(epoch_file_name);
+
+    // Check if the main epoch file exists among the filtered files
+    auto main_file_it = epoch_files.find(main_epoch_file);
+    if (main_file_it == epoch_files.end()) {
+        LOG_AND_THROW_EXCEPTION("Epoch file does not exist: " + main_epoch_file.string());
+    }
+
+    // Remove the main epoch file from the set of epoch files
+    epoch_files.erase(main_file_it);
+
+    // Iterate through the remaining epoch files and remove them
+    for (const auto& file : epoch_files) {
+        boost::system::error_code ec;
+        boost::filesystem::remove(file, ec);
+        if (ec) {
+            LOG_AND_THROW_IO_EXCEPTION("Failed to remove file: " + file.string() + ". Error: ", ec);
+        }
+    }
+}
 
 } // namespace limestone::internal
 
