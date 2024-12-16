@@ -210,7 +210,6 @@ log_channel& datastore::create_channel(const boost::filesystem::path& location) 
 epoch_id_type datastore::last_epoch() const noexcept { return static_cast<epoch_id_type>(epoch_id_informed_.load()); }
 
 void datastore::switch_epoch(epoch_id_type new_epoch_id) {
-    VLOG(30) << "switch_epoch: " << new_epoch_id;
     try {
         check_after_ready(static_cast<const char*>(__func__));
         auto neid = static_cast<std::uint64_t>(new_epoch_id);
