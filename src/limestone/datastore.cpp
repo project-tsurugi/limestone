@@ -154,6 +154,7 @@ static void write_epoch_to_file_internal(const std::string& file_path, epoch_id_
 }
 
 void datastore::write_epoch_to_file(epoch_id_type epoch_id) {
+    VLOG_LP(log_info) << "write_epoch_to_file() with epoch_id=" << epoch_id;
     if (++epoch_write_counter >= max_entries_in_epoch_file) {
         write_epoch_to_file_internal(tmp_epoch_file_path_.string(), epoch_id, file_write_mode::overwrite);
 
@@ -169,6 +170,7 @@ void datastore::write_epoch_to_file(epoch_id_type epoch_id) {
     } else {
         write_epoch_to_file_internal(epoch_file_path_.string(), epoch_id, file_write_mode::append);
     }
+    VLOG_LP(log_info) << "end write_epoch_to_file() with epoch_id=" << epoch_id;
 }
 
 
