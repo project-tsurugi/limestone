@@ -154,21 +154,25 @@ static void write_epoch_to_file_internal(const std::string& file_path, epoch_id_
 }
 
 void datastore::write_epoch_to_file(epoch_id_type epoch_id) {
+    TRACE_START << "epoch_id=" << epoch_id;
     if (++epoch_write_counter >= max_entries_in_epoch_file) {
         write_epoch_to_file_internal(tmp_epoch_file_path_.string(), epoch_id, file_write_mode::overwrite);
 
         boost::system::error_code ec;
         if (::rename(tmp_epoch_file_path_.c_str(), epoch_file_path_.c_str()) != 0) {
+            TRACE_ABORT;
             LOG_AND_THROW_IO_EXCEPTION("Failed to rename temp file: " + tmp_epoch_file_path_.string() + " to " + epoch_file_path_.string(), errno);
         }
         boost::filesystem::remove(tmp_epoch_file_path_, ec);
         if (ec) {
+            TRACE_ABORT;
             LOG_AND_THROW_IO_EXCEPTION("Failed to remove temp file: " + tmp_epoch_file_path_.string(), ec);
         }
         epoch_write_counter = 0;
     } else {
         write_epoch_to_file_internal(epoch_file_path_.string(), epoch_id, file_write_mode::append);
     }
+    TRACE_END;
 }
 
 
@@ -210,6 +214,7 @@ log_channel& datastore::create_channel(const boost::filesystem::path& location) 
 epoch_id_type datastore::last_epoch() const noexcept { return static_cast<epoch_id_type>(epoch_id_informed_.load()); }
 
 void datastore::switch_epoch(epoch_id_type new_epoch_id) {
+    TRACE_START << "new_epoch_id=" << new_epoch_id;
     try {
         check_after_ready(static_cast<const char*>(__func__));
         auto neid = static_cast<std::uint64_t>(new_epoch_id);
@@ -222,16 +227,20 @@ void datastore::switch_epoch(epoch_id_type new_epoch_id) {
             update_min_epoch_id(true);
         }
     } catch (...) {
+        TRACE_ABORT;
         HANDLE_EXCEPTION_AND_ABORT();
     }
+    TRACE_END;
 }
 
 void datastore::update_min_epoch_id(bool from_switch_epoch) {  // NOLINT(readability-function-cognitive-complexity)
+    TRACE_START << "from_switch_epoch=" << from_switch_epoch;
     auto upper_limit = epoch_id_switched_.load();
     if (upper_limit == 0) {
         return; // If epoch_id_switched_ is zero, it means no epoch has been switched, so updating epoch_id_to_be_recorded_ and epoch_id_informed_ is unnecessary.
     }
     upper_limit--;
+
     epoch_id_type max_finished_epoch = 0;
 
     for (const auto& e : log_channels_) {
@@ -246,6 +255,8 @@ void datastore::update_min_epoch_id(bool from_switch_epoch) {  // NOLINT(readabi
             max_finished_epoch = finished_epoch;
         }
     }
+
+    TRACE << "epoch_id_switched_ = " << epoch_id_switched_.load() << ", upper_limit = " << upper_limit << ", max_finished_epoch = " << max_finished_epoch;
 
     // update recorded_epoch_
     auto to_be_epoch = upper_limit;
@@ -265,6 +276,7 @@ void datastore::update_min_epoch_id(bool from_switch_epoch) {  // NOLINT(readabi
         }
     }
     if (to_be_epoch > epoch_id_record_finished_.load()) {
+        TRACE_END;
         return;
     }
 
@@ -285,7 +297,9 @@ void datastore::update_min_epoch_id(bool from_switch_epoch) {  // NOLINT(readabi
                     break;
                 }
                 if (persistent_callback_) {
+                    TRACE <<  "start calling persistent callback to " << to_be_epoch;
                     persistent_callback_(to_be_epoch);
+                    TRACE <<  "end calling persistent callback to " << to_be_epoch;
                 }
             }
             {
@@ -296,6 +310,7 @@ void datastore::update_min_epoch_id(bool from_switch_epoch) {  // NOLINT(readabi
             break;
         }
     }
+    TRACE_END;
 }
 
 
@@ -450,14 +465,14 @@ void datastore::recover([[maybe_unused]] const epoch_tag& tag) const noexcept {
 }
 
 rotation_result datastore::rotate_log_files() {
-    VLOG(50) << "start rotate_log_files()";
+    TRACE_START;
     std::lock_guard<std::mutex> lock(rotate_mutex); 
-    VLOG(50) << "start rotate_log_files() critical section";
+    TRACE << "start rotate_log_files() critical section";
     auto epoch_id = epoch_id_switched_.load();
     if (epoch_id == 0) {
         LOG_AND_THROW_EXCEPTION("rotation requires epoch_id > 0, but got epoch_id = 0");
     }
-    VLOG(50) << "epoch_id = " << epoch_id;
+    TRACE << "epoch_id = " << epoch_id;
     {
         on_wait1();
         // Wait until epoch_id_informed_ is less than rotated_epoch_id to ensure safe rotation.
@@ -466,7 +481,7 @@ rotation_result datastore::rotate_log_files() {
             cv_epoch_informed.wait(ul);  
         }
     }
-    VLOG(50) << "end waiting for epoch_id_informed_ to catch up";
+    TRACE << "end waiting for epoch_id_informed_ to catch up";
     rotation_result result(epoch_id);
     for (const auto& lc : log_channels_) {
         boost::system::error_code error;
@@ -478,7 +493,7 @@ rotation_result datastore::rotate_log_files() {
         result.add_rotated_file(rotated_file);
     }
     result.set_rotation_end_files(get_files());
-    VLOG(50) << "end rotate_log_files()";
+    TRACE_END;
     return result;
 }
 
@@ -586,7 +601,7 @@ void datastore::stop_online_compaction_worker() {
 }
 
 void datastore::compact_with_online() {
-    VLOG(50) << "start compact_with_online()";   
+    TRACE_START;
     check_after_ready(static_cast<const char*>(__func__));
 
     // rotate first
@@ -606,7 +621,7 @@ void datastore::compact_with_online() {
         (need_compaction_filenames.size() == 1 &&
          need_compaction_filenames.find(compaction_catalog::get_compacted_filename()) != need_compaction_filenames.end())) {
         LOG_LP(INFO) << "no files to compact";
-        VLOG(50) << "return compact_with_online() without compaction";
+        TRACE_END << "return compact_with_online() without compaction";
         return;
     }
 
@@ -655,7 +670,7 @@ void datastore::compact_with_online() {
     remove_file_safely(location_ / compaction_catalog::get_compacted_backup_filename());
 
     LOG_LP(INFO) << "compaction finished";
-    VLOG(50) << "end compact_with_online()";
+    TRACE_END;
 }
 
 } // namespace limestone::api

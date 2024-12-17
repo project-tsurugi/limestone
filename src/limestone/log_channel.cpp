@@ -59,6 +59,7 @@ void log_channel::begin_session() {
             current_epoch_id_.store(envelope_.epoch_id_switched_.load());
             std::atomic_thread_fence(std::memory_order_acq_rel);
         } while (current_epoch_id_.load() != envelope_.epoch_id_switched_.load());
+        TRACE_START << "current_epoch_id_=" << current_epoch_id_.load();
 
         auto log_file = file_path();
         strm_ = fopen(log_file.c_str(), "a");  // NOLINT(*-owning-memory)
@@ -71,13 +72,16 @@ void log_channel::begin_session() {
             registered_ = true;
         }
         log_entry::begin_session(strm_, static_cast<epoch_id_type>(current_epoch_id_.load()));
+        TRACE_END;
     } catch (...) {
+        TRACE_ABORT;
         HANDLE_EXCEPTION_AND_ABORT();
     }
 }
 
 void log_channel::end_session() {
     try {
+        TRACE_START << "current_epoch_id_=" << current_epoch_id_.load();
         if (fflush(strm_) != 0) {
             LOG_AND_THROW_IO_EXCEPTION("fflush failed", errno);
         }
@@ -91,7 +95,9 @@ void log_channel::end_session() {
         if (fclose(strm_) != 0) {  // NOLINT(*-owning-memory)
             LOG_AND_THROW_IO_EXCEPTION("fclose failed", errno);
         }
+        TRACE_END;
     } catch (...) {
+        TRACE_ABORT;
         HANDLE_EXCEPTION_AND_ABORT();
     }
 }
@@ -106,12 +112,15 @@ void log_channel::abort_session([[maybe_unused]] status status_code, [[maybe_unu
 }
 
 void log_channel::add_entry(storage_id_type storage_id, std::string_view key, std::string_view value, write_version_type write_version) {
+    TRACE_START << "storage_id=" << storage_id << ", key=" << key << ",value = " << value << ", epoch =" << write_version.epoch_number_ << ", minor =" << write_version.minor_write_version_;
     try {
         log_entry::write(strm_, storage_id, key, value, write_version);
         write_version_ = write_version;
     } catch (...) {
+        TRACE_ABORT;
         HANDLE_EXCEPTION_AND_ABORT();
     }
+    TRACE_END;
 }
 
 void log_channel::add_entry([[maybe_unused]] storage_id_type storage_id, [[maybe_unused]] std::string_view key, [[maybe_unused]] std::string_view value, [[maybe_unused]] write_version_type write_version, [[maybe_unused]] const std::vector<large_object_input>& large_objects) {
@@ -119,39 +128,51 @@ void log_channel::add_entry([[maybe_unused]] storage_id_type storage_id, [[maybe
 };
 
 void log_channel::remove_entry(storage_id_type storage_id, std::string_view key, write_version_type write_version) {
+    TRACE_START << "storage_id=" << storage_id << ", key=" << key << ", epoch =" << write_version.epoch_number_ << ", minor =" << write_version.minor_write_version_;
     try {
         log_entry::write_remove(strm_, storage_id, key, write_version);
         write_version_ = write_version;
     } catch (...) {
+        TRACE_ABORT;
         HANDLE_EXCEPTION_AND_ABORT();
     }
+    TRACE_END;
 }
 
 void log_channel::add_storage(storage_id_type storage_id, write_version_type write_version) {
+    TRACE_START << "storage_id=" << storage_id << ", epoch =" << write_version.epoch_number_ << ", minor =" << write_version.minor_write_version_;
     try {
         log_entry::write_add_storage(strm_, storage_id, write_version);
         write_version_ = write_version;
     } catch (...) {
+        TRACE_ABORT;
         HANDLE_EXCEPTION_AND_ABORT();
     }
+    VLOG(50) << "end add_storage() with storage_id=" << storage_id << ", epoch =" << write_version.epoch_number_ << ", minor =" << write_version.minor_write_version_;
 }
 
 void log_channel::remove_storage(storage_id_type storage_id, write_version_type write_version) {
+    TRACE_START << "storage_id=" << storage_id << ", epoch =" << write_version.epoch_number_ << ", minor =" << write_version.minor_write_version_;
     try {
         log_entry::write_remove_storage(strm_, storage_id, write_version);
         write_version_ = write_version;
     } catch (...) {
+        TRACE_ABORT;
         HANDLE_EXCEPTION_AND_ABORT();
     }
+    TRACE_END;
 }
 
 void log_channel::truncate_storage(storage_id_type storage_id, write_version_type write_version) {
+    TRACE_START << "storage_id=" << storage_id << ", epoch =" << write_version.epoch_number_ << ", minor =" << write_version.minor_write_version_;
     try {
         log_entry::write_clear_storage(strm_, storage_id, write_version);
         write_version_ = write_version;
     } catch (...) {
+        TRACE_ABORT;
         HANDLE_EXCEPTION_AND_ABORT();
     }
+    TRACE_END;
 }
 
 boost::filesystem::path log_channel::file_path() const noexcept {
