@@ -25,29 +25,36 @@
 
 namespace limestone::api {
 
+enum class exception_type {
+    fatal_error,
+    initialization_failure 
+};
+
 class limestone_exception : public std::runtime_error {
 public:
-    explicit limestone_exception(const std::string& message) noexcept
-        : std::runtime_error(message) {}
+    explicit limestone_exception(const exception_type type, const std::string& message) noexcept
+        : std::runtime_error(message), type_(type)  {}
 
-    explicit limestone_exception(const std::string& message, int error_code) noexcept
-        : std::runtime_error(message), error_code_(error_code) {}
+    explicit limestone_exception(const exception_type type, const std::string& message, int error_code) noexcept
+        : std::runtime_error(message), type_(type), error_code_(error_code) {}
 
     [[nodiscard]] int error_code() const noexcept { return error_code_; }
+    [[nodiscard]] exception_type type() const noexcept {return type_;}
 
 private:
+    exception_type type_;
     int error_code_{0};
 };
 
 class limestone_io_exception : public limestone_exception {
 public:
     // Constructor that takes an error message and errno as arguments (int)
-    explicit limestone_io_exception(const std::string& message, int error_code) noexcept
-        : limestone_exception(message, error_code) {}
+    explicit limestone_io_exception(const exception_type type, const std::string& message, int error_code) noexcept
+        : limestone_exception(type, message, error_code) {}
 
     // Constructor that takes an error message and boost::system::error_code as arguments
-    explicit limestone_io_exception(const std::string& message, const boost::system::error_code& error_code) noexcept
-        : limestone_exception(message, error_code.value()) {}
+    explicit limestone_io_exception(const exception_type type, const std::string& message, const boost::system::error_code& error_code) noexcept
+        : limestone_exception(type, message, error_code.value()) {}
 
     // Helper function to format the error message for int error_code
     static std::string format_message(const std::string& message, int error_code) noexcept{

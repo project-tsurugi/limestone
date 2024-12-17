@@ -27,7 +27,7 @@
 #include <limestone/api/datastore.h>
 #include "internal.h"
 #include "log_entry.h"
-#include "rotation_task.h"
+#include "rotation_result.h"
 
 namespace limestone::api {
 
@@ -41,12 +41,25 @@ log_channel::log_channel(boost::filesystem::path location, std::size_t id, datas
 
 void log_channel::begin_session() {
     try {
+        // Synchronize `current_epoch_id_` with `epoch_id_switched_`.
+        // This loop is necessary to prevent inconsistencies in `current_epoch_id_`
+        // that could occur if `epoch_id_switched_` changes at a specific timing.
+        //
+        // Case where inconsistency occurs:
+        // 1. This thread (L) loads `epoch_id_switched_` and reads 10.
+        // 2. Another thread (S) immediately updates `epoch_id_switched_` to 11.
+        // 3. If the other thread (S) reads `current_epoch_id_` at this point,
+        //    it expects `current_epoch_id_` to be consistent with the latest
+        //    `epoch_id_switched_` value (11), but `current_epoch_id_` may still
+        //    hold the outdated value, causing an inconsistency.
+        //
+        // This loop detects such inconsistencies and repeats until `current_epoch_id_`
+        // matches the latest value of `epoch_id_switched_`, ensuring consistency.
         do {
             current_epoch_id_.store(envelope_.epoch_id_switched_.load());
             std::atomic_thread_fence(std::memory_order_acq_rel);
         } while (current_epoch_id_.load() != envelope_.epoch_id_switched_.load());
         VLOG_LP(log_info) << "start begin_session() with current_epoch_id_=" << current_epoch_id_.load();
-        latest_ession_epoch_id_.store(static_cast<epoch_id_type>(current_epoch_id_.load()));
 
         auto log_file = file_path();
         strm_ = fopen(log_file.c_str(), "a");  // NOLINT(*-owning-memory)
@@ -59,10 +72,6 @@ void log_channel::begin_session() {
             registered_ = true;
         }
         log_entry::begin_session(strm_, static_cast<epoch_id_type>(current_epoch_id_.load()));
-        {
-            std::lock_guard<std::mutex> lock(session_mutex_);
-            waiting_epoch_ids_.insert(latest_ession_epoch_id_);
-        }
         VLOG_LP(log_info) << "end begin_session() with current_epoch_id_=" << current_epoch_id_.load();
     } catch (...) {
         HANDLE_EXCEPTION_AND_ABORT();
@@ -79,19 +88,11 @@ void log_channel::end_session() {
             LOG_AND_THROW_IO_EXCEPTION("fsync failed", errno);
         }
         finished_epoch_id_.store(current_epoch_id_.load());
-        current_epoch_id_.store(UINT64_MAX);
         envelope_.update_min_epoch_id();
+        current_epoch_id_.store(UINT64_MAX);
 
         if (fclose(strm_) != 0) {  // NOLINT(*-owning-memory)
             LOG_AND_THROW_IO_EXCEPTION("fclose failed", errno);
-        }
-
-        // Remove current_epoch_id_ from waiting_epoch_ids_
-        {
-            std::lock_guard<std::mutex> lock(session_mutex_);
-            waiting_epoch_ids_.erase(latest_ession_epoch_id_.load());
-            // Notify waiting threads
-            session_cv_.notify_all();
         }
         VLOG_LP(log_info) << "end end_session() with current_epoch_id_=" << current_epoch_id_.load();
     } catch (...) {
@@ -163,7 +164,7 @@ boost::filesystem::path log_channel::file_path() const noexcept {
 
 // DO rotate without condition check.
 //  use this after your check
-rotation_result log_channel::do_rotate_file(epoch_id_type epoch) {
+std::string log_channel::do_rotate_file(epoch_id_type epoch) {
     std::stringstream ss;
     ss << file_.string() << "."
        << std::setw(14) << std::setfill('0') << envelope_.current_unix_epoch_in_millis()
@@ -181,19 +182,7 @@ rotation_result log_channel::do_rotate_file(epoch_id_type epoch) {
     registered_ = false;
     envelope_.subtract_file(location_ / file_);
 
-    // Create a rotation result with the current epoch ID
-    rotation_result result(new_name, latest_ession_epoch_id_);
-    return result;
-}
-
-void log_channel::wait_for_end_session(epoch_id_type epoch) {
-    std::unique_lock<std::mutex> lock(session_mutex_);
-
-    // Wait until the specified epoch_id is removed from waiting_epoch_ids_
-    session_cv_.wait(lock, [this, epoch]() {
-        // Ensure that no ID less than or equal to the specified epoch exists in waiting_epoch_ids_
-        return waiting_epoch_ids_.empty() || *waiting_epoch_ids_.begin() > epoch;
-    });
+    return new_name;
 }
 
 } // namespace limestone::api

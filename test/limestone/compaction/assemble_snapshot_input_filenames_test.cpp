@@ -20,17 +20,7 @@
 #include "compaction_catalog.h"
 #include "limestone/api/epoch_id_type.h"
 #include "limestone/api/limestone_exception.h"
-
-namespace limestone::internal {
-// Forward declare the target function for testing
-std::set<std::string> assemble_snapshot_input_filenames(
-    const std::unique_ptr<compaction_catalog>& compaction_catalog,
-    const boost::filesystem::path& location);
-std::set<std::string> assemble_snapshot_input_filenames(
-    const std::unique_ptr<compaction_catalog>& compaction_catalog,
-    const boost::filesystem::path& location,
-    file_operations& file_ops);
-}
+#include "internal.h"
 
 namespace limestone::testing {
 

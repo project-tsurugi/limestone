@@ -28,8 +28,7 @@
 
 #include <limestone/api/datastore.h>
 #include "internal.h"
-
-#include "rotation_task.h"
+#include "rotation_result.h"
 #include "log_entry.h"
 #include "online_compaction.h"
 #include "compaction_catalog.h"
@@ -39,7 +38,7 @@ using namespace limestone::internal;
 
 datastore::datastore() noexcept = default;
 
-datastore::datastore(configuration const& conf) : location_(conf.data_locations_.at(0)) {
+datastore::datastore(configuration const& conf) : location_(conf.data_locations_.at(0)) { // NOLINT(readability-function-cognitive-complexity)
     try {
         LOG(INFO) << "/:limestone:config:datastore setting log location = " << location_.string();
         boost::system::error_code error;
@@ -68,12 +67,23 @@ datastore::datastore(configuration const& conf) : location_(conf.data_locations_
             }
         }
         internal::check_and_migrate_logdir_format(location_);
+
+        // acquire lock for manifest file
+        fd_for_flock_ = internal::acquire_manifest_lock(location_);
+        if (fd_for_flock_ == -1) {
+            if (errno == EWOULDBLOCK) {
+                std::string err_msg = "another process is using the log directory: " + location_.string() + ".";
+                throw limestone_exception(exception_type::initialization_failure, err_msg); 
+            }
+            std::string err_msg = "failed to acquire lock for manifest in directory: " + location_.string() + ".";
+            throw limestone_io_exception(exception_type::initialization_failure, err_msg, errno);
+        }
+
         add_file(compaction_catalog_path);
         compaction_catalog_ = std::make_unique<compaction_catalog>(compaction_catalog::from_catalog_file(location_));
 
-        // XXX: prusik era
-        // TODO: read rotated epoch files if main epoch file does not exist
-        epoch_file_path_ = location_ / boost::filesystem::path(std::string(limestone::internal::epoch_file_name));
+        epoch_file_path_ = location_ / std::string(limestone::internal::epoch_file_name);
+        tmp_epoch_file_path_ = location_ / std::string(limestone::internal::tmp_epoch_file_name);
         const bool result = boost::filesystem::exists(epoch_file_path_, error);
         if (!result || error) {
             FILE* strm = fopen(epoch_file_path_.c_str(), "a");  // NOLINT(*-owning-memory)
@@ -84,6 +94,14 @@ datastore::datastore(configuration const& conf) : location_(conf.data_locations_
                 LOG_AND_THROW_IO_EXCEPTION("fclose failed", errno);
             }
             add_file(epoch_file_path_);
+        }
+
+        const bool exists = boost::filesystem::exists(tmp_epoch_file_path_, error);        
+        if (exists) {
+            const bool result_remove = boost::filesystem::remove(tmp_epoch_file_path_, error);
+            if (!result_remove || error) {
+                LOG_AND_THROW_IO_EXCEPTION("fail to remove temporary epoch file, path: " + tmp_epoch_file_path_.string(), errno);
+            }
         }
 
         recover_max_parallelism_ = conf.recover_max_parallelism_;
@@ -107,10 +125,62 @@ void datastore::recover() const noexcept {
     check_before_ready(static_cast<const char*>(__func__));
 }
 
+enum class file_write_mode {
+    append,
+    overwrite
+};
+
+static void write_epoch_to_file_internal(const std::string& file_path, epoch_id_type epoch_id, file_write_mode mode) {
+    const char* fopen_mode = (mode == file_write_mode::append) ? "a" : "w";
+    std::unique_ptr<FILE, void (*)(FILE*)> file_ptr(fopen(file_path.c_str(), fopen_mode), [](FILE* fp) {
+        if (fp) {
+            if (fclose(fp) != 0) { // NOLINT(cppcoreguidelines-owning-memory)
+                LOG_AND_THROW_IO_EXCEPTION("fclose failed", errno);
+            }
+        }
+    });  
+    if (!file_ptr) {
+        LOG_AND_THROW_IO_EXCEPTION("fopen failed for file: " + file_path, errno);
+    }
+
+    log_entry::durable_epoch(file_ptr.get(), epoch_id);
+
+    if (fflush(file_ptr.get()) != 0) {
+        LOG_AND_THROW_IO_EXCEPTION("fflush failed for file: " + file_path, errno);
+    }
+    if (fsync(fileno(file_ptr.get())) != 0) {
+        LOG_AND_THROW_IO_EXCEPTION("fsync failed for file: " + file_path, errno);
+    }
+}
+
+void datastore::write_epoch_to_file(epoch_id_type epoch_id) {
+    if (++epoch_write_counter >= max_entries_in_epoch_file) {
+        write_epoch_to_file_internal(tmp_epoch_file_path_.string(), epoch_id, file_write_mode::overwrite);
+
+        boost::system::error_code ec;
+        if (::rename(tmp_epoch_file_path_.c_str(), epoch_file_path_.c_str()) != 0) {
+            LOG_AND_THROW_IO_EXCEPTION("Failed to rename temp file: " + tmp_epoch_file_path_.string() + " to " + epoch_file_path_.string(), errno);
+        }
+        boost::filesystem::remove(tmp_epoch_file_path_, ec);
+        if (ec) {
+            LOG_AND_THROW_IO_EXCEPTION("Failed to remove temp file: " + tmp_epoch_file_path_.string(), ec);
+        }
+        epoch_write_counter = 0;
+    } else {
+        write_epoch_to_file_internal(epoch_file_path_.string(), epoch_id, file_write_mode::append);
+    }
+}
+
+
+
 void datastore::ready() {
     try {
         create_snapshot();
         online_compaction_worker_future_ = std::async(std::launch::async, &datastore::online_compaction_worker, this);
+        if (epoch_id_switched_.load() != 0) {
+            write_epoch_to_file(epoch_id_informed_.load());
+        }
+        cleanup_rotated_epoch_files(location_);
         state_ = state::ready;
     } catch (...) {
         HANDLE_EXCEPTION_AND_ABORT();
@@ -142,30 +212,39 @@ epoch_id_type datastore::last_epoch() const noexcept { return static_cast<epoch_
 void datastore::switch_epoch(epoch_id_type new_epoch_id) {
     try {
         check_after_ready(static_cast<const char*>(__func__));
-        rotation_task_helper::attempt_task_execution_from_queue(); 
         auto neid = static_cast<std::uint64_t>(new_epoch_id);
         if (auto switched = epoch_id_switched_.load(); neid <= switched) {
             LOG_LP(WARNING) << "switch to epoch_id_type of " << neid << " (<=" << switched << ") is curious";
         }
 
         epoch_id_switched_.store(neid);
-        update_min_epoch_id(true);
+        if (state_ != state::not_ready) {
+            update_min_epoch_id(true);
+        }
     } catch (...) {
         HANDLE_EXCEPTION_AND_ABORT();
     }
 }
 
 void datastore::update_min_epoch_id(bool from_switch_epoch) {  // NOLINT(readability-function-cognitive-complexity)
+
     VLOG_LP(log_info) << "start update_min_epoch_id() with from_switch_epoch=" << from_switch_epoch;
-    auto upper_limit = epoch_id_switched_.load() - 1;
+    auto upper_limit = epoch_id_switched_.load();
+    if (upper_limit == 0) {
+        return; // If epoch_id_switched_ is zero, it means no epoch has been switched, so updating epoch_id_to_be_recorded_ and epoch_id_informed_ is unnecessary.
+    }
+    upper_limit--;
+
     epoch_id_type max_finished_epoch = 0;
 
     for (const auto& e : log_channels_) {
-        auto working_epoch = static_cast<epoch_id_type>(e->current_epoch_id_.load());
-        if ((working_epoch - 1) < upper_limit) {
-            upper_limit = working_epoch - 1;
-        }
+        auto working_epoch = e->current_epoch_id_.load();
         auto finished_epoch = e->finished_epoch_id_.load();
+        if (working_epoch > finished_epoch && working_epoch != UINT64_MAX) {
+            if ((working_epoch - 1) < upper_limit) {
+                upper_limit = working_epoch - 1;
+            }
+        }
         if (max_finished_epoch < finished_epoch) {
             max_finished_epoch = finished_epoch;
         }
@@ -178,51 +257,54 @@ void datastore::update_min_epoch_id(bool from_switch_epoch) {  // NOLINT(readabi
     if (from_switch_epoch && (to_be_epoch > static_cast<std::uint64_t>(max_finished_epoch))) {
         to_be_epoch = static_cast<std::uint64_t>(max_finished_epoch);
     }
-    auto old_epoch_id = epoch_id_recorded_.load();
+    auto old_epoch_id = epoch_id_to_be_recorded_.load();
     while (true) {
         if (old_epoch_id >= to_be_epoch) {
             break;
         }
-        if (epoch_id_recorded_.compare_exchange_strong(old_epoch_id, to_be_epoch)) {
-            VLOG_LP(log_info) << "start update epooch file to " << to_be_epoch;
+        if (epoch_id_to_be_recorded_.compare_exchange_strong(old_epoch_id, to_be_epoch)) {
             std::lock_guard<std::mutex> lock(mtx_epoch_file_);
-
-            FILE* strm = fopen(epoch_file_path_.c_str(), "a");  // NOLINT(*-owning-memory)
-            if (!strm) {
-                LOG_AND_THROW_IO_EXCEPTION("fopen failed", errno);
-            }
-            log_entry::durable_epoch(strm, static_cast<epoch_id_type>(epoch_id_recorded_.load()));
-            if (fflush(strm) != 0) {
-                LOG_AND_THROW_IO_EXCEPTION("fflush failed", errno);
-            }
-            if (fsync(fileno(strm)) != 0) {
-                LOG_AND_THROW_IO_EXCEPTION("fsync failed", errno);
-            }
-            if (fclose(strm) != 0) {  // NOLINT(*-owning-memory)
-                LOG_AND_THROW_IO_EXCEPTION("fclose failed", errno);
-            }
-            VLOG_LP(log_info) << "end update epooch file to " << to_be_epoch;
+            write_epoch_to_file(static_cast<epoch_id_type>(to_be_epoch));
+            epoch_id_record_finished_.store(epoch_id_to_be_recorded_.load());
             break;
         }
+    }
+    if (to_be_epoch > epoch_id_record_finished_.load()) {
+        return;
     }
 
     // update informed_epoch_
     to_be_epoch = upper_limit;
+    // In `informed_epoch_`, the update restriction based on the `from_switch_epoch` condition is intentionally omitted.
+    // Due to the interface specifications of Shirakami, it is necessary to advance the epoch even if the log channel
+    // is not updated. This behavior differs from `recorded_epoch_` and should be maintained as such.
     old_epoch_id = epoch_id_informed_.load();
     while (true) {
         if (old_epoch_id >= to_be_epoch) {
             break;
         }
         if (epoch_id_informed_.compare_exchange_strong(old_epoch_id, to_be_epoch)) {
-            if (persistent_callback_) {
-                VLOG_LP(log_info) << "start calling persistent callback to " << to_be_epoch;
-                persistent_callback_(to_be_epoch);
-                VLOG_LP(log_info) << "end calling persistent callback to " << to_be_epoch;
+            {
+                std::lock_guard<std::mutex> lock(mtx_epoch_persistent_callback_);
+                if (to_be_epoch < epoch_id_informed_.load()) {
+                    break;
+                }
+                if (persistent_callback_) {
+                    VLOG_LP(log_info) << "start calling persistent callback to " << to_be_epoch;
+                    persistent_callback_(to_be_epoch);
+                    VLOG_LP(log_info) << "end calling persistent callback to " << to_be_epoch;
+                }
+            }
+            {
+                // Notify waiting threads in rotate_log_files() about the update to epoch_id_informed_
+                std::lock_guard<std::mutex> lock(informed_mutex);
+                cv_epoch_informed.notify_all();  
             }
             break;
         }
     }
 }
+
 
 void datastore::add_persistent_callback(std::function<void(epoch_id_type)> callback) noexcept {
     check_before_ready(static_cast<const char*>(__func__));
@@ -251,7 +333,15 @@ std::future<void> datastore::shutdown() noexcept {
         VLOG(log_info) << "/:limestone:datastore:shutdown compaction task has been stopped.";
     }
 
-    return std::async(std::launch::async, []{
+    if (fd_for_flock_ != -1) {
+        if (::close(fd_for_flock_) == -1) {
+            VLOG(log_error) << "Failed to close lock file descriptor: " << strerror(errno);
+        } else {
+            fd_for_flock_ = -1;
+        }
+    }
+
+    return std::async(std::launch::async, [] {
         std::this_thread::sleep_for(std::chrono::microseconds(100000));
         VLOG(log_info) << "/:limestone:datastore:shutdown end";
     });
@@ -270,8 +360,9 @@ backup& datastore::begin_backup() {
 }
 
 std::unique_ptr<backup_detail> datastore::begin_backup(backup_type btype) {  // NOLINT(readability-function-cognitive-complexity)
-try {
-    rotation_result result = rotate_log_files();
+    try {
+        rotate_epoch_file();
+        rotation_result result = rotate_log_files();
 
         // LOG-0: all files are log file, so all files are selected in both standard/transaction mode.
         (void) btype;
@@ -366,19 +457,35 @@ void datastore::recover([[maybe_unused]] const epoch_tag& tag) const noexcept {
 }
 
 rotation_result datastore::rotate_log_files() {
-    // Create and enqueue a rotation task.
-    // Rotation task is executed when switch_epoch() is called.
-    // Wait for the result of the rotation task.
-    auto task = rotation_task_helper::create_and_enqueue_task(*this);
-    rotation_result result = task->wait_for_result();
-
-    // Wait for all log channels to complete the session with the specified session ID.
-    auto epoch_id = result.get_epoch_id();
-    if (epoch_id.has_value()) {
-        for (auto& lc : log_channels_) {
-            lc->wait_for_end_session(epoch_id.value());
+    VLOG(50) << "start rotate_log_files()";
+    std::lock_guard<std::mutex> lock(rotate_mutex); 
+    VLOG(50) << "start rotate_log_files() critical section";
+    auto epoch_id = epoch_id_switched_.load();
+    if (epoch_id == 0) {
+        LOG_AND_THROW_EXCEPTION("rotation requires epoch_id > 0, but got epoch_id = 0");
+    }
+    VLOG(50) << "epoch_id = " << epoch_id;
+    {
+        on_wait1();
+        // Wait until epoch_id_informed_ is less than rotated_epoch_id to ensure safe rotation.
+        std::unique_lock<std::mutex> ul(informed_mutex);
+        while (epoch_id_informed_.load() < epoch_id) {
+            cv_epoch_informed.wait(ul);  
         }
     }
+    VLOG(50) << "end waiting for epoch_id_informed_ to catch up";
+    rotation_result result(epoch_id);
+    for (const auto& lc : log_channels_) {
+        boost::system::error_code error;
+        bool ret = boost::filesystem::exists(lc->file_path(), error);
+        if (!ret || error) {
+            continue;  // skip if not exists
+        }
+        std::string rotated_file = lc->do_rotate_file();
+        result.add_rotated_file(rotated_file);
+    }
+    result.set_rotation_end_files(get_files());
+    VLOG(50) << "end rotate_log_files()";
     return result;
 }
 
@@ -486,6 +593,7 @@ void datastore::stop_online_compaction_worker() {
 }
 
 void datastore::compact_with_online() {
+    VLOG(50) << "start compact_with_online()";   
     check_after_ready(static_cast<const char*>(__func__));
 
     // rotate first
@@ -505,6 +613,7 @@ void datastore::compact_with_online() {
         (need_compaction_filenames.size() == 1 &&
          need_compaction_filenames.find(compaction_catalog::get_compacted_filename()) != need_compaction_filenames.end())) {
         LOG_LP(INFO) << "no files to compact";
+        VLOG(50) << "return compact_with_online() without compaction";
         return;
     }
 
@@ -529,7 +638,7 @@ void datastore::compact_with_online() {
 
     // get a set of all files in the location_ directory
     std::set<std::string> files_in_location = get_files_in_directory(location_);
-
+    
     // check if detached_pwals exist in location_
     for (auto it = detached_pwals.begin(); it != detached_pwals.end();) {
         if (files_in_location.find(*it) == files_in_location.end()) {
@@ -546,13 +655,14 @@ void datastore::compact_with_online() {
     // update compaction catalog
     compacted_file_info compacted_file_info{compacted_file.filename().string(), 1};
     detached_pwals.erase(compacted_file.filename().string());
-    compaction_catalog_->update_catalog_file(result.get_epoch_id().value_or(0), {compacted_file_info}, detached_pwals);
+    compaction_catalog_->update_catalog_file(result.get_epoch_id(), {compacted_file_info}, detached_pwals);
     add_file(compacted_file);
 
     // remove pwal_0000.compacted.prev
     remove_file_safely(location_ / compaction_catalog::get_compacted_backup_filename());
 
     LOG_LP(INFO) << "compaction finished";
+    VLOG(50) << "end compact_with_online()";
 }
 
 } // namespace limestone::api
