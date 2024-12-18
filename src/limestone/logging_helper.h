@@ -17,6 +17,7 @@
 
 #include <array>
 #include <string_view>
+#include <thread>
 
 namespace limestone {
 
