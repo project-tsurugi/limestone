@@ -112,4 +112,44 @@ constexpr auto location_prefix(const char (&prettyname)[N], const char (&funcnam
 // NOLINTNEXTLINE
 #define DVLOG_LP(x) _LOCATION_PREFIX_TO_STREAM(DVLOG(x))
 
+// Cached thread name retrieval
+inline std::string getThreadName() {
+    thread_local std::string cachedThreadName = [] {
+        std::array<char, 16> name = {"Unknown"};
+        if (pthread_getname_np(pthread_self(), name.data(), name.size()) != 0) {
+            return std::string("Unknown");
+        }
+        return std::string(name.data());
+    }();
+    return cachedThreadName;
+}
+
+
+// Log level for TRACE logging
+constexpr int TRACE_LOG_LEVEL = 50;
+
+// Common logging macro for TRACE operations
+// NOLINTBEGIN(cppcoreguidelines-macro-usage)
+#define TRACE_COMMON(label)                                                       \
+    if (!VLOG_IS_ON(TRACE_LOG_LEVEL)) {}                                          \
+    else                                                                          \
+        VLOG(TRACE_LOG_LEVEL)                                                     \
+            << "[Thread " << std::this_thread::get_id()                           \
+            << " (" << getThreadName() << ")] LIMESTONE TRACE: " << __func__      \
+            << ((label)[0] ? " " : "")                                            \
+            << (label)                                                            \
+            << ": "
+// NOLINTEND(cppcoreguidelines-macro-usage)
+
+// Specific macros for different TRACE use cases
+// NOLINTNEXTLINE
+#define TRACE TRACE_COMMON("trace")
+// NOLINTNEXTLINE
+#define TRACE_START TRACE_COMMON("start")
+// NOLINTNEXTLINE
+#define TRACE_END TRACE_COMMON("end")
+// NOLINTNEXTLINE
+#define TRACE_ABORT TRACE_COMMON("abort")
+
+
 } // namespace
