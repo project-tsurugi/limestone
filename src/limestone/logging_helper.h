@@ -126,7 +126,7 @@ inline std::string getThreadName() {
 
 
 // Log level for TRACE logging
-constexpr int TRACE_LOG_LEVEL = 50;
+constexpr int TRACE_LOG_LEVEL = 30;
 
 // Common logging macro for TRACE operations
 // NOLINTBEGIN(cppcoreguidelines-macro-usage)

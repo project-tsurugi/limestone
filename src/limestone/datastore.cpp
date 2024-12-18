@@ -131,6 +131,7 @@ enum class file_write_mode {
 };
 
 static void write_epoch_to_file_internal(const std::string& file_path, epoch_id_type epoch_id, file_write_mode mode) {
+    std::this_thread::sleep_for(std::chrono::milliseconds(100));
     const char* fopen_mode = (mode == file_write_mode::append) ? "a" : "w";
     std::unique_ptr<FILE, void (*)(FILE*)> file_ptr(fopen(file_path.c_str(), fopen_mode), [](FILE* fp) {
         if (fp) {
