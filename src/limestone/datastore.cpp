@@ -263,25 +263,31 @@ void datastore::update_min_epoch_id(bool from_switch_epoch) {  // NOLINT(readabi
     if (from_switch_epoch && (to_be_epoch > static_cast<std::uint64_t>(max_finished_epoch))) {
         to_be_epoch = static_cast<std::uint64_t>(max_finished_epoch);
     }
+
+    TRACE << "update epoch file part start with to_be_epoch = " << to_be_epoch;
     auto old_epoch_id = epoch_id_to_be_recorded_.load();
     while (true) {
         if (old_epoch_id >= to_be_epoch) {
             break;
         }
         if (epoch_id_to_be_recorded_.compare_exchange_strong(old_epoch_id, to_be_epoch)) {
+            TRACE << "epoch_id_to_be_recorded_ updated to " << to_be_epoch;
             std::lock_guard<std::mutex> lock(mtx_epoch_file_);
             write_epoch_to_file(static_cast<epoch_id_type>(to_be_epoch));
             epoch_id_record_finished_.store(epoch_id_to_be_recorded_.load());
+            TRACE << "epoch_id_record_finished_ updated to " << to_be_epoch;
             break;
         }
     }
     if (to_be_epoch > epoch_id_record_finished_.load()) {
+        TRACE << "skipping persistent callback part, to_be_epoch =  " << to_be_epoch << ", epoch_id_record_finished_ = " << epoch_id_record_finished_.load();
         TRACE_END;
         return;
     }
 
     // update informed_epoch_
     to_be_epoch = upper_limit;
+    TRACE << "persistent callback part start with to_be_epoch =" << to_be_epoch;
     // In `informed_epoch_`, the update restriction based on the `from_switch_epoch` condition is intentionally omitted.
     // Due to the interface specifications of Shirakami, it is necessary to advance the epoch even if the log channel
     // is not updated. This behavior differs from `recorded_epoch_` and should be maintained as such.
@@ -291,6 +297,7 @@ void datastore::update_min_epoch_id(bool from_switch_epoch) {  // NOLINT(readabi
             break;
         }
         if (epoch_id_informed_.compare_exchange_strong(old_epoch_id, to_be_epoch)) {
+            TRACE << "epoch_id_informed_ updated to " << to_be_epoch;
             {
                 std::lock_guard<std::mutex> lock(mtx_epoch_persistent_callback_);
                 if (to_be_epoch < epoch_id_informed_.load()) {
@@ -474,7 +481,7 @@ rotation_result datastore::rotate_log_files() {
     }
     TRACE << "epoch_id = " << epoch_id;
     {
-        on_wait1();
+        on_wait1(); // for testing
         // Wait until epoch_id_informed_ is less than rotated_epoch_id to ensure safe rotation.
         std::unique_lock<std::mutex> ul(informed_mutex);
         while (epoch_id_informed_.load() < epoch_id) {
