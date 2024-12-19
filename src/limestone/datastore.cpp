@@ -273,6 +273,8 @@ void datastore::update_min_epoch_id(bool from_switch_epoch) {  // NOLINT(readabi
         // as no WAL writer has been tool place from max_finished_epoch to upper_limit and
         // epoch file has updated with max_finished_epoch.
         to_be_epoch = upper_limit;
+    } else {
+        to_be_epoch = epoch_id_record_finished_.load();
     }
     // In `informed_epoch_`, the update restriction based on the `from_switch_epoch` condition is intentionally omitted.
     // Due to the interface specifications of Shirakami, it is necessary to advance the epoch even if the log channel
