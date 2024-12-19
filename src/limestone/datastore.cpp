@@ -274,8 +274,9 @@ void datastore::update_min_epoch_id(bool from_switch_epoch) {  // NOLINT(readabi
             TRACE << "epoch_id_to_be_recorded_ updated to " << to_be_epoch;
             std::lock_guard<std::mutex> lock(mtx_epoch_file_);
             write_epoch_to_file(static_cast<epoch_id_type>(to_be_epoch));
-            epoch_id_record_finished_.store(epoch_id_to_be_recorded_.load());
-            TRACE << "epoch_id_record_finished_ updated to " << to_be_epoch;
+            auto recorded_epoch = epoch_id_to_be_recorded_.load();
+            epoch_id_record_finished_.store(recorded_epoch);
+            TRACE << "epoch_id_record_finished_ updated to " << recorded_epoch;
             break;
         }
     }
