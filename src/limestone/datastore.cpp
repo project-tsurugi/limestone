@@ -72,10 +72,12 @@ datastore::datastore(configuration const& conf) : location_(conf.data_locations_
         fd_for_flock_ = internal::acquire_manifest_lock(location_);
         if (fd_for_flock_ == -1) {
             if (errno == EWOULDBLOCK) {
-                std::string err_msg = "another process is using the log directory: " + location_.string() + ".";
-                throw limestone_exception(exception_type::initialization_failure, err_msg); 
+                std::string err_msg = "another process is using the log directory: " + location_.string();
+                LOG(FATAL) << "/:limestone:config:datastore " << err_msg;
+                throw limestone_exception(exception_type::initialization_failure, err_msg);
             }
-            std::string err_msg = "failed to acquire lock for manifest in directory: " + location_.string() + ".";
+            std::string err_msg = "failed to acquire lock for manifest in directory: " + location_.string();
+            LOG(FATAL) << "/:limestone:config:datastore " << err_msg;
             throw limestone_io_exception(exception_type::initialization_failure, err_msg, errno);
         }
 

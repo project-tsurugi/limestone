@@ -291,9 +291,9 @@ int main(char *dir, subcommand mode) {  // NOLINT
         check_and_migrate_logdir_format(p);
         int lock_fd = acquire_manifest_lock(p);
         if (lock_fd == -1) {
-        LOG(ERROR) << "Another process is using the log directory: " << p
-                   << ". Command execution aborted.";
-                    log_and_exit(64);
+            LOG(ERROR) << "Log directory " << p
+                       << " is already in use by another process. Operation aborted.";
+            log_and_exit(64);
         }
         dblog_scan ds(p);
         ds.set_thread_num(FLAGS_thread_num);

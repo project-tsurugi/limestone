@@ -78,7 +78,7 @@ inline void handle_exception_and_abort(std::string_view func_name) {
         throw;
     } catch (const limestone_exception& e) {
         if (limestone::testing::enable_exception_throwing) {
-            throw;  
+            throw;
         }
         switch (e.type()) {
             case exception_type::fatal_error:
@@ -86,8 +86,7 @@ inline void handle_exception_and_abort(std::string_view func_name) {
                 std::abort();  // Safety measure: this should never be reached due to LOG_LP(FATAL)
                 break;
             case exception_type::initialization_failure:
-                LOG(ERROR) << "Initialization failed. The process will now terminate: " << e.what();
-                std::abort();  
+                throw;
                 break;
         }
     } catch (const std::runtime_error& e) {
@@ -106,4 +105,4 @@ inline void handle_exception_and_abort(std::string_view func_name) {
 // NOLINTNEXTLINE(cppcoreguidelines-macro-usage)
 #define HANDLE_EXCEPTION_AND_ABORT() handle_exception_and_abort(static_cast<const char*>(__func__))
 
-} // namespace limestone
+}  // namespace limestone

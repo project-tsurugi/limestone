@@ -584,7 +584,7 @@ TEST_F(dblogutil_test, execution_fails_while_active_datastore) {
     auto [rc_active, out_active] = inspect("pwal_0000", data_normal);
     EXPECT_NE(rc_active, 0);
     std::cerr << out_active << std::endl;
-    EXPECT_TRUE(contains(out_active, "Another process is using the log directory:"));
+    EXPECT_TRUE(contains(out_active, "Log directory \"/tmp/dblogutil_test\" is already in use by another process. Operation aborted."));
 
     // Inactive datastore
     ds1->shutdown();

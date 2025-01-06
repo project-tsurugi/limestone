@@ -151,8 +151,8 @@ TEST_F(datastore_test, prevent_double_start_test) { // NOLINT
 
     // another process is using the log directory
     ASSERT_DEATH({
-        auto ds2 = std::make_unique<limestone::api::datastore_test>(conf);
-    }, "Initialization failed. The process will now terminate: another process is using the log directory: /tmp/datastore_test/data_location.");
+            auto ds2 = std::make_unique<limestone::api::datastore_test>(conf);
+    }, "another process is using the log directory: /tmp/datastore_test/data_location.");
 
     // Ather datastore is created after the first one is destroyed
     ds1->shutdown();
