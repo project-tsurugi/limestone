@@ -257,10 +257,7 @@ protected:  // for tests
     // They allow derived classes to inject custom behavior or notifications
     // at specific wait points during the execution of the datastore class.
     // The default implementation does nothing, ensuring no impact on production code.
-    virtual void on_wait1() {}
-    virtual void on_wait2() {}
-    virtual void on_wait3() {}
-    virtual void on_wait4() {}
+    virtual void on_rotate_log_files() {}
 
 private:
     std::vector<std::unique_ptr<log_channel>> log_channels_;

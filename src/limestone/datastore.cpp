@@ -486,7 +486,7 @@ rotation_result datastore::rotate_log_files() {
     }
     TRACE << "epoch_id = " << epoch_id;
     {
-        on_wait1(); // for testing
+        on_rotate_log_files(); // for testing
         // Wait until epoch_id_informed_ is less than rotated_epoch_id to ensure safe rotation.
         std::unique_lock<std::mutex> ul(informed_mutex);
         while (epoch_id_informed_.load() < epoch_id) {

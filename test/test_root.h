@@ -36,27 +36,15 @@ public:
     void rotate_epoch_file() { rotate_epoch_file_for_tests(); }
 
 protected:
-    // Overrides for on_wait1 to on_wait4 hooks to enable custom behavior during testing.
-    void on_wait1() override {
-        if (on_wait1_callback) on_wait1_callback();  // Executes the registered callback if set
-    }
-    void on_wait2() override {
-        if (on_wait2_callback) on_wait2_callback();
-    }
-    void on_wait3() override {
-        if (on_wait3_callback) on_wait3_callback();
-    }
-    void on_wait4() override {
-        if (on_wait4_callback) on_wait4_callback();
+    // Overrides for on_rotate_log_files to on_wait hooks to enable custom behavior during testing.
+    void on_rotate_log_files() override {
+        if (on_rotate_log_files_callback) on_rotate_log_files_callback();  // Executes the registered callback if set
     }
 
 public:
-    // Callback functions for testing on_wait1 to on_wait4 behavior.
+    // Callback functions for testing on_rotate_log_files to on_wait4 behavior.
     // These can be dynamically assigned in each test case.
-    std::function<void()> on_wait1_callback;
-    std::function<void()> on_wait2_callback;
-    std::function<void()> on_wait3_callback;
-    std::function<void()> on_wait4_callback;
+    std::function<void()> on_rotate_log_files_callback;
 };
 
 } // namespace limestone::api

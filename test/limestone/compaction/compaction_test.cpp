@@ -143,24 +143,24 @@ protected:
             throw std::runtime_error("datastore_ must be of type datastore_test");
         }
 
-        // Set up the on_wait1 callback to signal when rotate_log_files() reaches the wait point
-        test_datastore->on_wait1_callback = [&]() {
+        // Set up the on_rotate_log_files callback to signal when rotate_log_files() reaches the wait point
+        test_datastore->on_rotate_log_files_callback = [&]() {
             std::unique_lock<std::mutex> lock(wait_mutex);
             wait_triggered = true;
-            wait_cv.notify_one();  // Notify that on_wait1 has been triggered
+            wait_cv.notify_one();  // Notify that on_rotate_log_files has been triggered
         };
 
         try {
             // Run compact_with_online in a separate thread
             auto future = std::async(std::launch::async, [&]() { datastore_->compact_with_online(); });
 
-            // Wait for on_wait1 to be triggered (simulating the waiting in rotate_log_files)
+            // Wait for on_rotate_log_files to be triggered (simulating the waiting in rotate_log_files)
             {
                 std::unique_lock<std::mutex> lock(wait_mutex);
                 wait_cv.wait(lock, [&]() { return wait_triggered; });
             }
 
-            // Now switch the epoch after on_wait1 has been triggered
+            // Now switch the epoch after on_rotate_log_files has been triggered
             datastore_->switch_epoch(epoch);
 
             // Wait for the compact operation to finish
