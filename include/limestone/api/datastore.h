@@ -257,8 +257,20 @@ protected:  // for tests
     // They allow derived classes to inject custom behavior or notifications
     // at specific wait points during the execution of the datastore class.
     // The default implementation does nothing, ensuring no impact on production code.
-    virtual void on_rotate_log_files() {}
-
+    virtual void on_rotate_log_files() noexcept {}
+    virtual void on_begin_session_current_epoch_id_store() noexcept {}
+    virtual void on_end_session_finished_epoch_id_store() noexcept {}
+    virtual void on_end_session_current_epoch_id_store() noexcept {}
+    virtual void on_switch_epoch_epoch_id_switched_store() noexcept {}
+    virtual void on_update_min_epoch_id_epoch_id_switched_load() noexcept {}
+    virtual void on_update_min_epoch_id_current_epoch_id_load() noexcept {}
+    virtual void on_update_min_epoch_id_finished_epoch_id_load() noexcept {}
+    virtual void on_update_min_epoch_id_epoch_id_to_be_recorded_load() noexcept {}
+    virtual void on_update_min_epoch_id_epoch_id_to_be_recorded_cas() noexcept {}
+    virtual void on_update_min_epoch_id_epoch_id_record_finished_load() noexcept {}
+    virtual void on_update_min_epoch_id_epoch_id_informed_load_1() noexcept {}
+    virtual void on_update_min_epoch_id_epoch_id_informed_cas() noexcept {}
+    virtual void on_update_min_epoch_id_epoch_id_informed_load_2() noexcept {}
 private:
     std::vector<std::unique_ptr<log_channel>> log_channels_;
 

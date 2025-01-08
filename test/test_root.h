@@ -36,15 +36,82 @@ public:
     void rotate_epoch_file() { rotate_epoch_file_for_tests(); }
 
 protected:
-    // Overrides for on_rotate_log_files to on_wait hooks to enable custom behavior during testing.
-    void on_rotate_log_files() override {
-        if (on_rotate_log_files_callback) on_rotate_log_files_callback();  // Executes the registered callback if set
+    inline void execute_callback(const std::function<void()>& callback) noexcept {
+        if (callback) {
+            callback();
+        }
     }
 
+    // Overrides for hook methods in the datastore class.
+    // These hooks provide customizable behavior for testing various operations, including
+    // epoch management, log rotation, and session handling.
+    void on_rotate_log_files() noexcept override {
+        execute_callback(on_rotate_log_files_callback);
+    }
+    void on_begin_session_current_epoch_id_store() noexcept override {
+        execute_callback(on_begin_session_current_epoch_id_store_callback);
+    }
+    void on_end_session_finished_epoch_id_store() noexcept override {
+        execute_callback(on_end_session_finished_epoch_id_store_callback);
+    }
+    void on_end_session_current_epoch_id_store() noexcept override {
+        execute_callback(on_end_session_current_epoch_id_store_callback);
+    }
+    void on_switch_epoch_epoch_id_switched_store() noexcept override {
+        execute_callback(on_switch_epoch_epoch_id_switched_store_callback);
+    }
+    void on_update_min_epoch_id_epoch_id_switched_load() noexcept override {
+        execute_callback(on_update_min_epoch_id_epoch_id_switched_load_callback);
+    }
+    void on_update_min_epoch_id_current_epoch_id_load() noexcept override {
+        execute_callback(on_update_min_epoch_id_current_epoch_id_load_callback);
+    }
+    void on_update_min_epoch_id_finished_epoch_id_load() noexcept override {
+        execute_callback(on_update_min_epoch_id_finished_epoch_id_load_callback);
+    }
+    void on_update_min_epoch_id_epoch_id_to_be_recorded_load() noexcept override {
+        execute_callback(on_update_min_epoch_id_epoch_id_to_be_recorded_load_callback);
+    }
+    void on_update_min_epoch_id_epoch_id_to_be_recorded_cas() noexcept override {
+        execute_callback(on_update_min_epoch_id_epoch_id_to_be_recorded_cas_callback);
+    }
+    void on_update_min_epoch_id_epoch_id_record_finished_load() noexcept override {
+        execute_callback(on_update_min_epoch_id_epoch_id_record_finished_load_callback);
+    }
+    void on_update_min_epoch_id_epoch_id_informed_load_1() noexcept override {
+        execute_callback(on_update_min_epoch_id_epoch_id_informed_load_1_callback);
+    }
+    void on_update_min_epoch_id_epoch_id_informed_cas() noexcept override {
+        execute_callback(on_update_min_epoch_id_epoch_id_informed_cas_callback);
+    }
+    void on_update_min_epoch_id_epoch_id_informed_load_2() noexcept override {
+        execute_callback(on_update_min_epoch_id_epoch_id_informed_load_2_callback);
+    }
+
+
 public:
-    // Callback functions for testing on_rotate_log_files to on_wait4 behavior.
-    // These can be dynamically assigned in each test case.
+    // Callback functions for testing various hooks in the datastore class.
+    // These functions can be dynamically assigned to customize behavior during testing of
+    // operations such as epoch management, log rotation, and session handling.
+    //
+    // Example usage:
+    // test_instance.on_end_session_finished_epoch_id_store_callback = []() {
+    //     std::cout << "Callback triggered for on_end_session_finished_epoch_id_store" << std::endl;
+    // };
     std::function<void()> on_rotate_log_files_callback;
+    std::function<void()> on_begin_session_current_epoch_id_store_callback;
+    std::function<void()> on_end_session_finished_epoch_id_store_callback;
+    std::function<void()> on_end_session_current_epoch_id_store_callback;
+    std::function<void()> on_switch_epoch_epoch_id_switched_store_callback;
+    std::function<void()> on_update_min_epoch_id_epoch_id_switched_load_callback;
+    std::function<void()> on_update_min_epoch_id_current_epoch_id_load_callback;
+    std::function<void()> on_update_min_epoch_id_finished_epoch_id_load_callback;
+    std::function<void()> on_update_min_epoch_id_epoch_id_to_be_recorded_load_callback;
+    std::function<void()> on_update_min_epoch_id_epoch_id_to_be_recorded_cas_callback;
+    std::function<void()> on_update_min_epoch_id_epoch_id_record_finished_load_callback;
+    std::function<void()> on_update_min_epoch_id_epoch_id_informed_load_1_callback;
+    std::function<void()> on_update_min_epoch_id_epoch_id_informed_cas_callback;
+    std::function<void()> on_update_min_epoch_id_epoch_id_informed_load_2_callback;
 };
 
 } // namespace limestone::api
