@@ -25,6 +25,7 @@
 
 #include <limestone/logging.h>
 #include <limestone/api/datastore.h>
+#include "race_condition_test_manager.h"
 
 #include "dblog_scan.h"
 #include "internal.h"
@@ -39,17 +40,22 @@ using namespace limestone::internal;
 
 namespace limestone::testing {
 
+static constexpr const char* OPERATION_WRITE_EPOCH = "write_epoch";
+static constexpr const char* OPERATION_PERSIST_CALLBACK = "persist_callback";
+
 class my_datastore : public datastore_test {
 public:
     explicit my_datastore(const configuration& conf) : datastore_test(conf) {
         // Set the write_epoch_callback_ to track written epochs
         set_write_epoch_callback([this](epoch_id_type epoch) {
             this->record_written_epoch(epoch);
+            this->log_operation(OPERATION_WRITE_EPOCH, epoch);
         });
 
         // Set the persistent_callback_ to track persisted epochs
         add_persistent_callback([this](epoch_id_type epoch) {
             this->record_persisted_epoch(epoch);
+            this->log_operation(OPERATION_PERSIST_CALLBACK, epoch);
         });
     }
 
@@ -137,6 +143,27 @@ public:
         return persisted_epochs_.size();
     }
 
+    /**
+     * @brief Get the operation log for written and persisted epochs.
+     * @return A vector containing operation logs in the form of <operation, epoch>.
+     */
+    std::vector<std::pair<std::string, epoch_id_type>> get_operation_log() const {
+        std::lock_guard<std::mutex> lock(mutex_log_);
+        return operation_log_;
+    }
+
+    /**
+     * @brief Print the operation log for debugging.
+     */
+    void print_operation_log() const {
+        auto operation_log = get_operation_log();
+        std::cerr << "Operation log contents:" << std::endl;
+        for (const auto& [operation, epoch] : operation_log) {
+            std::cerr << "Operation: " << operation << ", Epoch: " << epoch << std::endl;
+        }
+    }
+
+
 private:
     void record_written_epoch(epoch_id_type epoch) {
         std::lock_guard<std::mutex> lock(mutex_written_);
@@ -148,10 +175,18 @@ private:
         persisted_epochs_.emplace_back(epoch);
     }
 
+    void log_operation(const std::string& operation, epoch_id_type epoch) {
+        std::lock_guard<std::mutex> lock(mutex_log_);
+        operation_log_.emplace_back(operation, epoch);
+    }
+
     mutable std::mutex mutex_written_;  // Protects access to the written_epochs_ list
     mutable std::mutex mutex_persisted_;  // Protects access to the persisted_epochs_ list
+    mutable std::mutex mutex_log_;  // Protects access to the operation log
+
     std::vector<epoch_id_type> written_epochs_;  // Stores successfully written epochs
     std::vector<epoch_id_type> persisted_epochs_;  // Stores successfully persisted epochs
+    std::vector<std::pair<std::string, epoch_id_type>> operation_log_;  // Logs operations and epochs
 };
 
 
@@ -215,129 +250,10 @@ protected:
 
 };
 
-class race_condition_test_manager {
-public:
-    using test_method = std::function<void()>;
 
-    race_condition_test_manager(
-        my_datastore& datastore,
-        std::vector<std::pair<test_method, size_t>> test_methods)
-        : datastore_(datastore), test_methods_(std::move(test_methods)) {}
-
-    // Set a specific random seed for reproducible tests.
-    void set_random_seed(unsigned int seed) {
-        random_engine_.seed(seed);
-    }
-
-    // Run all test methods in separate threads.
-    void run() {
-        std::lock_guard<std::mutex> lock(mutex_);
-        size_t thread_id_counter = 0; // Ensure consistent order of thread IDs
-        for (const auto& [method, count] : test_methods_) {
-            for (size_t i = 0; i < count; ++i) {
-                size_t current_id = thread_id_counter++;
-                threads_.emplace_back([this, method, current_id]() {
-                    static thread_local size_t thread_local_id = current_id; // Assign thread-local ID
-                    try {
-                        method();
-                        thread_completed(current_id);
-                    } catch (const std::exception& e) {
-                        std::lock_guard<std::mutex> lock(mutex_);
-                        std::cerr << "Exception in thread: " << e.what() << std::endl;
-                        thread_completed(current_id);
-                    } catch (...) {
-                        std::lock_guard<std::mutex> lock(mutex_);
-                        std::cerr << "Unknown exception in thread." << std::endl;
-                        thread_completed(current_id);
-                    }
-                });
-            }
-        }
-    }
-
-    // Pause the current thread at a specific hook.
-    void wait_at_hook(const std::string& hook_name) {
-        static thread_local size_t thread_local_id;  // Thread-local ID
-        {
-            std::unique_lock<std::mutex> lock(mutex_);  // Use the same name 'lock'
-            pending_threads_.emplace(thread_local_id, hook_name);
-        }
-        {
-            std::unique_lock<std::mutex> lock(mutex_);  // Ensure consistent naming for lock
-            cv_.wait(lock, [this]() { return resumed_threads_.count(thread_local_id) > 0; });
-            resumed_threads_.erase(thread_local_id);
-        }
-    }
-
-    // Resume one random thread from the paused threads.
-    void resume_one_thread() {
-        std::unique_lock<std::mutex> lock(mutex_);
-        if (pending_threads_.empty()) return;
-
-        std::uniform_int_distribution<size_t> dist(0, pending_threads_.size() - 1);
-        auto it = pending_threads_.begin();
-        std::advance(it, dist(random_engine_));
-        resumed_threads_.insert(it->first);
-        pending_threads_.erase(it);
-        cv_.notify_all();
-    }
-
-    // Generate a new random seed and display it.
-    void generate_and_set_random_seed() {
-        std::random_device rd;
-        unsigned int seed = rd();
-        std::cout << "Generated random seed: " << seed << std::endl;
-        set_random_seed(seed);
-    }
-
-    // Wait until all threads are either paused or completed.
-    void wait_for_all_threads_to_pause_or_complete() {
-        std::unique_lock<std::mutex> lock(mutex_);
-        cv_.wait(lock, [this]() {
-            return (pending_threads_.size() + threads_completed_ == threads_.size());
-        });
-    }
-
-    // Check if all threads have completed execution.
-    bool all_threads_completed() {
-        std::lock_guard<std::mutex> lock(mutex_);
-        return threads_completed_ == threads_.size();
-    }
-
-    // Join all threads to ensure proper cleanup.
-    void join_all_threads() {
-        for (auto& thread : threads_) {
-            if (thread.joinable()) {
-                thread.join();
-            }
-        }
-    }
-
-private:
-    my_datastore& datastore_;
-    std::vector<std::pair<test_method, size_t>> test_methods_;
-
-    std::mutex mutex_;
-    std::condition_variable cv_;
-    std::vector<std::thread> threads_;
-    std::map<size_t, std::string> pending_threads_; // Use size_t instead of std::thread::id
-    std::set<size_t> resumed_threads_;
-    size_t threads_completed_ = 0;
-
-    std::mt19937 random_engine_{std::random_device{}()};
-
-    // Increment the count of completed threads and notify waiting threads.
-    void thread_completed(size_t thread_id) {
-        std::lock_guard<std::mutex> lock(mutex_);
-        threads_completed_++;
-        cv_.notify_all();
-    }
-};
-
-
-TEST_F(race_detection_test, race_detection_behavior_test) {
+TEST_F(race_detection_test, example) {
     // TestManager の初期化
-    race_condition_test_manager manager(*datastore_, {
+    race_condition_test_manager manager({
         { [this]() { switch_epoch(); }, 5 },
         { [this]() { write_to_log_channel0(); }, 1 },
         { [this]() { write_to_log_channel1(); }, 1 }
@@ -355,100 +271,120 @@ TEST_F(race_detection_test, race_detection_behavior_test) {
     }
 
     manager.join_all_threads();
-    std::cerr << "All threads completed" << std::endl;
 }
 
 
+TEST_F(race_detection_test, race_detection_behavior_test) {
+    EXPECT_EQ(lc0_->current_epoch_id(), UINT64_MAX);
+    EXPECT_EQ(lc0_->finished_epoch_id(), 0);
+    EXPECT_EQ(lc1_->current_epoch_id(), UINT64_MAX);
+    EXPECT_EQ(lc1_->finished_epoch_id(), 0);
+    EXPECT_EQ(datastore_->epoch_id_informed(), 0);
+    EXPECT_EQ(datastore_->epoch_id_to_be_recorded(), 0);
+    EXPECT_EQ(datastore_->epoch_id_record_finished(), 0);
+    EXPECT_EQ(datastore_->epoch_id_switched(), 1);
+    EXPECT_EQ(datastore_->get_written_epoch_count(), 0);
+    EXPECT_EQ(datastore_->get_persisted_epoch_count(), 0);
+    switch_epoch();
+    EXPECT_EQ(lc0_->current_epoch_id(), UINT64_MAX);
+    EXPECT_EQ(lc0_->finished_epoch_id(), 0);
+    EXPECT_EQ(lc1_->current_epoch_id(), UINT64_MAX);
+    EXPECT_EQ(lc1_->finished_epoch_id(), 0);
+    EXPECT_EQ(datastore_->epoch_id_informed(), 1);
+    EXPECT_EQ(datastore_->epoch_id_to_be_recorded(), 0);
+    EXPECT_EQ(datastore_->epoch_id_record_finished(), 0);
+    EXPECT_EQ(datastore_->epoch_id_switched(), 2);
+    EXPECT_EQ(datastore_->get_written_epoch_count(), 0);
+    EXPECT_EQ(datastore_->get_persisted_epoch_count(), 1);
+    EXPECT_EQ(datastore_->get_last_persisted_epoch(), 1);
+    switch_epoch();
+    EXPECT_EQ(lc0_->current_epoch_id(), UINT64_MAX);
+    EXPECT_EQ(lc0_->finished_epoch_id(), 0);
+    EXPECT_EQ(lc1_->current_epoch_id(), UINT64_MAX);
+    EXPECT_EQ(lc1_->finished_epoch_id(), 0);
+    EXPECT_EQ(datastore_->epoch_id_informed(), 2);
+    EXPECT_EQ(datastore_->epoch_id_to_be_recorded(), 0);
+    EXPECT_EQ(datastore_->epoch_id_record_finished(), 0);
+    EXPECT_EQ(datastore_->epoch_id_switched(), 3);
+    EXPECT_EQ(datastore_->get_written_epoch_count(), 0);
+    EXPECT_EQ(datastore_->get_persisted_epoch_count(), 2);
+    EXPECT_EQ(datastore_->get_last_persisted_epoch(), 2);
+    write_to_log_channel0();
+    EXPECT_EQ(lc0_->current_epoch_id(), UINT64_MAX);
+    EXPECT_EQ(lc0_->finished_epoch_id(), 3);
+    EXPECT_EQ(lc1_->current_epoch_id(), UINT64_MAX);
+    EXPECT_EQ(lc1_->finished_epoch_id(), 0);
+    EXPECT_EQ(datastore_->epoch_id_informed(), 2);
+    EXPECT_EQ(datastore_->epoch_id_to_be_recorded(), 2);
+    EXPECT_EQ(datastore_->epoch_id_record_finished(), 2);
+    EXPECT_EQ(datastore_->epoch_id_switched(), 3);
+    EXPECT_EQ(datastore_->get_written_epoch_count(), 1);
+    EXPECT_EQ(datastore_->get_last_written_epoch(), 2);
+    EXPECT_EQ(datastore_->get_persisted_epoch_count(), 2);
+    EXPECT_EQ(datastore_->get_last_persisted_epoch(), 2);
+    switch_epoch();
+    datastore_->print_operation_log();
+    EXPECT_EQ(lc0_->current_epoch_id(), UINT64_MAX);
+    EXPECT_EQ(lc0_->finished_epoch_id(), 3);
+    EXPECT_EQ(lc1_->current_epoch_id(), UINT64_MAX);
+    EXPECT_EQ(lc1_->finished_epoch_id(), 0);
+    EXPECT_EQ(datastore_->epoch_id_informed(), 3);
+    EXPECT_EQ(datastore_->epoch_id_to_be_recorded(), 3);
+    EXPECT_EQ(datastore_->epoch_id_record_finished(), 3);
+    EXPECT_EQ(datastore_->epoch_id_switched(), 4);
+    EXPECT_EQ(datastore_->get_written_epoch_count(), 2);
+    EXPECT_EQ(datastore_->get_last_written_epoch(), 3);
+    EXPECT_EQ(datastore_->get_persisted_epoch_count(), 3);
+    EXPECT_EQ(datastore_->get_last_persisted_epoch(), 3);
+    write_to_log_channel1();
+    EXPECT_EQ(lc0_->current_epoch_id(), UINT64_MAX);
+    EXPECT_EQ(lc0_->finished_epoch_id(), 3);
+    EXPECT_EQ(lc1_->current_epoch_id(), UINT64_MAX);
+    EXPECT_EQ(lc1_->finished_epoch_id(), 4);
+    EXPECT_EQ(datastore_->epoch_id_informed(), 3);
+    EXPECT_EQ(datastore_->epoch_id_to_be_recorded(), 3);
+    EXPECT_EQ(datastore_->epoch_id_record_finished(), 3);
+    EXPECT_EQ(datastore_->epoch_id_switched(), 4);
+    EXPECT_EQ(datastore_->get_written_epoch_count(), 2);
+    EXPECT_EQ(datastore_->get_last_written_epoch(), 3);
+    EXPECT_EQ(datastore_->get_persisted_epoch_count(), 3);
+    EXPECT_EQ(datastore_->get_last_persisted_epoch(), 3);
+    switch_epoch();
+    EXPECT_EQ(lc0_->current_epoch_id(), UINT64_MAX);
+    EXPECT_EQ(lc0_->finished_epoch_id(), 3);
+    EXPECT_EQ(lc1_->current_epoch_id(), UINT64_MAX);
+    EXPECT_EQ(lc1_->finished_epoch_id(), 4);
+    EXPECT_EQ(datastore_->epoch_id_informed(), 4);
+    EXPECT_EQ(datastore_->epoch_id_to_be_recorded(), 4);
+    EXPECT_EQ(datastore_->epoch_id_record_finished(), 4);
+    EXPECT_EQ(datastore_->epoch_id_switched(), 5);
+    EXPECT_EQ(datastore_->get_written_epoch_count(), 3);
+    EXPECT_EQ(datastore_->get_last_written_epoch(), 4);
+    EXPECT_EQ(datastore_->get_persisted_epoch_count(), 4);
+    EXPECT_EQ(datastore_->get_last_persisted_epoch(), 4);
 
+    // Verify operation log contents
+    auto operation_log = datastore_->get_operation_log();
+    std::vector<std::pair<std::string, epoch_id_type>> expected_log = {
+        {OPERATION_PERSIST_CALLBACK, 1},
+        {OPERATION_PERSIST_CALLBACK, 2},
+        {OPERATION_WRITE_EPOCH, 2},
+        {OPERATION_WRITE_EPOCH, 3},
+        {OPERATION_PERSIST_CALLBACK, 3},
+        {OPERATION_WRITE_EPOCH, 4},
+        {OPERATION_PERSIST_CALLBACK, 4},
+    };
 
-// TEST_F(race_detection_test, race_detection_behavior_test) {
-//     EXPECT_EQ(lc0_->current_epoch_id(), UINT64_MAX);
-//     EXPECT_EQ(lc0_->finished_epoch_id(), 0);
-//     EXPECT_EQ(lc1_->current_epoch_id(), UINT64_MAX);
-//     EXPECT_EQ(lc1_->finished_epoch_id(), 0);
-//     EXPECT_EQ(datastore_->epoch_id_informed(), 0);
-//     EXPECT_EQ(datastore_->epoch_id_to_be_recorded(), 0);
-//     EXPECT_EQ(datastore_->epoch_id_record_finished(), 0);
-//     EXPECT_EQ(datastore_->epoch_id_switched(), 1);
-//     EXPECT_EQ(datastore_->get_written_epoch_count(), 0);
-//     EXPECT_EQ(datastore_->get_persisted_epoch_count(), 0);
-//     switch_epoch();
-//     EXPECT_EQ(lc0_->current_epoch_id(), UINT64_MAX);
-//     EXPECT_EQ(lc0_->finished_epoch_id(), 0);
-//     EXPECT_EQ(lc1_->current_epoch_id(), UINT64_MAX);
-//     EXPECT_EQ(lc1_->finished_epoch_id(), 0);
-//     EXPECT_EQ(datastore_->epoch_id_informed(), 1);
-//     EXPECT_EQ(datastore_->epoch_id_to_be_recorded(), 0);
-//     EXPECT_EQ(datastore_->epoch_id_record_finished(), 0);
-//     EXPECT_EQ(datastore_->epoch_id_switched(), 2);
-//     EXPECT_EQ(datastore_->get_written_epoch_count(), 0);
-//     EXPECT_EQ(datastore_->get_persisted_epoch_count(), 1);
-//     EXPECT_EQ(datastore_->get_last_persisted_epoch(), 1);
-//     switch_epoch();
-//     EXPECT_EQ(lc0_->current_epoch_id(), UINT64_MAX);
-//     EXPECT_EQ(lc0_->finished_epoch_id(), 0);
-//     EXPECT_EQ(lc1_->current_epoch_id(), UINT64_MAX);
-//     EXPECT_EQ(lc1_->finished_epoch_id(), 0);
-//     EXPECT_EQ(datastore_->epoch_id_informed(), 2);
-//     EXPECT_EQ(datastore_->epoch_id_to_be_recorded(), 0);
-//     EXPECT_EQ(datastore_->epoch_id_record_finished(), 0);
-//     EXPECT_EQ(datastore_->epoch_id_switched(), 3);
-//     EXPECT_EQ(datastore_->get_written_epoch_count(), 0);
-//     EXPECT_EQ(datastore_->get_persisted_epoch_count(), 2);
-//     EXPECT_EQ(datastore_->get_last_persisted_epoch(), 2);
-//     write_to_log_channel0();
-//     EXPECT_EQ(lc0_->current_epoch_id(), UINT64_MAX);
-//     EXPECT_EQ(lc0_->finished_epoch_id(), 3);
-//     EXPECT_EQ(lc1_->current_epoch_id(), UINT64_MAX);
-//     EXPECT_EQ(lc1_->finished_epoch_id(), 0);
-//     EXPECT_EQ(datastore_->epoch_id_informed(), 2);
-//     EXPECT_EQ(datastore_->epoch_id_to_be_recorded(), 2);
-//     EXPECT_EQ(datastore_->epoch_id_record_finished(), 2);
-//     EXPECT_EQ(datastore_->epoch_id_switched(), 3);
-//     EXPECT_EQ(datastore_->get_written_epoch_count(), 1);
-//     EXPECT_EQ(datastore_->get_last_written_epoch(), 2);
-//     EXPECT_EQ(datastore_->get_persisted_epoch_count(), 2);
-//     EXPECT_EQ(datastore_->get_last_persisted_epoch(), 2);
-//     switch_epoch();
-//     EXPECT_EQ(lc0_->current_epoch_id(), UINT64_MAX);
-//     EXPECT_EQ(lc0_->finished_epoch_id(), 3);
-//     EXPECT_EQ(lc1_->current_epoch_id(), UINT64_MAX);
-//     EXPECT_EQ(lc1_->finished_epoch_id(), 0);
-//     EXPECT_EQ(datastore_->epoch_id_informed(), 3);
-//     EXPECT_EQ(datastore_->epoch_id_to_be_recorded(), 3);
-//     EXPECT_EQ(datastore_->epoch_id_record_finished(), 3);
-//     EXPECT_EQ(datastore_->epoch_id_switched(), 4);
-//     EXPECT_EQ(datastore_->get_written_epoch_count(), 2);
-//     EXPECT_EQ(datastore_->get_last_written_epoch(), 3);
-//     EXPECT_EQ(datastore_->get_persisted_epoch_count(), 3);
-//     EXPECT_EQ(datastore_->get_last_persisted_epoch(), 3);
-//     write_to_log_channel1();
-//     EXPECT_EQ(lc0_->current_epoch_id(), UINT64_MAX);
-//     EXPECT_EQ(lc0_->finished_epoch_id(), 3);
-//     EXPECT_EQ(lc1_->current_epoch_id(), UINT64_MAX);
-//     EXPECT_EQ(lc1_->finished_epoch_id(), 4);
-//     EXPECT_EQ(datastore_->epoch_id_informed(), 3);
-//     EXPECT_EQ(datastore_->epoch_id_to_be_recorded(), 3);
-//     EXPECT_EQ(datastore_->epoch_id_record_finished(), 3);
-//     EXPECT_EQ(datastore_->epoch_id_switched(), 4);
-//     EXPECT_EQ(datastore_->get_written_epoch_count(), 2);
-//     EXPECT_EQ(datastore_->get_last_written_epoch(), 3);
-//     EXPECT_EQ(datastore_->get_persisted_epoch_count(), 3);
-//     EXPECT_EQ(datastore_->get_last_persisted_epoch(), 3);
-//     switch_epoch();
-//     EXPECT_EQ(lc0_->current_epoch_id(), UINT64_MAX);
-//     EXPECT_EQ(lc0_->finished_epoch_id(), 3);
-//     EXPECT_EQ(lc1_->current_epoch_id(), UINT64_MAX);
-//     EXPECT_EQ(lc1_->finished_epoch_id(), 4);
-//     EXPECT_EQ(datastore_->epoch_id_informed(), 4);
-//     EXPECT_EQ(datastore_->epoch_id_to_be_recorded(), 4);
-//     EXPECT_EQ(datastore_->epoch_id_record_finished(), 4);
-//     EXPECT_EQ(datastore_->epoch_id_switched(), 5);
-//     EXPECT_EQ(datastore_->get_written_epoch_count(), 3);
-//     EXPECT_EQ(datastore_->get_last_written_epoch(), 4);
-//     EXPECT_EQ(datastore_->get_persisted_epoch_count(), 4);
-//     EXPECT_EQ(datastore_->get_last_persisted_epoch(), 4);
-// }
+    ASSERT_EQ(operation_log.size(), expected_log.size()) << "Operation log size mismatch.";
+
+    for (size_t i = 0; i < operation_log.size(); ++i) {
+        EXPECT_EQ(operation_log[i].first, expected_log[i].first) << "Mismatch at log index " << i << " for operation.";
+        EXPECT_EQ(operation_log[i].second, expected_log[i].second) << "Mismatch at log index " << i << " for epoch ID.";
+    }
+
+    // Print operation log for debugging
+    datastore_->print_operation_log();
+}
 
 
 
