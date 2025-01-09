@@ -42,9 +42,9 @@ class my_datastore : public datastore_test {
 public:
     explicit my_datastore(const configuration& conf) : datastore_test(conf) {
         // Set the write_epoch_callback_ to track written epochs
-        write_epoch_callback_ = [this](epoch_id_type epoch) {
+        set_write_epoch_callback([this](epoch_id_type epoch) {
             this->record_written_epoch(epoch);
-        };
+        });
 
         // Set the persistent_callback_ to track persisted epochs
         add_persistent_callback([this](epoch_id_type epoch) {

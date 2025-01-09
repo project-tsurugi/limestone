@@ -274,22 +274,39 @@ protected:  // for tests
     virtual void on_update_min_epoch_id_epoch_id_informed_load_2() noexcept {}
 
     /**
-     * @brief Callback function for writing epoch to file.
+     * @brief Sets the callback function for writing epoch to a file.
      * @details
-     * This callback is used to define the behavior for writing epoch information to a file.
-     * By default, it calls the `write_epoch_to_file` method. 
+     * This method allows you to override the default behavior for writing epoch 
+     * information by providing a custom callback. The callback can be a free 
+     * function, a lambda, or a member function bound to an object.
      * 
-     * - **Purpose**: This callback is intended for testing purposes only.
-     * - **Restriction**: It should not be modified in production code.
+     * Example:
+     * @code
+     * class CustomHandler {
+     * public:
+     *     void custom_epoch_writer(epoch_id_type epoch) {
+     *         // Custom logic
+     *     }
+     * };
      * 
-     * Derived classes for testing can modify this callback to alter the behavior
-     * without modifying the base class implementation.
+     * datastore ds;
+     * CustomHandler handler;
+     * ds.set_write_epoch_callback([&handler](epoch_id_type epoch) {
+     *     handler.custom_epoch_writer(epoch);
+     * });
+     * @endcode
+     * 
+     * @param callback The new callback function to use for writing epoch.
      */
+    void set_write_epoch_callback(std::function<void(epoch_id_type)> callback) {
+        write_epoch_callback_ = std::move(callback);
+    }
+
+private:
     std::function<void(epoch_id_type)> write_epoch_callback_{
         [this](epoch_id_type epoch) { this->write_epoch_to_file(epoch); }
     };
 
-private:
     std::vector<std::unique_ptr<log_channel>> log_channels_;
 
     boost::filesystem::path location_{};
