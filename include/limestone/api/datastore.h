@@ -248,7 +248,8 @@ public:
 protected:  // for tests
     auto& log_channels_for_tests() const noexcept { return log_channels_; }
     auto epoch_id_informed_for_tests() const noexcept { return epoch_id_informed_.load(); }
-    auto epoch_id_recorded_for_tests() const noexcept { return epoch_id_to_be_recorded_.load(); }
+    auto epoch_id_to_be_recorded_for_tests() const noexcept { return epoch_id_to_be_recorded_.load(); }
+    auto epoch_id_record_finished_for_tests() const noexcept { return epoch_id_record_finished_.load(); }
     auto epoch_id_switched_for_tests() const noexcept { return epoch_id_switched_.load(); }
     auto& files_for_tests() const noexcept { return files_; }
     void rotate_epoch_file_for_tests() { rotate_epoch_file(); }
@@ -271,6 +272,23 @@ protected:  // for tests
     virtual void on_update_min_epoch_id_epoch_id_informed_load_1() noexcept {}
     virtual void on_update_min_epoch_id_epoch_id_informed_cas() noexcept {}
     virtual void on_update_min_epoch_id_epoch_id_informed_load_2() noexcept {}
+
+    /**
+     * @brief Callback function for writing epoch to file.
+     * @details
+     * This callback is used to define the behavior for writing epoch information to a file.
+     * By default, it calls the `write_epoch_to_file` method. 
+     * 
+     * - **Purpose**: This callback is intended for testing purposes only.
+     * - **Restriction**: It should not be modified in production code.
+     * 
+     * Derived classes for testing can modify this callback to alter the behavior
+     * without modifying the base class implementation.
+     */
+    std::function<void(epoch_id_type)> write_epoch_callback_{
+        [this](epoch_id_type epoch) { this->write_epoch_to_file(epoch); }
+    };
+
 private:
     std::vector<std::unique_ptr<log_channel>> log_channels_;
 
@@ -376,7 +394,7 @@ private:
     // File descriptor for file lock (flock) on the manifest file
     int fd_for_flock_{-1};
 
-    void write_epoch_to_file(epoch_id_type epoch_id);
+    virtual void write_epoch_to_file(epoch_id_type epoch_id);
 
     int epoch_write_counter = 0;
 };

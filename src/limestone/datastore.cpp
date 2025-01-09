@@ -184,7 +184,7 @@ void datastore::ready() {
         create_snapshot();
         online_compaction_worker_future_ = std::async(std::launch::async, &datastore::online_compaction_worker, this);
         if (epoch_id_switched_.load() != 0) {
-            write_epoch_to_file(epoch_id_informed_.load());
+            write_epoch_callback_(epoch_id_informed_.load());
         }
         cleanup_rotated_epoch_files(location_);
         state_ = state::ready;
@@ -286,7 +286,7 @@ void datastore::update_min_epoch_id(bool from_switch_epoch) {  // NOLINT(readabi
             if (to_be_epoch < epoch_id_to_be_recorded_.load()) {
                 break;
             }           
-            write_epoch_to_file(static_cast<epoch_id_type>(to_be_epoch));
+            write_epoch_callback_(static_cast<epoch_id_type>(to_be_epoch));
             epoch_id_record_finished_.store(to_be_epoch);
             TRACE << "epoch_id_record_finished_ updated to " << to_be_epoch;
             break;

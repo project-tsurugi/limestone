@@ -164,6 +164,16 @@ public:
      */
     [[nodiscard]] boost::filesystem::path file_path() const noexcept;
 
+    /**
+     * @brief this is for test purpose only, must not be used for any purpose other than testing
+     */
+    [[nodiscard]] auto current_epoch_id() const noexcept { return current_epoch_id_.load(); }
+
+    /**
+     * @brief this is for test purpose only, must not be used for any purpose other than testing
+     */
+    [[nodiscard]] auto finished_epoch_id() const noexcept { return finished_epoch_id_.load(); }
+
 private:
     datastore& envelope_;
 
@@ -183,10 +193,11 @@ private:
 
     std::atomic_uint64_t finished_epoch_id_{0};
 
-    log_channel(boost::filesystem::path location, std::size_t id, datastore& envelope) noexcept;
-
     std::string do_rotate_file(epoch_id_type epoch = 0);
 
+protected: // Protected to allow testing with derived classes
+    log_channel(boost::filesystem::path location, std::size_t id, datastore& envelope) noexcept;
+ 
     friend class datastore;
     friend class rotation_task;
 };

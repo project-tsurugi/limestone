@@ -24,13 +24,14 @@ namespace limestone::api {
 
 class datastore_test : public datastore {
 public:
-    explicit datastore_test(configuration& conf) : datastore(conf) {}
+    explicit datastore_test(const configuration& conf) : datastore(conf) {}
     datastore_test() : datastore() {}
 
     // Provides access to internal members for testing purposes
     auto& log_channels() const noexcept { return log_channels_for_tests(); }
     auto epoch_id_informed() const noexcept { return epoch_id_informed_for_tests(); }
-    auto epoch_id_recorded() const noexcept { return epoch_id_recorded_for_tests(); }
+    auto epoch_id_to_be_recorded() const noexcept { return epoch_id_to_be_recorded_for_tests(); }
+    auto epoch_id_record_finished() const noexcept { return epoch_id_record_finished_for_tests(); }
     auto epoch_id_switched() const noexcept { return epoch_id_switched_for_tests(); }
     auto& files() const noexcept { return files_for_tests(); }
     void rotate_epoch_file() { rotate_epoch_file_for_tests(); }
