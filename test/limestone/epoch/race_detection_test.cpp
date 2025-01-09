@@ -19,6 +19,7 @@
 #include <iostream>
 #include <vector>
 #include <mutex>
+#include <random>
 #include <optional>
 #include <boost/filesystem.hpp>
 
@@ -153,6 +154,7 @@ private:
     std::vector<epoch_id_type> persisted_epochs_;  // Stores successfully persisted epochs
 };
 
+
 class race_detection_test : public ::testing::Test {
 public:
     static constexpr const char* location = "/tmp/race_detection_test";
@@ -213,95 +215,242 @@ protected:
 
 };
 
+class race_condition_test_manager {
+public:
+    using test_method = std::function<void()>;
+
+    race_condition_test_manager(
+        my_datastore& datastore,
+        std::vector<std::pair<test_method, size_t>> test_methods)
+        : datastore_(datastore), test_methods_(std::move(test_methods)) {}
+
+    // Set a specific random seed for reproducible tests.
+    void set_random_seed(unsigned int seed) {
+        random_engine_.seed(seed);
+    }
+
+    // Run all test methods in separate threads.
+    void run() {
+        std::lock_guard<std::mutex> lock(mutex_);
+        size_t thread_id_counter = 0; // Ensure consistent order of thread IDs
+        for (const auto& [method, count] : test_methods_) {
+            for (size_t i = 0; i < count; ++i) {
+                size_t current_id = thread_id_counter++;
+                threads_.emplace_back([this, method, current_id]() {
+                    static thread_local size_t thread_local_id = current_id; // Assign thread-local ID
+                    try {
+                        method();
+                        thread_completed(current_id);
+                    } catch (const std::exception& e) {
+                        std::lock_guard<std::mutex> lock(mutex_);
+                        std::cerr << "Exception in thread: " << e.what() << std::endl;
+                        thread_completed(current_id);
+                    } catch (...) {
+                        std::lock_guard<std::mutex> lock(mutex_);
+                        std::cerr << "Unknown exception in thread." << std::endl;
+                        thread_completed(current_id);
+                    }
+                });
+            }
+        }
+    }
+
+    // Pause the current thread at a specific hook.
+    void wait_at_hook(const std::string& hook_name) {
+        static thread_local size_t thread_local_id;  // Thread-local ID
+        {
+            std::unique_lock<std::mutex> lock(mutex_);  // Use the same name 'lock'
+            pending_threads_.emplace(thread_local_id, hook_name);
+        }
+        {
+            std::unique_lock<std::mutex> lock(mutex_);  // Ensure consistent naming for lock
+            cv_.wait(lock, [this]() { return resumed_threads_.count(thread_local_id) > 0; });
+            resumed_threads_.erase(thread_local_id);
+        }
+    }
+
+    // Resume one random thread from the paused threads.
+    void resume_one_thread() {
+        std::unique_lock<std::mutex> lock(mutex_);
+        if (pending_threads_.empty()) return;
+
+        std::uniform_int_distribution<size_t> dist(0, pending_threads_.size() - 1);
+        auto it = pending_threads_.begin();
+        std::advance(it, dist(random_engine_));
+        resumed_threads_.insert(it->first);
+        pending_threads_.erase(it);
+        cv_.notify_all();
+    }
+
+    // Generate a new random seed and display it.
+    void generate_and_set_random_seed() {
+        std::random_device rd;
+        unsigned int seed = rd();
+        std::cout << "Generated random seed: " << seed << std::endl;
+        set_random_seed(seed);
+    }
+
+    // Wait until all threads are either paused or completed.
+    void wait_for_all_threads_to_pause_or_complete() {
+        std::unique_lock<std::mutex> lock(mutex_);
+        cv_.wait(lock, [this]() {
+            return (pending_threads_.size() + threads_completed_ == threads_.size());
+        });
+    }
+
+    // Check if all threads have completed execution.
+    bool all_threads_completed() {
+        std::lock_guard<std::mutex> lock(mutex_);
+        return threads_completed_ == threads_.size();
+    }
+
+    // Join all threads to ensure proper cleanup.
+    void join_all_threads() {
+        for (auto& thread : threads_) {
+            if (thread.joinable()) {
+                thread.join();
+            }
+        }
+    }
+
+private:
+    my_datastore& datastore_;
+    std::vector<std::pair<test_method, size_t>> test_methods_;
+
+    std::mutex mutex_;
+    std::condition_variable cv_;
+    std::vector<std::thread> threads_;
+    std::map<size_t, std::string> pending_threads_; // Use size_t instead of std::thread::id
+    std::set<size_t> resumed_threads_;
+    size_t threads_completed_ = 0;
+
+    std::mt19937 random_engine_{std::random_device{}()};
+
+    // Increment the count of completed threads and notify waiting threads.
+    void thread_completed(size_t thread_id) {
+        std::lock_guard<std::mutex> lock(mutex_);
+        threads_completed_++;
+        cv_.notify_all();
+    }
+};
+
 
 TEST_F(race_detection_test, race_detection_behavior_test) {
-    EXPECT_EQ(lc0_->current_epoch_id(), UINT64_MAX);
-    EXPECT_EQ(lc0_->finished_epoch_id(), 0);
-    EXPECT_EQ(lc1_->current_epoch_id(), UINT64_MAX);
-    EXPECT_EQ(lc1_->finished_epoch_id(), 0);
-    EXPECT_EQ(datastore_->epoch_id_informed(), 0);
-    EXPECT_EQ(datastore_->epoch_id_to_be_recorded(), 0);
-    EXPECT_EQ(datastore_->epoch_id_record_finished(), 0);
-    EXPECT_EQ(datastore_->epoch_id_switched(), 1);
-    EXPECT_EQ(datastore_->get_written_epoch_count(), 0);
-    EXPECT_EQ(datastore_->get_persisted_epoch_count(), 0);
-    switch_epoch();
-    EXPECT_EQ(lc0_->current_epoch_id(), UINT64_MAX);
-    EXPECT_EQ(lc0_->finished_epoch_id(), 0);
-    EXPECT_EQ(lc1_->current_epoch_id(), UINT64_MAX);
-    EXPECT_EQ(lc1_->finished_epoch_id(), 0);
-    EXPECT_EQ(datastore_->epoch_id_informed(), 1);
-    EXPECT_EQ(datastore_->epoch_id_to_be_recorded(), 0);
-    EXPECT_EQ(datastore_->epoch_id_record_finished(), 0);
-    EXPECT_EQ(datastore_->epoch_id_switched(), 2);
-    EXPECT_EQ(datastore_->get_written_epoch_count(), 0);
-    EXPECT_EQ(datastore_->get_persisted_epoch_count(), 1);
-    EXPECT_EQ(datastore_->get_last_persisted_epoch(), 1);
-    switch_epoch();
-    EXPECT_EQ(lc0_->current_epoch_id(), UINT64_MAX);
-    EXPECT_EQ(lc0_->finished_epoch_id(), 0);
-    EXPECT_EQ(lc1_->current_epoch_id(), UINT64_MAX);
-    EXPECT_EQ(lc1_->finished_epoch_id(), 0);
-    EXPECT_EQ(datastore_->epoch_id_informed(), 2);
-    EXPECT_EQ(datastore_->epoch_id_to_be_recorded(), 0);
-    EXPECT_EQ(datastore_->epoch_id_record_finished(), 0);
-    EXPECT_EQ(datastore_->epoch_id_switched(), 3);
-    EXPECT_EQ(datastore_->get_written_epoch_count(), 0);
-    EXPECT_EQ(datastore_->get_persisted_epoch_count(), 2);
-    EXPECT_EQ(datastore_->get_last_persisted_epoch(), 2);
-    write_to_log_channel0();
-    EXPECT_EQ(lc0_->current_epoch_id(), UINT64_MAX);
-    EXPECT_EQ(lc0_->finished_epoch_id(), 3);
-    EXPECT_EQ(lc1_->current_epoch_id(), UINT64_MAX);
-    EXPECT_EQ(lc1_->finished_epoch_id(), 0);
-    EXPECT_EQ(datastore_->epoch_id_informed(), 2);
-    EXPECT_EQ(datastore_->epoch_id_to_be_recorded(), 2);
-    EXPECT_EQ(datastore_->epoch_id_record_finished(), 2);
-    EXPECT_EQ(datastore_->epoch_id_switched(), 3);
-    EXPECT_EQ(datastore_->get_written_epoch_count(), 1);
-    EXPECT_EQ(datastore_->get_last_written_epoch(), 2);
-    EXPECT_EQ(datastore_->get_persisted_epoch_count(), 2);
-    EXPECT_EQ(datastore_->get_last_persisted_epoch(), 2);
-    switch_epoch();
-    EXPECT_EQ(lc0_->current_epoch_id(), UINT64_MAX);
-    EXPECT_EQ(lc0_->finished_epoch_id(), 3);
-    EXPECT_EQ(lc1_->current_epoch_id(), UINT64_MAX);
-    EXPECT_EQ(lc1_->finished_epoch_id(), 0);
-    EXPECT_EQ(datastore_->epoch_id_informed(), 3);
-    EXPECT_EQ(datastore_->epoch_id_to_be_recorded(), 3);
-    EXPECT_EQ(datastore_->epoch_id_record_finished(), 3);
-    EXPECT_EQ(datastore_->epoch_id_switched(), 4);
-    EXPECT_EQ(datastore_->get_written_epoch_count(), 2);
-    EXPECT_EQ(datastore_->get_last_written_epoch(), 3);
-    EXPECT_EQ(datastore_->get_persisted_epoch_count(), 3);
-    EXPECT_EQ(datastore_->get_last_persisted_epoch(), 3);
-    write_to_log_channel1();
-    EXPECT_EQ(lc0_->current_epoch_id(), UINT64_MAX);
-    EXPECT_EQ(lc0_->finished_epoch_id(), 3);
-    EXPECT_EQ(lc1_->current_epoch_id(), UINT64_MAX);
-    EXPECT_EQ(lc1_->finished_epoch_id(), 4);
-    EXPECT_EQ(datastore_->epoch_id_informed(), 3);
-    EXPECT_EQ(datastore_->epoch_id_to_be_recorded(), 3);
-    EXPECT_EQ(datastore_->epoch_id_record_finished(), 3);
-    EXPECT_EQ(datastore_->epoch_id_switched(), 4);
-    EXPECT_EQ(datastore_->get_written_epoch_count(), 2);
-    EXPECT_EQ(datastore_->get_last_written_epoch(), 3);
-    EXPECT_EQ(datastore_->get_persisted_epoch_count(), 3);
-    EXPECT_EQ(datastore_->get_last_persisted_epoch(), 3);
-    switch_epoch();
-    EXPECT_EQ(lc0_->current_epoch_id(), UINT64_MAX);
-    EXPECT_EQ(lc0_->finished_epoch_id(), 3);
-    EXPECT_EQ(lc1_->current_epoch_id(), UINT64_MAX);
-    EXPECT_EQ(lc1_->finished_epoch_id(), 4);
-    EXPECT_EQ(datastore_->epoch_id_informed(), 4);
-    EXPECT_EQ(datastore_->epoch_id_to_be_recorded(), 4);
-    EXPECT_EQ(datastore_->epoch_id_record_finished(), 4);
-    EXPECT_EQ(datastore_->epoch_id_switched(), 5);
-    EXPECT_EQ(datastore_->get_written_epoch_count(), 3);
-    EXPECT_EQ(datastore_->get_last_written_epoch(), 4);
-    EXPECT_EQ(datastore_->get_persisted_epoch_count(), 4);
-    EXPECT_EQ(datastore_->get_last_persisted_epoch(), 4);
+    // TestManager の初期化
+    race_condition_test_manager manager(*datastore_, {
+        { [this]() { switch_epoch(); }, 5 },
+        { [this]() { write_to_log_channel0(); }, 1 },
+        { [this]() { write_to_log_channel1(); }, 1 }
+    });
+
+    manager.run();
+
+    // 全てのスレッドが待機または終了するまで待つ
+    manager.wait_for_all_threads_to_pause_or_complete();
+
+    // スレッドを順番に再開
+    while (!manager.all_threads_completed()) {
+        manager.resume_one_thread();
+        manager.wait_for_all_threads_to_pause_or_complete();
+    }
+
+    manager.join_all_threads();
+    std::cerr << "All threads completed" << std::endl;
 }
+
+
+
+
+// TEST_F(race_detection_test, race_detection_behavior_test) {
+//     EXPECT_EQ(lc0_->current_epoch_id(), UINT64_MAX);
+//     EXPECT_EQ(lc0_->finished_epoch_id(), 0);
+//     EXPECT_EQ(lc1_->current_epoch_id(), UINT64_MAX);
+//     EXPECT_EQ(lc1_->finished_epoch_id(), 0);
+//     EXPECT_EQ(datastore_->epoch_id_informed(), 0);
+//     EXPECT_EQ(datastore_->epoch_id_to_be_recorded(), 0);
+//     EXPECT_EQ(datastore_->epoch_id_record_finished(), 0);
+//     EXPECT_EQ(datastore_->epoch_id_switched(), 1);
+//     EXPECT_EQ(datastore_->get_written_epoch_count(), 0);
+//     EXPECT_EQ(datastore_->get_persisted_epoch_count(), 0);
+//     switch_epoch();
+//     EXPECT_EQ(lc0_->current_epoch_id(), UINT64_MAX);
+//     EXPECT_EQ(lc0_->finished_epoch_id(), 0);
+//     EXPECT_EQ(lc1_->current_epoch_id(), UINT64_MAX);
+//     EXPECT_EQ(lc1_->finished_epoch_id(), 0);
+//     EXPECT_EQ(datastore_->epoch_id_informed(), 1);
+//     EXPECT_EQ(datastore_->epoch_id_to_be_recorded(), 0);
+//     EXPECT_EQ(datastore_->epoch_id_record_finished(), 0);
+//     EXPECT_EQ(datastore_->epoch_id_switched(), 2);
+//     EXPECT_EQ(datastore_->get_written_epoch_count(), 0);
+//     EXPECT_EQ(datastore_->get_persisted_epoch_count(), 1);
+//     EXPECT_EQ(datastore_->get_last_persisted_epoch(), 1);
+//     switch_epoch();
+//     EXPECT_EQ(lc0_->current_epoch_id(), UINT64_MAX);
+//     EXPECT_EQ(lc0_->finished_epoch_id(), 0);
+//     EXPECT_EQ(lc1_->current_epoch_id(), UINT64_MAX);
+//     EXPECT_EQ(lc1_->finished_epoch_id(), 0);
+//     EXPECT_EQ(datastore_->epoch_id_informed(), 2);
+//     EXPECT_EQ(datastore_->epoch_id_to_be_recorded(), 0);
+//     EXPECT_EQ(datastore_->epoch_id_record_finished(), 0);
+//     EXPECT_EQ(datastore_->epoch_id_switched(), 3);
+//     EXPECT_EQ(datastore_->get_written_epoch_count(), 0);
+//     EXPECT_EQ(datastore_->get_persisted_epoch_count(), 2);
+//     EXPECT_EQ(datastore_->get_last_persisted_epoch(), 2);
+//     write_to_log_channel0();
+//     EXPECT_EQ(lc0_->current_epoch_id(), UINT64_MAX);
+//     EXPECT_EQ(lc0_->finished_epoch_id(), 3);
+//     EXPECT_EQ(lc1_->current_epoch_id(), UINT64_MAX);
+//     EXPECT_EQ(lc1_->finished_epoch_id(), 0);
+//     EXPECT_EQ(datastore_->epoch_id_informed(), 2);
+//     EXPECT_EQ(datastore_->epoch_id_to_be_recorded(), 2);
+//     EXPECT_EQ(datastore_->epoch_id_record_finished(), 2);
+//     EXPECT_EQ(datastore_->epoch_id_switched(), 3);
+//     EXPECT_EQ(datastore_->get_written_epoch_count(), 1);
+//     EXPECT_EQ(datastore_->get_last_written_epoch(), 2);
+//     EXPECT_EQ(datastore_->get_persisted_epoch_count(), 2);
+//     EXPECT_EQ(datastore_->get_last_persisted_epoch(), 2);
+//     switch_epoch();
+//     EXPECT_EQ(lc0_->current_epoch_id(), UINT64_MAX);
+//     EXPECT_EQ(lc0_->finished_epoch_id(), 3);
+//     EXPECT_EQ(lc1_->current_epoch_id(), UINT64_MAX);
+//     EXPECT_EQ(lc1_->finished_epoch_id(), 0);
+//     EXPECT_EQ(datastore_->epoch_id_informed(), 3);
+//     EXPECT_EQ(datastore_->epoch_id_to_be_recorded(), 3);
+//     EXPECT_EQ(datastore_->epoch_id_record_finished(), 3);
+//     EXPECT_EQ(datastore_->epoch_id_switched(), 4);
+//     EXPECT_EQ(datastore_->get_written_epoch_count(), 2);
+//     EXPECT_EQ(datastore_->get_last_written_epoch(), 3);
+//     EXPECT_EQ(datastore_->get_persisted_epoch_count(), 3);
+//     EXPECT_EQ(datastore_->get_last_persisted_epoch(), 3);
+//     write_to_log_channel1();
+//     EXPECT_EQ(lc0_->current_epoch_id(), UINT64_MAX);
+//     EXPECT_EQ(lc0_->finished_epoch_id(), 3);
+//     EXPECT_EQ(lc1_->current_epoch_id(), UINT64_MAX);
+//     EXPECT_EQ(lc1_->finished_epoch_id(), 4);
+//     EXPECT_EQ(datastore_->epoch_id_informed(), 3);
+//     EXPECT_EQ(datastore_->epoch_id_to_be_recorded(), 3);
+//     EXPECT_EQ(datastore_->epoch_id_record_finished(), 3);
+//     EXPECT_EQ(datastore_->epoch_id_switched(), 4);
+//     EXPECT_EQ(datastore_->get_written_epoch_count(), 2);
+//     EXPECT_EQ(datastore_->get_last_written_epoch(), 3);
+//     EXPECT_EQ(datastore_->get_persisted_epoch_count(), 3);
+//     EXPECT_EQ(datastore_->get_last_persisted_epoch(), 3);
+//     switch_epoch();
+//     EXPECT_EQ(lc0_->current_epoch_id(), UINT64_MAX);
+//     EXPECT_EQ(lc0_->finished_epoch_id(), 3);
+//     EXPECT_EQ(lc1_->current_epoch_id(), UINT64_MAX);
+//     EXPECT_EQ(lc1_->finished_epoch_id(), 4);
+//     EXPECT_EQ(datastore_->epoch_id_informed(), 4);
+//     EXPECT_EQ(datastore_->epoch_id_to_be_recorded(), 4);
+//     EXPECT_EQ(datastore_->epoch_id_record_finished(), 4);
+//     EXPECT_EQ(datastore_->epoch_id_switched(), 5);
+//     EXPECT_EQ(datastore_->get_written_epoch_count(), 3);
+//     EXPECT_EQ(datastore_->get_last_written_epoch(), 4);
+//     EXPECT_EQ(datastore_->get_persisted_epoch_count(), 4);
+//     EXPECT_EQ(datastore_->get_last_persisted_epoch(), 4);
+// }
+
+
 
 
 } // namespace limestone::testing
