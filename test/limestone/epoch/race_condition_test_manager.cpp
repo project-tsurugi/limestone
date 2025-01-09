@@ -15,8 +15,11 @@
  */
 
  #include "race_condition_test_manager.h"
+ #include "logging_helper.h"
 
 namespace limestone::testing {
+
+thread_local size_t race_condition_test_manager::thread_local_id = 0;
 
 race_condition_test_manager::race_condition_test_manager(std::vector<std::pair<test_method, size_t>> test_methods)
     : test_methods_(std::move(test_methods)) {}
@@ -27,12 +30,13 @@ void race_condition_test_manager::set_random_seed(unsigned int seed) {
 
 void race_condition_test_manager::run() {
     std::lock_guard<std::mutex> lock(mutex_);
-    size_t thread_id_counter = 0;
+    size_t thread_id_counter = 100;
     for (const auto& [method, count] : test_methods_) {
         for (size_t i = 0; i < count; ++i) {
             size_t current_id = thread_id_counter++;
             threads_.emplace_back([this, method, current_id]() {
-                static thread_local size_t thread_local_id = current_id;
+                thread_local_id = current_id;
+                VLOG_LP(50) << "Thread " << thread_local_id << " started.";
                 try {
                     method();
                     thread_completed(current_id);
@@ -51,17 +55,19 @@ void race_condition_test_manager::run() {
 }
 
 void race_condition_test_manager::wait_at_hook(const std::string& hook_name) {
-    static thread_local size_t thread_local_id; // Thread-local ID
-    size_t local_thread_id = thread_local_id;   // Copy the thread-local variable
+    size_t tid = thread_local_id; // Use the already-initialized thread_local_id
     {
+        VLOG_LP(50) << "Thread " << tid << " waiting at hook: " << hook_name;
         std::unique_lock<std::mutex> lock(mutex_);
-        pending_threads_.emplace(local_thread_id, hook_name);
+        pending_threads_.emplace(tid, hook_name);
+        cv_.notify_all();
     }
 
     {
         std::unique_lock<std::mutex> lock(mutex_);
-        cv_.wait(lock, [this, local_thread_id]() { return resumed_threads_.count(local_thread_id) > 0; });
-        resumed_threads_.erase(local_thread_id);
+        cv_.wait(lock, [this, tid]() { return resumed_threads_.count(tid) > 0; });
+        resumed_threads_.erase(tid);
+        VLOG_LP(50) << "Thread " << tid << " resumed from hook: " << hook_name;
     }
 }
 
@@ -87,6 +93,7 @@ void race_condition_test_manager::generate_and_set_random_seed() {
 }
 
 void race_condition_test_manager::wait_for_all_threads_to_pause_or_complete() {
+    VLOG_LP(50) << "Waiting for all threads to pause or complete.";
     std::unique_lock<std::mutex> lock(mutex_);
     cv_.wait(lock, [this]() {
         return (pending_threads_.size() + threads_completed_ == threads_.size());

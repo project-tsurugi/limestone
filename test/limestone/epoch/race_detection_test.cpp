@@ -43,6 +43,14 @@ namespace limestone::testing {
 static constexpr const char* OPERATION_WRITE_EPOCH = "write_epoch";
 static constexpr const char* OPERATION_PERSIST_CALLBACK = "persist_callback";
 
+// General utility for setting callbacks
+template <typename Hook>
+void set_callback(std::shared_ptr<limestone::testing::race_condition_test_manager> manager, 
+                  Hook& callback, const char* hook_name) {
+    callback = [manager, hook_name]() {
+        manager->wait_at_hook(hook_name);
+    };
+}
 class my_datastore : public datastore_test {
 public:
     explicit my_datastore(const configuration& conf) : datastore_test(conf) {
@@ -163,6 +171,33 @@ public:
         }
     }
 
+    /**
+     * @brief Registers a `race_condition_test_manager` instance for hook-based synchronization.
+     * 
+     * This method should be called during the initialization of the `my_datastore` instance.
+     * Since it is expected to be called in a single-threaded context during initialization,
+     * thread safety is not required.
+     *
+     * @param manager The `race_condition_test_manager` instance to register.
+     */
+    void register_race_condition_manager(
+        std::shared_ptr<limestone::testing::race_condition_test_manager> manager) {
+        race_condition_manager_ = manager;
+
+        set_callback(manager, on_begin_session_current_epoch_id_store_callback, "on_begin_session_current_epoch_id_store");
+        set_callback(manager, on_end_session_finished_epoch_id_store_callback, "on_end_session_finished_epoch_id_store");
+        set_callback(manager, on_end_session_current_epoch_id_store_callback, "on_end_session_current_epoch_id_store");
+        set_callback(manager, on_switch_epoch_epoch_id_switched_store_callback, "on_switch_epoch_epoch_id_switched_store");
+        set_callback(manager, on_update_min_epoch_id_epoch_id_switched_load_callback, "on_update_min_epoch_id_epoch_id_switched_load");
+        set_callback(manager, on_update_min_epoch_id_current_epoch_id_load_callback, "on_update_min_epoch_id_current_epoch_id_load");
+        set_callback(manager, on_update_min_epoch_id_finished_epoch_id_load_callback, "on_update_min_epoch_id_finished_epoch_id_load");
+        set_callback(manager, on_update_min_epoch_id_epoch_id_to_be_recorded_load_callback, "on_update_min_epoch_id_epoch_id_to_be_recorded_load");
+        set_callback(manager, on_update_min_epoch_id_epoch_id_to_be_recorded_cas_callback, "on_update_min_epoch_id_epoch_id_to_be_recorded_cas");
+        set_callback(manager, on_update_min_epoch_id_epoch_id_record_finished_load_callback, "on_update_min_epoch_id_epoch_id_record_finished_load");
+        set_callback(manager, on_update_min_epoch_id_epoch_id_informed_load_1_callback, "on_update_min_epoch_id_epoch_id_informed_load_1");
+        set_callback(manager, on_update_min_epoch_id_epoch_id_informed_cas_callback, "on_update_min_epoch_id_epoch_id_informed_cas");
+        set_callback(manager, on_update_min_epoch_id_epoch_id_informed_load_2_callback, "on_update_min_epoch_id_epoch_id_informed_load_2");
+    }
 
 private:
     void record_written_epoch(epoch_id_type epoch) {
@@ -187,6 +222,18 @@ private:
     std::vector<epoch_id_type> written_epochs_;  // Stores successfully written epochs
     std::vector<epoch_id_type> persisted_epochs_;  // Stores successfully persisted epochs
     std::vector<std::pair<std::string, epoch_id_type>> operation_log_;  // Logs operations and epochs
+
+    /**
+     * @brief Invokes a hook in the registered race condition test manager, if available.
+     * @param hook_name The name of the hook to invoke.
+     */
+    void invoke_hook(const std::string& hook_name) {
+        if (race_condition_manager_) {
+            race_condition_manager_->wait_at_hook(hook_name);
+        }
+    }
+
+    std::shared_ptr<limestone::testing::race_condition_test_manager> race_condition_manager_;
 };
 
 
@@ -253,25 +300,29 @@ protected:
 
 TEST_F(race_detection_test, example) {
     // TestManager の初期化
-    race_condition_test_manager manager({
-        { [this]() { switch_epoch(); }, 5 },
+    auto manager = std::make_shared<race_condition_test_manager>(std::vector<std::pair<std::function<void()>, size_t>>{
+        { [this]() { switch_epoch(); }, 1 },
         { [this]() { write_to_log_channel0(); }, 1 },
         { [this]() { write_to_log_channel1(); }, 1 }
     });
 
-    manager.run();
+    datastore_->register_race_condition_manager(manager);
+    FLAGS_v = 50;
+
+    manager->run();
 
     // 全てのスレッドが待機または終了するまで待つ
-    manager.wait_for_all_threads_to_pause_or_complete();
+    manager->wait_for_all_threads_to_pause_or_complete();
 
     // スレッドを順番に再開
-    while (!manager.all_threads_completed()) {
-        manager.resume_one_thread();
-        manager.wait_for_all_threads_to_pause_or_complete();
+    while (!manager->all_threads_completed()) {
+        manager->resume_one_thread();
+        manager->wait_for_all_threads_to_pause_or_complete();
     }
 
-    manager.join_all_threads();
+    manager->join_all_threads();
 }
+
 
 
 TEST_F(race_detection_test, race_detection_behavior_test) {

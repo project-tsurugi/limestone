@@ -15,6 +15,7 @@
  */
 #pragma once
 
+#include <glog/logging.h>
 #include <array>
 #include <string_view>
 #include <thread>

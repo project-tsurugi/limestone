@@ -46,6 +46,7 @@ public:
     void join_all_threads();
 
 private:
+    static thread_local size_t thread_local_id;
     std::vector<std::pair<test_method, size_t>> test_methods_;
     std::mutex mutex_;
     std::condition_variable cv_;
