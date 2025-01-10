@@ -253,7 +253,7 @@ void datastore::update_min_epoch_id(bool from_switch_epoch) {  // NOLINT(readabi
                 upper_limit = working_epoch - 1;
             }
         }
-        if (max_finished_epoch < finished_epoch && max_finished_epoch <= upper_limit) {
+        if (max_finished_epoch < finished_epoch && finished_epoch <= upper_limit) {
             max_finished_epoch = finished_epoch;
         }
     }
