@@ -366,11 +366,10 @@ TEST_F(race_detection_test, race_detection_behavior_test) {
     EXPECT_EQ(lc1_->current_epoch_id(), UINT64_MAX);
     EXPECT_EQ(lc1_->finished_epoch_id(), 0);
     EXPECT_EQ(datastore_->epoch_id_informed(), 2);
-    EXPECT_EQ(datastore_->epoch_id_to_be_recorded(), 2);
-    EXPECT_EQ(datastore_->epoch_id_record_finished(), 2);
+    EXPECT_EQ(datastore_->epoch_id_to_be_recorded(), 0);
+    EXPECT_EQ(datastore_->epoch_id_record_finished(), 0);
     EXPECT_EQ(datastore_->epoch_id_switched(), 3);
-    EXPECT_EQ(datastore_->get_written_epoch_count(), 1);
-    EXPECT_EQ(datastore_->get_last_written_epoch(), 2);
+    EXPECT_EQ(datastore_->get_written_epoch_count(), 0);
     EXPECT_EQ(datastore_->get_persisted_epoch_count(), 2);
     EXPECT_EQ(datastore_->get_last_persisted_epoch(), 2);
     switch_epoch();
@@ -383,7 +382,7 @@ TEST_F(race_detection_test, race_detection_behavior_test) {
     EXPECT_EQ(datastore_->epoch_id_to_be_recorded(), 3);
     EXPECT_EQ(datastore_->epoch_id_record_finished(), 3);
     EXPECT_EQ(datastore_->epoch_id_switched(), 4);
-    EXPECT_EQ(datastore_->get_written_epoch_count(), 2);
+    EXPECT_EQ(datastore_->get_written_epoch_count(), 1);
     EXPECT_EQ(datastore_->get_last_written_epoch(), 3);
     EXPECT_EQ(datastore_->get_persisted_epoch_count(), 3);
     EXPECT_EQ(datastore_->get_last_persisted_epoch(), 3);
@@ -396,7 +395,7 @@ TEST_F(race_detection_test, race_detection_behavior_test) {
     EXPECT_EQ(datastore_->epoch_id_to_be_recorded(), 3);
     EXPECT_EQ(datastore_->epoch_id_record_finished(), 3);
     EXPECT_EQ(datastore_->epoch_id_switched(), 4);
-    EXPECT_EQ(datastore_->get_written_epoch_count(), 2);
+    EXPECT_EQ(datastore_->get_written_epoch_count(), 1);
     EXPECT_EQ(datastore_->get_last_written_epoch(), 3);
     EXPECT_EQ(datastore_->get_persisted_epoch_count(), 3);
     EXPECT_EQ(datastore_->get_last_persisted_epoch(), 3);
@@ -409,7 +408,7 @@ TEST_F(race_detection_test, race_detection_behavior_test) {
     EXPECT_EQ(datastore_->epoch_id_to_be_recorded(), 4);
     EXPECT_EQ(datastore_->epoch_id_record_finished(), 4);
     EXPECT_EQ(datastore_->epoch_id_switched(), 5);
-    EXPECT_EQ(datastore_->get_written_epoch_count(), 3);
+    EXPECT_EQ(datastore_->get_written_epoch_count(), 2);
     EXPECT_EQ(datastore_->get_last_written_epoch(), 4);
     EXPECT_EQ(datastore_->get_persisted_epoch_count(), 4);
     EXPECT_EQ(datastore_->get_last_persisted_epoch(), 4);
@@ -419,7 +418,6 @@ TEST_F(race_detection_test, race_detection_behavior_test) {
     std::vector<std::pair<std::string, epoch_id_type>> expected_log = {
         {OPERATION_PERSIST_CALLBACK, 1},
         {OPERATION_PERSIST_CALLBACK, 2},
-        {OPERATION_WRITE_EPOCH, 2},
         {OPERATION_WRITE_EPOCH, 3},
         {OPERATION_PERSIST_CALLBACK, 3},
         {OPERATION_WRITE_EPOCH, 4},
