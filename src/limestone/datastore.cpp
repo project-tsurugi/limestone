@@ -258,7 +258,7 @@ void datastore::update_min_epoch_id(bool from_switch_epoch) {  // NOLINT(readabi
                 upper_limit = working_epoch - 1;
             }
         }
-        if (max_finished_epoch < finished_epoch) {
+        if (max_finished_epoch < finished_epoch && finished_epoch <= upper_limit) {
             max_finished_epoch = finished_epoch;
         }
     }
@@ -267,7 +267,7 @@ void datastore::update_min_epoch_id(bool from_switch_epoch) {  // NOLINT(readabi
 
     // update recorded_epoch_
     auto to_be_epoch = upper_limit;
-    if (from_switch_epoch && (to_be_epoch > static_cast<std::uint64_t>(max_finished_epoch))) {
+    if (to_be_epoch > static_cast<std::uint64_t>(max_finished_epoch)) {
         to_be_epoch = static_cast<std::uint64_t>(max_finished_epoch);
     }
 

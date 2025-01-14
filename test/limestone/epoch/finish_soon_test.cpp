@@ -56,7 +56,7 @@ TEST_F(finish_soon_test, same) {
     channel.end_session();
     
     ASSERT_EQ(2, datastore_->epoch_id_informed());
-    ASSERT_EQ(2, datastore_->epoch_id_to_be_recorded());
+    ASSERT_EQ(0, datastore_->epoch_id_to_be_recorded());
 
     datastore_->switch_epoch(4);
     ASSERT_EQ(3, datastore_->epoch_id_informed());
