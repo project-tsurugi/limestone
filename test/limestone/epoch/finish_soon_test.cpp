@@ -46,25 +46,25 @@ TEST_F(finish_soon_test, same) {
 
     datastore_->switch_epoch(2);
     ASSERT_EQ(1, datastore_->epoch_id_informed());
-    ASSERT_EQ(0, datastore_->epoch_id_recorded());
+    ASSERT_EQ(0, datastore_->epoch_id_to_be_recorded());
 
     datastore_->switch_epoch(3);
     ASSERT_EQ(2, datastore_->epoch_id_informed());
-    ASSERT_EQ(0, datastore_->epoch_id_recorded());
+    ASSERT_EQ(0, datastore_->epoch_id_to_be_recorded());
 
     channel.begin_session();
     channel.end_session();
     
     ASSERT_EQ(2, datastore_->epoch_id_informed());
-    ASSERT_EQ(0, datastore_->epoch_id_recorded());
+    ASSERT_EQ(0, datastore_->epoch_id_to_be_recorded());
 
     datastore_->switch_epoch(4);
     ASSERT_EQ(3, datastore_->epoch_id_informed());
-    ASSERT_EQ(3, datastore_->epoch_id_recorded());
+    ASSERT_EQ(3, datastore_->epoch_id_to_be_recorded());
     
     datastore_->switch_epoch(5);
     ASSERT_EQ(4, datastore_->epoch_id_informed());
-    ASSERT_EQ(3, datastore_->epoch_id_recorded());
+    ASSERT_EQ(3, datastore_->epoch_id_to_be_recorded());
 
     // cleanup
     datastore_->shutdown();
@@ -77,27 +77,27 @@ TEST_F(finish_soon_test, different) {
 
     datastore_->switch_epoch(2);
     ASSERT_EQ(1, datastore_->epoch_id_informed());
-    ASSERT_EQ(0, datastore_->epoch_id_recorded());
+    ASSERT_EQ(0, datastore_->epoch_id_to_be_recorded());
 
     datastore_->switch_epoch(3);
     ASSERT_EQ(2, datastore_->epoch_id_informed());
-    ASSERT_EQ(0, datastore_->epoch_id_recorded());
+    ASSERT_EQ(0, datastore_->epoch_id_to_be_recorded());
 
     channel.begin_session();
     ASSERT_EQ(2, datastore_->epoch_id_informed());
-    ASSERT_EQ(0, datastore_->epoch_id_recorded());
+    ASSERT_EQ(0, datastore_->epoch_id_to_be_recorded());
 
     datastore_->switch_epoch(4);
     ASSERT_EQ(2, datastore_->epoch_id_informed());
-    ASSERT_EQ(0, datastore_->epoch_id_recorded());
+    ASSERT_EQ(0, datastore_->epoch_id_to_be_recorded());
     
     channel.end_session();
     ASSERT_EQ(3, datastore_->epoch_id_informed());
-    ASSERT_EQ(3, datastore_->epoch_id_recorded());
+    ASSERT_EQ(3, datastore_->epoch_id_to_be_recorded());
 
     datastore_->switch_epoch(5);
     ASSERT_EQ(4, datastore_->epoch_id_informed());
-    ASSERT_EQ(3, datastore_->epoch_id_recorded());
+    ASSERT_EQ(3, datastore_->epoch_id_to_be_recorded());
 
     // cleanup
     datastore_->shutdown();

@@ -184,7 +184,7 @@ void datastore::ready() {
         create_snapshot();
         online_compaction_worker_future_ = std::async(std::launch::async, &datastore::online_compaction_worker, this);
         if (epoch_id_switched_.load() != 0) {
-            write_epoch_to_file(epoch_id_informed_.load());
+            write_epoch_callback_(epoch_id_informed_.load());
         }
         cleanup_rotated_epoch_files(location_);
         state_ = state::ready;
@@ -224,6 +224,7 @@ void datastore::switch_epoch(epoch_id_type new_epoch_id) {
             LOG_LP(WARNING) << "switch to epoch_id_type of " << neid << " (<=" << switched << ") is curious";
         }
 
+        on_switch_epoch_epoch_id_switched_store();    // for testing
         epoch_id_switched_.store(neid);
         if (state_ != state::not_ready) {
             update_min_epoch_id(true);
@@ -237,6 +238,8 @@ void datastore::switch_epoch(epoch_id_type new_epoch_id) {
 
 void datastore::update_min_epoch_id(bool from_switch_epoch) {  // NOLINT(readability-function-cognitive-complexity)
     TRACE_START << "from_switch_epoch=" << from_switch_epoch;
+    
+    on_update_min_epoch_id_epoch_id_switched_load(); // for testing
     auto upper_limit = epoch_id_switched_.load();
     if (upper_limit == 0) {
         return; // If epoch_id_switched_ is zero, it means no epoch has been switched, so updating epoch_id_to_be_recorded_ and epoch_id_informed_ is unnecessary.
@@ -246,7 +249,9 @@ void datastore::update_min_epoch_id(bool from_switch_epoch) {  // NOLINT(readabi
     epoch_id_type max_finished_epoch = 0;
 
     for (const auto& e : log_channels_) {
+        on_update_min_epoch_id_current_epoch_id_load(); // for testing
         auto working_epoch = e->current_epoch_id_.load();
+        on_update_min_epoch_id_finished_epoch_id_load(); // for testing
         auto finished_epoch = e->finished_epoch_id_.load();
         if (working_epoch > finished_epoch && working_epoch != UINT64_MAX) {
             if ((working_epoch - 1) < upper_limit) {
@@ -267,23 +272,27 @@ void datastore::update_min_epoch_id(bool from_switch_epoch) {  // NOLINT(readabi
     }
 
     TRACE << "update epoch file part start with to_be_epoch = " << to_be_epoch;
+    on_update_min_epoch_id_epoch_id_to_be_recorded_load();  // for testing
     auto old_epoch_id = epoch_id_to_be_recorded_.load();
     while (true) {
         if (old_epoch_id >= to_be_epoch) {
             break;
         }
+        on_update_min_epoch_id_epoch_id_to_be_recorded_cas();  // for testing
         if (epoch_id_to_be_recorded_.compare_exchange_strong(old_epoch_id, to_be_epoch)) {
             TRACE << "epoch_id_to_be_recorded_ updated to " << to_be_epoch;
+            on_update_min_epoch_id_epoch_id_to_be_recorded_load();  // for testing
             std::lock_guard<std::mutex> lock(mtx_epoch_file_);
             if (to_be_epoch < epoch_id_to_be_recorded_.load()) {
                 break;
             }           
-            write_epoch_to_file(static_cast<epoch_id_type>(to_be_epoch));
+            write_epoch_callback_(static_cast<epoch_id_type>(to_be_epoch));
             epoch_id_record_finished_.store(to_be_epoch);
             TRACE << "epoch_id_record_finished_ updated to " << to_be_epoch;
             break;
         }
     }
+    on_update_min_epoch_id_epoch_id_record_finished_load();  // for testing
     if (to_be_epoch > epoch_id_record_finished_.load()) {
         TRACE << "skipping persistent callback part, to_be_epoch =  " << to_be_epoch << ", epoch_id_record_finished_ = " << epoch_id_record_finished_.load();
         TRACE_END;
@@ -296,14 +305,17 @@ void datastore::update_min_epoch_id(bool from_switch_epoch) {  // NOLINT(readabi
     // In `informed_epoch_`, the update restriction based on the `from_switch_epoch` condition is intentionally omitted.
     // Due to the interface specifications of Shirakami, it is necessary to advance the epoch even if the log channel
     // is not updated. This behavior differs from `recorded_epoch_` and should be maintained as such.
+    on_update_min_epoch_id_epoch_id_informed_load_1();  // for testing
     old_epoch_id = epoch_id_informed_.load();
     while (true) {
         if (old_epoch_id >= to_be_epoch) {
             break;
         }
+        on_update_min_epoch_id_epoch_id_informed_cas();  // for testing
         if (epoch_id_informed_.compare_exchange_strong(old_epoch_id, to_be_epoch)) {
             TRACE << "epoch_id_informed_ updated to " << to_be_epoch;
             {
+                on_update_min_epoch_id_epoch_id_informed_load_2();  // for testing
                 std::lock_guard<std::mutex> lock(mtx_epoch_persistent_callback_);
                 if (to_be_epoch < epoch_id_informed_.load()) {
                     break;
@@ -486,7 +498,7 @@ rotation_result datastore::rotate_log_files() {
     }
     TRACE << "epoch_id = " << epoch_id;
     {
-        on_wait1(); // for testing
+        on_rotate_log_files(); // for testing
         // Wait until epoch_id_informed_ is less than rotated_epoch_id to ensure safe rotation.
         std::unique_lock<std::mutex> ul(informed_mutex);
         while (epoch_id_informed_.load() < epoch_id) {

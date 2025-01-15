@@ -248,7 +248,8 @@ public:
 protected:  // for tests
     auto& log_channels_for_tests() const noexcept { return log_channels_; }
     auto epoch_id_informed_for_tests() const noexcept { return epoch_id_informed_.load(); }
-    auto epoch_id_recorded_for_tests() const noexcept { return epoch_id_to_be_recorded_.load(); }
+    auto epoch_id_to_be_recorded_for_tests() const noexcept { return epoch_id_to_be_recorded_.load(); }
+    auto epoch_id_record_finished_for_tests() const noexcept { return epoch_id_record_finished_.load(); }
     auto epoch_id_switched_for_tests() const noexcept { return epoch_id_switched_.load(); }
     auto& files_for_tests() const noexcept { return files_; }
     void rotate_epoch_file_for_tests() { rotate_epoch_file(); }
@@ -257,12 +258,55 @@ protected:  // for tests
     // They allow derived classes to inject custom behavior or notifications
     // at specific wait points during the execution of the datastore class.
     // The default implementation does nothing, ensuring no impact on production code.
-    virtual void on_wait1() {}
-    virtual void on_wait2() {}
-    virtual void on_wait3() {}
-    virtual void on_wait4() {}
+    virtual void on_rotate_log_files() noexcept {}
+    virtual void on_begin_session_current_epoch_id_store() noexcept {}
+    virtual void on_end_session_finished_epoch_id_store() noexcept {}
+    virtual void on_end_session_current_epoch_id_store() noexcept {}
+    virtual void on_switch_epoch_epoch_id_switched_store() noexcept {}
+    virtual void on_update_min_epoch_id_epoch_id_switched_load() noexcept {}
+    virtual void on_update_min_epoch_id_current_epoch_id_load() noexcept {}
+    virtual void on_update_min_epoch_id_finished_epoch_id_load() noexcept {}
+    virtual void on_update_min_epoch_id_epoch_id_to_be_recorded_load() noexcept {}
+    virtual void on_update_min_epoch_id_epoch_id_to_be_recorded_cas() noexcept {}
+    virtual void on_update_min_epoch_id_epoch_id_record_finished_load() noexcept {}
+    virtual void on_update_min_epoch_id_epoch_id_informed_load_1() noexcept {}
+    virtual void on_update_min_epoch_id_epoch_id_informed_cas() noexcept {}
+    virtual void on_update_min_epoch_id_epoch_id_informed_load_2() noexcept {}
+
+    /**
+     * @brief Sets the callback function for writing epoch to a file.
+     * @details
+     * This method allows you to override the default behavior for writing epoch 
+     * information by providing a custom callback. The callback can be a free 
+     * function, a lambda, or a member function bound to an object.
+     * 
+     * Example:
+     * @code
+     * class CustomHandler {
+     * public:
+     *     void custom_epoch_writer(epoch_id_type epoch) {
+     *         // Custom logic
+     *     }
+     * };
+     * 
+     * datastore ds;
+     * CustomHandler handler;
+     * ds.set_write_epoch_callback([&handler](epoch_id_type epoch) {
+     *     handler.custom_epoch_writer(epoch);
+     * });
+     * @endcode
+     * 
+     * @param callback The new callback function to use for writing epoch.
+     */
+    void set_write_epoch_callback(std::function<void(epoch_id_type)> callback) {
+        write_epoch_callback_ = std::move(callback);
+    }
 
 private:
+    std::function<void(epoch_id_type)> write_epoch_callback_{
+        [this](epoch_id_type epoch) { this->write_epoch_to_file(epoch); }
+    };
+
     std::vector<std::unique_ptr<log_channel>> log_channels_;
 
     boost::filesystem::path location_{};
@@ -367,7 +411,7 @@ private:
     // File descriptor for file lock (flock) on the manifest file
     int fd_for_flock_{-1};
 
-    void write_epoch_to_file(epoch_id_type epoch_id);
+    virtual void write_epoch_to_file(epoch_id_type epoch_id);
 
     int epoch_write_counter = 0;
 };

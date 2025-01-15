@@ -56,6 +56,7 @@ void log_channel::begin_session() {
         // This loop detects such inconsistencies and repeats until `current_epoch_id_`
         // matches the latest value of `epoch_id_switched_`, ensuring consistency.
         do {
+            envelope_.on_begin_session_current_epoch_id_store(); // for testing
             current_epoch_id_.store(envelope_.epoch_id_switched_.load());
             std::atomic_thread_fence(std::memory_order_acq_rel);
         } while (current_epoch_id_.load() != envelope_.epoch_id_switched_.load());
@@ -88,8 +89,10 @@ void log_channel::end_session() {
         if (fsync(fileno(strm_)) != 0) {
             LOG_AND_THROW_IO_EXCEPTION("fsync failed", errno);
         }
+        envelope_.on_end_session_finished_epoch_id_store(); // for testing
         finished_epoch_id_.store(current_epoch_id_.load());
         envelope_.update_min_epoch_id();
+        envelope_.on_end_session_current_epoch_id_store(); // for testing
         current_epoch_id_.store(UINT64_MAX);
 
         if (fclose(strm_) != 0) {  // NOLINT(*-owning-memory)
