@@ -1,5 +1,5 @@
 /*
- * Copyright 2022-2023 Project Tsurugi.
+ * Copyright 2022-2025 Project Tsurugi.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -15,16 +15,26 @@
  */
 #pragma once
 
-#include <istream>
-
 namespace limestone::api {
 
-class large_object_view {
+/**
+ * @brief represents a BLOB file that can provide persistent BLOB data.
+ */
+class blob_file {
 public:
 
-    std::size_t size();
+    /**
+     * @brief retrieves the path to the BLOB file.
+     * @returns BLOB file path
+     */
+    [[nodiscard]] boost::filesystem::path const& path() const noexcept;
 
-    std::iostream open();
+    /**
+     * @brief returns whether this BLOB file is available.
+     * @return true if this is available
+     * @return false otherwise
+     */
+    [[nodiscard]] operator bool() const noexcept;
 };
 
 } // namespace limestone::api

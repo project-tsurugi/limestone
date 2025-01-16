@@ -23,7 +23,6 @@
 #include <boost/filesystem/fstream.hpp>
 
 #include <limestone/api/storage_id_type.h>
-#include <limestone/api/large_object_view.h>
 
 
 namespace limestone::internal {
@@ -80,16 +79,8 @@ public:
      */
     void value(std::string& buf) const noexcept;
 
-    /**
-     * @brief returns a list of large objects associated with the entry at the current cursor position
-     * @return a list of large objects associated with the current entry
-     */
-    std::vector<large_object_view>& large_objects() noexcept;
-
 private:
     std::unique_ptr<internal::cursor_impl> pimpl;
-
-    std::vector<large_object_view> large_objects_{};
 
     explicit cursor(const boost::filesystem::path& snapshot_file);
     explicit cursor(const boost::filesystem::path& snapshot_file, const boost::filesystem::path& compacted_file);

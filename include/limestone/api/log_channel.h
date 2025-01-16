@@ -26,9 +26,9 @@
 #include <boost/filesystem.hpp>
 
 #include <limestone/status.h>
+#include <limestone/api/blob_pool.h>
 #include <limestone/api/storage_id_type.h>
 #include <limestone/api/write_version_type.h>
-#include <limestone/api/large_object_input.h>
 
 namespace limestone::api {
 
@@ -101,7 +101,7 @@ public:
      *       Therefore, callers of this API must handle the exception properly as per the original design.
      * @attention this function is not thread-safe.
      */
-    void add_entry(storage_id_type storage_id, std::string_view key, std::string_view value, write_version_type write_version, const std::vector<large_object_input>& large_objects);
+    void add_entry(storage_id_type storage_id, std::string_view key, std::string_view value, write_version_type write_version, const std::vector<blob_id_type>& large_objects);
 
     /**
      * @brief add an entry indicating the deletion of entries

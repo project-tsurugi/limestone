@@ -28,6 +28,8 @@
 #include <boost/filesystem.hpp>
 
 #include <limestone/status.h>
+#include <limestone/api/blob_pool.h>
+#include <limestone/api/blob_file.h>
 #include <limestone/api/backup.h>
 #include <limestone/api/backup_detail.h>
 #include <limestone/api/log_channel.h>
@@ -245,6 +247,39 @@ public:
      */
     void compact_with_online();
 
+    /**
+     * @brief acquires a new empty BLOB pool.
+     * @details This pool is used for temporary registration of BLOBs,
+     *      and all BLOBs that are not fully registered will become unavailable when the pool is destroyed.
+     * @return the created BLOB pool
+     * @see blob_pool::release()
+     * @attention the returned BLOB pool must be released by the blob_pool::release() after the usage, or it may cause leaks of BLOB data.
+     * @attention Undefined behavior if using pool after destroying this datastore.
+     */
+    [[nodiscard]] std::unique_ptr<blob_pool> acquire_blob_pool();
+
+    /**
+     * @brief returns BLOB file for the BLOB reference.
+     * @param reference the target BLOB reference
+     * @return the corresponding BLOB file
+     * @return unavailable BLOB file if the ID is not valid
+     * @attention the returned BLOB file is only available
+     *    during the transaction that has provided the corresponded BLOB reference.
+     */
+    [[nodiscard]] blob_file get_blob_file(blob_id_type reference);
+
+
+    /**
+     * @brief change the available boundary version that the entries may be read.
+     * @details This version comprises the oldest accessible snapshot, that is,
+     *    the datastore may delete anything older than the version included in this snapshot.
+     * @param version the target boundary version
+     * @attention this function should be called after the ready() is called.
+     * @see switch_safe_snapshot()
+     * @note the specified version must be smaller than or equal to the version that was told by the switch_safe_snapshot().
+     */
+    void switch_available_boundary_version(write_version_type version);
+    
 protected:  // for tests
     auto& log_channels_for_tests() const noexcept { return log_channels_; }
     auto epoch_id_informed_for_tests() const noexcept { return epoch_id_informed_.load(); }
