@@ -34,7 +34,7 @@ public:
      * @return true if this is available
      * @return false otherwise
      */
-    [[nodiscard]] operator bool() const noexcept;
+    [[nodiscard]] explicit operator bool() const noexcept;
 };
 
 } // namespace limestone::api

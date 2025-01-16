@@ -62,7 +62,7 @@ public:
      */
     [[nodiscard]] virtual blob_id_type register_file(
             boost::filesystem::path const& file,
-            bool is_temporary_file = false) = 0;
+            bool is_temporary_file) = 0;
 
     /**
      * @brief registers a BLOB data provisionally into this BLOB pool.
