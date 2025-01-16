@@ -126,7 +126,7 @@ void log_channel::add_entry(storage_id_type storage_id, std::string_view key, st
     TRACE_END;
 }
 
-void log_channel::add_entry([[maybe_unused]] storage_id_type storage_id, [[maybe_unused]] std::string_view key, [[maybe_unused]] std::string_view value, [[maybe_unused]] write_version_type write_version, [[maybe_unused]] const std::vector<large_object_input>& large_objects) {
+void log_channel::add_entry([[maybe_unused]] storage_id_type storage_id, [[maybe_unused]] std::string_view key, [[maybe_unused]] std::string_view value, [[maybe_unused]] write_version_type write_version, [[maybe_unused]] const std::vector<blob_id_type>& large_objects) {
     LOG_AND_THROW_EXCEPTION("not implemented");// FIXME
 };
 

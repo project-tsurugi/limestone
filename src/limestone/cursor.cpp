@@ -58,8 +58,4 @@ void cursor::value(std::string& buf) const noexcept {
     pimpl->value(buf);
 }
 
-std::vector<large_object_view>& cursor::large_objects() noexcept {
-    return large_objects_;
-}
-
 } // namespace limestone::api
