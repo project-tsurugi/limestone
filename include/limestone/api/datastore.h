@@ -273,7 +273,8 @@ public:
      * @brief change the available boundary version that the entries may be read.
      * @details This version comprises the oldest accessible snapshot, that is,
      *    the datastore may delete anything older than the version included in this snapshot.
-     * @param version the target boundary version
+     * @details The boundary version must be monotonic, that is,
+     *    it must be greater than or equal to the previous boundary version.     * @param version the target boundary version
      * @attention this function should be called after the ready() is called.
      * @see switch_safe_snapshot()
      * @note the specified version must be smaller than or equal to the version that was told by the switch_safe_snapshot().

@@ -86,7 +86,7 @@ BLOB対応の方針変更により、以下のクラスを廃止しました。�
 
 BLOB対応の方針変更により、以下のメソッドを廃止しました。
 
-*  `std::vector<large_object_view>& large_objects();`
+*  `std::vector<large_object_view>& datastore::large_objects();`
 
 
 
