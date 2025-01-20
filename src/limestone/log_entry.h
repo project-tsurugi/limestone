@@ -27,6 +27,7 @@
 
 #include <limestone/api/storage_id_type.h>
 #include <limestone/api/write_version_type.h>
+#include <limestone/api/blob_pool.h>
 #include <limestone/logging.h>
 #include "logging_helper.h"
 #include "limestone_exception_helper.h"
@@ -125,6 +126,9 @@ public:
         case entry_type::normal_entry:
             write(strm, key_sid_, value_etc_);
             break;
+        case entry_type::normal_with_blob:
+            write_with_blob(strm, key_sid_, value_etc_, blob_ids_);
+            break;
         case entry_type::remove_entry:
             write_remove(strm, key_sid_, value_etc_);
             break;
@@ -188,6 +192,72 @@ public:
 
         write_bytes(strm, key_sid.data(), key_sid.length());
         write_bytes(strm, value_etc.data(), value_etc.length());
+    }
+
+    static void write_with_blob(
+        FILE* strm, 
+        storage_id_type storage_id, 
+        std::string_view key, 
+        std::string_view value, 
+        write_version_type write_version, 
+        const std::vector<blob_id_type>& large_objects) 
+    {
+        entry_type type = entry_type::normal_with_blob;
+        write_uint8(strm, static_cast<std::uint8_t>(type));
+
+        std::size_t key_len = key.length();
+        assert(key_len <= UINT32_MAX);
+        write_uint32le(strm, static_cast<std::uint32_t>(key_len));
+
+        std::size_t value_len = value.length();
+        assert(value_len <= UINT32_MAX);
+        write_uint32le(strm, static_cast<std::uint32_t>(value_len));
+
+        write_uint64le(strm, static_cast<std::uint64_t>(storage_id));
+        write_bytes(strm, key.data(), key_len);
+
+        write_uint64le(strm, static_cast<std::uint64_t>(write_version.epoch_number_));
+        write_uint64le(strm, static_cast<std::uint64_t>(write_version.minor_write_version_));
+        write_bytes(strm, value.data(), value_len);
+
+        // Write the number of BLOB references
+        std::size_t blob_count = large_objects.size();
+        assert(blob_count <= UINT32_MAX);
+        write_uint32le(strm, static_cast<std::uint32_t>(blob_count));
+
+        // Write each BLOB ID
+        for (const auto& blob_id : large_objects) {
+            write_uint64le(strm, static_cast<std::uint64_t>(blob_id));
+        }
+    }
+
+    static void write_with_blob(FILE* strm, std::string_view key_sid, std::string_view value_etc, std::string_view blob_ids) {
+        entry_type type = entry_type::normal_with_blob;
+        write_uint8(strm, static_cast<std::uint8_t>(type));
+
+        // key_len を計算
+        std::size_t key_len = key_sid.length() - sizeof(storage_id_type);
+        assert(key_len <= UINT32_MAX);
+        write_uint32le(strm, static_cast<std::uint32_t>(key_len));
+
+        // value_len を計算
+        std::size_t value_len = value_etc.length() - (sizeof(epoch_id_type) + sizeof(std::uint64_t));
+        assert(value_len <= UINT32_MAX);
+        write_uint32le(strm, static_cast<std::uint32_t>(value_len));
+
+        // key_sid を書き込み
+        write_bytes(strm, key_sid.data(), key_sid.length());
+
+        // value_etc を書き込み
+        write_bytes(strm, value_etc.data(), value_etc.length());
+
+        // BLOBの数を計算して書き込み
+        std::size_t blob_count = blob_ids.length() / sizeof(blob_id_type);
+        assert(blob_count <= UINT32_MAX);
+        write_uint32le(strm, static_cast<std::uint32_t>(blob_count));
+
+        // BLOBの実態をそのまま書き込み
+        write_bytes(strm, blob_ids.data(), blob_ids.length());
     }
 
     static void write_remove(FILE* strm, storage_id_type storage_id, std::string_view key, write_version_type write_version) {
@@ -290,6 +360,29 @@ public:
             if (ec) return false;
             break;
         }
+        case entry_type::normal_with_blob:
+        {
+            std::size_t key_len = read_uint32le(strm, ec);
+            if (ec) return false;
+            std::size_t value_len = read_uint32le(strm, ec);
+            if (ec) return false;
+
+            key_sid_.resize(key_len + sizeof(storage_id_type));
+            read_bytes(strm, key_sid_.data(), static_cast<std::streamsize>(key_sid_.length()), ec);
+            if (ec) return false;
+
+            value_etc_.resize(value_len + sizeof(epoch_id_type) + sizeof(std::uint64_t));
+            read_bytes(strm, value_etc_.data(), static_cast<std::streamsize>(value_etc_.length()), ec);
+            if (ec) return false;
+
+            std::size_t blob_count = read_uint32le(strm, ec);
+            if (ec) return false;
+
+            blob_ids_.resize(blob_count * sizeof(blob_id_type));
+            read_bytes(strm, blob_ids_.data(), static_cast<std::streamsize>(blob_ids_.size()), ec);
+            if (ec) return false;
+            break;
+        }
         case entry_type::remove_entry:
         {
             std::size_t key_len = read_uint32le(strm, ec);
@@ -377,12 +470,24 @@ public:
         memcpy(static_cast<void*>(&minor_write_version), value_etc.data() + sizeof(epoch_id_type), sizeof(std::uint64_t));
         return le64toh(minor_write_version);
     }
+    [[nodiscard]] std::vector<blob_id_type> large_objects() const {
+        std::vector<blob_id_type> blob_ids;
+        const std::size_t blob_count = blob_ids_.size() / sizeof(blob_id_type);
+        blob_ids.reserve(blob_count);
+        for (std::size_t i = 0; i < blob_count; ++i) {
+            blob_id_type blob_id;
+            memcpy(&blob_id, blob_ids_.data() + i * sizeof(blob_id_type), sizeof(blob_id_type));
+            blob_ids.push_back(le64toh(blob_id));
+        }
+        return blob_ids;
+    }
 
 private:
     entry_type entry_type_{};
     epoch_id_type epoch_id_{};
     std::string key_sid_{};
     std::string value_etc_{};
+    std::string blob_ids_{};
 
     static void write_uint8(FILE* out, const std::uint8_t value) {
         int ret = fputc(value, out);
