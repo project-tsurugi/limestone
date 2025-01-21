@@ -16,7 +16,9 @@
 #include <map>
 #include <unistd.h>
 #include "internal.h"
+#include "log_entry.h"
 #include "test_root.h"
+#include "limestone/api/epoch_id_type.h"
 
 #define LOGFORMAT_VER 2
 
@@ -216,5 +218,53 @@ TEST_F(log_channel_test, truncate_storage) {
     EXPECT_EQ(m["43-100"], "v2");  // in another storage
     EXPECT_EQ(m["42-120"], "v3");  // after truncate
 }
+
+TEST_F(log_channel_test, write_blob_entry) {
+    const limestone::api::epoch_id_type epoch_id = 31415;
+    const limestone::api::storage_id_type storage_id = 12345;
+    const std::string key = "this is a key";
+    const std::string value = "this is a value";
+    const limestone::api::write_version_type write_version = limestone::api::write_version_type(67898, 76543);
+    const std::vector<limestone::api::blob_id_type> large_objects = {314, 1592, 65358};
+
+
+    limestone::api::log_channel& channel = datastore_->create_channel(boost::filesystem::path(location));
+    datastore_->ready();
+    datastore_->switch_epoch(epoch_id);
+
+    channel.begin_session();
+    channel.add_entry(storage_id, key, value, write_version, large_objects);
+    channel.end_session();
+
+    limestone::api::log_entry log_entry_begin_;
+    limestone::api::log_entry log_entry_normal_with_blob_;
+    boost::filesystem::ifstream istrm;
+    istrm.open(boost::filesystem::path(location) / "pwal_0000", std::ios_base::in | std::ios_base::binary);
+    EXPECT_TRUE(log_entry_begin_.read(istrm));
+    EXPECT_TRUE(log_entry_normal_with_blob_.read(istrm));
+    istrm.close();
+
+    EXPECT_EQ(log_entry_begin_.type(), limestone::api::log_entry::entry_type::marker_begin);
+    EXPECT_EQ(log_entry_begin_.epoch_id(), epoch_id);
+
+    EXPECT_EQ(log_entry_normal_with_blob_.type(), limestone::api::log_entry::entry_type::normal_with_blob);
+    EXPECT_EQ(log_entry_normal_with_blob_.storage(), storage_id);
+
+    std::string buf_key;
+    log_entry_normal_with_blob_.key(buf_key);
+    EXPECT_EQ(buf_key, key);
+
+    std::string buf_value;
+    log_entry_normal_with_blob_.value(buf_value);
+    EXPECT_EQ(buf_value, value);
+
+    limestone::api::write_version_type buf_version;
+    log_entry_normal_with_blob_.write_version(buf_version);
+    EXPECT_EQ(buf_version, write_version);
+
+    EXPECT_EQ(log_entry_normal_with_blob_.large_objects(), large_objects);
+}
+
+
 
 }  // namespace limestone::testing
