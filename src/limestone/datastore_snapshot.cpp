@@ -166,12 +166,25 @@ static std::string create_value_from_db_key_and_value(const std::string_view& db
     return value;
 }
 
-static void sortdb_foreach(sorting_context& sctx,
-                           const std::function<void(const std::string_view key_sid, const std::string_view value_etc)>& write_snapshot_entry,
-                           const std::function<void(const std::string_view key_sid, const std::string_view value_etc)>& write_snapshot_remove_entry) {
+static std::pair<std::string_view, std::string_view> process_blob_entry(const std::string_view db_value) {
+    std::size_t value_size = le64toh(*reinterpret_cast<const std::size_t*>(db_value.data()));
+    std::string_view value = db_value.substr(sizeof(std::size_t), value_size);
+    std::string_view blob_ids = db_value.substr(sizeof(std::size_t) + value_size);
+    return {value, blob_ids};
+}
+
+
+static void sortdb_foreach(
+    sorting_context& sctx,
+    const std::function<void(
+        const log_entry::entry_type entry_type,
+        const std::string_view key_sid,
+        const std::string_view value_etc,
+        const std::string_view blob_ids
+    )>& write_snapshot_entry) {
     static_assert(sizeof(log_entry::entry_type) == 1);
 #if defined SORT_METHOD_PUT_ONLY
-    sctx.get_sortdb()->each([&sctx, write_snapshot_entry, write_snapshot_remove_entry, last_key = std::string{}](const std::string_view db_key, const std::string_view db_value) mutable {
+    sctx.get_sortdb()->each([&sctx, &write_snapshot_entry, last_key = std::string{}](const std::string_view db_key, const std::string_view db_value) mutable {
         // using the first entry in GROUP BY (original-)key
         // NB: max versions comes first (by the custom-comparator)
         std::string_view key(db_key.data() + write_version_size, db_key.size() - write_version_size);
@@ -193,20 +206,22 @@ static void sortdb_foreach(sorting_context& sctx,
 
         auto entry_type = static_cast<log_entry::entry_type>(db_value[0]);
         switch (entry_type) {
-        case log_entry::entry_type::normal_entry:
-            write_snapshot_entry(key, create_value_from_db_key_and_value(db_key, db_value));
-            break;
-        case log_entry::entry_type::remove_entry: {
-            write_snapshot_remove_entry(key, create_value_from_db_key_and_value(db_key, db_value));
-            break;
-        }
-        default:
-            LOG(ERROR) << "never reach " << static_cast<int>(entry_type);
-            std::abort();
+            case log_entry::entry_type::normal_entry:
+            case log_entry::entry_type::remove_entry:
+                write_snapshot_entry(entry_type, key, create_value_from_db_key_and_value(db_key, db_value), {});
+                break;
+            case log_entry::entry_type::normal_with_blob: {
+                auto [value, blob_ids] = process_blob_entry(create_value_from_db_key_and_value(db_key, db_value));
+                write_snapshot_entry(entry_type, key, value, blob_ids);
+                break;
+            }
+            default:
+                LOG(ERROR) << "never reach " << static_cast<int>(entry_type);
+                std::abort();
         }
     });
 #else
-    sctx.get_sortdb()->each([&sctx, &write_snapshot_entry, write_snapshot_remove_entry](const std::string_view db_key, const std::string_view db_value) {
+    sctx.get_sortdb()->each([&sctx, &write_snapshot_entry, process_blob_entry](const std::string_view db_key, const std::string_view db_value) {
         storage_id_type st_bytes{};
         memcpy(static_cast<void*>(&st_bytes), db_key.data(), sizeof(storage_id_type));
         storage_id_type st = le64toh(st_bytes);
@@ -220,15 +235,18 @@ static void sortdb_foreach(sorting_context& sctx,
         }
         auto entry_type = static_cast<log_entry::entry_type>(db_value[0]);
         switch (entry_type) {
-        case log_entry::entry_type::normal_entry:
-            write_snapshot_entry(db_key, db_value.substr(1));
-            break;
-        case log_entry::entry_type::remove_entry: 
-            write_snapshot_remove_entry(db_key, db_value.substr(1));
-            break;
-        default:
-            LOG(ERROR) << "never reach " << static_cast<int>(entry_type);
-            std::abort();
+            case log_entry::entry_type::normal_entry:
+            case log_entry::entry_type::remove_entry:
+                write_snapshot_entry(entry_type, db_key, db_value.substr(1), {});
+                break;
+            case log_entry::entry_type::normal_with_blob: {
+                auto [value, blob_ids] = process_blob_entry(db_value.substr(1));
+                write_snapshot_entry(entry_type, db_key, value, blob_ids);
+                break;
+            } break;
+            default:
+                LOG(ERROR) << "never reach " << static_cast<int>(entry_type);
+                std::abort();
         }
     });
 #endif
@@ -260,17 +278,45 @@ void create_compact_pwal(
     bool rewind = true;  // TODO: change by flag
     epoch_id_type epoch = rewind ? 0 : max_appeared_epoch;
     log_entry::begin_session(ostrm, epoch);
-    auto write_snapshot_entry = [&ostrm, &rewind](std::string_view key_stid, std::string_view value_etc) {
-        if (rewind) {
-            static std::string value{};
-            value = value_etc;
-            std::memset(value.data(), 0, 16);
-            log_entry::write(ostrm, key_stid, value);
-        } else {
-            log_entry::write(ostrm, key_stid, value_etc);
+
+    auto write_snapshot_entry = [&ostrm, rewind](
+        log_entry::entry_type entry_type, 
+        std::string_view key_sid, 
+        std::string_view value_etc, 
+        std::string_view blob_ids) {
+        switch (entry_type) {
+            case log_entry::entry_type::normal_entry:
+                if (rewind) {
+                    static std::string value{};
+                    value = value_etc;
+                    std::memset(value.data(), 0, 16);
+                    log_entry::write(ostrm, key_sid, value);
+                } else {
+                    log_entry::write(ostrm, key_sid, value_etc);
+                }
+                break;
+            case log_entry::entry_type::normal_with_blob:
+                if (rewind) {
+                    static std::string value{};
+                    value = value_etc;
+                    std::memset(value.data(), 0, 16);
+                    log_entry::write_with_blob(ostrm, key_sid, value, blob_ids);
+                } else {
+                    log_entry::write_with_blob(ostrm, key_sid, value_etc, blob_ids);
+                }
+                break;
+            case log_entry::entry_type::remove_entry:
+                // No action needed
+                break;
+            default:
+                LOG(ERROR) << "Unexpected entry type: " << static_cast<int>(entry_type);
+                std::abort();
         }
     };
-    sortdb_foreach(sctx, write_snapshot_entry, [](std::string_view, std::string_view) {});
+
+
+
+    sortdb_foreach(sctx, write_snapshot_entry);
     //log_entry::end_session(ostrm, epoch);
     if (fclose(ostrm) != 0) {  // NOLINT(*-owning-memory)
         LOG_AND_THROW_IO_EXCEPTION("cannot close snapshot file (" + snapshot_file.string() + ")", errno);
@@ -382,17 +428,32 @@ void datastore::create_snapshot() {
     }
     log_entry::begin_session(ostrm, 0);
     setvbuf(ostrm, nullptr, _IOFBF, 128L * 1024L);  // NOLINT, NB. glibc may ignore size when _IOFBF and buffer=NULL
-    auto write_snapshot_entry = [&ostrm](std::string_view key_sid, std::string_view value_etc) { log_entry::write(ostrm, key_sid, value_etc); };
 
-    std::function<void(std::string_view key, std::string_view value_etc)> write_snapshot_remove_entry;
-    if (compaction_catalog_->get_compacted_files().empty()) {
-        write_snapshot_remove_entry = [](std::string_view, std::string_view) {};
-    } else {
-        write_snapshot_remove_entry = [&ostrm](std::string_view key, std::string_view value_etc) {
-            log_entry::write_remove(ostrm, key, value_etc);
-        };
-    }
-    sortdb_foreach(sctx, write_snapshot_entry, write_snapshot_remove_entry);
+    const bool should_write_remove_entry = !compaction_catalog_->get_compacted_files().empty();
+    auto write_snapshot_entry = [&ostrm, should_write_remove_entry](
+        log_entry::entry_type entry_type, 
+        std::string_view key_sid, 
+        std::string_view value_etc, 
+        std::string_view blob_ids) {
+        switch (entry_type) {
+        case log_entry::entry_type::normal_entry:
+            log_entry::write(ostrm, key_sid, value_etc);
+            break;
+        case log_entry::entry_type::normal_with_blob:
+            log_entry::write_with_blob(ostrm, key_sid, value_etc, blob_ids);
+            break;
+        case log_entry::entry_type::remove_entry:
+            if (should_write_remove_entry) {
+                log_entry::write_remove(ostrm, key_sid, value_etc);
+            }
+            break;
+        default:
+            LOG(ERROR) << "Unexpected entry type: " << static_cast<int>(entry_type);
+            std::abort();
+        }
+    };
+
+    sortdb_foreach(sctx, write_snapshot_entry);
     if (fclose(ostrm) != 0) {  // NOLINT(*-owning-memory)
         LOG_AND_THROW_IO_EXCEPTION("cannot close snapshot file (" + snapshot_file.string() + ")", errno);
     }
