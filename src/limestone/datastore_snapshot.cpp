@@ -75,7 +75,7 @@ static void insert_entry_or_update_to_max(sortdb_wrapper* sortdb, const log_entr
         if (e.type() == log_entry::entry_type::normal_with_blob) {
             std::size_t value_size = e.value_etc().size();
             std::size_t value_size_le = htole64(value_size);
-            db_value.append(reinterpret_cast<const char*>(&value_size_le), sizeof(value_size_le));
+            db_value.append(reinterpret_cast<const char*>(&value_size_le), sizeof(value_size_le));  // NOLINT(cppcoreguidelines-pro-type-reinterpret-cast)
             db_value.append(e.value_etc());
             db_value.append(e.blob_ids());
         } else {
@@ -99,7 +99,7 @@ static void insert_twisted_entry(sortdb_wrapper* sortdb, const log_entry& e) {
     if (e.type() == log_entry::entry_type::normal_with_blob) {
         std::size_t value_size = value.size();
         std::size_t value_size_le = htole64(value_size);
-        db_value.append(reinterpret_cast<const char*>(&value_size_le), sizeof(value_size_le));
+        db_value.append(reinterpret_cast<const char*>(&value_size_le), sizeof(value_size_le));  // NOLINT(cppcoreguidelines-pro-type-reinterpret-cast)
 
         db_value.append(value);
         db_value.append(e.blob_ids());
@@ -192,7 +192,7 @@ static std::pair<std::string, std::string_view> split_db_value_and_blob_ids(cons
     const std::string_view remaining_data = raw_db_value.substr(1);
 
     // Retrieve value_size
-    std::size_t value_size = le64toh(*reinterpret_cast<const std::size_t*>(remaining_data.data()));
+    std::size_t value_size = le64toh(*reinterpret_cast<const std::size_t*>(remaining_data.data()));  // NOLINT(cppcoreguidelines-pro-type-reinterpret-cast)
 
     // Split value_data and blob_ids_part
     std::string_view value_data = remaining_data.substr(sizeof(std::size_t), value_size);
@@ -262,7 +262,7 @@ static void sortdb_foreach(
         }
     });
 #else
-    sctx.get_sortdb()->each([&sctx, &write_snapshot_entry, process_blob_entry](const std::string_view db_key, const std::string_view db_value) {
+    sctx.get_sortdb()->each([&sctx, &write_snapshot_entry](const std::string_view db_key, const std::string_view db_value) {
         storage_id_type st_bytes{};
         memcpy(static_cast<void*>(&st_bytes), db_key.data(), sizeof(storage_id_type));
         storage_id_type st = le64toh(st_bytes);
@@ -281,8 +281,8 @@ static void sortdb_foreach(
                 write_snapshot_entry(entry_type, db_key, db_value.substr(1), {});
                 break;
             case log_entry::entry_type::normal_with_blob: {
-                auto [value, blob_ids] = process_blob_entry(db_value.substr(1));
-                write_snapshot_entry(entry_type, db_key, value, blob_ids);
+                auto [value, blob_ids] = split_db_value_and_blob_ids(db_value);
+                write_snapshot_entry(entry_type, db_key, value.substr(1), blob_ids);
                 break;
             } break;
             default:
