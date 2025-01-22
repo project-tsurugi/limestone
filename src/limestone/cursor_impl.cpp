@@ -134,7 +134,7 @@ bool cursor_impl::is_relevant_entry(const limestone::api::log_entry& entry) {
             // Step 5: Retrieve the write_version from clear_storage_ for the same storage ID
             write_version_type range_ver = it->second;
 
-            // Step 6: Compare the versions (only if the entry is normal_entry or remove_entry)
+            // Step 6: Compare the versions
             if (wv < range_ver) {
                 return false;  // Skip this entry as it is outdated
             }
