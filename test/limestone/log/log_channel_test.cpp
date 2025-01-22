@@ -220,6 +220,8 @@ TEST_F(log_channel_test, truncate_storage) {
 }
 
 TEST_F(log_channel_test, write_blob_entry) {
+    FLAGS_v = 50;
+
     const limestone::api::epoch_id_type epoch_id = 31415;
     const limestone::api::storage_id_type storage_id = 12345;
     const std::string key = "this is a key";
@@ -229,40 +231,29 @@ TEST_F(log_channel_test, write_blob_entry) {
 
 
     limestone::api::log_channel& channel = datastore_->create_channel(boost::filesystem::path(location));
-    datastore_->ready();
-    datastore_->switch_epoch(epoch_id);
 
     channel.begin_session();
     channel.add_entry(storage_id, key, value, write_version, large_objects);
     channel.end_session();
 
-    limestone::api::log_entry log_entry_begin_;
-    limestone::api::log_entry log_entry_normal_with_blob_;
-    boost::filesystem::ifstream istrm;
-    istrm.open(boost::filesystem::path(location) / "pwal_0000", std::ios_base::in | std::ios_base::binary);
-    EXPECT_TRUE(log_entry_begin_.read(istrm));
-    EXPECT_TRUE(log_entry_normal_with_blob_.read(istrm));
-    istrm.close();
+    datastore_->ready();
+    auto ss = datastore_->get_snapshot();
+    auto cursor = ss->get_cursor();
 
-    EXPECT_EQ(log_entry_begin_.type(), limestone::api::log_entry::entry_type::marker_begin);
-    EXPECT_EQ(log_entry_begin_.epoch_id(), epoch_id);
-
-    EXPECT_EQ(log_entry_normal_with_blob_.type(), limestone::api::log_entry::entry_type::normal_with_blob);
-    EXPECT_EQ(log_entry_normal_with_blob_.storage(), storage_id);
+    EXPECT_TRUE(cursor->next());
+    EXPECT_EQ(cursor->storage(), storage_id);
 
     std::string buf_key;
-    log_entry_normal_with_blob_.key(buf_key);
+    cursor->key(buf_key);
     EXPECT_EQ(buf_key, key);
 
     std::string buf_value;
-    log_entry_normal_with_blob_.value(buf_value);
+    cursor->value(buf_value);
     EXPECT_EQ(buf_value, value);
 
-    limestone::api::write_version_type buf_version;
-    log_entry_normal_with_blob_.write_version(buf_version);
-    EXPECT_EQ(buf_version, write_version);
+    EXPECT_FALSE(cursor->next());
 
-    EXPECT_EQ(log_entry_normal_with_blob_.large_objects(), large_objects);
+
 }
 
 

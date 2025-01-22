@@ -72,10 +72,19 @@ static void insert_entry_or_update_to_max(sortdb_wrapper* sortdb, const log_entr
     if (need_write) {
         std::string db_value;
         db_value.append(1, static_cast<char>(e.type()));
-        db_value.append(e.value_etc());
+        if (e.type() == log_entry::entry_type::normal_with_blob) {
+            std::size_t value_size = e.value_etc().size();
+            std::size_t value_size_le = htole64(value_size);
+            db_value.append(reinterpret_cast<const char*>(&value_size_le), sizeof(value_size_le));
+            db_value.append(e.value_etc());
+            db_value.append(e.blob_ids());
+        } else {
+            db_value.append(e.value_etc());
+        }
         sortdb->put(e.key_sid(), db_value);
     }
 }
+
 
 [[maybe_unused]]
 static void insert_twisted_entry(sortdb_wrapper* sortdb, const log_entry& e) {
@@ -86,7 +95,18 @@ static void insert_twisted_entry(sortdb_wrapper* sortdb, const log_entry& e) {
     store_bswap64_value(&db_key[8], &e.value_etc()[8]);
     std::memcpy(&db_key[write_version_size], e.key_sid().data(), e.key_sid().size());
     std::string db_value(1, static_cast<char>(e.type()));
-    db_value.append(e.value_etc().substr(write_version_size));
+    if (e.type() == log_entry::entry_type::normal_with_blob) {
+        std::size_t value_size = e.value_etc().size();
+        std::size_t value_size_le = htole64(value_size);
+        db_value.append(reinterpret_cast<const char*>(&value_size_le), sizeof(value_size_le));
+
+        // value と blob_ids を追加
+        db_value.append(e.value_etc());
+        db_value.append(e.blob_ids());
+    } else {
+        // その他の場合、既存フォーマットを維持
+        db_value.append(e.value_etc().substr(write_version_size));
+    }
     sortdb->put(db_key, db_value);
 }
 
@@ -113,6 +133,7 @@ static std::pair<epoch_id_type, sorting_context> create_sorted_from_wals(
     auto add_entry = [&sctx, &add_entry_to_point](const log_entry& e){
         switch (e.type()) {
         case log_entry::entry_type::normal_entry:
+        case log_entry::entry_type::normal_with_blob:
         case log_entry::entry_type::remove_entry:
             add_entry_to_point(sctx.get_sortdb(), e);
             break;
@@ -194,6 +215,7 @@ static void sortdb_foreach(sorting_context& sctx,
         auto entry_type = static_cast<log_entry::entry_type>(db_value[0]);
         switch (entry_type) {
         case log_entry::entry_type::normal_entry:
+        case log_entry::entry_type::normal_with_blob:
             write_snapshot_entry(key, create_value_from_db_key_and_value(db_key, db_value));
             break;
         case log_entry::entry_type::remove_entry: {
@@ -221,6 +243,7 @@ static void sortdb_foreach(sorting_context& sctx,
         auto entry_type = static_cast<log_entry::entry_type>(db_value[0]);
         switch (entry_type) {
         case log_entry::entry_type::normal_entry:
+        case log_entry::entry_type::normal_with_blob:
             write_snapshot_entry(db_key, db_value.substr(1));
             break;
         case log_entry::entry_type::remove_entry: 

@@ -661,3 +661,6 @@ BLOBリスト付きのエントリに対応する。
 
 
 
+log_channel.hに更新しているが、だれも参照していないpriavte fieldがあったので削除した。
+
+    write_version_type write_version_{};

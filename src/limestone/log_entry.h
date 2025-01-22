@@ -448,17 +448,14 @@ public:
     }
 
     // for the purpose of storing key_sid and value_etc into LevelDB
-    std::string& value_etc() {
-        return value_etc_;
-    }
     [[nodiscard]] const std::string& value_etc() const {
         return value_etc_;
     }
-    std::string& key_sid() {
-        return key_sid_;
-    }
     [[nodiscard]] const std::string& key_sid() const {
         return key_sid_;
+    }
+    [[nodiscard]] const std::string& blob_ids() const {
+        return blob_ids_;
     }
     static epoch_id_type write_version_epoch_number(std::string_view value_etc) {
         epoch_id_type epoch_id{};

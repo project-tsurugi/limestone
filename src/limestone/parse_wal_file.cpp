@@ -126,9 +126,9 @@ void invalidate_epoch_snippet(boost::filesystem::fstream& strm, std::streampos f
         enum class token_type {
             eof,
             normal_entry = 1, marker_begin, marker_end, marker_durable, remove_entry, marker_invalidated_begin,
-            clear_storage, add_storage, remove_storage,
+            clear_storage, add_storage, remove_storage, normal_with_blob,
             SHORT_normal_entry = 101, SHORT_marker_begin, SHORT_marker_end, SHORT_marker_durable, SHORT_remove_entry, SHORT_marker_inv_begin,
-            SHORT_clear_storage, SHORT_add_storage, SHORT_remove_storage,
+            SHORT_clear_storage, SHORT_add_storage, SHORT_remove_storage, SHORT_normal_with_blob,
             UNKNOWN_TYPE_entry = 1001,
         };
 
@@ -141,6 +141,7 @@ void invalidate_epoch_snippet(boost::filesystem::fstream& strm, std::streampos f
                     value_ = token_type::eof;
                 } else switch (e.type()) {  // NOLINT(*braces-around-statements)
                 case log_entry::entry_type::normal_entry:             value_ = token_type::normal_entry; break;
+                case log_entry::entry_type::normal_with_blob:         value_ = token_type::normal_with_blob; break;
                 case log_entry::entry_type::marker_begin:             value_ = token_type::marker_begin; break;
                 case log_entry::entry_type::marker_end:               value_ = token_type::marker_end; break;
                 case log_entry::entry_type::marker_durable:           value_ = token_type::marker_durable; break;
@@ -154,6 +155,7 @@ void invalidate_epoch_snippet(boost::filesystem::fstream& strm, std::streampos f
             } else if (ec.value() == log_entry::read_error::short_entry) {
                 switch (e.type()) {
                 case log_entry::entry_type::normal_entry:             value_ = token_type::SHORT_normal_entry; break;
+                case log_entry::entry_type::normal_with_blob:         value_ = token_type::SHORT_normal_with_blob; break;
                 case log_entry::entry_type::marker_begin:             value_ = token_type::SHORT_marker_begin; break;
                 case log_entry::entry_type::marker_end:               value_ = token_type::SHORT_marker_end; break;
                 case log_entry::entry_type::marker_durable:           value_ = token_type::SHORT_marker_durable; break;
@@ -244,11 +246,12 @@ epoch_id_type dblog_scan::scan_one_pwal_file(  // NOLINT(readability-function-co
         bool aborted = false;
         switch (tok.value()) {
         case lex_token::token_type::normal_entry:
+        case lex_token::token_type::normal_with_blob:
         case lex_token::token_type::remove_entry:
         case lex_token::token_type::clear_storage:
         case lex_token::token_type::add_storage:
         case lex_token::token_type::remove_storage:
-// normal_entry | remove_entry | clear_storage | add_storage | remove_storage : (not 1st) { if (valid) process-entry } -> loop
+// normal_entry | normal_with_blob | remove_entry | clear_storage | add_storage | remove_storage : (not 1st) { if (valid) process-entry } -> loop
             if (!first) {
                 if (valid) {
                     add_entry(e);
@@ -313,11 +316,12 @@ epoch_id_type dblog_scan::scan_one_pwal_file(  // NOLINT(readability-function-co
             break;
         }
         case lex_token::token_type::SHORT_normal_entry:
+        case lex_token::token_type::SHORT_normal_with_blob:
         case lex_token::token_type::SHORT_remove_entry:
         case lex_token::token_type::SHORT_clear_storage:
         case lex_token::token_type::SHORT_add_storage:
         case lex_token::token_type::SHORT_remove_storage: {
-// SHORT_normal_entry | SHORT_remove_entry | SHORT_clear_storage | SHORT_add_storage | SHORT_remove_storage : (not 1st) { if (valid) error-truncated } -> END
+// SHORT_normal_entry | SHORT_normal_with_blob | SHORT_remove_entry | SHORT_clear_storage | SHORT_add_storage | SHORT_remove_storage : (not 1st) { if (valid) error-truncated } -> END
             if (first) {
                 err_unexpected();
                 pe = parse_error(parse_error::unexpected, fpos_before_read_entry);
