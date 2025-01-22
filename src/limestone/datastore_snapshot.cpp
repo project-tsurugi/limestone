@@ -94,18 +94,17 @@ static void insert_twisted_entry(sortdb_wrapper* sortdb, const log_entry& e) {
     store_bswap64_value(&db_key[0], &e.value_etc()[0]);  // NOLINT(readability-container-data-pointer)
     store_bswap64_value(&db_key[8], &e.value_etc()[8]);
     std::memcpy(&db_key[write_version_size], e.key_sid().data(), e.key_sid().size());
+    std::string value = e.value_etc().substr(write_version_size);
     std::string db_value(1, static_cast<char>(e.type()));
     if (e.type() == log_entry::entry_type::normal_with_blob) {
-        std::size_t value_size = e.value_etc().size();
+        std::size_t value_size = value.size();
         std::size_t value_size_le = htole64(value_size);
         db_value.append(reinterpret_cast<const char*>(&value_size_le), sizeof(value_size_le));
 
-        // value と blob_ids を追加
-        db_value.append(e.value_etc());
+        db_value.append(value);
         db_value.append(e.blob_ids());
     } else {
-        // その他の場合、既存フォーマットを維持
-        db_value.append(e.value_etc().substr(write_version_size));
+        db_value.append(value);
     }
     sortdb->put(db_key, db_value);
 }
@@ -187,12 +186,33 @@ static std::string create_value_from_db_key_and_value(const std::string_view& db
     return value;
 }
 
-static std::pair<std::string_view, std::string_view> process_blob_entry(const std::string_view db_value) {
-    std::size_t value_size = le64toh(*reinterpret_cast<const std::size_t*>(db_value.data()));
-    std::string_view value = db_value.substr(sizeof(std::size_t), value_size);
-    std::string_view blob_ids = db_value.substr(sizeof(std::size_t) + value_size);
-    return {value, blob_ids};
+static std::pair<std::string, std::string_view> split_db_value_and_blob_ids(const std::string_view raw_db_value) {
+    // The first byte is entry_type
+    const char entry_type = raw_db_value[0];
+    const std::string_view remaining_data = raw_db_value.substr(1);
+
+    // Retrieve value_size
+    std::size_t value_size = le64toh(*reinterpret_cast<const std::size_t*>(remaining_data.data()));
+
+    // Split value_data and blob_ids_part
+    std::string_view value_data = remaining_data.substr(sizeof(std::size_t), value_size);
+    std::string_view blob_ids_part = remaining_data.substr(sizeof(std::size_t) + value_size);
+
+    // Calculate the required size and create a buffer
+    std::string combined_value(value_size + 1, '\0'); // entry_type (1 byte) + value_data (variable length)
+
+    // Copy data
+    combined_value[0] = entry_type; // Copy entry_type to the beginning
+    std::memcpy(&combined_value[1], value_data.data(), value_data.size()); // Copy the remaining data
+
+    return {combined_value, blob_ids_part};
 }
+
+
+
+
+
+
 
 
 static void sortdb_foreach(
@@ -232,8 +252,8 @@ static void sortdb_foreach(
                 write_snapshot_entry(entry_type, key, create_value_from_db_key_and_value(db_key, db_value), {});
                 break;
             case log_entry::entry_type::normal_with_blob: {
-                auto [value, blob_ids] = process_blob_entry(create_value_from_db_key_and_value(db_key, db_value));
-                write_snapshot_entry(entry_type, key, value, blob_ids);
+                auto [db_value_without_blob_ids, blob_ids] = split_db_value_and_blob_ids(db_value);
+                write_snapshot_entry(entry_type, key, create_value_from_db_key_and_value(db_key, db_value_without_blob_ids), blob_ids);
                 break;
             }
             default:
