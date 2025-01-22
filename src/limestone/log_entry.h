@@ -334,7 +334,7 @@ public:
         return rc;
     }
 
-    bool read_entry_from(std::istream& strm, read_error& ec) {
+    bool read_entry_from(std::istream& strm, read_error& ec) { // NOLINT(readability-function-cognitive-complexity)
         ec.value(read_error::ok);
         ec.entry_type(entry_type::this_id_is_not_used);
         char one_char{};
@@ -472,8 +472,8 @@ public:
         const std::size_t blob_count = blob_ids_.size() / sizeof(blob_id_type);
         blob_ids.reserve(blob_count);
         for (std::size_t i = 0; i < blob_count; ++i) {
-            blob_id_type blob_id;
-            memcpy(&blob_id, blob_ids_.data() + i * sizeof(blob_id_type), sizeof(blob_id_type));
+            blob_id_type blob_id = 0;
+            std::memcpy(&blob_id, &blob_ids_[i * sizeof(blob_id_type)], sizeof(blob_id_type));
             blob_ids.push_back(le64toh(blob_id));
         }
         return blob_ids;
