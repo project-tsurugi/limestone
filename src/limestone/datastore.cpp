@@ -32,6 +32,8 @@
 #include "log_entry.h"
 #include "online_compaction.h"
 #include "compaction_catalog.h"
+#include "blob_file_resolver.h"
+#include "blob_pool_impl.h"
 
 namespace limestone::api {
 using namespace limestone::internal;
@@ -108,6 +110,8 @@ datastore::datastore(configuration const& conf) : location_(conf.data_locations_
 
         recover_max_parallelism_ = conf.recover_max_parallelism_;
         LOG(INFO) << "/:limestone:config:datastore setting the number of recover process thread = " << recover_max_parallelism_;
+
+        blob_file_resolver_ = std::make_unique<blob_file_resolver>(location_);
 
         VLOG_LP(log_debug) << "datastore is created, location = " << location_.string();
     } catch (...) {
@@ -695,6 +699,21 @@ void datastore::compact_with_online() {
 
     LOG_LP(INFO) << "compaction finished";
     TRACE_END;
+}
+
+std::unique_ptr<blob_pool> datastore::acquire_blob_pool() {
+    // Store the ID generation logic as a lambda function in a variable
+    auto id_generator = [this]() {
+        return next_blob_id_.fetch_add(1, std::memory_order_relaxed);
+    };
+
+    // Pass the lambda function as a constructor argument to create blob_pool_impl
+    return std::make_unique<limestone::internal::blob_pool_impl>(id_generator, *blob_file_resolver_);
+}
+
+blob_file datastore::get_blob_file(blob_id_type reference) {
+    check_after_ready(static_cast<const char*>(__func__));
+    return blob_file_resolver_->resolve_blob_file(reference, true);
 }
 
 } // namespace limestone::api

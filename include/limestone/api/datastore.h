@@ -42,7 +42,8 @@
 #include <limestone/api/restore_progress.h>
 
 namespace limestone::internal {
-    class compaction_catalog; 
+    class compaction_catalog;
+    class blob_file_resolver; 
 }
 namespace limestone::api {
 
@@ -450,6 +451,10 @@ private:
     virtual void write_epoch_to_file(epoch_id_type epoch_id);
 
     int epoch_write_counter = 0;
+
+    std::unique_ptr<limestone::internal::blob_file_resolver> blob_file_resolver_;
+
+    std::atomic<std::uint64_t> next_blob_id_{0};
 };
 
 } // namespace limestone::api
