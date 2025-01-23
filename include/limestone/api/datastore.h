@@ -263,8 +263,9 @@ public:
      * @brief returns BLOB file for the BLOB reference.
      * @param reference the target BLOB reference
      * @return the corresponding BLOB file
-     * @return unavailable BLOB file if the ID is not valid
-     * @attention the returned BLOB file is only available
+     * @return unavailable BLOB file if there is no BLOB file for the reference,
+     *   that is, the BLOB file has not been registered or has already been removed.
+     * @attention the returned BLOB file is only effective
      *    during the transaction that has provided the corresponded BLOB reference.
      */
     [[nodiscard]] blob_file get_blob_file(blob_id_type reference);

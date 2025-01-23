@@ -33,18 +33,21 @@ public:
     explicit blob_file(boost::filesystem::path path, bool available = false);
 
     /**
-     * @brief Retrieves the path to the BLOB file.
+     * @brief retrieves the path to the BLOB file.
      * @returns BLOB file path
+     * @attention undefined behavior if operator bool() returns false, i.e. the BLOB file has been removed by GC.
      */
     [[nodiscard]] boost::filesystem::path const& path() const noexcept;
 
     /**
-     * @brief Returns whether this BLOB file is available.
-     * @return true if this is available
+     * @brief returns whether this BLOB file is available.
+     * @return true if this object is available
      * @return false otherwise
+     * @note If this object is available, the path() may return a valid path to the BLOB file,
+     *   but it is not guaranteed to the file exists or is accessible.
+     *   Otherwise, if this is NOT available, the path() may return invalid path.
      */
     [[nodiscard]] explicit operator bool() const noexcept;
-
     /**
      * @brief Sets the availability status of the BLOB file.
      * @param available New availability status.
