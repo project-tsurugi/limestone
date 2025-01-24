@@ -19,7 +19,7 @@
 
 namespace limestone::api {
 
-blob_file::blob_file(boost::filesystem::path path, bool available)
+blob_file::blob_file(boost::filesystem::path path, bool available) noexcept
     : blob_path_(std::move(path)), available_(available) {}
 
 boost::filesystem::path const& blob_file::path() const noexcept {
@@ -28,10 +28,6 @@ boost::filesystem::path const& blob_file::path() const noexcept {
 
 blob_file::operator bool() const noexcept {
     return available_;
-}
-
-void blob_file::set_availability(bool available) noexcept {
-    available_ = available;
 }
 
 } // namespace limestone::api

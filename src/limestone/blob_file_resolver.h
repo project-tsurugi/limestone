@@ -48,7 +48,7 @@ public:
     explicit blob_file_resolver(
         boost::filesystem::path base_directory,
         std::size_t directory_count = 100,
-        std::function<std::size_t(blob_id_type)> hash_function = [](blob_id_type id) { return id; })
+        std::function<std::size_t(blob_id_type)> hash_function = [](blob_id_type id) { return id; }) noexcept
         : blob_directory_(std::move(base_directory) / "blob"),
           directory_count_(directory_count),
           hash_function_(std::move(hash_function)) {
@@ -62,7 +62,7 @@ public:
      * @param blob_id The ID of the BLOB.
      * @return The resolved file path.
      */
-    [[nodiscard]] boost::filesystem::path resolve_path(blob_id_type blob_id) const {
+    [[nodiscard]] boost::filesystem::path resolve_path(blob_id_type blob_id) const noexcept {
         // Calculate directory index
         std::size_t directory_index = hash_function_(blob_id) % directory_count_;
 
@@ -76,23 +76,11 @@ public:
         return subdirectory / file_name.str();
     }
 
-    /**
-     * @brief Resolves the BLOB file for the given BLOB ID.
-     * 
-     * @param blob_id The ID of the BLOB.
-     * @param available Initial availability status of the BLOB file (default: false).
-     * @return A blob_file instance corresponding to the BLOB ID.
-     */
-    [[nodiscard]] blob_file resolve_blob_file(blob_id_type blob_id, bool available = false) const {
-        boost::filesystem::path file_path = resolve_path(blob_id);
-        return blob_file(file_path, available);
-    }
-
 private:
     /**
      * @brief Precomputes all directory paths and stores them in the cache.
      */
-    void precompute_directory_cache() {
+    void precompute_directory_cache() noexcept {
         directory_cache_.reserve(directory_count_);
         for (std::size_t i = 0; i < directory_count_; ++i) {
             std::ostringstream dir_name;

@@ -702,18 +702,48 @@ void datastore::compact_with_online() {
 }
 
 std::unique_ptr<blob_pool> datastore::acquire_blob_pool() {
-    // Store the ID generation logic as a lambda function in a variable
+    TRACE_START;
+
+    // Define a lambda function for generating unique blob IDs in a thread-safe manner.
+    // This function uses a CAS (Compare-And-Swap) loop to ensure atomic updates to the ID.
+    // If the maximum value for blob IDs is reached, the function returns the max value, signaling an overflow condition.
     auto id_generator = [this]() {
-        return next_blob_id_.fetch_add(1, std::memory_order_relaxed);
+        blob_id_type current = 0;
+        do {
+            current = next_blob_id_.load(std::memory_order_acquire); // Load the current ID atomically.
+            if (current == std::numeric_limits<blob_id_type>::max()) {
+                return current; // Return max value to indicate overflow.
+            }
+        } while (!next_blob_id_.compare_exchange_weak(
+            current, 
+            current + 1,
+            std::memory_order_acq_rel, // Ensure atomicity of the update with acquire-release semantics.
+            std::memory_order_acquire));
+        return current; // Return the successfully updated ID.
     };
 
-    // Pass the lambda function as a constructor argument to create blob_pool_impl
-    return std::make_unique<limestone::internal::blob_pool_impl>(id_generator, *blob_file_resolver_);
+    // Create a blob_pool_impl instance by passing the ID generator lambda and blob_file_resolver.
+    // This approach allows flexible configuration and dependency injection for the blob pool.
+    auto pool = std::make_unique<limestone::internal::blob_pool_impl>(id_generator, *blob_file_resolver_);
+    TRACE_END;
+    return pool; // Return the constructed blob pool.
 }
 
 blob_file datastore::get_blob_file(blob_id_type reference) {
+    TRACE_START << "reference=" << reference;
     check_after_ready(static_cast<const char*>(__func__));
-    return blob_file_resolver_->resolve_blob_file(reference, true);
+    auto path = blob_file_resolver_->resolve_path(reference);
+    bool available = reference < next_blob_id_.load(std::memory_order_acquire);
+    if (available) {
+        try {
+            available = boost::filesystem::exists(path);
+        } catch (const boost::filesystem::filesystem_error& e) {
+            LOG_LP(ERROR) << "Failed to check blob file existence: " << e.what();
+            available = false;
+        }
+    }
+    TRACE_END;
+    return blob_file(path, available);
 }
 
 } // namespace limestone::api

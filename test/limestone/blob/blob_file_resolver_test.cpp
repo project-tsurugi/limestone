@@ -64,39 +64,4 @@ TEST_F(blob_file_resolver_test, handles_multiple_blob_ids) {
     }
 }
 
-TEST_F(blob_file_resolver_test, resolves_blob_file) {
-    // Test that blob_file is resolved correctly
-    blob_id_type blob_id = 123456;
-    bool initial_availability = true;
-
-    auto blob = resolver_->resolve_blob_file(blob_id, initial_availability);
-
-    // Expected path
-    std::ostringstream dir_name;
-    dir_name << "dir_" << std::setw(2) << std::setfill('0') << (blob_id % 10); // Mod 10 for directory count
-    boost::filesystem::path expected_path = boost::filesystem::path(base_directory) / "blob" / dir_name.str();
-    expected_path /= "000000000001e240.blob"; // Blob ID in hex: 123456 = 1e240
-
-    ASSERT_EQ(blob.path(), expected_path);
-    ASSERT_EQ(static_cast<bool>(blob), initial_availability);
-}
-
-TEST_F(blob_file_resolver_test, resolves_multiple_blob_files) {
-    // Test multiple blob IDs resolve to correct blob_file instances
-    for (blob_id_type blob_id = 0; blob_id < 100; ++blob_id) {
-        bool initial_availability = (blob_id % 2 == 0); // Alternate availability
-        auto blob = resolver_->resolve_blob_file(blob_id, initial_availability);
-
-        std::ostringstream dir_name;
-        dir_name << "dir_" << std::setw(2) << std::setfill('0') << (blob_id % 10); // Mod 10 for directory count
-        boost::filesystem::path expected_path = boost::filesystem::path(base_directory) / "blob" / dir_name.str();
-        std::ostringstream file_name;
-        file_name << std::hex << std::setw(16) << std::setfill('0') << blob_id << ".blob";
-        expected_path /= file_name.str();
-
-        ASSERT_EQ(blob.path(), expected_path);
-        ASSERT_EQ(static_cast<bool>(blob), initial_availability);
-    }
-}
-
 }  // namespace limestone::testing

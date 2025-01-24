@@ -30,7 +30,7 @@ public:
      * @param path Path to the BLOB file.
      * @param available Initial availability status of the BLOB file (default: false).
      */
-    explicit blob_file(boost::filesystem::path path, bool available = false);
+    explicit blob_file(boost::filesystem::path path, bool available = false) noexcept;
 
     /**
      * @brief retrieves the path to the BLOB file.
@@ -48,11 +48,6 @@ public:
      *   Otherwise, if this is NOT available, the path() may return invalid path.
      */
     [[nodiscard]] explicit operator bool() const noexcept;
-    /**
-     * @brief Sets the availability status of the BLOB file.
-     * @param available New availability status.
-     */
-    void set_availability(bool available) noexcept;
 };
 
 } // namespace limestone::api

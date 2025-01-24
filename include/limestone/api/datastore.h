@@ -291,6 +291,7 @@ protected:  // for tests
     auto epoch_id_switched_for_tests() const noexcept { return epoch_id_switched_.load(); }
     auto& files_for_tests() const noexcept { return files_; }
     void rotate_epoch_file_for_tests() { rotate_epoch_file(); }
+    void set_next_blob_id_for_tests(blob_id_type next_blob_id) noexcept { next_blob_id_ = next_blob_id; }
 
     // These virtual methods are hooks for testing thread synchronization.
     // They allow derived classes to inject custom behavior or notifications

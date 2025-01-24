@@ -20,19 +20,6 @@ TEST(blob_file_test, constructor_with_availability) {
     EXPECT_TRUE(static_cast<bool>(blob));
 }
 
-TEST(blob_file_test, set_availability) {
-    boost::filesystem::path test_path("/path/to/blob");
-    blob_file blob(test_path);
-
-    EXPECT_FALSE(static_cast<bool>(blob));
-
-    blob.set_availability(true);
-    EXPECT_TRUE(static_cast<bool>(blob));
-
-    blob.set_availability(false);
-    EXPECT_FALSE(static_cast<bool>(blob));
-}
-
 TEST(blob_file_test, path_returns_correct_value) {
     boost::filesystem::path test_path("/path/to/blob");
     blob_file blob(test_path);
