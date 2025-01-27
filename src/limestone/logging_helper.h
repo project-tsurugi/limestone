@@ -127,19 +127,19 @@ inline std::string getThreadName() {
 }
 
 
-// Log level for TRACE logging
-constexpr int TRACE_LOG_LEVEL = 50;
-
 // Common logging macro for TRACE operations
+// NOLINTBEGIN(cppcoreguidelines-pro-bounds-array-to-pointer-decay,cppcoreguidelines-macro-usage)
 #define TRACE_COMMON(level, label)                                                \
     if (!VLOG_IS_ON(level)) {}                                                    \
     else                                                                          \
         VLOG(level)                                                               \
             << "[Thread " << std::this_thread::get_id()                           \
             << " (" << getThreadName() << ")] LIMESTONE TRACE: " << __func__      \
-            << ((label)[0] ? " " : "")                                            \
-            << (label)                                                            \
-            << ": "
+            << (std::string_view(label).empty() ? "" : " ")                       \
+            << std::string_view(label)                                            \
+            << ": " 
+// NOLINTEND(cppcoreguidelines-pro-bounds-array-to-pointer-decay,cppcoreguidelines-macro-usage)
+
 
 // Specific macros for different TRACE use cases with default log level
 #define TRACE TRACE_COMMON(log_trace, "trace")
@@ -148,10 +148,10 @@ constexpr int TRACE_LOG_LEVEL = 50;
 #define TRACE_ABORT TRACE_COMMON(log_trace, "abort")
 
 // Specific macros for different TRACE use cases with custom log level
-#define TRACE_LEVEL(level) TRACE_COMMON(level, "trace")
-#define TRACE_START_LEVEL(level) TRACE_COMMON(level, "start")
-#define TRACE_END_LEVEL(level) TRACE_COMMON(level, "end")
-#define TRACE_ABORT_LEVEL(level) TRACE_COMMON(level, "abort")
+#define TRACE_FINE TRACE_COMMON(log_trace_fine, "trace")
+#define TRACE_FINE_START TRACE_COMMON(log_trace_fine, "start")
+#define TRACE_FINE_END TRACE_COMMON(log_trace_fine, "end")
+#define TRACE_FINE_ABORT TRACE_COMMON(log_trace_fine, "abort")
 
 
 } // namespace
