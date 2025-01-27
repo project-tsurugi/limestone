@@ -746,5 +746,11 @@ blob_file datastore::get_blob_file(blob_id_type reference) {
     return blob_file(path, available);
 }
 
+void datastore::switch_available_boundary_version([[maybe_unused]] write_version_type version) {
+    LOG_LP(ERROR) << "not implemented";
+    std::abort();  // FIXME should implement
+}
+
+
 } // namespace limestone::api
 
