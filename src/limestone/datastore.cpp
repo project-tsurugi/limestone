@@ -216,7 +216,7 @@ log_channel& datastore::create_channel(const boost::filesystem::path& location) 
 epoch_id_type datastore::last_epoch() const noexcept { return static_cast<epoch_id_type>(epoch_id_informed_.load()); }
 
 void datastore::switch_epoch(epoch_id_type new_epoch_id) {
-    TRACE_START_LEVEL(log_trace_fine) << "new_epoch_id=" << new_epoch_id;
+    TRACE_FINE_START << "new_epoch_id=" << new_epoch_id;
     try {
         check_after_ready(static_cast<const char*>(__func__));
         auto neid = static_cast<std::uint64_t>(new_epoch_id);
@@ -230,14 +230,14 @@ void datastore::switch_epoch(epoch_id_type new_epoch_id) {
             update_min_epoch_id(true);
         }
     } catch (...) {
-        TRACE_ABORT_LEVEL(log_trace_fine);
+        TRACE_FINE_ABORT;
         HANDLE_EXCEPTION_AND_ABORT();
     }
-    TRACE_END_LEVEL(log_trace_fine);
+    TRACE_FINE_END;
 }
 
 void datastore::update_min_epoch_id(bool from_switch_epoch) {  // NOLINT(readability-function-cognitive-complexity)
-    TRACE_START_LEVEL(log_trace_fine) << "from_switch_epoch=" << from_switch_epoch;
+    TRACE_FINE_START << "from_switch_epoch=" << from_switch_epoch;
     
     on_update_min_epoch_id_epoch_id_switched_load(); // for testing
     auto upper_limit = epoch_id_switched_.load();
@@ -263,7 +263,7 @@ void datastore::update_min_epoch_id(bool from_switch_epoch) {  // NOLINT(readabi
         }
     }
 
-    TRACE_LEVEL(log_trace_fine) << "epoch_id_switched_ = " << epoch_id_switched_.load() << ", upper_limit = " << upper_limit << ", max_finished_epoch = " << max_finished_epoch;
+    TRACE_FINE << "epoch_id_switched_ = " << epoch_id_switched_.load() << ", upper_limit = " << upper_limit << ", max_finished_epoch = " << max_finished_epoch;
 
     // update recorded_epoch_
     auto to_be_epoch = upper_limit;
@@ -271,7 +271,7 @@ void datastore::update_min_epoch_id(bool from_switch_epoch) {  // NOLINT(readabi
         to_be_epoch = static_cast<std::uint64_t>(max_finished_epoch);
     }
 
-    TRACE_LEVEL(log_trace_fine) << "update epoch file part start with to_be_epoch = " << to_be_epoch;
+    TRACE_FINE << "update epoch file part start with to_be_epoch = " << to_be_epoch;
     on_update_min_epoch_id_epoch_id_to_be_recorded_load();  // for testing
     auto old_epoch_id = epoch_id_to_be_recorded_.load();
     while (true) {
@@ -280,7 +280,7 @@ void datastore::update_min_epoch_id(bool from_switch_epoch) {  // NOLINT(readabi
         }
         on_update_min_epoch_id_epoch_id_to_be_recorded_cas();  // for testing
         if (epoch_id_to_be_recorded_.compare_exchange_strong(old_epoch_id, to_be_epoch)) {
-            TRACE_LEVEL(log_trace_fine) << "epoch_id_to_be_recorded_ updated to " << to_be_epoch;
+            TRACE_FINE << "epoch_id_to_be_recorded_ updated to " << to_be_epoch;
             on_update_min_epoch_id_epoch_id_to_be_recorded_load();  // for testing
             std::lock_guard<std::mutex> lock(mtx_epoch_file_);
             if (to_be_epoch < epoch_id_to_be_recorded_.load()) {
@@ -288,20 +288,20 @@ void datastore::update_min_epoch_id(bool from_switch_epoch) {  // NOLINT(readabi
             }           
             write_epoch_callback_(static_cast<epoch_id_type>(to_be_epoch));
             epoch_id_record_finished_.store(to_be_epoch);
-            TRACE_LEVEL(log_trace_fine) << "epoch_id_record_finished_ updated to " << to_be_epoch;
+            TRACE_FINE << "epoch_id_record_finished_ updated to " << to_be_epoch;
             break;
         }
     }
     on_update_min_epoch_id_epoch_id_record_finished_load();  // for testing
     if (to_be_epoch > epoch_id_record_finished_.load()) {
-        TRACE_LEVEL(log_trace_fine) << "skipping persistent callback part, to_be_epoch =  " << to_be_epoch << ", epoch_id_record_finished_ = " << epoch_id_record_finished_.load();
-        TRACE_END;
+        TRACE_FINE << "skipping persistent callback part, to_be_epoch =  " << to_be_epoch << ", epoch_id_record_finished_ = " << epoch_id_record_finished_.load();
+        TRACE_FINE_END;
         return;
     }
 
     // update informed_epoch_
     to_be_epoch = upper_limit;
-    TRACE_LEVEL(log_trace_fine) << "persistent callback part start with to_be_epoch =" << to_be_epoch;
+    TRACE_FINE << "persistent callback part start with to_be_epoch =" << to_be_epoch;
     // In `informed_epoch_`, the update restriction based on the `from_switch_epoch` condition is intentionally omitted.
     // Due to the interface specifications of Shirakami, it is necessary to advance the epoch even if the log channel
     // is not updated. This behavior differs from `recorded_epoch_` and should be maintained as such.
@@ -313,7 +313,7 @@ void datastore::update_min_epoch_id(bool from_switch_epoch) {  // NOLINT(readabi
         }
         on_update_min_epoch_id_epoch_id_informed_cas();  // for testing
         if (epoch_id_informed_.compare_exchange_strong(old_epoch_id, to_be_epoch)) {
-            TRACE_LEVEL(log_trace_fine) << "epoch_id_informed_ updated to " << to_be_epoch;
+            TRACE_FINE << "epoch_id_informed_ updated to " << to_be_epoch;
             {
                 on_update_min_epoch_id_epoch_id_informed_load_2();  // for testing
                 std::lock_guard<std::mutex> lock(mtx_epoch_persistent_callback_);
@@ -321,9 +321,9 @@ void datastore::update_min_epoch_id(bool from_switch_epoch) {  // NOLINT(readabi
                     break;
                 }
                 if (persistent_callback_) {
-                    TRACE_LEVEL(log_trace_fine) <<  "start calling persistent callback to " << to_be_epoch;
+                    TRACE_FINE <<  "start calling persistent callback to " << to_be_epoch;
                     persistent_callback_(to_be_epoch);
-                    TRACE_LEVEL(log_trace_fine) <<  "end calling persistent callback to " << to_be_epoch;
+                    TRACE_FINE <<  "end calling persistent callback to " << to_be_epoch;
                 }
             }
             {
@@ -334,7 +334,7 @@ void datastore::update_min_epoch_id(bool from_switch_epoch) {  // NOLINT(readabi
             break;
         }
     }
-    TRACE_END_LEVEL(log_trace_fine);
+    TRACE_FINE_END;
 }
 
 
