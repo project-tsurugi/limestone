@@ -699,7 +699,6 @@ void datastore::compact_with_online() {
 
 void datastore::switch_available_boundary_version([[maybe_unused]] write_version_type version) {
     LOG_LP(ERROR) << "not implemented";
-    std::abort();  // FIXME should implement
 }
 
 
