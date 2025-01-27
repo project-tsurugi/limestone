@@ -128,7 +128,7 @@ inline std::string getThreadName() {
 
 
 // Common logging macro for TRACE operations
-// NOLINTBEGIN(cppcoreguidelines-pro-bounds-array-to-pointer-decay)
+// NOLINTBEGIN(cppcoreguidelines-pro-bounds-array-to-pointer-decay,cppcoreguidelines-macro-usage)
 #define TRACE_COMMON(level, label)                                                \
     if (!VLOG_IS_ON(level)) {}                                                    \
     else                                                                          \
@@ -138,7 +138,7 @@ inline std::string getThreadName() {
             << (std::string_view(label).empty() ? "" : " ")                       \
             << std::string_view(label)                                            \
             << ": " 
-// NOLINTEND(cppcoreguidelines-pro-bounds-array-to-pointer-decay)
+// NOLINTEND(cppcoreguidelines-pro-bounds-array-to-pointer-decay,cppcoreguidelines-macro-usage)
 
 
 // Specific macros for different TRACE use cases with default log level
