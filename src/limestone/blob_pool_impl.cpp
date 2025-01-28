@@ -41,13 +41,13 @@ void blob_pool_impl::release() {
 blob_id_type blob_pool_impl::register_file(boost::filesystem::path const& file, bool is_temporary_file) {
     // Check if the pool has already been released
     if (is_released_.load(std::memory_order_acquire)) {
-        throw std::runtime_error("This pool is already released.");
+        throw std::logic_error("This pool is already released.");
     }
 
     // Verify that the source file exists
     boost::system::error_code ec{};
     if (!file_ops_->exists(file, ec)) {
-        LOG_AND_THROW_IO_EXCEPTION("Source file does not exist: " + file.string(), ec);
+        LOG_AND_THROW_BLOB_EXCEPTION("Source file does not exist: " + file.string(), ec);
     }
 
     // Generate a unique BLOB ID and resolve the target path
@@ -59,7 +59,7 @@ blob_id_type blob_pool_impl::register_file(boost::filesystem::path const& file, 
     if (!file_ops_->exists(target_dir, ec)) {
         file_ops_->create_directories(target_dir, ec);
         if (ec) {
-            LOG_AND_THROW_IO_EXCEPTION("Failed to create directory: " + target_dir.string(), ec);
+            LOG_AND_THROW_BLOB_EXCEPTION("Failed to create directory: " + target_dir.string(), ec);
         }
     }
 
@@ -70,12 +70,12 @@ blob_id_type blob_pool_impl::register_file(boost::filesystem::path const& file, 
         if (ec == boost::system::errc::cross_device_link) {
             handle_cross_filesystem_move(file, target_path, ec);
         } else if (ec) {
-            LOG_AND_THROW_IO_EXCEPTION("Failed to move file: " + file.string() + " to " + target_path.string(), ec);
+            LOG_AND_THROW_BLOB_EXCEPTION("Failed to move file: " + file.string() + " to " + target_path.string(), ec);
         }
     } else {
         file_ops_->copy_file(file, target_path, ec);
         if (ec) {
-            LOG_AND_THROW_IO_EXCEPTION("Failed to copy file: " + file.string() + " to " + target_path.string(), ec);
+            LOG_AND_THROW_BLOB_EXCEPTION("Failed to copy file: " + file.string() + " to " + target_path.string(), ec);
         }
     }
 
@@ -105,13 +105,13 @@ void blob_pool_impl::handle_cross_filesystem_move(const boost::filesystem::path&
                                                   boost::system::error_code& ec) {
     file_ops_->copy_file(source_path, target_path, ec);
     if (ec) {
-        LOG_AND_THROW_IO_EXCEPTION("Failed to copy file across filesystems: " + source_path.string() + " to " + target_path.string(), ec);
+        LOG_AND_THROW_BLOB_EXCEPTION("Failed to copy file across filesystems: " + source_path.string() + " to " + target_path.string(), ec);
     }
 
     // Remove the source file after copying
     file_ops_->remove(source_path, ec);
     if (ec) {
-        LOG_AND_THROW_IO_EXCEPTION("Failed to remove source file after copying: " + source_path.string(), ec);
+        LOG_AND_THROW_BLOB_EXCEPTION("Failed to remove source file after copying: " + source_path.string(), ec);
     }
 }
 

@@ -108,7 +108,7 @@ TEST_F(blob_pool_impl_test, register_file_fails_if_pool_released) {
     // Attempt to register a file
     EXPECT_THROW_WITH_PARTIAL_MESSAGE(
         pool_->register_file("/tmp/blob_pool_impl_test/nonexistent_file", false),
-        std::runtime_error,
+        std::logic_error,
         "This pool is already released.");
 }
 
@@ -118,7 +118,7 @@ TEST_F(blob_pool_impl_test, register_file_fails_if_source_does_not_exist) {
     // Register a non-existent file and verify the exception message
     EXPECT_THROW_WITH_PARTIAL_MESSAGE(
         pool_->register_file(test_source, false),
-        limestone_io_exception,
+        limestone_blob_exception,
         "Source file does not exist: /tmp/blob_pool_impl_test/nonexistent_file"
     );
 }
@@ -148,7 +148,7 @@ TEST_F(blob_pool_impl_test, register_file_rename_fails_with_cross_device_link) {
 
 TEST_F(blob_pool_impl_test, DISABLED_register_file_no_mock_cross_device_test) {
     // Set up source and target paths on different filesystems
-    boost::filesystem::path source_path("/dev/shm/ume/source_blob_cross_device");
+    boost::filesystem::path source_path("/dev/shm/source_blob_cross_device");
     boost::filesystem::path target_path = resolver_->resolve_path(1);
 
     // Create a test source file in /dev/shm
@@ -194,7 +194,7 @@ TEST_F(blob_pool_impl_test, register_file_rename_fails_with_other_error) {
     // Perform the registration and expect an exception
     EXPECT_THROW_WITH_PARTIAL_MESSAGE(
         pool_->register_file(source_path, true),
-        limestone_io_exception,
+        limestone_blob_exception,
         "Failed to move file: "
     );
 
@@ -223,7 +223,7 @@ TEST_F(blob_pool_impl_test, register_file_copy_file_fails) {
     // Perform the registration and expect an exception
     EXPECT_THROW_WITH_PARTIAL_MESSAGE(
         pool_->register_file(source_path, false),
-        limestone_io_exception,
+        limestone_blob_exception,
         "Failed to copy file: "
     );
 
@@ -255,7 +255,7 @@ TEST_F(blob_pool_impl_test, register_file_fails_if_directory_creation_fails) {
 
     EXPECT_THROW_WITH_PARTIAL_MESSAGE(
         pool_->register_file(test_source, false),
-        limestone_io_exception,
+        limestone_blob_exception,
         "Failed to create directory: " 
     );
 }
