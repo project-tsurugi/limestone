@@ -72,6 +72,23 @@ inline std::string extract_filename(const std::string& path) {
         throw limestone_io_exception(exception_type::fatal_error, full_message + " (at " + extract_filename(__FILE__) + ":" + std::to_string(__LINE__) + ")", (error_code)); \
     }
 
+// NOLINTNEXTLINE(cppcoreguidelines-macro-usage)
+#define THROW_LIMESTONE_BLOB_EXCEPTION(message, error_code) \
+    { \
+        std::string full_message = limestone_blob_exception::format_message((message), (error_code)); \
+        VLOG_LP(log_info) << full_message; \
+        throw limestone_blob_exception(exception_type::blob_error, full_message + " (at " + extract_filename(__FILE__) + ":" + std::to_string(__LINE__) + ")", (error_code)); \
+    }
+
+// NOLINTNEXTLINE(cppcoreguidelines-macro-usage)
+#define LOG_AND_THROW_BLOB_EXCEPTION(message, error_code) \
+    { \
+        std::string full_message = limestone_blob_exception::format_message((message), (error_code)); \
+        VLOG_LP(log_info) << full_message; \
+        throw limestone_blob_exception(exception_type::blob_error, full_message + " (at " + extract_filename(__FILE__) + ":" + std::to_string(__LINE__) + ")", (error_code)); \
+    }
+
+
 // helper function to handle exceptions and abort
 inline void handle_exception_and_abort(std::string_view func_name) {
     try {
@@ -85,6 +102,7 @@ inline void handle_exception_and_abort(std::string_view func_name) {
                 LOG_LP(FATAL) << "Fatal error in " << func_name << ": " << e.what();
                 std::abort();  // Safety measure: this should never be reached due to LOG_LP(FATAL)
                 break;
+            case exception_type::blob_error:
             case exception_type::initialization_failure:
                 throw;
                 break;

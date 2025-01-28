@@ -26,6 +26,7 @@
 namespace limestone::api {
 
 enum class exception_type {
+    blob_error,
     fatal_error,
     initialization_failure 
 };
@@ -65,6 +66,24 @@ public:
     }
 
     // Helper function to format the error message for boost::system::error_code
+    static std::string format_message(const std::string& message, const boost::system::error_code& error_code) noexcept {
+        return format_message(message, error_code.value());
+    }
+};
+
+class limestone_blob_exception : public limestone_exception {
+public:
+    explicit limestone_blob_exception(const exception_type type, const std::string& message, int error_code) noexcept
+        : limestone_exception(type, message, error_code) {}
+
+    explicit limestone_blob_exception(const exception_type type, const std::string& message, const boost::system::error_code& error_code) noexcept
+        : limestone_exception(type, message, error_code.value()) {}
+
+    static std::string format_message(const std::string& message, int error_code) noexcept {
+        std::string errno_str = std::strerror(error_code);
+        return "Blob Error (" + errno_str + "): " + message + " (errno = " + std::to_string(error_code) + ")";
+    }
+
     static std::string format_message(const std::string& message, const boost::system::error_code& error_code) noexcept {
         return format_message(message, error_code.value());
     }
