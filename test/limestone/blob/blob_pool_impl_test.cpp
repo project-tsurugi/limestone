@@ -1,5 +1,6 @@
 #include <gtest/gtest.h>
 #include <boost/filesystem.hpp>
+#include <fstream>
 #include "limestone/api/limestone_exception.h"
 #include "blob_pool_impl.h"
 #include "blob_file_resolver.h"
@@ -27,10 +28,11 @@ constexpr const char* blob_directory = "/tmp/blob_pool_impl_test/blob";
 
 class testable_blob_pool_impl : public blob_pool_impl {
 public:
-    using blob_pool_impl::blob_pool_impl;  // Use the inherited constructor
-
-    // Make handle_cross_filesystem_move publicly accessible
+    // for testing purposes, expose proteced members
+    using blob_pool_impl::blob_pool_impl; 
     using blob_pool_impl::handle_cross_filesystem_move;
+    using blob_pool_impl::copy_file;
+    using blob_pool_impl::copy_buffer_size;
 };
 
 class blob_pool_impl_test : public ::testing::Test {
@@ -302,7 +304,7 @@ TEST_F(blob_pool_impl_test, handle_cross_filesystem_move_fails_to_copy) {
     boost::system::error_code ec;
     EXPECT_THROW_WITH_PARTIAL_MESSAGE(
         pool_->handle_cross_filesystem_move(source_path, target_path, ec),
-        limestone_io_exception,
+        limestone_blob_exception,
         "Failed to copy file across filesystems"
     );
 
@@ -334,13 +336,78 @@ TEST_F(blob_pool_impl_test, handle_cross_filesystem_move_fails_to_remove) {
     boost::system::error_code ec;
     EXPECT_THROW_WITH_PARTIAL_MESSAGE(
         pool_->handle_cross_filesystem_move(source_path, target_path, ec),
-        limestone_io_exception,
+        limestone_blob_exception,
         "Failed to remove source file after copying"
     );
 
     // Verify both the source and target files exist
     EXPECT_TRUE(boost::filesystem::exists(source_path));
     EXPECT_TRUE(boost::filesystem::exists(target_path));
+}
+
+
+TEST_F(blob_pool_impl_test, file_size_boundary_tests) {
+    const std::vector<size_t> test_sizes = {
+        0,                              // Empty file
+        1,                              // Minimum data
+        testable_blob_pool_impl::copy_buffer_size - 1,  // Buffer size - 1
+        testable_blob_pool_impl::copy_buffer_size,      // Buffer size
+        testable_blob_pool_impl::copy_buffer_size + 1,  // Buffer size + 1
+        testable_blob_pool_impl::copy_buffer_size * 5 - 1,  // 5 * Buffer size - 1
+        testable_blob_pool_impl::copy_buffer_size * 5,      // 5 * Buffer size
+        testable_blob_pool_impl::copy_buffer_size * 5 + 1,  // 5 * Buffer size + 1
+        173205,                         // Random size 1
+        223620                          // Random size 2
+    };
+
+    for (const auto& size : test_sizes) {
+        SCOPED_TRACE("Testing with file size: " + std::to_string(size));
+
+        // Generate a test file with pseudo-random data
+        boost::filesystem::path source_path("/tmp/blob_pool_impl_test/source_blob");
+        boost::filesystem::path destination_path("/tmp/blob_pool_impl_test/blob/1");
+
+        {
+            std::ofstream source_file(source_path.string(), std::ios::binary);
+            uint32_t seed = 123456789;  // XORShift seed
+            for (size_t i = 0; i < size; ++i) {
+                seed ^= seed << 13;
+                seed ^= seed >> 17;
+                seed ^= seed << 5;
+                char value = static_cast<char>(seed & 0xFF);
+                source_file.put(value);
+            }
+        }
+
+        // Perform the copy
+        EXPECT_NO_THROW(pool_->copy_file(source_path, destination_path));
+
+        // Validate the results
+        EXPECT_TRUE(boost::filesystem::exists(destination_path));
+        EXPECT_EQ(boost::filesystem::file_size(destination_path), size);
+
+        // Verify file content
+        if (size > 0) {
+            std::ifstream source_file(source_path.string(), std::ios::binary);
+            std::ifstream destination_file(destination_path.string(), std::ios::binary);
+
+            uint32_t seed = 123456789;  // Reset XORShift seed
+            char source_value, destination_value;
+            for (size_t i = 0; i < size; ++i) {
+                seed ^= seed << 13;
+                seed ^= seed >> 17;
+                seed ^= seed << 5;
+                source_value = static_cast<char>(seed & 0xFF);
+
+                destination_file.get(destination_value);
+                ASSERT_EQ(destination_value, source_value) << "File content mismatch at byte " << i;
+            }
+        }
+
+        // Clean up
+        boost::filesystem::remove(source_path);
+        boost::filesystem::remove(destination_path);
+    }
 }
 
 

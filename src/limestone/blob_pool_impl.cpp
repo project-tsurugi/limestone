@@ -115,4 +115,83 @@ void blob_pool_impl::handle_cross_filesystem_move(const boost::filesystem::path&
     }
 }
 
+#include <cstdio>
+#include <memory>
+#include <iostream>
+
+struct FileCloser {
+    file_operations* file_ops;
+
+    void operator()(FILE* file) const {
+        if (file && file_ops->fclose(file) != 0) {
+            std::cerr << "Error closing file." << std::endl;
+        }
+    }
+};
+
+void blob_pool_impl::copy_file(const boost::filesystem::path& source, const boost::filesystem::path& destination) {
+    // Ensure the destination directory exists
+    boost::filesystem::path destination_dir = destination.parent_path();
+    boost::system::error_code ec;
+
+    if (!file_ops_->exists(destination_dir, ec)) {
+        file_ops_->create_directories(destination_dir, ec);
+        if (ec) {
+            LOG_AND_THROW_BLOB_EXCEPTION("Failed to create directory: " + destination_dir.string(), ec.value());
+        }
+    }
+
+    // Open source file for reading
+    FILE* src_raw = file_ops_->fopen(source.string().c_str(), "rb");
+    if (!src_raw) {
+        int error_code = errno;
+        LOG_AND_THROW_BLOB_EXCEPTION("Failed to open source file: " + source.string(), error_code);
+    }
+
+    // Use RAII for source file
+    auto src_file = std::unique_ptr<FILE, FileCloser>(src_raw, FileCloser{file_ops_});
+
+    // Open destination file for writing
+    FILE* dest_raw = file_ops_->fopen(destination.string().c_str(), "wb");
+    if (!dest_raw) {
+        int error_code = errno;
+        LOG_AND_THROW_BLOB_EXCEPTION("Failed to open destination file: " + destination.string(), error_code);
+    }
+
+    // Use RAII for destination file
+    auto dest_file = std::unique_ptr<FILE, FileCloser>(dest_raw, FileCloser{file_ops_});
+
+    // Buffer for copying
+    char buffer[copy_buffer_size];
+    size_t bytes_read = 0;
+
+    // Copy loop
+    while ((bytes_read = file_ops_->fread(buffer, 1, copy_buffer_size, src_file.get())) > 0) {
+        size_t bytes_written = file_ops_->fwrite(buffer, 1, bytes_read, dest_file.get());
+        if (bytes_written != bytes_read) {
+            int error_code = errno;
+            LOG_AND_THROW_BLOB_EXCEPTION("Failed to write data to destination file: " + destination.string(), error_code);
+        }
+    }
+
+    // Check for read errors
+    if (file_ops_->ferror(src_file.get())) {
+        int error_code = errno;
+        LOG_AND_THROW_BLOB_EXCEPTION("Error reading from source file: " + source.string(), error_code);
+    }
+
+    // Flush destination file
+    if (file_ops_->fflush(dest_file.get()) != 0) {
+        int error_code = errno;
+        LOG_AND_THROW_BLOB_EXCEPTION("Failed to flush data to destination file: " + destination.string(), error_code);
+    }
+
+    // Synchronize destination file to disk
+    if (file_ops_->fsync(file_ops_->fileno(dest_file.get())) != 0) {
+        int error_code = errno;
+        LOG_AND_THROW_BLOB_EXCEPTION("Failed to synchronize destination file to disk: " + destination.string(), error_code);
+    }
+}
+
+
 } // namespace limestone::internal

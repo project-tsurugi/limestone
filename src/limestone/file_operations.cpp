@@ -38,6 +38,10 @@ size_t real_file_operations::fwrite(const void* ptr, size_t size, size_t count, 
     return ::fwrite(ptr, size, count, stream);
 }
 
+size_t real_file_operations::fread(void* ptr, size_t size, size_t count, FILE* stream) {
+    return ::fread(ptr, size, count, stream);
+}
+
 int real_file_operations::fflush(FILE* stream) {
     return ::fflush(stream);
 }

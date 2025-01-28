@@ -57,6 +57,9 @@ public:
     // Writes data to a file
     virtual size_t fwrite(const void* ptr, size_t size, size_t count, FILE* stream) = 0;
 
+    // Reads data from a file
+    virtual size_t fread(void* ptr, size_t size, size_t count, FILE* stream) = 0;
+
     // Flushes the output buffer of a file
     virtual int fflush(FILE* stream) = 0;
 
@@ -129,6 +132,7 @@ class real_file_operations : public file_operations {
 public:
     FILE* fopen(const char* filename, const char* mode) override;
     size_t fwrite(const void* ptr, size_t size, size_t count, FILE* stream) override;
+    size_t fread(void* ptr, size_t size, size_t count, FILE* stream) override;
     int fflush(FILE* stream) override;
     int fclose(FILE* stream) override;
     int ferror(FILE* stream) override;

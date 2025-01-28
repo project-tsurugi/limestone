@@ -44,17 +44,34 @@ public:
     void reset_file_operations();
 
 protected:
+    // these protected fields and methods are used for testing purposes
+
+    static constexpr size_t copy_buffer_size = 65536;  // Buffer size for file copy operations
+
     /**
      * @brief Handles file movement across filesystems by copying and then deleting the source file.
      * @param source_path Path of the source file.
      * @param target_path Path of the target file.
      * @param ec Error code to track operation results.
-     * @throws limestone_io_exception if copying or deleting fails.
+     * @throws limestone_blob_exception if an I/O error occurs during the operation.
      */
     void handle_cross_filesystem_move(const boost::filesystem::path& source_path, 
                                       const boost::filesystem::path& target_path, 
                                       boost::system::error_code& ec);
 
+
+    /**
+     * @brief Copies a file from the source path to the destination path.
+     * 
+     * This function uses Boost.Filesystem to copy a file from the specified source
+     * path to the specified destination path. If the destination file already exists,
+     * it will be overwritten.
+     * 
+     * @param source The path to the source file to be copied.
+     * @param destination The path to the destination where the file should be copied.
+     * @throws limestone_blob_exception if an I/O error occurs during the operation.
+     */
+    void copy_file(const boost::filesystem::path& source, const boost::filesystem::path& destination);
 
 private:
     /**
