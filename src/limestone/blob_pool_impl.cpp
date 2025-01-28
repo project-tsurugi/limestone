@@ -60,27 +60,13 @@ blob_id_type blob_pool_impl::register_file(boost::filesystem::path const& file, 
 
     // Ensure the target directory exists
     boost::filesystem::path target_dir = target_path.parent_path();
-    if (!file_ops_->exists(target_dir, ec)) {
-        file_ops_->create_directories(target_dir, ec);
-        if (ec) {
-            LOG_AND_THROW_BLOB_EXCEPTION("Failed to create directory: " + target_dir.string(), ec);
-        }
-    }
+    create_directories_if_needed(target_dir);
 
     // Copy or move the source file
     if (is_temporary_file) {
-        file_ops_->rename(file, target_path, ec);
-
-        if (ec == boost::system::errc::cross_device_link) {
-            handle_cross_filesystem_move(file, target_path, ec);
-        } else if (ec) {
-            LOG_AND_THROW_BLOB_EXCEPTION("Failed to move file: " + file.string() + " to " + target_path.string(), ec);
-        }
+        move_file(file, target_path);
     } else {
-        file_ops_->copy_file(file, target_path, ec);
-        if (ec) {
-            LOG_AND_THROW_BLOB_EXCEPTION("Failed to copy file: " + file.string() + " to " + target_path.string(), ec);
-        }
+        copy_file(file, target_path);
     }
 
     return id;
@@ -104,29 +90,19 @@ void blob_pool_impl::reset_file_operations() {
     file_ops_ = &real_file_ops_; 
 }
 
-void blob_pool_impl::handle_cross_filesystem_move(const boost::filesystem::path& source_path, 
-                                                  const boost::filesystem::path& target_path, 
-                                                  boost::system::error_code& ec) {
-    file_ops_->copy_file(source_path, target_path, ec);
-    if (ec) {
-        LOG_AND_THROW_BLOB_EXCEPTION("Failed to copy file across filesystems: " + source_path.string() + " to " + target_path.string(), ec);
-    }
-
-    // Remove the source file after copying
-    file_ops_->remove(source_path, ec);
-    if (ec) {
-        LOG_AND_THROW_BLOB_EXCEPTION("Failed to remove source file after copying: " + source_path.string(), ec);
-    }
-}
-
-struct FileCloser {
-    file_operations* file_ops;
+class FileCloser {
+public:
+    explicit FileCloser(file_operations* ops)
+        : file_ops_(ops) {}
 
     void operator()(FILE* file) const {
-        if (file && file_ops->fclose(file) != 0) {
+        if (file && file_ops_->fclose(file) != 0) {
             VLOG_LP(log_error) << "Error closing file." << std::endl;
         }
     }
+
+private:
+    file_operations* file_ops_;
 };
 
 void blob_pool_impl::copy_file(const boost::filesystem::path& source, const boost::filesystem::path& destination) {
@@ -158,12 +134,12 @@ void blob_pool_impl::copy_file(const boost::filesystem::path& source, const boos
 
     try {
         // Buffer for copying
-        char buffer[copy_buffer_size];
+        std::array<char, copy_buffer_size> buffer = {};
         size_t bytes_read = 0;
 
         // Copy loop
-        while ((bytes_read = file_ops_->fread(buffer, 1, copy_buffer_size, src_file.get())) > 0) {
-            size_t bytes_written = file_ops_->fwrite(buffer, 1, bytes_read, dest_file.get());
+        while ((bytes_read = file_ops_->fread(buffer.data(), 1, copy_buffer_size, src_file.get())) > 0) {
+            size_t bytes_written = file_ops_->fwrite(buffer.data(), 1, bytes_read, dest_file.get());
             if (bytes_written != bytes_read) {
                 int error_code = errno;
                 LOG_AND_THROW_BLOB_EXCEPTION("Failed to write data to destination file: " + destination.string(), error_code);
@@ -171,7 +147,7 @@ void blob_pool_impl::copy_file(const boost::filesystem::path& source, const boos
         }
 
         // Check for read errors
-        if (file_ops_->ferror(src_file.get())) {
+        if (file_ops_->ferror(src_file.get()) != 0) {
             int error_code = errno;
             LOG_AND_THROW_BLOB_EXCEPTION("Error reading from source file: " + source.string(), error_code);
         }

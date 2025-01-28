@@ -31,7 +31,6 @@ class testable_blob_pool_impl : public blob_pool_impl {
 public:
     // for testing purposes, expose proteced members
     using blob_pool_impl::blob_pool_impl; 
-    using blob_pool_impl::handle_cross_filesystem_move;
     using blob_pool_impl::copy_file;
     using blob_pool_impl::move_file;
     using blob_pool_impl::create_directories_if_needed;
@@ -210,7 +209,7 @@ TEST_F(blob_pool_impl_test, register_file_rename_fails_with_other_error) {
     EXPECT_THROW_WITH_PARTIAL_MESSAGE(
         pool_->register_file(source_path, true),
         limestone_blob_exception,
-        "Failed to move file: "
+        "Failed to rename file: "
     );
 
     // Verify the source file still exists and the target file does not
@@ -228,8 +227,9 @@ TEST_F(blob_pool_impl_test, register_file_copy_file_fails) {
     // Mock file_operations to simulate copy_file failure
     class : public real_file_operations {
     public:
-        void copy_file(const boost::filesystem::path& source, const boost::filesystem::path& target, boost::system::error_code& ec) override {
-            ec = boost::system::errc::make_error_code(boost::system::errc::io_error);
+        int fsync(int fd) override {
+            errno = EIO;  // Simulate input/output error
+            return -1;
         }
     } custom_ops;
 
@@ -239,7 +239,7 @@ TEST_F(blob_pool_impl_test, register_file_copy_file_fails) {
     EXPECT_THROW_WITH_PARTIAL_MESSAGE(
         pool_->register_file(source_path, false),
         limestone_blob_exception,
-        "Failed to copy file: "
+        "Failed to synchronize destination file to disk: "
     );
 
     // Verify the source file still exists and the target file does not
@@ -274,90 +274,6 @@ TEST_F(blob_pool_impl_test, register_file_fails_if_directory_creation_fails) {
         "Failed to create directory: " 
     );
 }
-
-TEST_F(blob_pool_impl_test, handle_cross_filesystem_move_successful) {
-    boost::filesystem::path source_path("/tmp/blob_pool_impl_test/source_blob_cross_fs");
-    boost::filesystem::path target_path("/tmp/blob_pool_impl_test/blob/1");
-
-    // Create a test source file
-    std::ofstream(source_path.string()) << "test data";
-
-    // Ensure the target directory exists
-    boost::filesystem::create_directories(target_path.parent_path());
-
-    // Perform the cross-filesystem move
-    boost::system::error_code ec;
-    pool_->handle_cross_filesystem_move(source_path, target_path, ec);
-
-    // Verify the source file was removed and the target file exists
-    EXPECT_FALSE(boost::filesystem::exists(source_path));
-    EXPECT_TRUE(boost::filesystem::exists(target_path));
-    EXPECT_FALSE(ec);
-}
-
-TEST_F(blob_pool_impl_test, handle_cross_filesystem_move_fails_to_copy) {
-    boost::filesystem::path source_path("/tmp/blob_pool_impl_test/source_blob_cross_fs_fail_copy");
-    boost::filesystem::path target_path("/tmp/blob_pool_impl_test/blob/1");
-
-    // Create a test source file
-    std::ofstream(source_path.string()) << "test data";
-
-    // Use an anonymous class to simulate copy failure
-    class : public real_file_operations {
-    public:
-        void copy_file(const boost::filesystem::path& source, const boost::filesystem::path& target, boost::system::error_code& ec) override {
-            ec = boost::system::errc::make_error_code(boost::system::errc::io_error);
-            std::cerr << "Simulated failure to copy file from: " << source.string() << " to " << target.string() << std::endl;
-        }
-    } custom_ops;
-
-    // Inject the custom file_operations instance into the pool
-    pool_->set_file_operations(custom_ops);
-
-    boost::system::error_code ec;
-    EXPECT_THROW_WITH_PARTIAL_MESSAGE(
-        pool_->handle_cross_filesystem_move(source_path, target_path, ec),
-        limestone_blob_exception,
-        "Failed to copy file across filesystems"
-    );
-
-    // Verify the source file still exists and the target file does not
-    EXPECT_TRUE(boost::filesystem::exists(source_path));
-    EXPECT_FALSE(boost::filesystem::exists(target_path));
-}
-
-TEST_F(blob_pool_impl_test, handle_cross_filesystem_move_fails_to_remove) {
-    boost::filesystem::path source_path("/tmp/blob_pool_impl_test/source_blob_cross_fs_fail_remove");
-    boost::filesystem::path target_path("/tmp/blob_pool_impl_test/blob/1");
-
-    // Create a test source file
-    std::ofstream(source_path.string()) << "test data";
-
-    // Use an anonymous class to simulate remove failure
-    class : public real_file_operations {
-    public:
-        void remove(const boost::filesystem::path& path, boost::system::error_code& ec) override {
-            ec = boost::system::errc::make_error_code(boost::system::errc::permission_denied);
-            std::cerr << "Simulated failure to remove file: " << path.string() << std::endl;
-        }
-    } custom_ops;
-
-    // Inject the custom file_operations instance into the pool
-    pool_->set_file_operations(custom_ops);
-
-    // Perform the cross-filesystem move
-    boost::system::error_code ec;
-    EXPECT_THROW_WITH_PARTIAL_MESSAGE(
-        pool_->handle_cross_filesystem_move(source_path, target_path, ec),
-        limestone_blob_exception,
-        "Failed to remove source file after copying"
-    );
-
-    // Verify both the source and target files exist
-    EXPECT_TRUE(boost::filesystem::exists(source_path));
-    EXPECT_TRUE(boost::filesystem::exists(target_path));
-}
-
 
 TEST_F(blob_pool_impl_test, copy_file_file_size_boundary_tests) {
     const std::vector<size_t> test_sizes = {
