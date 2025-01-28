@@ -134,12 +134,7 @@ void blob_pool_impl::copy_file(const boost::filesystem::path& source, const boos
     boost::filesystem::path destination_dir = destination.parent_path();
     boost::system::error_code ec;
 
-    if (!file_ops_->exists(destination_dir, ec)) {
-        file_ops_->create_directories(destination_dir, ec);
-        if (ec) {
-            LOG_AND_THROW_BLOB_EXCEPTION("Failed to create directory: " + destination_dir.string(), ec.value());
-        }
-    }
+    create_directories_if_needed(destination_dir);
 
     // Open source file for reading
     FILE* src_raw = file_ops_->fopen(source.string().c_str(), "rb");
@@ -206,6 +201,40 @@ void blob_pool_impl::copy_file(const boost::filesystem::path& source, const boos
     }
 }
 
+void blob_pool_impl::move_file(const boost::filesystem::path& source, const boost::filesystem::path& destination) {
+    // Ensure the destination directory exists
+    boost::filesystem::path destination_dir = destination.parent_path();
+    boost::system::error_code ec;
 
+    create_directories_if_needed(destination_dir);
+
+    file_ops_->rename(source, destination, ec);
+    if (!ec) {
+        return;
+    }
+
+    if (ec.value() == EXDEV) { // EXDEV: "Invalid cross-device link"
+        copy_file(source, destination);
+        // Remove the source file
+        file_ops_->remove(source, ec);
+        if (ec) {
+            LOG_AND_THROW_BLOB_EXCEPTION("Failed to remove source file after copy: " + source.string(), ec.value());
+        }
+    } else {
+        // Other errors are not recoverable
+        LOG_AND_THROW_BLOB_EXCEPTION("Failed to rename file: " + source.string() + " -> " + destination.string(), ec.value());
+    }
+}
+
+void blob_pool_impl::create_directories_if_needed(const boost::filesystem::path& path) {
+    boost::system::error_code ec;
+
+    if (!file_ops_->exists(path, ec)) {
+        file_ops_->create_directories(path, ec);
+        if (ec) {
+            LOG_AND_THROW_BLOB_EXCEPTION("Failed to create directory: " + path.string(), ec.value());
+        }
+    }
+}
 
 } // namespace limestone::internal

@@ -25,6 +25,7 @@ using limestone::api::blob_id_type;
 
 constexpr const char* base_directory = "/tmp/blob_pool_impl_test";
 constexpr const char* blob_directory = "/tmp/blob_pool_impl_test/blob";
+constexpr const char* dev_shm_test_directory_ = "/dev/shm/blob_pool_impl_test";
 
 class testable_blob_pool_impl : public blob_pool_impl {
 public:
@@ -32,6 +33,8 @@ public:
     using blob_pool_impl::blob_pool_impl; 
     using blob_pool_impl::handle_cross_filesystem_move;
     using blob_pool_impl::copy_file;
+    using blob_pool_impl::move_file;
+    using blob_pool_impl::create_directories_if_needed;
     using blob_pool_impl::copy_buffer_size;
 };
 
@@ -52,6 +55,13 @@ protected:
             std::cerr << "cannot make directory" << std::endl;
         }
 
+        // Remove and recreate the test directory in /dev/shm
+        if (system(("rm -rf " + std::string(dev_shm_test_directory_)).c_str()) != 0) {
+            std::cerr << "Cannot remove directory: " << dev_shm_test_directory_ << std::endl;
+        }
+        if (system(("mkdir -p " + std::string(dev_shm_test_directory_)).c_str()) != 0) {
+            std::cerr << "Cannot create directory: " << dev_shm_test_directory_ << std::endl;
+        }
         // Initialize blob_file_resolver with the blob directory
         resolver_ = std::make_unique<blob_file_resolver>(
             boost::filesystem::path(blob_directory), 10 /* directory count */);
@@ -66,12 +76,15 @@ protected:
         if (system(("rm -rf " + std::string(base_directory)).c_str()) != 0) {
             std::cerr << "cannot remove directory" << std::endl;
         }
+        if (system(("rm -rf " + std::string(dev_shm_test_directory_)).c_str()) != 0) {
+            std::cerr << "Cannot remove directory: " << dev_shm_test_directory_ << std::endl;
+        }
     }
 
-    blob_id_type current_id_{0};                        // Counter for generating unique IDs
-    std::function<blob_id_type()> id_generator_;        // ID generator function
-    std::unique_ptr<blob_file_resolver> resolver_;      // Resolver for managing blob paths
-    std::unique_ptr<testable_blob_pool_impl> pool_;              // Pool instance
+    blob_id_type current_id_{0};                     // Counter for generating unique IDs
+    std::function<blob_id_type()> id_generator_;     // ID generator function
+    std::unique_ptr<blob_file_resolver> resolver_;   // Resolver for managing blob paths
+    std::unique_ptr<testable_blob_pool_impl> pool_;  // Pool instance
 };
 
 TEST_F(blob_pool_impl_test, register_file_with_existing_file) {
@@ -150,7 +163,7 @@ TEST_F(blob_pool_impl_test, register_file_rename_fails_with_cross_device_link) {
 
 TEST_F(blob_pool_impl_test, DISABLED_register_file_no_mock_cross_device_test) {
     // Set up source and target paths on different filesystems
-    boost::filesystem::path source_path("/dev/shm/source_blob_cross_device");
+    boost::filesystem::path source_path("/dev/shm/blob_pool_impl_test/source_blob_cross_device");
     boost::filesystem::path target_path = resolver_->resolve_path(1);
 
     // Create a test source file in /dev/shm
@@ -845,6 +858,232 @@ TEST_F(blob_pool_impl_test, copy_file_logs_when_cleanup_fails) {
         << "The destination file should still exist after failed removal.";
 }
 
+
+
+// Test case for creating directories when they do not exist
+TEST_F(blob_pool_impl_test, create_directories_if_needed_when_directory_does_not_exist) {
+    boost::filesystem::path test_dir("/tmp/blob_pool_test_dir");
+
+    // Ensure the directory does not exist initially
+    ASSERT_FALSE(boost::filesystem::exists(test_dir));
+
+    // Call create_directories_if_needed
+    EXPECT_NO_THROW(pool_->create_directories_if_needed(test_dir));
+
+    // Verify the directory was created
+    EXPECT_TRUE(boost::filesystem::exists(test_dir));
+    EXPECT_TRUE(boost::filesystem::is_directory(test_dir));
+
+    // Clean up
+    boost::filesystem::remove_all(test_dir);
+}
+
+// Test case for existing directories (should not throw or fail)
+TEST_F(blob_pool_impl_test, create_directories_if_needed_when_directory_already_exists) {
+    boost::filesystem::path test_dir("/tmp/blob_pool_test_existing_dir");
+
+    // Create the directory beforehand
+    boost::filesystem::create_directories(test_dir);
+    ASSERT_TRUE(boost::filesystem::exists(test_dir));
+
+    // Call create_directories_if_needed
+    EXPECT_NO_THROW(pool_->create_directories_if_needed(test_dir));
+
+    // Verify the directory still exists
+    EXPECT_TRUE(boost::filesystem::exists(test_dir));
+    EXPECT_TRUE(boost::filesystem::is_directory(test_dir));
+
+    // Clean up
+    boost::filesystem::remove_all(test_dir);
+}
+
+// Test case for invalid directory creation
+TEST_F(blob_pool_impl_test, create_directories_if_needed_invalid_directory) {
+    boost::filesystem::path invalid_dir("/invalid_blob_pool_test_dir");
+
+    // Attempt to create an invalid directory and verify it throws an exception
+    EXPECT_THROW(pool_->create_directories_if_needed(invalid_dir), limestone_blob_exception);
+
+    // Verify the directory was not created
+    EXPECT_FALSE(boost::filesystem::exists(invalid_dir));
+}
+
+// Test case for successful move within the same filesystem
+TEST_F(blob_pool_impl_test, move_file_within_same_filesystem) {
+    boost::filesystem::path source_path("/tmp/blob_pool_impl_test/source_blob");
+    boost::filesystem::path destination_path("/tmp/blob_pool_impl_test/blob/1");
+
+    // Create a source file
+    std::ofstream(source_path.string()) << "test data";
+
+    // Perform the move
+    EXPECT_NO_THROW(pool_->move_file(source_path, destination_path));
+
+    // Verify that the source file is removed and the destination file exists
+    EXPECT_FALSE(boost::filesystem::exists(source_path)) << "The source file should be removed.";
+    EXPECT_TRUE(boost::filesystem::exists(destination_path)) << "The destination file should exist.";
+}
+
+// Test case for cross-filesystem move
+TEST_F(blob_pool_impl_test, DISABLED_move_file_no_mock_across_filesystems) {
+    // Use `/dev/shm` (RAM disk) as a different filesystem from `/tmp`
+    boost::filesystem::path source_path("/dev/shm/blob_pool_impl_test/source_blob_cross_fs");
+    boost::filesystem::path destination_path("/tmp/blob_pool_impl_test/blob/1");
+
+    // Create a source file in `/dev/shm`
+    std::ofstream(source_path.string()) << "test data";
+
+    // Perform the move
+    EXPECT_NO_THROW(pool_->move_file(source_path, destination_path));
+
+    // Verify that the source file is removed and the destination file exists
+    EXPECT_FALSE(boost::filesystem::exists(source_path)) << "The source file should be removed.";
+    EXPECT_TRUE(boost::filesystem::exists(destination_path)) << "The destination file should exist.";
+
+    // Verify file content
+    std::ifstream dest_file(destination_path.string());
+    std::string content;
+    std::getline(dest_file, content);
+    EXPECT_EQ(content, "test data") << "The destination file content should match the source.";
+}
+
+TEST_F(blob_pool_impl_test, move_file_across_filesystems) {
+    boost::filesystem::path source_path("/tmp/blob_pool_impl_test/source_blob_cross_fs_mock");
+    boost::filesystem::path destination_path("/tmp/blob_pool_impl_test/blob/1");
+
+    // Create a source file
+    std::ofstream(source_path.string()) << "test data";
+
+    // Mock file_operations to simulate cross-device link error on rename
+    class : public real_file_operations {
+    public:
+        void rename(const boost::filesystem::path& source, const boost::filesystem::path& target, boost::system::error_code& ec) override {
+            ec = boost::system::errc::make_error_code(boost::system::errc::cross_device_link);
+        }
+    } custom_ops;
+
+    // Inject the mock file operations into the pool
+    pool_->set_file_operations(custom_ops);
+
+    // Perform the move
+    EXPECT_NO_THROW(pool_->move_file(source_path, destination_path));
+
+    // Verify that the source file is removed and the destination file exists
+    EXPECT_FALSE(boost::filesystem::exists(source_path)) << "The source file should be removed.";
+    EXPECT_TRUE(boost::filesystem::exists(destination_path)) << "The destination file should exist.";
+
+    // Verify the file content at the destination
+    std::ifstream dest_file(destination_path.string());
+    std::string content;
+    std::getline(dest_file, content);
+    EXPECT_EQ(content, "test data") << "The destination file content should match the source.";
+}
+
+
+
+// Test case for move failure due to other rename error
+TEST_F(blob_pool_impl_test, move_file_rename_fails_with_other_error) {
+    boost::filesystem::path source_path("/tmp/blob_pool_impl_test/source_blob_rename_fail");
+    boost::filesystem::path destination_path("/tmp/blob_pool_impl_test/blob/1");
+
+    // Create a source file
+    std::ofstream(source_path.string()) << "test data";
+
+    // Mock file_operations to simulate a different rename error
+    class : public real_file_operations {
+    public:
+        void rename(const boost::filesystem::path& source, const boost::filesystem::path& target, boost::system::error_code& ec) override {
+            ec = boost::system::errc::make_error_code(boost::system::errc::io_error);
+        }
+    } custom_ops;
+
+    pool_->set_file_operations(custom_ops);
+
+    // Expect an exception
+    EXPECT_THROW_WITH_PARTIAL_MESSAGE(
+        pool_->move_file(source_path, destination_path),
+        limestone_blob_exception,
+        "Failed to rename file"
+    );
+
+    // Verify the source file still exists and the destination file does not
+    EXPECT_TRUE(boost::filesystem::exists(source_path)) << "The source file should still exist.";
+    EXPECT_FALSE(boost::filesystem::exists(destination_path)) << "The destination file should not exist.";
+}
+
+TEST_F(blob_pool_impl_test, move_file_copy_fails) {
+    // Mock file_operations to simulate rename failure and then copy_file failure
+    class : public real_file_operations {
+    public:
+        size_t rename_attempts = 0;  // Number of rename attempts
+
+        void rename(const boost::filesystem::path& source, const boost::filesystem::path& target, boost::system::error_code& ec) override {
+            ++rename_attempts;  // Record rename attempts
+            ec = boost::system::errc::make_error_code(boost::system::errc::cross_device_link);  // Simulate cross-device link error
+        }
+
+        int fsync(int fd) override {
+            errno = EIO;  // Simulate input/output error
+            return -1;
+        }
+
+    } mock_ops;
+
+    pool_->set_file_operations(mock_ops);
+
+    boost::filesystem::path source_path("/tmp/blob_pool_impl_test/source_blob");
+    boost::filesystem::path destination_path("/tmp/blob_pool_impl_test/blob/1");
+
+    // Create a source file
+    std::ofstream(source_path.string()) << "test data";
+
+    // Perform the move and expect an exception due to copy failure
+    EXPECT_THROW_WITH_PARTIAL_MESSAGE(
+        pool_->move_file(source_path, destination_path),
+        limestone_blob_exception,
+        "Failed to synchronize destination file to disk"
+    );
+
+    // Verify rename was attempted
+    EXPECT_EQ(mock_ops.rename_attempts, 1) << "rename should have been attempted once.";
+
+    // Verify the source file still exists and the destination file does not
+    EXPECT_TRUE(boost::filesystem::exists(source_path)) << "The source file should still exist.";
+    EXPECT_FALSE(boost::filesystem::exists(destination_path)) << "The destination file should not exist.";
+}
+
+
+TEST_F(blob_pool_impl_test, move_file_remove_source_fails) {
+    boost::filesystem::path source_path("/tmp/blob_pool_impl_test/source_blob_remove_fail");
+    boost::filesystem::path destination_path("/tmp/blob_pool_impl_test/blob/1");
+
+    // Create a source file
+    std::ofstream(source_path.string()) << "test data";
+
+    // Mock file_operations to simulate source file removal failure
+    class : public real_file_operations {
+    public:
+        void rename(const boost::filesystem::path& source, const boost::filesystem::path& target, boost::system::error_code& ec) override {
+            ec = boost::system::errc::make_error_code(boost::system::errc::cross_device_link);  // Simulate cross-device link error
+        }
+        void remove(const boost::filesystem::path& path, boost::system::error_code& ec) override {
+            ec = boost::system::errc::make_error_code(boost::system::errc::permission_denied);  // Simulate removal failure
+        }
+    } custom_ops;
+
+    pool_->set_file_operations(custom_ops);
+
+    // Perform the move operation and expect an exception
+    EXPECT_THROW_WITH_PARTIAL_MESSAGE(
+        pool_->move_file(source_path, destination_path),
+        limestone_blob_exception,
+        "Failed to remove source file after copy"
+    );
+
+    // Verify that both the source and destination files exist
+    EXPECT_TRUE(boost::filesystem::exists(source_path)) << "The source file should still exist.";
+    EXPECT_TRUE(boost::filesystem::exists(destination_path)) << "The destination file should exist.";
+}
 
 
 }  // namespace limestone::testing

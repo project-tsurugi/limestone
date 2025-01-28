@@ -59,8 +59,7 @@ protected:
                                       const boost::filesystem::path& target_path, 
                                       boost::system::error_code& ec);
 
-
-    /**
+   /**
      * @brief Copies a file from the source path to the destination path.
      * 
      * This function uses Boost.Filesystem to copy a file from the specified source
@@ -72,6 +71,27 @@ protected:
      * @throws limestone_blob_exception if an I/O error occurs during the operation.
      */
     void copy_file(const boost::filesystem::path& source, const boost::filesystem::path& destination);
+
+    /**
+     * @brief Moves a file from the source path to the destination path.
+     * 
+     * This function uses Boost.Filesystem to move a file from the specified source
+     * path to the specified destination path. If the destination file already exists,
+     * it will be overwritten. The function ensures that the file move is reliable,
+     * handling potential errors such as cross-filesystem moves.
+     * 
+     * @param source The path to the source file to be moved.
+     * @param destination The path to the destination where the file should be moved.
+     * @throws limestone_blob_exception if an I/O error occurs during the operation.
+     */
+    void move_file(const boost::filesystem::path& source, const boost::filesystem::path& destination);
+
+    /**
+     * @brief Ensures that the specified directory exists. Creates it if it does not exist.
+     * @param path The directory path to check and create if necessary.
+     * @throws limestone_blob_exception if the directory cannot be created.
+     */
+    void create_directories_if_needed(const boost::filesystem::path& path);
 
 private:
     /**
