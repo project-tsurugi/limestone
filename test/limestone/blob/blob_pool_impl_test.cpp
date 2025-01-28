@@ -346,7 +346,7 @@ TEST_F(blob_pool_impl_test, handle_cross_filesystem_move_fails_to_remove) {
 }
 
 
-TEST_F(blob_pool_impl_test, file_size_boundary_tests) {
+TEST_F(blob_pool_impl_test, copy_file_file_size_boundary_tests) {
     const std::vector<size_t> test_sizes = {
         0,                              // Empty file
         1,                              // Minimum data
@@ -408,6 +408,441 @@ TEST_F(blob_pool_impl_test, file_size_boundary_tests) {
         boost::filesystem::remove(source_path);
         boost::filesystem::remove(destination_path);
     }
+}
+
+
+
+TEST_F(blob_pool_impl_test, copy_file_source_not_found) {
+    boost::filesystem::path source_path("/tmp/blob_pool_impl_test/nonexistent_file");
+    boost::filesystem::path destination_path("/tmp/blob_pool_impl_test/blob/1");
+
+    class : public real_file_operations {
+    public:
+        size_t fclose_call_count = 0;
+
+        int fclose(FILE* file) override {
+            ++fclose_call_count;
+            return real_file_operations::fclose(file);
+        }
+    } mock_ops;
+
+    pool_->set_file_operations(mock_ops);
+
+    EXPECT_THROW_WITH_PARTIAL_MESSAGE(
+        pool_->copy_file(source_path, destination_path),
+        limestone_blob_exception,
+        "Failed to open source file"
+    );
+
+    EXPECT_EQ(mock_ops.fclose_call_count, 0);  // fclose should not be called
+
+    // Check that the destination file does not exist
+    EXPECT_FALSE(boost::filesystem::exists(destination_path)) << "The destination file should not exist.";
+}
+
+TEST_F(blob_pool_impl_test, copy_file_open_dest_fails) {
+    class : public real_file_operations {
+    public:
+        size_t fclose_call_count = 0;
+
+        FILE* fopen(const char* path, const char* mode) override {
+            if (std::string(mode) == "wb") {
+                errno = EACCES;  // Simulate permission denied
+                return nullptr;
+            }
+            return real_file_operations::fopen(path, mode);
+        }
+
+        int fclose(FILE* file) override {
+            ++fclose_call_count;
+            return real_file_operations::fclose(file);
+        }
+    } mock_ops;
+
+    pool_->set_file_operations(mock_ops);
+
+    boost::filesystem::path source_path("/tmp/blob_pool_impl_test/source_blob");
+    boost::filesystem::path destination_path("/tmp/blob_pool_impl_test/blob/1");
+
+    // Create a source file
+    std::ofstream(source_path.string()) << "test data";
+
+    EXPECT_THROW_WITH_PARTIAL_MESSAGE(
+        pool_->copy_file(source_path, destination_path),
+        limestone_blob_exception,
+        "Failed to open destination file"
+    );
+
+    EXPECT_EQ(mock_ops.fclose_call_count, 1);  // Source file should be closed
+    // Check that the destination file does not exist
+    EXPECT_FALSE(boost::filesystem::exists(destination_path)) << "The destination file should not exist.";
+}
+
+TEST_F(blob_pool_impl_test, copy_file_source_close_fails) {
+    class : public real_file_operations {
+    public:
+        size_t fclose_call_count = 0;
+        size_t source_fclose_attempts = 0;  // Number of attempts to close the source file
+        std::set<FILE*> closed_files;
+        FILE* source_file = nullptr;
+
+        FILE* fopen(const char* path, const char* mode) override {
+            FILE* file = real_file_operations::fopen(path, mode);
+            if (std::string(mode) == "rb") {
+                source_file = file; 
+            }
+            return file;
+        }
+
+        int fclose(FILE* file) override {
+            if (file == source_file) {
+                ++source_fclose_attempts;  // Record the attempt to close the source file
+                errno = EBADF;  // Simulate failure for source close
+                return EOF;
+            }
+            closed_files.insert(file); 
+            ++fclose_call_count;
+            return real_file_operations::fclose(file);
+        }
+    } mock_ops;
+
+    pool_->set_file_operations(mock_ops);
+
+    boost::filesystem::path source_path("/tmp/blob_pool_impl_test/source_blob");
+    boost::filesystem::path destination_path("/tmp/blob_pool_impl_test/blob/1");
+
+    // Create a source file
+    std::ofstream(source_path.string()) << "test data";
+
+    EXPECT_NO_THROW(pool_->copy_file(source_path, destination_path));  // fclose failure is logged, not thrown
+
+    EXPECT_EQ(mock_ops.fclose_call_count, 1);  // Only destination should be closed
+    EXPECT_EQ(mock_ops.source_fclose_attempts, 1);  // Source close attempt should be 1
+    EXPECT_TRUE(mock_ops.closed_files.find(mock_ops.source_file) == mock_ops.closed_files.end())
+        << "Source file was not closed";
+    // Check that the destination file does not exist
+    EXPECT_TRUE(boost::filesystem::exists(destination_path)) << "The destination file should be exist.";
+}
+
+
+TEST_F(blob_pool_impl_test, copy_file_dest_close_fails) {
+    class : public real_file_operations {
+    public:
+        size_t fclose_call_count = 0;  // Number of successful fclose calls
+        size_t dest_fclose_attempts = 0;  // Number of attempts to close the destination file
+        std::set<FILE*> closed_files;  // Set of successfully closed files
+        FILE* dest_file = nullptr;  // Pointer to the destination file
+
+        FILE* fopen(const char* path, const char* mode) override {
+            FILE* file = real_file_operations::fopen(path, mode);
+            if (std::string(mode) == "wb") {
+                dest_file = file;  // Store the destination file pointer
+            }
+            return file;
+        }
+
+        int fclose(FILE* file) override {
+            if (file == dest_file) {
+                ++dest_fclose_attempts;  // Record the attempt to close the destination file
+                errno = EBADF;  // Simulate failure for destination close
+                return EOF;
+            }
+            closed_files.insert(file);  // Record the successfully closed file
+            ++fclose_call_count;
+            return real_file_operations::fclose(file);
+        }
+    } mock_ops;
+
+    pool_->set_file_operations(mock_ops);
+
+    boost::filesystem::path source_path("/tmp/blob_pool_impl_test/source_blob");
+    boost::filesystem::path destination_path("/tmp/blob_pool_impl_test/blob/1");
+
+    // Create a source file
+    std::ofstream(source_path.string()) << "test data";
+
+    // Perform the copy and verify that the destination close failure is logged, not thrown
+    EXPECT_NO_THROW(pool_->copy_file(source_path, destination_path));
+
+    // Verify fclose behavior
+    EXPECT_EQ(mock_ops.fclose_call_count, 1);  // Only source should be successfully closed
+    EXPECT_EQ(mock_ops.dest_fclose_attempts, 1);  // Destination close attempt should be exactly 1
+    EXPECT_TRUE(mock_ops.closed_files.find(mock_ops.dest_file) == mock_ops.closed_files.end())
+        << "Destination file was not closed successfully";
+    // Check that the destination file does not exist
+    EXPECT_TRUE(boost::filesystem::exists(destination_path)) << "The destination file should be exist.";
+}
+
+TEST_F(blob_pool_impl_test, copy_file_fflush_fails) {
+    class : public real_file_operations {
+    public:
+        size_t fclose_call_count = 0;
+
+        int fflush(FILE* file) override {
+            errno = EIO;  // Simulate input/output error
+            return EOF;
+        }
+
+        int fclose(FILE* file) override {
+            ++fclose_call_count;
+            return real_file_operations::fclose(file);
+        }
+    } mock_ops;
+
+    pool_->set_file_operations(mock_ops);
+
+    boost::filesystem::path source_path("/tmp/blob_pool_impl_test/source_blob");
+    boost::filesystem::path destination_path("/tmp/blob_pool_impl_test/blob/1");
+
+    // Create a source file
+    std::ofstream(source_path.string()) << "test data";
+
+    EXPECT_THROW_WITH_PARTIAL_MESSAGE(
+        pool_->copy_file(source_path, destination_path),
+        limestone_blob_exception,
+        "Failed to flush data to destination file"
+    );
+
+    EXPECT_EQ(mock_ops.fclose_call_count, 2);  // Both source and destination should be closed
+    // Check that the destination file does not exist
+    EXPECT_FALSE(boost::filesystem::exists(destination_path)) << "The destination file should not exist.";
+}
+
+TEST_F(blob_pool_impl_test, copy_file_directory_creation_fails) {
+    class : public real_file_operations {
+    public:
+        size_t create_directories_attempts = 0;  // Number of directory creation attempts
+
+        void create_directories(const boost::filesystem::path& path, boost::system::error_code& ec) override {
+            ++create_directories_attempts;  // Record directory creation attempts
+            ec = boost::system::errc::make_error_code(boost::system::errc::permission_denied);  // Simulate failure
+        }
+    } mock_ops;
+
+    pool_->set_file_operations(mock_ops);
+
+    boost::filesystem::path source_path("/tmp/blob_pool_impl_test/source_blob");
+    boost::filesystem::path destination_path("/tmp/blob_pool_impl_test/nonexistent_directory/destination_blob");
+
+    // Create a source file
+    std::ofstream(source_path.string()) << "test data";
+
+    EXPECT_THROW_WITH_PARTIAL_MESSAGE(
+        pool_->copy_file(source_path, destination_path),
+        limestone_blob_exception,
+        "Failed to create directory"
+    );
+
+    // Verify directory creation attempts
+    EXPECT_EQ(mock_ops.create_directories_attempts, 1) << "Directory creation should have been attempted once.";
+    // Check that the destination file does not exist
+    EXPECT_FALSE(boost::filesystem::exists(destination_path)) << "The destination file should not exist.";
+}
+
+TEST_F(blob_pool_impl_test, copy_file_fsync_fails) {
+    class : public real_file_operations {
+    public:
+        size_t fsync_attempts = 0;  // Number of fsync attempts
+
+        int fsync(int fd) override {
+            ++fsync_attempts;  // Record fsync attempts
+            errno = EIO;  // Simulate input/output error
+            return -1;
+        }
+    } mock_ops;
+
+    pool_->set_file_operations(mock_ops);
+
+    boost::filesystem::path source_path("/tmp/blob_pool_impl_test/source_blob");
+    boost::filesystem::path destination_path("/tmp/blob_pool_impl_test/blob/1");
+
+    // Create a source file
+    std::ofstream(source_path.string()) << "test data";
+
+    EXPECT_THROW_WITH_PARTIAL_MESSAGE(
+        pool_->copy_file(source_path, destination_path),
+        limestone_blob_exception,
+        "Failed to synchronize destination file to disk"
+    );
+
+    // Verify fsync attempts
+    EXPECT_EQ(mock_ops.fsync_attempts, 1) << "fsync should have been attempted once.";
+    // Check that the destination file does not exist
+    EXPECT_FALSE(boost::filesystem::exists(destination_path)) << "The destination file should not exist.";
+}
+
+TEST_F(blob_pool_impl_test, copy_file_read_fails) {
+    class : public real_file_operations {
+    public:
+        size_t fread_attempts = 0;  // Number of fread attempts
+        size_t fail_on_fread_attempt = 1;  // Fail on the nth fread attempt
+        bool read_error_set = false;  // Flag to simulate ferror state
+
+        size_t fread(void* ptr, size_t size, size_t count, FILE* stream) override {
+            ++fread_attempts;  // Record fread attempts
+            if (fread_attempts == fail_on_fread_attempt) {
+                read_error_set = true;  // Set read error flag
+                errno = EIO;  // Simulate input/output error
+                return 0;
+            }
+            return real_file_operations::fread(ptr, size, count, stream);
+        }
+
+        int ferror(FILE* stream) override {
+            return read_error_set ? 1 : real_file_operations::ferror(stream);  // Simulate error state
+        }
+    } mock_ops;
+
+    pool_->set_file_operations(mock_ops);
+
+    boost::filesystem::path source_path("/tmp/blob_pool_impl_test/source_blob");
+    boost::filesystem::path destination_path("/tmp/blob_pool_impl_test/blob/1");
+
+    // Create a source file with some data
+    std::ofstream(source_path.string()) << "test data";
+
+    EXPECT_THROW_WITH_PARTIAL_MESSAGE(
+        pool_->copy_file(source_path, destination_path),
+        limestone_blob_exception,
+        "Error reading from source file"
+    );
+
+    // Verify fread and ferror behavior
+    EXPECT_EQ(mock_ops.fread_attempts, 1) << "fread should have been attempted once.";
+    // Check that the destination file does not exist
+    EXPECT_FALSE(boost::filesystem::exists(destination_path)) << "The destination file should not exist.";
+}
+
+
+TEST_F(blob_pool_impl_test, copy_file_write_fails) {
+    class : public real_file_operations {
+    public:
+        size_t fwrite_attempts = 0;  // Number of fwrite attempts
+        size_t fail_on_fwrite_attempt = 1;  // Fail on the nth fwrite attempt
+
+        size_t fwrite(const void* ptr, size_t size, size_t count, FILE* stream) override {
+            ++fwrite_attempts;  // Record fwrite attempts
+            if (fwrite_attempts == fail_on_fwrite_attempt) {
+                errno = EIO;  // Simulate input/output error
+                return 0;
+            }
+            return real_file_operations::fwrite(ptr, size, count, stream);
+        }
+    } mock_ops;
+
+    pool_->set_file_operations(mock_ops);
+
+    boost::filesystem::path source_path("/tmp/blob_pool_impl_test/source_blob");
+    boost::filesystem::path destination_path("/tmp/blob_pool_impl_test/blob/1");
+
+    // Create a source file with some data
+    std::ofstream(source_path.string()) << "test data";
+
+    EXPECT_THROW_WITH_PARTIAL_MESSAGE(
+        pool_->copy_file(source_path, destination_path),
+        limestone_blob_exception,
+        "Failed to write data to destination file"
+    );
+
+    // Verify fwrite was attempted
+    EXPECT_EQ(mock_ops.fwrite_attempts, 1) << "fwrite should have been attempted once.";
+    // Check that the destination file does not exist
+    EXPECT_FALSE(boost::filesystem::exists(destination_path)) << "The destination file should not exist.";
+}
+
+TEST_F(blob_pool_impl_test, copy_file_fails_and_cleans_up_existing_destination) {
+    class : public real_file_operations {
+    public:
+        size_t fwrite_calls = 0;
+        size_t fail_after_calls = 1;  // Fail on the second fwrite
+        bool remove_called = false;  // Track if remove is called
+
+        size_t fwrite(const void* ptr, size_t size, size_t count, FILE* stream) override {
+            if (++fwrite_calls >= fail_after_calls) {
+                errno = EIO;  // Simulate a write error
+                return 0;  // Simulate failure
+            }
+            return real_file_operations::fwrite(ptr, size, count, stream);
+        }
+        void remove(const boost::filesystem::path& path, boost::system::error_code& ec) override {
+            remove_called = true;  // Track remove call
+            real_file_operations::remove(path, ec);
+        }
+    } mock_ops;
+
+    pool_->set_file_operations(mock_ops);
+
+    boost::filesystem::path source_path("/tmp/blob_pool_impl_test/source_blob");
+    boost::filesystem::path destination_path("/tmp/blob_pool_impl_test/blob/1");
+
+    // Create a source file
+    std::ofstream(source_path.string()) << "test data";
+
+    EXPECT_THROW_WITH_PARTIAL_MESSAGE(
+        pool_->copy_file(source_path, destination_path),
+        limestone_blob_exception,
+        "Failed to write data to destination file"
+    );
+
+    // Verify that remove was called
+    EXPECT_TRUE(mock_ops.remove_called) << "Destination file should be cleaned up.";
+    // Check that the destination file does not exist
+    EXPECT_FALSE(boost::filesystem::exists(destination_path)) << "The destination file should not exist.";
+}
+
+TEST_F(blob_pool_impl_test, copy_file_logs_when_cleanup_fails) {
+    class : public real_file_operations {
+    public:
+        size_t fwrite_calls = 0;
+        size_t fail_after_calls = 1;  // Simulate failure on the second fwrite
+        bool remove_called = false;  // Track if remove is called
+        boost::system::error_code remove_error;  // Simulate an error during remove
+
+        size_t fwrite(const void* ptr, size_t size, size_t count, FILE* stream) override {
+            if (++fwrite_calls >= fail_after_calls) {
+                errno = EIO;  // Simulate a write error
+                return 0;  // Fail the write operation
+            }
+            return real_file_operations::fwrite(ptr, size, count, stream);
+        }
+
+        void remove(const boost::filesystem::path& path, boost::system::error_code& ec) override {
+            remove_called = true;  // Mark that remove was attempted
+            ec = remove_error;     // Simulate the error
+        }
+    } mock_ops;
+
+    // Set up the mock file operations
+    mock_ops.remove_error = boost::system::errc::make_error_code(boost::system::errc::permission_denied);
+    pool_->set_file_operations(mock_ops);
+
+    // Create source and destination paths
+    boost::filesystem::path source_path("/tmp/blob_pool_impl_test/source_blob");
+    boost::filesystem::path destination_path("/tmp/blob_pool_impl_test/blob/1");
+
+    // Create a source file
+    std::ofstream(source_path.string()) << "test data";
+
+    // Redirect the log output to a stringstream for verification
+    std::ostringstream log_stream;
+    std::streambuf* original_cerr = std::cerr.rdbuf(log_stream.rdbuf());
+
+    // Execute the copy_file and expect an exception
+    EXPECT_THROW_WITH_PARTIAL_MESSAGE(
+        pool_->copy_file(source_path, destination_path),
+        limestone_blob_exception,
+        "Failed to write data to destination file"
+    );
+
+    // Restore the original cerr buffer
+    std::cerr.rdbuf(original_cerr);
+
+    // Verify that remove was attempted
+    EXPECT_TRUE(mock_ops.remove_called) << "The remove operation should have been attempted.";
+
+    // Verify that the destination file still exists
+    EXPECT_TRUE(boost::filesystem::exists(destination_path))
+        << "The destination file should still exist after failed removal.";
 }
 
 

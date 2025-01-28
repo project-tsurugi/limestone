@@ -20,6 +20,10 @@
 #include <boost/filesystem.hpp>
 #include <iostream>
 #include <fstream>
+#include <cstdio>
+#include <memory>
+
+
 
 namespace limestone::internal {
 
@@ -115,16 +119,12 @@ void blob_pool_impl::handle_cross_filesystem_move(const boost::filesystem::path&
     }
 }
 
-#include <cstdio>
-#include <memory>
-#include <iostream>
-
 struct FileCloser {
     file_operations* file_ops;
 
     void operator()(FILE* file) const {
         if (file && file_ops->fclose(file) != 0) {
-            std::cerr << "Error closing file." << std::endl;
+            VLOG_LP(log_error) << "Error closing file." << std::endl;
         }
     }
 };
@@ -161,37 +161,51 @@ void blob_pool_impl::copy_file(const boost::filesystem::path& source, const boos
     // Use RAII for destination file
     auto dest_file = std::unique_ptr<FILE, FileCloser>(dest_raw, FileCloser{file_ops_});
 
-    // Buffer for copying
-    char buffer[copy_buffer_size];
-    size_t bytes_read = 0;
+    try {
+        // Buffer for copying
+        char buffer[copy_buffer_size];
+        size_t bytes_read = 0;
 
-    // Copy loop
-    while ((bytes_read = file_ops_->fread(buffer, 1, copy_buffer_size, src_file.get())) > 0) {
-        size_t bytes_written = file_ops_->fwrite(buffer, 1, bytes_read, dest_file.get());
-        if (bytes_written != bytes_read) {
-            int error_code = errno;
-            LOG_AND_THROW_BLOB_EXCEPTION("Failed to write data to destination file: " + destination.string(), error_code);
+        // Copy loop
+        while ((bytes_read = file_ops_->fread(buffer, 1, copy_buffer_size, src_file.get())) > 0) {
+            size_t bytes_written = file_ops_->fwrite(buffer, 1, bytes_read, dest_file.get());
+            if (bytes_written != bytes_read) {
+                int error_code = errno;
+                LOG_AND_THROW_BLOB_EXCEPTION("Failed to write data to destination file: " + destination.string(), error_code);
+            }
         }
-    }
 
-    // Check for read errors
-    if (file_ops_->ferror(src_file.get())) {
-        int error_code = errno;
-        LOG_AND_THROW_BLOB_EXCEPTION("Error reading from source file: " + source.string(), error_code);
-    }
+        // Check for read errors
+        if (file_ops_->ferror(src_file.get())) {
+            int error_code = errno;
+            LOG_AND_THROW_BLOB_EXCEPTION("Error reading from source file: " + source.string(), error_code);
+        }
 
-    // Flush destination file
-    if (file_ops_->fflush(dest_file.get()) != 0) {
-        int error_code = errno;
-        LOG_AND_THROW_BLOB_EXCEPTION("Failed to flush data to destination file: " + destination.string(), error_code);
-    }
+        // Flush destination file
+        if (file_ops_->fflush(dest_file.get()) != 0) {
+            int error_code = errno;
+            LOG_AND_THROW_BLOB_EXCEPTION("Failed to flush data to destination file: " + destination.string(), error_code);
+        }
 
-    // Synchronize destination file to disk
-    if (file_ops_->fsync(file_ops_->fileno(dest_file.get())) != 0) {
-        int error_code = errno;
-        LOG_AND_THROW_BLOB_EXCEPTION("Failed to synchronize destination file to disk: " + destination.string(), error_code);
+        // Synchronize destination file to disk
+        if (file_ops_->fsync(file_ops_->fileno(dest_file.get())) != 0) {
+            int error_code = errno;
+            LOG_AND_THROW_BLOB_EXCEPTION("Failed to synchronize destination file to disk: " + destination.string(), error_code);
+        }
+
+    } catch (...) {
+        // Cleanup: Check if the destination file exists before attempting to remove it
+        if (file_ops_->exists(destination, ec)) {
+            file_ops_->remove(destination, ec);
+            if (ec) {
+                // Log failure to remove the destination file (non-fatal)
+                VLOG_LP(log_info) << "Warning: Failed to remove destination file after error: " << destination.string() << " (" << ec.message() << ")";
+            }
+        }
+        throw;  // Re-throw the original exception
     }
 }
+
 
 
 } // namespace limestone::internal
