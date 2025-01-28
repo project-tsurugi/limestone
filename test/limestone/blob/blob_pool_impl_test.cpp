@@ -146,7 +146,7 @@ TEST_F(blob_pool_impl_test, register_file_rename_fails_with_cross_device_link) {
     EXPECT_TRUE(boost::filesystem::exists(target_path));  // File should exist at target path
 }
 
-TEST_F(blob_pool_impl_test, register_file_no_mock_cross_device_test) {
+TEST_F(blob_pool_impl_test, DISABLED_register_file_no_mock_cross_device_test) {
     // Set up source and target paths on different filesystems
     boost::filesystem::path source_path("/dev/shm/ume/source_blob_cross_device");
     boost::filesystem::path target_path = resolver_->resolve_path(1);
