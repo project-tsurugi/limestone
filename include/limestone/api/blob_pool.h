@@ -58,7 +58,8 @@ public:
      * @return the corresponding BLOB reference
      * @attention This only act as provisional registration for the BLOB, and it may be lost after release() was called.
      *     To avoid it, you need to pass the BLOB references to log_channel::add_entry() to persistent them.
-     * @throws std::invalid_state if this pool is already released
+     * @throws std::logic_error if this pool is already released
+     * @throws limestone_blob_exception if an I/O error occurs during the operation
      */
     [[nodiscard]] virtual blob_id_type register_file(
             boost::filesystem::path const& file,
@@ -70,7 +71,8 @@ public:
      * @return the corresponding BLOB reference
      * @attention This only act as provisional registration for the BLOB, and it may be lost after release() was called.
      *     To avoid it, you need to pass the BLOB references to log_channel::add_entry() to persistent them.
-     * @throws std::invalid_state if this pool is already released
+     * @throws std::logic_error if this pool is already released
+     * @throws limestone_blob_exception if an I/O error occurs during the operation
      */
     [[nodiscard]] virtual blob_id_type register_data(std::string_view data) = 0;
 
@@ -80,7 +82,8 @@ public:
      * @return the corresponding BLOB reference of the duplicated one
      * @attention This only act as provisional registration for the BLOB, and it may be lost after release() was called.
      *     To avoid it, you need to pass the BLOB references to log_channel::add_entry() to persistent them.
-     * @throws std::invalid_state if this pool is already released
+     * @throws std::logic_error if this pool is already released
+     * @throws limestone_blob_exception if an I/O error occurs during the operation
      */
     [[nodiscard]] virtual blob_id_type duplicate_data(blob_id_type reference) = 0;
 };
