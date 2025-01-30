@@ -36,6 +36,7 @@ public:
     using blob_pool_impl::move_file;
     using blob_pool_impl::create_directories_if_needed;
     using blob_pool_impl::copy_buffer_size;
+    using blob_pool_impl::get_blob_ids;
 };
 
 class blob_pool_impl_test : public ::testing::Test {
@@ -99,6 +100,10 @@ TEST_F(blob_pool_impl_test, register_file_with_existing_file) {
 
     EXPECT_EQ(id, 1);
     EXPECT_TRUE(boost::filesystem::exists(expected_target));
+
+    // Verify blob_ids_ contains the registered ID
+    EXPECT_TRUE(pool_->get_blob_ids().size() == 1);
+    EXPECT_TRUE(*pool_->get_blob_ids().begin() == 1);
 }
 
 TEST_F(blob_pool_impl_test, register_file_with_temporary_file) {
@@ -114,6 +119,10 @@ TEST_F(blob_pool_impl_test, register_file_with_temporary_file) {
     EXPECT_EQ(id, 1);
     EXPECT_TRUE(boost::filesystem::exists(expected_target));
     EXPECT_FALSE(boost::filesystem::exists(test_source));
+
+    // Verify blob_ids_ contains the registered ID
+    EXPECT_TRUE(pool_->get_blob_ids().size() == 1);
+    EXPECT_TRUE(*pool_->get_blob_ids().begin() == 1);
 }
 
 TEST_F(blob_pool_impl_test, register_file_fails_if_pool_released) {
@@ -125,6 +134,9 @@ TEST_F(blob_pool_impl_test, register_file_fails_if_pool_released) {
         pool_->register_file("/tmp/blob_pool_impl_test/nonexistent_file", false),
         std::logic_error,
         "This pool is already released.");
+
+    // Verify the pool is empty
+    EXPECT_TRUE(pool_->get_blob_ids().empty());
 }
 
 TEST_F(blob_pool_impl_test, register_file_fails_if_source_does_not_exist) {
@@ -136,6 +148,9 @@ TEST_F(blob_pool_impl_test, register_file_fails_if_source_does_not_exist) {
         limestone_blob_exception,
         "Source file does not exist: /tmp/blob_pool_impl_test/nonexistent_file"
     );
+
+    // Verify the pool is empty
+    EXPECT_TRUE(pool_->get_blob_ids().empty());
 }
 
 TEST_F(blob_pool_impl_test, register_file_rename_fails_with_cross_device_link) {
@@ -159,6 +174,10 @@ TEST_F(blob_pool_impl_test, register_file_rename_fails_with_cross_device_link) {
     EXPECT_NO_THROW(pool_->register_file(source_path, true));
     EXPECT_FALSE(boost::filesystem::exists(source_path)); // Should be removed after cross-device move
     EXPECT_TRUE(boost::filesystem::exists(target_path));  // File should exist at target path
+
+    // Verify blob_ids_ contains the registered ID
+    EXPECT_TRUE(pool_->get_blob_ids().size() == 1);
+    EXPECT_TRUE(*pool_->get_blob_ids().begin() == 1);
 }
 
 TEST_F(blob_pool_impl_test, DISABLED_register_file_no_mock_cross_device_test) {
@@ -186,6 +205,10 @@ TEST_F(blob_pool_impl_test, DISABLED_register_file_no_mock_cross_device_test) {
     std::string target_content;
     std::getline(target_file, target_content);
     EXPECT_EQ(target_content, "test data");
+
+    // Verify blob_ids_ contains the registered ID
+    EXPECT_TRUE(pool_->get_blob_ids().size() == 1);
+    EXPECT_TRUE(*pool_->get_blob_ids().begin() == 1);
 }
 
 
@@ -216,6 +239,9 @@ TEST_F(blob_pool_impl_test, register_file_rename_fails_with_other_error) {
     // Verify the source file still exists and the target file does not
     EXPECT_TRUE(boost::filesystem::exists(source_path));
     EXPECT_FALSE(boost::filesystem::exists(target_path));
+
+    // Verify the pool is empty
+    EXPECT_TRUE(pool_->get_blob_ids().empty());
 }
 
 TEST_F(blob_pool_impl_test, register_file_copy_file_fails) {
@@ -246,8 +272,10 @@ TEST_F(blob_pool_impl_test, register_file_copy_file_fails) {
     // Verify the source file still exists and the target file does not
     EXPECT_TRUE(boost::filesystem::exists(source_path));
     EXPECT_FALSE(boost::filesystem::exists(target_path));
-}
 
+    // Verify the pool is empty}
+    EXPECT_TRUE(pool_->get_blob_ids().empty());
+}
 
 
 TEST_F(blob_pool_impl_test, register_file_fails_if_directory_creation_fails) {
@@ -274,6 +302,9 @@ TEST_F(blob_pool_impl_test, register_file_fails_if_directory_creation_fails) {
         limestone_blob_exception,
         "Failed to create directories: " 
     );
+
+    // Verify the pool is empty
+    EXPECT_TRUE(pool_->get_blob_ids().empty());
 }
 
 TEST_F(blob_pool_impl_test, copy_file_file_size_boundary_tests) {
@@ -1047,6 +1078,10 @@ TEST_F(blob_pool_impl_test, register_data_success) {
     std::string target_content = buffer.str();
 
     EXPECT_EQ(target_content, data);
+
+    // Verify blob_ids_ contains the registered ID
+    EXPECT_TRUE(pool_->get_blob_ids().size() == 1);
+    EXPECT_TRUE(*pool_->get_blob_ids().begin() == 1);
 }
 
 TEST_F(blob_pool_impl_test, register_data_fails_if_pool_released) {
@@ -1075,6 +1110,9 @@ TEST_F(blob_pool_impl_test, register_data_fails_to_open_file) {
         limestone_blob_exception,
         "Failed to open destination file"
     );
+
+    // Verify blob_ids_ is empty
+    EXPECT_TRUE(pool_->get_blob_ids().empty());
 }
 
 TEST_F(blob_pool_impl_test, register_data_fails_to_write_data) {
@@ -1093,6 +1131,9 @@ TEST_F(blob_pool_impl_test, register_data_fails_to_write_data) {
         limestone_blob_exception,
         "Failed to write data to destination file"
     );
+
+    // Verify blob_ids_ is empty
+    EXPECT_TRUE(pool_->get_blob_ids().empty());
 }
 
 TEST_F(blob_pool_impl_test, register_data_fails_to_flush_data) {
@@ -1111,6 +1152,9 @@ TEST_F(blob_pool_impl_test, register_data_fails_to_flush_data) {
         limestone_blob_exception,
         "Failed to flush data to destination file"
     );
+
+    // Verify blob_ids_ is empty
+    EXPECT_TRUE(pool_->get_blob_ids().empty());
 }
 
 TEST_F(blob_pool_impl_test, register_data_fails_to_sync_data) {
@@ -1129,6 +1173,9 @@ TEST_F(blob_pool_impl_test, register_data_fails_to_sync_data) {
         limestone_blob_exception,
         "Failed to synchronize destination file"
     );
+
+    // Verify blob_ids_ is empty
+    EXPECT_TRUE(pool_->get_blob_ids().empty());
 }
 
 
@@ -1152,6 +1199,9 @@ TEST_F(blob_pool_impl_test, register_data_fsync_fails_remove_fails_file_not_foun
         limestone_blob_exception,
         "Failed to synchronize destination file"
     );
+
+    // Verify blob_ids_ is empty
+    EXPECT_TRUE(pool_->get_blob_ids().empty());
 }
 
 
@@ -1175,6 +1225,9 @@ TEST_F(blob_pool_impl_test, register_data_fsync_fails_remove_fails_other_reason)
         limestone_blob_exception,
         "Failed to synchronize destination file"
     );
+
+    // Verify blob_ids_ is empty
+    EXPECT_TRUE(pool_->get_blob_ids().empty());
 }
 
 TEST_F(blob_pool_impl_test, duplicate_data_success) {
@@ -1192,6 +1245,12 @@ TEST_F(blob_pool_impl_test, duplicate_data_success) {
     ASSERT_EQ(stat(original_path.c_str(), &original_stat), 0);
     ASSERT_EQ(stat(duplicate_path.c_str(), &duplicate_stat), 0);
     EXPECT_EQ(original_stat.st_ino, duplicate_stat.st_ino);
+
+    // Verify blob_ids_ contains the registered IDs
+    const auto& blob_ids = pool_->get_blob_ids();
+    ASSERT_EQ(blob_ids.size(), 2);
+    ASSERT_NE(std::find(blob_ids.begin(), blob_ids.end(), original_id), blob_ids.end());
+    ASSERT_NE(std::find(blob_ids.begin(), blob_ids.end(), duplicate_id), blob_ids.end());
 }
 
 
@@ -1214,6 +1273,9 @@ TEST_F(blob_pool_impl_test, duplicate_data_source_not_found) {
         limestone_blob_exception,
         "Invalid blob_id"
     );
+
+    // Verify blob_ids_ is empty
+    EXPECT_TRUE(pool_->get_blob_ids().empty());
 }
 
 TEST_F(blob_pool_impl_test, duplicate_data_hard_link_failure) {
@@ -1234,6 +1296,84 @@ TEST_F(blob_pool_impl_test, duplicate_data_hard_link_failure) {
         limestone_blob_exception,
         "Failed to create hard link"
     );
+
+    // Verify blob_ids_ contains only the original ID
+    const auto& blob_ids = pool_->get_blob_ids();
+    ASSERT_EQ(blob_ids.size(), 1);
+    ASSERT_EQ(*blob_ids.begin(), original_id);
 }
+
+TEST_F(blob_pool_impl_test, release_success) {
+    // Register some BLOBs
+    blob_id_type id1 = pool_->register_data("test data 1");
+    blob_id_type id2 = pool_->register_data("test data 2");
+
+    boost::filesystem::path path1 = resolver_->resolve_path(id1);
+    boost::filesystem::path path2 = resolver_->resolve_path(id2);
+
+    // Ensure the files exist
+    ASSERT_TRUE(boost::filesystem::exists(path1));
+    ASSERT_TRUE(boost::filesystem::exists(path2));
+
+    // Verify the BLOB IDs are registered
+    const auto& blob_ids = pool_->get_blob_ids();
+    ASSERT_EQ(blob_ids.size(), 2);
+    ASSERT_NE(std::find(blob_ids.begin(), blob_ids.end(), id1), blob_ids.end());
+    ASSERT_NE(std::find(blob_ids.begin(), blob_ids.end(), id2), blob_ids.end());
+
+    // Call release
+    pool_->release();
+
+    // Verify the BLOBs were removed
+    EXPECT_FALSE(boost::filesystem::exists(path1));
+    EXPECT_FALSE(boost::filesystem::exists(path2));
+    EXPECT_TRUE(pool_->get_blob_ids().empty());
+}
+
+TEST_F(blob_pool_impl_test, release_with_partial_failure) {
+    // Register some BLOBs
+    blob_id_type id1 = pool_->register_data("test data 1");
+    blob_id_type id2 = pool_->register_data("test data 2");
+    blob_id_type id3 = pool_->register_data("test data 3");
+
+    boost::filesystem::path path1 = resolver_->resolve_path(id1);
+    boost::filesystem::path path2 = resolver_->resolve_path(id2);
+    boost::filesystem::path path3 = resolver_->resolve_path(id3);
+
+    // Ensure the files exist
+    ASSERT_TRUE(boost::filesystem::exists(path1));
+    ASSERT_TRUE(boost::filesystem::exists(path2));
+    ASSERT_TRUE(boost::filesystem::exists(path3));
+
+    // Replace file_ops_ with a custom implementation that fails on the second file
+    class custom_file_operations : public real_file_operations {
+    public:
+        custom_file_operations(const boost::filesystem::path& fail_path) : fail_path_(fail_path) {}
+
+        void remove(const boost::filesystem::path& p, boost::system::error_code& ec) override {
+            if (p == fail_path_) {
+                ec = boost::system::errc::make_error_code(boost::system::errc::permission_denied);
+            } else {
+                boost::filesystem::remove(p, ec);
+            }
+        }
+
+    private:
+        boost::filesystem::path fail_path_;
+    };
+
+    custom_file_operations custom_file_ops(path2);
+    pool_->set_file_operations(custom_file_ops);
+
+    // Call release
+    pool_->release();
+
+    // Verify the BLOBs were removed or failed as expected
+    EXPECT_FALSE(boost::filesystem::exists(path1));
+    EXPECT_TRUE(boost::filesystem::exists(path2));  // This file should fail to be removed
+    EXPECT_FALSE(boost::filesystem::exists(path3));
+    EXPECT_TRUE(pool_->get_blob_ids().empty());
+}
+
 
 }  // namespace limestone::testing

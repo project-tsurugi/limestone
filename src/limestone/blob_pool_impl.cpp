@@ -40,6 +40,18 @@ blob_id_type blob_pool_impl::generate_blob_id() {
 void blob_pool_impl::release() {
     // Release the pool
     is_released_.store(true, std::memory_order_release);
+
+    // Remove all provisional BLOBs
+    std::lock_guard<std::mutex> lock(mutex_);
+    boost::system::error_code ec;
+    for (const auto& id : blob_ids_) {
+        boost::filesystem::path path = resolver_.resolve_path(id);
+        file_ops_->remove(path, ec);
+        if (ec && ec != boost::system::errc::no_such_file_or_directory) {
+            VLOG_LP(log_error) << "Failed to remove file: " << path.string() << ". Error: " << ec.message();
+        }
+    }
+    blob_ids_.clear();
 }
 
 blob_id_type blob_pool_impl::register_file(boost::filesystem::path const& file, bool is_temporary_file) {
@@ -69,6 +81,11 @@ blob_id_type blob_pool_impl::register_file(boost::filesystem::path const& file, 
         copy_file(file, target_path);
     }
 
+    // Add the blob_id to the internal list
+    {
+        std::lock_guard<std::mutex> lock(mutex_);
+        blob_ids_.push_back(id);
+    }
     return id;
 }
 
@@ -99,6 +116,11 @@ blob_id_type blob_pool_impl::duplicate_data(blob_id_type reference) {
         LOG_AND_THROW_BLOB_EXCEPTION("Failed to create hard link from " + existing_path.string() + " to " + link_path.string(), ec.value());
     }
 
+    // Add the blob_id to the internal list
+    {
+        std::lock_guard<std::mutex> lock(mutex_);
+        blob_ids_.push_back(new_id);
+    }
     return new_id;
 }
 
@@ -278,6 +300,11 @@ blob_id_type blob_pool_impl::register_data(std::string_view data) {
         throw;
     }
 
+    // Add the blob_id to the internal list
+    {
+        std::lock_guard<std::mutex> lock(mutex_);
+        blob_ids_.push_back(id);
+    }
     return id;
 }
 

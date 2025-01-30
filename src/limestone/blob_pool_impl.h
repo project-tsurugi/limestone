@@ -33,13 +33,17 @@ public:
     [[nodiscard]] blob_id_type duplicate_data(blob_id_type reference) override;
 
 protected:
-    // these protected fields and methods are used for testing purposes
+    // These protected fields and methods include:
+    // - Test-specific methods
+    // - Production methods that are made protected to allow for testing
 
     static constexpr size_t copy_buffer_size = 65536;  // Buffer size for file copy operations
 
     /**
      * @brief Sets a custom file_operations implementation.
      * @param file_ops A reference to the file_operations implementation.
+     * 
+     * Note that this function is intended for testing purposes.
      */
     void set_file_operations(file_operations& file_ops);
 
@@ -77,6 +81,18 @@ protected:
      */
     void create_directories_if_needed(const boost::filesystem::path& path);
 
+    /**
+     * @brief Retrieves the list of blob IDs.
+     * 
+     * This function returns a constant reference to the list of blob IDs.
+     * Note that this function is intended for testing purposes.
+     * 
+     * @return A constant reference to the list of blob IDs.
+     */
+    [[nodiscard]] std::list<blob_id_type> get_blob_ids() noexcept {
+        std::lock_guard<std::mutex> lock(mutex_);
+        return blob_ids_;
+    }
 private:
     /**
      * @brief Generates a unique ID for a BLOB.
@@ -85,15 +101,26 @@ private:
      */
     [[nodiscard]] blob_id_type generate_blob_id();
 
-    std::function<blob_id_type()> id_generator_; // Callable object for ID generation
+    // Callable object for ID generation
+    std::function<blob_id_type()> id_generator_;
 
-    blob_file_resolver& resolver_; // Reference to a blob_file_resolver instance
+    // Reference to a blob_file_resolver instance
+    blob_file_resolver& resolver_;
 
-    real_file_operations real_file_ops_;  // Holds the default file_operations implementation
+    // Holds the default file_operations implementation
+    real_file_operations real_file_ops_;
 
-    file_operations* file_ops_;  // Pointer to the current file_operations implementation
+    // Pointer to the current file_operations implementation
+    file_operations* file_ops_;
 
-    std::atomic<bool> is_released_{false};  // Tracks whether the pool has been released (atomic for thread-safety)
+    // Tracks whether the pool has been released (atomic for thread-safety)
+    std::atomic<bool> is_released_{false};
+
+    // Holds BLOB IDs used to track provisional registrations
+    std::list<blob_id_type> blob_ids_;
+
+    // Ensures thread-safe access to blob_ids_
+    std::mutex mutex_;
 };
 
 } // namespace limestone::internal
