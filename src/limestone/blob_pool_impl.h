@@ -32,21 +32,16 @@ public:
 
     [[nodiscard]] blob_id_type duplicate_data(blob_id_type reference) override;
 
+protected:
+    // these protected fields and methods are used for testing purposes
+
+    static constexpr size_t copy_buffer_size = 65536;  // Buffer size for file copy operations
+
     /**
      * @brief Sets a custom file_operations implementation.
      * @param file_ops A reference to the file_operations implementation.
      */
     void set_file_operations(file_operations& file_ops);
-
-    /**
-     * @brief Resets file_operations to the default real_file_operations implementation.
-     */
-    void reset_file_operations();
-
-protected:
-    // these protected fields and methods are used for testing purposes
-
-    static constexpr size_t copy_buffer_size = 65536;  // Buffer size for file copy operations
 
    /**
      * @brief Copies a file from the source path to the destination path.

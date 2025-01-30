@@ -30,6 +30,7 @@ constexpr const char* dev_shm_test_directory_ = "/dev/shm/blob_pool_impl_test";
 class testable_blob_pool_impl : public blob_pool_impl {
 public:
     // for testing purposes, expose proteced members
+    using blob_pool_impl::set_file_operations;
     using blob_pool_impl::blob_pool_impl; 
     using blob_pool_impl::copy_file;
     using blob_pool_impl::move_file;
@@ -1001,5 +1002,209 @@ TEST_F(blob_pool_impl_test, move_file_remove_source_fails) {
     EXPECT_TRUE(boost::filesystem::exists(destination_path)) << "The destination file should exist.";
 }
 
+TEST_F(blob_pool_impl_test, register_data_success) {
+    std::string data = "test data";
+    blob_id_type id = pool_->register_data(data);
+
+    boost::filesystem::path target_path = resolver_->resolve_path(id);
+    EXPECT_TRUE(boost::filesystem::exists(target_path));
+
+    // Open the target file for reading
+    std::ifstream target_file(target_path.string(), std::ios::binary);
+_fails_if_pool_released
+    // Read the file content into a string using << operator
+    std::stringstream buffer;
+    buffer << target_file.rdbuf();
+    std::string target_content = buffer.str();
+
+    EXPECT_EQ(target_content, data);
+}
+
+TEST_F(blob_pool_impl_test, register_data_fails_if_pool_released) {
+    pool_->release();
+
+    EXPECT_THROW_WITH_PARTIAL_MESSAGE(
+        pool_->register_data("test data"),
+        std::logic_error,
+        "This pool is already released."
+    );
+}
+
+TEST_F(blob_pool_impl_test, register_data_fails_to_open_file) {
+    class : public real_file_operations {
+    public:
+        FILE* fopen(const char* filename, const char* mode) override {
+            return nullptr;  // Simulate failure to open file
+        }
+    } custom_ops;
+
+    pool_->set_file_operations(custom_ops);
+
+    std::string data = "test data";
+    EXPECT_THROW_WITH_PARTIAL_MESSAGE(
+        pool_->register_data(data),
+        limestone_blob_exception,
+        "Failed to open destination file"
+    );
+}
+
+TEST_F(blob_pool_impl_test, register_data_fails_to_write_data) {
+    class : public real_file_operations {
+    public:
+        size_t fwrite(const void* ptr, size_t size, size_t count, FILE* stream) override {
+            return 0;  // Simulate failure to write data
+        }
+    } custom_ops;
+
+    pool_->set_file_operations(custom_ops);
+
+    std::string data = "test data";
+    EXPECT_THROW_WITH_PARTIAL_MESSAGE(
+        pool_->register_data(data),
+        limestone_blob_exception,
+        "Failed to write data to destination file"
+    );
+}
+
+TEST_F(blob_pool_impl_test, register_data_fails_to_flush_data) {
+    class : public real_file_operations {
+    public:
+        int fflush(FILE* stream) override {
+            return EOF;  // Simulate failure to flush data
+        }
+    } custom_ops;
+
+    pool_->set_file_operations(custom_ops);
+
+    std::string data = "test data";
+    EXPECT_THROW_WITH_PARTIAL_MESSAGE(
+        pool_->register_data(data),
+        limestone_blob_exception,
+        "Failed to flush data to destination file"
+    );
+}
+
+TEST_F(blob_pool_impl_test, register_data_fails_to_sync_data) {
+    class : public real_file_operations {
+    public:
+        int fsync(int fd) override {
+            return -1;  // Simulate failure to sync data
+        }
+    } custom_ops;
+
+    pool_->set_file_operations(custom_ops);
+
+    std::string data = "test data";
+    EXPECT_THROW_WITH_PARTIAL_MESSAGE(
+        pool_->register_data(data),
+        limestone_blob_exception,
+        "Failed to synchronize destination file"
+    );
+}
+
+
+TEST_F(blob_pool_impl_test, register_data_fsync_fails_remove_fails_file_not_found) {
+    class fail_on_fsync_and_remove_file_not_found_ops : public real_file_operations {
+    public:
+        int fsync(int fd) override {
+            return -1;  
+        }
+
+        void remove(const boost::filesystem::path& path, boost::system::error_code& ec) override {
+            ec = boost::system::errc::make_error_code(boost::system::errc::no_such_file_or_directory);
+        }
+    } custom_ops;
+
+    pool_->set_file_operations(custom_ops);
+
+    std::string data = "test data";
+    EXPECT_THROW_WITH_PARTIAL_MESSAGE(
+        pool_->register_data(data),
+        limestone_blob_exception,
+        "Failed to synchronize destination file"
+    );
+}
+
+
+TEST_F(blob_pool_impl_test, register_data_fsync_fails_remove_fails_other_reason) {
+    class fail_on_fsync_and_remove_other_error_ops : public real_file_operations {
+    public:
+        int fsync(int fd) override {
+            return -1;  // fsync を失敗させる
+        }
+
+        void remove(const boost::filesystem::path& path, boost::system::error_code& ec) override {
+            ec = boost::system::errc::make_error_code(boost::system::errc::permission_denied);
+        }
+    } custom_ops;
+
+    pool_->set_file_operations(custom_ops);
+
+    std::string data = "test data";
+    EXPECT_THROW_WITH_PARTIAL_MESSAGE(
+        pool_->register_data(data),
+        limestone_blob_exception,
+        "Failed to synchronize destination file"
+    );
+}
+
+TEST_F(blob_pool_impl_test, duplicate_data_success) {
+    std::string data = "test data";
+    blob_id_type original_id = pool_->register_data(data);
+
+    blob_id_type duplicate_id = pool_->duplicate_data(original_id);
+
+    boost::filesystem::path original_path = resolver_->resolve_path(original_id);
+    boost::filesystem::path duplicate_path = resolver_->resolve_path(duplicate_id);
+
+    EXPECT_TRUE(boost::filesystem::exists(duplicate_path));
+
+    struct stat original_stat, duplicate_stat;
+    ASSERT_EQ(stat(original_path.c_str(), &original_stat), 0);
+    ASSERT_EQ(stat(duplicate_path.c_str(), &duplicate_stat), 0);
+    EXPECT_EQ(original_stat.st_ino, duplicate_stat.st_ino);
+}
+
+
+TEST_F(blob_pool_impl_test, duplicate_data__fails_if_pool_released) {
+    pool_->release();
+
+    EXPECT_THROW_WITH_PARTIAL_MESSAGE(
+        pool_->duplicate_data(1),
+        std::logic_error,
+        "This pool is already released."
+    );
+}
+
+
+TEST_F(blob_pool_impl_test, duplicate_data_source_not_found) {
+    blob_id_type invalid_id = 9999;
+
+    EXPECT_THROW_WITH_PARTIAL_MESSAGE(
+        pool_->duplicate_data(invalid_id),
+        limestone_blob_exception,
+        "Invalid blob_id"
+    );
+}
+
+TEST_F(blob_pool_impl_test, duplicate_data_hard_link_failure) {
+    class fail_on_create_hard_link_ops : public real_file_operations {
+    public:
+        void create_hard_link(const boost::filesystem::path& target, const boost::filesystem::path& link, boost::system::error_code& ec) override {
+            ec = boost::system::errc::make_error_code(boost::system::errc::permission_denied);
+        }
+    } custom_ops;
+
+    pool_->set_file_operations(custom_ops);
+
+    std::string data = "test data";
+    blob_id_type original_id = pool_->register_data(data);
+
+    EXPECT_THROW_WITH_PARTIAL_MESSAGE(
+        pool_->duplicate_data(original_id),
+        limestone_blob_exception,
+        "Failed to create hard link"
+    );
+}
 
 }  // namespace limestone::testing

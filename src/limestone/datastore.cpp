@@ -546,7 +546,7 @@ void datastore::rotate_epoch_file() {
     boost::filesystem::ofstream strm{};
     strm.open(epoch_file_path_, std::ios_base::out | std::ios_base::app | std::ios_base::binary);
     if(!strm || !strm.is_open() || strm.bad() || strm.fail()){
-        THROW_LIMESTONE_IO_EXCEPTION("does not have write permission for the log_location directory, path: " + location_.string(), errno);
+        LOG_AND_THROW_IO_EXCEPTION("does not have write permission for the log_location directory, path: " + location_.string(), errno);
     }
     strm.close();
 }

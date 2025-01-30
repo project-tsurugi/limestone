@@ -73,21 +73,37 @@ blob_id_type blob_pool_impl::register_file(boost::filesystem::path const& file, 
 }
 
 
+blob_id_type blob_pool_impl::duplicate_data(blob_id_type reference) {
+    // Check if the pool has already been released
+    if (is_released_.load(std::memory_order_acquire)) {
+        throw std::logic_error("This pool is already released.");
+    }
 
-blob_id_type blob_pool_impl::register_data(std::string_view /*data*/) {
-    return generate_blob_id(); // ダミーとして新しいIDを返す
-}
+    // Resolve the source and destination paths
+    boost::filesystem::path existing_path = resolver_.resolve_path(reference);
+    boost::system::error_code ec;
+    if (!file_ops_->exists(existing_path, ec) || ec) {
+        LOG_AND_THROW_BLOB_EXCEPTION_NO_ERRNO("Invalid blob_id: " + std::to_string(reference) + ". Blob file does not exist: " + existing_path.string());
+    }
 
-blob_id_type blob_pool_impl::duplicate_data(blob_id_type /*reference*/) {
-    return generate_blob_id(); // ダミーとして新しいIDを返す
+    blob_id_type new_id = generate_blob_id();
+    boost::filesystem::path link_path = resolver_.resolve_path(new_id);
+
+    // Ensure the destination directory exists
+    boost::filesystem::path destination_dir = link_path.parent_path();
+    create_directories_if_needed(destination_dir);
+
+    // Create a hard link to the source file
+    file_ops_->create_hard_link(existing_path, link_path, ec);
+    if (ec) {
+        LOG_AND_THROW_BLOB_EXCEPTION("Failed to create hard link from " + existing_path.string() + " to " + link_path.string(), ec.value());
+    }
+
+    return new_id;
 }
 
 void blob_pool_impl::set_file_operations(file_operations& file_ops) {
     file_ops_ = &file_ops;
-}
-
-void blob_pool_impl::reset_file_operations() {
-    file_ops_ = &real_file_ops_; 
 }
 
 class FileCloser {
@@ -108,7 +124,6 @@ private:
 void blob_pool_impl::copy_file(const boost::filesystem::path& source, const boost::filesystem::path& destination) {
     // Ensure the destination directory exists
     boost::filesystem::path destination_dir = destination.parent_path();
-    boost::system::error_code ec;
 
     create_directories_if_needed(destination_dir);
 
@@ -165,13 +180,10 @@ void blob_pool_impl::copy_file(const boost::filesystem::path& source, const boos
         }
 
     } catch (...) {
-        // Cleanup: Check if the destination file exists before attempting to remove it
-        if (file_ops_->exists(destination, ec)) {
-            file_ops_->remove(destination, ec);
-            if (ec) {
-                // Log failure to remove the destination file (non-fatal)
-                VLOG_LP(log_info) << "Warning: Failed to remove destination file after error: " << destination.string() << " (" << ec.message() << ")";
-            }
+        boost::system::error_code ec;
+        file_ops_->remove(destination, ec);
+        if (ec && ec != boost::system::errc::no_such_file_or_directory) {
+            VLOG_LP(log_error) << "Failed to remove file: " << destination.string() << ". Error: " << ec.message();
         }
         throw;  // Re-throw the original exception
     }
@@ -211,6 +223,62 @@ void blob_pool_impl::create_directories_if_needed(const boost::filesystem::path&
             LOG_AND_THROW_BLOB_EXCEPTION("Failed to create directory: " + path.string(), ec.value());
         }
     }
+}
+
+blob_id_type blob_pool_impl::register_data(std::string_view data) {
+    // Check if the pool has already been released
+    if (is_released_.load(std::memory_order_acquire)) {
+        throw std::logic_error("This pool is already released.");
+    }
+
+    // Generate a unique BLOB ID and resolve the target path
+    blob_id_type id = generate_blob_id();
+    boost::filesystem::path target_path = resolver_.resolve_path(id);
+
+    // Ensure the destination directory exists
+    boost::filesystem::path destination_dir = target_path.parent_path();
+    boost::system::error_code ec;
+    create_directories_if_needed(destination_dir);
+
+    // Open destination file for writing
+    FILE* dest_raw = file_ops_->fopen(target_path.string().c_str(), "wb");
+    if (!dest_raw) {
+        int error_code = errno;
+        LOG_AND_THROW_BLOB_EXCEPTION("Failed to open destination file: " + target_path.string(), error_code);
+    }
+
+    // Use RAII for destination file
+    auto dest_file = std::unique_ptr<FILE, FileCloser>(dest_raw, FileCloser{file_ops_});
+
+    try {
+        // Write data to the destination file
+        size_t bytes_written = file_ops_->fwrite(data.data(), 1, data.size(), dest_file.get());
+        if (bytes_written != data.size()) {
+            int error_code = errno;
+            LOG_AND_THROW_BLOB_EXCEPTION("Failed to write data to destination file: " + target_path.string(), error_code);
+        }
+
+        // Flush destination file
+        if (file_ops_->fflush(dest_file.get()) != 0) {
+            int error_code = errno;
+            LOG_AND_THROW_BLOB_EXCEPTION("Failed to flush data to destination file: " + target_path.string(), error_code);
+        }
+
+        // Synchronize destination file to disk
+        if (file_ops_->fsync(file_ops_->fileno(dest_file.get())) != 0) {
+            int error_code = errno;
+            LOG_AND_THROW_BLOB_EXCEPTION("Failed to synchronize destination file: " + target_path.string(), error_code);
+        }
+    } catch (...) {
+        // Ensure file is removed in case of an exception
+        file_ops_->remove(target_path, ec);
+        if (ec && ec != boost::system::errc::no_such_file_or_directory) {
+            VLOG_LP(log_error) << "Failed to remove file: " << target_path.string() << ". Error: " << ec.message();
+        }
+        throw;
+    }
+
+    return id;
 }
 
 } // namespace limestone::internal

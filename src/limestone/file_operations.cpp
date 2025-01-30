@@ -156,6 +156,10 @@ void real_file_operations::create_directories(const boost::filesystem::path& pat
     boost::filesystem::create_directories(path, ec);
 }
 
+void real_file_operations::create_hard_link(const boost::filesystem::path& target, const boost::filesystem::path& link, boost::system::error_code& ec) {
+    boost::filesystem::create_hard_link(target, link, ec);
+}
+
 }  // namespace limestone::internal
 
 

@@ -126,6 +126,8 @@ public:
     // Creates directories recursively (Boost)
     virtual void create_directories(const boost::filesystem::path& path, boost::system::error_code& ec) = 0;
 
+    // Creates a hard link (Boost)
+    virtual void create_hard_link(const boost::filesystem::path& target, const boost::filesystem::path& link, boost::system::error_code& ec) = 0;
 };
 
 class real_file_operations : public file_operations {
@@ -171,6 +173,7 @@ public:
     void remove(const boost::filesystem::path& path, boost::system::error_code& ec) override;
     void create_directory(const boost::filesystem::path& path, boost::system::error_code& ec) override;
     void create_directories(const boost::filesystem::path& path, boost::system::error_code& ec) override;
+    void create_hard_link(const boost::filesystem::path& target, const boost::filesystem::path& link, boost::system::error_code& ec) override;
 };
 
 }  // namespace limestone::internal
