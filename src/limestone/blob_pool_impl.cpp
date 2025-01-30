@@ -220,7 +220,7 @@ void blob_pool_impl::create_directories_if_needed(const boost::filesystem::path&
     if (!file_ops_->exists(path, ec)) {
         file_ops_->create_directories(path, ec);
         if (ec) {
-            LOG_AND_THROW_BLOB_EXCEPTION("Failed to create directory: " + path.string(), ec.value());
+            LOG_AND_THROW_BLOB_EXCEPTION("Failed to create directories: " + path.string(), ec.value());
         }
     }
 }

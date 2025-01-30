@@ -272,7 +272,7 @@ TEST_F(blob_pool_impl_test, register_file_fails_if_directory_creation_fails) {
     EXPECT_THROW_WITH_PARTIAL_MESSAGE(
         pool_->register_file(test_source, false),
         limestone_blob_exception,
-        "Failed to create directory: " 
+        "Failed to create directories: " 
     );
 }
 
@@ -560,7 +560,7 @@ TEST_F(blob_pool_impl_test, copy_file_directory_creation_fails) {
     EXPECT_THROW_WITH_PARTIAL_MESSAGE(
         pool_->copy_file(source_path, destination_path),
         limestone_blob_exception,
-        "Failed to create directory"
+        "Failed to create directories"
     );
 
     // Verify directory creation attempts
@@ -815,15 +815,44 @@ TEST_F(blob_pool_impl_test, create_directories_if_needed_when_directory_already_
 }
 
 // Test case for invalid directory creation
-TEST_F(blob_pool_impl_test, create_directories_if_needed_invalid_directory) {
+TEST_F(blob_pool_impl_test, DISABLED_create_directories_no_mock_if_needed_invalid_directory) {
     boost::filesystem::path invalid_dir("/invalid_blob_pool_test_dir");
 
     // Attempt to create an invalid directory and verify it throws an exception
-    EXPECT_THROW(pool_->create_directories_if_needed(invalid_dir), limestone_blob_exception);
+    EXPECT_THROW_WITH_PARTIAL_MESSAGE(
+        pool_->create_directories_if_needed(invalid_dir),
+        limestone_blob_exception,
+        "Failed to create directories"
+    );
 
     // Verify the directory was not created
     EXPECT_FALSE(boost::filesystem::exists(invalid_dir));
 }
+
+TEST_F(blob_pool_impl_test, create_directories_if_needed_invalid_directory) {
+    boost::filesystem::path invalid_dir("/tmp/blob_pool_impl_test/source_blob");
+
+    class fail_on_create_directories : public real_file_operations {
+    public:
+        void create_directories(const boost::filesystem::path& path, boost::system::error_code& ec) override {
+            ec = boost::system::errc::make_error_code(boost::system::errc::permission_denied);
+        }
+    } custom_ops;
+
+    pool_->set_file_operations(custom_ops);
+
+    // Attempt to create an invalid directory and verify it throws an exception
+    EXPECT_THROW_WITH_PARTIAL_MESSAGE(
+        pool_->create_directories_if_needed(invalid_dir),
+        limestone_blob_exception,
+        "Failed to create directories"
+    );
+
+    // Verify the directory was not created
+    EXPECT_FALSE(boost::filesystem::exists(invalid_dir));
+}
+
+
 
 // Test case for successful move within the same filesystem
 TEST_F(blob_pool_impl_test, move_file_within_same_filesystem) {
@@ -1011,7 +1040,7 @@ TEST_F(blob_pool_impl_test, register_data_success) {
 
     // Open the target file for reading
     std::ifstream target_file(target_path.string(), std::ios::binary);
-_fails_if_pool_released
+
     // Read the file content into a string using << operator
     std::stringstream buffer;
     buffer << target_file.rdbuf();
