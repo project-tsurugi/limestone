@@ -35,6 +35,7 @@ public:
     auto epoch_id_switched() const noexcept { return epoch_id_switched_for_tests(); }
     auto& files() const noexcept { return files_for_tests(); }
     void rotate_epoch_file() { rotate_epoch_file_for_tests(); }
+    void set_next_blob_id(blob_id_type next_blob_id) noexcept { set_next_blob_id_for_tests(next_blob_id); }
 
 protected:
     inline void execute_callback(const std::function<void()>& callback) noexcept {

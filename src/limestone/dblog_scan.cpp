@@ -42,7 +42,7 @@ std::optional<epoch_id_type> last_durable_epoch(const boost::filesystem::path& f
     // ASSERT: file exists
     istrm.open(file, std::ios_base::in | std::ios_base::binary);
     if (!istrm) {  // permission?
-        THROW_LIMESTONE_IO_EXCEPTION("cannot read epoch file: " + file.string(), errno);
+        LOG_AND_THROW_IO_EXCEPTION("cannot read epoch file: " + file.string(), errno);
     }
     while (e.read(istrm)) {
         if (e.type() != log_entry::entry_type::marker_durable) {

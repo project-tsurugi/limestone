@@ -32,6 +32,8 @@
 #include "log_entry.h"
 #include "online_compaction.h"
 #include "compaction_catalog.h"
+#include "blob_file_resolver.h"
+#include "blob_pool_impl.h"
 
 namespace limestone::api {
 using namespace limestone::internal;
@@ -108,6 +110,8 @@ datastore::datastore(configuration const& conf) : location_(conf.data_locations_
 
         recover_max_parallelism_ = conf.recover_max_parallelism_;
         LOG(INFO) << "/:limestone:config:datastore setting the number of recover process thread = " << recover_max_parallelism_;
+
+        blob_file_resolver_ = std::make_unique<blob_file_resolver>(location_);
 
         VLOG_LP(log_debug) << "datastore is created, location = " << location_.string();
     } catch (...) {
@@ -542,7 +546,7 @@ void datastore::rotate_epoch_file() {
     boost::filesystem::ofstream strm{};
     strm.open(epoch_file_path_, std::ios_base::out | std::ios_base::app | std::ios_base::binary);
     if(!strm || !strm.is_open() || strm.bad() || strm.fail()){
-        THROW_LIMESTONE_IO_EXCEPTION("does not have write permission for the log_location directory, path: " + location_.string(), errno);
+        LOG_AND_THROW_IO_EXCEPTION("does not have write permission for the log_location directory, path: " + location_.string(), errno);
     }
     strm.close();
 }
@@ -695,6 +699,51 @@ void datastore::compact_with_online() {
 
     LOG_LP(INFO) << "compaction finished";
     TRACE_END;
+}
+
+std::unique_ptr<blob_pool> datastore::acquire_blob_pool() {
+    TRACE_START;
+
+    // Define a lambda function for generating unique blob IDs in a thread-safe manner.
+    // This function uses a CAS (Compare-And-Swap) loop to ensure atomic updates to the ID.
+    // If the maximum value for blob IDs is reached, the function returns the max value, signaling an overflow condition.
+    auto id_generator = [this]() {
+        blob_id_type current = 0;
+        do {
+            current = next_blob_id_.load(std::memory_order_acquire); // Load the current ID atomically.
+            if (current == std::numeric_limits<blob_id_type>::max()) {
+                return current; // Return max value to indicate overflow.
+            }
+        } while (!next_blob_id_.compare_exchange_weak(
+            current, 
+            current + 1,
+            std::memory_order_acq_rel, // Ensure atomicity of the update with acquire-release semantics.
+            std::memory_order_acquire));
+        return current; // Return the successfully updated ID.
+    };
+
+    // Create a blob_pool_impl instance by passing the ID generator lambda and blob_file_resolver.
+    // This approach allows flexible configuration and dependency injection for the blob pool.
+    auto pool = std::make_unique<limestone::internal::blob_pool_impl>(id_generator, *blob_file_resolver_);
+    TRACE_END;
+    return pool; // Return the constructed blob pool.
+}
+
+blob_file datastore::get_blob_file(blob_id_type reference) {
+    TRACE_START << "reference=" << reference;
+    check_after_ready(static_cast<const char*>(__func__));
+    auto path = blob_file_resolver_->resolve_path(reference);
+    bool available = reference < next_blob_id_.load(std::memory_order_acquire);
+    if (available) {
+        try {
+            available = boost::filesystem::exists(path);
+        } catch (const boost::filesystem::filesystem_error& e) {
+            LOG_LP(ERROR) << "Failed to check blob file existence: " << e.what();
+            available = false;
+        }
+    }
+    TRACE_END;
+    return blob_file(path, available);
 }
 
 void datastore::switch_available_boundary_version([[maybe_unused]] write_version_type version) {

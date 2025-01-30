@@ -38,6 +38,10 @@ size_t real_file_operations::fwrite(const void* ptr, size_t size, size_t count, 
     return ::fwrite(ptr, size, count, stream);
 }
 
+size_t real_file_operations::fread(void* ptr, size_t size, size_t count, FILE* stream) {
+    return ::fread(ptr, size, count, stream);
+}
+
 int real_file_operations::fflush(FILE* stream) {
     return ::fflush(stream);
 }
@@ -105,6 +109,56 @@ void real_file_operations::directory_iterator_next(boost::filesystem::directory_
     it.increment(ec);
 }
 
+void real_file_operations::rename(const boost::filesystem::path& old_path, const boost::filesystem::path& new_path, boost::system::error_code& ec) {
+    boost::filesystem::rename(old_path, new_path, ec);
+}
+
+/**
+ * @brief Copies a file from the source path to the destination path.
+ * 
+ * This implementation uses std::filesystem::copy_file instead of boost::filesystem::copy_file
+ * to work around a known issue in Boost's copy_file implementation.
+ * The issue is documented in the following GitHub issue:
+ * https://github.com/boostorg/filesystem/issues/254
+ * 
+ * The issue arises when performing a copy operation across different filesystems
+ * (e.g., from /dev/shm to /tmp), where Boost's copy_file may fail with errno = 18
+ * (Invalid cross-device link). std::filesystem::copy_file handles this case correctly.
+ * 
+ * @param source The source file path (Boost filesystem path).
+ * @param destination The destination file path (Boost filesystem path).
+ * @param ec A Boost error code object to capture any error that occurs during the operation.
+ */
+void real_file_operations::copy_file(const boost::filesystem::path& source, const boost::filesystem::path& destination, boost::system::error_code& ec) {
+    // Standard error code to handle std::filesystem operations
+    std::error_code std_ec;
+
+    // Convert Boost paths to std::filesystem paths
+    std::filesystem::path std_source(source.string());
+    std::filesystem::path std_destination(destination.string());
+
+    // Use std::filesystem::copy_file with overwrite_existing option
+    std::filesystem::copy_file(std_source, std_destination, std::filesystem::copy_options::overwrite_existing, std_ec);
+
+    // Convert std::error_code to Boost error_code
+    ec = boost::system::error_code(std_ec.value(), boost::system::generic_category());
+}
+
+void real_file_operations::remove(const boost::filesystem::path& path, boost::system::error_code& ec) {
+    boost::filesystem::remove(path, ec);
+}
+
+void real_file_operations::create_directory(const boost::filesystem::path& path, boost::system::error_code& ec) {
+    boost::filesystem::create_directory(path, ec);
+}
+
+void real_file_operations::create_directories(const boost::filesystem::path& path, boost::system::error_code& ec) {
+    boost::filesystem::create_directories(path, ec);
+}
+
+void real_file_operations::create_hard_link(const boost::filesystem::path& target, const boost::filesystem::path& link, boost::system::error_code& ec) {
+    boost::filesystem::create_hard_link(target, link, ec);
+}
 
 }  // namespace limestone::internal
 

@@ -102,7 +102,7 @@ void cursor_impl::validate_and_read_stream(std::optional<boost::filesystem::ifst
             previous_key_sid = log_entry->key_sid();
         }
 
-        // Check the validity of the entry using the lambda function
+        // Check the validity of the entry
         if (is_relevant_entry(log_entry.value())) {
             // If a valid entry is found, return
             return;
@@ -114,11 +114,13 @@ void cursor_impl::validate_and_read_stream(std::optional<boost::filesystem::ifst
 }
 
 bool cursor_impl::is_relevant_entry(const limestone::api::log_entry& entry) {
-        // Step 1: Check if the entry is either normal_entry or remove_entry
+        // Step 1: Check if the entry is one of normal_entry, remove_entry, or normal_with_blob
         if (entry.type() != limestone::api::log_entry::entry_type::normal_entry &&
-            entry.type() != limestone::api::log_entry::entry_type::remove_entry) {
-            return false;  // Skip this entry if it's not normal or remove entry
+            entry.type() != limestone::api::log_entry::entry_type::remove_entry &&
+            entry.type() != limestone::api::log_entry::entry_type::normal_with_blob) {
+            return false;  // Skip this entry if it's not a normal, remove, or blob entry
         }
+
 
         // Step 2: Get the storage ID from log_entry
         auto storage_id = entry.storage();  // Assuming storage() returns the storage ID
@@ -132,7 +134,7 @@ bool cursor_impl::is_relevant_entry(const limestone::api::log_entry& entry) {
             // Step 5: Retrieve the write_version from clear_storage_ for the same storage ID
             write_version_type range_ver = it->second;
 
-            // Step 6: Compare the versions (only if the entry is normal_entry or remove_entry)
+            // Step 6: Compare the versions
             if (wv < range_ver) {
                 return false;  // Skip this entry as it is outdated
             }
@@ -182,8 +184,9 @@ bool cursor_impl::next() {
                 compacted_log_entry_ = std::nullopt;
             }
         }
-        // Check if the current log_entry_ is a normal entry
-        if (log_entry_.type() == log_entry::entry_type::normal_entry) {
+        // Check if the current log_entry_ is a normal entry or normal_with_blob
+        if (log_entry_.type() == log_entry::entry_type::normal_entry ||
+            log_entry_.type() == log_entry::entry_type::normal_with_blob) {
             return true;
         }
         // If it's not a normal entry, continue the loop to skip it and read the next entry

@@ -57,6 +57,9 @@ public:
     // Writes data to a file
     virtual size_t fwrite(const void* ptr, size_t size, size_t count, FILE* stream) = 0;
 
+    // Reads data from a file
+    virtual size_t fread(void* ptr, size_t size, size_t count, FILE* stream) = 0;
+
     // Flushes the output buffer of a file
     virtual int fflush(FILE* stream) = 0;
 
@@ -105,14 +108,33 @@ public:
     // Checks if a file or directory exists (Boost)
     virtual bool exists(const boost::filesystem::path& p, boost::system::error_code& ec) = 0;
 
-    // call directory_iterator::increment
+    // Advances the directory iterator to the next element (Boost)
     virtual void directory_iterator_next(boost::filesystem::directory_iterator& it, boost::system::error_code& ec) = 0;
+
+    // Renames a file or directory (Boost)
+    virtual void rename(const boost::filesystem::path& old_path, const boost::filesystem::path& new_path, boost::system::error_code& ec) = 0;
+
+    // Copies a file from source to destination (Boost)
+    virtual void copy_file(const boost::filesystem::path& source, const boost::filesystem::path& destination, boost::system::error_code& ec) = 0;
+
+    // Removes a file or directory (Boost)
+    virtual void remove(const boost::filesystem::path& path, boost::system::error_code& ec) = 0;
+
+    // Creates a directory (Boost)
+    virtual void create_directory(const boost::filesystem::path& path, boost::system::error_code& ec) = 0;
+
+    // Creates directories recursively (Boost)
+    virtual void create_directories(const boost::filesystem::path& path, boost::system::error_code& ec) = 0;
+
+    // Creates a hard link (Boost)
+    virtual void create_hard_link(const boost::filesystem::path& target, const boost::filesystem::path& link, boost::system::error_code& ec) = 0;
 };
 
 class real_file_operations : public file_operations {
 public:
     FILE* fopen(const char* filename, const char* mode) override;
     size_t fwrite(const void* ptr, size_t size, size_t count, FILE* stream) override;
+    size_t fread(void* ptr, size_t size, size_t count, FILE* stream) override;
     int fflush(FILE* stream) override;
     int fclose(FILE* stream) override;
     int ferror(FILE* stream) override;
@@ -129,6 +151,29 @@ public:
 
     bool exists(const boost::filesystem::path& p, boost::system::error_code& ec) override;
     void directory_iterator_next(boost::filesystem::directory_iterator& it, boost::system::error_code& ec) override;
+    void rename(const boost::filesystem::path& old_path, const boost::filesystem::path& new_path, boost::system::error_code& ec) override;
+
+    /**
+     * @brief Copies a file from the source path to the destination path.
+     * 
+     * This implementation uses std::filesystem::copy_file instead of boost::filesystem::copy_file
+     * to work around a known issue in Boost's copy_file implementation.
+     * The issue is documented in the following GitHub issue:
+     * https://github.com/boostorg/filesystem/issues/254
+     * 
+     * The issue arises when performing a copy operation across different filesystems
+     * (e.g., from /dev/shm to /tmp), where Boost's copy_file may fail with errno = 18
+     * (Invalid cross-device link). std::filesystem::copy_file handles this case correctly.
+     * 
+     * @param source The source file path (Boost filesystem path).
+     * @param destination The destination file path (Boost filesystem path).
+     * @param ec A Boost error code object to capture any error that occurs during the operation.
+     */
+    void copy_file(const boost::filesystem::path& source, const boost::filesystem::path& destination, boost::system::error_code& ec) override;
+    void remove(const boost::filesystem::path& path, boost::system::error_code& ec) override;
+    void create_directory(const boost::filesystem::path& path, boost::system::error_code& ec) override;
+    void create_directories(const boost::filesystem::path& path, boost::system::error_code& ec) override;
+    void create_hard_link(const boost::filesystem::path& target, const boost::filesystem::path& link, boost::system::error_code& ec) override;
 };
 
 }  // namespace limestone::internal

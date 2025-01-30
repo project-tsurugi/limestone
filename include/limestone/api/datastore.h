@@ -42,7 +42,8 @@
 #include <limestone/api/restore_progress.h>
 
 namespace limestone::internal {
-    class compaction_catalog; 
+    class compaction_catalog;
+    class blob_file_resolver; 
 }
 namespace limestone::api {
 
@@ -262,8 +263,9 @@ public:
      * @brief returns BLOB file for the BLOB reference.
      * @param reference the target BLOB reference
      * @return the corresponding BLOB file
-     * @return unavailable BLOB file if the ID is not valid
-     * @attention the returned BLOB file is only available
+     * @return unavailable BLOB file if there is no BLOB file for the reference,
+     *   that is, the BLOB file has not been registered or has already been removed.
+     * @attention the returned BLOB file is only effective
      *    during the transaction that has provided the corresponded BLOB reference.
      */
     [[nodiscard]] blob_file get_blob_file(blob_id_type reference);
@@ -289,6 +291,7 @@ protected:  // for tests
     auto epoch_id_switched_for_tests() const noexcept { return epoch_id_switched_.load(); }
     auto& files_for_tests() const noexcept { return files_; }
     void rotate_epoch_file_for_tests() { rotate_epoch_file(); }
+    void set_next_blob_id_for_tests(blob_id_type next_blob_id) noexcept { next_blob_id_ = next_blob_id; }
 
     // These virtual methods are hooks for testing thread synchronization.
     // They allow derived classes to inject custom behavior or notifications
@@ -450,6 +453,10 @@ private:
     virtual void write_epoch_to_file(epoch_id_type epoch_id);
 
     int epoch_write_counter = 0;
+
+    std::unique_ptr<limestone::internal::blob_file_resolver> blob_file_resolver_;
+
+    std::atomic<std::uint64_t> next_blob_id_{0};
 };
 
 } // namespace limestone::api

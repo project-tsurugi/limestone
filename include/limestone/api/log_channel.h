@@ -187,8 +187,6 @@ private:
 
     bool registered_{};
 
-    write_version_type write_version_{};
-
     std::atomic_uint64_t current_epoch_id_{UINT64_MAX};
 
     std::atomic_uint64_t finished_epoch_id_{0};

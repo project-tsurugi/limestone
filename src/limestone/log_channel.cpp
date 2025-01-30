@@ -118,7 +118,6 @@ void log_channel::add_entry(storage_id_type storage_id, std::string_view key, st
     TRACE_START << "storage_id=" << storage_id << ", key=" << key << ",value = " << value << ", epoch =" << write_version.epoch_number_ << ", minor =" << write_version.minor_write_version_;
     try {
         log_entry::write(strm_, storage_id, key, value, write_version);
-        write_version_ = write_version;
     } catch (...) {
         TRACE_ABORT;
         HANDLE_EXCEPTION_AND_ABORT();
@@ -127,14 +126,20 @@ void log_channel::add_entry(storage_id_type storage_id, std::string_view key, st
 }
 
 void log_channel::add_entry([[maybe_unused]] storage_id_type storage_id, [[maybe_unused]] std::string_view key, [[maybe_unused]] std::string_view value, [[maybe_unused]] write_version_type write_version, [[maybe_unused]] const std::vector<blob_id_type>& large_objects) {
-    LOG_LP(ERROR) << "not implemented";;// FIXME
+    TRACE_START << "storage_id=" << storage_id << ", key=" << key << ",value = " << value << ", epoch =" << write_version.epoch_number_ << ", minor =" << write_version.minor_write_version_ << ", large_objects.size()=" << large_objects.size();
+    try {
+        log_entry::write_with_blob(strm_, storage_id, key, value, write_version, large_objects);
+    } catch (...) {
+        TRACE_ABORT;
+        HANDLE_EXCEPTION_AND_ABORT();
+    }
+    TRACE_END;
 };
 
 void log_channel::remove_entry(storage_id_type storage_id, std::string_view key, write_version_type write_version) {
     TRACE_START << "storage_id=" << storage_id << ", key=" << key << ", epoch =" << write_version.epoch_number_ << ", minor =" << write_version.minor_write_version_;
     try {
         log_entry::write_remove(strm_, storage_id, key, write_version);
-        write_version_ = write_version;
     } catch (...) {
         TRACE_ABORT;
         HANDLE_EXCEPTION_AND_ABORT();
@@ -146,7 +151,6 @@ void log_channel::add_storage(storage_id_type storage_id, write_version_type wri
     TRACE_START << "storage_id=" << storage_id << ", epoch =" << write_version.epoch_number_ << ", minor =" << write_version.minor_write_version_;
     try {
         log_entry::write_add_storage(strm_, storage_id, write_version);
-        write_version_ = write_version;
     } catch (...) {
         TRACE_ABORT;
         HANDLE_EXCEPTION_AND_ABORT();
@@ -158,7 +162,6 @@ void log_channel::remove_storage(storage_id_type storage_id, write_version_type 
     TRACE_START << "storage_id=" << storage_id << ", epoch =" << write_version.epoch_number_ << ", minor =" << write_version.minor_write_version_;
     try {
         log_entry::write_remove_storage(strm_, storage_id, write_version);
-        write_version_ = write_version;
     } catch (...) {
         TRACE_ABORT;
         HANDLE_EXCEPTION_AND_ABORT();
@@ -170,7 +173,6 @@ void log_channel::truncate_storage(storage_id_type storage_id, write_version_typ
     TRACE_START << "storage_id=" << storage_id << ", epoch =" << write_version.epoch_number_ << ", minor =" << write_version.minor_write_version_;
     try {
         log_entry::write_clear_storage(strm_, storage_id, write_version);
-        write_version_ = write_version;
     } catch (...) {
         TRACE_ABORT;
         HANDLE_EXCEPTION_AND_ABORT();

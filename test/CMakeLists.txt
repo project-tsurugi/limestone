@@ -30,6 +30,7 @@ endfunction (add_test_executable)
 
 file(GLOB SRCS
         "limestone/api/*.cpp"
+        "limestone/blob/*.cpp"
         "limestone/log/*.cpp"
         "limestone/epoch/*.cpp"
         "limestone/utils/*.cpp"
