@@ -185,7 +185,7 @@ void datastore::write_epoch_to_file(epoch_id_type epoch_id) {
 
 void datastore::ready() {
     try {
-        create_snapshot();
+        create_snapshot_and_set_next_blob_id();
         online_compaction_worker_future_ = std::async(std::launch::async, &datastore::online_compaction_worker, this);
         if (epoch_id_switched_.load() != 0) {
             write_epoch_callback_(epoch_id_informed_.load());

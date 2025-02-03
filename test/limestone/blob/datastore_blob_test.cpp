@@ -1,6 +1,7 @@
 #include <gtest/gtest.h>
 #include <limestone/api/datastore.h>
 #include <limestone/api/blob_file.h>
+#include <limestone/api/log_channel.h>
 #include <limits>
 #include <string>
 #include <memory>
@@ -9,6 +10,8 @@
 
 namespace limestone::testing {
 
+using limestone::api::log_channel;
+
 constexpr const char* data_location = "/tmp/datastore_blob_test/data_location";
 constexpr const char* metadata_location = "/tmp/datastore_blob_test/metadata_location";
 
@@ -16,6 +19,9 @@ class datastore_blob_test : public ::testing::Test {
 protected:
     std::unique_ptr<api::datastore_test> datastore_;
     boost::filesystem::path location_;
+    log_channel* lc0_{};
+    log_channel* lc1_{};
+    log_channel* lc2_{};
 
     void SetUp() override {
         if (system("chmod -R a+rwx /tmp/datastore_blob_test") != 0) {
@@ -29,12 +35,7 @@ protected:
             std::cerr << "cannot make directory" << std::endl;
         }
 
-        std::vector<boost::filesystem::path> data_locations{};
-        data_locations.emplace_back(data_location);
-        boost::filesystem::path metadata_location_path{metadata_location};
-        limestone::api::configuration conf(data_locations, metadata_location_path);
-
-        datastore_ = std::make_unique<limestone::api::datastore_test>(conf);
+        gen_datastore();
     }
 
     void TearDown() override {
@@ -42,6 +43,21 @@ protected:
             datastore_->shutdown();
         }
         boost::filesystem::remove_all(location_);
+    }
+
+    void gen_datastore() {
+        std::vector<boost::filesystem::path> data_locations{};
+        data_locations.emplace_back(data_location);
+        boost::filesystem::path metadata_location_path{metadata_location};
+        limestone::api::configuration conf(data_locations, metadata_location_path);
+
+        datastore_ = std::make_unique<limestone::api::datastore_test>(conf);
+
+        lc0_ = &datastore_->create_channel(data_location);
+        lc1_ = &datastore_->create_channel(data_location);
+        lc2_ = &datastore_->create_channel(data_location);
+
+        datastore_->ready();
     }
 
     void create_dummy_file(api::blob_id_type existing_blob_id) {
@@ -100,6 +116,109 @@ TEST_F(datastore_blob_test, DISABLED_get_blob_file_permission_error) {
     boost::filesystem::permissions(file.path().parent_path(), boost::filesystem::perms::all_all);
 }
 
+TEST_F(datastore_blob_test, next_blob_id) {
+    // On the first startup, it should be 1
+    {
+        EXPECT_EQ(datastore_->next_blob_id(), 1);
+        auto cursor = datastore_->get_snapshot()->get_cursor();
+        EXPECT_FALSE(cursor->next());
+    }
 
+    // After restarting without doing anything, it should still be 1
+    {
+        datastore_->shutdown();
+        datastore_ = nullptr;
+        gen_datastore();
+
+        EXPECT_EQ(datastore_->next_blob_id(), 1);
+        auto cursor = datastore_->get_snapshot()->get_cursor();
+        EXPECT_FALSE(cursor->next());
+    }
+
+    // Add an entry without a BLOB and restart
+    {
+        lc0_->begin_session();
+        lc0_->add_entry(101, "test_key", "test_value", {1, 0});
+        lc0_->end_session();
+        datastore_->shutdown();
+        datastore_ = nullptr;
+        gen_datastore();
+
+        EXPECT_EQ(datastore_->next_blob_id(), 1);
+        auto cursor = datastore_->get_snapshot()->get_cursor();
+        EXPECT_TRUE(cursor->next());
+        EXPECT_EQ(cursor->storage(), 101);
+        std::string key;
+        std::string value;
+        cursor->key(key);
+        cursor->value(value);
+        EXPECT_EQ(key, "test_key");
+        EXPECT_EQ(value, "test_value");
+        EXPECT_FALSE(cursor->next());
+    }
+
+    // Add an entry with a BLOB and restart
+    {
+        lc0_->begin_session();
+        lc0_->add_entry(101, "test_key2", "test_value2", {1, 0}, {1001, 1002});
+        lc0_->end_session();
+        datastore_->shutdown();
+        datastore_ = nullptr;
+        gen_datastore();
+
+        EXPECT_EQ(datastore_->next_blob_id(), 1003);
+        auto cursor = datastore_->get_snapshot()->get_cursor();
+        EXPECT_TRUE(cursor->next());
+        std::string key;
+        std::string value;
+        cursor->key(key);
+        cursor->value(value);
+        EXPECT_EQ(key, "test_key");
+        EXPECT_EQ(value, "test_value");
+        EXPECT_TRUE(cursor->next());
+        std::string key2;
+        std::string value2;
+        cursor->key(key2);
+        cursor->value(value2);
+        EXPECT_EQ(key2, "test_key2");
+        EXPECT_EQ(value2, "test_value2");
+        EXPECT_FALSE(cursor->next());
+    }
+
+    // Add an entry without a BLOB and restart
+    {
+        lc0_->begin_session();
+        lc0_->add_entry(101, "test_key3", "test_value3", {1, 0});
+        lc0_->end_session();
+        datastore_->shutdown();
+        datastore_ = nullptr;
+        gen_datastore();
+
+        EXPECT_EQ(datastore_->next_blob_id(), 1003);
+        auto cursor = datastore_->get_snapshot()->get_cursor();
+        EXPECT_TRUE(cursor->next());
+        std::string key;
+        std::string value;
+        cursor->key(key);
+        cursor->value(value);
+        EXPECT_EQ(key, "test_key");
+        EXPECT_EQ(value, "test_value");
+        EXPECT_TRUE(cursor->next());
+        std::string key2;
+        std::string value2;
+        cursor->key(key2);
+        cursor->value(value2);
+        EXPECT_EQ(key2, "test_key2");
+        EXPECT_EQ(value2, "test_value2");
+        EXPECT_TRUE(cursor->next());
+        std::string key3;
+        std::string value3;
+        cursor->key(key3);
+        cursor->value(value3);
+        EXPECT_EQ(key3, "test_key3");
+        EXPECT_EQ(value3, "test_value3");
+        EXPECT_FALSE(cursor->next());
+    }
+}
 
 } // namespace limestone::testing

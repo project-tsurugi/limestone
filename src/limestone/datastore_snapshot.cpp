@@ -131,8 +131,8 @@ static std::pair<epoch_id_type, sorting_context> create_sorted_from_wals(
 #endif
     auto add_entry = [&sctx, &add_entry_to_point](const log_entry& e){
         switch (e.type()) {
-        case log_entry::entry_type::normal_entry:
         case log_entry::entry_type::normal_with_blob:
+        case log_entry::entry_type::normal_entry:
         case log_entry::entry_type::remove_entry:
             add_entry_to_point(sctx.get_sortdb(), e);
             break;
@@ -254,6 +254,7 @@ static void sortdb_foreach(
             case log_entry::entry_type::normal_with_blob: {
                 auto [db_value_without_blob_ids, blob_ids] = split_db_value_and_blob_ids(db_value);
                 write_snapshot_entry(entry_type, key, create_value_from_db_key_and_value(db_key, db_value_without_blob_ids), blob_ids);
+                sctx.update_max_blob_id(log_entry::parse_blob_ids(blob_ids));
                 break;
             }
             default:
@@ -283,6 +284,7 @@ static void sortdb_foreach(
             case log_entry::entry_type::normal_with_blob: {
                 auto [value, blob_ids] = split_db_value_and_blob_ids(db_value);
                 write_snapshot_entry(entry_type, db_key, value.substr(1), blob_ids);
+                sctx.update_max_blob_id(log_entry::parse_blob_ids(blob_ids));
                 break;
             } break;
             default:
@@ -444,7 +446,7 @@ using namespace limestone::internal;
  
 snapshot::~snapshot() = default;
 
-void datastore::create_snapshot() {
+void datastore::create_snapshot_and_set_next_blob_id() {
     const auto& from_dir = location_;
     std::set<std::string> file_names = assemble_snapshot_input_filenames(compaction_catalog_, from_dir);
     auto [max_appeared_epoch, sctx] = create_sorted_from_wals(from_dir, recover_max_parallelism_, file_names);
@@ -500,6 +502,8 @@ void datastore::create_snapshot() {
     }
 
     clear_storage = sctx.get_clear_storage();
+
+    next_blob_id_.store(sctx.get_max_blob_id() + 1);
 }
 
 } // namespace limestone::api

@@ -33,6 +33,7 @@ public:
     auto epoch_id_to_be_recorded() const noexcept { return epoch_id_to_be_recorded_for_tests(); }
     auto epoch_id_record_finished() const noexcept { return epoch_id_record_finished_for_tests(); }
     auto epoch_id_switched() const noexcept { return epoch_id_switched_for_tests(); }
+    auto next_blob_id() const noexcept { return next_blob_id_for_tests(); }
     auto& files() const noexcept { return files_for_tests(); }
     void rotate_epoch_file() { rotate_epoch_file_for_tests(); }
     void set_next_blob_id(blob_id_type next_blob_id) noexcept { set_next_blob_id_for_tests(next_blob_id); }

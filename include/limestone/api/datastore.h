@@ -289,6 +289,7 @@ protected:  // for tests
     auto epoch_id_to_be_recorded_for_tests() const noexcept { return epoch_id_to_be_recorded_.load(); }
     auto epoch_id_record_finished_for_tests() const noexcept { return epoch_id_record_finished_.load(); }
     auto epoch_id_switched_for_tests() const noexcept { return epoch_id_switched_.load(); }
+    auto next_blob_id_for_tests() const noexcept { return next_blob_id_.load(); }
     auto& files_for_tests() const noexcept { return files_; }
     void rotate_epoch_file_for_tests() { rotate_epoch_file(); }
     void set_next_blob_id_for_tests(blob_id_type next_blob_id) noexcept { next_blob_id_ = next_blob_id; }
@@ -418,12 +419,12 @@ private:
     void check_before_ready(std::string_view func) const noexcept;
 
     /**
-     * @brief create snapshot from log files stored in the location directory
+     * @brief create snapshot from log files stored in the location directory and set the next blob ID
      * @details file name of snapshot to be created is snapshot::file_name_ which is stored in location_ / snapshot::subdirectory_name_.
      * @param from the location of log files
      * @attention this function is not thread-safe.
      */
-    void create_snapshot();
+    void create_snapshot_and_set_next_blob_id();
 
 
     /**

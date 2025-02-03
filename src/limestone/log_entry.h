@@ -467,16 +467,19 @@ public:
         memcpy(static_cast<void*>(&minor_write_version), value_etc.data() + sizeof(epoch_id_type), sizeof(std::uint64_t));
         return le64toh(minor_write_version);
     }
-    [[nodiscard]] std::vector<blob_id_type> large_objects() const {
+    static std::vector<blob_id_type> parse_blob_ids(std::string_view blob_ids_data) {
         std::vector<blob_id_type> blob_ids;
-        const std::size_t blob_count = blob_ids_.size() / sizeof(blob_id_type);
+        const std::size_t blob_count = blob_ids_data.size() / sizeof(blob_id_type);
         blob_ids.reserve(blob_count);
         for (std::size_t i = 0; i < blob_count; ++i) {
             blob_id_type blob_id = 0;
-            std::memcpy(&blob_id, &blob_ids_[i * sizeof(blob_id_type)], sizeof(blob_id_type));
+            std::memcpy(&blob_id, blob_ids_data.data() + i * sizeof(blob_id_type), sizeof(blob_id_type));
             blob_ids.push_back(le64toh(blob_id));
         }
         return blob_ids;
+    }    
+    [[nodiscard]] std::vector<blob_id_type> get_blob_ids() const {
+        return parse_blob_ids(blob_ids_);
     }
 
 private:
