@@ -24,7 +24,7 @@
 #include <vector>
 
 #include <limestone/api/blob_file.h>
-#include <limestone/api/blob_pool.h>
+#include <limestone/api/blob_id_type.h>
 
 namespace limestone::internal {
 

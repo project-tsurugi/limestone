@@ -1,6 +1,5 @@
 #include <gtest/gtest.h>
 #include <limestone/api/datastore.h>
-#include <limestone/api/blob_pool.h>
 #include <limestone/api/blob_file.h>
 #include <limits>
 #include <string>

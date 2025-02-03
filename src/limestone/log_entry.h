@@ -27,7 +27,7 @@
 
 #include <limestone/api/storage_id_type.h>
 #include <limestone/api/write_version_type.h>
-#include <limestone/api/blob_pool.h>
+#include <limestone/api/blob_id_type.h>
 #include <limestone/logging.h>
 #include "logging_helper.h"
 #include "limestone_exception_helper.h"
