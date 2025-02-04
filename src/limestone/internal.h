@@ -22,6 +22,7 @@
 #include <optional>
 
 #include "file_operations.h"
+#include "limestone/api/blob_id_type.h"
 
 namespace limestone::internal {
 using namespace limestone::api;
@@ -81,7 +82,7 @@ status purge_dir(const boost::filesystem::path& dir);
 
 // from datastore_snapshot.cpp
 
-void create_compact_pwal(const boost::filesystem::path& from_dir, const boost::filesystem::path& to_dir, int num_worker,
+blob_id_type create_compact_pwal_and_get_max_blob_id(const boost::filesystem::path& from_dir, const boost::filesystem::path& to_dir, int num_worker,
                          const std::set<std::string>& file_names = std::set<std::string>());
 
 std::set<boost::filesystem::path> filter_epoch_files(const boost::filesystem::path& directory);

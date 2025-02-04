@@ -164,16 +164,25 @@ void compaction_catalog::parse_catalog_entry(const std::string& line, bool& max_
         } else {
             LOG_AND_THROW_EXCEPTION("Invalid format for " + std::string(MAX_EPOCH_ID_KEY) + ": " + line);
         }
-    } else {
+    } else if (type == MAX_BLOB_ID_KEY) {
+        blob_id_type blob_id = 0;
+        if (iss >> blob_id) {
+            max_blob_id_ = blob_id;
+        } else {
+            LOG_AND_THROW_EXCEPTION("Invalid format for " + std::string(MAX_BLOB_ID_KEY) + ": " + line);
+        }
+    }
+    else {
         LOG_AND_THROW_EXCEPTION("Unknown entry type: " + type);
     }
     
 }
 
 // Method to update the compaction catalog
-void compaction_catalog::update_catalog_file(epoch_id_type max_epoch_id, const std::set<compacted_file_info>& compacted_files, const std::set<std::string>& detached_pwals) {
+void compaction_catalog::update_catalog_file(epoch_id_type max_epoch_id, blob_id_type max_blob_id, const std::set<compacted_file_info>& compacted_files, const std::set<std::string>& detached_pwals) {
     // Update internal state
     max_epoch_id_ = max_epoch_id;
+    max_blob_id_ = max_blob_id;
     compacted_files_ = compacted_files;
     detached_pwals_ = detached_pwals;
 
@@ -270,6 +279,10 @@ std::string compaction_catalog::create_catalog_content() const {
     catalog += " " + std::to_string(max_epoch_id_);
     catalog += "\n";
 
+    catalog += MAX_BLOB_ID_KEY;
+    catalog += " " + std::to_string(max_blob_id_);
+    catalog += "\n";
+
     catalog += FOOTER_LINE;
     catalog += "\n";
 
@@ -280,6 +293,10 @@ std::string compaction_catalog::create_catalog_content() const {
 // Getter methods
 epoch_id_type compaction_catalog::get_max_epoch_id() const {
     return max_epoch_id_;
+}
+
+blob_id_type compaction_catalog::get_max_blob_id() const {
+    return max_blob_id_;
 }
 
 const std::set<compacted_file_info>& compaction_catalog::get_compacted_files() const {

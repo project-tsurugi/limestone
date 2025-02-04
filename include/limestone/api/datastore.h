@@ -419,12 +419,12 @@ private:
     void check_before_ready(std::string_view func) const noexcept;
 
     /**
-     * @brief create snapshot from log files stored in the location directory and set the next blob ID
-     * @details file name of snapshot to be created is snapshot::file_name_ which is stored in location_ / snapshot::subdirectory_name_.
-     * @param from the location of log files
-     * @attention this function is not thread-safe.
+     * @brief Creates a snapshot of the current state and retrieves the maximum blob ID.
+     *
+     * This function creates a snapshot of the current state of the datastore and returns the maximum blob ID present in the datastore.
+     * It is useful for ensuring data consistency and for retrieving the highest blob ID for further processing or reference.
      */
-    void create_snapshot_and_set_next_blob_id();
+    blob_id_type create_snapshot_and_get_max_blob_id();
 
 
     /**

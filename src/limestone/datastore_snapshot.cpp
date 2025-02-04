@@ -295,7 +295,7 @@ static void sortdb_foreach(
 #endif
 }
 
-void create_compact_pwal(
+blob_id_type create_compact_pwal_and_get_max_blob_id(
     const boost::filesystem::path& from_dir, 
     const boost::filesystem::path& to_dir, 
     int num_worker,
@@ -364,6 +364,8 @@ void create_compact_pwal(
     if (fclose(ostrm) != 0) {  // NOLINT(*-owning-memory)
         LOG_AND_THROW_IO_EXCEPTION("cannot close snapshot file (" + snapshot_file.string() + ")", errno);
     }
+
+    return sctx.get_max_blob_id();
 }
 
 std::set<std::string> assemble_snapshot_input_filenames(
@@ -446,7 +448,7 @@ using namespace limestone::internal;
  
 snapshot::~snapshot() = default;
 
-void datastore::create_snapshot_and_set_next_blob_id() {
+blob_id_type datastore::create_snapshot_and_get_max_blob_id() {
     const auto& from_dir = location_;
     std::set<std::string> file_names = assemble_snapshot_input_filenames(compaction_catalog_, from_dir);
     auto [max_appeared_epoch, sctx] = create_sorted_from_wals(from_dir, recover_max_parallelism_, file_names);
@@ -503,7 +505,7 @@ void datastore::create_snapshot_and_set_next_blob_id() {
 
     clear_storage = sctx.get_clear_storage();
 
-    next_blob_id_.store(sctx.get_max_blob_id() + 1);
+    return sctx.get_max_blob_id();
 }
 
 } // namespace limestone::api

@@ -181,11 +181,14 @@ void datastore::write_epoch_to_file(epoch_id_type epoch_id) {
     TRACE_END;
 }
 
-
-
 void datastore::ready() {
     try {
-        create_snapshot_and_set_next_blob_id();
+        blob_id_type max_blob_id =  create_snapshot_and_get_max_blob_id();
+        if (max_blob_id < compaction_catalog_->get_max_blob_id()) {
+            max_blob_id = compaction_catalog_->get_max_blob_id();
+        }
+        next_blob_id_.store(max_blob_id + 1);
+
         online_compaction_worker_future_ = std::async(std::launch::async, &datastore::online_compaction_worker, this);
         if (epoch_id_switched_.load() != 0) {
             write_epoch_callback_(epoch_id_informed_.load());
@@ -662,7 +665,7 @@ void datastore::compact_with_online() {
     ensure_directory_exists(compaction_temp_dir);
 
     // create a compacted file
-    create_compact_pwal(location_, compaction_temp_dir, recover_max_parallelism_, need_compaction_filenames);
+    blob_id_type max_blob_id = create_compact_pwal_and_get_max_blob_id(location_, compaction_temp_dir, recover_max_parallelism_, need_compaction_filenames);
 
     // handle existing compacted file
     handle_existing_compacted_file(location_);
@@ -691,7 +694,10 @@ void datastore::compact_with_online() {
     // update compaction catalog
     compacted_file_info compacted_file_info{compacted_file.filename().string(), 1};
     detached_pwals.erase(compacted_file.filename().string());
-    compaction_catalog_->update_catalog_file(result.get_epoch_id(), {compacted_file_info}, detached_pwals);
+    if (compaction_catalog_->get_max_blob_id() > max_blob_id) {
+        max_blob_id = compaction_catalog_->get_max_blob_id();
+    }
+    compaction_catalog_->update_catalog_file(result.get_epoch_id(), max_blob_id, {compacted_file_info}, detached_pwals);
     add_file(compacted_file);
 
     // remove pwal_0000.compacted.prev

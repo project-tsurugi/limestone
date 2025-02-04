@@ -23,6 +23,7 @@
 #include <utility>
 
 #include "limestone/api/epoch_id_type.h"
+#include "limestone/api/blob_id_type.h"
 #include "file_operations.h"
 
 namespace limestone::internal {
@@ -133,14 +134,15 @@ public:
     /**
      * @brief Updates the compaction catalog and writes the changes to a file.
      * 
-     * This method updates the catalog with new compacted files, detached PWALs, and the maximum epoch ID,
-     * then writes the updated catalog to a file.
+     * This method updates the catalog with new compacted files, detached PWALs, the maximum epoch ID,
+     * and the maximum blob ID, then writes the updated catalog to a file.
      * 
      * @param max_epoch_id The maximum epoch ID to be recorded in the catalog.
+     * @param max_blob_id The maximum blob ID to be recorded in the catalog.
      * @param compacted_files Set of compacted files to be included in the catalog.
      * @param detached_pwals Set of detached PWALs to be included in the catalog.
      */
-    void update_catalog_file(epoch_id_type max_epoch_id, const std::set<compacted_file_info> &compacted_files,
+    void update_catalog_file(epoch_id_type max_epoch_id, blob_id_type max_blob_id, const std::set<compacted_file_info> &compacted_files,
                         const std::set<std::string> &detached_pwals);
 
     /**
@@ -149,6 +151,13 @@ public:
      * @return epoch_id_type The maximum epoch ID recorded in the catalog.
      */
     [[nodiscard]] epoch_id_type get_max_epoch_id() const;
+
+    /**
+     * @brief Retrieves the maximum blob ID from the catalog.
+     *
+     * @return The maximum blob ID recorded in the catalog.
+     */
+    [[nodiscard]] blob_id_type get_max_blob_id() const;
 
     /**
      * @brief Get the set of compacted file information.
@@ -201,16 +210,16 @@ private:
     static constexpr const char *COMPACTED_FILE_KEY = "COMPACTED_FILE";                           ///< Key for compacted files in the catalog file
     static constexpr const char *DETACHED_PWAL_KEY = "DETACHED_PWAL";                             ///< Key for detached PWALs in the catalog file
     static constexpr const char *MAX_EPOCH_ID_KEY = "MAX_EPOCH_ID";                               ///< Key for maximum epoch ID in the catalog file
+    static constexpr const char *MAX_BLOB_ID_KEY = "MAX_BLOB_ID";                                 ///< Key for maximum blob ID in the catalog file
     static constexpr const char *COMPACTION_TEMP_DIRNAME = "compaction_temp";                     ///< Name of the temporary directory for compaction
     static constexpr const char *COMPACTED_FILENAME = "pwal_0000.compacted";                      ///< Prefix for temporary compaction files
     static constexpr const char *COMPACTED_BACKUP_FILENAME = "pwal_0000.compacted.prev";          ///< Extension for temporary compaction files
-
-    // Static variables
 
     // Member variables
     std::set<compacted_file_info> compacted_files_{};  ///< Set of compacted files
     std::set<std::string> detached_pwals_{};           ///< Set of detached PWALs
     epoch_id_type max_epoch_id_ = 0;                   ///< Maximum epoch ID included in the compacted files
+    blob_id_type max_blob_id_ = 0;                     ///< Maximum blob ID included in the compacted files
 
     // Static pointer to file operations interface
     std::unique_ptr<file_operations> file_ops_ = std::make_unique<real_file_operations>();

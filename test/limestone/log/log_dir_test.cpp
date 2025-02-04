@@ -60,7 +60,7 @@ const boost::filesystem::path compaction_catalog_path = boost::filesystem::path(
         create_file(manifest_path, data_manifest(persistent_format_version));
         if (persistent_format_version > 1) {
             compaction_catalog catalog{location};
-            catalog.update_catalog_file(0, {}, {});
+            catalog.update_catalog_file(0, 0, {}, {});
         }
     }
 
