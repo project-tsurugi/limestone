@@ -38,19 +38,12 @@ blob_id_type blob_pool_impl::generate_blob_id() {
     return id_generator_();
 }
 void blob_pool_impl::release() {
+
     // Release the pool
     is_released_.store(true, std::memory_order_release);
 
-    // Remove all provisional BLOBs
-    std::lock_guard<std::mutex> lock(mutex_);
-    boost::system::error_code ec;
-    for (const auto& id : blob_ids_) {
-        boost::filesystem::path path = resolver_.resolve_path(id);
-        file_ops_->remove(path, ec);
-        if (ec && ec != boost::system::errc::no_such_file_or_directory) {
-            VLOG_LP(log_error) << "Failed to remove file: " << path.string() << ". Error: " << ec.message();
-        }
-    }
+    // TODO: Remove blob_ids that have not been persisted with add_entry. Currently, they will be removed by GC, so do not remove them here.
+
     blob_ids_.clear();
 }
 
