@@ -43,7 +43,7 @@ public:
 
     /// @brief Returns the blob ID stored in this blob_item.
     /// @return The blob ID.
-    blob_id_type get_blob_id() const;
+    [[nodiscard]] blob_id_type get_blob_id() const;
 
     // Future expansion: Additional accessors for version and other metadata can be added here.
 
@@ -138,11 +138,11 @@ public:
 
     /// @brief Returns an iterator to the beginning of the container.
     /// @return A const iterator to the first element.
-    const_iterator begin() const;
+    [[nodiscard]] const_iterator begin() const;
 
     /// @brief Returns an iterator to the end of the container.
     /// @return A const iterator to one past the last element.
-    const_iterator end() const;
+    [[nodiscard]] const_iterator end() const;
 
 private:
     bool iterator_used_ = false;

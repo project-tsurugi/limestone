@@ -114,7 +114,7 @@ typename blob_item_container::const_iterator blob_item_container::begin() const 
     //
     // This operation does not change the observable state of the container from the client's point
     // of view, because the container is intended to be read-only once an iterator is retrieved.
-    blob_item_container* self = const_cast<blob_item_container*>(this);
+    auto self = const_cast<blob_item_container*>(this);
     if (!self->iterator_used_) {
         self->sort();
         self->iterator_used_ = true;
