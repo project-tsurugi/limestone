@@ -16,6 +16,7 @@
 
 #include "blob_pool_impl.h"
 #include "limestone_exception_helper.h"
+#include "limestone/api/datastore.h"
 #include <filesystem>
 #include <boost/filesystem.hpp>
 #include <iostream>
@@ -28,11 +29,13 @@
 namespace limestone::internal {
 
 blob_pool_impl::blob_pool_impl(std::function<blob_id_type()> id_generator,
-                               limestone::internal::blob_file_resolver& resolver)
+                               limestone::internal::blob_file_resolver& resolver,
+                               limestone::api::datastore& datastore)
     : id_generator_(std::move(id_generator)),
       resolver_(resolver),
+      datastore_(datastore),
       real_file_ops_(),
-      file_ops_(&real_file_ops_) {}  // Use the address of the member variable
+      file_ops_(&real_file_ops_) {}   // Use the address of the member variable
 
 blob_id_type blob_pool_impl::generate_blob_id() {
     return id_generator_();
@@ -44,7 +47,8 @@ void blob_pool_impl::release() {
     // Remove all provisional BLOBs
     std::lock_guard<std::mutex> lock(mutex_);
     boost::system::error_code ec;
-    for (const auto& id : blob_ids_) {
+    auto blob_ids_to_remove = datastore_.check_and_remove_persistent_blob_ids(blob_ids_);
+    for (const auto& id : blob_ids_to_remove) {
         boost::filesystem::path path = resolver_.resolve_path(id);
         file_ops_->remove(path, ec);
         if (ec && ec != boost::system::errc::no_such_file_or_directory) {

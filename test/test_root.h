@@ -37,6 +37,7 @@ public:
     auto& files() const noexcept { return files_for_tests(); }
     void rotate_epoch_file() { rotate_epoch_file_for_tests(); }
     void set_next_blob_id(blob_id_type next_blob_id) noexcept { set_next_blob_id_for_tests(next_blob_id); }
+    std::set<blob_id_type> get_persistent_blob_ids() noexcept { return get_persistent_blob_ids_for_tests(); }
 
 protected:
     inline void execute_callback(const std::function<void()>& callback) noexcept {

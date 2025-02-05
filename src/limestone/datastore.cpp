@@ -730,7 +730,7 @@ std::unique_ptr<blob_pool> datastore::acquire_blob_pool() {
 
     // Create a blob_pool_impl instance by passing the ID generator lambda and blob_file_resolver.
     // This approach allows flexible configuration and dependency injection for the blob pool.
-    auto pool = std::make_unique<limestone::internal::blob_pool_impl>(id_generator, *blob_file_resolver_);
+    auto pool = std::make_unique<limestone::internal::blob_pool_impl>(id_generator, *blob_file_resolver_, *this);
     TRACE_END;
     return pool; // Return the constructed blob pool.
 }
@@ -754,6 +754,30 @@ blob_file datastore::get_blob_file(blob_id_type reference) {
 
 void datastore::switch_available_boundary_version([[maybe_unused]] write_version_type version) {
      LOG_FIRST_N(ERROR, 1) << "not implemented";
+}
+
+void datastore::add_persistent_blob_ids(const std::vector<blob_id_type>& blob_ids) {
+    std::lock_guard<std::mutex> lock(persistent_blob_ids_mutex_);
+    for (const auto& blob_id : blob_ids) {
+        persistent_blob_ids_.insert(blob_id);
+    }
+}
+
+
+std::vector<blob_id_type> datastore::check_and_remove_persistent_blob_ids(const std::vector<blob_id_type>& blob_ids) {
+    std::lock_guard<std::mutex> lock(persistent_blob_ids_mutex_);
+    std::vector<blob_id_type> not_found_blob_ids;
+
+    for (const auto& blob_id : blob_ids) {
+        auto it = persistent_blob_ids_.find(blob_id);
+        if (it != persistent_blob_ids_.end()) {
+            persistent_blob_ids_.erase(it);
+        } else {
+            not_found_blob_ids.push_back(blob_id);
+        }
+    }
+
+    return not_found_blob_ids;
 }
 
 
