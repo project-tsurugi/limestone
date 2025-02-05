@@ -48,6 +48,11 @@ void blob_item_container::diff(const blob_item_container &other) {
     if (iterator_used_) {
         throw std::logic_error("Cannot modify blob_item_container once an iterator has been obtained.");
     }
+    // If 'other' is the same container as 'this', then clear the container.
+    if (&other == this) {
+        items_.clear();
+        return;
+    }
     
     // Move current items to a local variable and clear items_
     container_type old_items = std::move(items_);
@@ -85,14 +90,13 @@ void blob_item_container::diff(const blob_item_container &other) {
 }
 
 
-void blob_item_container::merge(const std::vector<blob_item_container> &containers) {
+void blob_item_container::merge(const blob_item_container &other) {
     if (iterator_used_) {
         throw std::logic_error("Cannot modify blob_item_container once an iterator has been obtained.");
     }
-    for (const auto &container : containers) {
-        for (const auto &item : container.items_) {
-            items_.push_back(item);
-        }
+    // Add all items from 'other' into this container.
+    for (const auto &item : other.items_) {
+        items_.push_back(item);
     }
     sort();
 }

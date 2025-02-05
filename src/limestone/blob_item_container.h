@@ -63,15 +63,18 @@ private:
  *     In a multithreaded context, each thread is expected to maintain its own
  *     blob_item_container and merge them later.
  *
- *   - The provided iterator is read-only (const_iterator only). Once an iterator is
- *     obtained via begin(), the container becomes permanently read-only.
+ *   - The provided iterator is read-only (const_iterator only) and returns references
+ *     to blob_item objects in sorted order (by blob_id). Once an iterator is obtained
+ *     via begin(), the container becomes permanently read-only.
  *     This restriction simplifies the iterator implementation, prevents accidental
  *     modifications during iteration, and improves performance.
  *
  *   - The diff method removes from this container all items that are present in
- *     the specified other container.
+ *     the specified other container. In case of duplicate blob IDs in this container,
+ *     all occurrences that match an ID in the other container are removed.
  *
- *   - The merge method adds the items from the specified containers into this container.
+ *   - The merge method adds the items from the specified container into this container.
+ *     Note: Duplicate removal is not performed.
  *
  * These design decisions were made after careful consideration of the requirements,
  * potential future extensions, and optimal performance. This class is intended for
@@ -80,6 +83,8 @@ private:
 class blob_item_container {
 public:
     using container_type = std::vector<blob_item>;
+    // The iterator is defined as const_iterator, so that users receive only read-only,
+    // sorted references to blob_item objects.
     using iterator = container_type::const_iterator;
     using const_iterator = container_type::const_iterator;
 
@@ -101,7 +106,7 @@ public:
      * @brief Adds a blob_item to the container.
      *
      * @note Once an iterator has been obtained, the container becomes permanently read-only.
-     *       Calling this function after obtaining an iterator will throw an exception.
+     *       Calling this function after obtaining an iterator will throw a std::logic_error.
      *
      * @param item The blob_item to add.
      * @throws std::logic_error if the container is locked for modifications.
@@ -116,18 +121,20 @@ public:
      * all occurrences that match an ID in the other container are removed.
      *
      * @param other The container containing items to be removed from this container.
+     * @throws std::logic_error if the container is locked for modifications.
      */
     void diff(const blob_item_container &other);
 
     /**
-     * @brief Merges the contents of the specified blob_item_container objects into this container.
+     * @brief Merges the contents of the specified blob_item_container into this container.
      *
-     * This function adds the items from the specified containers to this container and then sorts the result.
-     * Note that merge does not remove duplicate blob IDs.
+     * This function adds the items from the other container to this container and then sorts the result.
+     * Note: Duplicate removal is not performed.
      *
-     * @param containers A vector of blob_item_container objects whose items are to be added to this container.
+     * @param other The blob_item_container whose items are to be added to this container.
+     * @throws std::logic_error if the container is locked for modifications.
      */
-    void merge(const std::vector<blob_item_container> &containers);
+    void merge(const blob_item_container &other);
 
     /// @brief Returns an iterator to the beginning of the container.
     /// @return A const iterator to the first element.
