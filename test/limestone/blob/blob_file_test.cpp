@@ -2,7 +2,9 @@
 #include <gtest/gtest.h>
 #include <boost/filesystem.hpp>
 
-namespace limestone::api {
+namespace limestone::testing {
+
+using namespace limestone::api;
 
 TEST(blob_file_test, constructor_with_default_availability) {
     boost::filesystem::path test_path("/path/to/blob");
