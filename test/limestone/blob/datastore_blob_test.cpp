@@ -10,6 +10,8 @@
 
 namespace limestone::testing {
 
+using limestone::api::blob_id_type;
+
 constexpr const char* data_location = "/tmp/datastore_blob_test/data_location";
 constexpr const char* metadata_location = "/tmp/datastore_blob_test/metadata_location";
 
@@ -101,6 +103,132 @@ TEST_F(datastore_blob_test, DISABLED_get_blob_file_permission_error) {
     boost::filesystem::permissions(file.path().parent_path(), boost::filesystem::perms::all_all);
 }
 
+TEST_F(datastore_blob_test, add_persistent_blob_ids) {
+    std::vector<blob_id_type> blob_ids = {1, 2, 3};
+    datastore_->add_persistent_blob_ids(blob_ids);
+
+    auto persistent_blob_ids = datastore_->get_persistent_blob_ids();
+    EXPECT_EQ(persistent_blob_ids.size(), 3);
+    EXPECT_TRUE(persistent_blob_ids.find(1) != persistent_blob_ids.end());
+    EXPECT_TRUE(persistent_blob_ids.find(2) != persistent_blob_ids.end());
+    EXPECT_TRUE(persistent_blob_ids.find(3) != persistent_blob_ids.end());
+}
+
+TEST_F(datastore_blob_test, add_empty_persistent_blob_ids) {
+    std::vector<blob_id_type> empty_blob_ids;
+    datastore_->add_persistent_blob_ids(empty_blob_ids);
+
+    auto persistent_blob_ids = datastore_->get_persistent_blob_ids();
+    EXPECT_TRUE(persistent_blob_ids.empty());
+}
+
+TEST_F(datastore_blob_test, add_persistent_blob_ids_multiple_calls) {
+    // Check initial state
+    auto initial_persistent_blob_ids = datastore_->get_persistent_blob_ids();
+    EXPECT_TRUE(initial_persistent_blob_ids.empty());
+
+    // First call
+    std::vector<blob_id_type> blob_ids1 = {1, 2, 3};
+    datastore_->add_persistent_blob_ids(blob_ids1);
+
+    auto persistent_blob_ids_after_first_call = datastore_->get_persistent_blob_ids();
+    EXPECT_EQ(persistent_blob_ids_after_first_call.size(), 3);
+    EXPECT_TRUE(persistent_blob_ids_after_first_call.find(1) != persistent_blob_ids_after_first_call.end());
+    EXPECT_TRUE(persistent_blob_ids_after_first_call.find(2) != persistent_blob_ids_after_first_call.end());
+    EXPECT_TRUE(persistent_blob_ids_after_first_call.find(3) != persistent_blob_ids_after_first_call.end());
+
+    // Call with an empty list
+    std::vector<blob_id_type> empty_blob_ids;
+    datastore_->add_persistent_blob_ids(empty_blob_ids);
+
+    auto persistent_blob_ids_after_empty_call = datastore_->get_persistent_blob_ids();
+    EXPECT_EQ(persistent_blob_ids_after_empty_call.size(), 3); // No change
+    EXPECT_TRUE(persistent_blob_ids_after_empty_call.find(1) != persistent_blob_ids_after_empty_call.end());
+    EXPECT_TRUE(persistent_blob_ids_after_empty_call.find(2) != persistent_blob_ids_after_empty_call.end());
+    EXPECT_TRUE(persistent_blob_ids_after_empty_call.find(3) != persistent_blob_ids_after_empty_call.end());
+
+    // Additional call
+    std::vector<blob_id_type> blob_ids2 = {4, 5};
+    datastore_->add_persistent_blob_ids(blob_ids2);
+
+    auto persistent_blob_ids_after_second_call = datastore_->get_persistent_blob_ids();
+    EXPECT_EQ(persistent_blob_ids_after_second_call.size(), 5);
+    EXPECT_TRUE(persistent_blob_ids_after_second_call.find(1) != persistent_blob_ids_after_second_call.end());
+    EXPECT_TRUE(persistent_blob_ids_after_second_call.find(2) != persistent_blob_ids_after_second_call.end());
+    EXPECT_TRUE(persistent_blob_ids_after_second_call.find(3) != persistent_blob_ids_after_second_call.end());
+    EXPECT_TRUE(persistent_blob_ids_after_second_call.find(4) != persistent_blob_ids_after_second_call.end());
+    EXPECT_TRUE(persistent_blob_ids_after_second_call.find(5) != persistent_blob_ids_after_second_call.end());
+}
+
+
+TEST_F(datastore_blob_test, check_and_remove_persistent_blob_ids_all_exist) {
+    std::vector<blob_id_type> blob_ids_to_add = {1, 2, 3};
+    datastore_->add_persistent_blob_ids(blob_ids_to_add);
+
+    std::vector<blob_id_type> blob_ids_to_check_and_remove = {1, 2, 3};
+    auto not_found_blob_ids = datastore_->check_and_remove_persistent_blob_ids(blob_ids_to_check_and_remove);
+
+    auto persistent_blob_ids = datastore_->get_persistent_blob_ids();
+    EXPECT_TRUE(persistent_blob_ids.empty());
+
+    EXPECT_TRUE(not_found_blob_ids.empty());
+}
+
+TEST_F(datastore_blob_test, check_and_remove_persistent_blob_ids_some_exist) {
+    std::vector<blob_id_type> blob_ids_to_add = {1, 2, 3};
+    datastore_->add_persistent_blob_ids(blob_ids_to_add);
+
+    std::vector<blob_id_type> blob_ids_to_check_and_remove = {2, 3, 4};
+    auto not_found_blob_ids = datastore_->check_and_remove_persistent_blob_ids(blob_ids_to_check_and_remove);
+
+    auto persistent_blob_ids = datastore_->get_persistent_blob_ids();
+    EXPECT_EQ(persistent_blob_ids.size(), 1);
+    EXPECT_TRUE(persistent_blob_ids.find(1) != persistent_blob_ids.end());
+    EXPECT_TRUE(persistent_blob_ids.find(2) == persistent_blob_ids.end());
+    EXPECT_TRUE(persistent_blob_ids.find(3) == persistent_blob_ids.end());
+
+    EXPECT_EQ(not_found_blob_ids.size(), 1);
+    EXPECT_EQ(not_found_blob_ids[0], 4);
+}
+
+TEST_F(datastore_blob_test, check_and_remove_persistent_blob_ids_empty_parameter) {
+    std::vector<blob_id_type> blob_ids_to_add = {1, 2, 3};
+    datastore_->add_persistent_blob_ids(blob_ids_to_add);
+
+    std::vector<blob_id_type> empty_blob_ids_to_check_and_remove;
+    auto not_found_blob_ids = datastore_->check_and_remove_persistent_blob_ids(empty_blob_ids_to_check_and_remove);
+
+    auto persistent_blob_ids = datastore_->get_persistent_blob_ids();
+    EXPECT_EQ(persistent_blob_ids.size(), 3);
+    EXPECT_TRUE(persistent_blob_ids.find(1) != persistent_blob_ids.end());
+    EXPECT_TRUE(persistent_blob_ids.find(2) != persistent_blob_ids.end());
+    EXPECT_TRUE(persistent_blob_ids.find(3) != persistent_blob_ids.end());
+
+    EXPECT_TRUE(not_found_blob_ids.empty());
+}
+
+TEST_F(datastore_blob_test, check_and_remove_persistent_blob_ids_empty_persistent_blob_ids) {
+    std::vector<blob_id_type> empty_blob_ids_to_check_and_remove = {1, 2, 3};
+    auto not_found_blob_ids = datastore_->check_and_remove_persistent_blob_ids(empty_blob_ids_to_check_and_remove);
+
+    auto persistent_blob_ids = datastore_->get_persistent_blob_ids();
+    EXPECT_TRUE(persistent_blob_ids.empty());
+
+    EXPECT_EQ(not_found_blob_ids.size(), 3);
+    EXPECT_TRUE(std::find(not_found_blob_ids.begin(), not_found_blob_ids.end(), 1) != not_found_blob_ids.end());
+    EXPECT_TRUE(std::find(not_found_blob_ids.begin(), not_found_blob_ids.end(), 2) != not_found_blob_ids.end());
+    EXPECT_TRUE(std::find(not_found_blob_ids.begin(), not_found_blob_ids.end(), 3) != not_found_blob_ids.end());
+}
+
+TEST_F(datastore_blob_test, check_and_remove_persistent_blob_ids_both_empty) {
+    std::vector<blob_id_type> empty_blob_ids_to_check_and_remove;
+    auto not_found_blob_ids = datastore_->check_and_remove_persistent_blob_ids(empty_blob_ids_to_check_and_remove);
+
+    auto persistent_blob_ids = datastore_->get_persistent_blob_ids();
+    EXPECT_TRUE(persistent_blob_ids.empty());
+
+    EXPECT_TRUE(not_found_blob_ids.empty());
+}
 
 
 } // namespace limestone::testing

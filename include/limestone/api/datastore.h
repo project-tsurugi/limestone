@@ -282,6 +282,11 @@ public:
      * @note the specified version must be smaller than or equal to the version that was told by the switch_safe_snapshot().
      */
     void switch_available_boundary_version(write_version_type version);
+
+
+    void add_persistent_blob_ids(const std::vector<blob_id_type>& blob_ids);
+
+    std::vector<blob_id_type> check_and_remove_persistent_blob_ids(const std::vector<blob_id_type>& blob_ids);
     
 protected:  // for tests
     auto& log_channels_for_tests() const noexcept { return log_channels_; }
@@ -292,6 +297,10 @@ protected:  // for tests
     auto& files_for_tests() const noexcept { return files_; }
     void rotate_epoch_file_for_tests() { rotate_epoch_file(); }
     void set_next_blob_id_for_tests(blob_id_type next_blob_id) noexcept { next_blob_id_ = next_blob_id; }
+    std::set<blob_id_type> get_persistent_blob_ids_for_tests() noexcept {
+        std::lock_guard<std::mutex> lock(persistent_blob_ids_mutex_);
+        return persistent_blob_ids_;
+    }
 
     // These virtual methods are hooks for testing thread synchronization.
     // They allow derived classes to inject custom behavior or notifications
@@ -457,6 +466,11 @@ private:
     std::unique_ptr<limestone::internal::blob_file_resolver> blob_file_resolver_;
 
     std::atomic<std::uint64_t> next_blob_id_{0};
+
+    std::set<blob_id_type> persistent_blob_ids_;
+
+    std::mutex persistent_blob_ids_mutex_;
+
 };
 
 } // namespace limestone::api

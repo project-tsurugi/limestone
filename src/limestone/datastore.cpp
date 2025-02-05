@@ -750,6 +750,30 @@ void datastore::switch_available_boundary_version([[maybe_unused]] write_version
      LOG_FIRST_N(ERROR, 1) << "not implemented";
 }
 
+void datastore::add_persistent_blob_ids(const std::vector<blob_id_type>& blob_ids) {
+    std::lock_guard<std::mutex> lock(persistent_blob_ids_mutex_);
+    for (const auto& blob_id : blob_ids) {
+        persistent_blob_ids_.insert(blob_id);
+    }
+}
+
+
+std::vector<blob_id_type> datastore::check_and_remove_persistent_blob_ids(const std::vector<blob_id_type>& blob_ids) {
+    std::lock_guard<std::mutex> lock(persistent_blob_ids_mutex_);
+    std::vector<blob_id_type> not_found_blob_ids;
+
+    for (const auto& blob_id : blob_ids) {
+        auto it = persistent_blob_ids_.find(blob_id);
+        if (it != persistent_blob_ids_.end()) {
+            persistent_blob_ids_.erase(it);
+        } else {
+            not_found_blob_ids.push_back(blob_id);
+        }
+    }
+
+    return not_found_blob_ids;
+}
+
 
 } // namespace limestone::api
 
