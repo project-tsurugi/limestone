@@ -230,5 +230,45 @@ TEST_F(datastore_blob_test, check_and_remove_persistent_blob_ids_both_empty) {
     EXPECT_TRUE(not_found_blob_ids.empty());
 }
 
+TEST_F(datastore_blob_test, scenario01) {
+    auto *log_channel = &datastore_->create_channel(data_location);
+
+    datastore_->ready();
+    auto pool = datastore_->acquire_blob_pool();
+
+    std::string data1 = "test data";
+    std::string data2 = "more test data";
+    auto blob_id1 = pool->register_data(data1);
+    auto blob_id2 = pool->register_data(data2);
+
+    auto blob_fil1 = datastore_->get_blob_file(blob_id1);
+    auto blob_fil2 = datastore_->get_blob_file(blob_id2);
+
+    EXPECT_TRUE(boost::filesystem::exists(blob_fil1.path()));
+    EXPECT_TRUE(boost::filesystem::exists(blob_fil2.path()));
+
+    log_channel->begin_session();
+    log_channel->add_entry(1, "key1", "value1", {1,1}, {blob_id1});
+    log_channel->end_session();
+
+    EXPECT_TRUE(boost::filesystem::exists(blob_fil1.path()));
+    EXPECT_TRUE(boost::filesystem::exists(blob_fil2.path()));
+    EXPECT_EQ(datastore_->get_persistent_blob_ids().size(), 1);
+    EXPECT_TRUE(datastore_->get_persistent_blob_ids().find(blob_id1) != datastore_->get_persistent_blob_ids().end());
+
+    pool->release();
+
+    EXPECT_TRUE(boost::filesystem::exists(blob_fil1.path()));
+    EXPECT_FALSE(boost::filesystem::exists(blob_fil2.path()));
+    EXPECT_TRUE(datastore_->get_persistent_blob_ids().empty());
+
+    pool->release();
+
+    EXPECT_TRUE(boost::filesystem::exists(blob_fil1.path()));
+    EXPECT_FALSE(boost::filesystem::exists(blob_fil2.path()));
+    EXPECT_TRUE(datastore_->get_persistent_blob_ids().empty());
+}
+
+
 
 } // namespace limestone::testing

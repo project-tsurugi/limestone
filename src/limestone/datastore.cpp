@@ -724,7 +724,7 @@ std::unique_ptr<blob_pool> datastore::acquire_blob_pool() {
 
     // Create a blob_pool_impl instance by passing the ID generator lambda and blob_file_resolver.
     // This approach allows flexible configuration and dependency injection for the blob pool.
-    auto pool = std::make_unique<limestone::internal::blob_pool_impl>(id_generator, *blob_file_resolver_);
+    auto pool = std::make_unique<limestone::internal::blob_pool_impl>(id_generator, *blob_file_resolver_, *this);
     TRACE_END;
     return pool; // Return the constructed blob pool.
 }

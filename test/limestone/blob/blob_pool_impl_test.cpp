@@ -25,6 +25,7 @@ using limestone::api::blob_id_type;
 
 constexpr const char* base_directory = "/tmp/blob_pool_impl_test";
 constexpr const char* blob_directory = "/tmp/blob_pool_impl_test/blob";
+constexpr const char* metadata_location = "/tmp/blob_pool_impl_test/metadata_location";
 constexpr const char* dev_shm_test_directory_ = "/dev/shm/blob_pool_impl_test";
 
 class testable_blob_pool_impl : public blob_pool_impl {
@@ -55,6 +56,9 @@ protected:
         if (system(("mkdir -p " + std::string(blob_directory)).c_str()) != 0) {
             std::cerr << "cannot make directory" << std::endl;
         }
+        if (system(("mkdir -p " + std::string(metadata_location)).c_str()) != 0) {
+            std::cerr << "cannot make directory" << std::endl;
+        }
 
         // Remove and recreate the test directory in /dev/shm
         if (system(("rm -rf " + std::string(dev_shm_test_directory_)).c_str()) != 0) {
@@ -63,17 +67,27 @@ protected:
         if (system(("mkdir -p " + std::string(dev_shm_test_directory_)).c_str()) != 0) {
             std::cerr << "Cannot create directory: " << dev_shm_test_directory_ << std::endl;
         }
+
+        std::vector<boost::filesystem::path> data_locations{};
+        data_locations.emplace_back(base_directory);
+        boost::filesystem::path metadata_location_path{metadata_location};
+        limestone::api::configuration conf(data_locations, metadata_location_path);
+
+        datastore_ = std::make_unique<limestone::api::datastore>(conf);
+
         // Initialize blob_file_resolver with the blob directory
         resolver_ = std::make_unique<blob_file_resolver>(
             boost::filesystem::path(blob_directory), 10 /* directory count */);
 
         // Initialize blob_pool_impl with the resolver and ID generator
-        pool_ = std::make_unique<testable_blob_pool_impl>(id_generator_, *resolver_);
+        pool_ = std::make_unique<testable_blob_pool_impl>(id_generator_, *resolver_, *datastore_);
     }
 
     void TearDown() override {
         pool_.reset();
         resolver_.reset();
+        datastore_->shutdown();
+        datastore_ = nullptr;
         if (system(("rm -rf " + std::string(base_directory)).c_str()) != 0) {
             std::cerr << "cannot remove directory" << std::endl;
         }
@@ -82,6 +96,7 @@ protected:
         }
     }
 
+    std::unique_ptr<api::datastore> datastore_;      // Datastore instance
     blob_id_type current_id_{0};                     // Counter for generating unique IDs
     std::function<blob_id_type()> id_generator_;     // ID generator function
     std::unique_ptr<blob_file_resolver> resolver_;   // Resolver for managing blob paths
@@ -1325,8 +1340,8 @@ TEST_F(blob_pool_impl_test, release_success) {
     pool_->release();
 
     // Verify the BLOBs were removed
-    // EXPECT_FALSE(boost::filesystem::exists(path1)); // This test will not pass until Issue #82 is resolved, so it is commented out.
-    // EXPECT_FALSE(boost::filesystem::exists(path2)); // This test will not pass until Issue #82 is resolved, so it is commented out.
+    EXPECT_FALSE(boost::filesystem::exists(path1));
+    EXPECT_FALSE(boost::filesystem::exists(path2));
     EXPECT_TRUE(pool_->get_blob_ids().empty());
 }
 
@@ -1369,11 +1384,10 @@ TEST_F(blob_pool_impl_test, release_with_partial_failure) {
     pool_->release();
 
     // Verify the BLOBs were removed or failed as expected
-//    EXPECT_FALSE(boost::filesystem::exists(path1)); // This test will not pass until Issue #82 is resolved, so it is commented out.
+    EXPECT_FALSE(boost::filesystem::exists(path1));
     EXPECT_TRUE(boost::filesystem::exists(path2));  // This file should fail to be removed
-//    EXPECT_FALSE(boost::filesystem::exists(path3)); // This test will not pass until Issue #82 is resolved, so it is commented out.
+    EXPECT_FALSE(boost::filesystem::exists(path3));
     EXPECT_TRUE(pool_->get_blob_ids().empty());
 }
-
 
 }  // namespace limestone::testing

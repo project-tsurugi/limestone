@@ -3,6 +3,7 @@
 #include <limestone/api/blob_pool.h>
 #include <functional>
 #include <atomic>
+#include "limestone/api/datastore.h"
 #include "blob_file_resolver.h"
 #include "file_operations.h"
 
@@ -19,9 +20,9 @@ public:
      * @brief Constructs a blob_pool_impl instance with the given ID generator and blob_file_resolver.
      * @param id_generator A callable object that generates unique IDs of type blob_id_type.
      * @param resolver Reference to a blob_file_resolver instance.
+     * @param datastore Reference to a datastore instance.
      */
-    explicit blob_pool_impl(std::function<blob_id_type()> id_generator,
-                            limestone::internal::blob_file_resolver& resolver);
+    blob_pool_impl(std::function<blob_id_type()> id_generator, blob_file_resolver& resolver, datastore& datastore);
 
     void release() override;
 
@@ -89,7 +90,7 @@ protected:
      * 
      * @return A constant reference to the list of blob IDs.
      */
-    [[nodiscard]] std::list<blob_id_type> get_blob_ids() noexcept {
+    [[nodiscard]] std::vector<blob_id_type> get_blob_ids() noexcept {
         std::lock_guard<std::mutex> lock(mutex_);
         return blob_ids_;
     }
@@ -107,6 +108,9 @@ private:
     // Reference to a blob_file_resolver instance
     blob_file_resolver& resolver_;
 
+    // Reference to the datastore for managing BLOB data
+    limestone::api::datastore& datastore_;
+
     // Holds the default file_operations implementation
     real_file_operations real_file_ops_;
 
@@ -117,10 +121,11 @@ private:
     std::atomic<bool> is_released_{false};
 
     // Holds BLOB IDs used to track provisional registrations
-    std::list<blob_id_type> blob_ids_;
+    std::vector<blob_id_type> blob_ids_;
 
     // Ensures thread-safe access to blob_ids_
     std::mutex mutex_;
+
 };
 
 } // namespace limestone::internal
