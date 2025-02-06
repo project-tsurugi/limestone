@@ -103,6 +103,12 @@ protected:
     std::vector<boost::filesystem::path> get_blob_file_list() const;
 
 private:
+    // Disallow copy and move operations
+    blob_file_garbage_collector(const blob_file_garbage_collector&) = delete;
+    blob_file_garbage_collector& operator=(const blob_file_garbage_collector&) = delete;
+    blob_file_garbage_collector(blob_file_garbage_collector&&) = delete;
+    blob_file_garbage_collector& operator=(blob_file_garbage_collector&&) = delete;
+
     const blob_file_resolver &resolver_; ///< Reference to the blob_file_resolver instance.
     std::vector<boost::filesystem::path> blob_file_list_; ///< List of found BLOB file paths.
     blob_id_type max_existing_blob_id_ = 0; ///< Maximum blob_id that existed at startup.
