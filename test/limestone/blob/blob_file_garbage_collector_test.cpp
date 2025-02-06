@@ -21,7 +21,10 @@ public:
     explicit testable_blob_file_garbage_collector(const blob_file_resolver &resolver)
         : blob_file_garbage_collector(resolver) {}
     using blob_file_garbage_collector::wait_for_scan;
+    using blob_file_garbage_collector::wait_for_cleanup;
+    using blob_file_garbage_collector::set_file_operations;
     using blob_file_garbage_collector::get_blob_file_list;
+    using blob_file_garbage_collector::get_gc_exempt_blob_list;
 };
 
 
@@ -228,6 +231,100 @@ TEST_F(blob_file_garbage_collector_test, scan_catches_exception_when_directory_m
     // Verify that get_blob_file_list() returns an empty list.
     auto actual_ids = get_sorted_blob_ids(gc_->get_blob_file_list());
     EXPECT_TRUE(actual_ids.empty());
+}
+
+TEST_F(blob_file_garbage_collector_test, add_gc_exempt_blob_item_adds_item_correctly) {
+    // Arrange: Create a blob_item with a test blob_id.
+    blob_id_type test_id = 123;
+    blob_item test_item(test_id);
+
+    // Act: Add the test blob_item to the gc_exempt_blob_ container.
+    gc_->add_gc_exempt_blob_item(test_item);
+
+    // Assert: Verify that the container now includes the test blob_item.
+    const blob_item_container &exempt_items = gc_->get_gc_exempt_blob_list();
+    auto actual_ids = get_sorted_blob_ids(exempt_items);
+    std::vector<blob_id_type> expected_ids = { test_id };
+    EXPECT_EQ(actual_ids, expected_ids);
+}
+
+TEST_F(blob_file_garbage_collector_test, finalize_scan_and_cleanup_deletes_non_exempt_files) {
+    // Arrange:
+    // Create dummy blob files with blob IDs 101, 102, 103.
+    create_blob_file(*resolver_, 101);
+    create_blob_file(*resolver_, 102);
+    create_blob_file(*resolver_, 103);
+
+    // Assume that all files have blob IDs <= 200 so that they are included in the scanned list.
+    gc_->start_scan(200);
+    gc_->wait_for_scan();
+
+    // Mark blob 102 as GC exempt.
+    gc_->add_gc_exempt_blob_item(blob_item(102));
+
+    // Act:
+    // Call finalize_scan_and_cleanup, which spawns a detached thread that will wait
+    // for the scan to complete and then delete non-exempt blob files.
+    gc_->finalize_scan_and_cleanup();
+
+    // Wait for the cleanup process to complete.
+    gc_->wait_for_cleanup();
+
+    // Assert:
+    // Expect non-exempt blob files to have been deleted.
+    EXPECT_FALSE(boost::filesystem::exists(resolver_->resolve_path(101)));
+    EXPECT_FALSE(boost::filesystem::exists(resolver_->resolve_path(103)));
+
+    // The GC exempt blob (102) should still exist.
+    EXPECT_TRUE(boost::filesystem::exists(resolver_->resolve_path(102)));
+}
+
+TEST_F(blob_file_garbage_collector_test, finalize_scan_and_cleanup_handles_deletion_failure) {
+    // Arrange:
+    // Create dummy blob files with blob IDs 501 and 502.
+    create_blob_file(*resolver_, 501);
+    create_blob_file(*resolver_, 502);
+
+    // Assume that all files have blob IDs <= 600 so that they are included in the scanned list.
+    gc_->start_scan(600);
+    gc_->wait_for_scan();
+
+    // Set up test file operations to simulate a deletion failure for blob ID 501.
+    class TestFileOperations : public real_file_operations {
+    public:
+        TestFileOperations(blob_id_type fail_id, blob_file_resolver* resolver) : real_file_operations(), fail_id_(fail_id), resolver_(resolver) {}
+
+        void remove(const boost::filesystem::path& path, boost::system::error_code& ec) override {
+            auto id = resolver_->extract_blob_id(path);
+            if (id == fail_id_) {
+                ec = boost::system::errc::make_error_code(boost::system::errc::permission_denied);
+            } else {
+                real_file_operations::remove(path, ec);
+            }
+        }
+
+    private:
+        blob_id_type fail_id_;
+        blob_file_resolver* resolver_;
+    };
+
+    blob_id_type fail_id = 501;
+    blob_file_resolver* resolver = resolver_.get(); // Capture resolver_ pointer
+    gc_->set_file_operations(std::make_unique<TestFileOperations>(fail_id, resolver));
+
+    // Call finalize_scan_and_cleanup, which spawns a detached thread that will wait
+    // for the scan to complete and then delete non-exempt blob files.
+    gc_->finalize_scan_and_cleanup();
+
+    // Wait for the cleanup process to complete.
+    gc_->wait_for_cleanup();
+
+    // Assert:
+    // Expect the deletion of blob ID 501 to have failed, so the file should still exist.
+    EXPECT_TRUE(boost::filesystem::exists(resolver_->resolve_path(501)));
+
+    // Expect the deletion of blob ID 502 to have succeeded, so the file should not exist.
+    EXPECT_FALSE(boost::filesystem::exists(resolver_->resolve_path(502)));
 }
 
 }  // namespace limestone::testing

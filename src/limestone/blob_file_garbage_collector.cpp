@@ -29,7 +29,7 @@ namespace limestone::internal {
 blob_file_garbage_collector::blob_file_garbage_collector(const blob_file_resolver &resolver)
     : resolver_(resolver)
 {
-    // Nothing else to do here; blob_file_resolver is assumed to be fully initialized.
+    file_ops_ = std::make_unique<real_file_operations>(); 
 }
 
 blob_file_garbage_collector::~blob_file_garbage_collector() {
@@ -52,6 +52,9 @@ void blob_file_garbage_collector::start_scan(blob_id_type max_existing_blob_id) 
 }
 
 void blob_file_garbage_collector::wait_for_scan() {
+    if (!scan_started) {
+        return;
+    }
     std::unique_lock<std::mutex> lock(mutex_);
     cv_.wait(lock, [this]() { return scan_complete_; });
 }
@@ -89,6 +92,46 @@ void blob_file_garbage_collector::scan_directory() {
         scan_complete_ = true;
     }
     cv_.notify_all();
+}
+
+void blob_file_garbage_collector::add_gc_exempt_blob_item(const blob_item &item) {
+    gc_exempt_blob_.add_blob_item(item);
+}
+
+void blob_file_garbage_collector::finalize_scan_and_cleanup() {
+    // Create a promise to signal when cleanup is complete.
+    cleanup_promise_ = std::make_shared<std::promise<void>>();
+    std::thread([this, cleanup_promise = cleanup_promise_]() {
+        // Wait for scanning to complete using the existing wait_for_scan() method.
+        this->wait_for_scan();
+        
+        // Determine deletion targets using the diff method.
+        scaned_blobs_.diff(gc_exempt_blob_);
+
+        // Perform deletion for each blob item not in GC exempt list.
+        for (const auto &item : scaned_blobs_) {
+            boost::filesystem::path file_path = resolver_.resolve_path(item.get_blob_id());
+            boost::system::error_code ec;
+            file_ops_->remove(file_path, ec);
+            if (ec && ec != boost::system::errc::no_such_file_or_directory) {
+                LOG_LP(ERROR) << "Failed to remove file: "
+                              << file_path.string() << " Error: " << ec.message();
+            }
+        }
+        // Signal that cleanup is complete.
+        cleanup_promise->set_value();
+    }).detach();
+}
+
+void blob_file_garbage_collector::wait_for_cleanup() {
+    if (cleanup_promise_) {
+        // Wait for the future to be ready.
+        cleanup_promise_->get_future().wait();
+    }
+}
+
+void blob_file_garbage_collector::set_file_operations(std::unique_ptr<file_operations> file_ops) {
+    file_ops_ = std::move(file_ops);
 }
 
 } // namespace limestone::internal
