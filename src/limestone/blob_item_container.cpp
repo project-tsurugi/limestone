@@ -18,7 +18,7 @@
 #include <stdexcept>
 #include <algorithm>
 
-namespace limestone::api {
+namespace limestone::internal {
 
 //==============================================================================
 // blob_item Implementation

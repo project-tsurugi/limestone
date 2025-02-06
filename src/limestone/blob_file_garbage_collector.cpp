@@ -46,7 +46,6 @@ void blob_file_garbage_collector::start_scan(blob_id_type max_existing_blob_id) 
     scan_started = true;
     max_existing_blob_id_ = max_existing_blob_id;
     scan_complete_ = false;
-    blob_file_list_.clear();
     
     // Launch the scanning thread that will execute scan_directory().
     scan_thread_ = std::thread(&blob_file_garbage_collector::scan_directory, this);
@@ -55,10 +54,6 @@ void blob_file_garbage_collector::start_scan(blob_id_type max_existing_blob_id) 
 void blob_file_garbage_collector::wait_for_scan() {
     std::unique_lock<std::mutex> lock(mutex_);
     cv_.wait(lock, [this]() { return scan_complete_; });
-}
-
-std::vector<boost::filesystem::path> blob_file_garbage_collector::get_blob_file_list() const {
-    return blob_file_list_;
 }
 
 void blob_file_garbage_collector::scan_directory() {
@@ -81,7 +76,8 @@ void blob_file_garbage_collector::scan_directory() {
 
                 // Only consider files with blob_id <= max_existing_blob_id_
                 if (id <= max_existing_blob_id_) {
-                    blob_file_list_.push_back(file_path);
+                    blob_id_type id = resolver_.extract_blob_id(file_path);
+                    scaned_blobs_.add_blob_item(blob_item(id));
                 }
             }
         }

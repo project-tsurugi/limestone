@@ -22,7 +22,9 @@
 #include <stdexcept>
 #include "limestone/api/blob_id_type.h"
 
-namespace limestone::api {
+namespace limestone::internal {
+
+using namespace limestone::api;    
 
 /**
  * @brief The blob_item class represents a BLOB item that holds a blob ID

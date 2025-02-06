@@ -33,6 +33,15 @@ std::string generate_blob_filename(blob_id_type id) {
     return oss.str();
 }
 
+// Helper function: From a blob_item_container reference, create a sorted list of blob IDs.
+std::vector<blob_id_type> get_sorted_blob_ids(const blob_item_container &container) {
+    std::vector<blob_id_type> ids;
+    for (const auto &item : container) {
+        ids.push_back(item.get_blob_id());
+    }
+    std::sort(ids.begin(), ids.end());
+    return ids;
+}
 
 class blob_file_garbage_collector_test : public ::testing::Test {
 protected:
@@ -106,20 +115,14 @@ TEST_F(blob_file_garbage_collector_test, scan_collects_only_files_with_blob_id_l
     gc_->wait_for_scan();
 
     // Get scan results
-    auto file_list = gc_->get_blob_file_list();
+    auto actual_ids = get_sorted_blob_ids(gc_->get_blob_file_list());
 
     // Expected result is only the paths of files with blob_id 100, 200, 300
     // Each file path should be generated with resolver_->resolve_path(blob_id)
-    std::vector<boost::filesystem::path> expected;
-    expected.push_back(resolver_->resolve_path(100));
-    expected.push_back(resolver_->resolve_path(200));
-    expected.push_back(resolver_->resolve_path(300));
-
-    // Sort and compare (order should be guaranteed, but just in case)
-    std::sort(file_list.begin(), file_list.end());
-    std::sort(expected.begin(), expected.end());
-
-    EXPECT_EQ(file_list, expected);
+    ASSERT_EQ(actual_ids.size(), 3);
+    EXPECT_EQ(actual_ids[0], 100);
+    EXPECT_EQ(actual_ids[1], 200);
+    EXPECT_EQ(actual_ids[2], 300);
 }
 
 // Test case: Invalid files (not in blob_file format) are ignored
@@ -146,15 +149,10 @@ TEST_F(blob_file_garbage_collector_test, scan_ignores_invalid_files) {
     gc_->start_scan(500);
     gc_->wait_for_scan();
 
-    auto file_list = gc_->get_blob_file_list();
     // Expected result is only the file with blob_id 150
-    std::vector<boost::filesystem::path> expected;
-    expected.push_back(resolver_->resolve_path(150));
-
-    std::sort(file_list.begin(), file_list.end());
-    std::sort(expected.begin(), expected.end());
-
-    EXPECT_EQ(file_list, expected);
+    auto actual_ids = get_sorted_blob_ids(gc_->get_blob_file_list());
+    ASSERT_EQ(actual_ids.size(), 1);
+    EXPECT_EQ(actual_ids[0], 150);
 }
 
 // Test case: get_blob_file_list() returns the correct list after scan completion
@@ -167,17 +165,12 @@ TEST_F(blob_file_garbage_collector_test, get_blob_file_list_after_scan) {
     gc_->start_scan(1000); // Specify a sufficiently large value for max_existing_blob_id
     gc_->wait_for_scan();
 
-    auto file_list = gc_->get_blob_file_list();
     // Expected files are those with blob_id 10, 20, 30
-    std::vector<boost::filesystem::path> expected;
-    expected.push_back(resolver_->resolve_path(10));
-    expected.push_back(resolver_->resolve_path(20));
-    expected.push_back(resolver_->resolve_path(30));
-
-    std::sort(file_list.begin(), file_list.end());
-    std::sort(expected.begin(), expected.end());
-
-    EXPECT_EQ(file_list, expected);
+    auto actual_ids = get_sorted_blob_ids(gc_->get_blob_file_list());
+    ASSERT_EQ(actual_ids.size(), 3);
+    EXPECT_EQ(actual_ids[0], 10);
+    EXPECT_EQ(actual_ids[1], 20);
+    EXPECT_EQ(actual_ids[2], 30);
 }
 
 TEST_F(blob_file_garbage_collector_test, max_existing_blob_id_inclusive) {
@@ -191,14 +184,9 @@ TEST_F(blob_file_garbage_collector_test, max_existing_blob_id_inclusive) {
     gc_->start_scan(100);
     gc_->wait_for_scan();
 
-    auto file_list = gc_->get_blob_file_list();
-    std::vector<boost::filesystem::path> expected;
-    expected.push_back(resolver_->resolve_path(100));
-
-    std::sort(file_list.begin(), file_list.end());
-    std::sort(expected.begin(), expected.end());
-
-    EXPECT_EQ(file_list, expected);
+    auto actual_ids = get_sorted_blob_ids(gc_->get_blob_file_list());
+    ASSERT_EQ(actual_ids.size(), 1);
+    EXPECT_EQ(actual_ids[0], 100);
 }
 
 TEST_F(blob_file_garbage_collector_test, max_existing_blob_id_exclusive) {
@@ -212,9 +200,8 @@ TEST_F(blob_file_garbage_collector_test, max_existing_blob_id_exclusive) {
     gc_->start_scan(99);
     gc_->wait_for_scan();
 
-    auto file_list = gc_->get_blob_file_list();
-    // Expected: empty list.
-    EXPECT_TRUE(file_list.empty());
+    auto actual_ids = get_sorted_blob_ids(gc_->get_blob_file_list());
+    EXPECT_TRUE(actual_ids.empty());
 }
 
 TEST_F(blob_file_garbage_collector_test, start_scan_called_twice_throws) {
@@ -239,8 +226,8 @@ TEST_F(blob_file_garbage_collector_test, scan_catches_exception_when_directory_m
     });
 
     // Verify that get_blob_file_list() returns an empty list.
-    auto file_list = gc_->get_blob_file_list();
-    EXPECT_TRUE(file_list.empty());
+    auto actual_ids = get_sorted_blob_ids(gc_->get_blob_file_list());
+    EXPECT_TRUE(actual_ids.empty());
 }
 
 }  // namespace limestone::testing

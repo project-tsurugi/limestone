@@ -4,10 +4,11 @@
 
 namespace limestone::testing {
 
+using namespace limestone::internal;
 using namespace limestone::api;
 
 // Helper function to extract all blob_id values from a blob_item_container.
-std::vector<blob_id_type> get_blob_ids(const limestone::api::blob_item_container &container) {
+std::vector<blob_id_type> get_blob_ids(const blob_item_container &container) {
     std::vector<blob_id_type> ids;
     for (const auto &item : container) {
         ids.push_back(item.get_blob_id());
