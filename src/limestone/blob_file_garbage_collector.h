@@ -107,6 +107,14 @@ public:
      */
     void finalize_scan_and_cleanup();
 
+    /**
+     * @brief Shutdown the garbage collector.
+     *
+     * This method should be called before destroying the object. It waits for any background
+     * threads (scanning and cleanup) to finish.
+     */
+    void shutdown();
+
 protected:
     /**
      * @brief Waits for the background scanning process to complete.
@@ -155,20 +163,30 @@ private:
     blob_file_garbage_collector(blob_file_garbage_collector&&) = delete;
     blob_file_garbage_collector& operator=(blob_file_garbage_collector&&) = delete;
 
-    const blob_file_resolver& resolver_;     ///< Reference to the blob_file_resolver instance.
-    blob_item_container scaned_blobs_;       ///< Container for storing scanned blob items.
-    blob_item_container gc_exempt_blob_;     ///< Container for storing blob items exempt from garbage collection.
-    blob_id_type max_existing_blob_id_ = 0;  ///< Maximum blob_id that existed at startup.
-    bool scan_started = false;               ///< Flag indicating whether the scanning process has started.
+    // --- Resolver and Blob Containers ---
+    const blob_file_resolver& resolver_;         ///< Reference to the blob_file_resolver instance.
+    blob_item_container scaned_blobs_;             ///< Container for storing scanned blob items.
+    blob_item_container gc_exempt_blob_;           ///< Container for storing blob items exempt from garbage collection.
+    blob_id_type max_existing_blob_id_ = 0;        ///< Maximum blob_id that existed at startup.
 
-    mutable std::mutex mutex_;    ///< Mutex for synchronizing access to scan_complete_.
-    std::condition_variable cv_;  ///< Condition variable to signal scan completion.
-    bool scan_complete_ = false;  ///< Flag indicating whether the scanning process has completed.
-    std::thread scan_thread_;     ///< Background thread for scanning the BLOB directory.
+    // --- Scanning Process Fields ---
+    bool scan_started_ = false;                    ///< Flag indicating whether the scanning process has started.
+    bool scan_complete_ = false;                   ///< Flag indicating whether the scanning process has completed.
+    bool scan_waited_ = false;                     ///< Flag indicating that wait_for_scan() has been called.
+    std::thread scan_thread_;                      ///< Background thread for scanning the BLOB directory.
 
-    std::shared_ptr<std::promise<void>> cleanup_promise_;  ///< Promise for signaling cleanup completion.
+    // --- Cleanup Process Fields ---
+    bool cleanup_started_ = false;                 ///< Flag indicating whether the cleanup process has started.
+    bool cleanup_waited_ = false;                  ///< Flag indicating that wait_for_cleanup() has been called.
+    bool cleanup_complete_ = false;                ///< Flag indicating whether the cleanup process has completed.
+    std::thread cleanup_thread_;                   ///< Background thread for garbage collection.
 
-    std::unique_ptr<file_operations> file_ops_;  ///< Pointer to the file_operations implementation.
+    // --- Synchronization and File Operations ---
+    mutable std::mutex mutex_;                     ///< Mutex for synchronizing access to state variables.
+    std::condition_variable scan_cv_;              ///< Condition variable to signal scan completion.
+    std::condition_variable cleanup_cv_;           ///< Condition variable to signal cleanup completion.
+    std::unique_ptr<file_operations> file_ops_;    ///< Pointer to the file_operations implementation.
+
 
     /**
      * @brief The background function that scans the blob_root directory for BLOB files.

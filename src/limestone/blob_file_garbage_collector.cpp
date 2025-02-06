@@ -33,31 +33,25 @@ blob_file_garbage_collector::blob_file_garbage_collector(const blob_file_resolve
 }
 
 blob_file_garbage_collector::~blob_file_garbage_collector() {
-    wait_for_scan();
-    if (scan_thread_.joinable()) {
-        scan_thread_.join();
-    }
 }
 
 void blob_file_garbage_collector::start_scan(blob_id_type max_existing_blob_id) {
-    if (scan_started) {
-        throw std::logic_error("start_scan() has already been called. Duplicate invocation is not allowed.");
+    {
+        std::lock_guard<std::mutex> lock(mutex_);
+        if (scan_waited_) {
+            throw std::logic_error("Cannot start scan after wait_for_scan() has been called.");
+        }
+        if (scan_started_) {
+            throw std::logic_error("Scan has already been started.");
+        }
+        scan_started_ = true;
+        max_existing_blob_id_ = max_existing_blob_id;
+        scan_complete_ = false;
     }
-    scan_started = true;
-    max_existing_blob_id_ = max_existing_blob_id;
-    scan_complete_ = false;
-    
-    // Launch the scanning thread that will execute scan_directory().
+    // Launch the scanning thread
     scan_thread_ = std::thread(&blob_file_garbage_collector::scan_directory, this);
 }
 
-void blob_file_garbage_collector::wait_for_scan() {
-    if (!scan_started) {
-        return;
-    }
-    std::unique_lock<std::mutex> lock(mutex_);
-    cv_.wait(lock, [this]() { return scan_complete_; });
-}
 
 void blob_file_garbage_collector::scan_directory() {
     try {
@@ -91,7 +85,7 @@ void blob_file_garbage_collector::scan_directory() {
         std::lock_guard<std::mutex> lock(mutex_);
         scan_complete_ = true;
     }
-    cv_.notify_all();
+    scan_cv_.notify_all();
 }
 
 void blob_file_garbage_collector::add_gc_exempt_blob_item(const blob_item &item) {
@@ -99,39 +93,81 @@ void blob_file_garbage_collector::add_gc_exempt_blob_item(const blob_item &item)
 }
 
 void blob_file_garbage_collector::finalize_scan_and_cleanup() {
-    // Create a promise to signal when cleanup is complete.
-    cleanup_promise_ = std::make_shared<std::promise<void>>();
-    std::thread([this, cleanup_promise = cleanup_promise_]() {
-        // Wait for scanning to complete using the existing wait_for_scan() method.
+    {
+        std::lock_guard<std::mutex> lock(mutex_);
+        // If wait_for_cleanup() has already been called, do not start cleanup.
+        if (cleanup_waited_) {
+            return;
+        }
+        // Mark the start of the cleanup process
+        cleanup_started_ = true;
+    }
+    cleanup_thread_ = std::thread([this]() {
+        // Wait for the scan to complete
         this->wait_for_scan();
         
-        // Determine deletion targets using the diff method.
+        // Calculate the difference and perform deletion operations
         scaned_blobs_.diff(gc_exempt_blob_);
-
-        // Perform deletion for each blob item not in GC exempt list.
         for (const auto &item : scaned_blobs_) {
             boost::filesystem::path file_path = resolver_.resolve_path(item.get_blob_id());
             boost::system::error_code ec;
             file_ops_->remove(file_path, ec);
             if (ec && ec != boost::system::errc::no_such_file_or_directory) {
-                LOG_LP(ERROR) << "Failed to remove file: "
-                              << file_path.string() << " Error: " << ec.message();
+                LOG_LP(ERROR) << "Failed to remove file: " << file_path.string()
+                              << " Error: " << ec.message();
             }
         }
-        // Signal that cleanup is complete.
-        cleanup_promise->set_value();
-    }).detach();
+        
+        {
+            std::lock_guard<std::mutex> lock(mutex_);
+            // Mark that cleanup is complete
+            cleanup_complete_ = true;
+        }
+        // Notify any thread waiting for cleanup completion
+        cleanup_cv_.notify_all();
+    });
+}
+
+void blob_file_garbage_collector::wait_for_scan() {
+    std::unique_lock<std::mutex> lock(mutex_);
+    // Mark that wait_for_scan() has been called.
+    scan_waited_ = true;
+    // If the scan has not been started, return immediately.
+    if (!scan_started_) {
+        return;
+    }
+    // Wait until the scan is complete.
+    scan_cv_.wait(lock, [this]() { return scan_complete_; });
 }
 
 void blob_file_garbage_collector::wait_for_cleanup() {
-    if (cleanup_promise_) {
-        // Wait for the future to be ready.
-        cleanup_promise_->get_future().wait();
+    std::unique_lock<std::mutex> lock(mutex_);
+    // Mark that wait_for_cleanup() has been called.
+    cleanup_waited_ = true;
+    // If cleanup has not started, return immediately to avoid indefinite blocking.
+    if (!cleanup_started_) {
+        return;
     }
+    // Wait until the cleanup process is complete.
+    cleanup_cv_.wait(lock, [this]() { return cleanup_complete_; });
 }
 
 void blob_file_garbage_collector::set_file_operations(std::unique_ptr<file_operations> file_ops) {
     file_ops_ = std::move(file_ops);
 }
+
+void blob_file_garbage_collector::shutdown() {
+    wait_for_scan();
+    wait_for_cleanup();
+
+    if (scan_thread_.joinable()) {
+        scan_thread_.join();
+    }
+
+    if (cleanup_thread_.joinable()) {
+        cleanup_thread_.join();
+    }
+}
+
 
 } // namespace limestone::internal

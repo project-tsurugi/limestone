@@ -80,6 +80,7 @@ protected:
     }
 
     void TearDown() override {
+        gc_->shutdown();
         gc_.reset();
         resolver_.reset();
         std::string cmd = "rm -rf " + std::string(base_directory);
@@ -326,5 +327,47 @@ TEST_F(blob_file_garbage_collector_test, finalize_scan_and_cleanup_handles_delet
     // Expect the deletion of blob ID 502 to have succeeded, so the file should not exist.
     EXPECT_FALSE(boost::filesystem::exists(resolver_->resolve_path(502)));
 }
+
+// Test: Calling start_scan() after wait_for_scan() has been invoked should throw an exception.
+TEST_F(blob_file_garbage_collector_test, start_scan_after_wait_for_scan_should_throw) {
+    // Call wait_for_scan() without starting scan.
+    gc_->wait_for_scan();
+    // Since wait_for_scan() sets scan_waited_, starting the scan now should throw.
+    EXPECT_THROW(gc_->start_scan(1000), std::logic_error);
+}
+
+// Test: Calling finalize_scan_and_cleanup() after wait_for_cleanup() has been invoked does nothing.
+// (i.e. cleanup is not started if wait_for_cleanup() has been called first.)
+TEST_F(blob_file_garbage_collector_test, finalize_cleanup_after_wait_for_cleanup_does_nothing) {
+    // Call wait_for_cleanup() first, which sets cleanup_waited_.
+    gc_->wait_for_cleanup();
+    // Now, finalize_scan_and_cleanup() should check cleanup_waited_ and refrain from starting cleanup.
+    // This call should return immediately (and not hang).
+    gc_->finalize_scan_and_cleanup();
+    // Also, calling wait_for_cleanup() again should return immediately.
+    gc_->wait_for_cleanup();
+    SUCCEED();  // If we reach here, the test passes.
+}
+
+// Test: Calling wait_for_scan() twice does not block.
+TEST_F(blob_file_garbage_collector_test, wait_for_scan_called_twice) {
+    gc_->start_scan(1000);
+    gc_->wait_for_scan();
+    // Second call should return immediately.
+    gc_->wait_for_scan();
+    SUCCEED();
+}
+
+// Test: Calling wait_for_cleanup() twice does not block.
+TEST_F(blob_file_garbage_collector_test, wait_for_cleanup_called_twice) {
+    gc_->start_scan(1000);
+    gc_->wait_for_scan();
+    gc_->finalize_scan_and_cleanup();
+    gc_->wait_for_cleanup();
+    // Second call should return immediately.
+    gc_->wait_for_cleanup();
+    SUCCEED();
+}
+
 
 }  // namespace limestone::testing
