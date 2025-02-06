@@ -85,7 +85,7 @@ TEST_F(blob_file_resolver_test, is_blob_file_returns_false_for_invalid_filename)
     EXPECT_FALSE(resolver_->is_blob_file(invalid_path1));
 
     // Different extension
-    boost::filesystem::path invalid_path2 = boost::filesystem::path("/some/path") / "000000000001e240.dat";
+    boost::filesystem::path invalid_path2 = boost::filesystem::path("/some/path") / "000000000001e240.data";
     EXPECT_FALSE(resolver_->is_blob_file(invalid_path2));
 
     // Contains non-hexadecimal character
