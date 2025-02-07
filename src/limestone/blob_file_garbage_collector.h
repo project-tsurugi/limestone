@@ -42,7 +42,7 @@ namespace limestone::internal {
  * are considered for garbage collection. Files with blob_id greater than max_existing_blob_id
  * (i.e., newly generated files) are ignored.
  *
- * This class is intended for internal use only and is implemented as a singleton.
+ * This class is intended for internal use only.
  *
  * @note The scanning process is initiated by calling scan_blob_files() exactly once.
  *       Subsequent calls will throw a std::logic_error.
@@ -60,11 +60,9 @@ namespace limestone::internal {
 class blob_file_garbage_collector {
 public:
     /**
-     * @brief Returns the singleton instance of blob_file_garbage_collector.
-     *
-     * @return Reference to the singleton blob_file_garbage_collector.
+     * @brief Constructor.
      */
-    static blob_file_garbage_collector& getInstance();
+    blob_file_garbage_collector();
 
     /**
      * @brief Destructor.
@@ -126,17 +124,6 @@ public:
     void shutdown();
 
 protected:
-    // Protected constructor: only accessible via getInstance()
-    blob_file_garbage_collector();
-
-    /**
-     * @brief Test-only method to reset the singleton instance.
-     *
-     * This method is intended for use in unit tests to clear the singleton instance,
-     * allowing tests to start with a fresh instance.
-     */
-    static void reset_for_test();
-
     /**
      * @brief Waits for the background scanning process to complete.
      *
@@ -178,10 +165,6 @@ protected:
     const blob_item_container& get_gc_exempt_blob_list() const { return gc_exempt_blob_; };
 
 private:
-    // --- Singleton Instance ---
-    static std::unique_ptr<blob_file_garbage_collector> instance_;  // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
-    static std::mutex instance_mutex_;  // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
-
     // --- Resolver and Blob Containers ---
     const blob_file_resolver* resolver_ = nullptr;   ///< Pointer to the blob_file_resolver instance.
     blob_item_container scanned_blobs_;              ///< Container for storing scanned blob items.

@@ -25,7 +25,6 @@ public:
     using blob_file_garbage_collector::set_file_operations;
     using blob_file_garbage_collector::get_blob_file_list;
     using blob_file_garbage_collector::get_gc_exempt_blob_list;
-    using blob_file_garbage_collector::reset_for_test;
 };
 
 
@@ -88,7 +87,6 @@ protected:
         if (std::system(cmd.c_str()) != 0) {
             std::cerr << "Cannot remove directory" << std::endl;
         }
-        testable_blob_file_garbage_collector::reset_for_test();
     }
 
     std::unique_ptr<blob_file_resolver> resolver_;
@@ -361,33 +359,6 @@ TEST_F(blob_file_garbage_collector_test, wait_for_cleanup_called_twice) {
 TEST_F(blob_file_garbage_collector_test, finalize_scan_and_cleanup_without_scan_throws) {
     // Calling finalize_scan_and_cleanup() without calling scan_blob_files() should throw std::logic_error.
     EXPECT_THROW(gc_->finalize_scan_and_cleanup(), std::logic_error);
-}
-
-TEST_F(blob_file_garbage_collector_test, getInstance_returns_same_instance) {
-    // Get the instance of blob_file_garbage_collector using getInstance().
-    blob_file_garbage_collector& instance1 = blob_file_garbage_collector::getInstance();
-    blob_file_garbage_collector& instance2 = blob_file_garbage_collector::getInstance();
-
-    // Assert that both instances are the same.
-    ASSERT_EQ(&instance1, &instance2);
-}
-
-TEST_F(blob_file_garbage_collector_test, getInstance_is_initialized) {
-    // Get the instance of blob_file_garbage_collector using getInstance().
-    blob_file_garbage_collector& instance = blob_file_garbage_collector::getInstance();
-
-    // Create some blob_files for testing.
-    // Specify blob_id as 100, 200, 300, 600.
-    // Since max_existing_blob_id is 500, the file with 600 will be excluded.
-    create_blob_file(*resolver_, 100);
-    create_blob_file(*resolver_, 200);
-    create_blob_file(*resolver_, 300);
-    create_blob_file(*resolver_, 600); // Excluded as a new file
-
-    // Start scan: max_existing_blob_id = 500
-    instance.scan_blob_files(500, *resolver_);
-    instance.shutdown();
-    SUCCEED();
 }
 
 TEST_F(blob_file_garbage_collector_test, scan_blob_files_without_resolver_throws) {
