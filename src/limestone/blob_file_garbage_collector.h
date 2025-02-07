@@ -72,6 +72,12 @@ public:
      */
     ~blob_file_garbage_collector();
 
+    // Disallow copy and move operations
+    blob_file_garbage_collector(const blob_file_garbage_collector&) = delete;
+    blob_file_garbage_collector& operator=(const blob_file_garbage_collector&) = delete;
+    blob_file_garbage_collector(blob_file_garbage_collector&&) = delete;
+    blob_file_garbage_collector& operator=(blob_file_garbage_collector&&) = delete;
+
     /**
      * @brief Starts scanning the BLOB directory for BLOB files in a background thread.
      *
@@ -157,12 +163,6 @@ protected:
     const blob_item_container& get_gc_exempt_blob_list() const { return gc_exempt_blob_; };
 
 private:
-    // Disallow copy and move operations
-    blob_file_garbage_collector(const blob_file_garbage_collector&) = delete;
-    blob_file_garbage_collector& operator=(const blob_file_garbage_collector&) = delete;
-    blob_file_garbage_collector(blob_file_garbage_collector&&) = delete;
-    blob_file_garbage_collector& operator=(blob_file_garbage_collector&&) = delete;
-
     // --- Resolver and Blob Containers ---
     const blob_file_resolver& resolver_;         ///< Reference to the blob_file_resolver instance.
     blob_item_container scaned_blobs_;             ///< Container for storing scanned blob items.
