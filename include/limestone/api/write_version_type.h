@@ -1,5 +1,5 @@
 /*
- * Copyright 2022-2023 Project Tsurugi.
+ * Copyright 2022-2025 Project Tsurugi.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -44,6 +44,8 @@ public:
         }
         return this->epoch_number_ < value.epoch_number_;
     }
+    [[nodiscard]] epoch_id_type get_major() const { return epoch_number_; }
+    [[nodiscard]] std::uint64_t get_minor() const { return minor_write_version_; }
 
 private:
     /**
