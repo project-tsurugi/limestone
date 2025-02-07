@@ -42,7 +42,9 @@
  
  // Constructor now takes a blob_file_resolver and sets the resolver_ member.
  blob_file_garbage_collector::blob_file_garbage_collector(const blob_file_resolver& resolver)
-     : resolver_(&resolver) {
+     : resolver_(&resolver),
+     scanned_blobs_(std::make_unique<blob_item_container>()),
+     gc_exempt_blob_(std::make_unique<blob_item_container>()) {
      file_ops_ = std::make_unique<real_file_operations>(); 
  }
  
@@ -81,7 +83,7 @@
  
                  blob_id_type id = resolver_->extract_blob_id(file_path);
                  if (id <= max_existing_blob_id_) {
-                     scanned_blobs_.add_blob_item(blob_item(id));
+                     scanned_blobs_->add_blob_item(blob_item(id));
                  }
              }
          }
@@ -96,7 +98,7 @@
  }
  
  void blob_file_garbage_collector::add_gc_exempt_blob_item(const blob_item &item) {
-     gc_exempt_blob_.add_blob_item(item);
+     gc_exempt_blob_->add_blob_item(item);
  }
  
  void blob_file_garbage_collector::finalize_scan_and_cleanup() {
@@ -115,8 +117,8 @@
          this->wait_for_blob_file_scan();
          
          // Calculate the difference and perform deletion operations
-         scanned_blobs_.diff(gc_exempt_blob_);
-         for (const auto &item : scanned_blobs_) {
+         scanned_blobs_->diff(*gc_exempt_blob_);
+         for (const auto &item : *scanned_blobs_) {
              boost::filesystem::path file_path = resolver_->resolve_path(item.get_blob_id());
              boost::system::error_code ec;
              file_ops_->remove(file_path, ec);
@@ -132,6 +134,7 @@
          }
          // Notify any thread waiting for cleanup completion
          cleanup_cv_.notify_all();
+         cleanup();
      });
  }
  
@@ -177,6 +180,7 @@
     if (cleanup_thread_.joinable()) {
         cleanup_thread_.join();
     }
+    cleanup();
 }
 
 void blob_file_garbage_collector::scan_snapshot(const boost::filesystem::path &snapshot_file, const boost::filesystem::path &compacted_file) {
@@ -208,11 +212,11 @@ void blob_file_garbage_collector::scan_snapshot(const boost::filesystem::path &s
                 if (cur.type() == log_entry::entry_type::normal_with_blob) {
                     auto blob_ids = cur.blob_ids();
                     for (auto id : blob_ids) {
-                        scanned_blobs_.add_blob_item(blob_item(id));
+                        scanned_blobs_->add_blob_item(blob_item(id));
                     }
                 }
             }
-            finalize_scan_and_cleanup() 
+            finalize_scan_and_cleanup(); 
         } catch (const limestone_exception &e) {
             LOG_LP(ERROR) << "Exception in snapshot scan thread: " << e.what();
         } catch (...) {
@@ -236,5 +240,11 @@ void blob_file_garbage_collector::wait_for_scan_snapshot() {
     snapshot_scan_cv_.wait(lock, [this]() { return snapshot_scan_complete_; });
 }
 
- } // namespace limestone::internal
+void blob_file_garbage_collector::cleanup() {
+    std::lock_guard<std::mutex> lock(mutex_);
+    scanned_blobs_.reset(new blob_item_container());
+    gc_exempt_blob_.reset(new blob_item_container());
+}
+
+} // namespace limestone::internal
  

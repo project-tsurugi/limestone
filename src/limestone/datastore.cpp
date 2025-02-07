@@ -121,8 +121,6 @@ datastore::datastore(configuration const& conf) : location_(conf.data_locations_
                 LOG_AND_THROW_IO_EXCEPTION("fail to create directory: " + blob_root.string(), error);
             }
         }
-        blob_file_garbage_collector_ = std::make_unique<blob_file_garbage_collector>(*blob_file_resolver_);
-
         VLOG_LP(log_debug) << "datastore is created, location = " << location_.string();
     } catch (...) {
         HANDLE_EXCEPTION_AND_ABORT();
@@ -133,6 +131,9 @@ datastore::~datastore() noexcept{
     stop_online_compaction_worker();
     if (online_compaction_worker_future_.valid()) {
         online_compaction_worker_future_.wait();
+    }
+    if(blob_file_garbage_collector_) {
+        blob_file_garbage_collector_->shutdown();
     }
 }
 
@@ -197,6 +198,7 @@ void datastore::ready() {
         if (max_blob_id < compaction_catalog_->get_max_blob_id()) {
             max_blob_id = compaction_catalog_->get_max_blob_id();
         }
+        blob_file_garbage_collector_ = std::make_unique<blob_file_garbage_collector>(*blob_file_resolver_);
         blob_file_garbage_collector_->scan_blob_files(max_blob_id);
 
         next_blob_id_.store(max_blob_id + 1);
@@ -390,6 +392,11 @@ std::future<void> datastore::shutdown() noexcept {
         } else {
             fd_for_flock_ = -1;
         }
+    }
+
+    if (blob_file_garbage_collector_) {
+        blob_file_garbage_collector_->shutdown();
+        blob_file_garbage_collector_.reset();
     }
 
     return std::async(std::launch::async, [] {

@@ -165,7 +165,7 @@ protected:
      * @note This method is expected to be called only after the scanning process has completed
      *       (i.e., after wait_for_blob_file_scan() returns). Therefore, no locking is performed here.
      */
-    const blob_item_container& get_blob_file_list() const { return scanned_blobs_; };
+    const blob_item_container& get_blob_file_list() const { return *scanned_blobs_; };
 
     /**
      * @brief Sets a custom file_operations implementation.
@@ -180,14 +180,14 @@ protected:
      *
      * @return A constant reference to a container holding the blob items that are exempt from garbage collection.
      */
-    const blob_item_container& get_gc_exempt_blob_list() const { return gc_exempt_blob_; };
+    const blob_item_container& get_gc_exempt_blob_list() const { return *gc_exempt_blob_; };
 
 private:
     // --- Resolver and Blob Containers ---
-    const blob_file_resolver* resolver_ = nullptr;   ///< Pointer to the blob_file_resolver instance.
-    blob_item_container scanned_blobs_;              ///< Container for storing scanned blob items.
-    blob_item_container gc_exempt_blob_;             ///< Container for storing blob items exempt from garbage collection.
-    blob_id_type max_existing_blob_id_ = 0;           ///< Maximum blob_id that existed at startup.
+    const blob_file_resolver* resolver_ = nullptr;         ///< Pointer to the blob_file_resolver instance.
+    std::unique_ptr<blob_item_container> scanned_blobs_;   ///< Container for storing scanned blob items.
+    std::unique_ptr<blob_item_container> gc_exempt_blob_;  ///< Container for storing blob items exempt from garbage collection.
+    blob_id_type max_existing_blob_id_ = 0;                ///< Maximum blob_id that existed at startup.
 
     // --- Blob File Scanning Process Fields ---
     bool blob_file_scan_started_ = false;            ///< Flag indicating whether the blob scanning process has started.
@@ -223,6 +223,21 @@ private:
      * equal to max_existing_blob_id_ are added to scanned_blobs_.
      */
     void scan_directory();
+
+    /**
+     * @brief Cleans up internal container resources.
+     *
+     * This method resets the smart pointers for the scanned blob items and the GC exempt blob items
+     * by allocating new, empty container instances. This operation effectively releases the memory
+     * that was previously allocated to these containers.
+     *
+     * @note This method is intended to be called after the cleanup process has completed normally,
+     *       such as at the end of finalize_scan_and_cleanup() or during shutdown().
+     *
+     * @warning FIXME: In the case of an exception during processing, ensure that cleanup() is still
+     *          invoked to prevent resource leakage.
+     */
+    void cleanup();
 };
 
 }  // namespace limestone::internal
