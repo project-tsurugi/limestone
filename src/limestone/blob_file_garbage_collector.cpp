@@ -16,7 +16,8 @@
  
  #include "blob_file_garbage_collector.h"
  #include "logging_helper.h"
- 
+ #include "cursor_impl.h"
+
  #include <boost/filesystem.hpp>
  #include <sstream>
  #include <iomanip>
@@ -25,6 +26,18 @@
  #include <exception>
  #include <pthread.h>
  
+ namespace {
+    class my_cursor : public limestone::internal::cursor_impl {
+    public:
+        using cursor_impl::cursor_impl;
+        using cursor_impl::close;
+        using cursor_impl::next;
+        using cursor_impl::blob_ids;
+        using cursor_impl::type;
+    };
+}
+
+
  namespace limestone::internal {
  
  // Constructor now takes a blob_file_resolver and sets the resolver_ member.
@@ -151,16 +164,77 @@
  }
  
  void blob_file_garbage_collector::shutdown() {
-     wait_for_blob_file_scan();
-     wait_for_cleanup();
- 
-     if (blob_file_scan_thread_.joinable()) {
-         blob_file_scan_thread_.join();
-     }
-     if (cleanup_thread_.joinable()) {
-         cleanup_thread_.join();
-     }
- }
- 
+    wait_for_blob_file_scan();
+    wait_for_scan_snapshot();
+    wait_for_cleanup();
+
+    if (blob_file_scan_thread_.joinable()) {
+        blob_file_scan_thread_.join();
+    }
+    if (snapshot_scan_thread_.joinable()) {
+        snapshot_scan_thread_.join();
+    }
+    if (cleanup_thread_.joinable()) {
+        cleanup_thread_.join();
+    }
+}
+
+void blob_file_garbage_collector::scan_snapshot(const boost::filesystem::path &snapshot_file, const boost::filesystem::path &compacted_file) {
+    {
+        std::lock_guard<std::mutex> lock(mutex_);
+        if (snapshot_scan_started_) {
+            throw std::logic_error("Snapshot scanning has already been started.");
+        }
+        snapshot_scan_started_ = true;
+        snapshot_scan_complete_ = false;
+    }
+
+    snapshot_scan_thread_ = std::thread([this, snapshot_file, compacted_file]() {
+        try {
+            my_cursor cur(snapshot_file, compacted_file);
+            struct AutoClose {
+                my_cursor &cursor_ref;
+                AutoClose(my_cursor &cur) : cursor_ref(cur) {}
+                ~AutoClose() {
+                    try {
+                        cursor_ref.close();
+                    } catch (...) {
+                        // Ignore exceptions that occur in close()
+                    }
+                }
+            } autoClose(cur);
+
+            while (cur.next()) {
+                if (cur.type() == log_entry::entry_type::normal_with_blob) {
+                    auto blob_ids = cur.blob_ids();
+                    for (auto id : blob_ids) {
+                        scanned_blobs_.add_blob_item(blob_item(id));
+                    }
+                }
+            }
+            finalize_scan_and_cleanup() 
+        } catch (const limestone_exception &e) {
+            LOG_LP(ERROR) << "Exception in snapshot scan thread: " << e.what();
+        } catch (...) {
+            LOG_LP(ERROR) << "Unknown exception in snapshot scan thread.";
+        }
+
+        {
+            std::lock_guard<std::mutex> lock(mutex_);
+            snapshot_scan_complete_ = true;
+        }
+        snapshot_scan_cv_.notify_all();
+    });
+}
+
+void blob_file_garbage_collector::wait_for_scan_snapshot() {
+    std::unique_lock<std::mutex> lock(mutex_);
+    snapshot_scan_waited_ = true;
+    if (!snapshot_scan_started_) {
+        return;
+    }
+    snapshot_scan_cv_.wait(lock, [this]() { return snapshot_scan_complete_; });
+}
+
  } // namespace limestone::internal
  

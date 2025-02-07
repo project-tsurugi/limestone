@@ -34,6 +34,7 @@
 #include "compaction_catalog.h"
 #include "blob_file_resolver.h"
 #include "blob_pool_impl.h"
+#include "blob_file_garbage_collector.h"
 
 namespace limestone::api {
 using namespace limestone::internal;
@@ -112,6 +113,15 @@ datastore::datastore(configuration const& conf) : location_(conf.data_locations_
         LOG(INFO) << "/:limestone:config:datastore setting the number of recover process thread = " << recover_max_parallelism_;
 
         blob_file_resolver_ = std::make_unique<blob_file_resolver>(location_);
+        auto blob_root = blob_file_resolver_->get_blob_root();
+        const bool blob_root_exists = boost::filesystem::exists(blob_root, error);
+        if (!blob_root_exists || error) {
+            const bool result_mkdir = boost::filesystem::create_directories(blob_root, error);
+            if (!result_mkdir || error) {
+                LOG_AND_THROW_IO_EXCEPTION("fail to create directory: " + blob_root.string(), error);
+            }
+        }
+        blob_file_garbage_collector_ = std::make_unique<blob_file_garbage_collector>(*blob_file_resolver_);
 
         VLOG_LP(log_debug) << "datastore is created, location = " << location_.string();
     } catch (...) {
@@ -187,6 +197,8 @@ void datastore::ready() {
         if (max_blob_id < compaction_catalog_->get_max_blob_id()) {
             max_blob_id = compaction_catalog_->get_max_blob_id();
         }
+        blob_file_garbage_collector_->scan_blob_files(max_blob_id);
+
         next_blob_id_.store(max_blob_id + 1);
 
         online_compaction_worker_future_ = std::async(std::launch::async, &datastore::online_compaction_worker, this);

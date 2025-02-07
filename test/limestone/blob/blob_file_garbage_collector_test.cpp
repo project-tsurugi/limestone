@@ -14,7 +14,8 @@ using namespace limestone::internal;
 using limestone::api::blob_id_type;
 
 constexpr const char* base_directory = "/tmp/blob_file_gc_test";
-
+const boost::filesystem::path snapshot_path("/tmp/blob_file_gc_test/snapshot");
+const boost::filesystem::path compacted_path("/tmp/blob_file_gc_test/compacted");
 
 class testable_blob_file_garbage_collector : public blob_file_garbage_collector {
 public:
@@ -22,6 +23,7 @@ public:
         : blob_file_garbage_collector(resolver) {}
     using blob_file_garbage_collector::wait_for_blob_file_scan;
     using blob_file_garbage_collector::wait_for_cleanup;
+    using blob_file_garbage_collector::wait_for_scan_snapshot;
     using blob_file_garbage_collector::set_file_operations;
     using blob_file_garbage_collector::get_blob_file_list;
     using blob_file_garbage_collector::get_gc_exempt_blob_list;
@@ -361,6 +363,43 @@ TEST_F(blob_file_garbage_collector_test, finalize_scan_and_cleanup_after_wait_th
     gc_->finalize_scan_and_cleanup();
     gc_->wait_for_cleanup();
     EXPECT_THROW(gc_->finalize_scan_and_cleanup(), std::logic_error);
+}
+
+// Test: snapshot_scan completes successfully and wait_for_scan_snapshot returns normally.
+TEST_F(blob_file_garbage_collector_test, snapshot_scan_completes_properly) {
+
+    // Act: Start the snapshot scan and wait for it to complete.
+    gc_->scan_snapshot(snapshot_path, compacted_path);
+    gc_->wait_for_scan_snapshot();
+
+    // Assert:
+    // If wait_for_scan_snapshot() returns, it can be considered that the background scan has completed.
+    SUCCEED();
+}
+
+// Test: Calling scan_snapshot() twice throws an exception.
+TEST_F(blob_file_garbage_collector_test, snapshot_scan_called_twice_throws) {
+    gc_->scan_snapshot(snapshot_path, compacted_path);
+    // The second call should throw an exception.
+    EXPECT_THROW(gc_->scan_snapshot(snapshot_path, compacted_path), std::logic_error);
+    gc_->wait_for_scan_snapshot();
+}
+
+// Test: Calling wait_for_scan_snapshot() without starting snapshot scan returns immediately.
+TEST_F(blob_file_garbage_collector_test, wait_for_snapshot_without_scan_returns_immediately) {
+    // Even if called when snapshot_scan_started_ is false, the wait process should return immediately.
+    // (Internally, it checks "if scan has not started, then return")
+    gc_->wait_for_scan_snapshot();
+    SUCCEED();
+}
+
+// Test: Calling wait_for_scan_snapshot() twice does not block.
+TEST_F(blob_file_garbage_collector_test, wait_for_snapshot_called_twice) {
+    gc_->scan_snapshot(snapshot_path, compacted_path);
+    gc_->wait_for_scan_snapshot();
+    // The second call should return immediately as it has already completed.
+    gc_->wait_for_scan_snapshot();
+    SUCCEED();
 }
 
 }  // namespace limestone::testing

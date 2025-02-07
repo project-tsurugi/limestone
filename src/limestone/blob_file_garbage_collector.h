@@ -102,6 +102,17 @@ public:
     void add_gc_exempt_blob_item(const blob_item& item);
 
     /**
+     * @brief Starts scanning snapshots in a background thread.
+     *
+     * This method initiates the snapshot scanning process using the provided snapshot_file and compacted_file.
+     * Both files are considered part of the snapshot data.
+     *
+     * @param snapshot_file The snapshot file.
+     * @param compacted_file The compacted file.
+     */
+    void scan_snapshot(const boost::filesystem::path &snapshot_file, const boost::filesystem::path &compacted_file);
+
+    /**
      * @brief Spawns a background thread that waits for the blob file scan to complete,
      * then performs garbage collection by deleting BLOB files that are not exempt.
      *
@@ -125,11 +136,18 @@ public:
 
 protected:
     /**
-     * @brief Waits for the background scanning process to complete.
+     * @brief Waits for the background blob file scanning process to complete.
      *
-     * This method blocks until the scanning thread sets the blob_file_scan_complete_ flag.
+     * This method blocks until the blob file scanning thread sets the blob_file_scan_complete_ flag.
      */
     void wait_for_blob_file_scan();
+
+    /**
+     * @brief Waits for the background snapshot scanning process to complete.
+     *
+     * This method blocks until the snapshot scanning thread sets the snapshot_scan_complete_ flag.
+     */
+    void wait_for_scan_snapshot();
 
     /**
      * @brief Waits for the background cleanup thread (spawned by finalize_scan_and_cleanup)
@@ -171,12 +189,19 @@ private:
     blob_item_container gc_exempt_blob_;             ///< Container for storing blob items exempt from garbage collection.
     blob_id_type max_existing_blob_id_ = 0;           ///< Maximum blob_id that existed at startup.
 
-    // --- Scanning Process Fields ---
-    bool blob_file_scan_started_ = false;            ///< Flag indicating whether the scanning process has started.
-    bool blob_file_scan_complete_ = false;           ///< Flag indicating whether the scanning process has completed.
+    // --- Blob File Scanning Process Fields ---
+    bool blob_file_scan_started_ = false;            ///< Flag indicating whether the blob scanning process has started.
+    bool blob_file_scan_complete_ = false;           ///< Flag indicating whether the blob scanning process has completed.
     bool blob_file_scan_waited_ = false;             ///< Flag indicating that wait_for_blob_file_scan() has been called.
     std::thread blob_file_scan_thread_;              ///< Background thread for scanning the BLOB directory.
-    std::condition_variable blob_file_scan_cv_;      ///< Condition variable to signal scan completion.
+    std::condition_variable blob_file_scan_cv_;      ///< Condition variable to signal blob scan completion.
+
+    // --- Snapshot Scanning Process Fields ---
+    bool snapshot_scan_started_ = false;             ///< Flag indicating whether the snapshot scanning process has started.
+    bool snapshot_scan_complete_ = false;            ///< Flag indicating whether the snapshot scanning process has completed.
+    bool snapshot_scan_waited_ = false;              ///< Flag indicating that wait_for_scan_snapshot() has been called.
+    std::thread snapshot_scan_thread_;               ///< Background thread for scanning snapshots.
+    std::condition_variable snapshot_scan_cv_;       ///< Condition variable to signal snapshot scan completion.
 
     // --- Cleanup Process Fields ---
     bool cleanup_started_ = false;                   ///< Flag indicating whether the cleanup process has started.

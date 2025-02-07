@@ -210,6 +210,13 @@ log_entry::entry_type cursor_impl::type() const {
     return log_entry_.type();
 }
 
+std::vector<limestone::api::blob_id_type> cursor_impl::blob_ids() const {
+    if (log_entry_.type() != log_entry::entry_type::normal_with_blob) {
+        return {};
+    }
+    return log_entry_.get_blob_ids();
+}
+
 void cursor_impl::set_clear_storage(const std::map<limestone::api::storage_id_type, limestone::api::write_version_type>& clear_storage) {
     clear_storage_ = clear_storage;
 }

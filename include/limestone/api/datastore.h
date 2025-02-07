@@ -44,6 +44,7 @@
 namespace limestone::internal {
     class compaction_catalog;
     class blob_file_resolver; 
+    class blob_file_garbage_collector;
 }
 namespace limestone::api {
 
@@ -471,6 +472,8 @@ private:
     std::set<blob_id_type> persistent_blob_ids_;
 
     std::mutex persistent_blob_ids_mutex_;
+
+    std::unique_ptr<limestone::internal::blob_file_garbage_collector> blob_file_garbage_collector_;
 
 };
 
