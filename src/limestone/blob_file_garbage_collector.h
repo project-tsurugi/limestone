@@ -22,6 +22,7 @@
 #include <mutex>
 #include <thread>
 #include <vector>
+#include <memory>
 
 #include "blob_file_resolver.h"
 #include "blob_item_container.h"
@@ -66,7 +67,7 @@ public:
     static blob_file_garbage_collector& getInstance();
 
     /**
-     * @brief Destructor. 
+     * @brief Destructor.
      */
     ~blob_file_garbage_collector();
 
@@ -87,7 +88,7 @@ public:
      * @param max_existing_blob_id The maximum blob_id among the BLOB files that existed at startup.
      * @param resolver The blob_file_resolver to be used for scanning.
      *
-     * @throws std::logic_error if scan_blob_files() is called more than once, or if resolver has not been set.
+     * @throws std::logic_error if scan_blob_files() is called more than once, or if resolver is not set.
      *
      * @note This function is intended to be called only once during the lifecycle of the object.
      */
@@ -127,6 +128,14 @@ public:
 protected:
     // Protected constructor: only accessible via getInstance()
     blob_file_garbage_collector();
+
+    /**
+     * @brief Test-only method to reset the singleton instance.
+     *
+     * This method is intended for use in unit tests to clear the singleton instance,
+     * allowing tests to start with a fresh instance.
+     */
+    static void reset_for_test();
 
     /**
      * @brief Waits for the background scanning process to complete.
@@ -169,6 +178,9 @@ protected:
     const blob_item_container& get_gc_exempt_blob_list() const { return gc_exempt_blob_; };
 
 private:
+    // --- Singleton Instance ---
+    static std::unique_ptr<blob_file_garbage_collector> instance_;
+    static std::mutex instance_mutex_;
 
     // --- Resolver and Blob Containers ---
     const blob_file_resolver* resolver_ = nullptr;   ///< Pointer to the blob_file_resolver instance.

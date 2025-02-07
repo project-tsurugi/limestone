@@ -25,6 +25,7 @@ public:
     using blob_file_garbage_collector::set_file_operations;
     using blob_file_garbage_collector::get_blob_file_list;
     using blob_file_garbage_collector::get_gc_exempt_blob_list;
+    using blob_file_garbage_collector::reset_for_test;
 };
 
 
@@ -87,6 +88,7 @@ protected:
         if (std::system(cmd.c_str()) != 0) {
             std::cerr << "Cannot remove directory" << std::endl;
         }
+        testable_blob_file_garbage_collector::reset_for_test();
     }
 
     std::unique_ptr<blob_file_resolver> resolver_;

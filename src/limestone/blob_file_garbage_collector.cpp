@@ -26,6 +26,10 @@
 
 namespace limestone::internal {
 
+// --- Singleton Instance ---
+std::unique_ptr<blob_file_garbage_collector> blob_file_garbage_collector::instance_ = nullptr;
+std::mutex blob_file_garbage_collector::instance_mutex_;
+
 blob_file_garbage_collector::blob_file_garbage_collector() {
     file_ops_ = std::make_unique<real_file_operations>(); 
 }
@@ -34,10 +38,17 @@ blob_file_garbage_collector::~blob_file_garbage_collector() {
 }
 
 blob_file_garbage_collector& blob_file_garbage_collector::getInstance() {
-    static blob_file_garbage_collector instance;
-    return instance;
+    std::lock_guard<std::mutex> lock(instance_mutex_);
+    if (!instance_) {
+        instance_.reset(new blob_file_garbage_collector());
+    }
+    return *instance_;
 }
 
+void blob_file_garbage_collector::reset_for_test() {
+    std::lock_guard<std::mutex> lock(instance_mutex_);
+    instance_.reset();
+}
 
 void blob_file_garbage_collector::scan_blob_files(blob_id_type max_existing_blob_id, const blob_file_resolver& resolver) {
     {
@@ -64,6 +75,7 @@ void blob_file_garbage_collector::scan_blob_files(blob_id_type max_existing_blob
 }
 
 void blob_file_garbage_collector::scan_directory() {
+    pthread_setname_np(pthread_self(), "lstone_scan_blb");
     try {
         // Obtain the root directory from the resolver.
         boost::filesystem::path root = resolver_->get_blob_root();
@@ -111,6 +123,8 @@ void blob_file_garbage_collector::finalize_scan_and_cleanup() {
         cleanup_started_ = true;
     }
     cleanup_thread_ = std::thread([this]() {
+        pthread_setname_np(pthread_self(), "lstone_cleanup");
+
         // Wait for the scan to complete
         this->wait_for_blob_file_scan();
         
