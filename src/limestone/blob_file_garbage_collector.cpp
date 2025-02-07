@@ -26,16 +26,20 @@
 
 namespace limestone::internal {
 
-blob_file_garbage_collector::blob_file_garbage_collector(const blob_file_resolver &resolver)
-    : resolver_(resolver)
-{
+blob_file_garbage_collector::blob_file_garbage_collector() {
     file_ops_ = std::make_unique<real_file_operations>(); 
 }
 
 blob_file_garbage_collector::~blob_file_garbage_collector() {
 }
 
-void blob_file_garbage_collector::scan_blob_files(blob_id_type max_existing_blob_id) {
+blob_file_garbage_collector& blob_file_garbage_collector::getInstance() {
+    static blob_file_garbage_collector instance;
+    return instance;
+}
+
+
+void blob_file_garbage_collector::scan_blob_files(blob_id_type max_existing_blob_id, const blob_file_resolver& resolver) {
     {
         std::lock_guard<std::mutex> lock(mutex_);
         if (blob_file_scan_waited_) {
@@ -43,6 +47,13 @@ void blob_file_garbage_collector::scan_blob_files(blob_id_type max_existing_blob
         }
         if (blob_file_scan_started_) {
             throw std::logic_error("Scan has already been started.");
+        }
+        // Set resolver if not already set
+        if (!resolver_) {
+            resolver_ = &resolver;
+        }
+        if (!resolver_) {
+            throw std::logic_error("Resolver is not set.");
         }
         blob_file_scan_started_ = true;
         max_existing_blob_id_ = max_existing_blob_id;
@@ -52,11 +63,10 @@ void blob_file_garbage_collector::scan_blob_files(blob_id_type max_existing_blob
     blob_file_scan_thread_ = std::thread(&blob_file_garbage_collector::scan_directory, this);
 }
 
-
 void blob_file_garbage_collector::scan_directory() {
     try {
         // Obtain the root directory from the resolver.
-        boost::filesystem::path root = resolver_.get_blob_root();
+        boost::filesystem::path root = resolver_->get_blob_root();
 
         // Iterate recursively over the root directory.
         for (boost::filesystem::recursive_directory_iterator it(root), end; it != end; ++it) {
@@ -64,13 +74,11 @@ void blob_file_garbage_collector::scan_directory() {
                 const boost::filesystem::path& file_path = it->path();
 
                 // Use blob_file_resolver's function to check if this file is a valid blob_file.
-                if (!resolver_.is_blob_file(file_path)) {
+                if (!resolver_->is_blob_file(file_path)) {
                     continue;
                 }
 
-                // Extract blob_id from the file path.
-                blob_id_type id = resolver_.extract_blob_id(file_path);
-                // Only consider files with blob_id <= max_existing_blob_id_
+                blob_id_type id = resolver_->extract_blob_id(file_path);
                 if (id <= max_existing_blob_id_) {
                     scanned_blobs_.add_blob_item(blob_item(id));
                 }
@@ -93,9 +101,11 @@ void blob_file_garbage_collector::add_gc_exempt_blob_item(const blob_item &item)
 void blob_file_garbage_collector::finalize_scan_and_cleanup() {
     {
         std::lock_guard<std::mutex> lock(mutex_);
-        // If wait_for_cleanup() has already been called, do not start cleanup.
+        if (!resolver_) {
+            throw std::logic_error("Resolver is not set. Cannot finalize scan and cleanup.");
+        }
         if (cleanup_waited_) {
-            return;
+            throw std::logic_error("Cannot start cleanup after wait_for_cleanup() has been called.");
         }
         // Mark the start of the cleanup process
         cleanup_started_ = true;
@@ -107,7 +117,7 @@ void blob_file_garbage_collector::finalize_scan_and_cleanup() {
         // Calculate the difference and perform deletion operations
         scanned_blobs_.diff(gc_exempt_blob_);
         for (const auto &item : scanned_blobs_) {
-            boost::filesystem::path file_path = resolver_.resolve_path(item.get_blob_id());
+            boost::filesystem::path file_path = resolver_->resolve_path(item.get_blob_id());
             boost::system::error_code ec;
             file_ops_->remove(file_path, ec);
             if (ec && ec != boost::system::errc::no_such_file_or_directory) {
@@ -115,7 +125,6 @@ void blob_file_garbage_collector::finalize_scan_and_cleanup() {
                               << " Error: " << ec.message();
             }
         }
-        
         {
             std::lock_guard<std::mutex> lock(mutex_);
             // Mark that cleanup is complete
@@ -161,7 +170,6 @@ void blob_file_garbage_collector::shutdown() {
     if (blob_file_scan_thread_.joinable()) {
         blob_file_scan_thread_.join();
     }
-
     if (cleanup_thread_.joinable()) {
         cleanup_thread_.join();
     }

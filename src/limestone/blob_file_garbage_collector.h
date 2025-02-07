@@ -16,7 +16,6 @@
 #pragma once
 
 #include <limestone/api/blob_id_type.h>
-
 #include <boost/filesystem.hpp>
 #include <condition_variable>
 #include <future>
@@ -24,7 +23,6 @@
 #include <thread>
 #include <vector>
 
-#include "limestone/api/snapshot.h"
 #include "blob_file_resolver.h"
 #include "blob_item_container.h"
 #include "file_operations.h"
@@ -35,14 +33,15 @@ namespace limestone::internal {
  * @brief The blob_file_garbage_collector class is responsible for scanning the BLOB directory,
  *        in a background thread, to generate a list of BLOB file paths for garbage collection.
  *
- * This class uses a blob_file_resolver instance to obtain the root directory for BLOB files
- * and to utilize its functionality for file name validation and blob_id extraction.
+ * This class uses a blob_file_resolver (passed as a parameter to scan_blob_files())
+ * to obtain the root directory for BLOB files and to utilize its functionality for
+ * file name validation and blob_id extraction.
  *
  * Only files whose blob_id is less than or equal to a specified maximum (max_existing_blob_id)
  * are considered for garbage collection. Files with blob_id greater than max_existing_blob_id
  * (i.e., newly generated files) are ignored.
  *
- * This class is intended for internal use only.
+ * This class is intended for internal use only and is implemented as a singleton.
  *
  * @note The scanning process is initiated by calling scan_blob_files() exactly once.
  *       Subsequent calls will throw a std::logic_error.
@@ -60,20 +59,18 @@ namespace limestone::internal {
 class blob_file_garbage_collector {
 public:
     /**
-     * @brief Constructs a blob_file_garbage_collector with the given blob_file_resolver.
+     * @brief Returns the singleton instance of blob_file_garbage_collector.
      *
-     * The blob_file_resolver provides the root directory and necessary path resolution functions.
-     *
-     * @param resolver A reference to a blob_file_resolver instance.
+     * @return Reference to the singleton blob_file_garbage_collector.
      */
-    explicit blob_file_garbage_collector(const blob_file_resolver& resolver);
+    static blob_file_garbage_collector& getInstance();
 
     /**
-     * @brief Destructor. Waits for the background scanning thread to complete, if necessary.
+     * @brief Destructor. 
      */
     ~blob_file_garbage_collector();
 
-    // Disallow copy and move operations
+    // Disallow copy and move operations.
     blob_file_garbage_collector(const blob_file_garbage_collector&) = delete;
     blob_file_garbage_collector& operator=(const blob_file_garbage_collector&) = delete;
     blob_file_garbage_collector(blob_file_garbage_collector&&) = delete;
@@ -88,12 +85,13 @@ public:
      * (i.e., newly generated files) are ignored.
      *
      * @param max_existing_blob_id The maximum blob_id among the BLOB files that existed at startup.
+     * @param resolver The blob_file_resolver to be used for scanning.
      *
-     * @throws std::logic_error if scan_blob_files() is called more than once.
+     * @throws std::logic_error if scan_blob_files() is called more than once, or if resolver has not been set.
      *
      * @note This function is intended to be called only once during the lifecycle of the object.
      */
-    void scan_blob_files(blob_id_type max_existing_blob_id);
+    void scan_blob_files(blob_id_type max_existing_blob_id, const blob_file_resolver& resolver);
 
     /**
      * @brief Adds a BLOB item to the container of BLOBs that are exempt from garbage collection.
@@ -113,6 +111,8 @@ public:
      * (i.e., not detached) so that it can be joined in shutdown(), ensuring proper termination.
      *
      * This method returns immediately after starting the background thread.
+     *
+     * @throws std::logic_error if the resolver is not set (i.e., scan_blob_files() was not previously called).
      */
     void finalize_scan_and_cleanup();
 
@@ -125,6 +125,9 @@ public:
     void shutdown();
 
 protected:
+    // Protected constructor: only accessible via getInstance()
+    blob_file_garbage_collector();
+
     /**
      * @brief Waits for the background scanning process to complete.
      *
@@ -166,29 +169,30 @@ protected:
     const blob_item_container& get_gc_exempt_blob_list() const { return gc_exempt_blob_; };
 
 private:
+
     // --- Resolver and Blob Containers ---
-    const blob_file_resolver& resolver_;     ///< Reference to the blob_file_resolver instance.
-    blob_item_container scanned_blobs_;       ///< Container for storing scanned blob items.
-    blob_item_container gc_exempt_blob_;     ///< Container for storing blob items exempt from garbage collection.
-    blob_id_type max_existing_blob_id_ = 0;  ///< Maximum blob_id that existed at startup.
+    const blob_file_resolver* resolver_ = nullptr;   ///< Pointer to the blob_file_resolver instance.
+    blob_item_container scanned_blobs_;              ///< Container for storing scanned blob items.
+    blob_item_container gc_exempt_blob_;             ///< Container for storing blob items exempt from garbage collection.
+    blob_id_type max_existing_blob_id_ = 0;           ///< Maximum blob_id that existed at startup.
 
     // --- Scanning Process Fields ---
-    bool blob_file_scan_started_ = false;        ///< Flag indicating whether the scanning process has started.
-    bool blob_file_scan_complete_ = false;       ///< Flag indicating whether the scanning process has completed.
-    bool blob_file_scan_waited_ = false;         ///< Flag indicating that wait_for_blob_file_scan() has been called.
-    std::thread blob_file_scan_thread_;          ///< Background thread for scanning the BLOB directory.
-    std::condition_variable blob_file_scan_cv_;  ///< Condition variable to signal scan completion.
+    bool blob_file_scan_started_ = false;            ///< Flag indicating whether the scanning process has started.
+    bool blob_file_scan_complete_ = false;           ///< Flag indicating whether the scanning process has completed.
+    bool blob_file_scan_waited_ = false;             ///< Flag indicating that wait_for_blob_file_scan() has been called.
+    std::thread blob_file_scan_thread_;              ///< Background thread for scanning the BLOB directory.
+    std::condition_variable blob_file_scan_cv_;      ///< Condition variable to signal scan completion.
 
     // --- Cleanup Process Fields ---
-    bool cleanup_started_ = false;        ///< Flag indicating whether the cleanup process has started.
-    bool cleanup_waited_ = false;         ///< Flag indicating that wait_for_cleanup() has been called.
-    bool cleanup_complete_ = false;       ///< Flag indicating whether the cleanup process has completed.
-    std::thread cleanup_thread_;          ///< Background thread for garbage collection.
-    std::condition_variable cleanup_cv_;  ///< Condition variable to signal cleanup completion.
+    bool cleanup_started_ = false;                   ///< Flag indicating whether the cleanup process has started.
+    bool cleanup_waited_ = false;                    ///< Flag indicating that wait_for_cleanup() has been called.
+    bool cleanup_complete_ = false;                  ///< Flag indicating whether the cleanup process has completed.
+    std::thread cleanup_thread_;                     ///< Background thread for garbage collection.
+    std::condition_variable cleanup_cv_;             ///< Condition variable to signal cleanup completion.
 
     // --- Others ---
-    mutable std::mutex mutex_;                   ///< Mutex for synchronizing access to state variables.
-    std::unique_ptr<file_operations> file_ops_;  ///< Pointer to the file_operations implementation.
+    mutable std::mutex mutex_;                       ///< Mutex for synchronizing access to state variables.
+    std::unique_ptr<file_operations> file_ops_;      ///< Pointer to the file_operations implementation.
 
     /**
      * @brief The background function that scans the blob_root directory for BLOB files.
