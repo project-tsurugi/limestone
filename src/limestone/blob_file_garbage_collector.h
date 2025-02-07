@@ -69,7 +69,7 @@ public:
     /**
      * @brief Destructor.
      */
-    ~blob_file_garbage_collector();
+    ~blob_file_garbage_collector() = default;
 
     // Disallow copy and move operations.
     blob_file_garbage_collector(const blob_file_garbage_collector&) = delete;
@@ -179,8 +179,8 @@ protected:
 
 private:
     // --- Singleton Instance ---
-    static std::unique_ptr<blob_file_garbage_collector> instance_;
-    static std::mutex instance_mutex_;
+    static std::unique_ptr<blob_file_garbage_collector> instance_;  // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
+    static std::mutex instance_mutex_;  // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
 
     // --- Resolver and Blob Containers ---
     const blob_file_resolver* resolver_ = nullptr;   ///< Pointer to the blob_file_resolver instance.

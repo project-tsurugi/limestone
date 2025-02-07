@@ -26,21 +26,19 @@
 
 namespace limestone::internal {
 
-// --- Singleton Instance ---
-std::unique_ptr<blob_file_garbage_collector> blob_file_garbage_collector::instance_ = nullptr;
+// NOLINTNEXTLINE(fuchsia-statically-constructed-objects, cppcoreguidelines-avoid-non-const-global-variables)
+std::unique_ptr<blob_file_garbage_collector> blob_file_garbage_collector::instance_ = nullptr; // NOLINT()
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 std::mutex blob_file_garbage_collector::instance_mutex_;
 
 blob_file_garbage_collector::blob_file_garbage_collector() {
     file_ops_ = std::make_unique<real_file_operations>(); 
 }
 
-blob_file_garbage_collector::~blob_file_garbage_collector() {
-}
-
 blob_file_garbage_collector& blob_file_garbage_collector::getInstance() {
     std::lock_guard<std::mutex> lock(instance_mutex_);
     if (!instance_) {
-        instance_.reset(new blob_file_garbage_collector());
+        instance_.reset(new blob_file_garbage_collector()); // NOLINT(cppcoreguidelines-owning-memory)
     }
     return *instance_;
 }
