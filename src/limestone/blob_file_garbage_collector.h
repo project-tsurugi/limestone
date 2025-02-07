@@ -96,20 +96,6 @@ public:
     void scan_blob_files(blob_id_type max_existing_blob_id);
 
     /**
-     * @brief Spawns a background thread that scans the provided snapshot and extracts
-     *        the necessary blob items to add to the GC-exempt container.
-     *
-     * This method launches a background thread that traverses the snapshot,
-     * extracts entries required for GC exemption, and adds them to gc_exempt_blob_.
-     * The function returns immediately after starting the thread.
-     *
-     * @param snapshot The snapshot object to be scanned for GC-exempt blob items.
-     *
-     * @throws std::logic_error if the snapshot scan process has already been started.
-     */
-    void scan_snapshot_for_gc_exempt_blob_items(const ::limestone::api::snapshot& snapshot);
-
-    /**
      * @brief Adds a BLOB item to the container of BLOBs that are exempt from garbage collection.
      *
      * This method registers a BLOB item which should not be deleted during the garbage collection process.
@@ -145,14 +131,6 @@ protected:
      * This method blocks until the scanning thread sets the blob_file_scan_complete_ flag.
      */
     void wait_for_blob_file_scan();
-
-    /**
-     * @brief Waits for the background snapshot scan process to complete.
-     *
-     * This method blocks until the background thread spawned by
-     * scan_snapshot_for_gc_exempt_blob_items() finishes processing.
-     */
-    void wait_for_snapshot_scan();
 
     /**
      * @brief Waits for the background cleanup thread (spawned by finalize_scan_and_cleanup)
@@ -200,13 +178,6 @@ private:
     bool blob_file_scan_waited_ = false;         ///< Flag indicating that wait_for_blob_file_scan() has been called.
     std::thread blob_file_scan_thread_;          ///< Background thread for scanning the BLOB directory.
     std::condition_variable blob_file_scan_cv_;  ///< Condition variable to signal scan completion.
-
-    // --- Snapshot Scan Process Fields ---
-    bool snapshot_scan_started_ = false;        ///< Flag indicating whether the snapshot scan process has started.
-    bool snapshot_scan_waited_ = false;         ///< Flag indicating that wait_for_snapshot_scan() has been called.
-    bool snapshot_scan_complete_ = false;       ///< Flag indicating whether the snapshot scan process has completed.
-    std::thread snapshot_scan_thread_;          ///< Background thread for scanning the snapshot.
-    std::condition_variable snapshot_scan_cv_;  ///< Condition variable to signal snapshot scan completion.
 
     // --- Cleanup Process Fields ---
     bool cleanup_started_ = false;        ///< Flag indicating whether the cleanup process has started.

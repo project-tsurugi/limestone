@@ -167,41 +167,4 @@ void blob_file_garbage_collector::shutdown() {
     }
 }
 
-void blob_file_garbage_collector::scan_snapshot_for_gc_exempt_blob_items(const ::limestone::api::snapshot& snapshot) {
-    {
-        std::lock_guard<std::mutex> lock(mutex_);
-        if (snapshot_scan_started_) {
-            throw std::logic_error("Snapshot scan has already been started.");
-        }
-        snapshot_scan_started_ = true;
-        snapshot_scan_complete_ = false;
-    }
-    // Launch the background snapshot scan thread
-    snapshot_scan_thread_ = std::thread([this, &snapshot]() {
-        // ここで snapshot を走査して、必要な blob_item を抽出する処理を実装する。
-        // 例:
-        // auto cursor = snapshot.get_cursor();
-        // while(cursor && cursor->next()) {
-        //     // 必要な条件に合致した blob_item を gc_exempt_blob_ に追加する
-        //     blob_item item(/*...*/);
-        //     gc_exempt_blob_.add_blob_item(item);
-        // }
-
-        // 走査処理完了後
-        {
-            std::lock_guard<std::mutex> lock(mutex_);
-            snapshot_scan_complete_ = true;
-        }
-        snapshot_scan_cv_.notify_all();
-    });
-}
-
-void blob_file_garbage_collector::wait_for_snapshot_scan() {
-    std::unique_lock<std::mutex> lock(mutex_);
-    snapshot_scan_waited_ = true;
-    // Wait until the snapshot scan is complete.
-    snapshot_scan_cv_.wait(lock, [this]() { return snapshot_scan_complete_; });
-}
-
-
 } // namespace limestone::internal
