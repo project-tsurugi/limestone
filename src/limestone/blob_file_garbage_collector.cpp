@@ -195,28 +195,16 @@ void blob_file_garbage_collector::scan_snapshot(const boost::filesystem::path &s
 
     snapshot_scan_thread_ = std::thread([this, snapshot_file, compacted_file]() {
         try {
-            my_cursor cur(snapshot_file, compacted_file);
-            struct AutoClose {
-                my_cursor &cursor_ref;
-                AutoClose(my_cursor &cur) : cursor_ref(cur) {}
-                ~AutoClose() {
-                    try {
-                        cursor_ref.close();
-                    } catch (...) {
-                        // Ignore exceptions that occur in close()
-                    }
-                }
-            } autoClose(cur);
-
-            while (cur.next()) {
-                if (cur.type() == log_entry::entry_type::normal_with_blob) {
-                    auto blob_ids = cur.blob_ids();
+            auto cur = std::make_unique<my_cursor>(snapshot_file, compacted_file);
+            while (cur->next()) {
+                if (cur->type() == log_entry::entry_type::normal_with_blob) {
+                    auto blob_ids = cur->blob_ids();
                     for (auto id : blob_ids) {
                         gc_exempt_blob_->add_blob_item(blob_item(id));
                     }
                 }
             }
-            finalize_scan_and_cleanup(); 
+            finalize_scan_and_cleanup();
         } catch (const limestone_exception &e) {
             LOG_LP(ERROR) << "Exception in snapshot scan thread: " << e.what();
         } catch (const std::exception &e) {
@@ -224,7 +212,6 @@ void blob_file_garbage_collector::scan_snapshot(const boost::filesystem::path &s
         } catch (...) {
             LOG_LP(ERROR) << "Unknown exception in snapshot scan thread.";
         }
-
         {
             std::lock_guard<std::mutex> lock(mutex_);
             snapshot_scan_complete_ = true;
@@ -244,8 +231,8 @@ void blob_file_garbage_collector::wait_for_scan_snapshot() {
 
 void blob_file_garbage_collector::reset() {
     std::lock_guard<std::mutex> lock(mutex_);
-    scanned_blobs_.reset(new blob_item_container());
-    gc_exempt_blob_.reset(new blob_item_container());
+    scanned_blobs_ = std::make_unique<blob_item_container>();
+    gc_exempt_blob_ = std::make_unique<blob_item_container>();
 }
 
 } // namespace limestone::internal
