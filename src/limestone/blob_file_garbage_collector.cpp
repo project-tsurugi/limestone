@@ -27,12 +27,13 @@
  
  namespace limestone::internal {
  
- 
- blob_file_garbage_collector::blob_file_garbage_collector() {
+ // Constructor now takes a blob_file_resolver and sets the resolver_ member.
+ blob_file_garbage_collector::blob_file_garbage_collector(const blob_file_resolver& resolver)
+     : resolver_(&resolver) {
      file_ops_ = std::make_unique<real_file_operations>(); 
  }
  
- void blob_file_garbage_collector::scan_blob_files(blob_id_type max_existing_blob_id, const blob_file_resolver& resolver) {
+ void blob_file_garbage_collector::scan_blob_files(blob_id_type max_existing_blob_id) {
      {
          std::lock_guard<std::mutex> lock(mutex_);
          if (blob_file_scan_waited_) {
@@ -40,13 +41,6 @@
          }
          if (blob_file_scan_started_) {
              throw std::logic_error("Scan has already been started.");
-         }
-         // Set resolver if not already set
-         if (!resolver_) {
-             resolver_ = &resolver;
-         }
-         if (!resolver_) {
-             throw std::logic_error("Resolver is not set.");
          }
          blob_file_scan_started_ = true;
          max_existing_blob_id_ = max_existing_blob_id;
@@ -95,9 +89,6 @@
  void blob_file_garbage_collector::finalize_scan_and_cleanup() {
      {
          std::lock_guard<std::mutex> lock(mutex_);
-         if (!resolver_) {
-             throw std::logic_error("Resolver is not set. Cannot finalize scan and cleanup.");
-         }
          if (cleanup_waited_) {
              throw std::logic_error("Cannot start cleanup after wait_for_cleanup() has been called.");
          }

@@ -18,8 +18,8 @@ constexpr const char* base_directory = "/tmp/blob_file_gc_test";
 
 class testable_blob_file_garbage_collector : public blob_file_garbage_collector {
 public:
-    explicit testable_blob_file_garbage_collector()
-        : blob_file_garbage_collector() {}
+    explicit testable_blob_file_garbage_collector(const blob_file_resolver& resolver)
+        : blob_file_garbage_collector(resolver) {}
     using blob_file_garbage_collector::wait_for_blob_file_scan;
     using blob_file_garbage_collector::wait_for_cleanup;
     using blob_file_garbage_collector::set_file_operations;
@@ -76,7 +76,7 @@ protected:
         }
 
         // Create blob_file_garbage_collector (using resolver_)
-        gc_ = std::make_unique<testable_blob_file_garbage_collector>();
+        gc_ = std::make_unique<testable_blob_file_garbage_collector>(*resolver_);
     }
 
     void TearDown() override {
@@ -115,7 +115,7 @@ TEST_F(blob_file_garbage_collector_test, scan_collects_only_files_with_blob_id_l
     create_blob_file(*resolver_, 600); // Excluded as a new file
 
     // Start scan: max_existing_blob_id = 500
-    gc_->scan_blob_files(500, *resolver_);
+    gc_->scan_blob_files(500);
     gc_->wait_for_blob_file_scan();
 
     // Get scan results
@@ -150,7 +150,7 @@ TEST_F(blob_file_garbage_collector_test, scan_ignores_invalid_files) {
         ofs.close();
     }
     // Start scan: max_existing_blob_id = 500
-    gc_->scan_blob_files(500, *resolver_);
+    gc_->scan_blob_files(500);
     gc_->wait_for_blob_file_scan();
 
     // Expected result is only the file with blob_id 150
@@ -166,7 +166,7 @@ TEST_F(blob_file_garbage_collector_test, get_blob_file_list_after_scan) {
     create_blob_file(*resolver_, 20);
     create_blob_file(*resolver_, 30);
 
-    gc_->scan_blob_files(1000, *resolver_); // Specify a sufficiently large value for max_existing_blob_id
+    gc_->scan_blob_files(1000); // Specify a sufficiently large value for max_existing_blob_id
     gc_->wait_for_blob_file_scan();
 
     // Expected files are those with blob_id 10, 20, 30
@@ -185,7 +185,7 @@ TEST_F(blob_file_garbage_collector_test, max_existing_blob_id_inclusive) {
 
     // Start scan with max_existing_blob_id exactly equal to 100.
     // Expected: Only the file with blob_id 100 is collected (since 200 > 100).
-    gc_->scan_blob_files(100, *resolver_);
+    gc_->scan_blob_files(100);
     gc_->wait_for_blob_file_scan();
 
     auto actual_ids = get_sorted_blob_ids(gc_->get_blob_file_list());
@@ -201,7 +201,7 @@ TEST_F(blob_file_garbage_collector_test, max_existing_blob_id_exclusive) {
 
     // Start scan with max_existing_blob_id set to 99.
     // Expected: Neither file should be collected because both 100 and 200 exceed 99.
-    gc_->scan_blob_files(99, *resolver_);
+    gc_->scan_blob_files(99);
     gc_->wait_for_blob_file_scan();
 
     auto actual_ids = get_sorted_blob_ids(gc_->get_blob_file_list());
@@ -210,10 +210,10 @@ TEST_F(blob_file_garbage_collector_test, max_existing_blob_id_exclusive) {
 
 TEST_F(blob_file_garbage_collector_test, start_scan_called_twice_throws) {
     // Start scanning for the first time.
-    gc_->scan_blob_files(1000, *resolver_);
+    gc_->scan_blob_files(1000);
 
     // A second call to scan_blob_files() should throw std::logic_error.
-    EXPECT_THROW(gc_->scan_blob_files(1000, *resolver_), std::logic_error);
+    EXPECT_THROW(gc_->scan_blob_files(1000), std::logic_error);
 
     gc_->wait_for_blob_file_scan();
 }
@@ -225,7 +225,7 @@ TEST_F(blob_file_garbage_collector_test, scan_catches_exception_when_directory_m
     // Start scanning. Even though the directory does not exist and an exception will occur,
     // scan_directory() should catch the exception, log the error, and mark the scan as complete.
     EXPECT_NO_THROW({
-        gc_->scan_blob_files(1000, *resolver_);
+        gc_->scan_blob_files(1000);
         gc_->wait_for_blob_file_scan();
     });
 
@@ -257,7 +257,7 @@ TEST_F(blob_file_garbage_collector_test, finalize_scan_and_cleanup_deletes_non_e
     create_blob_file(*resolver_, 103);
 
     // Assume that all files have blob IDs <= 200 so that they are included in the scanned list.
-    gc_->scan_blob_files(200, *resolver_);
+    gc_->scan_blob_files(200);
     gc_->wait_for_blob_file_scan();
 
     // Mark blob 102 as GC exempt.
@@ -287,7 +287,7 @@ TEST_F(blob_file_garbage_collector_test, finalize_scan_and_cleanup_handles_delet
     create_blob_file(*resolver_, 502);
 
     // Assume that all files have blob IDs <= 600 so that they are included in the scanned list.
-    gc_->scan_blob_files(600, *resolver_);
+    gc_->scan_blob_files(600);
     gc_->wait_for_blob_file_scan();
 
     // Set up test file operations to simulate a deletion failure for blob ID 501.
@@ -333,12 +333,12 @@ TEST_F(blob_file_garbage_collector_test, start_scan_after_wait_for_scan_should_t
     // Call wait_for_blob_file_scan() without starting scan.
     gc_->wait_for_blob_file_scan();
     // Since wait_for_blob_file_scan() sets blob_file_scan_waited_, starting the scan now should throw.
-    EXPECT_THROW(gc_->scan_blob_files(1000, *resolver_), std::logic_error);
+    EXPECT_THROW(gc_->scan_blob_files(1000), std::logic_error);
 }
 
 // Test: Calling wait_for_blob_file_scan() twice does not block.
 TEST_F(blob_file_garbage_collector_test, wait_for_scan_called_twice) {
-    gc_->scan_blob_files(1000, *resolver_);
+    gc_->scan_blob_files(1000);
     gc_->wait_for_blob_file_scan();
     // Second call should return immediately.
     gc_->wait_for_blob_file_scan();
@@ -347,7 +347,7 @@ TEST_F(blob_file_garbage_collector_test, wait_for_scan_called_twice) {
 
 // Test: Calling wait_for_cleanup() twice does not block.
 TEST_F(blob_file_garbage_collector_test, wait_for_cleanup_called_twice) {
-    gc_->scan_blob_files(1000, *resolver_);
+    gc_->scan_blob_files(1000);
     gc_->wait_for_blob_file_scan();
     gc_->finalize_scan_and_cleanup();
     gc_->wait_for_cleanup();
@@ -356,19 +356,8 @@ TEST_F(blob_file_garbage_collector_test, wait_for_cleanup_called_twice) {
     SUCCEED();
 }
 
-TEST_F(blob_file_garbage_collector_test, finalize_scan_and_cleanup_without_scan_throws) {
-    // Calling finalize_scan_and_cleanup() without calling scan_blob_files() should throw std::logic_error.
-    EXPECT_THROW(gc_->finalize_scan_and_cleanup(), std::logic_error);
-}
-
-TEST_F(blob_file_garbage_collector_test, scan_blob_files_without_resolver_throws) {
-    // Calling scan_blob_files() without a resolver should throw std::logic_error.
-    blob_file_resolver* invalid_resolver = nullptr;
-    EXPECT_THROW(gc_->scan_blob_files(500, *invalid_resolver), std::logic_error);
-}
-
 TEST_F(blob_file_garbage_collector_test, finalize_scan_and_cleanup_after_wait_throws) {
-    gc_->scan_blob_files(500, *resolver_);
+    gc_->scan_blob_files(500);
     gc_->finalize_scan_and_cleanup();
     gc_->wait_for_cleanup();
     EXPECT_THROW(gc_->finalize_scan_and_cleanup(), std::logic_error);

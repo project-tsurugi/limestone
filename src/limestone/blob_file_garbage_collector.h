@@ -34,7 +34,7 @@ namespace limestone::internal {
  * @brief The blob_file_garbage_collector class is responsible for scanning the BLOB directory,
  *        in a background thread, to generate a list of BLOB file paths for garbage collection.
  *
- * This class uses a blob_file_resolver (passed as a parameter to scan_blob_files())
+ * This class uses a blob_file_resolver (provided in the constructor)
  * to obtain the root directory for BLOB files and to utilize its functionality for
  * file name validation and blob_id extraction.
  *
@@ -61,8 +61,9 @@ class blob_file_garbage_collector {
 public:
     /**
      * @brief Constructor.
+     * @param resolver The blob_file_resolver to be used for scanning.
      */
-    blob_file_garbage_collector();
+    explicit blob_file_garbage_collector(const blob_file_resolver& resolver);
 
     /**
      * @brief Destructor.
@@ -84,13 +85,12 @@ public:
      * (i.e., newly generated files) are ignored.
      *
      * @param max_existing_blob_id The maximum blob_id among the BLOB files that existed at startup.
-     * @param resolver The blob_file_resolver to be used for scanning.
      *
-     * @throws std::logic_error if scan_blob_files() is called more than once, or if resolver is not set.
+     * @throws std::logic_error if scan_blob_files() is called more than once.
      *
      * @note This function is intended to be called only once during the lifecycle of the object.
      */
-    void scan_blob_files(blob_id_type max_existing_blob_id, const blob_file_resolver& resolver);
+    void scan_blob_files(blob_id_type max_existing_blob_id);
 
     /**
      * @brief Adds a BLOB item to the container of BLOBs that are exempt from garbage collection.
@@ -111,7 +111,7 @@ public:
      *
      * This method returns immediately after starting the background thread.
      *
-     * @throws std::logic_error if the resolver is not set (i.e., scan_blob_files() was not previously called).
+     * @throws std::logic_error if the resolver is not set.
      */
     void finalize_scan_and_cleanup();
 
