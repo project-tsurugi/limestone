@@ -211,9 +211,6 @@ log_entry::entry_type cursor_impl::type() const {
 }
 
 std::vector<limestone::api::blob_id_type> cursor_impl::blob_ids() const {
-    if (log_entry_.type() != log_entry::entry_type::normal_with_blob) {
-        return {};
-    }
     return log_entry_.get_blob_ids();
 }
 

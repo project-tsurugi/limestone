@@ -3,7 +3,9 @@
 #include <fstream>
 #include <sstream>
 #include <iomanip>
-#include <cstdlib> // system()
+#include <cstdlib> 
+#include "test_root.h"
+#include "log_entry.h"
 #include "blob_file_garbage_collector.h"
 #include "limestone/logging.h"
 #include "blob_file_resolver.h"
@@ -14,8 +16,8 @@ using namespace limestone::internal;
 using limestone::api::blob_id_type;
 
 constexpr const char* base_directory = "/tmp/blob_file_gc_test";
-const boost::filesystem::path snapshot_path("/tmp/blob_file_gc_test/snapshot");
-const boost::filesystem::path compacted_path("/tmp/blob_file_gc_test/compacted");
+const boost::filesystem::path snapshot_path("/tmp/blob_file_gc_test/pwal_0000");
+const boost::filesystem::path compacted_path("/tmp/blob_file_gc_test/pwal_0001");
 
 class testable_blob_file_garbage_collector : public blob_file_garbage_collector {
 public:
@@ -50,6 +52,11 @@ std::vector<blob_id_type> get_sorted_blob_ids(const blob_item_container &contain
 
 class blob_file_garbage_collector_test : public ::testing::Test {
 protected:
+    std::unique_ptr<api::datastore_test> datastore_;
+    boost::filesystem::path location_;
+    log_channel* lc0_{};
+    log_channel* lc1_{};
+
     void SetUp() override {
         // Delete and recreate the test directory
         std::string cmd = "rm -rf " + std::string(base_directory);
@@ -82,6 +89,10 @@ protected:
     }
 
     void TearDown() override {
+        if (datastore_) {
+            datastore_->shutdown();
+        }
+
         gc_->shutdown();
         gc_.reset();
         resolver_.reset();
@@ -89,6 +100,19 @@ protected:
         if (std::system(cmd.c_str()) != 0) {
             std::cerr << "Cannot remove directory" << std::endl;
         }
+    }
+
+    void gen_datastore() {
+        std::vector<boost::filesystem::path> data_locations{};
+        data_locations.emplace_back(base_directory);
+        boost::filesystem::path metadata_location_path{base_directory};
+        limestone::api::configuration conf(data_locations, metadata_location_path);
+
+        datastore_ = std::make_unique<limestone::api::datastore_test>(conf);
+
+        lc0_ = &datastore_->create_channel(base_directory);
+        lc1_ = &datastore_->create_channel(base_directory);
+        datastore_->ready();
     }
 
     std::unique_ptr<blob_file_resolver> resolver_;
@@ -401,5 +425,69 @@ TEST_F(blob_file_garbage_collector_test, wait_for_snapshot_called_twice) {
     gc_->wait_for_scan_snapshot();
     SUCCEED();
 }
+
+
+
+TEST_F(blob_file_garbage_collector_test, full_process_test) {
+    // Step 1: Create multiple BLOB files with blob IDs 100, 200, 300, and 400.
+    create_blob_file(*resolver_, 100);
+    create_blob_file(*resolver_, 200);
+    create_blob_file(*resolver_, 300);
+    create_blob_file(*resolver_, 400);
+
+    // Step 2: Call scan_blob_files with max_existing_blob_id set to 1000 so that all files are included.
+    gc_->scan_blob_files(1000);
+
+    // Step 3: Wait for the BLOB file scanning to complete.
+    gc_->wait_for_blob_file_scan();
+
+    // Step 4: Create the snapshot and compacted files.
+    // In this test, two PWAL files are generated and used as the snapshot file and the compacted file.
+    // The PWAL files include entries with blob IDs 200 and 400.
+    ASSERT_FALSE(boost::filesystem::exists(snapshot_path));
+    ASSERT_FALSE(boost::filesystem::exists(compacted_path));
+    gen_datastore();
+    lc0_->begin_session();
+    lc0_->add_entry(1, "key1", "value1", {1,1}, {200});
+    lc0_->end_session();  
+    lc1_->begin_session();
+    lc1_->add_entry(1, "key2", "value2", {1,1}, {400});
+    lc1_->end_session();
+    ASSERT_TRUE(boost::filesystem::exists(snapshot_path));
+    ASSERT_TRUE(boost::filesystem::exists(compacted_path));
+
+    // Step 5: Call scan_snapshot using both the snapshot file and the compacted file.
+    gc_->scan_snapshot(snapshot_path, compacted_path);
+
+    // Step 6: Wait for the snapshot scanning to complete.
+    gc_->wait_for_scan_snapshot();
+
+    // Step 7: Verify that the GC-exempt blob container contains the correct entries (i.e., blob IDs 200 and 400).
+    auto& exempt = gc_->get_gc_exempt_blob_list();
+    std::vector<blob_id_type> exempt_ids;
+    for (const auto &item : exempt) {
+        exempt_ids.push_back(item.get_blob_id());
+    }
+    std::sort(exempt_ids.begin(), exempt_ids.end());
+    std::vector<blob_id_type> expected_exempt = {200, 400};
+    EXPECT_EQ(exempt_ids, expected_exempt);
+
+    // Step 8: Wait for the cleanup process to complete.
+    gc_->wait_for_cleanup();
+
+    // Step 9: Verify that the intended files have been deleted:
+    //         - Files for blob IDs 100 and 300 (non-GC exempt) should be deleted.
+    //         - Files for blob IDs 200 and 400 (GC exempt) should remain.
+    boost::filesystem::path file100 = resolver_->resolve_path(100);
+    boost::filesystem::path file200 = resolver_->resolve_path(200);
+    boost::filesystem::path file300 = resolver_->resolve_path(300);
+    boost::filesystem::path file400 = resolver_->resolve_path(400);
+
+    EXPECT_FALSE(boost::filesystem::exists(file100));
+    EXPECT_TRUE(boost::filesystem::exists(file200));
+    EXPECT_FALSE(boost::filesystem::exists(file300));
+    EXPECT_TRUE(boost::filesystem::exists(file400));
+}
+
 
 }  // namespace limestone::testing

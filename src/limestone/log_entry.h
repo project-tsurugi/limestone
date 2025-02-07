@@ -235,28 +235,28 @@ public:
         entry_type type = entry_type::normal_with_blob;
         write_uint8(strm, static_cast<std::uint8_t>(type));
 
-        // key_len を計算
+        // Calculate key_len
         std::size_t key_len = key_sid.length() - sizeof(storage_id_type);
         assert(key_len <= UINT32_MAX);
         write_uint32le(strm, static_cast<std::uint32_t>(key_len));
 
-        // value_len を計算
+        // Calculate value_len
         std::size_t value_len = value_etc.length() - (sizeof(epoch_id_type) + sizeof(std::uint64_t));
         assert(value_len <= UINT32_MAX);
         write_uint32le(strm, static_cast<std::uint32_t>(value_len));
 
-        // key_sid を書き込み
+        // Write key_sid
         write_bytes(strm, key_sid.data(), key_sid.length());
 
-        // value_etc を書き込み
+        // Write value_etc
         write_bytes(strm, value_etc.data(), value_etc.length());
 
-        // BLOBの数を計算して書き込み
+        // Calculate and write the number of BLOBs
         std::size_t blob_count = blob_ids.length() / sizeof(blob_id_type);
         assert(blob_count <= UINT32_MAX);
         write_uint32le(strm, static_cast<std::uint32_t>(blob_count));
 
-        // BLOBの実態をそのまま書き込み
+        // Write the actual BLOB data
         write_bytes(strm, blob_ids.data(), blob_ids.length());
     }
 

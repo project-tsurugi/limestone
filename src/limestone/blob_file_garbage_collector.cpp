@@ -134,7 +134,7 @@
          }
          // Notify any thread waiting for cleanup completion
          cleanup_cv_.notify_all();
-         cleanup();
+         reset();
      });
  }
  
@@ -180,7 +180,7 @@
     if (cleanup_thread_.joinable()) {
         cleanup_thread_.join();
     }
-    cleanup();
+    reset();
 }
 
 void blob_file_garbage_collector::scan_snapshot(const boost::filesystem::path &snapshot_file, const boost::filesystem::path &compacted_file) {
@@ -212,13 +212,15 @@ void blob_file_garbage_collector::scan_snapshot(const boost::filesystem::path &s
                 if (cur.type() == log_entry::entry_type::normal_with_blob) {
                     auto blob_ids = cur.blob_ids();
                     for (auto id : blob_ids) {
-                        scanned_blobs_->add_blob_item(blob_item(id));
+                        gc_exempt_blob_->add_blob_item(blob_item(id));
                     }
                 }
             }
             finalize_scan_and_cleanup(); 
         } catch (const limestone_exception &e) {
             LOG_LP(ERROR) << "Exception in snapshot scan thread: " << e.what();
+        } catch (const std::exception &e) {
+            LOG_LP(ERROR) << "Standard exception in snapshot scan thread: " << e.what();
         } catch (...) {
             LOG_LP(ERROR) << "Unknown exception in snapshot scan thread.";
         }
@@ -240,7 +242,7 @@ void blob_file_garbage_collector::wait_for_scan_snapshot() {
     snapshot_scan_cv_.wait(lock, [this]() { return snapshot_scan_complete_; });
 }
 
-void blob_file_garbage_collector::cleanup() {
+void blob_file_garbage_collector::reset() {
     std::lock_guard<std::mutex> lock(mutex_);
     scanned_blobs_.reset(new blob_item_container());
     gc_exempt_blob_.reset(new blob_item_container());

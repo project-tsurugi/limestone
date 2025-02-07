@@ -234,10 +234,10 @@ private:
      * @note This method is intended to be called after the cleanup process has completed normally,
      *       such as at the end of finalize_scan_and_cleanup() or during shutdown().
      *
-     * @warning FIXME: In the case of an exception during processing, ensure that cleanup() is still
+     * @warning FIXME: In the case of an exception during processing, ensure that reset() is still
      *          invoked to prevent resource leakage.
      */
-    void cleanup();
+    void reset();
 };
 
 }  // namespace limestone::internal
