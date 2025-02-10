@@ -8,7 +8,7 @@ add_library(${package_name}
 
 set_target_properties(${package_name}
         PROPERTIES
-                INSTALL_RPATH "\$ORIGIN/../lib"
+                INSTALL_RPATH "\$ORIGIN"
                 OUTPUT_NAME ${export_name}
 )
 
@@ -74,7 +74,7 @@ target_include_directories(dblogutil
 target_link_libraries(dblogutil PRIVATE limestone-impl PRIVATE glog::glog gflags::gflags)
 set_target_properties(dblogutil
         PROPERTIES
-                INSTALL_RPATH "\$ORIGIN/../lib"
+                INSTALL_RPATH "\$ORIGIN/../${CMAKE_INSTALL_LIBDIR}"
                 RUNTIME_OUTPUT_NAME "tglogutil"
 )
 install_custom(dblogutil dblogutil)
