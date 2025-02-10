@@ -49,4 +49,25 @@ std::map<storage_id_type, write_version_type> sorting_context::get_clear_storage
     return clear_storage;
 }
 
+void sorting_context::update_max_blob_id(const std::vector<blob_id_type>& blob_ids) {
+    if (blob_ids.empty()) {
+        return;
+    }
+    // Find the maximum value in blob_ids
+    blob_id_type new_max = *std::max_element(blob_ids.begin(), blob_ids.end());
+    // Load the current maximum blob ID with relaxed memory order
+    blob_id_type current = max_blob_id_.load(std::memory_order_relaxed);
+    // Try to update max_blob_id_ if new_max is greater than current
+    while (current < new_max &&
+           // Attempt to update max_blob_id_ to new_max
+           // If another thread updates max_blob_id_ first, current is updated to the latest value
+           !max_blob_id_.compare_exchange_weak(current, new_max, std::memory_order_relaxed)) {
+        // Loop continues until max_blob_id_ is successfully updated or current >= new_max
+    }
+}
+
+blob_id_type sorting_context::get_max_blob_id() const {
+    return max_blob_id_.load(std::memory_order_relaxed);
+}
+
 } // namespace limestone::internal

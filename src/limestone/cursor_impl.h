@@ -21,7 +21,9 @@
 #include <boost/filesystem/fstream.hpp>
 #include <limestone/api/storage_id_type.h>
 #include <limestone/api/cursor.h>
+#include <limestone/api/blob_id_type.h>
 #include "log_entry.h"
+
 
 namespace limestone::internal {
 
@@ -59,6 +61,7 @@ protected:
     [[nodiscard]] limestone::api::storage_id_type storage() const noexcept;
     void key(std::string& buf) const noexcept;
     void value(std::string& buf) const noexcept;
+    std::vector<limestone::api::blob_id_type> blob_ids() const;
     [[nodiscard]] limestone::api::log_entry::entry_type type() const;
     bool is_relevant_entry(const limestone::api::log_entry& entry);
     // Making the cursor class a friend so that it can access protected members

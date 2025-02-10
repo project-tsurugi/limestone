@@ -252,10 +252,40 @@ TEST_F(log_channel_test, write_blob_entry) {
     EXPECT_EQ(buf_value, value);
 
     EXPECT_FALSE(cursor->next());
-
-
 }
 
+TEST_F(log_channel_test, write_blob_entry_empty_large_objects) {
+    FLAGS_v = 50;
 
+    const limestone::api::epoch_id_type epoch_id = 31415;
+    const limestone::api::storage_id_type storage_id = 12345;
+    const std::string key = "this is a key";
+    const std::string value = "this is a value";
+    const limestone::api::write_version_type write_version = limestone::api::write_version_type(67898, 76543);
+    const std::vector<limestone::api::blob_id_type> large_objects = {};  // Empty large_objects
+
+    limestone::api::log_channel& channel = datastore_->create_channel(boost::filesystem::path(location));
+
+    channel.begin_session();
+    channel.add_entry(storage_id, key, value, write_version, large_objects);
+    channel.end_session();
+
+    datastore_->ready();
+    auto ss = datastore_->get_snapshot();
+    auto cursor = ss->get_cursor();
+
+    EXPECT_TRUE(cursor->next());
+    EXPECT_EQ(cursor->storage(), storage_id);
+
+    std::string buf_key;
+    cursor->key(buf_key);
+    EXPECT_EQ(buf_key, key);
+
+    std::string buf_value;
+    cursor->value(buf_value);
+    EXPECT_EQ(buf_value, value);
+
+    EXPECT_FALSE(cursor->next());
+}
 
 }  // namespace limestone::testing

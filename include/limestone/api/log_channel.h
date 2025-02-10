@@ -26,7 +26,7 @@
 #include <boost/filesystem.hpp>
 
 #include <limestone/status.h>
-#include <limestone/api/blob_pool.h>
+#include <limestone/api/blob_id_type.h>
 #include <limestone/api/storage_id_type.h>
 #include <limestone/api/write_version_type.h>
 

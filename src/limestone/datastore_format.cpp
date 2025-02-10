@@ -70,7 +70,7 @@ void setup_initial_logdir(const boost::filesystem::path& logdir) {
     }
     // Create compaction catalog file
     compaction_catalog catalog(logdir);
-    catalog.update_catalog_file(0, {}, {});
+    catalog.update_catalog_file(0, 0, {}, {});
 }
 
 

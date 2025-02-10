@@ -15,6 +15,7 @@
  */
 #pragma once
 
+#include "blob_id_type.h"
 #include <boost/filesystem.hpp>
 
 namespace limestone::api {

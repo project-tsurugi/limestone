@@ -32,7 +32,7 @@ protected:
     const std::string value = "this is a value";
     const std::string key2 = "this is a key2";
     const std::string value2 = "this is a value2";
-    const std::vector<limestone::api::blob_id_type> large_objects = {314, 1592, 65358};
+    const std::vector<limestone::api::blob_id_type> blob_ids = {314, 1592, 65358};
     const limestone::api::storage_id_type storage_id = 12345;
     const limestone::api::write_version_type write_version = limestone::api::write_version_type(67898, 76543);
     const limestone::api::write_version_type write_version2 = limestone::api::write_version_type(2236, 1732);
@@ -66,7 +66,7 @@ protected:
         FILE* ostrm = fopen(file_path.c_str(), "a");
         limestone::api::log_entry::begin_session(ostrm, epoch_id);
         limestone::api::log_entry::write(ostrm, storage_id, key, value, write_version);
-        limestone::api::log_entry::write_with_blob(ostrm, storage_id, key2, value2, write_version2, large_objects);
+        limestone::api::log_entry::write_with_blob(ostrm, storage_id, key2, value2, write_version2, blob_ids);
         limestone::api::log_entry::end_session(ostrm, epoch_id + 1);
         fclose(ostrm);
     }
@@ -116,7 +116,7 @@ protected:
         log_entry_normal_with_blob_.write_version(buf_version2);
         EXPECT_EQ(buf_version2, write_version2);
 
-        EXPECT_EQ(log_entry_normal_with_blob_.large_objects(), large_objects);
+        EXPECT_EQ(log_entry_normal_with_blob_.get_blob_ids(), blob_ids);
 
         EXPECT_EQ(log_entry_end_.type(), limestone::api::log_entry::entry_type::marker_end);
         EXPECT_EQ(log_entry_end_.epoch_id(), epoch_id + 1);

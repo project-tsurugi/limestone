@@ -65,7 +65,7 @@ protected:
 
     void add_detached_pwals(const std::initializer_list<std::string>& pwals) {
         detached_pwals_.insert(pwals.begin(), pwals.end());
-        compaction_catalog_->update_catalog_file(0, compacted_files_, detached_pwals_);
+        compaction_catalog_->update_catalog_file(0, 0, compacted_files_, detached_pwals_);
     }
 
     std::unique_ptr<compaction_catalog> compaction_catalog_;

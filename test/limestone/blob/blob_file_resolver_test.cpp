@@ -64,4 +64,43 @@ TEST_F(blob_file_resolver_test, handles_multiple_blob_ids) {
     }
 }
 
+// Test for get_blob_root()
+TEST_F(blob_file_resolver_test, get_blob_root_returns_correct_directory) {
+    boost::filesystem::path expected_root = boost::filesystem::path(base_directory) / "blob";
+    EXPECT_EQ(resolver_->get_blob_root(), expected_root);
+}
+
+// Test for is_blob_file() with valid file names.
+TEST_F(blob_file_resolver_test, is_blob_file_returns_true_for_valid_filename) {
+    // Example of a valid filename: 16-digit hexadecimal + ".blob"
+    std::string valid_filename = "000000000001e240.blob"; // blob_id 123456
+    boost::filesystem::path valid_path = boost::filesystem::path("/some/path") / valid_filename;
+    EXPECT_TRUE(resolver_->is_blob_file(valid_path));
+}
+
+// Test for is_blob_file() with invalid file names.
+TEST_F(blob_file_resolver_test, is_blob_file_returns_false_for_invalid_filename) {
+    // Insufficient digits
+    boost::filesystem::path invalid_path1 = boost::filesystem::path("/some/path") / "0001e240.blob";
+    EXPECT_FALSE(resolver_->is_blob_file(invalid_path1));
+
+    // Different extension
+    boost::filesystem::path invalid_path2 = boost::filesystem::path("/some/path") / "000000000001e240.data";
+    EXPECT_FALSE(resolver_->is_blob_file(invalid_path2));
+
+    // Contains non-hexadecimal character
+    boost::filesystem::path invalid_path3 = boost::filesystem::path("/some/path") / "000000000001e24G.blob";
+    EXPECT_FALSE(resolver_->is_blob_file(invalid_path3));
+}
+
+// Test for extract_blob_id()
+TEST_F(blob_file_resolver_test, extract_blob_id_returns_correct_id) {
+    // Example of a valid filename
+    std::string filename = "000000000001e240.blob"; // blob_id 123456 = 0x1e240
+    boost::filesystem::path file_path = boost::filesystem::path("/some/path") / filename;
+    blob_id_type extracted = resolver_->extract_blob_id(file_path);
+    blob_id_type expected = 123456; // 0x1e240
+    EXPECT_EQ(extracted, expected);
+}
+
 }  // namespace limestone::testing

@@ -44,6 +44,7 @@
 namespace limestone::internal {
     class compaction_catalog;
     class blob_file_resolver; 
+    class blob_file_garbage_collector;
 }
 namespace limestone::api {
 
@@ -294,6 +295,7 @@ protected:  // for tests
     auto epoch_id_to_be_recorded_for_tests() const noexcept { return epoch_id_to_be_recorded_.load(); }
     auto epoch_id_record_finished_for_tests() const noexcept { return epoch_id_record_finished_.load(); }
     auto epoch_id_switched_for_tests() const noexcept { return epoch_id_switched_.load(); }
+    auto next_blob_id_for_tests() const noexcept { return next_blob_id_.load(); }
     auto& files_for_tests() const noexcept { return files_; }
     void rotate_epoch_file_for_tests() { rotate_epoch_file(); }
     void set_next_blob_id_for_tests(blob_id_type next_blob_id) noexcept { next_blob_id_ = next_blob_id; }
@@ -427,12 +429,12 @@ private:
     void check_before_ready(std::string_view func) const noexcept;
 
     /**
-     * @brief create snapshot from log files stored in the location directory
-     * @details file name of snapshot to be created is snapshot::file_name_ which is stored in location_ / snapshot::subdirectory_name_.
-     * @param from the location of log files
-     * @attention this function is not thread-safe.
+     * @brief Creates a snapshot of the current state and retrieves the maximum blob ID.
+     *
+     * This function creates a snapshot of the current state of the datastore and returns the maximum blob ID present in the datastore.
+     * It is useful for ensuring data consistency and for retrieving the highest blob ID for further processing or reference.
      */
-    void create_snapshot();
+    blob_id_type create_snapshot_and_get_max_blob_id();
 
 
     /**
@@ -470,6 +472,8 @@ private:
     std::set<blob_id_type> persistent_blob_ids_;
 
     std::mutex persistent_blob_ids_mutex_;
+
+    std::unique_ptr<limestone::internal::blob_file_garbage_collector> blob_file_garbage_collector_;
 
 };
 

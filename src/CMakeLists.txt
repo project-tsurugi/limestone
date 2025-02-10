@@ -14,7 +14,7 @@ set_target_properties(${package_name}
 
 if(${RECOVERY_SORTER_KVSLIB_UPPERCASE} STREQUAL "ROCKSDB")
     set(sort_lib RocksDB::RocksDB)
-    target_compile_options(${package_name} PRIVATE -DSORT_METHOD_USE_ROCKSDB)
+    target_compile_options(${package_name} PUBLIC -DSORT_METHOD_USE_ROCKSDB)
 else()
     set(sort_lib leveldb)
 endif()

@@ -18,15 +18,18 @@
 #include <mutex>
 #include <map>
 #include <optional>
+#include <atomic>
 #include "sortdb_wrapper.h" 
 #include <limestone/api/write_version_type.h>
 #include <limestone/api/storage_id_type.h>
+#include <limestone/api/blob_id_type.h>
 
 namespace limestone::internal {
 
 using api::sortdb_wrapper;
 using api::storage_id_type;
 using api::write_version_type;
+using api::blob_id_type;
 
 class sorting_context {
 public:
@@ -40,6 +43,10 @@ public:
 
     // public getter
     sortdb_wrapper* get_sortdb();
+    [[nodiscard]] blob_id_type get_max_blob_id() const;
+
+    // blob_id methods
+    void update_max_blob_id(const std::vector<blob_id_type>&);
 
     // clear_storage methods
     [[nodiscard]] std::map<storage_id_type, write_version_type> get_clear_storage() const;
@@ -50,6 +57,8 @@ private:
     std::unique_ptr<sortdb_wrapper> sortdb;
     std::mutex mtx_clear_storage;
     std::map<storage_id_type, write_version_type> clear_storage;
-};
+    
+    std::atomic<blob_id_type> max_blob_id_{0};
+};;
 
 } // namespace limestone::internal

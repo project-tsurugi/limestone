@@ -18,10 +18,12 @@
 #include <boost/filesystem.hpp>
 #include "compaction_catalog.h"
 #include "limestone/api/limestone_exception.h"
+#include "limestone/api/blob_file.h"
 
 namespace limestone::testing {
 
 using limestone::api::epoch_id_type;
+using limestone::api::blob_id_type;
 using limestone::api::limestone_io_exception;
 using limestone::api::limestone_exception;
 using limestone::internal::file_operations;
@@ -155,27 +157,31 @@ TEST_F(compaction_catalog_test, update_catalog) {
     testable_compaction_catalog catalog(test_dir);
 
     epoch_id_type max_epoch_id = 123;
+    blob_id_type max_blob_id = 456;
     std::set<compacted_file_info> compacted_files = {
         {"file1", 1},
         {"file2", 2}
     };
     std::set<std::string> detached_pwals = {"pwal1", "pwal2"};
 
-    catalog.update_catalog_file(max_epoch_id, compacted_files, detached_pwals);
+    catalog.update_catalog_file(max_epoch_id, max_blob_id, compacted_files, detached_pwals);
     EXPECT_EQ(catalog.get_max_epoch_id(), max_epoch_id);
+    EXPECT_EQ(catalog.get_max_blob_id(), max_blob_id);
     EXPECT_EQ(catalog.get_compacted_files(), compacted_files);
     EXPECT_EQ(catalog.get_detached_pwals(), detached_pwals);
 
     // update existing catalog
 
     max_epoch_id = 456;
+    max_blob_id = 789;
     compacted_files = {
         {"file3", 3},
         {"file4", 4}
     };
     detached_pwals = {};
-    catalog.update_catalog_file(max_epoch_id, compacted_files, detached_pwals);
+    catalog.update_catalog_file(max_epoch_id, max_blob_id, compacted_files, detached_pwals);
     EXPECT_EQ(catalog.get_max_epoch_id(), max_epoch_id);
+    EXPECT_EQ(catalog.get_max_blob_id(), max_blob_id);
     EXPECT_EQ(catalog.get_compacted_files(), compacted_files);
     EXPECT_EQ(catalog.get_detached_pwals(), detached_pwals);
 
@@ -191,7 +197,7 @@ TEST_F(compaction_catalog_test, update_catalog) {
     EXPECT_THROW(
         {
             try {
-                catalog.update_catalog_file(max_epoch_id, compacted_files, detached_pwals);
+                catalog.update_catalog_file(max_epoch_id, max_blob_id, compacted_files, detached_pwals);
             } catch (const limestone_io_exception& e) {
                 EXPECT_EQ(e.error_code(), EACCES);  
                 throw;
@@ -211,7 +217,7 @@ TEST_F(compaction_catalog_test, update_catalog) {
     EXPECT_THROW(
         {
             try {
-                catalog.update_catalog_file(max_epoch_id, compacted_files, detached_pwals);
+                catalog.update_catalog_file(max_epoch_id, max_blob_id, compacted_files, detached_pwals);
             } catch (const limestone_io_exception& e) {
                 EXPECT_EQ(e.error_code(), EACCES);  
                 throw;
@@ -228,7 +234,7 @@ TEST_F(compaction_catalog_test, update_catalog) {
         }
     };
     catalog.set_file_operations(std::make_unique<mock_fclose>());
-    catalog.update_catalog_file(max_epoch_id, compacted_files, detached_pwals);  // no exception expected
+    catalog.update_catalog_file(max_epoch_id, max_blob_id, compacted_files, detached_pwals);  // no exception expected
 
     // file_ops_->fopen failure
     class mock_fopen : public limestone::internal::real_file_operations {
@@ -242,7 +248,7 @@ TEST_F(compaction_catalog_test, update_catalog) {
     EXPECT_THROW(
         {
             try {
-                catalog.update_catalog_file(max_epoch_id, compacted_files, detached_pwals);
+                catalog.update_catalog_file(max_epoch_id, max_blob_id, compacted_files, detached_pwals);
             } catch (const limestone_io_exception& e) {
                 EXPECT_EQ(e.error_code(), ENOSPC);  
                 throw;
@@ -266,7 +272,7 @@ TEST_F(compaction_catalog_test, update_catalog) {
     EXPECT_THROW(
         {
             try {
-                catalog.update_catalog_file(max_epoch_id, compacted_files, detached_pwals);
+                catalog.update_catalog_file(max_epoch_id, max_blob_id, compacted_files, detached_pwals);
             } catch (const limestone_io_exception& e) {
                 EXPECT_EQ(e.error_code(), ENOSPC);  
                 throw;
@@ -288,7 +294,7 @@ TEST_F(compaction_catalog_test, update_catalog) {
     EXPECT_THROW(
         {
             try {
-                catalog.update_catalog_file(max_epoch_id, compacted_files, detached_pwals);
+                catalog.update_catalog_file(max_epoch_id, max_blob_id, compacted_files, detached_pwals);
             } catch (const limestone_exception& e) {
                 EXPECT_EQ(e.error_code(), 0);  
                 throw;
@@ -308,7 +314,7 @@ TEST_F(compaction_catalog_test, update_catalog) {
     EXPECT_THROW(
         {
             try {
-                catalog.update_catalog_file(max_epoch_id, compacted_files, detached_pwals);
+                catalog.update_catalog_file(max_epoch_id, max_blob_id, compacted_files, detached_pwals);
             } catch (const limestone_io_exception& e) {
                 EXPECT_EQ(e.error_code(), ENOSPC);  
                 throw;
@@ -328,7 +334,7 @@ TEST_F(compaction_catalog_test, update_catalog) {
     EXPECT_THROW(
         {
             try {
-                catalog.update_catalog_file(max_epoch_id, compacted_files, detached_pwals);
+                catalog.update_catalog_file(max_epoch_id, max_blob_id, compacted_files, detached_pwals);
             } catch (const limestone_io_exception& e) {
                 EXPECT_EQ(e.error_code(), EBADF);  
                 throw;
@@ -348,7 +354,7 @@ TEST_F(compaction_catalog_test, update_catalog) {
     EXPECT_THROW(
         {
             try {
-                catalog.update_catalog_file(max_epoch_id, compacted_files, detached_pwals);
+                catalog.update_catalog_file(max_epoch_id, max_blob_id, compacted_files, detached_pwals);
             } catch (const limestone_io_exception& e) {
                 EXPECT_EQ(e.error_code(), ENOSPC);  
                 throw;
@@ -361,17 +367,19 @@ TEST_F(compaction_catalog_test, update_and_load_catalog_file) {
     testable_compaction_catalog catalog(test_dir);
 
     epoch_id_type max_epoch_id = 123;
+    blob_id_type max_blob_id = 456;
     std::set<compacted_file_info> compacted_files = {
         {"file1", 1},
         {"file2", 2}
     };
     std::set<std::string> detached_pwals = {"pwal1", "pwal2"};
 
-    catalog.update_catalog_file(max_epoch_id, compacted_files, detached_pwals);
+    catalog.update_catalog_file(max_epoch_id, max_blob_id, compacted_files, detached_pwals);
 
     compaction_catalog loaded_catalog = compaction_catalog::from_catalog_file(test_dir);
 
     EXPECT_EQ(loaded_catalog.get_max_epoch_id(), max_epoch_id);
+    EXPECT_EQ(loaded_catalog.get_max_blob_id(), max_blob_id);
     EXPECT_EQ(loaded_catalog.get_compacted_files(), compacted_files);
     EXPECT_EQ(loaded_catalog.get_detached_pwals(), detached_pwals);
 
@@ -388,17 +396,19 @@ TEST_F(compaction_catalog_test, update_and_load_catalog_file) {
     };
 
     max_epoch_id = 456;
+    max_blob_id = 789;
     compacted_files = {
         {"file3", 3},
         {"file4", 4}
     };
     detached_pwals = {};
-    catalog.update_catalog_file(max_epoch_id, compacted_files, detached_pwals);
+    catalog.update_catalog_file(max_epoch_id, max_blob_id, compacted_files, detached_pwals);
     catalog.set_file_operations(std::make_unique<mock_fwrite_one_byte>());
-    catalog.update_catalog_file(max_epoch_id, compacted_files, detached_pwals);
+    catalog.update_catalog_file(max_epoch_id, max_blob_id, compacted_files, detached_pwals);
 
     loaded_catalog = compaction_catalog::from_catalog_file(test_dir);
     EXPECT_EQ(loaded_catalog.get_max_epoch_id(), max_epoch_id);
+    EXPECT_EQ(loaded_catalog.get_max_blob_id(), max_blob_id);
     EXPECT_EQ(loaded_catalog.get_compacted_files(), compacted_files);
     EXPECT_EQ(loaded_catalog.get_detached_pwals(), detached_pwals);
 }
@@ -587,13 +597,14 @@ TEST_F(compaction_catalog_test, load_from_backup) {
         compaction_catalog catalog(test_dir);
 
         epoch_id_type max_epoch_id = 123;
+        blob_id_type blob_id = 456;
         std::set<compacted_file_info> compacted_files = {
             {"file1", 1},
             {"file2", 2}
         };
         std::set<std::string> detached_pwals = {"pwal1", "pwal2"};
 
-        catalog.update_catalog_file(max_epoch_id, compacted_files, detached_pwals);
+        catalog.update_catalog_file(max_epoch_id, blob_id, compacted_files, detached_pwals);
 
     }
 
@@ -604,6 +615,7 @@ TEST_F(compaction_catalog_test, load_from_backup) {
     compaction_catalog loaded_catalog = compaction_catalog::from_catalog_file(test_dir);
 
     EXPECT_EQ(loaded_catalog.get_max_epoch_id(), 123);
+    EXPECT_EQ(loaded_catalog.get_max_blob_id(), 456);
     EXPECT_EQ(loaded_catalog.get_compacted_files().size(), 2);
     EXPECT_EQ(loaded_catalog.get_detached_pwals().size(), 2);
 }

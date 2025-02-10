@@ -34,6 +34,7 @@
 #include "compaction_catalog.h"
 #include "blob_file_resolver.h"
 #include "blob_pool_impl.h"
+#include "blob_file_garbage_collector.h"
 
 namespace limestone::api {
 using namespace limestone::internal;
@@ -112,7 +113,14 @@ datastore::datastore(configuration const& conf) : location_(conf.data_locations_
         LOG(INFO) << "/:limestone:config:datastore setting the number of recover process thread = " << recover_max_parallelism_;
 
         blob_file_resolver_ = std::make_unique<blob_file_resolver>(location_);
-
+        auto blob_root = blob_file_resolver_->get_blob_root();
+        const bool blob_root_exists = boost::filesystem::exists(blob_root, error);
+        if (!blob_root_exists || error) {
+            const bool result_mkdir = boost::filesystem::create_directories(blob_root, error);
+            if (!result_mkdir || error) {
+                LOG_AND_THROW_IO_EXCEPTION("fail to create directory: " + blob_root.string(), error);
+            }
+        }
         VLOG_LP(log_debug) << "datastore is created, location = " << location_.string();
     } catch (...) {
         HANDLE_EXCEPTION_AND_ABORT();
@@ -123,6 +131,9 @@ datastore::~datastore() noexcept{
     stop_online_compaction_worker();
     if (online_compaction_worker_future_.valid()) {
         online_compaction_worker_future_.wait();
+    }
+    if(blob_file_garbage_collector_) {
+        blob_file_garbage_collector_->shutdown();
     }
 }
 
@@ -181,11 +192,17 @@ void datastore::write_epoch_to_file(epoch_id_type epoch_id) {
     TRACE_END;
 }
 
-
-
 void datastore::ready() {
     try {
-        create_snapshot();
+        blob_id_type max_blob_id =  create_snapshot_and_get_max_blob_id();
+        if (max_blob_id < compaction_catalog_->get_max_blob_id()) {
+            max_blob_id = compaction_catalog_->get_max_blob_id();
+        }
+        blob_file_garbage_collector_ = std::make_unique<blob_file_garbage_collector>(*blob_file_resolver_);
+        blob_file_garbage_collector_->scan_blob_files(max_blob_id);
+
+        next_blob_id_.store(max_blob_id + 1);
+
         online_compaction_worker_future_ = std::async(std::launch::async, &datastore::online_compaction_worker, this);
         if (epoch_id_switched_.load() != 0) {
             write_epoch_callback_(epoch_id_informed_.load());
@@ -375,6 +392,11 @@ std::future<void> datastore::shutdown() noexcept {
         } else {
             fd_for_flock_ = -1;
         }
+    }
+
+    if (blob_file_garbage_collector_) {
+        blob_file_garbage_collector_->shutdown();
+        blob_file_garbage_collector_.reset();
     }
 
     return std::async(std::launch::async, [] {
@@ -662,7 +684,7 @@ void datastore::compact_with_online() {
     ensure_directory_exists(compaction_temp_dir);
 
     // create a compacted file
-    create_compact_pwal(location_, compaction_temp_dir, recover_max_parallelism_, need_compaction_filenames);
+    blob_id_type max_blob_id = create_compact_pwal_and_get_max_blob_id(location_, compaction_temp_dir, recover_max_parallelism_, need_compaction_filenames);
 
     // handle existing compacted file
     handle_existing_compacted_file(location_);
@@ -691,7 +713,10 @@ void datastore::compact_with_online() {
     // update compaction catalog
     compacted_file_info compacted_file_info{compacted_file.filename().string(), 1};
     detached_pwals.erase(compacted_file.filename().string());
-    compaction_catalog_->update_catalog_file(result.get_epoch_id(), {compacted_file_info}, detached_pwals);
+    if (compaction_catalog_->get_max_blob_id() > max_blob_id) {
+        max_blob_id = compaction_catalog_->get_max_blob_id();
+    }
+    compaction_catalog_->update_catalog_file(result.get_epoch_id(), max_blob_id, {compacted_file_info}, detached_pwals);
     add_file(compacted_file);
 
     // remove pwal_0000.compacted.prev
