@@ -25,35 +25,32 @@
  
  class log_entry_comparator {
  public:
-     /// @brief Compare two log_entry objects in descending order.
+     /// @brief Compare two log_entry objects.
      ///
-     /// The comparison is performed first using the write_version of each log_entry,
-     /// which provides its own comparison functionality. If the write_versions are equal,
-     /// then the key portion (excluding the storage_id prefix) is compared in descending order.
+     /// First, compare the key_sid() as a binary string.
+     /// If they differ, the one with the lexicographically smaller key_sid() comes first.
+     /// If key_sid() values are identical, then compare write_version in descending order.
      bool operator()(const log_entry& a, const log_entry& b) const {
-         write_version_type wa, wb;
-         // Obtain the write_version information using the getter method.
-         a.write_version(wa);
-         b.write_version(wb);
- 
-         // Use the write_version_type's built-in comparison for descending order.
-         // If the write_versions differ, the one with the larger value should come first.
-         if (!(wa == wb)) {
-             return wb < wa; // Returns true if 'a' has a larger write_version than 'b'.
-         }
- 
-         // If write_versions are equal, compare the keys (excluding the storage_id prefix).
+         // Compare key_sid() as a binary string (the entire string)
          std::string_view key_a(a.key_sid());
          std::string_view key_b(b.key_sid());
-         key_a.remove_prefix(sizeof(storage_id_type)); // Remove the storage_id portion.
-         key_b.remove_prefix(sizeof(storage_id_type));
- 
-         // Compare the keys in descending order.
-         return key_b < key_a;
+         if (key_a != key_b) {
+             return key_a < key_b;
+         }
+         // If keys are identical, then compare write_version in descending order.
+         write_version_type wa;
+         write_version_type wb;
+         a.write_version(wa);
+         b.write_version(wb);
+         if (!(wa == wb)) {
+             return wb < wa;  // Descending: the entry with the higher write_version comes first.
+         }
+         return false;
      }
  };
  
  } // namespace limestone::internal
+ 
 
 
 

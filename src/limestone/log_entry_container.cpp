@@ -83,19 +83,19 @@
  
  // Static merge function using a multi-way merge algorithm with Boost's binomial_heap.
  log_entry_container log_entry_container::merge_sorted_collections(
-     std::vector<log_entry_container>& collections) {
+     std::vector<log_entry_container>& container_list) {
  
      log_entry_container merged;
  
      // First, ensure that each collection is sorted.
-     for (auto& coll : collections) {
-         coll.sort(); // This will ensure that each collection is sorted.
+     for (auto& container : container_list) {
+         container.sort(); // This will ensure that each collection is sorted.
      }
  
      // Reserve capacity for the merged entries.
      std::size_t total_size = 0;
-     for (const auto& coll : collections) {
-         total_size += coll.size();
+     for (const auto& container : container_list) {
+         total_size += container.size();
      }
      // If total_size is 0, then all collections are empty; return an empty merged collection.
      if (total_size == 0) {
@@ -108,9 +108,9 @@
      boost::heap::binomial_heap<iterator_range, boost::heap::compare<iterator_range_compare>> heap;
  
      // Push non-empty collections into the heap.
-     for (auto& coll : collections) {
-         if (coll.size() > 0) {
-             iterator_range range { coll.begin(), coll.end() };
+     for (auto& container : container_list) {
+         if (container.size() > 0) {
+             iterator_range range { container.begin(), container.end() };
              heap.push(range);
          }
      }
@@ -136,8 +136,8 @@
      merged.sorted_ = true;
  
      // Clear the input collections as specified.
-     for (auto& coll : collections) {
-         coll.clear();
+     for (auto& container : container_list) {
+         container.clear();
      }
  
      return merged;
