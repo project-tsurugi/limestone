@@ -277,7 +277,8 @@ public:
      * @details This version comprises the oldest accessible snapshot, that is,
      *    the datastore may delete anything older than the version included in this snapshot.
      * @details The boundary version must be monotonic, that is,
-     *    it must be greater than or equal to the previous boundary version.     * @param version the target boundary version
+     *    it must be greater than or equal to the previous boundary version.   
+     * @param version the target boundary version
      * @attention this function should be called after the ready() is called.
      * @see switch_safe_snapshot()
      * @note the specified version must be smaller than or equal to the version that was told by the switch_safe_snapshot().
@@ -285,10 +286,34 @@ public:
     void switch_available_boundary_version(write_version_type version);
 
 
+    /**
+     * @brief Adds a list of persistent blob IDs to the datastore.
+     *
+     * This function takes a vector of blob IDs and adds them to the datastore,
+     * ensuring that they are stored persistently.
+     *
+     * NOTE: This method is intended for internal use only. It is used by blob_pool::release
+     * to determine whether a given blob ID should be deleted. Once a blob ID is confirmed
+     * as not subject to deletion, its entry is removed from the persistent tracking.
+     *
+     * @param blob_ids A vector containing the blob IDs to be added.
+     */
     void add_persistent_blob_ids(const std::vector<blob_id_type>& blob_ids);
 
+    /**
+     * @brief Checks and removes persistent blob IDs from the given list.
+     *
+     * This function takes a vector of blob IDs and checks for their persistence.
+     * It is used by blob_pool::release to determine whether a given blob ID should be deleted.
+     * Once a blob ID is confirmed as not subject to deletion, its entry is removed from the persistent tracking.
+     *
+     * NOTE: This method is intended for internal use only.
+     *
+     * @param blob_ids A vector of blob IDs to be checked and potentially removed.
+     * @return A vector of blob IDs that were persistent and have been removed.
+     */
     std::vector<blob_id_type> check_and_remove_persistent_blob_ids(const std::vector<blob_id_type>& blob_ids);
-    
+
 protected:  // for tests
     auto& log_channels_for_tests() const noexcept { return log_channels_; }
     auto epoch_id_informed_for_tests() const noexcept { return epoch_id_informed_.load(); }
