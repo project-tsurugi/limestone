@@ -98,8 +98,8 @@ extern constexpr const std::string_view data_case1_pwal1 =
 
 extern constexpr const std::string_view data_case1_pwalcompact =
     "\x02\x00\x00\x00\x00\x00\x00\x00\x00"
-    "\x01\x01\x00\x00\x00\x01\x00\x00\x00" "storage1" "A" "\0\0\0\0\0\0\0\0" "\0\0\0\0\0\0\0\0" "1"  // normal_entry
-    "\x01\x01\x00\x00\x00\x01\x00\x00\x00" "storage1" "B" "\0\0\0\0\0\0\0\0" "\0\0\0\0\0\0\0\0" "0"  // normal_entry
+    "\x01\x01\x00\x00\x00\x01\x00\x00\x00" "storage1" "A" "\xf1\0\0\0\0\0\0\0" "verminor" "1"  // normal_entry
+    "\x01\x01\x00\x00\x00\x01\x00\x00\x00" "storage1" "B" "\xf0\0\0\0\0\0\0\0" "verminor" "0"  // normal_entry
     // XXX: epoch footer...
     ""sv;
 

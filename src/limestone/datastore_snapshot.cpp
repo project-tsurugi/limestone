@@ -319,8 +319,7 @@ blob_id_type create_compact_pwal_and_get_max_blob_id(
         LOG_AND_THROW_IO_EXCEPTION("cannot create snapshot file (" + snapshot_file.string() + ")", errno);
     }
     setvbuf(ostrm, nullptr, _IOFBF, 128L * 1024L);  // NOLINT, NB. glibc may ignore size when _IOFBF and buffer=NULL
-
-    log_entry::begin_session(ostrm, max_appeared_epoch);
+    log_entry::begin_session(ostrm, 0);
     
     auto write_snapshot_entry = [&ostrm](
         log_entry::entry_type entry_type, 
