@@ -58,7 +58,7 @@ public:
     ///
     /// The entries are sorted in descending order based on each log_entry's key_sid().
     /// After sorting is completed, the internal sorted flag is set to true.
-    void sort();
+    void sort_descending();
 
     /// @brief Checks whether the container is currently sorted.
     /// @return true if the container is sorted; false otherwise.

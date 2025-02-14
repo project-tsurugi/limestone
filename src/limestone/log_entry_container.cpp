@@ -52,11 +52,12 @@
  
  // ----- Sorting Functions -----
  
- void log_entry_container::sort() {
-    // Only sort if the collection is not already sorted.
+ void log_entry_container::sort_descending() {
     if (!sorted_) {
-        // Sort using log_entry_comparator.
-        std::sort(entries_.begin(), entries_.end(), log_entry_comparator());
+        // Reverse the order by swapping the operands in the comparator.
+        std::sort(entries_.begin(), entries_.end(), [](const log_entry& a, const log_entry& b) {
+            return log_entry_comparator()(b, a);
+        });
         sorted_ = true;
     }
 }
@@ -89,7 +90,7 @@
  
      // First, ensure that each collection is sorted.
      for (auto& container : container_list) {
-         container.sort(); // This will ensure that each collection is sorted.
+         container.sort_descending(); // This will ensure that each collection is sorted.
      }
  
      // Reserve capacity for the merged entries.

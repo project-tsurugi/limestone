@@ -11,30 +11,28 @@
 #include "log_entry_comparator.h"
 
 // Use the appropriate namespaces for the API and internal classes.
-using namespace limestone::api;         // For log_entry, storage_id_type, write_version_type, epoch_id_type, etc.
-using namespace limestone::internal;    // For log_entry_comparator
+using namespace limestone::api;      // For log_entry, storage_id_type, write_version_type, epoch_id_type, etc.
+using namespace limestone::internal; // For log_entry_comparator
 
 namespace limestone {
 namespace testing {
 
-// Test fixture renamed to avoid symbol collisions with datastore_blob_test.
-class log_entry_comparator_unit_test : public ::testing::Test {
+// Test fixture to avoid symbol collisions with datastore_blob_test.
+class log_entry_comparator_test : public ::testing::Test {
 protected:
     std::string temp_dir;
     int file_counter = 0;
 
-    // Set up a temporary directory named "/tmp/limestone_log_entry_comparator_test"
-    // after ensuring its parent directory is writable.
+    // Set up a temporary directory "/tmp/limestone_log_entry_comparator_test"
+    // after ensuring that its parent directory is writable.
     void SetUp() override {
-        // Change permissions and remove any previous test directory.
-        if (system("chmod -R a+rwx /tmp") != 0) {
-            std::cerr << "cannot change permission" << std::endl;
-        }
+        // Remove any previous test directory.
         if (system("rm -rf /tmp/limestone_log_entry_comparator_test") != 0) {
-            std::cerr << "cannot remove directory /tmp/limestone_log_entry_comparator_test" << std::endl;
+            std::cerr << "Cannot remove directory /tmp/limestone_log_entry_comparator_test" << std::endl;
         }
+        // Create the test directory.
         if (system("mkdir -p /tmp/limestone_log_entry_comparator_test") != 0) {
-            std::cerr << "cannot make directory /tmp/limestone_log_entry_comparator_test" << std::endl;
+            std::cerr << "Cannot create directory /tmp/limestone_log_entry_comparator_test" << std::endl;
         }
         temp_dir = "/tmp/limestone_log_entry_comparator_test";
         file_counter = 0;
@@ -81,45 +79,91 @@ protected:
     }
 };
 
-// -----------------------------------------------------------------------------
-// New comparator specification:
-//
-// 1. First, compare key_sid() as a binary string (the entire string as stored).
-//    - If a.key_sid() != b.key_sid(), then the one with the lexicographically smaller
-//      key_sid() comes first.
-// 2. If key_sid() values are completely equal, then compare write_version in descending order.
-//    (That is, the entry with the higher write_version comes first.)
-// -----------------------------------------------------------------------------
-
-// Test case 1: Different write_versions but identical keys.
-// Since keys are equal, ordering is determined by write_version in descending order.
-TEST_F(log_entry_comparator_unit_test, different_write_versions) {
-    // Use the same key and value for both entries.
-    storage_id_type storage = 100;
+// Test case: Different minor numbers with the same epoch.
+TEST_F(log_entry_comparator_test, different_minor_numbers) {
+    storage_id_type storage = 400;
     std::string key = "testKey";
     std::string value = "testValue";
+    
+    // Both entries have the same epoch (10) but different minor numbers.
+    // In ascending order, write_version (10,1) is less than (10,2).
+    write_version_type wv_low(10, 1);  // Lower minor number
+    write_version_type wv_high(10, 2); // Higher minor number
 
-    // Create write_version_type instances via the public constructor.
-    write_version_type wv1(10, 1); // Higher version
-    write_version_type wv2(5, 1);  // Lower version
-
-    // Both entries have the same key_sid.
-    log_entry entry1 = create_normal_log_entry(storage, key, value, wv1);
-    log_entry entry2 = create_normal_log_entry(storage, key, value, wv2);
+    log_entry entry_low = create_normal_log_entry(storage, key, value, wv_low);
+    log_entry entry_high = create_normal_log_entry(storage, key, value, wv_high);
 
     log_entry_comparator comp;
-    // Since keys are equal, ordering is determined by write_version in descending order.
-    EXPECT_TRUE(comp(entry1, entry2));
+    // Since keys are equal, ordering is determined by write_version in ascending order.
+    EXPECT_TRUE(comp(entry_low, entry_high));
+    EXPECT_FALSE(comp(entry_high, entry_low));
+}
+
+// Test case: Different epochs with the same minor number.
+TEST_F(log_entry_comparator_test, different_epoch_numbers) {
+    storage_id_type storage = 500;
+    std::string key = "testKey";
+    std::string value = "testValue";
+    
+    // Both entries have the same minor number (1) but different epochs.
+    // In ascending order, write_version (10,1) is less than (20,1).
+    write_version_type wv_low(10, 1);  // Lower epoch
+    write_version_type wv_high(20, 1); // Higher epoch
+
+    log_entry entry_low = create_normal_log_entry(storage, key, value, wv_low);
+    log_entry entry_high = create_normal_log_entry(storage, key, value, wv_high);
+
+    log_entry_comparator comp;
+    // Since keys are equal, ordering is determined by write_version in ascending order.
+    EXPECT_TRUE(comp(entry_low, entry_high));
+    EXPECT_FALSE(comp(entry_high, entry_low));
+}
+
+// Test case: Equal epochs and minor numbers.
+TEST_F(log_entry_comparator_test, equal_epoch_and_minor) {
+    storage_id_type storage = 600;
+    std::string key = "testKey";
+    std::string value = "testValue";
+    
+    // Both entries have identical write_versions.
+    write_version_type wv(15, 3);
+
+    log_entry entry1 = create_normal_log_entry(storage, key, value, wv);
+    log_entry entry2 = create_normal_log_entry(storage, key, value, wv);
+
+    log_entry_comparator comp;
+    // When write_version and keys are equal, neither entry is considered less than the other.
+    EXPECT_FALSE(comp(entry1, entry2));
     EXPECT_FALSE(comp(entry2, entry1));
 }
 
-// Test case 2: Equal write_versions but different keys.
-// Ordering is solely determined by key_sid() using lexicographical (binary) ascending order.
-TEST_F(log_entry_comparator_unit_test, equal_write_versions_different_keys) {
+// Test case: Verify that epoch is prioritized over minor in write_version comparison.
+TEST_F(log_entry_comparator_test, epoch_priority_over_minor) {
+    storage_id_type storage = 700;
+    std::string key = "testKey";
+    std::string value = "testValue";
+    
+    // Create write_versions:
+    // One entry with (epoch=10, minor=100) and another with (epoch=11, minor=1).
+    // Since epoch is prioritized, (10,100) is less than (11,1) in ascending order.
+    write_version_type wv_low_epoch(10, 100);
+    write_version_type wv_high_epoch(11, 1);
+
+    log_entry entry_low_epoch = create_normal_log_entry(storage, key, value, wv_low_epoch);
+    log_entry entry_high_epoch = create_normal_log_entry(storage, key, value, wv_high_epoch);
+
+    log_entry_comparator comp;
+    EXPECT_TRUE(comp(entry_low_epoch, entry_high_epoch));
+    EXPECT_FALSE(comp(entry_high_epoch, entry_low_epoch));
+}
+
+// Test case: Equal write_versions but different keys.
+// Ordering is determined solely by key_sid() using lexicographical order (ascending).
+TEST_F(log_entry_comparator_test, equal_write_versions_different_keys) {
     storage_id_type storage = 200;
-    // Supply different user key portions.
-    std::string key1 = "zzz";  // This will be part of key_sid.
-    std::string key2 = "aaa";  // This will be part of key_sid.
+    // Use different user keys.
+    std::string key1 = "zzz";  // Part of key_sid.
+    std::string key2 = "aaa";  // Part of key_sid.
     std::string value = "testValue";
     write_version_type wv(7, 3);
 
@@ -127,19 +171,14 @@ TEST_F(log_entry_comparator_unit_test, equal_write_versions_different_keys) {
     log_entry entry2 = create_normal_log_entry(storage, key2, value, wv);
 
     log_entry_comparator comp;
-    // Since keys are different and write_version is equal,
-    // the one with the lexicographically smaller key_sid() comes first.
-    // Assuming that log_entry::write() stores the key as (storage_id + key),
-    // and that the binary comparison reflects the user key,
-    // "aaa" < "zzz" so entry2 should come before entry1.
+    // Assuming key_sid() includes storage and key, "aaa" is lexicographically less than "zzz".
     EXPECT_TRUE(comp(entry2, entry1));
     EXPECT_FALSE(comp(entry1, entry2));
 }
 
-// Test case 3: Equal write_versions and equal keys.
-// In this case, both key_sid() and write_version are identical,
-// so the comparator should return false for both orderings.
-TEST_F(log_entry_comparator_unit_test, equal_write_versions_equal_keys) {
+// Test case: Equal write_versions and equal keys.
+// When both key_sid() and write_version are identical, neither entry is less than the other.
+TEST_F(log_entry_comparator_test, equal_write_versions_equal_keys) {
     storage_id_type storage = 300;
     std::string key = "sameKey";
     std::string value = "testValue";
@@ -153,36 +192,93 @@ TEST_F(log_entry_comparator_unit_test, equal_write_versions_equal_keys) {
     EXPECT_FALSE(comp(entry2, entry1));
 }
 
-// Test case 4: Mixed comparison.
-// Create three entries with differing keys and write_versions.
-// Since key_sid() is the primary comparison, if keys differ the ordering is determined solely by key_sid().
-TEST_F(log_entry_comparator_unit_test, mixed_comparison) {
-    // Create three entries:
-    //   entry1: write_version = (8, 0), key = "bbb"
-    //   entry2: write_version = (8, 0), key = "ccc"
-    //   entry3: write_version = (10, 0), key = "aaa"
-    storage_id_type storage = 400;
+// Test case: Compare entries with different storage IDs.
+// Assumes that key_sid() includes the storage ID and that a lower storage ID produces a lexicographically smaller key_sid().
+TEST_F(log_entry_comparator_test, different_storage_ids) {
+    // Create two log_entry objects with the same key and write_version, but different storage IDs.
+    std::string key = "testKey";
     std::string value = "testValue";
-    write_version_type wv1(8, 0);
-    write_version_type wv2(8, 0);
-    write_version_type wv3(10, 0);
+    write_version_type wv(10, 1);
 
-    log_entry entry1 = create_normal_log_entry(storage, "bbb", value, wv1);
-    log_entry entry2 = create_normal_log_entry(storage, "ccc", value, wv2);
-    log_entry entry3 = create_normal_log_entry(storage, "aaa", value, wv3);
+    // Define two different storage IDs.
+    storage_id_type storage1 = 100;
+    storage_id_type storage2 = 200;
+
+    log_entry entry1 = create_normal_log_entry(storage1, key, value, wv);
+    log_entry entry2 = create_normal_log_entry(storage2, key, value, wv);
 
     log_entry_comparator comp;
-    // Since key_sid() is primary:
-    // Lexicographically (binary), assuming the stored key reflects the user key,
-    // "aaa" < "bbb" < "ccc". Therefore, entry3 (with key "aaa") should come first,
-    // then entry1 ("bbb"), then entry2 ("ccc").
-    EXPECT_TRUE(comp(entry3, entry1));
-    EXPECT_TRUE(comp(entry3, entry2));
+    // Expect that the entry with the lower storage ID produces a key_sid that is lexicographically smaller.
     EXPECT_TRUE(comp(entry1, entry2));
-
-    EXPECT_FALSE(comp(entry1, entry3));
-    EXPECT_FALSE(comp(entry2, entry3));
     EXPECT_FALSE(comp(entry2, entry1));
+}
+
+// Test case: Overall priority test of storage ID, key, and write_version in log_entry comparison.
+// Priority order (all in ascending order):
+// 1. Storage ID (lower is prioritized)
+// 2. Key (lexicographical order when storage IDs are equal)
+// 3. Write Version (compared by epoch first, then minor when storage and key are equal)
+TEST_F(log_entry_comparator_test, overall_priority_storage_key_write_version) {
+    // Create four log_entry objects with various combinations:
+    //
+    // Entry1: storage=100, key="aaa", write_version=(10,0)
+    // Entry2: storage=100, key="aaa", write_version=(10,1)   (Same storage and key as Entry1, but higher write_version)
+    // Entry3: storage=100, key="bbb", write_version=(9,9)    (Same storage as Entry1/2, but key "bbb")
+    // Entry4: storage=200, key="aaa", write_version=(9,9)    (Higher storage than Entry1-3; key is "aaa")
+    
+    std::string value = "testValue"; // Value is not used for sorting.
+    storage_id_type storage_low = 100;
+    storage_id_type storage_high = 200;
+    
+    // Entries with same storage and key, differing only in write_version.
+    write_version_type wv1(10, 0);
+    write_version_type wv2(10, 1);
+    // Entry3: same storage as Entry1/2, but with key "bbb".
+    write_version_type wv3(9, 9);
+    // Entry4: different storage, key "aaa".
+    write_version_type wv4(9, 9);
+    
+    log_entry entry1 = create_normal_log_entry(storage_low, "aaa", value, wv1);
+    log_entry entry2 = create_normal_log_entry(storage_low, "aaa", value, wv2);
+    log_entry entry3 = create_normal_log_entry(storage_low, "bbb", value, wv3);
+    log_entry entry4 = create_normal_log_entry(storage_high, "aaa", value, wv4);
+    
+    // Place entries in unsorted order.
+    std::vector<log_entry> entries = { entry3, entry4, entry2, entry1 };
+    
+    // Sort using log_entry_comparator.
+    log_entry_comparator comp;
+    std::sort(entries.begin(), entries.end(), comp);
+    
+    // Expected sorted order (ascending):
+    // 1. entry1: storage=100, key="aaa", write_version=(10,0)
+    // 2. entry2: storage=100, key="aaa", write_version=(10,1)
+    // 3. entry3: storage=100, key="bbb", write_version=(9,9)
+    // 4. entry4: storage=200, key="aaa", write_version=(9,9)
+    //
+    // Explanation:
+    // - Entries with storage=100 come before those with storage=200.
+    // - Among entries with storage=100 and key "aaa", (10,0) < (10,1).
+    // - For the same storage, "aaa" is lexicographically less than "bbb".
+    
+    // Verify the sorted order using the comparator.
+    EXPECT_TRUE(comp(entries[0], entries[1]));  // entry1 < entry2
+    EXPECT_TRUE(comp(entries[1], entries[2]));  // entry2 < entry3
+    EXPECT_TRUE(comp(entries[2], entries[3]));  // entry3 < entry4
+    
+    // Optionally, print the sorted order for manual verification.
+    auto describe = [](const log_entry& entry) -> std::string {
+        std::ostringstream oss;
+        oss << "key_sid: " << entry.key_sid();
+        write_version_type wv;
+        entry.write_version(wv);
+        oss << ", write_version: (" << wv.get_major() << "," << wv.get_minor() << ")";
+        return oss.str();
+    };
+    
+    for (size_t i = 0; i < entries.size(); ++i) {
+        std::cout << "Entry " << i+1 << ": " << describe(entries[i]) << std::endl;
+    }
 }
 
 } // namespace testing

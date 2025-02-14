@@ -22,33 +22,30 @@
  namespace limestone::internal {
  
  using namespace limestone::api;
- 
+
  class log_entry_comparator {
  public:
-     /// @brief Compare two log_entry objects.
+     /// @brief Compare log_entry objects in ascending order.
      ///
-     /// First, compare the key_sid() as a binary string.
-     /// If they differ, the one with the lexicographically smaller key_sid() comes first.
-     /// If key_sid() values are identical, then compare write_version in descending order.
+     /// First, compare key_sid() in lexicographical (ascending) order.
+     /// If they differ, return the result of that comparison.
+     /// If key_sid() values are equal, then compare write_version in ascending order.
      bool operator()(const log_entry& a, const log_entry& b) const {
-         // Compare key_sid() as a binary string (the entire string)
+         // Compare key_sid() in lexicographical order
          std::string_view key_a(a.key_sid());
          std::string_view key_b(b.key_sid());
          if (key_a != key_b) {
              return key_a < key_b;
          }
-         // If keys are identical, then compare write_version in descending order.
+         // If key_sid() values are equal, compare write_version in ascending order
          write_version_type wa;
          write_version_type wb;
          a.write_version(wa);
          b.write_version(wb);
-         if (!(wa == wb)) {
-             return wb < wa;  // Descending: the entry with the higher write_version comes first.
-         }
-         return false;
+         return wa < wb;
      }
  };
- 
+
  } // namespace limestone::internal
  
 
