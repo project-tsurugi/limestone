@@ -300,6 +300,7 @@ blob_id_type create_compact_pwal_and_get_max_blob_id(
     const boost::filesystem::path& to_dir, 
     int num_worker,
     const std::set<std::string>& file_names) {
+    
     auto [max_appeared_epoch, sctx] = create_sorted_from_wals(from_dir, num_worker, file_names);
 
     boost::system::error_code error;
@@ -318,46 +319,28 @@ blob_id_type create_compact_pwal_and_get_max_blob_id(
         LOG_AND_THROW_IO_EXCEPTION("cannot create snapshot file (" + snapshot_file.string() + ")", errno);
     }
     setvbuf(ostrm, nullptr, _IOFBF, 128L * 1024L);  // NOLINT, NB. glibc may ignore size when _IOFBF and buffer=NULL
-    bool rewind = true;  // TODO: change by flag
-    epoch_id_type epoch = rewind ? 0 : max_appeared_epoch;
-    log_entry::begin_session(ostrm, epoch);
 
-    auto write_snapshot_entry = [&ostrm, rewind](
+    log_entry::begin_session(ostrm, max_appeared_epoch);
+    
+    auto write_snapshot_entry = [&ostrm](
         log_entry::entry_type entry_type, 
         std::string_view key_sid, 
         std::string_view value_etc, 
         std::string_view blob_ids) {
         switch (entry_type) {
             case log_entry::entry_type::normal_entry:
-                if (rewind) {
-                    static std::string value{};
-                    value = value_etc;
-                    std::memset(value.data(), 0, 16);
-                    log_entry::write(ostrm, key_sid, value);
-                } else {
-                    log_entry::write(ostrm, key_sid, value_etc);
-                }
+                log_entry::write(ostrm, key_sid, value_etc);
                 break;
             case log_entry::entry_type::normal_with_blob:
-                if (rewind) {
-                    static std::string value{};
-                    value = value_etc;
-                    std::memset(value.data(), 0, 16);
-                    log_entry::write_with_blob(ostrm, key_sid, value, blob_ids);
-                } else {
-                    log_entry::write_with_blob(ostrm, key_sid, value_etc, blob_ids);
-                }
+                log_entry::write_with_blob(ostrm, key_sid, value_etc, blob_ids);
                 break;
             case log_entry::entry_type::remove_entry:
-                // No action needed
                 break;
             default:
                 LOG(ERROR) << "Unexpected entry type: " << static_cast<int>(entry_type);
                 std::abort();
         }
     };
-
-
 
     sortdb_foreach(sctx, write_snapshot_entry);
     //log_entry::end_session(ostrm, epoch);
