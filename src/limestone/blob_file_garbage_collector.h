@@ -25,7 +25,7 @@
 #include <memory>
 
 #include "blob_file_resolver.h"
-#include "blob_item_container.h"
+#include "blob_id_container.h"
 #include "file_operations.h"
 
 namespace limestone::internal {
@@ -93,13 +93,13 @@ public:
     void scan_blob_files(blob_id_type max_existing_blob_id);
 
     /**
-     * @brief Adds a BLOB item to the container of BLOBs that are exempt from garbage collection.
+     * @brief Adds a BLOB id to the container of BLOBs that are exempt from garbage collection.
      *
-     * This method registers a BLOB item which should not be deleted during the garbage collection process.
+     * This method registers a BLOB id which should not be deleted during the garbage collection process.
      *
-     * @param item The blob_item to add to the gc_exempt_blob_ container.
+     * @param id The blob_id to add to the gc_exempt_blob_ container.
      */
-    void add_gc_exempt_blob_item(const blob_item& item);
+    void add_gc_exempt_blob_id(blob_id_type id);
 
     /**
      * @brief Starts scanning snapshots in a background thread.
@@ -117,7 +117,7 @@ public:
      * then performs garbage collection by deleting BLOB files that are not exempt.
      *
      * The deletion targets are determined by computing the difference between the scanned
-     * blob items and those registered as GC-exempt. The background cleanup thread is retained
+     * blob ids and those registered as GC-exempt. The background cleanup thread is retained
      * (i.e., not detached) so that it can be joined in shutdown(), ensuring proper termination.
      *
      * This method returns immediately after starting the background thread.
@@ -160,12 +160,12 @@ protected:
     /**
      * @brief Retrieves the list of scanned blob files.
      *
-     * @return const blob_item_container& A constant reference to the container holding the scanned blob files.
+     * @return const blob_id_container& A constant reference to the container holding the scanned blob ids.
      *
      * @note This method is expected to be called only after the scanning process has completed
      *       (i.e., after wait_for_blob_file_scan() returns). Therefore, no locking is performed here.
      */
-    const blob_item_container& get_blob_file_list() const { return *scanned_blobs_; };
+    const blob_id_container& get_blob_file_list() const { return *scanned_blobs_; };
 
     /**
      * @brief Sets a custom file_operations implementation.
@@ -176,43 +176,43 @@ protected:
     void set_file_operations(std::unique_ptr<file_operations> file_ops);
 
     /**
-     * @brief Retrieves the list of blob items that are exempt from garbage collection.
+     * @brief Retrieves the list of blob ids that are exempt from garbage collection.
      *
-     * @return A constant reference to a container holding the blob items that are exempt from garbage collection.
+     * @return A constant reference to a container holding the blob ids that are exempt from garbage collection.
      */
-    const blob_item_container& get_gc_exempt_blob_list() const { return *gc_exempt_blob_; };
+    const blob_id_container& get_gc_exempt_blob_list() const { return *gc_exempt_blob_; };
 
 private:
     // --- Resolver and Blob Containers ---
     const blob_file_resolver* resolver_ = nullptr;         ///< Pointer to the blob_file_resolver instance.
-    std::unique_ptr<blob_item_container> scanned_blobs_;   ///< Container for storing scanned blob items.
-    std::unique_ptr<blob_item_container> gc_exempt_blob_;  ///< Container for storing blob items exempt from garbage collection.
-    blob_id_type max_existing_blob_id_ = 0;                ///< Maximum blob_id that existed at startup.
+    std::unique_ptr<blob_id_container> scanned_blobs_;      ///< Container for storing scanned blob ids.
+    std::unique_ptr<blob_id_container> gc_exempt_blob_;     ///< Container for storing blob ids exempt from garbage collection.
+    blob_id_type max_existing_blob_id_ = 0;                 ///< Maximum blob_id that existed at startup.
 
     // --- Blob File Scanning Process Fields ---
-    bool blob_file_scan_started_ = false;            ///< Flag indicating whether the blob scanning process has started.
-    bool blob_file_scan_complete_ = false;           ///< Flag indicating whether the blob scanning process has completed.
-    bool blob_file_scan_waited_ = false;             ///< Flag indicating that wait_for_blob_file_scan() has been called.
-    std::thread blob_file_scan_thread_;              ///< Background thread for scanning the BLOB directory.
-    std::condition_variable blob_file_scan_cv_;      ///< Condition variable to signal blob scan completion.
+    bool blob_file_scan_started_ = false;           ///< Flag indicating whether the blob scanning process has started.
+    bool blob_file_scan_complete_ = false;          ///< Flag indicating whether the blob scanning process has completed.
+    bool blob_file_scan_waited_ = false;            ///< Flag indicating that wait_for_blob_file_scan() has been called.
+    std::thread blob_file_scan_thread_;             ///< Background thread for scanning the BLOB directory.
+    std::condition_variable blob_file_scan_cv_;     ///< Condition variable to signal blob scan completion.
 
     // --- Snapshot Scanning Process Fields ---
-    bool snapshot_scan_started_ = false;             ///< Flag indicating whether the snapshot scanning process has started.
-    bool snapshot_scan_complete_ = false;            ///< Flag indicating whether the snapshot scanning process has completed.
-    bool snapshot_scan_waited_ = false;              ///< Flag indicating that wait_for_scan_snapshot() has been called.
-    std::thread snapshot_scan_thread_;               ///< Background thread for scanning snapshots.
-    std::condition_variable snapshot_scan_cv_;       ///< Condition variable to signal snapshot scan completion.
+    bool snapshot_scan_started_ = false;            ///< Flag indicating whether the snapshot scanning process has started.
+    bool snapshot_scan_complete_ = false;           ///< Flag indicating whether the snapshot scanning process has completed.
+    bool snapshot_scan_waited_ = false;             ///< Flag indicating that wait_for_scan_snapshot() has been called.
+    std::thread snapshot_scan_thread_;              ///< Background thread for scanning snapshots.
+    std::condition_variable snapshot_scan_cv_;      ///< Condition variable to signal snapshot scan completion.
 
     // --- Cleanup Process Fields ---
-    bool cleanup_started_ = false;                   ///< Flag indicating whether the cleanup process has started.
-    bool cleanup_waited_ = false;                    ///< Flag indicating that wait_for_cleanup() has been called.
-    bool cleanup_complete_ = false;                  ///< Flag indicating whether the cleanup process has completed.
-    std::thread cleanup_thread_;                     ///< Background thread for garbage collection.
-    std::condition_variable cleanup_cv_;             ///< Condition variable to signal cleanup completion.
+    bool cleanup_started_ = false;                  ///< Flag indicating whether the cleanup process has started.
+    bool cleanup_waited_ = false;                   ///< Flag indicating that wait_for_cleanup() has been called.
+    bool cleanup_complete_ = false;                 ///< Flag indicating whether the cleanup process has completed.
+    std::thread cleanup_thread_;                    ///< Background thread for garbage collection.
+    std::condition_variable cleanup_cv_;            ///< Condition variable to signal cleanup completion.
 
     // --- Others ---
-    mutable std::mutex mutex_;                       ///< Mutex for synchronizing access to state variables.
-    std::unique_ptr<file_operations> file_ops_;      ///< Pointer to the file_operations implementation.
+    mutable std::mutex mutex_;                      ///< Mutex for synchronizing access to state variables.
+    std::unique_ptr<file_operations> file_ops_;     ///< Pointer to the file_operations implementation.
 
     /**
      * @brief The background function that scans the blob_root directory for BLOB files.
@@ -227,7 +227,7 @@ private:
     /**
      * @brief Cleans up internal container resources.
      *
-     * This method resets the smart pointers for the scanned blob items and the GC exempt blob items
+     * This method resets the smart pointers for the scanned blob ids and the GC exempt blob ids
      * by allocating new, empty container instances. This operation effectively releases the memory
      * that was previously allocated to these containers.
      *
