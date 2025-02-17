@@ -35,6 +35,7 @@
 #include "blob_file_resolver.h"
 #include "blob_pool_impl.h"
 #include "blob_file_garbage_collector.h"
+#include "blob_file_gc_snapshot.h"
 
 namespace limestone::api {
 using namespace limestone::internal;
@@ -206,6 +207,7 @@ void datastore::ready() {
         online_compaction_worker_future_ = std::async(std::launch::async, &datastore::online_compaction_worker, this);
         if (epoch_id_switched_.load() != 0) {
             write_epoch_callback_(epoch_id_informed_.load());
+            available_boundary_version_ = write_version_type{epoch_id_informed_.load(), 0};
         }
         cleanup_rotated_epoch_files(location_);
         state_ = state::ready;
@@ -683,8 +685,17 @@ void datastore::compact_with_online() {
     boost::filesystem::path compaction_temp_dir = location_ / compaction_catalog::get_compaction_temp_dirname();
     ensure_directory_exists(compaction_temp_dir);
 
-    // create a compacted file
+    // create a compacted file and snapshot for blob file garbage collection
+    write_version_type boundary_version_copy;
+    {
+        std::lock_guard<std::mutex> lock(boundary_mutex_);
+        boundary_version_copy = available_boundary_version_;
+    }
+    blob_file_gc_snapshot gc_snapshot(boundary_version_copy);
+
     blob_id_type max_blob_id = create_compact_pwal_and_get_max_blob_id(location_, compaction_temp_dir, recover_max_parallelism_, need_compaction_filenames);
+
+
 
     // handle existing compacted file
     handle_existing_compacted_file(location_);
@@ -723,6 +734,19 @@ void datastore::compact_with_online() {
     remove_file_safely(location_ / compaction_catalog::get_compacted_backup_filename());
 
     LOG_LP(INFO) << "compaction finished";
+
+    // blob files garbage collection
+    blob_file_garbage_collector garb_collector(*blob_file_resolver_);   
+    garb_collector.scan_blob_files(boundary_version_copy.get_major());
+    log_entry_container log_entries = gc_snapshot.finalize_snapshot();
+    for(const auto& entry : log_entries) {
+        for(const auto& blob_id : entry.get_blob_ids()) {
+            garb_collector.add_gc_exempt_blob_id(blob_id);
+        }
+    }
+    garb_collector.finalize_scan_and_cleanup();
+
+    LOG_LP(INFO) << "blob files garbage collection finished";
     TRACE_END;
 }
 
@@ -772,7 +796,19 @@ blob_file datastore::get_blob_file(blob_id_type reference) {
 }
 
 void datastore::switch_available_boundary_version([[maybe_unused]] write_version_type version) {
-     LOG_FIRST_N(ERROR, 1) << "not implemented";
+    TRACE_FINE_START << "version=" << version.get_major() << "." << version.get_minor();
+    {
+        std::lock_guard<std::mutex> lock(boundary_mutex_);
+        if (version < available_boundary_version_) {
+            LOG_LP(ERROR) << "The new boundary version (" << version.get_major() << ", " 
+            << version.get_minor() << ") is smaller than the current boundary version (" 
+            << available_boundary_version_.get_major() << ", " 
+            << available_boundary_version_.get_minor() << ")";
+            return;
+        }
+    }
+    available_boundary_version_ = version;
+    TRACE_FINE_END;
 }
 
 void datastore::add_persistent_blob_ids(const std::vector<blob_id_type>& blob_ids) {

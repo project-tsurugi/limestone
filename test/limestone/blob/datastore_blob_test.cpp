@@ -12,6 +12,7 @@ namespace limestone::testing {
 
 using limestone::api::log_channel;
 using limestone::api::blob_id_type;
+using limestone::api::write_version_type;
 
 constexpr const char* data_location = "/tmp/datastore_blob_test/data_location";
 constexpr const char* metadata_location = "/tmp/datastore_blob_test/metadata_location";
@@ -383,6 +384,69 @@ TEST_F(datastore_blob_test, next_blob_id) {
         EXPECT_EQ(value3, "test_value3");
         EXPECT_FALSE(cursor->next());
     }
+}
+
+TEST_F(datastore_blob_test, switch_available_boundary_version_basic) {
+    write_version_type initial_version(0, 0);
+    write_version_type version1(1, 0);
+    write_version_type version2(2, 5);
+    write_version_type invalid_version(0, 5);  // Boundary version must be monotonically increasing
+
+    // Check initial version
+    EXPECT_EQ(datastore_->get_available_boundary_version(), initial_version);
+
+    // Set valid versions
+    datastore_->switch_available_boundary_version(version1);
+    EXPECT_EQ(datastore_->get_available_boundary_version(), version1);
+
+    datastore_->switch_available_boundary_version(version2);
+    EXPECT_EQ(datastore_->get_available_boundary_version(), version2);
+
+    // Attempting to set an invalid version (smaller value) results in an error (version remains unchanged)
+    datastore_->switch_available_boundary_version(invalid_version);
+    EXPECT_EQ(datastore_->get_available_boundary_version(), version2);
+}
+
+TEST_F(datastore_blob_test, available_boundary_version_after_reboot) {
+    // Check the initial value after ready() execution
+    write_version_type expected_version(0, 0);
+    if (datastore_->last_epoch() != 0) {
+        expected_version = write_version_type(datastore_->last_epoch(), 0);
+    }
+    EXPECT_EQ(datastore_->get_available_boundary_version(), expected_version);
+
+    // --- Step 1: Write data ---
+    datastore_->switch_epoch(115);
+    lc0_->begin_session();
+    lc0_->add_entry(101, "test_key", "test_value", {115, 52});
+    lc0_->end_session();
+    datastore_->switch_epoch(116);
+
+    // --- Step 2: Shutdown ---
+    datastore_->shutdown();
+    datastore_ = nullptr;
+
+    // --- Step 3: Restart ---
+    gen_datastore();
+
+    // --- Step 4: Check after restart ---
+    // Verify that available_boundary_version_ is properly restored after restart
+
+    EXPECT_EQ(datastore_->get_available_boundary_version().get_major(), 115);
+    EXPECT_EQ(datastore_->get_available_boundary_version().get_minor(), 0);
+
+    // Verify data consistency
+    auto cursor = datastore_->get_snapshot()->get_cursor();
+    EXPECT_TRUE(cursor->next());
+
+    std::string key;
+    std::string value;
+    cursor->key(key);
+    cursor->value(value);
+    EXPECT_EQ(key, "test_key");
+    EXPECT_EQ(value, "test_value");
+
+    EXPECT_FALSE(cursor->next());
 }
 
 } // namespace limestone::testing

@@ -112,7 +112,8 @@ static void insert_twisted_entry(sortdb_wrapper* sortdb, const log_entry& e) {
 static std::pair<epoch_id_type, sorting_context> create_sorted_from_wals(
     const boost::filesystem::path& from_dir,
     int num_worker,
-    const std::set<std::string>& file_names = std::set<std::string>()) {
+    const std::set<std::string>& file_names = std::set<std::string>(),
+    std::optional<std::reference_wrapper<blob_file_gc_snapshot>> gc_snapshot_ref = std::nullopt) {
 #if defined SORT_METHOD_PUT_ONLY
     sorting_context sctx{std::make_unique<sortdb_wrapper>(from_dir, comp_twisted_key)};
 #else
@@ -129,9 +130,14 @@ static std::pair<epoch_id_type, sorting_context> create_sorted_from_wals(
     const auto add_entry_to_point = insert_entry_or_update_to_max;
     bool works_with_multi_thread = false;
 #endif
-    auto add_entry = [&sctx, &add_entry_to_point](const log_entry& e){
+    auto add_entry = [&sctx, &add_entry_to_point, &gc_snapshot_ref](const log_entry& e){
         switch (e.type()) {
         case log_entry::entry_type::normal_with_blob:
+            if(gc_snapshot_ref) {
+                gc_snapshot_ref.value().get().sanitize_and_add_entry(e);
+            }
+            add_entry_to_point(sctx.get_sortdb(), e);
+            break;
         case log_entry::entry_type::normal_entry:
         case log_entry::entry_type::remove_entry:
             add_entry_to_point(sctx.get_sortdb(), e);
@@ -302,7 +308,7 @@ blob_id_type create_compact_pwal_and_get_max_blob_id(
     const std::set<std::string>& file_names,
     std::optional<std::reference_wrapper<blob_file_gc_snapshot>> gc_snapshot_ref) {
     
-    auto [max_appeared_epoch, sctx] = create_sorted_from_wals(from_dir, num_worker, file_names);
+    auto [max_appeared_epoch, sctx] = create_sorted_from_wals(from_dir, num_worker, file_names, gc_snapshot_ref);
 
     boost::system::error_code error;
     const bool result_check = boost::filesystem::exists(to_dir, error);
@@ -322,7 +328,7 @@ blob_id_type create_compact_pwal_and_get_max_blob_id(
     setvbuf(ostrm, nullptr, _IOFBF, 128L * 1024L);  // NOLINT, NB. glibc may ignore size when _IOFBF and buffer=NULL
     log_entry::begin_session(ostrm, 0);
 
-    auto write_snapshot_entry = [&ostrm, &gc_snapshot_ref](log_entry::entry_type entry_type, std::string_view key_sid, std::string_view value_etc,
+    auto write_snapshot_entry = [&ostrm](log_entry::entry_type entry_type, std::string_view key_sid, std::string_view value_etc,
                                                         std::string_view blob_ids) {
         switch (entry_type) {
             case log_entry::entry_type::normal_entry:
@@ -330,10 +336,6 @@ blob_id_type create_compact_pwal_and_get_max_blob_id(
                 break;
             case log_entry::entry_type::normal_with_blob:
                 log_entry::write_with_blob(ostrm, key_sid, value_etc, blob_ids);
-                if (gc_snapshot_ref.has_value()) {
-                    log_entry entry = log_entry::make_normal_with_blob_log_entry(key_sid, value_etc, blob_ids);
-                    gc_snapshot_ref->get().sanitize_and_add_entry(entry);
-                }
                 break;
             case log_entry::entry_type::remove_entry:
                 break;

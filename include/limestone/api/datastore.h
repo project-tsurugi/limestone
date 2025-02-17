@@ -328,6 +328,7 @@ protected:  // for tests
         std::lock_guard<std::mutex> lock(persistent_blob_ids_mutex_);
         return persistent_blob_ids_;
     }
+    write_version_type get_available_boundary_version_for_tests() const noexcept { return available_boundary_version_; }
 
     // These virtual methods are hooks for testing thread synchronization.
     // They allow derived classes to inject custom behavior or notifications
@@ -499,6 +500,12 @@ private:
     std::mutex persistent_blob_ids_mutex_;
 
     std::unique_ptr<limestone::internal::blob_file_garbage_collector> blob_file_garbage_collector_;
+
+    // Boundary version for safe snapshots
+    write_version_type available_boundary_version_; 
+
+    // Mutex to protect boundary version updates
+    mutable std::mutex boundary_mutex_;         
 
 };
 
