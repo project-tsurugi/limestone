@@ -502,6 +502,33 @@ public:
         }
     }
 
+    /**
+     * @brief Creates a normal_with_blob type log_entry from raw data.
+     *
+     * This method constructs a log_entry instance specifically for entries of type normal_with_blob.
+     * It initializes the key_sid, value_etc, and blob_ids fields from the provided parameters.
+     * Note: The epoch_id field is not explicitly set by this method. If epoch_id is needed,
+     * it should be extracted from the value_etc field (e.g. using write_version_epoch_number(value_etc)).
+     *
+     * @param key_sid A string view representing the key_sid field.
+     * @param value_etc A string view representing the value_etc field.
+     *                  This should contain the write_version header concatenated with the payload.
+     * @param blob_ids A string view representing the blob_ids field (default is empty).
+     * @return log_entry The constructed log_entry with type normal_with_blob.
+     */
+    static log_entry make_normal_with_blob_log_entry(
+        std::string_view key_sid,
+        std::string_view value_etc,
+        std::string_view blob_ids = std::string_view()) {
+        log_entry entry;
+        entry.entry_type_ = entry_type::normal_with_blob;
+        entry.key_sid_ = std::string(key_sid);
+        entry.value_etc_ = std::string(value_etc);
+        entry.blob_ids_ = std::string(blob_ids);
+        return entry;
+    }
+
+
 private:
     entry_type entry_type_{};
     epoch_id_type epoch_id_{};

@@ -14,21 +14,21 @@ using namespace limestone::api;
 namespace limestone::testing {
 
 // Test fixture for testing truncate_value_from_normal_entry()
-class log_entry_truncate_value_test : public ::testing::Test {
+class log_entry_blob_test : public ::testing::Test {
 protected:
     std::string temp_dir;
     int file_counter = 0;
 
     void SetUp() override {
         // Remove any previous test directory.
-        if (system("rm -rf /tmp/limestone_log_entry_truncate_value_test") != 0) {
-            std::cerr << "Failed to remove directory /tmp/limestone_log_entry_truncate_value_test" << std::endl;
+        if (system("rm -rf /tmp/limestone_log_entry_blob_test") != 0) {
+            std::cerr << "Failed to remove directory /tmp/limestone_log_entry_blob_test" << std::endl;
         }
         // Create the test directory.
-        if (system("mkdir -p /tmp/limestone_log_entry_truncate_value_test") != 0) {
-            std::cerr << "Failed to create directory /tmp/limestone_log_entry_truncate_value_test" << std::endl;
+        if (system("mkdir -p /tmp/limestone_log_entry_blob_test") != 0) {
+            std::cerr << "Failed to create directory /tmp/limestone_log_entry_blob_test" << std::endl;
         }
-        temp_dir = "/tmp/limestone_log_entry_truncate_value_test";
+        temp_dir = "/tmp/limestone_log_entry_blob_test";
         file_counter = 0;
     }
 
@@ -55,7 +55,7 @@ constexpr std::size_t header_size() {
  *
  * The checking order is: storage_id, key, value, write_version.
  */
-TEST_F(log_entry_truncate_value_test, truncate_value_normal_entry) {
+TEST_F(log_entry_blob_test, truncate_value_normal_entry) {
     // Prepare test data.
     storage_id_type storage = 123;
     std::string key = "testKey";
@@ -132,7 +132,7 @@ TEST_F(log_entry_truncate_value_test, truncate_value_normal_entry) {
  *   write_with_blob(FILE*, storage_id_type, std::string_view key, std::string_view value,
  *                   write_version_type, const std::vector<blob_id_type>& large_objects)
  */
-TEST_F(log_entry_truncate_value_test, truncate_value_with_blob) {
+TEST_F(log_entry_blob_test, truncate_value_with_blob) {
     // Prepare test data.
     storage_id_type storage = 456;
     std::string key = "blobKey";
@@ -203,7 +203,7 @@ TEST_F(log_entry_truncate_value_test, truncate_value_with_blob) {
  * @brief Verify that for an entry type without a value portion (e.g. marker_begin),
  *        truncate_value_from_normal_entry() does not modify value_etc.
  */
-TEST_F(log_entry_truncate_value_test, truncate_value_non_normal_entry) {
+TEST_F(log_entry_blob_test, truncate_value_non_normal_entry) {
     // Create a marker_begin entry.
     std::string temp_file = get_temp_file_name();
     FILE* out = std::fopen(temp_file.c_str(), "wb");
@@ -227,5 +227,42 @@ TEST_F(log_entry_truncate_value_test, truncate_value_non_normal_entry) {
     // For entries like marker_begin that do not have a value portion, value_etc should remain unchanged.
     EXPECT_EQ(entry.value_etc(), original_value_etc);
 }
+
+/**
+ * @brief Test the make_normal_with_blob_log_entry factory method.
+ *
+ * Verifies that the created log_entry has type normal_with_blob and that its
+ * key_sid, value_etc, and blob_ids fields match the provided parameters.
+ */
+TEST_F(log_entry_blob_test, make_normal_with_blob_log_entry) {
+    std::string key_sid = "dummy_storage_and_key";
+    std::string value_etc = "header_data_and_payload";
+    std::string blob_ids = "dummy_blob_ids";
+
+    log_entry entry = log_entry::make_normal_with_blob_log_entry(key_sid, value_etc, blob_ids);
+
+    EXPECT_EQ(entry.type(), log_entry::entry_type::normal_with_blob);
+    EXPECT_EQ(entry.key_sid(), key_sid);
+    EXPECT_EQ(entry.value_etc(), value_etc);
+    EXPECT_EQ(entry.blob_ids(), blob_ids);
+}
+
+/**
+ * @brief Test the make_normal_with_blob_log_entry factory method with default blob_ids.
+ *
+ * Verifies that when blob_ids is omitted, it defaults to an empty string.
+ */
+TEST_F(log_entry_blob_test, make_normal_with_blob_log_entry_default_blob_ids) {
+    std::string key_sid = "dummy_storage_and_key";
+    std::string value_etc = "header_data_and_payload";
+
+    log_entry entry = log_entry::make_normal_with_blob_log_entry(key_sid, value_etc);
+
+    EXPECT_EQ(entry.type(), log_entry::entry_type::normal_with_blob);
+    EXPECT_EQ(entry.key_sid(), key_sid);
+    EXPECT_EQ(entry.value_etc(), value_etc);
+    EXPECT_EQ(entry.blob_ids(), std::string());
+}
+
 
 } // namespace limestone::testing

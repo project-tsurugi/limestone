@@ -296,10 +296,11 @@ static void sortdb_foreach(
 }
 
 blob_id_type create_compact_pwal_and_get_max_blob_id(
-    const boost::filesystem::path& from_dir, 
-    const boost::filesystem::path& to_dir, 
+    const boost::filesystem::path& from_dir,
+    const boost::filesystem::path& to_dir,
     int num_worker,
-    const std::set<std::string>& file_names) {
+    const std::set<std::string>& file_names,
+    std::optional<std::reference_wrapper<blob_file_gc_snapshot>> gc_snapshot_ref) {
     
     auto [max_appeared_epoch, sctx] = create_sorted_from_wals(from_dir, num_worker, file_names);
 
@@ -320,18 +321,19 @@ blob_id_type create_compact_pwal_and_get_max_blob_id(
     }
     setvbuf(ostrm, nullptr, _IOFBF, 128L * 1024L);  // NOLINT, NB. glibc may ignore size when _IOFBF and buffer=NULL
     log_entry::begin_session(ostrm, 0);
-    
-    auto write_snapshot_entry = [&ostrm](
-        log_entry::entry_type entry_type, 
-        std::string_view key_sid, 
-        std::string_view value_etc, 
-        std::string_view blob_ids) {
+
+    auto write_snapshot_entry = [&ostrm, &gc_snapshot_ref](log_entry::entry_type entry_type, std::string_view key_sid, std::string_view value_etc,
+                                                        std::string_view blob_ids) {
         switch (entry_type) {
             case log_entry::entry_type::normal_entry:
                 log_entry::write(ostrm, key_sid, value_etc);
                 break;
             case log_entry::entry_type::normal_with_blob:
                 log_entry::write_with_blob(ostrm, key_sid, value_etc, blob_ids);
+                if (gc_snapshot_ref.has_value()) {
+                    log_entry entry = log_entry::make_normal_with_blob_log_entry(key_sid, value_etc, blob_ids);
+                    gc_snapshot_ref->get().sanitize_and_add_entry(entry);
+                }
                 break;
             case log_entry::entry_type::remove_entry:
                 break;
@@ -340,6 +342,7 @@ blob_id_type create_compact_pwal_and_get_max_blob_id(
                 std::abort();
         }
     };
+    
 
     sortdb_foreach(sctx, write_snapshot_entry);
     //log_entry::end_session(ostrm, epoch);
