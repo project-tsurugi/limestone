@@ -482,6 +482,26 @@ public:
         return parse_blob_ids(blob_ids_);
     }
 
+    /**
+     * @brief Truncates the value portion of value_etc_, keeping only the write_version header,
+     *        but only for entries of type normal_entry and normal_with_blob.
+     *
+     * For these entry types, value_etc_ contains the write_version header followed by the value.
+     * This method removes any data beyond the header, leaving only the write_version information.
+     * For other entry types, the method does nothing.
+     */
+    void truncate_value_from_normal_entry() {
+        // Process only normal_entry and normal_with_blob entry types.
+        if (entry_type_ != entry_type::normal_entry && entry_type_ != entry_type::normal_with_blob) {
+            return;
+        }
+
+        constexpr std::size_t header_size = sizeof(epoch_id_type) + sizeof(std::uint64_t);
+        if (value_etc_.size() > header_size) {
+            value_etc_.resize(header_size);
+        }
+    }
+
 private:
     entry_type entry_type_{};
     epoch_id_type epoch_id_{};

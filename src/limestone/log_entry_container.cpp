@@ -83,66 +83,67 @@
 
  
  // Static merge function using a multi-way merge algorithm with Boost's binomial_heap.
- log_entry_container log_entry_container::merge_sorted_collections(
-     std::vector<log_entry_container>& container_list) {
- 
-     log_entry_container merged;
- 
-     // First, ensure that each collection is sorted.
-     for (auto& container : container_list) {
-         container.sort_descending(); // This will ensure that each collection is sorted.
-     }
- 
-     // Reserve capacity for the merged entries.
-     std::size_t total_size = 0;
-     for (const auto& container : container_list) {
-         total_size += container.size();
-     }
-     // If total_size is 0, then all collections are empty; return an empty merged collection.
-     if (total_size == 0) {
-         return merged;
-     }
- 
-     merged.entries_.reserve(total_size);
- 
-     // Define a Boost binomial_heap for iterator_range with our custom comparator.
-     boost::heap::binomial_heap<iterator_range, boost::heap::compare<iterator_range_compare>> heap;
- 
-     // Push non-empty collections into the heap.
-     for (auto& container : container_list) {
-         if (container.size() > 0) {
-             iterator_range range { container.begin(), container.end() };
-             heap.push(range);
-         }
-     }
- 
-     // Multi-way merge: repeatedly extract the largest key_sid element and push the next element from that range.
-     while (!heap.empty()) {
-         auto top = heap.top();
-         heap.pop();
- 
-         // Append the largest key_sid log_entry to the merged collection.
-         merged.entries_.push_back(*(top.current));
- 
-         // Advance the iterator in the extracted range.
-         auto next_it = top.current;
-         ++next_it;
-         if (next_it != top.end) {
-             // If there are remaining elements in this range, push the updated range back into the heap.
-             heap.push(iterator_range{ next_it, top.end });
-         }
-     }
- 
-     // Mark the merged collection as sorted.
-     merged.sorted_ = true;
- 
-     // Clear the input collections as specified.
-     for (auto& container : container_list) {
-         container.clear();
-     }
- 
-     return merged;
- }
+log_entry_container log_entry_container::merge_sorted_collections(
+    std::vector<std::shared_ptr<log_entry_container>>& container_list) {
+
+    log_entry_container merged;
+
+    // First, ensure that each collection is sorted.
+    for (auto& container_ptr : container_list) {
+        container_ptr->sort_descending(); // Ensure each container is sorted.
+    }
+
+    // Reserve capacity for the merged entries.
+    std::size_t total_size = 0;
+    for (const auto& container_ptr : container_list) {
+        total_size += container_ptr->size();
+    }
+    // If total_size is 0, then all collections are empty; return an empty merged container.
+    if (total_size == 0) {
+        return merged;
+    }
+
+    merged.entries_.reserve(total_size);
+
+    // Define a Boost binomial_heap for iterator_range with our custom comparator.
+    boost::heap::binomial_heap<iterator_range, boost::heap::compare<iterator_range_compare>> heap;
+
+    // Push non-empty collections into the heap.
+    for (auto& container_ptr : container_list) {
+        if (container_ptr->size() > 0) {
+            // Note: container_ptr->begin() and container_ptr->end() return iterators into the internal vector.
+            iterator_range range { container_ptr->begin(), container_ptr->end() };
+            heap.push(range);
+        }
+    }
+
+    // Multi-way merge: repeatedly extract the largest key_sid element and push the next element from that range.
+    while (!heap.empty()) {
+        auto top = heap.top();
+        heap.pop();
+
+        // Append the largest key_sid log_entry to the merged collection.
+        merged.entries_.push_back(*(top.current));
+
+        // Advance the iterator in the extracted range.
+        auto next_it = top.current;
+        ++next_it;
+        if (next_it != top.end) {
+            // If there are remaining elements in this range, push the updated range back into the heap.
+            heap.push(iterator_range{ next_it, top.end });
+        }
+    }
+
+    // Mark the merged collection as sorted.
+    merged.sorted_ = true;
+
+    // Clear the input collections as specified.
+    for (auto& container_ptr : container_list) {
+        container_ptr->clear();
+    }
+
+    return merged;
+}
  
  } // namespace limestone::internal
  

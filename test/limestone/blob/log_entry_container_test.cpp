@@ -152,108 +152,96 @@ TEST_F(log_entry_container_test, sort_order) {
     EXPECT_EQ(it, container.end());
 }
 
-// Test merging two sorted containers.
+// Test merging three sorted containers.
 TEST_F(log_entry_container_test, merge_sorted_collections) {
-// Create three containers.
-log_entry_container container1, container2, container3;
+    // Create three containers.
+    log_entry_container container1, container2, container3;
 
-// --- Container 1 ---
-// Two entries:
-//   Entry 1: storage=100, key="D", value="val1", write_version=(1,0)
-//   Entry 2: storage=100, key="B", value="val2", write_version=(2,0)
-// In descending order (using sort_descending()), container1 becomes:
-//   1st: ("D", (1,0))
-//   2nd: ("B", (2,0))
-log_entry c1_e1 = create_normal_log_entry(100, "D", "val1", write_version_type(1, 0));
-log_entry c1_e2 = create_normal_log_entry(100, "B", "val2", write_version_type(2, 0));
-container1.append(c1_e1);
-container1.append(c1_e2);
+    // --- Container 1 ---
+    // Two entries:
+    //   Entry 1: storage=100, key="D", value="val1", write_version=(1,0)
+    //   Entry 2: storage=100, key="B", value="val2", write_version=(2,0)
+    log_entry c1_e1 = create_normal_log_entry(100, "D", "val1", write_version_type(1, 0));
+    log_entry c1_e2 = create_normal_log_entry(100, "B", "val2", write_version_type(2, 0));
+    container1.append(c1_e1);
+    container1.append(c1_e2);
 
-// --- Container 2 ---
-// Two entries:
-//   Entry 1: storage=100, key="C", value="val3", write_version=(3,0)
-//   Entry 2: storage=100, key="A", value="val4", write_version=(4,0)
-// Sorted descending: first "C", then "A".
-log_entry c2_e1 = create_normal_log_entry(100, "C", "val3", write_version_type(3, 0));
-log_entry c2_e2 = create_normal_log_entry(100, "A", "val4", write_version_type(4, 0));
-container2.append(c2_e1);
-container2.append(c2_e2);
+    // --- Container 2 ---
+    // Two entries:
+    //   Entry 1: storage=100, key="C", value="val3", write_version=(3,0)
+    //   Entry 2: storage=100, key="A", value="val4", write_version=(4,0)
+    log_entry c2_e1 = create_normal_log_entry(100, "C", "val3", write_version_type(3, 0));
+    log_entry c2_e2 = create_normal_log_entry(100, "A", "val4", write_version_type(4, 0));
+    container2.append(c2_e1);
+    container2.append(c2_e2);
 
-// --- Container 3 ---
-// Three entries:
-//   Entry 1: storage=100, key="E", value="val5", write_version=(5,0)
-//   Entry 2: storage=100, key="B", value="val6", write_version=(6,0)
-//   Entry 3: storage=100, key="A", value="val7", write_version=(7,0)
-// Sorted descending: first "E", then "B", then "A".
-log_entry c3_e1 = create_normal_log_entry(100, "E", "val5", write_version_type(5, 0));
-log_entry c3_e2 = create_normal_log_entry(100, "B", "val6", write_version_type(6, 0));
-log_entry c3_e3 = create_normal_log_entry(100, "A", "val7", write_version_type(7, 0));
-container3.append(c3_e1);
-container3.append(c3_e2);
-container3.append(c3_e3);
+    // --- Container 3 ---
+    // Three entries:
+    //   Entry 1: storage=100, key="E", value="val5", write_version=(5,0)
+    //   Entry 2: storage=100, key="B", value="val6", write_version=(6,0)
+    //   Entry 3: storage=100, key="A", value="val7", write_version=(7,0)
+    log_entry c3_e1 = create_normal_log_entry(100, "E", "val5", write_version_type(5, 0));
+    log_entry c3_e2 = create_normal_log_entry(100, "B", "val6", write_version_type(6, 0));
+    log_entry c3_e3 = create_normal_log_entry(100, "A", "val7", write_version_type(7, 0));
+    container3.append(c3_e1);
+    container3.append(c3_e2);
+    container3.append(c3_e3);
 
-// Prepare a vector of containers to merge.
-// The merge_sorted_collections() function will first sort each container in descending order.
-std::vector<log_entry_container> containers{ container1, container2, container3 };
+    // Prepare a vector of containers to merge using shared_ptr.
+    std::vector<std::shared_ptr<log_entry_container>> containers;
+    containers.push_back(std::make_shared<log_entry_container>(std::move(container1)));
+    containers.push_back(std::make_shared<log_entry_container>(std::move(container2)));
+    containers.push_back(std::make_shared<log_entry_container>(std::move(container3)));
 
-// Perform the merge.
-log_entry_container merged = log_entry_container::merge_sorted_collections(containers);
+    // Perform the merge.
+    log_entry_container merged = log_entry_container::merge_sorted_collections(containers);
 
-// Expected merged order (descending):
-// Compute ascending order first (based on storage, key, write_version ascending):
-//   Ascending order would be:
-//     ("A", (4,0)) from container2,
-//     ("A", (7,0)) from container3,
-//     ("B", (2,0)) from container1,
-//     ("B", (6,0)) from container3,
-//     ("C", (3,0)) from container2,
-//     ("D", (1,0)) from container1,
-//     ("E", (5,0)) from container3.
-// Reversing, the descending order becomes:
-//   1. ("E", (5,0))      -- container3
-//   2. ("D", (1,0))      -- container1
-//   3. ("C", (3,0))      -- container2
-//   4. ("B", (6,0))      -- container3
-//   5. ("B", (2,0))      -- container1
-//   6. ("A", (7,0))      -- container3
-//   7. ("A", (4,0))      -- container2
+    // Expected merged order (descending):
+    //   1. ("E", (5,0))      -- container3
+    //   2. ("D", (1,0))      -- container1
+    //   3. ("C", (3,0))      -- container2
+    //   4. ("B", (6,0))      -- container3
+    //   5. ("B", (2,0))      -- container1
+    //   6. ("A", (7,0))      -- container3
+    //   7. ("A", (4,0))      -- container2
+    auto it = merged.begin();
+    ASSERT_NE(it, merged.end());
+    check_log_entry(*it, 100, "E", "val5", write_version_type(5, 0));
 
-auto it = merged.begin();
-ASSERT_NE(it, merged.end());
-check_log_entry(*it, 100, "E", "val5", write_version_type(5, 0));
+    ++it;
+    ASSERT_NE(it, merged.end());
+    check_log_entry(*it, 100, "D", "val1", write_version_type(1, 0));
 
-++it;
-ASSERT_NE(it, merged.end());
-check_log_entry(*it, 100, "D", "val1", write_version_type(1, 0));
+    ++it;
+    ASSERT_NE(it, merged.end());
+    check_log_entry(*it, 100, "C", "val3", write_version_type(3, 0));
 
-++it;
-ASSERT_NE(it, merged.end());
-check_log_entry(*it, 100, "C", "val3", write_version_type(3, 0));
+    ++it;
+    ASSERT_NE(it, merged.end());
+    check_log_entry(*it, 100, "B", "val6", write_version_type(6, 0));
 
-++it;
-ASSERT_NE(it, merged.end());
-check_log_entry(*it, 100, "B", "val6", write_version_type(6, 0));
+    ++it;
+    ASSERT_NE(it, merged.end());
+    check_log_entry(*it, 100, "B", "val2", write_version_type(2, 0));
 
-++it;
-ASSERT_NE(it, merged.end());
-check_log_entry(*it, 100, "B", "val2", write_version_type(2, 0));
+    ++it;
+    ASSERT_NE(it, merged.end());
+    check_log_entry(*it, 100, "A", "val7", write_version_type(7, 0));
 
-++it;
-ASSERT_NE(it, merged.end());
-check_log_entry(*it, 100, "A", "val7", write_version_type(7, 0));
+    ++it;
+    ASSERT_NE(it, merged.end());
+    check_log_entry(*it, 100, "A", "val4", write_version_type(4, 0));
 
-++it;
-ASSERT_NE(it, merged.end());
-check_log_entry(*it, 100, "A", "val4", write_version_type(4, 0));
+    ++it;
+    EXPECT_EQ(it, merged.end());
 
-++it;
-EXPECT_EQ(it, merged.end());
-
-// Verify that all original containers have been cleared.
-for (auto& c : containers) {
-EXPECT_EQ(c.size(), 0u);
+    // Verify that all original containers have been cleared.
+    for (auto& uptr : containers) {
+        EXPECT_EQ(uptr->size(), 0u);
+    }
 }
-}
+
+
 
 // Test case: Merge sorted collections with an empty container included.
 TEST_F(log_entry_container_test, merge_sorted_collections_with_empty_container) {
@@ -261,39 +249,25 @@ TEST_F(log_entry_container_test, merge_sorted_collections_with_empty_container) 
     log_entry_container container1, container2, container_empty;
     
     // --- Container 1 ---
-    // Two entries:
-    //   Entry 1: storage=100, key="B", value="val1", write_version=(2,0)
-    //   Entry 2: storage=100, key="A", value="val2", write_version=(1,0)
     log_entry c1_e1 = create_normal_log_entry(100, "B", "val1", write_version_type(2, 0));
     log_entry c1_e2 = create_normal_log_entry(100, "A", "val2", write_version_type(1, 0));
     container1.append(c1_e1);
     container1.append(c1_e2);
     
     // --- Container 2 ---
-    // One entry:
-    //   Entry 1: storage=100, key="C", value="val3", write_version=(3,0)
     log_entry c2_e1 = create_normal_log_entry(100, "C", "val3", write_version_type(3, 0));
     container2.append(c2_e1);
     
-    // --- Container Empty ---
-    // This container remains empty.
-    
-    // Prepare a vector of containers to merge.
-    // Note: container_empty is intentionally empty.
-    std::vector<log_entry_container> containers{ container1, container_empty, container2 };
+    // Prepare vector using shared_ptr.
+    std::vector<std::shared_ptr<log_entry_container>> containers;
+    containers.push_back(std::make_unique<log_entry_container>(std::move(container1)));
+    containers.push_back(std::make_unique<log_entry_container>(std::move(container_empty)));
+    containers.push_back(std::make_unique<log_entry_container>(std::move(container2)));
     
     // Perform the merge.
     log_entry_container merged = log_entry_container::merge_sorted_collections(containers);
     
-    // Expected merged order (descending order):
-    //   - Since sort_descending() is used and key_sid() reflects storage and key,
-    //     we assume that keys are compared lexicographically.
-    //   - With keys "A", "B", "C" and descending order, "C" is the largest,
-    //     then "B", then "A".
-    //   - Thus, expected merged order:
-    //         1st: ("C", "val3", (3,0))
-    //         2nd: ("B", "val1", (2,0))
-    //         3rd: ("A", "val2", (1,0))
+    // Expected descending order: "C" > "B" > "A"
     auto it = merged.begin();
     ASSERT_NE(it, merged.end());
     check_log_entry(*it, 100, "C", "val3", write_version_type(3, 0));
@@ -310,8 +284,8 @@ TEST_F(log_entry_container_test, merge_sorted_collections_with_empty_container) 
     EXPECT_EQ(it, merged.end());
     
     // Verify that all original containers have been cleared.
-    for (auto& c : containers) {
-        EXPECT_EQ(c.size(), 0u);
+    for (auto& uptr : containers) {
+        EXPECT_EQ(uptr->size(), 0u);
     }
 }
 
@@ -320,8 +294,11 @@ TEST_F(log_entry_container_test, merge_all_empty_containers) {
     // Create three empty containers.
     log_entry_container container1, container2, container3;
     
-    // Prepare a vector of empty containers.
-    std::vector<log_entry_container> containers{ container1, container2, container3 };
+    // Prepare vector using shared_ptr.
+    std::vector<std::shared_ptr<log_entry_container>> containers;
+    containers.push_back(std::make_unique<log_entry_container>(std::move(container1)));
+    containers.push_back(std::make_unique<log_entry_container>(std::move(container2)));
+    containers.push_back(std::make_unique<log_entry_container>(std::move(container3)));
     
     // Perform the merge.
     log_entry_container merged = log_entry_container::merge_sorted_collections(containers);
@@ -330,15 +307,15 @@ TEST_F(log_entry_container_test, merge_all_empty_containers) {
     EXPECT_EQ(merged.size(), 0u);
     
     // Also, each original container should be cleared.
-    for (auto& c : containers) {
-        EXPECT_EQ(c.size(), 0u);
+    for (auto& uptr : containers) {
+        EXPECT_EQ(uptr->size(), 0u);
     }
 }
 
 // Test case: Container list is empty.
 TEST_F(log_entry_container_test, merge_empty_container_list) {
-    // Prepare an empty vector of containers.
-    std::vector<log_entry_container> containers;
+    // Prepare an empty vector of containers using shared_ptr.
+    std::vector<std::shared_ptr<log_entry_container>> containers;
     
     // Perform the merge.
     log_entry_container merged = log_entry_container::merge_sorted_collections(containers);
@@ -347,30 +324,31 @@ TEST_F(log_entry_container_test, merge_empty_container_list) {
     EXPECT_EQ(merged.size(), 0u);
 }
 
+
 // Test case: Each container contains a single entry.
 TEST_F(log_entry_container_test, merge_single_entry_containers) {
     // Create three containers, each with one entry.
     log_entry_container container1, container2, container3;
     
-    // Container 1: one entry.
     log_entry c1_e1 = create_normal_log_entry(100, "A", "val1", write_version_type(1, 0));
     container1.append(c1_e1);
     
-    // Container 2: one entry.
     log_entry c2_e1 = create_normal_log_entry(100, "B", "val2", write_version_type(2, 0));
     container2.append(c2_e1);
     
-    // Container 3: one entry.
     log_entry c3_e1 = create_normal_log_entry(100, "C", "val3", write_version_type(3, 0));
     container3.append(c3_e1);
     
-    // Prepare a vector of containers.
-    std::vector<log_entry_container> containers{ container1, container2, container3 };
+    // Prepare vector using shared_ptr.
+    std::vector<std::shared_ptr<log_entry_container>> containers;
+    containers.push_back(std::make_unique<log_entry_container>(std::move(container1)));
+    containers.push_back(std::make_unique<log_entry_container>(std::move(container2)));
+    containers.push_back(std::make_unique<log_entry_container>(std::move(container3)));
     
     // Perform the merge.
     log_entry_container merged = log_entry_container::merge_sorted_collections(containers);
     
-    // Expected descending order: key "C" > "B" > "A"
+    // Expected descending order: "C" > "B" > "A"
     auto it = merged.begin();
     ASSERT_NE(it, merged.end());
     check_log_entry(*it, 100, "C", "val3", write_version_type(3, 0));
@@ -387,50 +365,46 @@ TEST_F(log_entry_container_test, merge_single_entry_containers) {
     EXPECT_EQ(it, merged.end());
     
     // Verify that all original containers have been cleared.
-    for (auto& c : containers) {
-        EXPECT_EQ(c.size(), 0u);
+    for (auto& uptr : containers) {
+        EXPECT_EQ(uptr->size(), 0u);
     }
 }
+
 
 // Test case: Merge sorted collections with duplicate entries.
 TEST_F(log_entry_container_test, merge_with_duplicate_entries) {
     // Create two containers with duplicate entries.
     log_entry_container container1, container2;
     
-    // Both containers contain entries with identical values:
-    //   Entry: storage=100, key="X", value="dup", write_version=(5,0)
     log_entry dup_entry1 = create_normal_log_entry(100, "X", "dup", write_version_type(5, 0));
     log_entry dup_entry2 = create_normal_log_entry(100, "X", "dup", write_version_type(5, 0));
     log_entry dup_entry3 = create_normal_log_entry(100, "X", "dup", write_version_type(5, 0));
     
-    // Container 1: two duplicate entries.
     container1.append(dup_entry1);
     container1.append(dup_entry2);
-    
-    // Container 2: one duplicate entry.
     container2.append(dup_entry3);
     
-    // Prepare a vector of containers to merge.
-    std::vector<log_entry_container> containers{ container1, container2 };
+    // Prepare vector using shared_ptr.
+    std::vector<std::shared_ptr<log_entry_container>> containers;
+    containers.push_back(std::make_unique<log_entry_container>(std::move(container1)));
+    containers.push_back(std::make_unique<log_entry_container>(std::move(container2)));
     
     // Perform the merge.
     log_entry_container merged = log_entry_container::merge_sorted_collections(containers);
     
     // Since all entries are identical, merged container should contain all 3 entries.
-    auto it = merged.begin();
     int count = 0;
-    for (; it != merged.end(); ++it) {
+    for (auto it = merged.begin(); it != merged.end(); ++it) {
         check_log_entry(*it, 100, "X", "dup", write_version_type(5, 0));
         count++;
     }
     EXPECT_EQ(count, 3);
     
     // Verify that all original containers have been cleared.
-    for (auto& c : containers) {
-        EXPECT_EQ(c.size(), 0u);
+    for (auto& uptr : containers) {
+        EXPECT_EQ(uptr->size(), 0u);
     }
 }
-
 
 } // namespace testing
 } // namespace limestone

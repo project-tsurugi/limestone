@@ -20,49 +20,7 @@
 #include "log_entry_container.h"
 #include "limestone/api/blob_id_type.h"
 
-namespace limestone {
-namespace internal {
-
-/*
- * blob_id_iterator
- *
- * A simple, Java-style iterator that allows sequential access to all blob IDs
- * contained in a snapshot (log_entry_container) without creating a separate list.
- * 
- * The iterator provides:
- *   - has_next(): to check if there is a next blob ID.
- *   - current(): to retrieve the current blob ID and advance the iterator.
- *
- * Internally, the iterator caches the blob IDs from the current log entry to
- * avoid repeated calls to get_blob_ids().
- */
-class blob_id_iterator {
-public:
-    // Constructs an iterator for the given snapshot.
-    // The iterator starts at the first blob ID of the first log entry.
-    explicit blob_id_iterator(const log_entry_container* snapshot);
-
-    // Returns true if there is a next blob ID in the snapshot.
-    bool has_next() const;
-
-    // Returns the current blob ID and advances the iterator.
-    // Caller should check has_next() before calling current().
-    limestone::api::blob_id_type current();
-
-private:
-    // Pointer to the snapshot containing log entries.
-    const log_entry_container* snapshot_;
-    // Index of the current log entry within the snapshot.
-    std::size_t entry_index_;
-    // Index of the current blob ID within the blob ID list of the current log entry.
-    std::size_t blob_index_;
-    // Cached blob IDs from the current log entry to reduce repeated retrieval.
-    std::vector<limestone::api::blob_id_type> cached_blob_ids_;
-
-    // Advances internal indices (and updates the cache) to point to the next valid blob ID.
-    // If the current log entry has no further blob IDs, it advances to the next log entry.
-    void advance_to_valid();
-};
+namespace limestone::internal {
 
 /*
  * blob_file_gc_snapshot
@@ -84,8 +42,9 @@ public:
     // Disable copy and move semantics.
     blob_file_gc_snapshot(const blob_file_gc_snapshot&) = delete;
     blob_file_gc_snapshot& operator=(const blob_file_gc_snapshot&) = delete;
-    blob_file_gc_snapshot(blob_file_gc_snapshot&&) = default;
-    blob_file_gc_snapshot& operator=(blob_file_gc_snapshot&&) = default;
+    blob_file_gc_snapshot(blob_file_gc_snapshot&&) = delete;
+    blob_file_gc_snapshot& operator=(blob_file_gc_snapshot&&) = delete;
+    ~blob_file_gc_snapshot() = default;
 
     /* 
     * Sanitizes and adds a log entry to the snapshot.
@@ -104,22 +63,14 @@ public:
     */
     void finalize_local_entries();
 
-
-    /* 
-     * Finalizes the snapshot after all threads have finished adding entries.
+    /**
+     * @brief Finalizes the snapshot after all entries have been added and returns the snapshot.
      *
-     * This method merges all entries from the internal buffer, sorts them in descending order,
-     * and removes duplicate entries with the same key_sid by retaining only the entry with the maximum write_version.
-     */
-    void finalize_snapshot();
-
-    /* 
-     * Returns a blob_id_iterator that provides sequential access to all blob IDs in the snapshot.
+     * Merges thread-local containers, sorts them in descending order, and removes duplicate entries.
      *
-     * This iterator allows clients to iterate over each blob ID without creating an additional list,
-     * thereby reducing memory overhead.
+     * @return const log_entry_container& The finalized snapshot of log entries.
      */
-    blob_id_iterator blob_ids_iterator() const;
+    const log_entry_container& finalize_snapshot();
     
     /* 
      * Resets the internal state for a new garbage collection cycle.
@@ -127,21 +78,12 @@ public:
     void reset();
 
 private:
-    /* 
-     * Merges entries from multiple sources (if applicable).
-     */
-    void merge_entries();
-
-    /* 
-     * Removes duplicate entries by retaining only the entry with the highest write_version for each key_sid.
-     */
-    void remove_duplicate_entries();
+    // Thread-local pointer to each thread's log_entry_container.
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+    static thread_local std::shared_ptr<log_entry_container> tls_container_;
 
     // The threshold for write_version used in garbage collection.
     write_version_type threshold_;
-
-    // Internal buffer to accumulate log entries from multiple threads.
-    std::vector<log_entry> entries_;
 
     // Final snapshot after merging, sorting, and duplicate removal.
     log_entry_container snapshot_;
@@ -149,9 +91,11 @@ private:
     // Mutex to ensure thread-safe access to internal data.
     mutable std::mutex mtx_;
 
-    std::vector<log_entry_container*> thread_containers_;
+    // List of thread-local containers to be merged into the final snapshot.
+    std::vector<std::shared_ptr<log_entry_container>> thread_containers_;
+
+    // Global mutex to safely access thread_containers_.
     std::mutex global_mtx_;
 };
 
-} // namespace internal
-} // namespace limestone
+} // namespace limestone::internal
