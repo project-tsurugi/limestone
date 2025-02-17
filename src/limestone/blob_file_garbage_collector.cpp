@@ -49,7 +49,17 @@ using limestone::api::log_entry;
        gc_exempt_blob_(std::make_unique<blob_id_container>()) {
      file_ops_ = std::make_unique<real_file_operations>(); 
  }
-  
+
+ blob_file_garbage_collector::~blob_file_garbage_collector() {
+     try {
+         shutdown();
+     } catch (const std::exception &e) {
+         LOG_LP(ERROR) << "Exception in destructor during shutdown: " << e.what();
+     } catch (...) {
+         LOG_LP(ERROR) << "Unknown exception in destructor during shutdown.";
+     }
+ }
+
  void blob_file_garbage_collector::scan_blob_files(blob_id_type max_existing_blob_id) {
      {
          std::lock_guard<std::mutex> lock(mutex_);

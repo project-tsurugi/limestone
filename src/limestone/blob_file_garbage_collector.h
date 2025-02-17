@@ -67,8 +67,14 @@ public:
 
     /**
      * @brief Destructor.
+     *
+     * @warning This destructor calls shutdown() defensively to prevent resource leaks,
+     *          but it is the caller's responsibility to explicitly invoke shutdown()
+     *          before destroying the object.
+     *          Relying on the destructor to call shutdown() is not recommended,
+     *          as it may block execution for an extended period.
      */
-    ~blob_file_garbage_collector() = default;
+    ~blob_file_garbage_collector();
 
     // Disallow copy and move operations.
     blob_file_garbage_collector(const blob_file_garbage_collector&) = delete;
