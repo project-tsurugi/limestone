@@ -27,10 +27,15 @@
 thread_local std::shared_ptr<log_entry_container> blob_file_gc_snapshot::tls_container_ = nullptr;
 
  blob_file_gc_snapshot::blob_file_gc_snapshot(const write_version_type& threshold)
-     : threshold_(threshold)
- {
+     : threshold_(threshold) {
      // The thread_containers_ vector and snapshot_ are default-constructed.
  }
+
+ blob_file_gc_snapshot::~blob_file_gc_snapshot() {
+    // Reset the thread-local container to avoid state leakage between tests or re-use in the same thread.
+    tls_container_.reset();
+}
+
 
  void blob_file_gc_snapshot::sanitize_and_add_entry(const log_entry& entry) {
      // Only process entries of type normal_with_blob.
@@ -67,34 +72,33 @@ thread_local std::shared_ptr<log_entry_container> blob_file_gc_snapshot::tls_con
      tls_container_->append(modified_entry);
  }
 
- void blob_file_gc_snapshot::finalize_local_entries()
-{
-    tls_container_->sort_descending();
-}
- 
-const log_entry_container& blob_file_gc_snapshot::finalize_snapshot()
-{
-    log_entry_container merged = log_entry_container::merge_sorted_collections(thread_containers_);
-    
-    // Remove duplicate entries from the merged container.
-    // Since the container is sorted in descending order, the first entry for a given key_sid
-    // is the one with the maximum write_version.
-    snapshot_.clear();
-    std::string last_key;
-    for (const auto& entry : merged) {
-        const std::string& current_key = entry.key_sid();
-        if (last_key.empty() || current_key != last_key) {
-            snapshot_.append(entry);
-            last_key = current_key;
-        }
+ void blob_file_gc_snapshot::finalize_local_entries() {
+    if (tls_container_) {
+        tls_container_->sort_descending();
+        tls_container_.reset();
     }
+ }
 
-    return snapshot_;
-}
+ const log_entry_container& blob_file_gc_snapshot::finalize_snapshot() {
+     log_entry_container merged = log_entry_container::merge_sorted_collections(thread_containers_);
 
- 
- void blob_file_gc_snapshot::reset()
- {
+     // Remove duplicate entries from the merged container.
+     // Since the container is sorted in descending order, the first entry for a given key_sid
+     // is the one with the maximum write_version.
+     snapshot_.clear();
+     std::string last_key;
+     for (const auto& entry : merged) {
+         const std::string& current_key = entry.key_sid();
+         if (last_key.empty() || current_key != last_key) {
+             snapshot_.append(entry);
+             last_key = current_key;
+         }
+     }
+
+     return snapshot_;
+ }
+
+ void blob_file_gc_snapshot::reset() {
      {
          // Clean up any remaining thread-local containers.
          std::lock_guard<std::mutex> lock(global_mtx_);
@@ -104,7 +108,6 @@ const log_entry_container& blob_file_gc_snapshot::finalize_snapshot()
      // Note: The thread_local tls_container remains set in each thread.
      // Its lifetime is managed per thread; if needed, threads can reset it.
  }
- 
- 
+
  } // namespace limestone::internal
   

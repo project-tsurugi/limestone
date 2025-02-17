@@ -44,8 +44,12 @@ public:
     blob_file_gc_snapshot& operator=(const blob_file_gc_snapshot&) = delete;
     blob_file_gc_snapshot(blob_file_gc_snapshot&&) = delete;
     blob_file_gc_snapshot& operator=(blob_file_gc_snapshot&&) = delete;
-    ~blob_file_gc_snapshot() = default;
 
+   /**
+     * @brief Destructor that resets the thread-local container.
+     */
+    ~blob_file_gc_snapshot();
+    
     /* 
     * Sanitizes and adds a log entry to the snapshot.
     *
