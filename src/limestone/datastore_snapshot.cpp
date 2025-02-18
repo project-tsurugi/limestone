@@ -282,7 +282,7 @@ static void sortdb_foreach(
             }
             case log_entry::entry_type::clear_storage:
             case log_entry::entry_type::remove_storage:
-                write_snapshot_entry(entry_type, db_key, db_value.substr(1), {});    
+                write_snapshot_entry(entry_type, key, create_value_from_db_key_and_value(db_key, db_value), {});    
                 break;
            default:
                 LOG(ERROR) << "never reach " << static_cast<int>(entry_type);
