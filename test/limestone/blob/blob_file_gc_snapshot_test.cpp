@@ -17,6 +17,18 @@ using namespace limestone::internal;
 namespace limestone {
 namespace testing {
 
+/*
+ * Testable subclass to expose protected methods for unit testing.
+ */
+class testable_blob_file_gc_snapshot : public blob_file_gc_snapshot {
+public:
+    using blob_file_gc_snapshot::blob_file_gc_snapshot;  // inherit constructor
+
+    // Expose protected methods as public.
+    using blob_file_gc_snapshot::finalize_high_entries_impl;
+    using blob_file_gc_snapshot::finalize_low_entries_impl;
+};
+
 // Test fixture for blob_file_gc_snapshot.
 class blob_file_gc_snapshot_test : public ::testing::Test {
 protected:
@@ -246,7 +258,7 @@ TEST_F(blob_file_gc_snapshot_test, tls_container_null_state_behavior) {
     // Create a snapshot instance with a given threshold.
     blob_file_gc_snapshot snapshot(write_version_type(100, 1));
     EXPECT_EQ(snapshot.boundary_version(), write_version_type(100, 1));
-    
+
     // Ensure the internal state is reset so that tls_container_ becomes nullptr.
     snapshot.reset();
 
@@ -272,7 +284,7 @@ TEST_F(blob_file_gc_snapshot_test, tls_container_null_state_behavior) {
 
 TEST_F(blob_file_gc_snapshot_test, threshold_boundary_test) {
     // Create a snapshot with threshold write_version (100, 1)
-    blob_file_gc_snapshot snapshot(write_version_type(100, 1));
+    testable_blob_file_gc_snapshot snapshot(write_version_type(100, 1));
     EXPECT_EQ(snapshot.boundary_version(), write_version_type(100, 1));
 
     // Case 1: Entry with write_version exactly equal to threshold.
@@ -280,8 +292,10 @@ TEST_F(blob_file_gc_snapshot_test, threshold_boundary_test) {
     log_entry entry_equal = create_blob_log_entry(600, "boundaryKey", "boundaryValue", write_version_type(100, 1));
     snapshot.sanitize_and_add_entry(entry_equal);
     snapshot.finalize_local_entries();
-    const log_entry_container& snap_equal = snapshot.finalize_snapshot();
+    log_entry_container snap_equal = snapshot.finalize_low_entries_impl();
     EXPECT_EQ(snap_equal.size(), 0u);
+    snap_equal = snapshot.finalize_high_entries_impl();
+    EXPECT_EQ(snap_equal.size(), 1u);
 
     // Reset snapshot state.
     snapshot.reset();
@@ -291,7 +305,9 @@ TEST_F(blob_file_gc_snapshot_test, threshold_boundary_test) {
     log_entry entry_lower = create_blob_log_entry(600, "boundaryKey", "boundaryValue", write_version_type(100, 0));
     snapshot.sanitize_and_add_entry(entry_lower);
     snapshot.finalize_local_entries();
-    const log_entry_container& snap_lower = snapshot.finalize_snapshot();
+    log_entry_container snap_lower = snapshot.finalize_low_entries_impl();
+    EXPECT_EQ(snap_lower.size(), 1u);
+    snap_lower = snapshot.finalize_high_entries_impl();
     EXPECT_EQ(snap_lower.size(), 1u);
 
     // Reset snapshot state.
@@ -302,8 +318,10 @@ TEST_F(blob_file_gc_snapshot_test, threshold_boundary_test) {
     log_entry entry_higher = create_blob_log_entry(600, "boundaryKey", "boundaryValue", write_version_type(101, 0));
     snapshot.sanitize_and_add_entry(entry_higher);
     snapshot.finalize_local_entries();
-    const log_entry_container& snap_higher = snapshot.finalize_snapshot();
+    log_entry_container snap_higher = snapshot.finalize_low_entries_impl();
     EXPECT_EQ(snap_higher.size(), 0u);
+    snap_higher = snapshot.finalize_high_entries_impl();
+    EXPECT_EQ(snap_higher.size(), 1u);
 }
 
 

@@ -78,8 +78,8 @@ public:
     /**
      * @brief Finalizes the snapshot after all entries have been added and returns the snapshot.
      *
-     * Merges thread-local low containers, sorts them in descending order, and removes duplicate entries.
-     * Then, high container entries are appended directly.
+     * This method calls the two protected methods finalize_low_entries_impl() and
+     * finalize_high_entries_impl() sequentially, and combines their results.
      *
      * @return const log_entry_container& The finalized snapshot of log entries.
      */
@@ -96,6 +96,23 @@ public:
      * @return const write_version_type& The boundary version.
      */
     const write_version_type& boundary_version() const;
+
+protected:
+    // Protected methods for unit testing.
+
+    /**
+     * @brief Finalizes low entries: merges, sorts and removes duplicates.
+     *
+     * @return log_entry_container The merged low entries container.
+     */
+    log_entry_container finalize_low_entries_impl();
+
+    /**
+     * @brief Finalizes high entries: appends all high container entries.
+     *
+     * @return log_entry_container The container holding all high entries.
+     */
+    log_entry_container finalize_high_entries_impl();
 
 private:
     // Thread-local pointer to each thread's low log_entry_container.
