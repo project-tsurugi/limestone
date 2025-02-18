@@ -23,7 +23,8 @@
 
 #include "file_operations.h"
 #include "limestone/api/blob_id_type.h"
-#include "blob_file_gc_snapshot.h"
+#include "compaction_options.h"
+
 
 namespace limestone::internal {
 using namespace limestone::api;
@@ -84,27 +85,17 @@ status purge_dir(const boost::filesystem::path& dir);
 // from datastore_snapshot.cpp
 
 /**
- * @brief Creates a compacted PWAL file from WAL files and returns the maximum blob_id encountered.
+ * @brief Creates a compacted PWAL (Persistent Write-Ahead Log) and retrieves the maximum blob ID.
  *
- * This function compacts WAL files in the directory @p from_dir into a single snapshot file
- * in the directory @p to_dir. Optionally, if a blob_file_gc_snapshot instance is provided via
- * @p snapshot_ref, additional snapshot processing for BLOB file garbage collection is performed.
+ * This function performs log compaction using the given compaction options. 
+ * It processes the specified input directory, compacts the logs, and stores 
+ * the result in the target directory.
  *
- * @param from_dir The directory containing WAL files.
- * @param to_dir The target directory where the compacted PWAL file is created.
- * @param num_worker The number of worker threads to use.
- * @param file_names The set of file names to process.
- * @param snapshot_ref Optional reference to a blob_file_gc_snapshot instance for performing additional
- *                     snapshot processing for BLOB file GC. If omitted, the function behaves normally.
- * @return blob_id_type The maximum blob_id encountered during processing.
+ * @param options The compaction options that specify source and destination directories, 
+ *                number of workers, file set, and garbage collection settings.
+ * @return The maximum blob ID found during the compaction process.
  */
-  
-limestone::api::blob_id_type create_compact_pwal_and_get_max_blob_id(
-    const boost::filesystem::path& from_dir,
-    const boost::filesystem::path& to_dir,
-    int num_worker,
-    const std::set<std::string>& file_names,
-    std::optional<std::reference_wrapper<blob_file_gc_snapshot>> snapshot_ref = std::nullopt);
+limestone::api::blob_id_type create_compact_pwal_and_get_max_blob_id(compaction_options options);
 
 
 std::set<boost::filesystem::path> filter_epoch_files(const boost::filesystem::path& directory);

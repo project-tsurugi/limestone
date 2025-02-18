@@ -1,5 +1,5 @@
 /*
- * Copyright 0-2025 Project Tsurugi.
+ * Copyright 2022-2025 Project Tsurugi.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -34,7 +34,7 @@
      EXPECT_EQ(options.get_from_dir(), from_dir_);
      EXPECT_EQ(options.get_to_dir(), to_dir_);
      EXPECT_EQ(options.get_num_worker(), num_workers_);
-     EXPECT_FALSE(options.is_using_file_set());
+     EXPECT_FALSE(options.has_file_set());
      EXPECT_FALSE(options.is_gc_enabled());
  }
  
@@ -46,7 +46,7 @@
      EXPECT_EQ(options.get_from_dir(), from_dir_);
      EXPECT_EQ(options.get_to_dir(), to_dir_);
      EXPECT_EQ(options.get_num_worker(), num_workers_);
-     EXPECT_TRUE(options.is_using_file_set());
+     EXPECT_TRUE(options.has_file_set());
      EXPECT_EQ(options.get_file_names(), file_names);
      EXPECT_FALSE(options.is_gc_enabled());
  }
@@ -61,7 +61,7 @@
      EXPECT_EQ(options.get_from_dir(), from_dir_);
      EXPECT_EQ(options.get_to_dir(), to_dir_);
      EXPECT_EQ(options.get_num_worker(), num_workers_);
-     EXPECT_TRUE(options.is_using_file_set());
+     EXPECT_TRUE(options.has_file_set());
      EXPECT_EQ(options.get_file_names(), file_names);
      EXPECT_TRUE(options.is_gc_enabled());
  }
@@ -71,6 +71,20 @@
  
      EXPECT_FALSE(options.is_gc_enabled());
      EXPECT_THROW(options.get_gc_snapshot(), std::bad_optional_access);
+ }
+ 
+ // New test for the constructor without to_dir (pre-compaction phase)
+ TEST_F(compaction_options_test, construct_without_to_dir) {
+     std::set<std::string> file_names = {"file1", "file2"};
+ 
+     compaction_options options(from_dir_, num_workers_, file_names);
+ 
+     EXPECT_EQ(options.get_from_dir(), from_dir_);
+     EXPECT_EQ(options.get_to_dir(), boost::filesystem::path("/not_exists_dir"));
+     EXPECT_EQ(options.get_num_worker(), num_workers_);
+     EXPECT_TRUE(options.has_file_set());
+     EXPECT_EQ(options.get_file_names(), file_names);
+     EXPECT_FALSE(options.is_gc_enabled());
  }
  
  }  // namespace limestone::testing

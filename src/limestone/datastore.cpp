@@ -32,6 +32,7 @@
 #include "log_entry.h"
 #include "online_compaction.h"
 #include "compaction_catalog.h"
+#include "compaction_options.h"
 #include "blob_file_resolver.h"
 #include "blob_pool_impl.h"
 #include "blob_file_garbage_collector.h"
@@ -692,9 +693,8 @@ void datastore::compact_with_online() {
         boundary_version_copy = available_boundary_version_;
     }
     blob_file_gc_snapshot gc_snapshot(boundary_version_copy);
-
-    blob_id_type max_blob_id = create_compact_pwal_and_get_max_blob_id(location_, compaction_temp_dir, recover_max_parallelism_, need_compaction_filenames);
-
+    compaction_options options{location_, compaction_temp_dir, recover_max_parallelism_, need_compaction_filenames, gc_snapshot};
+    blob_id_type max_blob_id = create_compact_pwal_and_get_max_blob_id(options);
 
 
     // handle existing compacted file

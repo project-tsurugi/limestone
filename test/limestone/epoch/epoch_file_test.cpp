@@ -78,7 +78,8 @@ public:
     epoch_id_type last_durable_epoch() {
         boost::filesystem::path from_dir = boost::filesystem::path(location);
         std::set<std::string> file_names = assemble_snapshot_input_filenames(compaction_catalog_, from_dir);
-        dblog_scan logscan = file_names.empty() ? dblog_scan{from_dir} : dblog_scan{from_dir, file_names};
+        compaction_options options(from_dir, 1, file_names);
+        dblog_scan logscan = file_names.empty() ? dblog_scan(from_dir) : dblog_scan(from_dir, options);
         epoch_id_type last_durable_epoch = logscan.last_durable_epoch_in_dir();
         return last_durable_epoch;
     }

@@ -19,6 +19,7 @@
 #include <limestone/api/datastore.h>
 #include "internal.h"
 #include "log_entry.h"
+#include "compaction_options.h"
 
 
 namespace limestone::internal {
@@ -85,17 +86,6 @@ public:
     explicit dblog_scan(const boost::filesystem::path& logdir) : dblogdir_(logdir) { rescan_directory_paths(); }
 
     /**
-     * @brief Constructor that initializes the dblog_scan with the specified log directory.
-     *
-     * This constructor uses the initial content of the `logdir` to determine the target files for processing.
-     * If the contents of `logdir` change during processing, you must call the `rescan_directory_paths()` method
-     * to update the target files accordingly.
-     *
-     * @param logdir The path to the directory containing the files to be processed.
-     */
-    explicit dblog_scan(boost::filesystem::path&& logdir) : dblogdir_(std::move(logdir)) { rescan_directory_paths(); }
-
-    /**
      * @brief Constructor that initializes the dblog_scan with the specified log directory and file names.
      *
      * This constructor processes only the files specified in the `file_names` set within the `logdir`.
@@ -105,24 +95,8 @@ public:
      * @param logdir The path to the directory containing the files to be processed.
      * @param file_names The set of file names within `logdir` to be processed.
      */
-    explicit dblog_scan(const boost::filesystem::path& logdir, const std::set<std::string>& file_names) : dblogdir_(logdir) {
-        for (const auto& file_name : file_names) {
-            path_list_.emplace_back(dblogdir_ / file_name);
-        }
-    }
-
-    /**
-     * @brief Constructor that initializes the dblog_scan with the specified log directory and file names.
-     *
-     * This constructor processes only the files specified in the `file_names` set within the `logdir`.
-     * It is used when you do not want the target files to change even if the contents of `logdir` are modified after
-     * determining the target files.
-     *
-     * @param logdir The path to the directory containing the files to be processed.
-     * @param file_names The set of file names within `logdir` to be processed.
-     */
-    explicit dblog_scan(boost::filesystem::path&& logdir, const std::set<std::string>& file_names) : dblogdir_(std::move(logdir)) {
-        for (const auto& file_name : file_names) {
+    explicit dblog_scan(const boost::filesystem::path& logdir, compaction_options options) : dblogdir_(logdir) {
+        for (const auto& file_name : options.get_file_names()) {
             path_list_.emplace_back(dblogdir_ / file_name);
         }
     }
@@ -193,15 +167,6 @@ public:
      * directory, adding all file paths in the directory to the path list.
      */
     void rescan_directory_paths();
-
-    /**
-     * @brief Cleans up unnecessary epoch files in the log directory.
-     *
-     * This method identifies and removes unnecessary epoch files in the log directory.
-     * Only the main epoch file is retained, and all rotated epoch files are deleted.
-     * If the main epoch file does not exist among the identified files, an exception is thrown.
-     */
-    void cleanup_rotated_epoch_files();
 
 private:
     boost::filesystem::path dblogdir_;

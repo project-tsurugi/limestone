@@ -109,17 +109,16 @@ static void insert_twisted_entry(sortdb_wrapper* sortdb, const log_entry& e) {
     sortdb->put(db_key, db_value);
 }
 
-static std::pair<epoch_id_type, sorting_context> create_sorted_from_wals(
-    const boost::filesystem::path& from_dir,
-    int num_worker,
-    const std::set<std::string>& file_names = std::set<std::string>(),
-    std::optional<std::reference_wrapper<blob_file_gc_snapshot>> gc_snapshot_ref = std::nullopt) {
+static std::pair<epoch_id_type, sorting_context> create_sorted_from_wals(compaction_options options) {
+    auto from_dir = options.get_from_dir();
+    auto file_names = options.get_file_names();
+    auto num_worker = options.get_num_worker();
 #if defined SORT_METHOD_PUT_ONLY
     sorting_context sctx{std::make_unique<sortdb_wrapper>(from_dir, comp_twisted_key)};
 #else
     sorting_context sctx{std::make_unique<sortdb_wrapper>(from_dir)};
 #endif
-    dblog_scan logscan = file_names.empty() ? dblog_scan{from_dir} : dblog_scan{from_dir, file_names};
+    dblog_scan logscan = file_names.empty() ? dblog_scan{from_dir} : dblog_scan{from_dir, options};
 
     epoch_id_type ld_epoch = logscan.last_durable_epoch_in_dir();
 
@@ -130,11 +129,11 @@ static std::pair<epoch_id_type, sorting_context> create_sorted_from_wals(
     const auto add_entry_to_point = insert_entry_or_update_to_max;
     bool works_with_multi_thread = false;
 #endif
-    auto add_entry = [&sctx, &add_entry_to_point, &gc_snapshot_ref](const log_entry& e){
+    auto add_entry = [&sctx, &add_entry_to_point, &options](const log_entry& e){
         switch (e.type()) {
         case log_entry::entry_type::normal_with_blob:
-            if(gc_snapshot_ref) {
-                gc_snapshot_ref.value().get().sanitize_and_add_entry(e);
+            if (options.is_gc_enabled()) {
+                options.get_gc_snapshot().sanitize_and_add_entry(e);
             }
             add_entry_to_point(sctx.get_sortdb(), e);
             break;
@@ -301,16 +300,11 @@ static void sortdb_foreach(
 #endif
 }
 
-blob_id_type create_compact_pwal_and_get_max_blob_id(
-    const boost::filesystem::path& from_dir,
-    const boost::filesystem::path& to_dir,
-    int num_worker,
-    const std::set<std::string>& file_names,
-    std::optional<std::reference_wrapper<blob_file_gc_snapshot>> gc_snapshot_ref) {
-    
-    auto [max_appeared_epoch, sctx] = create_sorted_from_wals(from_dir, num_worker, file_names, gc_snapshot_ref);
+blob_id_type create_compact_pwal_and_get_max_blob_id(compaction_options options) {
+    auto [max_appeared_epoch, sctx] = create_sorted_from_wals(options);
 
     boost::system::error_code error;
+    auto to_dir = options.get_to_dir();
     const bool result_check = boost::filesystem::exists(to_dir, error);
     if (!result_check || error) {
         const bool result_mkdir = boost::filesystem::create_directory(to_dir, error);
@@ -438,7 +432,8 @@ snapshot::~snapshot() = default;
 blob_id_type datastore::create_snapshot_and_get_max_blob_id() {
     const auto& from_dir = location_;
     std::set<std::string> file_names = assemble_snapshot_input_filenames(compaction_catalog_, from_dir);
-    auto [max_appeared_epoch, sctx] = create_sorted_from_wals(from_dir, recover_max_parallelism_, file_names);
+    compaction_options options(from_dir, recover_max_parallelism_, file_names);
+    auto [max_appeared_epoch, sctx] = create_sorted_from_wals(options);
     epoch_id_switched_.store(max_appeared_epoch);
     epoch_id_informed_.store(max_appeared_epoch);
 
