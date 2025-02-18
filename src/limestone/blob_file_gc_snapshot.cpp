@@ -24,15 +24,17 @@
  // ----------------- Implementation of blob_file_gc_snapshot methods -----------------
  // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
  thread_local std::shared_ptr<log_entry_container> blob_file_gc_snapshot::tls_low_container_ = nullptr;
+ // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+ thread_local std::shared_ptr<log_entry_container> blob_file_gc_snapshot::tls_high_container_ = nullptr;
  
- blob_file_gc_snapshot::blob_file_gc_snapshot(const write_version_type& boundary_version)
-  : boundary_version_(boundary_version) {
-     // The thread_low_containers_ vector and snapshot_ are default-constructed.
+ blob_file_gc_snapshot::blob_file_gc_snapshot(const write_version_type& boundary_version) : boundary_version_(boundary_version) {
+     // The thread_low_containers_, thread_high_containers_ and snapshot_ are default-constructed.
  }
  
  blob_file_gc_snapshot::~blob_file_gc_snapshot() {
-     // Reset the thread-local container to avoid state leakage between tests or re-use in the same thread.
+     // Reset the thread-local containers to avoid state leakage between tests or re-use in the same thread.
      tls_low_container_.reset();
+     tls_high_container_.reset();
  }
  
  void blob_file_gc_snapshot::sanitize_and_add_entry(const log_entry& entry) {
@@ -52,22 +54,28 @@
      write_version_type entry_wv;
      modified_entry.write_version(entry_wv);
  
-     // Compare the obtained write_version with the threshold.
-     if (!(entry_wv < boundary_version_)) {
-         return;
-     }
- 
-     // Obtain or create the thread-local low log_entry_container.
-     if (!tls_low_container_) {
-         tls_low_container_ = std::make_shared<log_entry_container>();
-         {
-             std::lock_guard<std::mutex> lock(global_mtx_);
-             thread_low_containers_.push_back(tls_low_container_);
+     // Dispatch entry to the appropriate container based on write_version.
+     if (entry_wv < boundary_version_) {
+         // Process low container.
+         if (!tls_low_container_) {
+             tls_low_container_ = std::make_shared<log_entry_container>();
+             {
+                 std::lock_guard<std::mutex> lock(global_mtx_);
+                 thread_low_containers_.push_back(tls_low_container_);
+             }
          }
+         tls_low_container_->append(modified_entry);
+     } else {
+         // Process high container.
+         if (!tls_high_container_) {
+             tls_high_container_ = std::make_shared<log_entry_container>();
+             {
+                 std::lock_guard<std::mutex> lock(global_mtx_);
+                 thread_high_containers_.push_back(tls_high_container_);
+             }
+         }
+         tls_high_container_->append(modified_entry);
      }
- 
-     // Append the modified entry into the thread-local low container.
-     tls_low_container_->append(modified_entry);
  }
  
  void blob_file_gc_snapshot::finalize_local_entries() {
@@ -75,36 +83,44 @@
          tls_low_container_->sort_descending();
          tls_low_container_.reset();
      }
+     if (tls_high_container_) {
+         // For high container, no sorting is required.
+         tls_high_container_.reset();
+     }
  }
  
  const log_entry_container& blob_file_gc_snapshot::finalize_snapshot() {
-     log_entry_container merged = log_entry_container::merge_sorted_collections(thread_low_containers_);
- 
-     // Remove duplicate entries from the merged container.
-     // Since the container is sorted in descending order, the first entry for a given key_sid
-     // is the one with the maximum write_version.
-     snapshot_.clear();
+     // Process low containers: merge, sort, and remove duplicate entries.
+     log_entry_container low_merged = log_entry_container::merge_sorted_collections(thread_low_containers_);
+     aggregated_entries.clear();
      std::string last_key;
-     for (const auto& entry : merged) {
+     for (const auto& entry : low_merged) {
          const std::string& current_key = entry.key_sid();
          if (last_key.empty() || current_key != last_key) {
-             snapshot_.append(entry);
+             aggregated_entries.append(entry);
              last_key = current_key;
          }
      }
  
-     return snapshot_;
+     // Process high containers: append all entries directly.
+     for (const auto& high_container : thread_high_containers_) {
+         for (const auto& entry : *high_container) {
+             aggregated_entries.append(entry);
+         }
+     }
+ 
+     return aggregated_entries;
  }
  
  void blob_file_gc_snapshot::reset() {
      {
-         // Clean up any remaining thread-local low containers.
          std::lock_guard<std::mutex> lock(global_mtx_);
          thread_low_containers_.clear();
+         thread_high_containers_.clear();
      }
-     snapshot_.clear();
-     // Note: The thread_local tls_low_container remains set in each thread.
-     // Its lifetime is managed per thread; if needed, threads can reset it.
+     aggregated_entries.clear();
+     // Note: The thread_local containers remain set in each thread.
+     // Their lifetime is managed per thread; if needed, threads can reset them.
  }
  
  const write_version_type& blob_file_gc_snapshot::boundary_version() const {

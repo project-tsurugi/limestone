@@ -28,15 +28,13 @@ namespace limestone::internal {
  * blob_file_gc_snapshot
  *
  * This class maintains a snapshot of log entries for blob file garbage collection.
- * It provides an interface to obtain an iterator over all blob IDs contained in the snapshot.
+ * It collects entries from multiple threads in two separate groups:
  *
- * Instead of returning a complete list of blob IDs (which may consume significant memory),
- * the class returns a custom iterator that extracts blob IDs on-the-fly.
- *
- * The snapshot is composed of two groups:
  *   - Low entries container: Contains log entries with write_version below boundary_version.
  *     These entries will be merged, sorted, and deduplicated.
- *   - High entries container: Will be added later (not processed with merge/sort/deduplication).
+ *
+ *   - High entries container: Contains log entries with write_version greater than or equal to boundary_version.
+ *     These entries are not processed with merge/sort/duplicate removal and will be directly appended.
  */
 class blob_file_gc_snapshot {
 public:
@@ -53,7 +51,7 @@ public:
     blob_file_gc_snapshot& operator=(blob_file_gc_snapshot&&) = delete;
 
     /**
-     * @brief Destructor that resets the thread-local container.
+     * @brief Destructor that resets the thread-local containers.
      */
     ~blob_file_gc_snapshot();
     
@@ -62,7 +60,9 @@ public:
      *
      * Only entries of type normal_with_blob are processed.
      * The method clears the payload from the entry’s value_etc (keeping the write_version header)
-     * and adds the entry if its write_version is below the boundary_version.
+     * and adds the entry into the appropriate container based on its write_version:
+     *   - write_version below boundary_version goes to the low entries container.
+     *   - write_version greater than or equal to boundary_version goes to the high entries container.
      *
      * @param entry The log_entry to be processed and potentially added.
      */
@@ -70,14 +70,16 @@ public:
 
     /* 
      * Notifies that the add_entry operations in the current thread are complete,
-     * and finalizes (sorts) the local container for later merging.
+     * and finalizes (sorts) the low container for later merging.
+     * For the high container, no sorting is performed.
      */
     void finalize_local_entries();
 
     /**
      * @brief Finalizes the snapshot after all entries have been added and returns the snapshot.
      *
-     * Merges thread-local low entries containers, sorts them in descending order, and removes duplicate entries.
+     * Merges thread-local low containers, sorts them in descending order, and removes duplicate entries.
+     * Then, high container entries are appended directly.
      *
      * @return const log_entry_container& The finalized snapshot of log entries.
      */
@@ -100,20 +102,24 @@ private:
     // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
     static thread_local std::shared_ptr<log_entry_container> tls_low_container_;
 
+    // Thread-local pointer to each thread's high log_entry_container.
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+    static thread_local std::shared_ptr<log_entry_container> tls_high_container_;
+
     // The boundary version for write_version used in garbage collection.
     write_version_type boundary_version_;
 
-    // Final snapshot after merging, sorting, and duplicate removal.
-    log_entry_container snapshot_;
+    // Final snapshot after merging low containers (with deduplication) and appending high entries.
+    log_entry_container aggregated_entries;
 
-    // Mutex to ensure thread-safe access to internal data.
-    mutable std::mutex mtx_;
+    // Global mutex to ensure thread-safe access to thread-local container vectors.
+    mutable std::mutex global_mtx_;
 
     // List of thread-local low containers to be merged into the final snapshot.
     std::vector<std::shared_ptr<log_entry_container>> thread_low_containers_;
 
-    // Global mutex to safely access thread_low_containers_.
-    std::mutex global_mtx_;
+    // List of thread-local high containers whose entries are directly appended.
+    std::vector<std::shared_ptr<log_entry_container>> thread_high_containers_;
 };
 
 } // namespace limestone::internal
