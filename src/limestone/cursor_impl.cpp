@@ -81,13 +81,16 @@ void cursor_impl::validate_and_read_stream(std::optional<boost::filesystem::ifst
         // If the entry is not yet read, read it
         if (!log_entry) {
             log_entry.emplace();  // Construct a new log_entry
-            if (!log_entry->read(*stream)) {
-                // If reading fails, close the stream and reset the log_entry
-                stream->close();
-                stream = std::nullopt;
-                log_entry = std::nullopt;
-                return;
-            }
+            do {
+                if (!log_entry->read(*stream)) {
+                    // If reading fails, close the stream and reset the log_entry
+                    stream->close();
+                    stream = std::nullopt;
+                    log_entry = std::nullopt;
+                    return;
+                }
+            } while (log_entry->type() != log_entry::entry_type::normal_entry &&
+                     log_entry->type() != log_entry::entry_type::normal_with_blob);
             // Check if the key_sid is in ascending order
             // TODO: Key order violation is detected here and the process is aborted.
             // However, this check should be moved to an earlier point, and if the key order is invalid,
