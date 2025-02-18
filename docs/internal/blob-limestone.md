@@ -664,3 +664,99 @@ BLOBリスト付きのエントリに対応する。
 log_channel.hに更新しているが、だれも参照していないpriavte fieldがあったので削除した。
 
     write_version_type write_version_{};
+
+## コンパクション時のGC
+
+### blob_file_gc_snapshotクラス
+
+* 概要
+  * BLOB_FILEのGCを行うための暮らす
+  * GC対象外のblob_idのリストを生成するために使用する。
+  * コンパクション時に、BLOB付きのエントリを登録する。
+    * エントリの追加機能はマルチスレッド対応
+    * メモリ上のエントリを保持する。ただし、このクラスの目的に不要なvalue部は削除して保持する。
+  * スレッドの処理が終了するとスナップショット作成対象のエントリをソートする。
+  * 全てのスレッドが終了したら、スナップショット作成対象のエントリをマージソートでマージしながらスナップショットを作成し、削除不可なエントリのセットを作成する。
+    * write_versionがboundary_version以上のエントリは無条件に削除不可
+    * write_versionがboundary_version未満のエントリは該当するエントリからスナップショットを作成し、スナップショットに含まれるエントリを削除不可とする。
+  * 削除不可のエントリがもつblob_idのリストから、削除不可なblob idのリストを作成する。
+
+
+* コンストラクタ、パラメータとして、boundary_versionを受け取る。
+
+```
+   /* 
+     * Constructs a blob_file_gc_snapshot with the given boundary_version.
+     * @param boundary_version The boundary_version for garbage collection.
+     */
+    explicit blob_file_gc_snapshot(const write_version_type& boundary_version);
+```
+
+* エントリを登録するメソッド
+
+```    
+    /* 
+    * Sanitizes and adds a log entry to the snapshot.
+    *
+    * Only entries of type normal_with_blob are processed.
+    * The method clears the payload from the entry’s value_etc (keeping the write_version header)
+    * and adds the entry if its write_version is below the boundary_version.
+    *
+    * @param entry The log_entry to be processed and potentially added.
+    */
+    void sanitize_and_add_entry(const log_entry& entry);
+```
+
+* 当該スレッドのエントリ追加が終了したことを通知するメソッド
+  * これが呼ばれると、当該スレッドが登録したエントリをソートする。
+  * ソートしたデータは内部に保持する。
+
+```
+    /* 
+    * Notifies that the add_entry operations in the current thread are complete,
+    * and finalizes (sorts) the local container for later merging.
+    */
+    void finalize_local_entries();
+```
+
+* 全てのスレッドの処理が終了し、登録すべきエントリがなくなった呼び出すメソッド
+  * マージソートでスナップショットを作成し、削除してはいけないエントリのリストを作成する。
+
+
+```
+    /**
+     * @brief Finalizes the snapshot after all entries have been added and returns the snapshot.
+     *
+     * Merges thread-local containers, sorts them in descending order, and removes duplicate entries.
+     *
+     * @return const log_entry_container& The finalized snapshot of log entries.
+     */
+    const log_entry_container& finalize_snapshot();
+```    
+
+* 内部に保持していた情報をクリアしメモリを開放する。
+```    
+    /* 
+     * Resets the internal state for a new garbage collection cycle.
+     */
+    void reset();
+```
+
+
+
+
+### オンラインコンパクション対応のための既存コードの変更点
+
+* `switch_available_boundary_version(write_version_type version)`で通知された、boundary_versionを覚えておく
+* オンラインコンパクション時は、write_versionがboundary_version以上のエントリは、削除しないで残しておく
+  * SORT_METHOD_PUT_ONLYの有無によって、実装が切り替わるが、両方のパターンに対応する。
+  * SORT_METHOD_PUT_ONLYの有無によって、ロジックを変える必要がある。
+  * こうしないと、まだ参照されているBLOBを含むエントリを削除してしまう可能性がある。
+  * 対象となるのはBLOBを含むエントリのみ
+* コンパクション時に、新たに作成したPWALファイルと、既存のコンパクション済みファイルを読み取るが、そのときに、
+  BLOB付きのエントリをblob_file_gc_snapshotに追加する。
+* コンパクション処理が終了 = 全てのエントリ追加完了なので、blob_file_gc_snapshot::finalize_snapshot()を呼び出し、
+  削除不可なエントリのリストを作成する。
+* 削除不可なエントリのリストから、削除不可なblob_idのリストを作成する。
+* 後は起動時のコンパクションと同様に、blob_fileをスキャンして作成したblob_idのリストと、削除不可なblob_idのリストを比較し、
+  削除すべきblob_idのリストを作成、blob_fileを削除する。

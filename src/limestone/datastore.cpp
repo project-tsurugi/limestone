@@ -657,6 +657,14 @@ void datastore::compact_with_online() {
     TRACE_START;
     check_after_ready(static_cast<const char*>(__func__));
 
+    // get a copy of next_blob_id and boundary_version before rotation
+    blob_id_type next_blob_id_copy = next_blob_id_.load(std::memory_order_acquire);
+    write_version_type boundary_version_copy;
+    {
+        std::lock_guard<std::mutex> lock(boundary_mutex_);
+        boundary_version_copy = available_boundary_version_;
+    }
+
     // rotate first
     rotation_result result = rotate_log_files();
 
@@ -687,11 +695,6 @@ void datastore::compact_with_online() {
     ensure_directory_exists(compaction_temp_dir);
 
     // create a compacted file and snapshot for blob file garbage collection
-    write_version_type boundary_version_copy;
-    {
-        std::lock_guard<std::mutex> lock(boundary_mutex_);
-        boundary_version_copy = available_boundary_version_;
-    }
     blob_file_gc_snapshot gc_snapshot(boundary_version_copy);
     compaction_options options{location_, compaction_temp_dir, recover_max_parallelism_, need_compaction_filenames, gc_snapshot};
     blob_id_type max_blob_id = create_compact_pwal_and_get_max_blob_id(options);
@@ -737,7 +740,7 @@ void datastore::compact_with_online() {
 
     // blob files garbage collection
     blob_file_garbage_collector garb_collector(*blob_file_resolver_);   
-    garb_collector.scan_blob_files(boundary_version_copy.get_major());
+    garb_collector.scan_blob_files(next_blob_id_copy);
     log_entry_container log_entries = gc_snapshot.finalize_snapshot();
     for(const auto& entry : log_entries) {
         for(const auto& blob_id : entry.get_blob_ids()) {
@@ -795,7 +798,7 @@ blob_file datastore::get_blob_file(blob_id_type reference) {
     return blob_file(path, available);
 }
 
-void datastore::switch_available_boundary_version([[maybe_unused]] write_version_type version) {
+void datastore::switch_available_boundary_version(write_version_type version) {
     TRACE_FINE_START << "version=" << version.get_major() << "." << version.get_minor();
     {
         std::lock_guard<std::mutex> lock(boundary_mutex_);

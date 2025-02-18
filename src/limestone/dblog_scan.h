@@ -97,11 +97,12 @@ public:
      * @param logdir The path to the directory containing the files to be processed.
      * @param file_names The set of file names within `logdir` to be processed.
      */
-    explicit dblog_scan(boost::filesystem::path logdir, const compaction_options &options) : dblogdir_(std::move(logdir)) {
-        for (const auto &file_name : options.get_file_names()) {
-            path_list_.emplace_back(dblogdir_ / file_name);
-        }
-    }
+     explicit dblog_scan(boost::filesystem::path logdir, compaction_options& options) 
+     : dblogdir_(std::move(logdir)), options_(options) {
+         for (const auto& file_name : options.get_file_names()) {
+             path_list_.emplace_back(dblogdir_ / file_name);
+         }
+     }
 
     const boost::filesystem::path& get_dblogdir() { return dblogdir_; }
     void set_thread_num(int thread_num) noexcept { thread_num_ = thread_num; }
@@ -172,6 +173,7 @@ public:
 
 private:
     boost::filesystem::path dblogdir_;
+    std::optional<std::reference_wrapper<compaction_options>> options_;
     std::list<boost::filesystem::path> path_list_;
     int thread_num_{1};
     bool fail_fast_{false};
