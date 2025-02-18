@@ -55,7 +55,8 @@
      std::set<std::string> file_names = {"file1", "file2"};
      write_version_type boundary_version(42, 5);
  
-     compaction_options options(from_dir_, to_dir_, num_workers_, file_names, boundary_version);
+     blob_file_gc_snapshot gc_snapshot(boundary_version);
+     compaction_options options(from_dir_, to_dir_, num_workers_, file_names, gc_snapshot);
  
      EXPECT_EQ(options.get_from_dir(), from_dir_);
      EXPECT_EQ(options.get_to_dir(), to_dir_);
@@ -63,7 +64,6 @@
      EXPECT_TRUE(options.is_using_file_set());
      EXPECT_EQ(options.get_file_names(), file_names);
      EXPECT_TRUE(options.is_gc_enabled());
-     EXPECT_EQ(options.get_available_boundary_version(), boundary_version);
  }
  
  TEST_F(compaction_options_test, get_gc_snapshot_without_gc_enabled) {

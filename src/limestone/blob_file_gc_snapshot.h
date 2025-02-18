@@ -34,10 +34,10 @@ namespace limestone::internal {
 class blob_file_gc_snapshot {
 public:
     /* 
-     * Constructs a blob_file_gc_snapshot with the given threshold.
-     * @param threshold The write_version threshold for garbage collection.
+     * Constructs a blob_file_gc_snapshot with the given boundary_version.
+     * @param boundary_version The boundary_version for garbage collection.
      */
-    explicit blob_file_gc_snapshot(const write_version_type& threshold);
+    explicit blob_file_gc_snapshot(const write_version_type& boundary_version);
 
     // Disable copy and move semantics.
     blob_file_gc_snapshot(const blob_file_gc_snapshot&) = delete;
@@ -55,7 +55,7 @@ public:
     *
     * Only entries of type normal_with_blob are processed.
     * The method clears the payload from the entry’s value_etc (keeping the write_version header)
-    * and adds the entry if its write_version is below the threshold.
+    * and adds the entry if its write_version is below the boundary_version.
     *
     * @param entry The log_entry to be processed and potentially added.
     */
@@ -81,13 +81,20 @@ public:
      */
     void reset();
 
+    /**
+     * @brief Returns the boundary version used for garbage collection.
+     * 
+     * @return const write_version_type& The boundary version.
+     */
+    const write_version_type& boundary_version() const;
+
 private:
     // Thread-local pointer to each thread's log_entry_container.
     // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
     static thread_local std::shared_ptr<log_entry_container> tls_container_;
 
-    // The threshold for write_version used in garbage collection.
-    write_version_type threshold_;
+    // The boundary version for write_version used in garbage collection.
+    write_version_type boundary_version_;
 
     // Final snapshot after merging, sorting, and duplicate removal.
     log_entry_container snapshot_;

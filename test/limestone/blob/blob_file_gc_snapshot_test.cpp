@@ -245,7 +245,8 @@ TEST_F(blob_file_gc_snapshot_test, finalize_snapshot_merging_duplicates) {
 TEST_F(blob_file_gc_snapshot_test, tls_container_null_state_behavior) {
     // Create a snapshot instance with a given threshold.
     blob_file_gc_snapshot snapshot(write_version_type(100, 1));
-
+    EXPECT_EQ(snapshot.boundary_version(), write_version_type(100, 1));
+    
     // Ensure the internal state is reset so that tls_container_ becomes nullptr.
     snapshot.reset();
 
@@ -272,6 +273,7 @@ TEST_F(blob_file_gc_snapshot_test, tls_container_null_state_behavior) {
 TEST_F(blob_file_gc_snapshot_test, threshold_boundary_test) {
     // Create a snapshot with threshold write_version (100, 1)
     blob_file_gc_snapshot snapshot(write_version_type(100, 1));
+    EXPECT_EQ(snapshot.boundary_version(), write_version_type(100, 1));
 
     // Case 1: Entry with write_version exactly equal to threshold.
     // Expected: The entry should NOT be added (because it's not less than the threshold).

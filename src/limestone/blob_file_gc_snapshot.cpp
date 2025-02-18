@@ -26,8 +26,8 @@
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 thread_local std::shared_ptr<log_entry_container> blob_file_gc_snapshot::tls_container_ = nullptr;
 
- blob_file_gc_snapshot::blob_file_gc_snapshot(const write_version_type& threshold)
-     : threshold_(threshold) {
+ blob_file_gc_snapshot::blob_file_gc_snapshot(const write_version_type& boundary_version)
+     : boundary_version_(boundary_version) {
      // The thread_containers_ vector and snapshot_ are default-constructed.
  }
 
@@ -55,7 +55,7 @@ thread_local std::shared_ptr<log_entry_container> blob_file_gc_snapshot::tls_con
      modified_entry.write_version(entry_wv);
 
      // Compare the obtained write_version with the threshold.
-     if (!(entry_wv < threshold_)) {
+     if (!(entry_wv < boundary_version_)) {
          return;
      }
 
@@ -108,6 +108,10 @@ thread_local std::shared_ptr<log_entry_container> blob_file_gc_snapshot::tls_con
      // Note: The thread_local tls_container remains set in each thread.
      // Its lifetime is managed per thread; if needed, threads can reset it.
  }
+
+const write_version_type& blob_file_gc_snapshot::boundary_version() const {
+    return boundary_version_;
+}
 
  } // namespace limestone::internal
   
