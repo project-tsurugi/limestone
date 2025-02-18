@@ -109,7 +109,7 @@ static void insert_twisted_entry(sortdb_wrapper* sortdb, const log_entry& e) {
     sortdb->put(db_key, db_value);
 }
 
-static std::pair<epoch_id_type, sorting_context> create_sorted_from_wals(compaction_options options) {
+static std::pair<epoch_id_type, sorting_context> create_sorted_from_wals(compaction_options &options) {
     auto from_dir = options.get_from_dir();
     auto file_names = options.get_file_names();
     auto num_worker = options.get_num_worker();
@@ -300,11 +300,11 @@ static void sortdb_foreach(
 #endif
 }
 
-blob_id_type create_compact_pwal_and_get_max_blob_id(compaction_options options) {
+blob_id_type create_compact_pwal_and_get_max_blob_id(compaction_options &options) {
     auto [max_appeared_epoch, sctx] = create_sorted_from_wals(options);
 
     boost::system::error_code error;
-    auto to_dir = options.get_to_dir();
+    const auto &to_dir = options.get_to_dir();
     const bool result_check = boost::filesystem::exists(to_dir, error);
     if (!result_check || error) {
         const bool result_mkdir = boost::filesystem::create_directory(to_dir, error);

@@ -70,7 +70,7 @@
      compaction_options options(from_dir_, to_dir_, num_workers_);
  
      EXPECT_FALSE(options.is_gc_enabled());
-     EXPECT_THROW(options.get_gc_snapshot(), std::bad_optional_access);
+     EXPECT_THROW((void)options.get_gc_snapshot(), std::bad_optional_access);
  }
  
  // New test for the constructor without to_dir (pre-compaction phase)

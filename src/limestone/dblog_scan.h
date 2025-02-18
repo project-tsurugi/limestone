@@ -82,8 +82,10 @@ public:
      *
      * @param logdir The path to the directory containing the files to be processed.
      */
+     explicit dblog_scan(boost::filesystem::path logdir) : dblogdir_(std::move(logdir)) {
+        rescan_directory_paths();
+    }
 
-    explicit dblog_scan(const boost::filesystem::path& logdir) : dblogdir_(logdir) { rescan_directory_paths(); }
 
     /**
      * @brief Constructor that initializes the dblog_scan with the specified log directory and file names.
@@ -95,8 +97,8 @@ public:
      * @param logdir The path to the directory containing the files to be processed.
      * @param file_names The set of file names within `logdir` to be processed.
      */
-    explicit dblog_scan(const boost::filesystem::path& logdir, compaction_options options) : dblogdir_(logdir) {
-        for (const auto& file_name : options.get_file_names()) {
+    explicit dblog_scan(boost::filesystem::path logdir, const compaction_options &options) : dblogdir_(std::move(logdir)) {
+        for (const auto &file_name : options.get_file_names()) {
             path_list_.emplace_back(dblogdir_ / file_name);
         }
     }

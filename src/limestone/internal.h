@@ -95,7 +95,7 @@ status purge_dir(const boost::filesystem::path& dir);
  *                number of workers, file set, and garbage collection settings.
  * @return The maximum blob ID found during the compaction process.
  */
-limestone::api::blob_id_type create_compact_pwal_and_get_max_blob_id(compaction_options options);
+limestone::api::blob_id_type create_compact_pwal_and_get_max_blob_id(compaction_options &options);
 
 
 std::set<boost::filesystem::path> filter_epoch_files(const boost::filesystem::path& directory);
