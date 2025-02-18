@@ -17,6 +17,8 @@
 
 #include <cstddef>
 #include <vector>
+#include <memory>
+#include <mutex>
 #include "log_entry_container.h"
 #include "limestone/api/blob_id_type.h"
 
@@ -30,6 +32,11 @@ namespace limestone::internal {
  *
  * Instead of returning a complete list of blob IDs (which may consume significant memory),
  * the class returns a custom iterator that extracts blob IDs on-the-fly.
+ *
+ * The snapshot is composed of two groups:
+ *   - Low entries container: Contains log entries with write_version below boundary_version.
+ *     These entries will be merged, sorted, and deduplicated.
+ *   - High entries container: Will be added later (not processed with merge/sort/deduplication).
  */
 class blob_file_gc_snapshot {
 public:
@@ -45,32 +52,32 @@ public:
     blob_file_gc_snapshot(blob_file_gc_snapshot&&) = delete;
     blob_file_gc_snapshot& operator=(blob_file_gc_snapshot&&) = delete;
 
-   /**
+    /**
      * @brief Destructor that resets the thread-local container.
      */
     ~blob_file_gc_snapshot();
     
     /* 
-    * Sanitizes and adds a log entry to the snapshot.
-    *
-    * Only entries of type normal_with_blob are processed.
-    * The method clears the payload from the entry’s value_etc (keeping the write_version header)
-    * and adds the entry if its write_version is below the boundary_version.
-    *
-    * @param entry The log_entry to be processed and potentially added.
-    */
+     * Sanitizes and adds a log entry to the snapshot.
+     *
+     * Only entries of type normal_with_blob are processed.
+     * The method clears the payload from the entry’s value_etc (keeping the write_version header)
+     * and adds the entry if its write_version is below the boundary_version.
+     *
+     * @param entry The log_entry to be processed and potentially added.
+     */
     void sanitize_and_add_entry(const log_entry& entry);
 
     /* 
-    * Notifies that the add_entry operations in the current thread are complete,
-    * and finalizes (sorts) the local container for later merging.
-    */
+     * Notifies that the add_entry operations in the current thread are complete,
+     * and finalizes (sorts) the local container for later merging.
+     */
     void finalize_local_entries();
 
     /**
      * @brief Finalizes the snapshot after all entries have been added and returns the snapshot.
      *
-     * Merges thread-local containers, sorts them in descending order, and removes duplicate entries.
+     * Merges thread-local low entries containers, sorts them in descending order, and removes duplicate entries.
      *
      * @return const log_entry_container& The finalized snapshot of log entries.
      */
@@ -89,9 +96,9 @@ public:
     const write_version_type& boundary_version() const;
 
 private:
-    // Thread-local pointer to each thread's log_entry_container.
+    // Thread-local pointer to each thread's low log_entry_container.
     // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
-    static thread_local std::shared_ptr<log_entry_container> tls_container_;
+    static thread_local std::shared_ptr<log_entry_container> tls_low_container_;
 
     // The boundary version for write_version used in garbage collection.
     write_version_type boundary_version_;
@@ -102,10 +109,10 @@ private:
     // Mutex to ensure thread-safe access to internal data.
     mutable std::mutex mtx_;
 
-    // List of thread-local containers to be merged into the final snapshot.
-    std::vector<std::shared_ptr<log_entry_container>> thread_containers_;
+    // List of thread-local low containers to be merged into the final snapshot.
+    std::vector<std::shared_ptr<log_entry_container>> thread_low_containers_;
 
-    // Global mutex to safely access thread_containers_.
+    // Global mutex to safely access thread_low_containers_.
     std::mutex global_mtx_;
 };
 
