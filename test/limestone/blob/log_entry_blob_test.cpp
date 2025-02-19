@@ -244,7 +244,7 @@ TEST_F(log_entry_blob_test, make_normal_with_blob_log_entry) {
     EXPECT_EQ(entry.type(), log_entry::entry_type::normal_with_blob);
     EXPECT_EQ(entry.key_sid(), key_sid);
     EXPECT_EQ(entry.value_etc(), value_etc);
-    EXPECT_EQ(entry.blob_ids(), blob_ids);
+    EXPECT_EQ(entry.raw_blob_ids(), blob_ids);
 }
 
 /**
@@ -261,7 +261,7 @@ TEST_F(log_entry_blob_test, make_normal_with_blob_log_entry_default_blob_ids) {
     EXPECT_EQ(entry.type(), log_entry::entry_type::normal_with_blob);
     EXPECT_EQ(entry.key_sid(), key_sid);
     EXPECT_EQ(entry.value_etc(), value_etc);
-    EXPECT_EQ(entry.blob_ids(), std::string());
+    EXPECT_EQ(entry.raw_blob_ids(), std::string());
 }
 
 

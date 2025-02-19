@@ -75,6 +75,29 @@ TEST(blob_id_container_test, diff_removes_matching_items) {
     EXPECT_EQ(result, expected);
 }
 
+TEST(blob_id_container_test, diff_removes_matching_items2) {
+    blob_id_container container;
+    container.add_blob_id(1003);
+    container.add_blob_id(2002);
+    container.add_blob_id(1002);
+    container.add_blob_id(1001);
+    container.add_blob_id(2001);
+
+    blob_id_container other;
+    other.add_blob_id(2001);
+    other.add_blob_id(2002);
+    other.add_blob_id(1003);
+
+    // Execute diff: remove blob IDs present in the other container.
+    container.diff(other);
+
+    // After diff, container should contain blob IDs: 1 and 3.
+    std::vector<blob_id_type> result = get_blob_ids(container);
+    std::vector<blob_id_type> expected {1001, 1002};
+    EXPECT_EQ(result, expected);
+}
+
+
 TEST(blob_id_container_test, diff_with_our_container_empty) {
     // Our container is empty.
     blob_id_container container;

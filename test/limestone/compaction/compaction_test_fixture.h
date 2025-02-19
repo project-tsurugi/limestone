@@ -194,6 +194,19 @@ protected:
                           << ", Minor: " << log_entry::write_version_minor_write_version(entry.value_etc()) << std::endl;
                 break;
             }
+            case log_entry::entry_type::normal_with_blob: {
+                std::string value;
+                entry.value(value);
+                std::cout << "Entry Type: normal_with_blob, Storage ID: " << storage_id << ", Key: " << key << ", Value: " << value
+                          << ", Write Version: Epoch: " << log_entry::write_version_epoch_number(entry.value_etc())
+                          << ", Minor: " << log_entry::write_version_minor_write_version(entry.value_etc()) 
+                          << ", Blob IDs: ";
+                for (const auto& blob_id : entry.get_blob_ids()) {
+                    std::cout << blob_id << " ";
+                }
+                std::cout << std::endl;
+                break;
+            }
             case log_entry::entry_type::remove_entry: {
                 std::cout << "Entry Type: remove_entry, Storage ID: " << storage_id << ", Key: " << key
                           << ", Write Version: Epoch: " << log_entry::write_version_epoch_number(entry.value_etc())
@@ -384,7 +397,7 @@ protected:
         }
 
         // Check the blob IDs
-        {
+        if (entry.type() == log_entry::entry_type::normal_with_blob) {
             std::vector<blob_id_type> actual_blob_ids = entry.get_blob_ids();
             if (actual_blob_ids.size() != expected_blob_ids.size()) {
                 return ::testing::AssertionFailure() << "Expected blob IDs size: " << expected_blob_ids.size() << ", but got: " << actual_blob_ids.size();
@@ -406,7 +419,24 @@ protected:
         std::sort(list.begin(), list.end());
         return list;
     }
-};
 
+    boost::filesystem::path create_dummy_blob_files(blob_id_type blob_id) {
+        boost::filesystem::path path = datastore_->get_blob_file(blob_id).path();
+        if (!boost::filesystem::exists(path)) {
+            boost::filesystem::path dir = path.parent_path();
+            if (!boost::filesystem::exists(dir)) {
+                if (!boost::filesystem::create_directories(dir)) {
+                    std::cerr << "Failed to create directory: " << dir.string() << std::endl;
+                }
+            }
+            boost::filesystem::ofstream ofs(path, std::ios::binary);
+            if (!ofs) {
+                throw std::runtime_error("Failed to open file: " + path.string());
+            }
+            ofs << "dummy_blob_data";
+        }
+        return path;
+    }
+};
 
 } // namespace limestone::testing

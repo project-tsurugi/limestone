@@ -17,6 +17,7 @@
 #include "blob_id_container.h"
 #include <stdexcept>
 #include <algorithm>
+#include <sstream> // added for debug_string
 
 namespace limestone::internal {
 
@@ -39,14 +40,15 @@ void blob_id_container::diff(const blob_id_container &other) {
     
     container_type old_ids = std::move(ids_);
     ids_.clear();
-
     std::sort(old_ids.begin(), old_ids.end());
+    
+    container_type sorted_other = other.ids_;
+    std::sort(sorted_other.begin(), sorted_other.end());
 
-    // other.ids_ はすでにソート済みであることを仮定
     auto it1 = old_ids.begin();
     auto end1 = old_ids.end();
-    auto it2 = other.ids_.begin();
-    auto end2 = other.ids_.end();
+    auto it2 = sorted_other.begin();
+    auto end2 = sorted_other.end();
 
     while (it1 != end1) {
         while (it2 != end2 && *it2 < *it1) {
@@ -88,6 +90,19 @@ typename blob_id_container::const_iterator blob_id_container::end() const {
 
 void blob_id_container::sort() {
     std::sort(ids_.begin(), ids_.end());
+}
+
+std::string blob_id_container::debug_string() const {
+    std::ostringstream oss;
+    oss << "[";
+    for (std::size_t i = 0; i < ids_.size(); ++i) {
+        oss << ids_[i];
+        if (i + 1 < ids_.size()) {
+            oss << ", ";
+        }
+    }
+    oss << "]";
+    return oss.str();
 }
 
 } // namespace limestone::internal

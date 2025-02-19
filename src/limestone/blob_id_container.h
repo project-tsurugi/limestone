@@ -79,6 +79,9 @@ public:
     [[nodiscard]] const_iterator begin() const;
     [[nodiscard]] const_iterator end() const;
 
+    // Returns a string representation of the blob IDs for debugging.
+    [[nodiscard]] std::string debug_string() const;
+
 private:
     bool iterator_used_ = false;
     container_type ids_;

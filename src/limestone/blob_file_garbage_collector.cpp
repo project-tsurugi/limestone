@@ -104,6 +104,7 @@ using limestone::api::log_entry;
                  }
              }
          }
+         VLOG_LP(log_trace_fine) << "Blob file scan complete.";
      } catch (const std::exception &e) {
          LOG_LP(ERROR) << "Exception in blob_file_garbage_collector::scan_directory: " << e.what();
      }
@@ -135,12 +136,15 @@ using limestone::api::log_entry;
           
          // Calculate the difference and perform deletion operations
          scanned_blobs_->diff(*gc_exempt_blob_);
+
          for (const auto &id : *scanned_blobs_) {
             if (shutdown_requested_.load(std::memory_order_acquire)) {
                 break;
             }
              boost::filesystem::path file_path = resolver_->resolve_path(id);
              boost::system::error_code ec;
+             VLOG_LP(log_trace_fine) << "Removing blob id: " << id;
+             VLOG_LP(log_trace_fine) << "Removing blob file: " << file_path.string();
              file_ops_->remove(file_path, ec);
              if (ec && ec != boost::system::errc::no_such_file_or_directory) {
                  LOG_LP(ERROR) << "Failed to remove file: " << file_path.string()
@@ -243,10 +247,12 @@ void blob_file_garbage_collector::scan_snapshot(const boost::filesystem::path &s
                 if (cur->type() == log_entry::entry_type::normal_with_blob) {
                     auto blob_ids = cur->blob_ids();
                     for (auto id : blob_ids) {
+                        VLOG_LP(log_trace_fine) << "Scanned blob id: " << id;
                         gc_exempt_blob_->add_blob_id(id);
                     }
                 }
             }
+            VLOG_LP(log_trace_fine) << "Snapshot scan finished.";
             finalize_scan_and_cleanup();
         } catch (const limestone_exception &e) {
             LOG_LP(ERROR) << "Exception in snapshot scan thread: " << e.what();
