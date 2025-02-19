@@ -92,7 +92,12 @@ void cursor_impl::validate_and_read_stream(std::optional<boost::filesystem::ifst
                            << ") is smaller than the previous key_sid (" << previous_key_sid << ")";
                 THROW_LIMESTONE_EXCEPTION("Key order violation detected in " + stream_name);
             }
-
+            // Skip processing if key_sid is the same as previous_key_sid
+            if (!previous_key_sid.empty() && log_entry->key_sid() == previous_key_sid) {
+                DVLOG_LP(log_trace_fine) << stream_name << " log entry key_sid (" << log_entry->key_sid() << ") is same as previous, skipping.";
+                log_entry = std::nullopt;
+                continue;
+            }
             // Update the previous key_sid to the current one
             previous_key_sid = log_entry->key_sid();
         }

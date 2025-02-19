@@ -594,5 +594,30 @@ TEST_F(cursor_impl_test, use_compacted_when_snapshot_empty) {
     EXPECT_EQ(key, "compacted_key") << "Expected the entry from the compacted file when snapshot is empty";
 }
 
+// Test case for skipping duplicate key_sid entries in validate_and_read_stream
+TEST_F(cursor_impl_test, skip_duplicate_key) {
+    entry_maker_.init()
+        .add_entry(1, "dup", "first", {1, 0})
+        .add_entry(1, "dup", "second", {1, 1})
+        .add_entry(1, "unique", "third", {1, 2});
+    boost::filesystem::path snapshot_file = boost::filesystem::path(location) / "snapshot_duplicate";
+    create_log_file("snapshot_duplicate", entry_maker_.get_entries());
+
+    cursor_impl_testable cursor(snapshot_file);
+
+    // The first call to next() should return the first "dup" entry.
+    ASSERT_TRUE(cursor.next()) << "Expected to read the first entry with key 'dup'";
+    std::string key;
+    cursor.key(key);
+    EXPECT_EQ(key, "dup") << "Expected key to be 'dup'";
+
+    // The second call to next() should skip the duplicate "dup" and return the "unique" entry.
+    ASSERT_TRUE(cursor.next()) << "Expected to read the next entry after skipping duplicate";
+    cursor.key(key);
+    EXPECT_EQ(key, "unique") << "Expected key to be 'unique' after skipping duplicate";
+
+    // There should be no further entries.
+    EXPECT_FALSE(cursor.next()) << "Expected no further entries";
+}
 
 }  // namespace limestone::testing
