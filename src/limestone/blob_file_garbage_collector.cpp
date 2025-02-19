@@ -85,7 +85,10 @@ using limestone::api::log_entry;
   
          // Iterate recursively over the root directory.
          for (boost::filesystem::recursive_directory_iterator it(root), end; it != end; ++it) {
-             if (boost::filesystem::is_regular_file(it->path())) {
+            if (shutdown_requested_.load(std::memory_order_acquire)) {
+                break;
+            }
+            if (boost::filesystem::is_regular_file(it->path())) {
                  const boost::filesystem::path& file_path = it->path();
   
                  // Use blob_file_resolver's function to check if this file is a valid blob file.
@@ -131,6 +134,9 @@ using limestone::api::log_entry;
          // Calculate the difference and perform deletion operations
          scanned_blobs_->diff(*gc_exempt_blob_);
          for (const auto &id : *scanned_blobs_) {
+            if (shutdown_requested_.load(std::memory_order_acquire)) {
+                break;
+            }
              boost::filesystem::path file_path = resolver_->resolve_path(id);
              boost::system::error_code ec;
              file_ops_->remove(file_path, ec);
@@ -179,6 +185,11 @@ using limestone::api::log_entry;
  }
   
  void blob_file_garbage_collector::shutdown() {
+    // Use a dedicated mutex to ensure shutdown() is executed exclusively.
+    std::lock_guard<std::mutex> shutdown_lock(shutdown_mutex_);
+
+    shutdown_requested_.store(true, std::memory_order_release);
+
      wait_for_blob_file_scan();
      wait_for_scan_snapshot();
      wait_for_cleanup();
@@ -193,6 +204,8 @@ using limestone::api::log_entry;
          cleanup_thread_.join();
      }
      reset();
+
+     shutdown_requested_.store(false, std::memory_order_release);
  }
   
  void blob_file_garbage_collector::scan_snapshot(const boost::filesystem::path &snapshot_file, const boost::filesystem::path &compacted_file) {
@@ -209,12 +222,15 @@ using limestone::api::log_entry;
          try {
              auto cur = std::make_unique<my_cursor>(snapshot_file, compacted_file);
              while (cur->next()) {
-                 if (cur->type() == log_entry::entry_type::normal_with_blob) {
-                     auto blob_ids = cur->blob_ids();
-                     for (auto id : blob_ids) {
-                         gc_exempt_blob_->add_blob_id(id);
-                     }
-                 }
+                if (shutdown_requested_.load(std::memory_order_acquire)) {
+                    break;
+                }
+                if (cur->type() == log_entry::entry_type::normal_with_blob) {
+                    auto blob_ids = cur->blob_ids();
+                    for (auto id : blob_ids) {
+                        gc_exempt_blob_->add_blob_id(id);
+                    }
+                }
              }
              finalize_scan_and_cleanup();
          } catch (const limestone_exception &e) {

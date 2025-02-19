@@ -70,14 +70,6 @@ void cursor_impl::validate_and_read_stream(std::optional<boost::filesystem::ifst
             return;
         }
 
-        // If the stream has reached EOF, close it and exit
-        if (stream->eof()) {
-            DVLOG_LP(log_trace) << stream_name << " stream reached EOF, closing it.";
-            stream->close();
-            stream = std::nullopt;
-            return;
-        }
-
         // If the entry is not yet read, read it
         if (!log_entry) {
             log_entry.emplace();  // Construct a new log_entry

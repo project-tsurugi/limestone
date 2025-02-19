@@ -219,6 +219,8 @@ private:
     // --- Others ---
     mutable std::mutex mutex_;                      ///< Mutex for synchronizing access to state variables.
     std::unique_ptr<file_operations> file_ops_;     ///< Pointer to the file_operations implementation.
+    std::mutex shutdown_mutex_;                     ///< Mutex to ensure shutdown() is executed exclusively.
+    std::atomic_bool shutdown_requested_{false};    ///< Shutdown flag indicating if shutdown has been requested.
 
     /**
      * @brief The background function that scans the blob_root directory for BLOB files.
