@@ -203,6 +203,10 @@ void datastore::ready() {
         blob_file_garbage_collector_ = std::make_unique<blob_file_garbage_collector>(*blob_file_resolver_);
         blob_file_garbage_collector_->scan_blob_files(max_blob_id);
 
+        boost::filesystem::path compacted_file = location_ / limestone::internal::compaction_catalog::get_compacted_filename();
+        boost::filesystem::path snapshot_file = location_ / std::string(snapshot::subdirectory_name_) / std::string(snapshot::file_name_);
+        blob_file_garbage_collector_->scan_snapshot(snapshot_file, compacted_file);
+
         next_blob_id_.store(max_blob_id + 1);
 
         online_compaction_worker_future_ = std::async(std::launch::async, &datastore::online_compaction_worker, this);
@@ -837,6 +841,13 @@ std::vector<blob_id_type> datastore::check_and_remove_persistent_blob_ids(const 
 
     return not_found_blob_ids;
 }
+
+void datastore::wait_for_blob_file_garbace_collector_for_tests() const noexcept {
+    if (blob_file_garbage_collector_) {
+        blob_file_garbage_collector_->wait_for_all_threads();
+    }
+}
+
 
 
 } // namespace limestone::api

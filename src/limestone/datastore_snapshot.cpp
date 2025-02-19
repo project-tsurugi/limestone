@@ -69,7 +69,7 @@ static void insert_entry_or_update_to_max(compaction_options &options, sortdb_wr
             need_write = false;
         }
     }
-    if (e.type() == log_entry::entry_type::normal_with_blob && options.is_gc_enabled()) {
+    if (e.type() == log_entry::entry_type::normal_with_blob && !need_write && options.is_gc_enabled()) {
         write_version_type write_version;
         e.write_version(write_version);
         if (options.get_gc_snapshot().boundary_version() <= write_version) {
@@ -85,7 +85,7 @@ static void insert_entry_or_update_to_max(compaction_options &options, sortdb_wr
             std::size_t value_size_le = htole64(value_size);
             db_value.append(reinterpret_cast<const char*>(&value_size_le), sizeof(value_size_le));  // NOLINT(cppcoreguidelines-pro-type-reinterpret-cast)
             db_value.append(e.value_etc());
-            db_value.append(e.blob_ids());
+            db_value.append(e.raw_blob_ids());
         } else {
             db_value.append(e.value_etc());
         }
@@ -110,7 +110,7 @@ static void insert_twisted_entry([[maybe_unused]]compaction_options &options, so
         db_value.append(reinterpret_cast<const char*>(&value_size_le), sizeof(value_size_le));  // NOLINT(cppcoreguidelines-pro-type-reinterpret-cast)
 
         db_value.append(value);
-        db_value.append(e.blob_ids());
+        db_value.append(e.raw_blob_ids());
     } else {
         db_value.append(value);
     }

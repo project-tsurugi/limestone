@@ -40,6 +40,7 @@ public:
     void set_next_blob_id(blob_id_type next_blob_id) noexcept { set_next_blob_id_for_tests(next_blob_id); }
     std::set<blob_id_type> get_persistent_blob_ids() noexcept { return get_persistent_blob_ids_for_tests(); }
     write_version_type get_available_boundary_version() const noexcept { return get_available_boundary_version_for_tests(); }
+    void wait_for_blob_file_garbace_collector() const noexcept { wait_for_blob_file_garbace_collector_for_tests(); }
 
 protected:
     inline void execute_callback(const std::function<void()>& callback) noexcept {
