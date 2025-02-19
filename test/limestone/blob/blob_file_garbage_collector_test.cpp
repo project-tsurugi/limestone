@@ -84,6 +84,12 @@ protected:
 
         // Create blob_file_garbage_collector (using resolver_)
         gc_ = std::make_unique<testable_blob_file_garbage_collector>(*resolver_);
+
+        // Create an empty file
+        std::ofstream ofs(snapshot_path.string());
+        ofs.close();
+        ofs.open(compacted_path.string());
+        ofs.close();
     }
 
     void TearDown() override {
@@ -435,8 +441,8 @@ TEST_F(blob_file_garbage_collector_test, full_process_test) {
     // Step 4: Create the snapshot and compacted files.
     // In this test, two PWAL files are generated and used as the snapshot file and the compacted file.
     // The PWAL files include entries with blob IDs 200 and 400.
-    ASSERT_FALSE(boost::filesystem::exists(snapshot_path));
-    ASSERT_FALSE(boost::filesystem::exists(compacted_path));
+    boost::filesystem::remove(snapshot_path);
+    boost::filesystem::remove(compacted_path);
     gen_datastore();
     lc0_->begin_session();
     lc0_->add_entry(1, "key1", "value1", {1,1}, {200});
@@ -475,4 +481,39 @@ TEST_F(blob_file_garbage_collector_test, full_process_test) {
     EXPECT_TRUE(boost::filesystem::exists(file400));
 }
 
+// Test: When compacted_path does not exist, scan_snapshot processes snapshot_path and reads expected data.
+TEST_F(blob_file_garbage_collector_test, snapshot_scan_reads_expected_data) {
+    // Arrange:
+    // Ensure that compacted_path does not exist
+    if (boost::filesystem::exists(compacted_path)) {
+        boost::filesystem::remove(compacted_path);
+    }
+    EXPECT_FALSE(boost::filesystem::exists(compacted_path));
+    EXPECT_TRUE(boost::filesystem::exists(snapshot_path));
+
+    // Act:
+    // Since compacted_path does not exist, scan_snapshot should only process snapshot_path.
+    EXPECT_NO_THROW({
+        gc_->scan_snapshot(snapshot_path, compacted_path);
+        gc_->wait_for_scan_snapshot();
+    });
+
+    SUCCEED();
+}
+
+TEST_F(blob_file_garbage_collector_test, snapshot_scan_throws_when_snapshot_file_missing) {
+    // Arrange:
+    // Ensure that snapshot_path does not exist (simulate a missing snapshot file)
+    if (boost::filesystem::exists(snapshot_path)) {
+        boost::filesystem::remove(snapshot_path);
+    }
+    EXPECT_FALSE(boost::filesystem::exists(snapshot_path));
+
+    // Act & Assert:
+    // Since snapshot_path is missing, scan_snapshot should throw an exception.
+    EXPECT_THROW({
+        gc_->scan_snapshot(snapshot_path, compacted_path);
+        gc_->wait_for_scan_snapshot();
+    }, std::exception);
+}
 }  // namespace limestone::testing
