@@ -208,7 +208,6 @@ void datastore::ready() {
         online_compaction_worker_future_ = std::async(std::launch::async, &datastore::online_compaction_worker, this);
         if (epoch_id_switched_.load() != 0) {
             write_epoch_callback_(epoch_id_informed_.load());
-            available_boundary_version_ = write_version_type{epoch_id_informed_.load(), 0};
         }
         cleanup_rotated_epoch_files(location_);
         state_ = state::ready;
@@ -764,6 +763,7 @@ std::unique_ptr<blob_pool> datastore::acquire_blob_pool() {
         do {
             current = next_blob_id_.load(std::memory_order_acquire); // Load the current ID atomically.
             if (current == std::numeric_limits<blob_id_type>::max()) {
+                LOG_LP(ERROR) << "Blob ID overflow detected.";
                 return current; // Return max value to indicate overflow.
             }
         } while (!next_blob_id_.compare_exchange_weak(
@@ -794,7 +794,7 @@ blob_file datastore::get_blob_file(blob_id_type reference) {
             available = false;
         }
     }
-    TRACE_END;
+    TRACE_END << "path=" << path.string() << ", available=" << available;
     return blob_file(path, available);
 }
 

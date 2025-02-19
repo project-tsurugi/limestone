@@ -62,13 +62,14 @@ protected:
         datastore_->ready();
     }
 
-    void create_dummy_file(api::blob_id_type existing_blob_id) {
-        auto file = datastore_->get_blob_file(existing_blob_id);
+    boost::filesystem::path create_dummy_file(api::blob_id_type blob_id) {
+        auto file = datastore_->get_blob_file(blob_id);
         auto path = file.path();
         boost::filesystem::create_directories(path.parent_path());
         boost::filesystem::ofstream dummy_file(path);
         dummy_file << "test data";
         dummy_file.close();
+        return path;  
     }
 };
 
@@ -77,45 +78,95 @@ TEST_F(datastore_blob_test, acquire_blob_pool_basic) {
     ASSERT_NE(pool, nullptr);
 }
 
+TEST_F(datastore_blob_test, acquire_blob_pool_overflow_boundary) {
+    // Set next_blob_id to max - 1.
+    auto max_id = std::numeric_limits<blob_id_type>::max();
+    datastore_->set_next_blob_id(max_id - 1);
 
-// Environment-independent part
+    // Acquire the blob pool.
+    auto pool = datastore_->acquire_blob_pool();
+    ASSERT_NE(pool, nullptr);
+
+    std::string test_data1 = "test data 1";
+    std::string test_data2 = "test data 2";
+
+    // First call: the id_generator should return max - 1 and update next_blob_id to max.
+    auto id1 = pool->register_data(test_data1);
+    EXPECT_EQ(id1, max_id - 1) << "Expected first registered blob ID to be max - 1";
+
+    // Second call: since next_blob_id is now max, the lambda should return max.
+    auto id2 = pool->register_data(test_data2);
+    EXPECT_EQ(id2, max_id) << "Expected second registered blob ID to be max, indicating overflow";
+}
+
+
+
 TEST_F(datastore_blob_test, get_blob_file_basic) {
     int next_blob_id = 12345;
     int existing_blob_id = 12344;
     datastore_->set_next_blob_id(next_blob_id);
 
-    create_dummy_file(existing_blob_id);
-    create_dummy_file(next_blob_id);
+    // create_dummy_file now returns the generated file's path.
+    boost::filesystem::path expected_existing_path = create_dummy_file(existing_blob_id);
+    boost::filesystem::path expected_next_path = create_dummy_file(next_blob_id);
 
-    // Case 1: Normal case - file exists and is accessible
+    // Case 1: Normal case - file exists and is accessible.
     auto file = datastore_->get_blob_file(existing_blob_id);
-    EXPECT_TRUE(static_cast<bool>(file));
+    EXPECT_EQ(file.path().string(), expected_existing_path.string())
+        << "Returned path should match the dummy file path for existing_blob_id";
+    EXPECT_TRUE(static_cast<bool>(file))
+        << "File should be available when it exists";
 
-    // Case 2: File is removed after being confirmed to exist
+    // Case 2: File is removed after being confirmed to exist.
     boost::filesystem::remove(file.path());
     auto file_removed = datastore_->get_blob_file(existing_blob_id);
-    EXPECT_FALSE(static_cast<bool>(file_removed));
+    EXPECT_FALSE(static_cast<bool>(file_removed))
+        << "File should be marked as unavailable if it has been removed";
+    EXPECT_EQ(file_removed.path().string(), expected_existing_path.string())
+        << "Returned path should still match the dummy file path even if the file is unavailable";
 
-    // Case 3: Boundary condition - ID equal to next_blob_id
+    // Case 3: Boundary condition - ID equal to next_blob_id.
     auto file_next_blob_id = datastore_->get_blob_file(next_blob_id);
-    EXPECT_TRUE(boost::filesystem::exists(file_next_blob_id.path()));
+    EXPECT_EQ(file_next_blob_id.path().string(), expected_next_path.string())
+        << "Returned path should match the dummy file path for next_blob_id";
+    EXPECT_FALSE(static_cast<bool>(file_next_blob_id))
+        << "File should be available for next_blob_id if it exists";
 }
 
 // Environment-dependent part (disabled in CI environment)
-// Reason: This test modifies directory permissions to simulate a "permission denied" scenario.
-// However, in certain environments, such as CI, the behavior might differ, making the test unreliable.
-TEST_F(datastore_blob_test, DISABLED_get_blob_file_permission_error) {
-    int existing_blob_id = 12344;
-    create_dummy_file(existing_blob_id);
+// This test simulates a permission error so that boost::filesystem::exists() fails,
+// causing the catch block to mark the file as unavailable.
+TEST_F(datastore_blob_test, DISABLED_get_blob_file_filesystem_error) {
+    FLAGS_v = 70;
+    int existing_blob_id = 12345;
+    datastore_->set_next_blob_id(existing_blob_id + 1);
+    boost::filesystem::path expected_path = create_dummy_file(existing_blob_id);
 
+    // Normally, the file should exist.
     auto file = datastore_->get_blob_file(existing_blob_id);
+    EXPECT_TRUE(boost::filesystem::exists(file.path()))
+        << "File should exist before permission change";
+    EXPECT_TRUE(static_cast<bool>(file))
+        << "File should be available before permission change";
+    EXPECT_EQ(file.path().string(), expected_path.string())
+        << "Returned path should match the dummy file path";
 
-    // Simulate a permission denied scenario by modifying directory permissions
-    boost::filesystem::permissions(file.path().parent_path(), boost::filesystem::perms::no_perms);
-    EXPECT_THROW(boost::filesystem::exists(file.path()), boost::filesystem::filesystem_error);
+    // Get the parent directory of the file and save its original permissions.
+    boost::filesystem::path parent_dir = file.path().parent_path();
+    auto original_perms = boost::filesystem::status(parent_dir).permissions();
 
-    // Cleanup: Restore permissions for subsequent tests
-    boost::filesystem::permissions(file.path().parent_path(), boost::filesystem::perms::all_all);
+    // Set the directory permissions to no permissions to simulate a filesystem error.
+    boost::filesystem::permissions(parent_dir, boost::filesystem::perms::no_perms);
+
+    // Now, get_blob_file should mark the file as unavailable.
+    auto file_error = datastore_->get_blob_file(existing_blob_id);
+    EXPECT_FALSE(static_cast<bool>(file_error))
+        << "Expected file to be marked unavailable due to permission error";
+    EXPECT_EQ(file_error.path().string(), expected_path.string())
+        << "Returned path should still match the dummy file path even if file is unavailable";
+
+    // Restore the original permissions so that subsequent tests are not affected.
+    boost::filesystem::permissions(parent_dir, original_perms);
 }
 
 TEST_F(datastore_blob_test, add_persistent_blob_ids) {
@@ -432,7 +483,7 @@ TEST_F(datastore_blob_test, available_boundary_version_after_reboot) {
     // --- Step 4: Check after restart ---
     // Verify that available_boundary_version_ is properly restored after restart
 
-    EXPECT_EQ(datastore_->get_available_boundary_version().get_major(), 115);
+    EXPECT_EQ(datastore_->get_available_boundary_version().get_major(), 0);
     EXPECT_EQ(datastore_->get_available_boundary_version().get_minor(), 0);
 
     // Verify data consistency
@@ -447,6 +498,53 @@ TEST_F(datastore_blob_test, available_boundary_version_after_reboot) {
     EXPECT_EQ(value, "test_value");
 
     EXPECT_FALSE(cursor->next());
+}
+
+TEST_F(datastore_blob_test, initial_available_boundary_version_) {
+    auto boundary_version = datastore_->get_available_boundary_version();
+    EXPECT_EQ(boundary_version.get_major(), 0);
+    EXPECT_EQ(boundary_version.get_minor(), 0);
+
+    // Change available_boundary_version_ and reboot
+    datastore_->switch_epoch(1);
+    lc0_->begin_session();
+    lc0_->add_entry(1, "key1", "value1", {1,1});
+    lc0_->end_session();
+    datastore_->switch_epoch(2);
+    datastore_->switch_available_boundary_version({1, 5});
+
+    boundary_version = datastore_->get_available_boundary_version();
+    EXPECT_EQ(boundary_version.get_major(), 1);
+    EXPECT_EQ(boundary_version.get_minor(), 5);
+
+    datastore_->shutdown();
+    datastore_.reset();
+    gen_datastore();
+
+    boundary_version = datastore_->get_available_boundary_version();
+    EXPECT_EQ(boundary_version.get_major(), 0);
+    EXPECT_EQ(boundary_version.get_minor(), 0);
+}
+
+TEST_F(datastore_blob_test, switch_available_boundary_version) {
+    auto boundary_version = datastore_->get_available_boundary_version();
+    EXPECT_EQ(boundary_version.get_major(), 0);
+    EXPECT_EQ(boundary_version.get_minor(), 0);
+
+    datastore_->switch_available_boundary_version({1, 5});
+    boundary_version = datastore_->get_available_boundary_version();
+    EXPECT_EQ(boundary_version.get_major(), 1);
+    EXPECT_EQ(boundary_version.get_minor(), 5);
+
+    datastore_->switch_available_boundary_version({1, 3});
+    boundary_version = datastore_->get_available_boundary_version();
+    EXPECT_EQ(boundary_version.get_major(), 1);
+    EXPECT_EQ(boundary_version.get_minor(), 5);
+
+    datastore_->switch_available_boundary_version({2, 3});
+    boundary_version = datastore_->get_available_boundary_version();
+    EXPECT_EQ(boundary_version.get_major(), 2);
+    EXPECT_EQ(boundary_version.get_minor(), 3);
 }
 
 } // namespace limestone::testing
