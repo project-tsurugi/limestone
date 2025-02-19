@@ -454,7 +454,7 @@ public:
     [[nodiscard]] const std::string& key_sid() const {
         return key_sid_;
     }
-    [[nodiscard]] const std::string& blob_ids() const {
+    [[nodiscard]] const std::string& raw_blob_ids() const {
         return blob_ids_;
     }
     static epoch_id_type write_version_epoch_number(std::string_view value_etc) {
