@@ -97,8 +97,10 @@ using limestone::api::log_entry;
                  }
   
                  blob_id_type id = resolver_->extract_blob_id(file_path);
+                 VLOG_LP(log_trace_fine) << "Scanned blob file: " << file_path.string();
                  if (id <= max_existing_blob_id_) {
                      scanned_blobs_->add_blob_id(id);
+                     VLOG_LP(log_trace_fine) << "Added blob id: " << id;
                  }
              }
          }
@@ -190,38 +192,51 @@ using limestone::api::log_entry;
 
     shutdown_requested_.store(true, std::memory_order_release);
 
-     wait_for_blob_file_scan();
-     wait_for_scan_snapshot();
-     wait_for_cleanup();
- 
-     if (blob_file_scan_thread_.joinable()) {
-         blob_file_scan_thread_.join();
-     }
-     if (snapshot_scan_thread_.joinable()) {
-         snapshot_scan_thread_.join();
-     }
-     if (cleanup_thread_.joinable()) {
-         cleanup_thread_.join();
-     }
-     reset();
+    wait_for_all_threads();
 
      shutdown_requested_.store(false, std::memory_order_release);
  }
   
- void blob_file_garbage_collector::scan_snapshot(const boost::filesystem::path &snapshot_file, const boost::filesystem::path &compacted_file) {
-     {
-         std::lock_guard<std::mutex> lock(mutex_);
-         if (snapshot_scan_started_) {
-             throw std::logic_error("Snapshot scanning has already been started.");
-         }
-         snapshot_scan_started_ = true;
-         snapshot_scan_complete_ = false;
-     }
- 
-     snapshot_scan_thread_ = std::thread([this, snapshot_file, compacted_file]() {
-         try {
-             auto cur = std::make_unique<my_cursor>(snapshot_file, compacted_file);
-             while (cur->next()) {
+
+void blob_file_garbage_collector::wait_for_all_threads() {
+    wait_for_blob_file_scan();
+    wait_for_scan_snapshot();
+    wait_for_cleanup();
+
+    if (blob_file_scan_thread_.joinable()) {
+        blob_file_scan_thread_.join();
+    }
+    if (snapshot_scan_thread_.joinable()) {
+        snapshot_scan_thread_.join();
+    }
+    if (cleanup_thread_.joinable()) {
+        cleanup_thread_.join();
+    }
+    reset();
+}
+
+
+
+void blob_file_garbage_collector::scan_snapshot(const boost::filesystem::path &snapshot_file, const boost::filesystem::path &compacted_file) {
+    std::unique_ptr<my_cursor> cur;
+    if (boost::filesystem::exists(compacted_file)) {
+        cur = std::make_unique<my_cursor>(snapshot_file, compacted_file);
+    } else {
+        cur = std::make_unique<my_cursor>(snapshot_file);
+    }
+    {
+        std::lock_guard<std::mutex> lock(mutex_);
+        if (snapshot_scan_started_) {
+            throw std::logic_error("Snapshot scanning has already been started.");
+        }
+        snapshot_scan_started_ = true;
+        snapshot_scan_complete_ = false;
+    }
+    
+    // Launch the snapshot scanning thread with the pre-created cursor.
+    snapshot_scan_thread_ = std::thread([this, cur = std::move(cur)]() {
+        try {
+            while (cur->next()) {
                 if (shutdown_requested_.load(std::memory_order_acquire)) {
                     break;
                 }
@@ -231,22 +246,22 @@ using limestone::api::log_entry;
                         gc_exempt_blob_->add_blob_id(id);
                     }
                 }
-             }
-             finalize_scan_and_cleanup();
-         } catch (const limestone_exception &e) {
-             LOG_LP(ERROR) << "Exception in snapshot scan thread: " << e.what();
-         } catch (const std::exception &e) {
-             LOG_LP(ERROR) << "Standard exception in snapshot scan thread: " << e.what();
-         } catch (...) {
-             LOG_LP(ERROR) << "Unknown exception in snapshot scan thread.";
-         }
-         {
-             std::lock_guard<std::mutex> lock(mutex_);
-             snapshot_scan_complete_ = true;
-         }
-         snapshot_scan_cv_.notify_all();
-     });
- }
+            }
+            finalize_scan_and_cleanup();
+        } catch (const limestone_exception &e) {
+            LOG_LP(ERROR) << "Exception in snapshot scan thread: " << e.what();
+        } catch (const std::exception &e) {
+            LOG_LP(ERROR) << "Standard exception in snapshot scan thread: " << e.what();
+        } catch (...) {
+            LOG_LP(ERROR) << "Unknown exception in snapshot scan thread.";
+        }
+        {
+            std::lock_guard<std::mutex> lock(mutex_);
+            snapshot_scan_complete_ = true;
+        }
+        snapshot_scan_cv_.notify_all();
+    });
+}
   
  void blob_file_garbage_collector::wait_for_scan_snapshot() {
      std::unique_lock<std::mutex> lock(mutex_);

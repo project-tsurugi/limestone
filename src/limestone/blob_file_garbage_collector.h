@@ -133,12 +133,27 @@ public:
     void finalize_scan_and_cleanup();
 
     /**
-     * @brief Shutdown the garbage collector.
+     * @brief Shuts down the garbage collection process.
      *
-     * This method should be called before destroying the object. It waits for any background
-     * threads (scanning and cleanup) to finish.
+     * This method performs necessary cleanup and stops all ongoing tasks related
+     * to the management and removal of obsolete blob files.
      */
     void shutdown();
+
+    /**
+     * @brief Blocks the current thread until all worker threads have completed execution.
+     *
+     * This function waits for all threads that are performing tasks related to garbage collection,
+     * ensuring that no operations are in progress before proceeding. Use this to provide a
+     * synchronized point in the program before continuing with operations that depend on the
+     * complete termination of background tasks.
+     *
+     * @warning This function may cause the calling thread to block for an extended period if the
+     *          worker threads are processing long-running tasks.
+     * @note This function can use test purposes only.
+     * 
+     */
+    void wait_for_all_threads();
 
 protected:
     /**
