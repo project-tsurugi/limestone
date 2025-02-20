@@ -93,12 +93,11 @@ TEST_F(compaction_test, basic_blob_gc_test) {
     // - "blob_key2": remains from epoch 1.
     // - "noblob_key1": updated in epoch 2.
     // - "noblob_key2": remains from epoch 1.
-    ASSERT_EQ(log_entries.size(), 5);
-    EXPECT_TRUE(AssertLogEntry(log_entries[0], 1, "blob_key1", "blob_value1_epoch2", 2, 0, {2001, 2002}, log_entry::entry_type::normal_with_blob));
-    EXPECT_TRUE(AssertLogEntry(log_entries[1], 1, "blob_key1", "blob_value1", 1, 0, {1001, 1002}, log_entry::entry_type::normal_with_blob));
-    EXPECT_TRUE(AssertLogEntry(log_entries[2], 1, "blob_key2", "blob_value2", 1, 1, {1003}, log_entry::entry_type::normal_with_blob));
-    EXPECT_TRUE(AssertLogEntry(log_entries[3], 1, "noblob_key1", "noblob_value1_epoch2", 2, 1, {}, log_entry::entry_type::normal_entry));
-    EXPECT_TRUE(AssertLogEntry(log_entries[4], 1, "noblob_key2", "noblob_value2", 1, 3, {}, log_entry::entry_type::normal_entry));
+    ASSERT_EQ(log_entries.size(), 4);
+    EXPECT_TRUE(AssertLogEntry(log_entries[0], 1, "blob_key1", "blob_value1_epoch2", 0, 0, {2001, 2002}, log_entry::entry_type::normal_with_blob));
+    EXPECT_TRUE(AssertLogEntry(log_entries[1], 1, "blob_key2", "blob_value2", 0, 0, {1003}, log_entry::entry_type::normal_with_blob));
+    EXPECT_TRUE(AssertLogEntry(log_entries[2], 1, "noblob_key1", "noblob_value1_epoch2", 0, 0, {}, log_entry::entry_type::normal_entry));
+    EXPECT_TRUE(AssertLogEntry(log_entries[3], 1, "noblob_key2", "noblob_value2", 0, 0, {}, log_entry::entry_type::normal_entry));
 
     // Verify the existence of the compacted blob files.
     EXPECT_TRUE(boost::filesystem::exists(path1001));

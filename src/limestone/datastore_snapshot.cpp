@@ -58,32 +58,38 @@ static int comp_twisted_key(const std::string_view& a, const std::string_view& b
 }
 
 [[maybe_unused]]
-static void insert_entry_or_update_to_max(compaction_options &options, sortdb_wrapper* sortdb, const log_entry& e) {
+static void insert_entry_or_update_to_max(sortdb_wrapper* sortdb, const log_entry& e) {
     bool need_write = true;
-    // skip older entry than already inserted
+    // Skip writing if an older entry is already stored.
     std::string value;
     if (sortdb->get(e.key_sid(), &value)) {
-        write_version_type write_version;
-        e.write_version(write_version);
-        if (write_version < write_version_type(value.substr(1))) {
+        write_version_type stored_write_version;
+        if (e.type() == log_entry::entry_type::normal_with_blob) {
+            // For normal_with_blob, the stored format is:
+            // [0]: entry_type, [1,8]: value_size, [9, ...]: value_etc (which starts with write_version)
+            stored_write_version = write_version_type(value.substr(1 + sizeof(std::size_t)));
+        } else {
+            // For non-normal_with_blob, the stored format is:
+            // [0]: entry_type, [1, ...]: value_etc (which starts with write_version)
+            stored_write_version = write_version_type(value.substr(1));
+        }
+        
+        write_version_type new_write_version;
+        e.write_version(new_write_version);
+        if (new_write_version < stored_write_version) {
             need_write = false;
         }
     }
-    if (e.type() == log_entry::entry_type::normal_with_blob && !need_write && options.is_gc_enabled()) {
-        write_version_type write_version;
-        e.write_version(write_version);
-        if (options.get_gc_snapshot().boundary_version() <= write_version) {
-            need_write = true;
-        }
-    }
-
     if (need_write) {
         std::string db_value;
-        db_value.append(1, static_cast<char>(e.type()));
+        db_value.push_back(static_cast<char>(e.type()));
         if (e.type() == log_entry::entry_type::normal_with_blob) {
+            // For normal_with_blob entries, insert an 8-byte value_size field
+            // (no endian conversion required because only the writing process will read it),
+            // followed by the value data and then the BLOB ID data.
+            // This allows later splitting the stored data into the value part and the blob IDs.
             std::size_t value_size = e.value_etc().size();
-            std::size_t value_size_le = htole64(value_size);
-            db_value.append(reinterpret_cast<const char*>(&value_size_le), sizeof(value_size_le));  // NOLINT(cppcoreguidelines-pro-type-reinterpret-cast)
+            db_value.append(reinterpret_cast<const char*>(&value_size), sizeof(value_size));
             db_value.append(e.value_etc());
             db_value.append(e.raw_blob_ids());
         } else {
@@ -94,8 +100,9 @@ static void insert_entry_or_update_to_max(compaction_options &options, sortdb_wr
 }
 
 
+
 [[maybe_unused]]
-static void insert_twisted_entry([[maybe_unused]]compaction_options &options, sortdb_wrapper* sortdb, const log_entry& e) {
+static void insert_twisted_entry(sortdb_wrapper* sortdb, const log_entry& e) {
     // key_sid: storage_id[8] key[*], value_etc: epoch[8]LE minor_version[8]LE value[*], type: type[1]
     // db_key: epoch[8]BE minor_version[8]BE storage_id[8] key[*], db_value: type[1] value[*]
     std::string db_key(write_version_size + e.key_sid().size(), '\0');
@@ -143,11 +150,11 @@ static std::pair<epoch_id_type, sorting_context> create_sorted_from_wals(compact
             if (options.is_gc_enabled()) {
                 options.get_gc_snapshot().sanitize_and_add_entry(e);
             }
-            add_entry_to_point(options, sctx.get_sortdb(), e);
+            add_entry_to_point(sctx.get_sortdb(), e);
             break;
         case log_entry::entry_type::normal_entry:
         case log_entry::entry_type::remove_entry:
-            add_entry_to_point(options,sctx.get_sortdb(), e);
+            add_entry_to_point(sctx.get_sortdb(), e);
             break;
         case log_entry::entry_type::clear_storage:
         case log_entry::entry_type::remove_storage: {  // remove_storage is treated as clear_storage
@@ -155,9 +162,6 @@ static std::pair<epoch_id_type, sorting_context> create_sorted_from_wals(compact
             write_version_type wv;
             e.write_version(wv);
             sctx.clear_storage_update(e.storage(), wv);
-            if (options.is_gc_enabled() && options.get_gc_snapshot().boundary_version() <= wv) {
-                add_entry_to_point(options, sctx.get_sortdb(), e);
-            }
             return;
         }
         case log_entry::entry_type::add_storage:
@@ -203,6 +207,8 @@ static std::string create_value_from_db_key_and_value(const std::string_view& db
 }
 
 static std::pair<std::string, std::string_view> split_db_value_and_blob_ids(const std::string_view raw_db_value) {
+
+#if defined SORT_METHOD_PUT_ONLY
     // The first byte is entry_type
     const char entry_type = raw_db_value[0];
     const std::string_view remaining_data = raw_db_value.substr(1);
@@ -222,7 +228,38 @@ static std::pair<std::string, std::string_view> split_db_value_and_blob_ids(cons
     std::memcpy(&combined_value[1], value_data.data(), value_data.size()); // Copy the remaining data
 
     return {combined_value, blob_ids_part};
+#else
+    // Layout of raw_db_value for normal_with_blob entries:
+    // [0]                     : entry_type (1 byte)
+    // [1, 8]                  : value_etc size (8 bytes, stored directly)
+    // [9, 9 + value_etc_size) : value_etc (value_etc_size bytes)
+    // [9 + value_etc_size, ...) : blob_ids
+
+    // 1. Extract value_etc size from the 8 bytes following the entry_type.
+    // No endian conversion is required.
+    const std::size_t value_etc_size = *reinterpret_cast<const std::size_t*>(raw_db_value.data() + 1);
+
+    // 2. The value_etc data starts after the entry_type and size field.
+    // The size field occupies 8 bytes, so the offset is 1 + 8 = 9.
+    const std::size_t value_etc_offset = 1 + sizeof(std::size_t);
+
+    // 3. Create a string to hold the value_etc data.
+    std::string value_etc(value_etc_size, '\0');
+
+    // Copy value_etc data from raw_db_value starting at value_etc_offset for value_etc_size bytes.
+    std::memcpy(&value_etc[0], raw_db_value.data() + value_etc_offset, value_etc_size);
+
+    // 4. The blob_ids part is the remainder of raw_db_value after value_etc.
+    const std::size_t blob_ids_offset = value_etc_offset + value_etc_size;
+    std::string_view blob_ids_part(raw_db_value.data() + blob_ids_offset,
+                                   raw_db_value.size() - blob_ids_offset);
+
+    return {value_etc, blob_ids_part};
+
+#endif
+
 }
+
 
 
 
@@ -242,19 +279,12 @@ static void sortdb_foreach(
     )>& write_snapshot_entry) {
     static_assert(sizeof(log_entry::entry_type) == 1);
 #if defined SORT_METHOD_PUT_ONLY
-    sctx.get_sortdb()->each([&sctx, &write_snapshot_entry, &options, last_key = std::string{}](const std::string_view db_key, const std::string_view db_value) mutable {
-        auto entry_type = static_cast<log_entry::entry_type>(db_value[0]);
-        write_version_type boundary_version = {UINT64_MAX, UINT64_MAX};
-        if (entry_type == log_entry::entry_type::normal_with_blob && options.is_gc_enabled()) {
-            boundary_version = options.get_gc_snapshot().boundary_version();
-        }
-        write_version_type write_version = extract_write_version(db_key);
-
+    sctx.get_sortdb()->each([&sctx, &write_snapshot_entry, last_key = std::string{}](const std::string_view db_key, const std::string_view db_value) mutable {
         // using the first entry in GROUP BY (original-)key
         // NB: max versions comes first (by the custom-comparator)
         std::string_view key(db_key.data() + write_version_size, db_key.size() - write_version_size);
-        if (key == last_key && write_version < boundary_version) {  // same (original-)key with prev
-            return; // first skip
+        if (key == last_key) {  // same (original-)key with prev
+            return; // skip
         }
         last_key.assign(key);
         storage_id_type st_bytes{};
@@ -264,11 +294,12 @@ static void sortdb_foreach(
         if (auto ret = sctx.clear_storage_find(st); ret) {
             // check range delete
             write_version_type range_ver = ret.value();
-            if (write_version < range_ver && write_version < boundary_version) {
+            if (extract_write_version(db_key) < range_ver) {
                 return;  // skip
             }
         }
 
+        auto entry_type = static_cast<log_entry::entry_type>(db_value[0]);
         switch (entry_type) {
             case log_entry::entry_type::normal_entry:
             case log_entry::entry_type::remove_entry:
@@ -280,23 +311,13 @@ static void sortdb_foreach(
                 sctx.update_max_blob_id(log_entry::parse_blob_ids(blob_ids));
                 break;
             }
-            case log_entry::entry_type::clear_storage:
-            case log_entry::entry_type::remove_storage:
-                write_snapshot_entry(entry_type, key, create_value_from_db_key_and_value(db_key, db_value), {});    
-                break;
            default:
                 LOG(ERROR) << "never reach " << static_cast<int>(entry_type);
                 std::abort();
         }
     });
 #else
-    sctx.get_sortdb()->each([&sctx, &write_snapshot_entry, &options](const std::string_view db_key, const std::string_view db_value) {
-        auto entry_type = static_cast<log_entry::entry_type>(db_value[0]);
-        write_version_type boundary_version = {UINT64_MAX, UINT64_MAX};
-        if (entry_type == log_entry::entry_type::normal_with_blob && options.is_gc_enabled()) {
-            boundary_version = options.get_gc_snapshot().boundary_version();
-        }
-
+    sctx.get_sortdb()->each([&sctx, &write_snapshot_entry](const std::string_view db_key, const std::string_view db_value) {
         storage_id_type st_bytes{};
         memcpy(static_cast<void*>(&st_bytes), db_key.data(), sizeof(storage_id_type));
         storage_id_type st = le64toh(st_bytes);
@@ -304,25 +325,22 @@ static void sortdb_foreach(
             // check range delete
             write_version_type range_ver = ret.value();
             write_version_type point_ver{db_value.substr(1)};
-            if (point_ver < range_ver && point_ver < boundary_version) {
+            if (point_ver < range_ver) {
                 return;  // skip
             }
         }
+        auto entry_type = static_cast<log_entry::entry_type>(db_value[0]);
         switch (entry_type) {
             case log_entry::entry_type::normal_entry:
             case log_entry::entry_type::remove_entry:
                 write_snapshot_entry(entry_type, db_key, db_value.substr(1), {});
                 break;
             case log_entry::entry_type::normal_with_blob: {
-                auto [value, blob_ids] = split_db_value_and_blob_ids(db_value);
-                write_snapshot_entry(entry_type, db_key, value.substr(1), blob_ids);
+                auto [value_etc, blob_ids] = split_db_value_and_blob_ids(db_value);
+                write_snapshot_entry(entry_type, db_key, value_etc, blob_ids);
                 sctx.update_max_blob_id(log_entry::parse_blob_ids(blob_ids));
                 break;
             } break;
-            case log_entry::entry_type::clear_storage:
-            case log_entry::entry_type::remove_storage:
-                write_snapshot_entry(entry_type, db_key, db_value.substr(1), {});
-                break;
             default:
                 LOG(ERROR) << "never reach " << static_cast<int>(entry_type);
                 std::abort();
@@ -351,27 +369,38 @@ blob_id_type create_compact_pwal_and_get_max_blob_id(compaction_options &options
         LOG_AND_THROW_IO_EXCEPTION("cannot create snapshot file (" + snapshot_file.string() + ")", errno);
     }
     setvbuf(ostrm, nullptr, _IOFBF, 128L * 1024L);  // NOLINT, NB. glibc may ignore size when _IOFBF and buffer=NULL
-    log_entry::begin_session(ostrm, 0);
+    bool rewind = true;  // TODO: change by flag
+    epoch_id_type epoch = rewind ? 0 : max_appeared_epoch;
+    log_entry::begin_session(ostrm, epoch);
 
-    auto write_snapshot_entry = [&ostrm, &options](log_entry::entry_type entry_type, std::string_view key_sid, std::string_view value_etc,
+    auto write_snapshot_entry = [&ostrm, rewind](
+        log_entry::entry_type entry_type, 
+        std::string_view key_sid, 
+        std::string_view value_etc, 
                                                         std::string_view blob_ids) {
         switch (entry_type) {
             case log_entry::entry_type::normal_entry:
+                if (rewind) {
+                    static std::string value{};
+                    value = value_etc;
+                    std::memset(value.data(), 0, 16);
+                    log_entry::write(ostrm, key_sid, value);
+                } else {
                 log_entry::write(ostrm, key_sid, value_etc);
-                break;
-            case log_entry::entry_type::normal_with_blob:
-                log_entry::write_with_blob(ostrm, key_sid, value_etc, blob_ids);
-                break;
-            case log_entry::entry_type::remove_entry:
-                if (options.is_gc_enabled()) {
-                    log_entry::write_remove(ostrm, key_sid, value_etc);
                 }
                 break;
-            case log_entry::entry_type::clear_storage:
-                log_entry::write_clear_storage(ostrm, key_sid, value_etc);
+            case log_entry::entry_type::normal_with_blob:
+                if (rewind) {
+                    static std::string value{};
+                    value = value_etc;
+                    std::memset(value.data(), 0, 16);
+                    log_entry::write_with_blob(ostrm, key_sid, value, blob_ids);
+                } else {
+                log_entry::write_with_blob(ostrm, key_sid, value_etc, blob_ids);
+                }
                 break;
-            case log_entry::entry_type::remove_storage:
-                log_entry::write_remove_storage(ostrm, key_sid, value_etc);
+            case log_entry::entry_type::remove_entry:
+                // No action needed
                 break;
             default:
                 LOG(ERROR) << "Unexpected entry type: " << static_cast<int>(entry_type);

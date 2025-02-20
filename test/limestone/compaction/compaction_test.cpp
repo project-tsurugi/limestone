@@ -688,11 +688,9 @@ TEST_F(compaction_test, scenario03) {
     ASSERT_PRED_FORMAT2(ContainsString, pwals, "pwal_0000.compacted");
 
     log_entries = read_log_file("pwal_0000.compacted", location);
-    ASSERT_EQ(log_entries.size(), 4);                                                                                 // Ensure that there are log entries
-    EXPECT_TRUE(AssertLogEntry(log_entries[0], 1, "key1", std::nullopt, 1, 1, {}, log_entry::entry_type::remove_entry));
-    EXPECT_TRUE(AssertLogEntry(log_entries[1], 1, "key3", "value3", 1, 3, {}, log_entry::entry_type::normal_entry));
-    EXPECT_TRUE(AssertLogEntry(log_entries[2], 1, "key4", std::nullopt, 1, 0, {}, log_entry::entry_type::remove_entry));
-    EXPECT_TRUE(AssertLogEntry(log_entries[3], 2, "key2", "value2", 1, 0, {}, log_entry::entry_type::normal_entry));
+    ASSERT_EQ(log_entries.size(), 2);                                                                                 // Ensure that there are log entries
+    EXPECT_TRUE(AssertLogEntry(log_entries[0], 1, "key3", "value3", 0, 0, {}, log_entry::entry_type::normal_entry));  // write version changed to 0
+    EXPECT_TRUE(AssertLogEntry(log_entries[1], 2, "key2", "value2", 0, 0, {}, log_entry::entry_type::normal_entry));  // write version changed to 0
 
     // 3. Add/Update PWALs (include remove_entry again)
 
@@ -748,11 +746,9 @@ TEST_F(compaction_test, scenario03) {
 
     // 5. check the compacted file and snapshot creating at the boot time
     log_entries = read_log_file("pwal_0000.compacted", location);
-    ASSERT_EQ(log_entries.size(), 4);                                                                                 // Ensure that there are log entries
-    EXPECT_TRUE(AssertLogEntry(log_entries[0], 1, "key1", std::nullopt, 1, 1, {}, log_entry::entry_type::remove_entry));
-    EXPECT_TRUE(AssertLogEntry(log_entries[1], 1, "key3", "value3", 1, 3, {}, log_entry::entry_type::normal_entry));
-    EXPECT_TRUE(AssertLogEntry(log_entries[2], 1, "key4", std::nullopt, 1, 0, {}, log_entry::entry_type::remove_entry));
-    EXPECT_TRUE(AssertLogEntry(log_entries[3], 2, "key2", "value2", 1, 0, {}, log_entry::entry_type::normal_entry));
+    ASSERT_EQ(log_entries.size(), 2);                                                                                 // Ensure that there are log entries
+    EXPECT_TRUE(AssertLogEntry(log_entries[0], 1, "key3", "value3", 0, 0, {}, log_entry::entry_type::normal_entry));  // write version changed to 0
+    EXPECT_TRUE(AssertLogEntry(log_entries[1], 2, "key2", "value2", 0, 0, {}, log_entry::entry_type::normal_entry));  // write version changed to 0
 
     log_entries = read_log_file("data/snapshot", location);
     ASSERT_EQ(log_entries.size(), 4);  // Ensure that there are log entries
@@ -856,14 +852,13 @@ TEST_F(compaction_test, scenario04) {
     ASSERT_PRED_FORMAT3(ContainsPrefix, pwals, "pwal_0002.", 1);
 
     log_entries = read_log_file("pwal_0000.compacted", location);
-    ASSERT_EQ(log_entries.size(), 7);
-    EXPECT_TRUE(AssertLogEntry(log_entries[0], 1, "key1", "value1", 1, 0, {}, log_entry::entry_type::normal_entry));
-    EXPECT_TRUE(AssertLogEntry(log_entries[1], 1, "key2", "value2", 1, 1, {}, log_entry::entry_type::normal_entry));
-    EXPECT_TRUE(AssertLogEntry(log_entries[2], 1, "key5", "value5", 1, 2, {}, log_entry::entry_type::normal_entry));
-    EXPECT_TRUE(AssertLogEntry(log_entries[3], 1, "key6", "value6", 1, 3, {}, log_entry::entry_type::normal_entry));
-    EXPECT_TRUE(AssertLogEntry(log_entries[4], 1, "key7", "value7", 3, 0, {}, log_entry::entry_type::normal_entry));
-    EXPECT_TRUE(AssertLogEntry(log_entries[5], 2, "", "", 2, 0, {}, log_entry::entry_type::remove_storage));
-    EXPECT_TRUE(AssertLogEntry(log_entries[6], 2, "key8", "value8", 3, 0, {}, log_entry::entry_type::normal_entry));
+    ASSERT_EQ(log_entries.size(), 6);
+    EXPECT_TRUE(AssertLogEntry(log_entries[0], 1, "key1", "value1", 0, 0, {}, log_entry::entry_type::normal_entry));
+    EXPECT_TRUE(AssertLogEntry(log_entries[1], 1, "key2", "value2", 0, 0, {}, log_entry::entry_type::normal_entry));
+    EXPECT_TRUE(AssertLogEntry(log_entries[2], 1, "key5", "value5", 0, 0, {}, log_entry::entry_type::normal_entry));
+    EXPECT_TRUE(AssertLogEntry(log_entries[3], 1, "key6", "value6", 0, 0, {}, log_entry::entry_type::normal_entry));
+    EXPECT_TRUE(AssertLogEntry(log_entries[4], 1, "key7", "value7", 0, 0, {}, log_entry::entry_type::normal_entry));
+    EXPECT_TRUE(AssertLogEntry(log_entries[5], 2, "key8", "value8", 0, 0, {}, log_entry::entry_type::normal_entry));
 
     // Storage ID 1: Add normal entries
     lc0_->begin_session();
@@ -939,15 +934,13 @@ TEST_F(compaction_test, scenario04) {
 
     // check the compacted file and snapshot creating at the boot time
     log_entries = read_log_file("pwal_0000.compacted", location);
-    ASSERT_EQ(log_entries.size(), 7);
-
-    EXPECT_TRUE(AssertLogEntry(log_entries[0], 1, "key1", "value1", 1, 0, {}, log_entry::entry_type::normal_entry));
-    EXPECT_TRUE(AssertLogEntry(log_entries[1], 1, "key2", "value2", 1, 1, {}, log_entry::entry_type::normal_entry));
-    EXPECT_TRUE(AssertLogEntry(log_entries[2], 1, "key5", "value5", 1, 2, {}, log_entry::entry_type::normal_entry));
-    EXPECT_TRUE(AssertLogEntry(log_entries[3], 1, "key6", "value6", 1, 3, {}, log_entry::entry_type::normal_entry));
-    EXPECT_TRUE(AssertLogEntry(log_entries[4], 1, "key7", "value7", 3, 0, {}, log_entry::entry_type::normal_entry));
-    EXPECT_TRUE(AssertLogEntry(log_entries[5], 2, "", "", 2, 0, {}, log_entry::entry_type::remove_storage));
-    EXPECT_TRUE(AssertLogEntry(log_entries[6], 2, "key8", "value8", 3, 0, {}, log_entry::entry_type::normal_entry));
+    ASSERT_EQ(log_entries.size(), 6);
+    EXPECT_TRUE(AssertLogEntry(log_entries[0], 1, "key1", "value1", 0, 0, {}, log_entry::entry_type::normal_entry));
+    EXPECT_TRUE(AssertLogEntry(log_entries[1], 1, "key2", "value2", 0, 0, {}, log_entry::entry_type::normal_entry));
+    EXPECT_TRUE(AssertLogEntry(log_entries[2], 1, "key5", "value5", 0, 0, {}, log_entry::entry_type::normal_entry));
+    EXPECT_TRUE(AssertLogEntry(log_entries[3], 1, "key6", "value6", 0, 0, {}, log_entry::entry_type::normal_entry));
+    EXPECT_TRUE(AssertLogEntry(log_entries[4], 1, "key7", "value7", 0, 0, {}, log_entry::entry_type::normal_entry));
+    EXPECT_TRUE(AssertLogEntry(log_entries[5], 2, "key8", "value8", 0, 0, {}, log_entry::entry_type::normal_entry));
 
     log_entries = read_log_file("data/snapshot", location);
     ASSERT_EQ(log_entries.size(), 4);
@@ -1062,9 +1055,9 @@ TEST_F(compaction_test, scenario_blob) {
 
     log_entries = read_log_file("pwal_0000.compacted", location);
     ASSERT_EQ(log_entries.size(), 3);
-    EXPECT_TRUE(AssertLogEntry(log_entries[0], 1, "key1", "value1", 1, 0, {1001, 1002}, log_entry::entry_type::normal_with_blob));
-    EXPECT_TRUE(AssertLogEntry(log_entries[1], 1, "key2", "value2", 1, 1, {1003, 1004}, log_entry::entry_type::normal_with_blob));
-    EXPECT_TRUE(AssertLogEntry(log_entries[2], 2, "key3", "value3", 1, 0, {1005, 1006}, log_entry::entry_type::normal_with_blob));
+    EXPECT_TRUE(AssertLogEntry(log_entries[0], 1, "key1", "value1", 0, 0, {1001, 1002}, log_entry::entry_type::normal_with_blob));
+    EXPECT_TRUE(AssertLogEntry(log_entries[1], 1, "key2", "value2", 0, 0, {1003, 1004}, log_entry::entry_type::normal_with_blob));
+    EXPECT_TRUE(AssertLogEntry(log_entries[2], 2, "key3", "value3", 0, 0, {1005, 1006}, log_entry::entry_type::normal_with_blob));
 
     // Write entries without BLOBs and perform compaction.
 
@@ -1106,11 +1099,11 @@ TEST_F(compaction_test, scenario_blob) {
 
     log_entries = read_log_file("pwal_0000.compacted", location);
     ASSERT_EQ(log_entries.size(), 5);
-    EXPECT_TRUE(AssertLogEntry(log_entries[0], 1, "key1", "value1", 1, 0, {1001, 1002}, log_entry::entry_type::normal_with_blob));
-    EXPECT_TRUE(AssertLogEntry(log_entries[1], 1, "key15", "value5", 4, 2, {1001, 1002}, log_entry::entry_type::normal_entry));
-    EXPECT_TRUE(AssertLogEntry(log_entries[2], 1, "key16", "value6", 4, 3, {1001, 1002}, log_entry::entry_type::normal_entry));
-    EXPECT_TRUE(AssertLogEntry(log_entries[3], 1, "key2", "value2", 1, 1, {1003, 1004}, log_entry::entry_type::normal_with_blob));
-    EXPECT_TRUE(AssertLogEntry(log_entries[4], 2, "key3", "value3", 1, 0, {1005, 1006}, log_entry::entry_type::normal_with_blob));
+    EXPECT_TRUE(AssertLogEntry(log_entries[0], 1, "key1", "value1", 0, 0, {1001, 1002}, log_entry::entry_type::normal_with_blob));
+    EXPECT_TRUE(AssertLogEntry(log_entries[1], 1, "key15", "value5", 0, 0, {1001, 1002}, log_entry::entry_type::normal_entry));
+    EXPECT_TRUE(AssertLogEntry(log_entries[2], 1, "key16", "value6", 0, 0, {1001, 1002}, log_entry::entry_type::normal_entry));
+    EXPECT_TRUE(AssertLogEntry(log_entries[3], 1, "key2", "value2", 0, 0, {1003, 1004}, log_entry::entry_type::normal_with_blob));
+    EXPECT_TRUE(AssertLogEntry(log_entries[4], 2, "key3", "value3", 0, 0, {1005, 1006}, log_entry::entry_type::normal_with_blob));
 
     // Write entries with BLOBs but with blob_ids smaller than max_blob_id and perform compaction.
 
@@ -1152,12 +1145,12 @@ TEST_F(compaction_test, scenario_blob) {
 
     log_entries = read_log_file("pwal_0000.compacted", location);
     ASSERT_EQ(log_entries.size(), 6);
-    EXPECT_TRUE(AssertLogEntry(log_entries[0], 1, "key1", "value1", 1, 0, {1001, 1002}, log_entry::entry_type::normal_with_blob));
-    EXPECT_TRUE(AssertLogEntry(log_entries[1], 1, "key15", "value5", 4, 2, {1001, 1002}, log_entry::entry_type::normal_entry));
-    EXPECT_TRUE(AssertLogEntry(log_entries[2], 1, "key16", "value6", 4, 3, {1001, 1002}, log_entry::entry_type::normal_entry));
-    EXPECT_TRUE(AssertLogEntry(log_entries[3], 1, "key2", "value2", 1, 1, {1003, 1004}, log_entry::entry_type::normal_with_blob));
-    EXPECT_TRUE(AssertLogEntry(log_entries[4], 2, "key3", "value3", 1, 0, {1005, 1006}, log_entry::entry_type::normal_with_blob));
-    EXPECT_TRUE(AssertLogEntry(log_entries[5], 2, "key5", "value5", 4, 2, {128, 32, 59}, log_entry::entry_type::normal_with_blob));
+    EXPECT_TRUE(AssertLogEntry(log_entries[0], 1, "key1", "value1", 0, 0, {1001, 1002}, log_entry::entry_type::normal_with_blob));
+    EXPECT_TRUE(AssertLogEntry(log_entries[1], 1, "key15", "value5", 0, 0, {1001, 1002}, log_entry::entry_type::normal_entry));
+    EXPECT_TRUE(AssertLogEntry(log_entries[2], 1, "key16", "value6", 0, 0, {1001, 1002}, log_entry::entry_type::normal_entry));
+    EXPECT_TRUE(AssertLogEntry(log_entries[3], 1, "key2", "value2", 0, 0, {1003, 1004}, log_entry::entry_type::normal_with_blob));
+    EXPECT_TRUE(AssertLogEntry(log_entries[4], 2, "key3", "value3", 0, 0, {1005, 1006}, log_entry::entry_type::normal_with_blob));
+    EXPECT_TRUE(AssertLogEntry(log_entries[5], 2, "key5", "value5", 0, 0, {128, 32, 59}, log_entry::entry_type::normal_with_blob));
 
     // datastoreの再起動後、コンパクションカタログのmax_blobg_idがnext_blob_idに反映されることを確認
     datastore_->shutdown();
