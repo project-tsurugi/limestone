@@ -668,6 +668,12 @@ void datastore::compact_with_online() {
         boundary_version_copy = available_boundary_version_;
     }
 
+    // check blob file garbage collection runnable
+    bool blob_file_gc_runnable = false;
+    if (boundary_version_copy.get_minor() > compaction_catalog_->get_max_epoch_id()) {
+        blob_file_gc_runnable = true;
+    }
+
     // rotate first
     rotation_result result = rotate_log_files();
 
@@ -697,9 +703,27 @@ void datastore::compact_with_online() {
     boost::filesystem::path compaction_temp_dir = location_ / compaction_catalog::get_compaction_temp_dirname();
     ensure_directory_exists(compaction_temp_dir);
 
-    // create a compacted file and snapshot for blob file garbage collection
-    blob_file_gc_snapshot gc_snapshot(boundary_version_copy);
-    compaction_options options{location_, compaction_temp_dir, recover_max_parallelism_, need_compaction_filenames, gc_snapshot};
+    // Set the appropriate options based on whether blob file GC is executable.
+    compaction_options options = [&]() -> compaction_options {
+        if (blob_file_gc_runnable) {
+            blob_file_gc_snapshot gc_snapshot(boundary_version_copy);
+            return compaction_options{
+                location_, 
+                compaction_temp_dir, 
+                recover_max_parallelism_, 
+                need_compaction_filenames, 
+                gc_snapshot
+            };
+        } else {
+            return compaction_options{
+                location_, 
+                compaction_temp_dir, 
+                recover_max_parallelism_, 
+                need_compaction_filenames
+            };
+        }
+    }();
+    // create a compacted file
     blob_id_type max_blob_id = create_compact_pwal_and_get_max_blob_id(options);
 
 
@@ -742,17 +766,20 @@ void datastore::compact_with_online() {
     LOG_LP(INFO) << "compaction finished";
 
     // blob files garbage collection
-    blob_file_garbage_collector garb_collector(*blob_file_resolver_);   
-    garb_collector.scan_blob_files(next_blob_id_copy);
-    log_entry_container log_entries = gc_snapshot.finalize_snapshot();
-    for(const auto& entry : log_entries) {
-        for(const auto& blob_id : entry.get_blob_ids()) {
-            garb_collector.add_gc_exempt_blob_id(blob_id);
+    if (options.is_gc_enabled()) {
+        LOG_LP(INFO) << "start blob files garbage collection";
+        blob_file_garbage_collector garb_collector(*blob_file_resolver_);
+        garb_collector.scan_blob_files(next_blob_id_copy);
+        log_entry_container log_entries = options.get_gc_snapshot().finalize_snapshot();
+        for (const auto& entry : log_entries) {
+            for (const auto& blob_id : entry.get_blob_ids()) {
+                garb_collector.add_gc_exempt_blob_id(blob_id);
+            }
         }
+        garb_collector.finalize_scan_and_cleanup();
+        LOG_LP(INFO) << "blob files garbage collection finished";
     }
-    garb_collector.finalize_scan_and_cleanup();
 
-    LOG_LP(INFO) << "blob files garbage collection finished";
     TRACE_END;
 }
 
