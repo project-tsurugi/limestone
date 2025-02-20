@@ -89,7 +89,7 @@ static void insert_entry_or_update_to_max(sortdb_wrapper* sortdb, const log_entr
             // followed by the value data and then the BLOB ID data.
             // This allows later splitting the stored data into the value part and the blob IDs.
             std::size_t value_size = e.value_etc().size();
-            db_value.append(reinterpret_cast<const char*>(&value_size), sizeof(value_size));
+            db_value.append(reinterpret_cast<const char*>(&value_size), sizeof(value_size));  // NOLINT(*-reinterpret-cast)
             db_value.append(e.value_etc());
             db_value.append(e.raw_blob_ids());
         } else {
@@ -237,7 +237,7 @@ static std::pair<std::string, std::string_view> split_db_value_and_blob_ids(cons
 
     // 1. Extract value_etc size from the 8 bytes following the entry_type.
     // No endian conversion is required.
-    const std::size_t value_etc_size = *reinterpret_cast<const std::size_t*>(raw_db_value.data() + 1);
+    const std::size_t value_etc_size = *reinterpret_cast<const std::size_t*>(raw_db_value.data() + 1);  // NOLINT(cppcoreguidelines-pro-type-reinterpret-cast)
 
     // 2. The value_etc data starts after the entry_type and size field.
     // The size field occupies 8 bytes, so the offset is 1 + 8 = 9.
@@ -247,7 +247,7 @@ static std::pair<std::string, std::string_view> split_db_value_and_blob_ids(cons
     std::string value_etc(value_etc_size, '\0');
 
     // Copy value_etc data from raw_db_value starting at value_etc_offset for value_etc_size bytes.
-    std::memcpy(&value_etc[0], raw_db_value.data() + value_etc_offset, value_etc_size);
+    std::memcpy(value_etc.data(), raw_db_value.data() + value_etc_offset, value_etc_size);
 
     // 4. The blob_ids part is the remainder of raw_db_value after value_etc.
     const std::size_t blob_ids_offset = value_etc_offset + value_etc_size;

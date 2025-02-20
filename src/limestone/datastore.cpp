@@ -711,21 +711,9 @@ void datastore::compact_with_online() {
     compaction_options options = [&]() -> compaction_options {
         if (blob_file_gc_runnable) {
             blob_file_gc_snapshot gc_snapshot(boundary_version_copy);
-            return compaction_options{
-                location_, 
-                compaction_temp_dir, 
-                recover_max_parallelism_, 
-                need_compaction_filenames, 
-                gc_snapshot
-            };
-        } else {
-            return compaction_options{
-                location_, 
-                compaction_temp_dir, 
-                recover_max_parallelism_, 
-                need_compaction_filenames
-            };
+            return compaction_options{location_, compaction_temp_dir, recover_max_parallelism_, need_compaction_filenames, gc_snapshot};
         }
+        return compaction_options{location_, compaction_temp_dir, recover_max_parallelism_, need_compaction_filenames};
     }();
 
     std::cerr << "is_gc_enabled = " <<  options.is_gc_enabled() << std::endl;
