@@ -100,12 +100,32 @@ TEST_F(compaction_test, basic_blob_gc_test) {
     EXPECT_TRUE(AssertLogEntry(log_entries[3], 1, "noblob_key2", "noblob_value2", 0, 0, {}, log_entry::entry_type::normal_entry));
 
     // Verify the existence of the compacted blob files.
+    // GC will not be performed because available_boundary_version remains at the initial value.
     EXPECT_TRUE(boost::filesystem::exists(path1001));
     EXPECT_TRUE(boost::filesystem::exists(path1002));
     EXPECT_TRUE(boost::filesystem::exists(path1003));
     EXPECT_TRUE(boost::filesystem::exists(path2001));
     EXPECT_TRUE(boost::filesystem::exists(path2002));
     
+
+    lc0_->begin_session();
+    lc0_->add_entry(1, "blob_key5", "value5", {1, 1});
+    lc0_->end_session();
+
+    datastore_->switch_epoch(4);
+
+    datastore_->switch_available_boundary_version({3,0});
+
+    // Perform compaction in epoch 5.
+    run_compact_with_epoch_switch(5);
+
+    // Verify the existence of the compacted blob files.
+    EXPECT_FALSE(boost::filesystem::exists(path1001));
+    EXPECT_FALSE(boost::filesystem::exists(path1002));
+    EXPECT_TRUE(boost::filesystem::exists(path1003));
+    EXPECT_TRUE(boost::filesystem::exists(path2001));
+    EXPECT_TRUE(boost::filesystem::exists(path2002));
+
     // Restart datastore and verify snapshot content.
     std::vector<std::pair<std::string, std::string>> kv_list = restart_datastore_and_read_snapshot();
     ASSERT_EQ(kv_list.size(), 4);

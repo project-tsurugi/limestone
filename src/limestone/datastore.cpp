@@ -670,9 +670,13 @@ void datastore::compact_with_online() {
 
     // check blob file garbage collection runnable
     bool blob_file_gc_runnable = false;
-    if (boundary_version_copy.get_minor() > compaction_catalog_->get_max_epoch_id()) {
+    if (boundary_version_copy.get_major() > compaction_catalog_->get_max_epoch_id()) {
         blob_file_gc_runnable = true;
     }
+    std::cerr << "boundary_version_copy = " << boundary_version_copy.get_major() <<  "." << boundary_version_copy.get_minor() << std::endl;
+    std::cerr << "max_epoch_id = " << compaction_catalog_->get_max_epoch_id() << std::endl;
+    std::cerr << "blob_file_gc_runnable = " << blob_file_gc_runnable << std::endl;
+
 
     // rotate first
     rotation_result result = rotate_log_files();
@@ -723,6 +727,8 @@ void datastore::compact_with_online() {
             };
         }
     }();
+
+    std::cerr << "is_gc_enabled = " <<  options.is_gc_enabled() << std::endl;
     // create a compacted file
     blob_id_type max_blob_id = create_compact_pwal_and_get_max_blob_id(options);
 
