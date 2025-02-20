@@ -148,7 +148,6 @@ static std::pair<epoch_id_type, sorting_context> create_sorted_from_wals(compact
         switch (e.type()) {
         case log_entry::entry_type::normal_with_blob:
             if (options.is_gc_enabled()) {
-                std::cerr << "write version = " << options.get_gc_snapshot().boundary_version().get_major() << "." << options.get_gc_snapshot().boundary_version().get_minor() << std::endl;
                 options.get_gc_snapshot().sanitize_and_add_entry(e);
             }
             add_entry_to_point(sctx.get_sortdb(), e);
