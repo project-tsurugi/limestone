@@ -141,6 +141,16 @@ public:
     void shutdown();
 
     /**
+     * Determines if any blob file operations are currently in progress.
+     *
+     * Returns true if blob file scanning, snapshot scanning, or cleanup has been started.
+     * This indicates that the blob file is actively undergoing some form of scanning or cleanup.
+     *
+     * @return True if any corresponding operation is active; false otherwise.
+     */
+    bool is_active() const;
+
+    /**
      * @brief Blocks the current thread until all worker threads have completed execution.
      *
      * This function waits for all threads that are performing tasks related to garbage collection,

@@ -323,7 +323,7 @@ protected:  // for tests
     auto next_blob_id_for_tests() const noexcept { return next_blob_id_.load(); }
     auto& files_for_tests() const noexcept { return files_; }
     void rotate_epoch_file_for_tests() { rotate_epoch_file(); }
-    void set_next_blob_id_for_tests(blob_id_type next_blob_id) noexcept { next_blob_id_ = next_blob_id; }
+    void set_next_blob_id_for_tests(blob_id_type next_blob_id) noexcept { next_blob_id_.store(next_blob_id); }
     std::set<blob_id_type> get_persistent_blob_ids_for_tests() noexcept {
         std::lock_guard<std::mutex> lock(persistent_blob_ids_mutex_);
         return persistent_blob_ids_;

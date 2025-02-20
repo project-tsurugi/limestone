@@ -55,7 +55,7 @@ TEST_F(compaction_test, basic_blob_gc_test) {
     auto path1003 = create_dummy_blob_files(1003);
     auto path2001 = create_dummy_blob_files(2001);
     auto path2002 = create_dummy_blob_files(2002);
-
+    datastore_->set_next_blob_id(2003);
 
     // Verify PWAL content before compaction.
     // Here, we assume that "pwal_0000" aggregates entries from both epoch 1 and epoch 2.
@@ -109,7 +109,7 @@ TEST_F(compaction_test, basic_blob_gc_test) {
     
 
     lc0_->begin_session();
-    lc0_->add_entry(1, "blob_key5", "value5", {1, 1});
+    lc0_->add_entry(1, "noblob_key5", "noblob_value5", {1, 1});
     lc0_->end_session();
 
     datastore_->switch_epoch(4);
@@ -117,7 +117,9 @@ TEST_F(compaction_test, basic_blob_gc_test) {
     datastore_->switch_available_boundary_version({3,0});
 
     // Perform compaction in epoch 5.
+    FLAGS_v = 100;
     run_compact_with_epoch_switch(5);
+    FLAGS_v = 30;
 
     // Verify the existence of the compacted blob files.
     EXPECT_FALSE(boost::filesystem::exists(path1001));
@@ -128,7 +130,7 @@ TEST_F(compaction_test, basic_blob_gc_test) {
 
     // Restart datastore and verify snapshot content.
     std::vector<std::pair<std::string, std::string>> kv_list = restart_datastore_and_read_snapshot();
-    ASSERT_EQ(kv_list.size(), 4);
+    ASSERT_EQ(kv_list.size(), 5);
     EXPECT_EQ(kv_list[0].first, "blob_key1");
     EXPECT_EQ(kv_list[0].second, "blob_value1_epoch2");
     EXPECT_EQ(kv_list[1].first, "blob_key2");
@@ -137,6 +139,8 @@ TEST_F(compaction_test, basic_blob_gc_test) {
     EXPECT_EQ(kv_list[2].second, "noblob_value1_epoch2");
     EXPECT_EQ(kv_list[3].first, "noblob_key2");
     EXPECT_EQ(kv_list[3].second, "noblob_value2");
+    EXPECT_EQ(kv_list[4].first, "noblob_key5");
+    EXPECT_EQ(kv_list[4].second, "noblob_value5");
 
     // Verify that no snapshot PWAL file exists.
     log_entries = read_log_file("data/snapshot", location);

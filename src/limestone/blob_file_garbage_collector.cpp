@@ -116,6 +116,7 @@ using limestone::api::log_entry;
  }
   
  void blob_file_garbage_collector::add_gc_exempt_blob_id(blob_id_type id) {
+    VLOG_LP(log_trace_fine) << "Adding blob id to gc_exempt_blob_: " << id;
      gc_exempt_blob_->add_blob_id(id);
  }
   
@@ -135,7 +136,10 @@ using limestone::api::log_entry;
          this->wait_for_blob_file_scan();
           
          // Calculate the difference and perform deletion operations
+         VLOG_LP(100) << "Scanned blobs before diff: " << scanned_blobs_->debug_string();
+         VLOG_LP(100) << "GC exempt blobs: " << gc_exempt_blob_->debug_string();
          scanned_blobs_->diff(*gc_exempt_blob_);
+         VLOG_LP(100) << "Scanned blobs after: " << scanned_blobs_->debug_string();
 
          for (const auto &id : *scanned_blobs_) {
             if (shutdown_requested_.load(std::memory_order_acquire)) {
@@ -282,7 +286,18 @@ void blob_file_garbage_collector::scan_snapshot(const boost::filesystem::path &s
      std::lock_guard<std::mutex> lock(mutex_);
      scanned_blobs_ = std::make_unique<blob_id_container>();
      gc_exempt_blob_ = std::make_unique<blob_id_container>();
+     blob_file_scan_started_ = false;
+     blob_file_scan_waited_ = false;
+     snapshot_scan_started_ = false;
+     snapshot_scan_waited_ = false;
+     cleanup_started_ = false;
+     cleanup_waited_ = false;
  }
  
+ bool blob_file_garbage_collector::is_active() const {
+    std::lock_guard<std::mutex> lock(mutex_);
+    return !(blob_file_scan_complete_ && snapshot_scan_complete_ && cleanup_complete_);
+}
+
  } // namespace limestone::internal
  

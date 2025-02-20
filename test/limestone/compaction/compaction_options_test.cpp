@@ -54,9 +54,8 @@
  TEST_F(compaction_options_test, construct_with_file_set_and_gc) {
      std::set<std::string> file_names = {"file1", "file2"};
      write_version_type boundary_version(42, 5);
- 
-     blob_file_gc_snapshot gc_snapshot(boundary_version);
-     compaction_options options(from_dir_, to_dir_, num_workers_, file_names, gc_snapshot);
+     auto gc_snapshot = std::make_unique<blob_file_gc_snapshot>(boundary_version);
+     compaction_options options(from_dir_, to_dir_, num_workers_, file_names, std::move(gc_snapshot));
  
      EXPECT_EQ(options.get_from_dir(), from_dir_);
      EXPECT_EQ(options.get_to_dir(), to_dir_);
@@ -70,7 +69,7 @@
      compaction_options options(from_dir_, to_dir_, num_workers_);
  
      EXPECT_FALSE(options.is_gc_enabled());
-     EXPECT_THROW((void)options.get_gc_snapshot(), std::bad_optional_access);
+     EXPECT_THROW((void)options.get_gc_snapshot(), std::logic_error);
  }
  
  // New test for the constructor without to_dir (pre-compaction phase)

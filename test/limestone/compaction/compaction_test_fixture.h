@@ -58,6 +58,7 @@ public:
         lc2_ = &datastore_->create_channel(location);
 
         datastore_->ready();
+        datastore_->wait_for_blob_file_garbace_collector();
     }
 
     void TearDown() {
@@ -152,6 +153,7 @@ protected:
 
             // Wait for the compact operation to finish
             future.get();  // Will rethrow any exception from compact_with_online
+            datastore_->wait_for_blob_file_garbace_collector();
         } catch (const std::exception& e) {
             std::cerr << "Error: " << e.what() << std::endl;
             throw;  // Re-throw the exception for further handling

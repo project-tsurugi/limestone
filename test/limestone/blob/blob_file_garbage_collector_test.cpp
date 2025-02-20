@@ -383,13 +383,6 @@ TEST_F(blob_file_garbage_collector_test, wait_for_cleanup_called_twice) {
     SUCCEED();
 }
 
-TEST_F(blob_file_garbage_collector_test, finalize_scan_and_cleanup_after_wait_throws) {
-    gc_->scan_blob_files(500);
-    gc_->finalize_scan_and_cleanup();
-    gc_->wait_for_cleanup();
-    EXPECT_THROW(gc_->finalize_scan_and_cleanup(), std::logic_error);
-}
-
 // Test: snapshot_scan completes successfully and wait_for_scan_snapshot returns normally.
 TEST_F(blob_file_garbage_collector_test, snapshot_scan_completes_properly) {
     // Act: Start the snapshot scan and wait for it to complete.

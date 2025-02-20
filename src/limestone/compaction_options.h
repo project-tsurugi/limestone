@@ -40,7 +40,7 @@
        num_worker_(workers),
        file_names_(std::move(file_names)),
        has_file_set_(true),
-       gc_snapshot_(std::nullopt)
+       gc_snapshot_(nullptr)
      {}
  
      // Constructor: to_dir provided, GC disabled, no file set.
@@ -53,7 +53,7 @@
        to_dir_(std::move(to)),
        num_worker_(workers),
        has_file_set_(false),
-       gc_snapshot_(std::nullopt)
+       gc_snapshot_(nullptr)
      {}
  
      // Constructor: to_dir provided, file set available, GC disabled.
@@ -68,7 +68,7 @@
        num_worker_(workers),
        file_names_(std::move(file_names)),
        has_file_set_(true),
-       gc_snapshot_(std::nullopt)
+       gc_snapshot_(nullptr)
      {}
  
      // Constructor: to_dir provided, file set available, GC enabled.
@@ -78,14 +78,14 @@
          boost::filesystem::path to,
          int workers,
          std::set<std::string> file_names,
-         blob_file_gc_snapshot& gc_snapshot
+         std::unique_ptr<blob_file_gc_snapshot> gc_snapshot
      )
      : from_dir_(std::move(from)),
        to_dir_(std::move(to)),
        num_worker_(workers),
        file_names_(std::move(file_names)),
        has_file_set_(true),
-       gc_snapshot_(std::ref(gc_snapshot))
+       gc_snapshot_(std::move(gc_snapshot))
      {}
  
      // Getter for from_dir.
@@ -102,27 +102,31 @@
  
      // Returns true if a file set is configured.
      [[nodiscard]] bool has_file_set() const { return has_file_set_; }
- 
+
      // Check if GC is enabled.
-     [[nodiscard]] bool is_gc_enabled() const { return gc_snapshot_.has_value(); }
- 
+     [[nodiscard]] bool is_gc_enabled() const { return static_cast<bool>(gc_snapshot_); }
+
      // Getter for gc_snapshot.
      // It is caller's responsibility to ensure GC is enabled before calling.
-     [[nodiscard]] blob_file_gc_snapshot& get_gc_snapshot() const { return gc_snapshot_.value().get(); }
- 
-  private:
+     [[nodiscard]] blob_file_gc_snapshot& get_gc_snapshot() const {
+         if (!gc_snapshot_) {
+             throw std::logic_error("GC is not enabled");
+         }
+         return *gc_snapshot_;
+     }
+
+ private:
      // Basic compaction settings.
      boost::filesystem::path from_dir_;
      boost::filesystem::path to_dir_;
      int num_worker_;
- 
+
      // File set for compaction.
      std::set<std::string> file_names_;
      bool has_file_set_;
- 
+
      // Garbage collection settings.
-     std::optional<std::reference_wrapper<blob_file_gc_snapshot>> gc_snapshot_;
+     std::unique_ptr<blob_file_gc_snapshot> gc_snapshot_;
  };
- 
- } // namespace limestone::internal
- 
+
+ }  // namespace limestone::internal
