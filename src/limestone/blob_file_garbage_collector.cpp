@@ -140,7 +140,8 @@
                                << " Error: " << ec.message();
              }
          }
-         state_machine_.transition(blob_file_gc_event::complete_cleanup);
+         state_machine_.complete_cleanup();
+         VLOG_LP(log_trace_fine) << "Notifying cleanup_cv_";
          {
             std::lock_guard<std::mutex> lock(mutex_);
             cleanup_cv_.notify_all();
@@ -150,14 +151,19 @@
  }
   
  void blob_file_garbage_collector::wait_for_blob_file_scan() {
+    VLOG_LP(log_trace_fine) << "entering wait_for_blob_file_scan";
     // If the scan has not been started, return immediately.
     blob_file_gc_state current_state = state_machine_.get_state();
     if (current_state != blob_file_gc_state::scanning_blob_only &&
-        current_state != blob_file_gc_state::scanning_both) {
+        current_state != blob_file_gc_state::scanning_both &&
+        current_state != blob_file_gc_state::snapshot_scan_completed_blob_not_started &&
+        current_state != blob_file_gc_state::snapshot_scan_completed_blob_in_progress) {
+        VLOG_LP(log_trace_fine) << "wait_for_blob_file_scan returning immediately";
         return;
     }
 
     // Wait until the scan is complete.
+    VLOG_LP(log_trace_fine) << "Waiting for blob_file_scan_cv_";
     std::unique_lock<std::mutex> lock(mutex_);
     blob_file_scan_cv_.wait(lock, [this]() {
         blob_file_gc_state state = state_machine_.get_state();
@@ -170,12 +176,17 @@
   
  void blob_file_garbage_collector::wait_for_cleanup() {
     // If cleanup has not started, return immediately to avoid indefinite blocking.
+    VLOG_LP(log_trace_fine) << "entering wait_for_cleanup";
     blob_file_gc_state current_state = state_machine_.get_state();
-    if (current_state != blob_file_gc_state::cleaning_up) {
+    if (current_state == blob_file_gc_state::completed|| 
+        current_state == blob_file_gc_state::not_started ||
+        current_state == blob_file_gc_state::shutdown) {
+        VLOG_LP(log_trace_fine) << "wait_for_cleanup returning immediately.";
         return;
     }
 
     // Wait until the cleanup process is complete.
+    VLOG_LP(log_trace_fine) << "Waiting for cleanup_cv_";
     std::unique_lock<std::mutex> lock(mutex_);
     cleanup_cv_.wait(lock, [this]() {
         blob_file_gc_state state = state_machine_.get_state();
@@ -189,22 +200,14 @@
  }
   
  void blob_file_garbage_collector::shutdown() {
-    // Use a dedicated mutex to ensure shutdown() is executed exclusively.
-    std::lock_guard<std::mutex> shutdown_lock(shutdown_mutex_);
-
+    state_machine_.shutdown();
     shutdown_requested_.store(true, std::memory_order_release);
-
     wait_for_all_threads();
-
-     shutdown_requested_.store(false, std::memory_order_release);
+    shutdown_requested_.store(false, std::memory_order_release);
  }
   
 
 void blob_file_garbage_collector::wait_for_all_threads() {
-    wait_for_blob_file_scan();
-    wait_for_scan_snapshot();
-    wait_for_cleanup();
-
     if (blob_file_scan_thread_.joinable()) {
         blob_file_scan_thread_.join();
     }
@@ -260,18 +263,24 @@ void blob_file_garbage_collector::start_add_gc_exempt_blob_ids() {
 
 void blob_file_garbage_collector::finalize_add_gc_exempt_blob_ids() {
     state_machine_.complete_snapshot_scan(blob_file_gc_state_machine::snapshot_scan_mode::external);
+    finalize_scan_and_cleanup(); 
     snapshot_scan_cv_.notify_all();
 }
   
 void blob_file_garbage_collector::wait_for_scan_snapshot() {
+    VLOG_LP(log_trace_fine) << "entering wait_for_scan_snapshot";
     // If the snapshot scan has not started, return immediately.
     blob_file_gc_state current_state = state_machine_.get_state();
     if (current_state != blob_file_gc_state::scanning_snapshot_only &&
-        current_state != blob_file_gc_state::scanning_both) {
+        current_state != blob_file_gc_state::scanning_both &&
+        current_state != blob_file_gc_state::blob_scan_completed_snapshot_not_started &&
+        current_state != blob_file_gc_state::blob_scan_completed_snapshot_in_progress) {
+        VLOG_LP(log_trace_fine) << "wait_for_scan_snapshot returning immediately";
         return;
     }
 
     // Wait until the snapshot scan is complete.
+    VLOG_LP(log_trace_fine) << "Waiting for snapshot_scan_cv_";
     std::unique_lock<std::mutex> lock(mutex_);
     snapshot_scan_cv_.wait(lock, [this]() {
         blob_file_gc_state state = state_machine_.get_state();

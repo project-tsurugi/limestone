@@ -94,12 +94,11 @@ protected:
     }
 
     void TearDown() override {
+        gc_->shutdown();
+        gc_.reset();
         if (datastore_) {
             datastore_->shutdown();
         }
-
-        gc_->shutdown();
-        gc_.reset();
         resolver_.reset();
         std::string cmd = "rm -rf " + std::string(base_directory);
         if (std::system(cmd.c_str()) != 0) {
@@ -269,7 +268,9 @@ TEST_F(blob_file_garbage_collector_test, add_gc_exempt_blob_id_adds_id_correctly
     blob_id_type test_id = 123;
 
     // Act: Add the test blob_id to the GC exempt container.
+    gc_->start_add_gc_exempt_blob_ids();
     gc_->add_gc_exempt_blob_id(test_id);
+    gc_->finalize_add_gc_exempt_blob_ids();
 
     // Assert: Verify that the container now includes the test blob_id.
     const blob_id_container &exempt_ids = gc_->get_gc_exempt_blob_list();
@@ -279,6 +280,7 @@ TEST_F(blob_file_garbage_collector_test, add_gc_exempt_blob_id_adds_id_correctly
 }
 
 TEST_F(blob_file_garbage_collector_test, finalize_scan_and_cleanup_deletes_non_exempt_files) {
+    FLAGS_v = 100;
     // Arrange:
     // Create dummy blob files with blob IDs 101, 102, 103.
     create_blob_file(*resolver_, 101);
@@ -286,17 +288,12 @@ TEST_F(blob_file_garbage_collector_test, finalize_scan_and_cleanup_deletes_non_e
     create_blob_file(*resolver_, 103);
 
     // Assume that all files have blob IDs <= 200 so that they are included in the scanned list.
-    FLAGS_logbuflevel = -1;  
-    FLAGS_v = 100;
     gc_->scan_blob_files(200);
-    gc_->wait_for_blob_file_scan();
 
     // Mark blob 102 as GC exempt.
+    gc_->start_add_gc_exempt_blob_ids();
     gc_->add_gc_exempt_blob_id(102);
-
-    // Act:
-    // Call finalize_scan_and_cleanup, which spawns a thread that will delete non-exempt blob files.
-    gc_->finalize_scan_and_cleanup();
+    gc_->finalize_add_gc_exempt_blob_ids();
 
     // Wait for the cleanup process to complete.
     gc_->wait_for_cleanup();
@@ -306,11 +303,12 @@ TEST_F(blob_file_garbage_collector_test, finalize_scan_and_cleanup_deletes_non_e
     EXPECT_FALSE(boost::filesystem::exists(resolver_->resolve_path(101)));
     EXPECT_FALSE(boost::filesystem::exists(resolver_->resolve_path(103)));
 
-    // The GC exempt blob (102) should still exist.
+    // // The GC exempt blob (102) should still exist.
     EXPECT_TRUE(boost::filesystem::exists(resolver_->resolve_path(102)));
 }
 
 TEST_F(blob_file_garbage_collector_test, finalize_scan_and_cleanup_handles_deletion_failure) {
+    FLAGS_v = 100;
     // Arrange:
     // Create dummy blob files with blob IDs 501 and 502.
     create_blob_file(*resolver_, 501);
@@ -344,8 +342,9 @@ TEST_F(blob_file_garbage_collector_test, finalize_scan_and_cleanup_handles_delet
     blob_file_resolver* resolver = resolver_.get(); // Capture resolver_ pointer
     gc_->set_file_operations(std::make_unique<TestFileOperations>(fail_id, resolver));
 
-    // Call finalize_scan_and_cleanup.
-    gc_->finalize_scan_and_cleanup();
+    // Filnalize scan snapshot
+    gc_->start_add_gc_exempt_blob_ids();
+    gc_->finalize_add_gc_exempt_blob_ids();
 
     // Wait for the cleanup process to complete.
     gc_->wait_for_cleanup();
@@ -356,14 +355,6 @@ TEST_F(blob_file_garbage_collector_test, finalize_scan_and_cleanup_handles_delet
 
     // Expect the deletion of blob ID 502 to have succeeded, so the file should not exist.
     EXPECT_FALSE(boost::filesystem::exists(resolver_->resolve_path(502)));
-}
-
-// Test: Calling scan_blob_files() after wait_for_blob_file_scan() has been invoked should throw an exception.
-TEST_F(blob_file_garbage_collector_test, start_scan_after_wait_for_scan_should_throw) {
-    // Call wait_for_blob_file_scan() without starting scan.
-    gc_->wait_for_blob_file_scan();
-    // Since wait_for_blob_file_scan() sets a flag, starting the scan now should throw.
-    EXPECT_THROW(gc_->scan_blob_files(1000), std::logic_error);
 }
 
 // Test: Calling wait_for_blob_file_scan() twice does not block.
@@ -378,8 +369,8 @@ TEST_F(blob_file_garbage_collector_test, wait_for_scan_called_twice) {
 // Test: Calling wait_for_cleanup() twice does not block.
 TEST_F(blob_file_garbage_collector_test, wait_for_cleanup_called_twice) {
     gc_->scan_blob_files(1000);
-    gc_->wait_for_blob_file_scan();
-    gc_->finalize_scan_and_cleanup();
+    gc_->start_add_gc_exempt_blob_ids();
+    gc_->finalize_add_gc_exempt_blob_ids();
     gc_->wait_for_cleanup();
     // Second call should return immediately.
     gc_->wait_for_cleanup();
@@ -491,7 +482,8 @@ TEST_F(blob_file_garbage_collector_test, snapshot_scan_reads_expected_data) {
     // Since compacted_path does not exist, scan_snapshot should only process snapshot_path.
     EXPECT_NO_THROW({
         gc_->scan_snapshot(snapshot_path, compacted_path);
-        gc_->wait_for_scan_snapshot();
+        gc_->scan_blob_files(1000);
+        gc_->wait_for_cleanup();
     });
 
     SUCCEED();
@@ -509,7 +501,8 @@ TEST_F(blob_file_garbage_collector_test, snapshot_scan_throws_when_snapshot_file
     // Since snapshot_path is missing, scan_snapshot should throw an exception.
     EXPECT_THROW({
         gc_->scan_snapshot(snapshot_path, compacted_path);
-        gc_->wait_for_scan_snapshot();
+        gc_->scan_blob_files(1000);
+        gc_->wait_for_cleanup();
     }, std::exception);
 }
 

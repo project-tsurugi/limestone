@@ -13,20 +13,21 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
- 
- #include "blob_file_garbage_collector.h"
- #include "logging_helper.h"
- #include "cursor_impl.h"
- #include "log_entry.h"
- 
- #include <boost/filesystem.hpp>
- #include <sstream>
- #include <iomanip>
- #include <iostream>
- #include <stdexcept>
- #include <exception>
- #include <pthread.h>
- #include <unordered_map>
+
+#include <pthread.h>
+
+#include <boost/filesystem.hpp>
+#include <exception>
+#include <iomanip>
+#include <iostream>
+#include <sstream>
+#include <stdexcept>
+#include <unordered_map>
+
+#include "blob_file_garbage_collector.h"
+#include "cursor_impl.h"
+#include "log_entry.h"
+#include "logging_helper.h"
 
 namespace std {
 template <>
@@ -37,8 +38,8 @@ struct hash<std::pair<limestone::internal::blob_file_gc_state, limestone::intern
 };
 }  // namespace std
 
- namespace limestone::internal {
-    
+namespace limestone::internal {
+
 /**
  * @brief Defines a key for the state transition map.
  */
@@ -72,13 +73,15 @@ static const std::unordered_map<state_event_pair, blob_file_gc_state> state_tran
     // =========================
     // Blob Scan Completed (Snapshot Not Started)
     // =========================
-    {{blob_file_gc_state::blob_scan_completed_snapshot_not_started, blob_file_gc_event::start_snapshot_scan}, blob_file_gc_state::blob_scan_completed_snapshot_in_progress},
+    {{blob_file_gc_state::blob_scan_completed_snapshot_not_started, blob_file_gc_event::start_snapshot_scan},
+     blob_file_gc_state::blob_scan_completed_snapshot_in_progress},
     {{blob_file_gc_state::blob_scan_completed_snapshot_not_started, blob_file_gc_event::complete_snapshot_scan}, blob_file_gc_state::cleaning_up},
 
     // =========================
     // Snapshot Scan Completed (Blob Not Started)
     // =========================
-    {{blob_file_gc_state::snapshot_scan_completed_blob_not_started, blob_file_gc_event::start_blob_scan}, blob_file_gc_state::snapshot_scan_completed_blob_in_progress},
+    {{blob_file_gc_state::snapshot_scan_completed_blob_not_started, blob_file_gc_event::start_blob_scan},
+     blob_file_gc_state::snapshot_scan_completed_blob_in_progress},
     {{blob_file_gc_state::snapshot_scan_completed_blob_not_started, blob_file_gc_event::complete_blob_scan}, blob_file_gc_state::cleaning_up},
 
     // =========================
@@ -112,12 +115,15 @@ static const std::unordered_map<state_event_pair, blob_file_gc_state> state_tran
     {{blob_file_gc_state::shutdown, blob_file_gc_event::shutdown}, blob_file_gc_state::shutdown},
 
     // =========================
-    // Reset Transition (After Shutdown)
+    // Shutdown -- The state does not change for events other than Reset
     // =========================
-    {{blob_file_gc_state::shutdown, blob_file_gc_event::reset}, blob_file_gc_state::not_started}
-};
-
-
+    {{blob_file_gc_state::shutdown, blob_file_gc_event::start_blob_scan}, blob_file_gc_state::shutdown},
+    {{blob_file_gc_state::shutdown, blob_file_gc_event::start_snapshot_scan}, blob_file_gc_state::shutdown},
+    {{blob_file_gc_state::shutdown, blob_file_gc_event::complete_blob_scan}, blob_file_gc_state::shutdown},
+    {{blob_file_gc_state::shutdown, blob_file_gc_event::complete_snapshot_scan}, blob_file_gc_state::shutdown},
+    {{blob_file_gc_state::shutdown, blob_file_gc_event::complete_cleanup}, blob_file_gc_state::shutdown},
+    {{blob_file_gc_state::shutdown, blob_file_gc_event::shutdown}, blob_file_gc_state::shutdown},
+    {{blob_file_gc_state::shutdown, blob_file_gc_event::reset}, blob_file_gc_state::not_started}};
 
 // ================= blob_file_gc_state_machine =================
 
@@ -125,56 +131,53 @@ static const std::unordered_map<state_event_pair, blob_file_gc_state> state_tran
  * @brief Converts a state enum value to a human-readable string.
  */
 std::string blob_file_gc_state_machine::to_string(blob_file_gc_state state) {
-    static const std::unordered_map<blob_file_gc_state, std::string> state_strings = {
-        {blob_file_gc_state::not_started, "Not Started"},
-        {blob_file_gc_state::scanning_blob_only, "Scanning Blob Only"},
-        {blob_file_gc_state::scanning_snapshot_only, "Scanning Snapshot Only"},
-        {blob_file_gc_state::scanning_both, "Scanning Both"},
-        {blob_file_gc_state::blob_scan_completed_snapshot_not_started, "Blob Scan Completed, Snapshot Not Started"},
-        {blob_file_gc_state::blob_scan_completed_snapshot_in_progress, "Blob Scan Completed, Snapshot In Progress"},
-        {blob_file_gc_state::snapshot_scan_completed_blob_not_started, "Snapshot Scan Completed, Blob Not Started"},
-        {blob_file_gc_state::snapshot_scan_completed_blob_in_progress, "Snapshot Scan Completed, Blob In Progress"},
-        {blob_file_gc_state::cleaning_up, "Cleaning Up"},
-        {blob_file_gc_state::completed, "Completed"},
-        {blob_file_gc_state::shutdown, "Shutdown"}
-    };
+    static const std::unordered_map<blob_file_gc_state, std::string> state_strings =
+        {{blob_file_gc_state::not_started, "Not Started"},
+         {blob_file_gc_state::scanning_blob_only, "Scanning Blob Only"},
+         {blob_file_gc_state::scanning_snapshot_only, "Scanning Snapshot Only"},
+         {blob_file_gc_state::scanning_both, "Scanning Both"},
+         {blob_file_gc_state::blob_scan_completed_snapshot_not_started, "Blob Scan Completed, Snapshot Not Started"},
+         {blob_file_gc_state::blob_scan_completed_snapshot_in_progress, "Blob Scan Completed, Snapshot In Progress"},
+         {blob_file_gc_state::snapshot_scan_completed_blob_not_started, "Snapshot Scan Completed, Blob Not Started"},
+         {blob_file_gc_state::snapshot_scan_completed_blob_in_progress, "Snapshot Scan Completed, Blob In Progress"},
+         {blob_file_gc_state::cleaning_up, "Cleaning Up"},
+         {blob_file_gc_state::completed, "Completed"},
+         {blob_file_gc_state::shutdown, "Shutdown"}};
 
     auto it = state_strings.find(state);
     return (it != state_strings.end()) ? it->second : "Unknown State";
 }
 
 blob_file_gc_state blob_file_gc_state_machine::transition(blob_file_gc_event event) {
+    VLOG_LP(log_trace) << "Transitioning from " << to_string(current_state_) << " with event " << to_string(event);
     state_event_pair key = {current_state_, event};
     auto it = state_transition_map.find(key);
     if (it == state_transition_map.end()) {
-        throw std::logic_error("Invalid transition: " + to_string(current_state_) + 
-                               " with event " + to_string(event));
+        throw std::logic_error("Invalid transition: " + to_string(current_state_) + " with event " + to_string(event));
     }
+    VLOG_LP(log_trace) << "Transitioned to " << to_string(it->second);
     return it->second;
 }
 
 std::string blob_file_gc_state_machine::to_string(blob_file_gc_event event) {
-    static const std::unordered_map<blob_file_gc_event, std::string> event_strings = {
-        {blob_file_gc_event::start_blob_scan, "Start Blob Scan"},
-        {blob_file_gc_event::start_snapshot_scan, "Start Snapshot Scan"},
-        {blob_file_gc_event::complete_blob_scan, "Complete Blob Scan"},
-        {blob_file_gc_event::complete_snapshot_scan, "Complete Snapshot Scan"},
-        {blob_file_gc_event::complete_cleanup, "Complete Cleanup"},
-        {blob_file_gc_event::shutdown, "Shutdown"},
-        {blob_file_gc_event::reset, "Reset"}
-    };
+    static const std::unordered_map<blob_file_gc_event, std::string> event_strings = {{blob_file_gc_event::start_blob_scan, "Start Blob Scan"},
+                                                                                      {blob_file_gc_event::start_snapshot_scan, "Start Snapshot Scan"},
+                                                                                      {blob_file_gc_event::complete_blob_scan, "Complete Blob Scan"},
+                                                                                      {blob_file_gc_event::complete_snapshot_scan, "Complete Snapshot Scan"},
+                                                                                      {blob_file_gc_event::complete_cleanup, "Complete Cleanup"},
+                                                                                      {blob_file_gc_event::shutdown, "Shutdown"},
+                                                                                      {blob_file_gc_event::reset, "Reset"}};
 
     auto it = event_strings.find(event);
     return (it != event_strings.end()) ? it->second : "Unknown Event";
 }
 
-
 std::optional<blob_file_gc_state> blob_file_gc_state_machine::get_next_state_if_valid(blob_file_gc_state current, blob_file_gc_event event) const {
     auto it = state_transition_map.find({current, event});
     if (it != state_transition_map.end()) {
-        return it->second; // Valid transition, return next state
+        return it->second;  // Valid transition, return next state
     }
-    return std::nullopt; // Invalid transition
+    return std::nullopt;  // Invalid transition
 }
 
 blob_file_gc_state blob_file_gc_state_machine::get_state() const {
@@ -184,7 +187,7 @@ blob_file_gc_state blob_file_gc_state_machine::get_state() const {
 
 blob_file_gc_state blob_file_gc_state_machine::start_blob_scan() {
     std::lock_guard<std::mutex> lock(mutex_);
-    current_state_ =  transition(blob_file_gc_event::start_blob_scan);
+    current_state_ = transition(blob_file_gc_event::start_blob_scan);
     return current_state_;
 }
 
@@ -196,8 +199,8 @@ blob_file_gc_state blob_file_gc_state_machine::start_snapshot_scan(snapshot_scan
     current_state_ = transition(blob_file_gc_event::start_snapshot_scan);
     // If an exception is thrown when the state transition fails,
     // reaching this line indicates that the state transition was successful.
-    snapshot_scan_mode_ = mode; 
-    return current_state_; 
+    snapshot_scan_mode_ = mode;
+    return current_state_;
 }
 
 blob_file_gc_state blob_file_gc_state_machine::complete_blob_scan() {
@@ -221,19 +224,19 @@ blob_file_gc_state blob_file_gc_state_machine::complete_snapshot_scan(snapshot_s
 
 blob_file_gc_state blob_file_gc_state_machine::complete_cleanup() {
     std::lock_guard<std::mutex> lock(mutex_);
-    current_state_ =  transition(blob_file_gc_event::complete_cleanup);
+    current_state_ = transition(blob_file_gc_event::complete_cleanup);
     return current_state_;
 }
 
 blob_file_gc_state blob_file_gc_state_machine::shutdown() {
     std::lock_guard<std::mutex> lock(mutex_);
-    current_state_ =  transition(blob_file_gc_event::shutdown);
+    current_state_ = transition(blob_file_gc_event::shutdown);
     return current_state_;
 }
 
-blob_file_gc_state  blob_file_gc_state_machine::reset() {
+blob_file_gc_state blob_file_gc_state_machine::reset() {
     std::lock_guard<std::mutex> lock(mutex_);
-    current_state_ =  transition(blob_file_gc_event::reset);
+    current_state_ = transition(blob_file_gc_event::reset);
     snapshot_scan_mode_ = snapshot_scan_mode::none;
     return current_state_;
 }
@@ -246,6 +249,6 @@ void blob_file_gc_state_machine::force_set_state(blob_file_gc_state new_state) {
 blob_file_gc_state_machine::snapshot_scan_mode blob_file_gc_state_machine::get_snapshot_scan_mode() {
     std::lock_guard<std::mutex> lock(mutex_);
     return snapshot_scan_mode_;
-}    
+}
 
- }  // namespace limestone::internal
+}  // namespace limestone::internal
