@@ -115,6 +115,7 @@ blob_file_gc_state blob_file_gc_state_machine::transition(blob_file_gc_event eve
     const auto& state_transition_map = get_state_transition_map();
     auto it = state_transition_map.find({current_state_, event});
     if (it == state_transition_map.end()) {
+        VLOG_LP(log_trace) << "Invalid transition" << to_string(current_state_) << " with event " << to_string(event);
         throw std::logic_error("Invalid transition: " + to_string(current_state_) + " with event " + to_string(event));
     }
     VLOG_LP(log_trace) << "Transitioned to " << to_string(it->second);
