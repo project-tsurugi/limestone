@@ -123,6 +123,12 @@ static const std::unordered_map<state_event_pair, blob_file_gc_state> state_tran
     {{blob_file_gc_state::shutdown, blob_file_gc_event::complete_snapshot_scan}, blob_file_gc_state::shutdown},
     {{blob_file_gc_state::shutdown, blob_file_gc_event::complete_cleanup}, blob_file_gc_state::shutdown},
     {{blob_file_gc_state::shutdown, blob_file_gc_event::shutdown}, blob_file_gc_state::shutdown},
+
+    // =========================
+    // Reset
+    // =========================
+    {{blob_file_gc_state::not_started, blob_file_gc_event::reset}, blob_file_gc_state::not_started},
+    {{blob_file_gc_state::completed, blob_file_gc_event::reset}, blob_file_gc_state::not_started},
     {{blob_file_gc_state::shutdown, blob_file_gc_event::reset}, blob_file_gc_state::not_started}};
 
 // ================= blob_file_gc_state_machine =================

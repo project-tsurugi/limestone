@@ -670,12 +670,14 @@ void datastore::compact_with_online() {
 
     // check blob file garbage collection runnable
     bool blob_file_gc_runnable = false;
-    if (boundary_version_copy.get_major() > compaction_catalog_->get_max_epoch_id() && blob_file_garbage_collector_->is_active()) {
+    bool is_active = blob_file_garbage_collector_->is_active();
+    if (boundary_version_copy.get_major() > compaction_catalog_->get_max_epoch_id() && !is_active) {
         blob_file_gc_runnable = true;
+        blob_file_garbage_collector_->shutdown();
     }
     VLOG_LP(log_trace_fine) << "boundary_version_copy.get_major(): " << boundary_version_copy.get_major()
                             << ", compaction_catalog_->get_max_epoch_id(): " << compaction_catalog_->get_max_epoch_id()
-                            << ", blob_file_garbage_collector_->is_active(): " << blob_file_garbage_collector_->is_active()
+                            << ", blob_file_garbage_collector_->is_active(): " << is_active
                             << ", blob_file_gc_runnable: " << blob_file_gc_runnable;
 
     // rotate first
@@ -762,9 +764,9 @@ void datastore::compact_with_online() {
     // blob files garbage collection
     if (options.is_gc_enabled()) {
         LOG_LP(INFO) << "start blob files garbage collection";
-        blob_file_garbage_collector_->wait_for_all_threads();
         blob_file_garbage_collector_->scan_blob_files(next_blob_id_copy);
         log_entry_container log_entries = options.get_gc_snapshot().finalize_snapshot();
+        blob_file_garbage_collector_->start_add_gc_exempt_blob_ids();
         for (const auto& entry : log_entries) {
             for (const auto& blob_id : entry.get_blob_ids()) {
                 blob_file_garbage_collector_->add_gc_exempt_blob_id(blob_id);

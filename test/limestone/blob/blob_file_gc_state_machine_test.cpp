@@ -89,27 +89,6 @@ class blob_file_gc_state_machine_test : public ::testing::Test {
     
     
     /**
-     * @brief Test: Reset should only be allowed from shutdown.
-     */
-    TEST_F(blob_file_gc_state_machine_test, reset_only_allowed_from_shutdown) {
-        for (int s = static_cast<int>(blob_file_gc_state::not_started);
-                s <= static_cast<int>(blob_file_gc_state::shutdown); ++s) {
-    
-            blob_file_gc_state current_state = static_cast<blob_file_gc_state>(s);
-            state_machine_.force_set_state(current_state);
-    
-            if (current_state == blob_file_gc_state::shutdown) {
-                EXPECT_NO_THROW(state_machine_.transition(blob_file_gc_event::reset))
-                    << "Reset should be allowed from shutdown";
-            } else {
-                EXPECT_THROW(state_machine_.transition(blob_file_gc_event::reset), std::logic_error)
-                    << "Reset should only be allowed from shutdown, but was allowed from " 
-                    << blob_file_gc_state_machine::to_string(current_state);
-            }
-        }
-    }
-    
-    /**
      * @brief Test: Shutdown should always be allowed.
      */
     TEST_F(blob_file_gc_state_machine_test, shutdown_always_allowed) {

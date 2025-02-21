@@ -146,7 +146,6 @@
             std::lock_guard<std::mutex> lock(mutex_);
             cleanup_cv_.notify_all();
         }
-         reset();
      });
  }
   
@@ -204,6 +203,7 @@
     shutdown_requested_.store(true, std::memory_order_release);
     wait_for_all_threads();
     shutdown_requested_.store(false, std::memory_order_release);
+    reset();
  }
   
 
@@ -217,7 +217,6 @@ void blob_file_garbage_collector::wait_for_all_threads() {
     if (cleanup_thread_.joinable()) {
         cleanup_thread_.join();
     }
-    reset();
 }
 
 void blob_file_garbage_collector::scan_snapshot(const boost::filesystem::path &snapshot_file, const boost::filesystem::path &compacted_file) {
@@ -293,7 +292,7 @@ void blob_file_garbage_collector::wait_for_scan_snapshot() {
 
   
  void blob_file_garbage_collector::reset() {
-     std::lock_guard<std::mutex> lock(mutex_);
+    state_machine_.reset();
      scanned_blobs_ = std::make_unique<blob_id_container>();
      gc_exempt_blob_ = std::make_unique<blob_id_container>();
      max_existing_blob_id_ = 0;
@@ -301,7 +300,8 @@ void blob_file_garbage_collector::wait_for_scan_snapshot() {
 
  bool blob_file_garbage_collector::is_active() const {
      blob_file_gc_state current_state = state_machine_.get_state();
-     return current_state != blob_file_gc_state::not_started;
+     return current_state != blob_file_gc_state::not_started &&
+            current_state != blob_file_gc_state::completed;
  }
 
  } // namespace limestone::internal
