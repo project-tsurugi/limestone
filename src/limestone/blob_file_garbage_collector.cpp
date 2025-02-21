@@ -161,8 +161,7 @@
         return;
     }
 
-    // Wait until the scan is complete.
-    VLOG_LP(log_trace_fine) << "Waiting for blob_file_scan_cv_";
+    // Wait until the scan is complete or shutdown is requested
     std::unique_lock<std::mutex> lock(mutex_);
     blob_file_scan_cv_.wait(lock, [this]() {
         blob_file_gc_state state = state_machine_.get_state();
@@ -171,7 +170,11 @@
                state == blob_file_gc_state::cleaning_up ||
                state == blob_file_gc_state::completed;
     });
+
+    VLOG_LP(log_trace_fine) << "Exiting wait_for_blob_file_scan";
  }
+  
+
   
  void blob_file_garbage_collector::wait_for_cleanup() {
     // If cleanup has not started, return immediately to avoid indefinite blocking.
