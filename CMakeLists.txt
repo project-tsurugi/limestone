@@ -46,11 +46,9 @@ if (ENABLE_GOOGLE_PERFTOOLS)
     set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -DENABLE_GOOGLE_PERFTOOLS")
 endif()
 
-# TODO: default-value LEVELDB -> ROCKSDB
-set(RECOVERY_SORTER_KVSLIB LEVELDB CACHE STRING "using eKVS library at recovery process")
+set(RECOVERY_SORTER_KVSLIB ROCKSDB CACHE STRING "using eKVS library at recovery process")
 string(TOUPPER $CACHE{RECOVERY_SORTER_KVSLIB} RECOVERY_SORTER_KVSLIB_UPPERCASE)
-# TODO: default-value OFF -> ON
-option(RECOVERY_SORTER_PUT_ONLY "using put-only method at recovery process (faster)" OFF)
+option(RECOVERY_SORTER_PUT_ONLY "using put-only method at recovery process (faster)" ON)
 
 # set(ENGINE "engine")
 
