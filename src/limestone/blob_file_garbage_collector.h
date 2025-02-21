@@ -56,7 +56,6 @@ enum class blob_file_gc_event {
     start_snapshot_scan,
     complete_blob_scan,
     complete_snapshot_scan,
-    notify_snapshot_scan_progress,
     complete_cleanup,
     shutdown,
     reset
@@ -70,6 +69,12 @@ enum class blob_file_gc_event {
  */
 class blob_file_gc_state_machine {
 public:
+    enum class snapshot_scan_mode {
+        none,       // Scan not started yet
+        internal,   // BLOB file GC executes scan internally
+        external    // Accept scan results from external source
+    };
+
     /**
      * @brief Constructor initializing the state to `not_started`.
      */
@@ -87,7 +92,7 @@ public:
      * @return The new state after the transition.
      * @throws std::logic_error if the transition is invalid.
      */
-    blob_file_gc_state start_snapshot_scan();
+    blob_file_gc_state start_snapshot_scan(snapshot_scan_mode mode);
 
     /**
      * @brief Marks the BLOB file scan as completed.
@@ -101,7 +106,7 @@ public:
      * @return The new state after the transition.
      * @throws std::logic_error if the transition is invalid.
      */
-    blob_file_gc_state complete_snapshot_scan();
+    blob_file_gc_state complete_snapshot_scan(snapshot_scan_mode mode);
 
     /**
      * @brief Receives updates on the snapshot scan progress.
@@ -126,6 +131,13 @@ public:
      * @return The new state after the transition.
      */
     blob_file_gc_state shutdown();
+
+    /**
+     * @brief Resets the state machine to the initial state.
+     *
+     * This method resets both the state and snapshot scan mode to their default values.
+     */
+    blob_file_gc_state  reset();
 
     /**
      * @brief Retrieves the current state.
@@ -180,16 +192,10 @@ public:
 
 
 private:
-    std::atomic<blob_file_gc_state> current_state_; ///< Stores the current state.
+    blob_file_gc_state current_state_; ///< Stores the current state.
     mutable std::mutex mutex_; ///< Mutex to ensure thread-safe state transitions.
-
-    /**
-     * @brief Checks if both scans are completed and initiates cleanup if necessary.
-     * @return The new state after the transition.
-     */
-    blob_file_gc_state check_cleanup_transition();
+    snapshot_scan_mode snapshot_scan_mode_ = snapshot_scan_mode::none;
 };
- 
 
 /**
  * @brief The blob_file_garbage_collector class is responsible for scanning the BLOB directory,
@@ -279,19 +285,8 @@ public:
      */
     void scan_snapshot(const boost::filesystem::path &snapshot_file, const boost::filesystem::path &compacted_file);
 
-    /**
-     * @brief Spawns a background thread that waits for the blob file scan to complete,
-     * then performs garbage collection by deleting BLOB files that are not exempt.
-     *
-     * The deletion targets are determined by computing the difference between the scanned
-     * blob ids and those registered as GC-exempt. The background cleanup thread is retained
-     * (i.e., not detached) so that it can be joined in shutdown(), ensuring proper termination.
-     *
-     * This method returns immediately after starting the background thread.
-     *
-     * @throws std::logic_error if the resolver is not set.
-     */
-    void finalize_scan_and_cleanup();
+
+    void finalize_scan_snapshot();
 
     /**
      * @brief Shuts down the garbage collection process.
@@ -327,6 +322,20 @@ public:
     void wait_for_all_threads();
 
 protected:
+    /**
+     * @brief Spawns a background thread that waits for the blob file scan to complete,
+     * then performs garbage collection by deleting BLOB files that are not exempt.
+     *
+     * The deletion targets are determined by computing the difference between the scanned
+     * blob ids and those registered as GC-exempt. The background cleanup thread is retained
+     * (i.e., not detached) so that it can be joined in shutdown(), ensuring proper termination.
+     *
+     * This method returns immediately after starting the background thread.
+     *
+     * @throws std::logic_error if the resolver is not set.
+     */
+    void finalize_scan_and_cleanup();
+
     /**
      * @brief Waits for the background blob file scanning process to complete.
      *
@@ -374,7 +383,12 @@ protected:
      */
     const blob_id_container& get_gc_exempt_blob_list() const { return *gc_exempt_blob_; };
 
+
+    
+
 private:
+    blob_file_gc_state_machine state_machine_;  
+
     // --- Resolver and Blob Containers ---
     const blob_file_resolver* resolver_ = nullptr;         ///< Pointer to the blob_file_resolver instance.
     std::unique_ptr<blob_id_container> scanned_blobs_;      ///< Container for storing scanned blob ids.
@@ -382,23 +396,14 @@ private:
     blob_id_type max_existing_blob_id_ = 0;                 ///< Maximum blob_id that existed at startup.
 
     // --- Blob File Scanning Process Fields ---
-    bool blob_file_scan_started_ = false;           ///< Flag indicating whether the blob scanning process has started.
-    bool blob_file_scan_complete_ = false;          ///< Flag indicating whether the blob scanning process has completed.
-    bool blob_file_scan_waited_ = false;            ///< Flag indicating that wait_for_blob_file_scan() has been called.
     std::thread blob_file_scan_thread_;             ///< Background thread for scanning the BLOB directory.
     std::condition_variable blob_file_scan_cv_;     ///< Condition variable to signal blob scan completion.
 
     // --- Snapshot Scanning Process Fields ---
-    bool snapshot_scan_started_ = false;            ///< Flag indicating whether the snapshot scanning process has started.
-    bool snapshot_scan_complete_ = false;           ///< Flag indicating whether the snapshot scanning process has completed.
-    bool snapshot_scan_waited_ = false;             ///< Flag indicating that wait_for_scan_snapshot() has been called.
     std::thread snapshot_scan_thread_;              ///< Background thread for scanning snapshots.
     std::condition_variable snapshot_scan_cv_;      ///< Condition variable to signal snapshot scan completion.
 
     // --- Cleanup Process Fields ---
-    bool cleanup_started_ = false;                  ///< Flag indicating whether the cleanup process has started.
-    bool cleanup_waited_ = false;                   ///< Flag indicating that wait_for_cleanup() has been called.
-    bool cleanup_complete_ = false;                 ///< Flag indicating whether the cleanup process has completed.
     std::thread cleanup_thread_;                    ///< Background thread for garbage collection.
     std::condition_variable cleanup_cv_;            ///< Condition variable to signal cleanup completion.
 
