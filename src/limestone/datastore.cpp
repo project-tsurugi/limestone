@@ -402,7 +402,6 @@ std::future<void> datastore::shutdown() noexcept {
 
     if (blob_file_garbage_collector_) {
         blob_file_garbage_collector_->shutdown();
-        blob_file_garbage_collector_.reset();
     }
 
     return std::async(std::launch::async, [] {
