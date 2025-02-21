@@ -33,105 +33,61 @@ namespace std {
 template <>
 struct hash<std::pair<limestone::internal::blob_file_gc_state, limestone::internal::blob_file_gc_event>> {
     size_t operator()(const std::pair<limestone::internal::blob_file_gc_state, limestone::internal::blob_file_gc_event>& pair) const noexcept {
-        return std::hash<int>()(static_cast<int>(pair.first)) ^ (std::hash<int>()(static_cast<int>(pair.second)) << 1);
+        return std::hash<int>()(static_cast<int>(pair.first)) ^ (std::hash<int>()(static_cast<int>(pair.second)) << 1U);
     }
 };
 }  // namespace std
 
 namespace limestone::internal {
 
+using state_event_pair = std::pair<blob_file_gc_state, blob_file_gc_event>;    
 /**
- * @brief Defines a key for the state transition map.
+ * @brief Returns the state transition map.
+ * 
+ * This function ensures that the map is only initialized when needed,
+ * preventing static initialization order issues.
  */
-using state_event_pair = std::pair<blob_file_gc_state, blob_file_gc_event>;
-
-static const std::unordered_map<state_event_pair, blob_file_gc_state> state_transition_map = {
-    // =========================
-    // Not Started
-    // =========================
-    {{blob_file_gc_state::not_started, blob_file_gc_event::start_blob_scan}, blob_file_gc_state::scanning_blob_only},
-    {{blob_file_gc_state::not_started, blob_file_gc_event::start_snapshot_scan}, blob_file_gc_state::scanning_snapshot_only},
-
-    // =========================
-    // Scanning Blob Only
-    // =========================
-    {{blob_file_gc_state::scanning_blob_only, blob_file_gc_event::start_snapshot_scan}, blob_file_gc_state::scanning_both},
-    {{blob_file_gc_state::scanning_blob_only, blob_file_gc_event::complete_blob_scan}, blob_file_gc_state::blob_scan_completed_snapshot_not_started},
-
-    // =========================
-    // Scanning Snapshot Only
-    // =========================
-    {{blob_file_gc_state::scanning_snapshot_only, blob_file_gc_event::start_blob_scan}, blob_file_gc_state::scanning_both},
-    {{blob_file_gc_state::scanning_snapshot_only, blob_file_gc_event::complete_snapshot_scan}, blob_file_gc_state::snapshot_scan_completed_blob_not_started},
-
-    // =========================
-    // Scanning Both
-    // =========================
-    {{blob_file_gc_state::scanning_both, blob_file_gc_event::complete_blob_scan}, blob_file_gc_state::blob_scan_completed_snapshot_in_progress},
-    {{blob_file_gc_state::scanning_both, blob_file_gc_event::complete_snapshot_scan}, blob_file_gc_state::snapshot_scan_completed_blob_in_progress},
-
-    // =========================
-    // Blob Scan Completed (Snapshot Not Started)
-    // =========================
-    {{blob_file_gc_state::blob_scan_completed_snapshot_not_started, blob_file_gc_event::start_snapshot_scan},
-     blob_file_gc_state::blob_scan_completed_snapshot_in_progress},
-    {{blob_file_gc_state::blob_scan_completed_snapshot_not_started, blob_file_gc_event::complete_snapshot_scan}, blob_file_gc_state::cleaning_up},
-
-    // =========================
-    // Snapshot Scan Completed (Blob Not Started)
-    // =========================
-    {{blob_file_gc_state::snapshot_scan_completed_blob_not_started, blob_file_gc_event::start_blob_scan},
-     blob_file_gc_state::snapshot_scan_completed_blob_in_progress},
-    {{blob_file_gc_state::snapshot_scan_completed_blob_not_started, blob_file_gc_event::complete_blob_scan}, blob_file_gc_state::cleaning_up},
-
-    // =========================
-    // Blob Scan Completed (Snapshot In Progress)
-    // =========================
-    {{blob_file_gc_state::blob_scan_completed_snapshot_in_progress, blob_file_gc_event::complete_snapshot_scan}, blob_file_gc_state::cleaning_up},
-
-    // =========================
-    // Snapshot Scan Completed (Blob In Progress)
-    // =========================
-    {{blob_file_gc_state::snapshot_scan_completed_blob_in_progress, blob_file_gc_event::complete_blob_scan}, blob_file_gc_state::cleaning_up},
-
-    // =========================
-    // Cleaning Up
-    // =========================
-    {{blob_file_gc_state::cleaning_up, blob_file_gc_event::complete_cleanup}, blob_file_gc_state::completed},
-
-    // =========================
-    // Shutdown Transitions
-    // =========================
-    {{blob_file_gc_state::not_started, blob_file_gc_event::shutdown}, blob_file_gc_state::shutdown},
-    {{blob_file_gc_state::scanning_blob_only, blob_file_gc_event::shutdown}, blob_file_gc_state::shutdown},
-    {{blob_file_gc_state::scanning_snapshot_only, blob_file_gc_event::shutdown}, blob_file_gc_state::shutdown},
-    {{blob_file_gc_state::scanning_both, blob_file_gc_event::shutdown}, blob_file_gc_state::shutdown},
-    {{blob_file_gc_state::blob_scan_completed_snapshot_not_started, blob_file_gc_event::shutdown}, blob_file_gc_state::shutdown},
-    {{blob_file_gc_state::blob_scan_completed_snapshot_in_progress, blob_file_gc_event::shutdown}, blob_file_gc_state::shutdown},
-    {{blob_file_gc_state::snapshot_scan_completed_blob_not_started, blob_file_gc_event::shutdown}, blob_file_gc_state::shutdown},
-    {{blob_file_gc_state::snapshot_scan_completed_blob_in_progress, blob_file_gc_event::shutdown}, blob_file_gc_state::shutdown},
-    {{blob_file_gc_state::cleaning_up, blob_file_gc_event::shutdown}, blob_file_gc_state::shutdown},
-    {{blob_file_gc_state::completed, blob_file_gc_event::shutdown}, blob_file_gc_state::shutdown},
-    {{blob_file_gc_state::shutdown, blob_file_gc_event::shutdown}, blob_file_gc_state::shutdown},
-
-    // =========================
-    // Shutdown -- The state does not change for events other than Reset
-    // =========================
-    {{blob_file_gc_state::shutdown, blob_file_gc_event::start_blob_scan}, blob_file_gc_state::shutdown},
-    {{blob_file_gc_state::shutdown, blob_file_gc_event::start_snapshot_scan}, blob_file_gc_state::shutdown},
-    {{blob_file_gc_state::shutdown, blob_file_gc_event::complete_blob_scan}, blob_file_gc_state::shutdown},
-    {{blob_file_gc_state::shutdown, blob_file_gc_event::complete_snapshot_scan}, blob_file_gc_state::shutdown},
-    {{blob_file_gc_state::shutdown, blob_file_gc_event::complete_cleanup}, blob_file_gc_state::shutdown},
-    {{blob_file_gc_state::shutdown, blob_file_gc_event::shutdown}, blob_file_gc_state::shutdown},
-
-    // =========================
-    // Reset
-    // =========================
-    {{blob_file_gc_state::not_started, blob_file_gc_event::reset}, blob_file_gc_state::not_started},
-    {{blob_file_gc_state::completed, blob_file_gc_event::reset}, blob_file_gc_state::not_started},
-    {{blob_file_gc_state::shutdown, blob_file_gc_event::reset}, blob_file_gc_state::not_started}};
-
-// ================= blob_file_gc_state_machine =================
+static const std::unordered_map<state_event_pair, blob_file_gc_state>& get_state_transition_map() {
+    static const std::unordered_map<state_event_pair, blob_file_gc_state> state_transition_map = {
+        {{blob_file_gc_state::not_started, blob_file_gc_event::start_blob_scan}, blob_file_gc_state::scanning_blob_only},
+        {{blob_file_gc_state::not_started, blob_file_gc_event::start_snapshot_scan}, blob_file_gc_state::scanning_snapshot_only},
+        {{blob_file_gc_state::scanning_blob_only, blob_file_gc_event::start_snapshot_scan}, blob_file_gc_state::scanning_both},
+        {{blob_file_gc_state::scanning_blob_only, blob_file_gc_event::complete_blob_scan}, blob_file_gc_state::blob_scan_completed_snapshot_not_started},
+        {{blob_file_gc_state::scanning_snapshot_only, blob_file_gc_event::start_blob_scan}, blob_file_gc_state::scanning_both},
+        {{blob_file_gc_state::scanning_snapshot_only, blob_file_gc_event::complete_snapshot_scan}, blob_file_gc_state::snapshot_scan_completed_blob_not_started},
+        {{blob_file_gc_state::scanning_both, blob_file_gc_event::complete_blob_scan}, blob_file_gc_state::blob_scan_completed_snapshot_in_progress},
+        {{blob_file_gc_state::scanning_both, blob_file_gc_event::complete_snapshot_scan}, blob_file_gc_state::snapshot_scan_completed_blob_in_progress},
+        {{blob_file_gc_state::blob_scan_completed_snapshot_not_started, blob_file_gc_event::start_snapshot_scan},
+         blob_file_gc_state::blob_scan_completed_snapshot_in_progress},
+        {{blob_file_gc_state::blob_scan_completed_snapshot_not_started, blob_file_gc_event::complete_snapshot_scan}, blob_file_gc_state::cleaning_up},
+        {{blob_file_gc_state::snapshot_scan_completed_blob_not_started, blob_file_gc_event::start_blob_scan},
+         blob_file_gc_state::snapshot_scan_completed_blob_in_progress},
+        {{blob_file_gc_state::snapshot_scan_completed_blob_not_started, blob_file_gc_event::complete_blob_scan}, blob_file_gc_state::cleaning_up},
+        {{blob_file_gc_state::blob_scan_completed_snapshot_in_progress, blob_file_gc_event::complete_snapshot_scan}, blob_file_gc_state::cleaning_up},
+        {{blob_file_gc_state::snapshot_scan_completed_blob_in_progress, blob_file_gc_event::complete_blob_scan}, blob_file_gc_state::cleaning_up},
+        {{blob_file_gc_state::cleaning_up, blob_file_gc_event::complete_cleanup}, blob_file_gc_state::completed},
+        {{blob_file_gc_state::not_started, blob_file_gc_event::shutdown}, blob_file_gc_state::shutdown},
+        {{blob_file_gc_state::scanning_blob_only, blob_file_gc_event::shutdown}, blob_file_gc_state::shutdown},
+        {{blob_file_gc_state::scanning_snapshot_only, blob_file_gc_event::shutdown}, blob_file_gc_state::shutdown},
+        {{blob_file_gc_state::scanning_both, blob_file_gc_event::shutdown}, blob_file_gc_state::shutdown},
+        {{blob_file_gc_state::blob_scan_completed_snapshot_not_started, blob_file_gc_event::shutdown}, blob_file_gc_state::shutdown},
+        {{blob_file_gc_state::blob_scan_completed_snapshot_in_progress, blob_file_gc_event::shutdown}, blob_file_gc_state::shutdown},
+        {{blob_file_gc_state::snapshot_scan_completed_blob_not_started, blob_file_gc_event::shutdown}, blob_file_gc_state::shutdown},
+        {{blob_file_gc_state::snapshot_scan_completed_blob_in_progress, blob_file_gc_event::shutdown}, blob_file_gc_state::shutdown},
+        {{blob_file_gc_state::cleaning_up, blob_file_gc_event::shutdown}, blob_file_gc_state::shutdown},
+        {{blob_file_gc_state::completed, blob_file_gc_event::shutdown}, blob_file_gc_state::shutdown},
+        {{blob_file_gc_state::shutdown, blob_file_gc_event::shutdown}, blob_file_gc_state::shutdown},
+        {{blob_file_gc_state::shutdown, blob_file_gc_event::start_blob_scan}, blob_file_gc_state::shutdown},
+        {{blob_file_gc_state::shutdown, blob_file_gc_event::start_snapshot_scan}, blob_file_gc_state::shutdown},
+        {{blob_file_gc_state::shutdown, blob_file_gc_event::complete_blob_scan}, blob_file_gc_state::shutdown},
+        {{blob_file_gc_state::shutdown, blob_file_gc_event::complete_snapshot_scan}, blob_file_gc_state::shutdown},
+        {{blob_file_gc_state::shutdown, blob_file_gc_event::complete_cleanup}, blob_file_gc_state::shutdown},
+        {{blob_file_gc_state::not_started, blob_file_gc_event::reset}, blob_file_gc_state::not_started},
+        {{blob_file_gc_state::completed, blob_file_gc_event::reset}, blob_file_gc_state::not_started},
+        {{blob_file_gc_state::shutdown, blob_file_gc_event::reset}, blob_file_gc_state::not_started},
+    };
+    return state_transition_map;
+}
 
 /**
  * @brief Converts a state enum value to a human-readable string.
@@ -156,8 +112,8 @@ std::string blob_file_gc_state_machine::to_string(blob_file_gc_state state) {
 
 blob_file_gc_state blob_file_gc_state_machine::transition(blob_file_gc_event event) {
     VLOG_LP(log_trace) << "Transitioning from " << to_string(current_state_) << " with event " << to_string(event);
-    state_event_pair key = {current_state_, event};
-    auto it = state_transition_map.find(key);
+    const auto& state_transition_map = get_state_transition_map();
+    auto it = state_transition_map.find({current_state_, event});
     if (it == state_transition_map.end()) {
         throw std::logic_error("Invalid transition: " + to_string(current_state_) + " with event " + to_string(event));
     }
@@ -179,6 +135,7 @@ std::string blob_file_gc_state_machine::to_string(blob_file_gc_event event) {
 }
 
 std::optional<blob_file_gc_state> blob_file_gc_state_machine::get_next_state_if_valid(blob_file_gc_state current, blob_file_gc_event event) const {
+    const auto& state_transition_map = get_state_transition_map();
     auto it = state_transition_map.find({current, event});
     if (it != state_transition_map.end()) {
         return it->second;  // Valid transition, return next state
