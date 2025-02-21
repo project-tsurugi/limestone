@@ -765,7 +765,7 @@ void datastore::compact_with_online() {
                 blob_file_garbage_collector_->add_gc_exempt_blob_id(blob_id);
             }
         }
-        blob_file_garbage_collector_->finalize_scan_snapshot();
+        blob_file_garbage_collector_->finalize_add_gc_exempt_blob_ids();
         LOG_LP(INFO) << "blob files garbage collection finished";
     }
 
