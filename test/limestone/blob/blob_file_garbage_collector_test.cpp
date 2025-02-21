@@ -509,4 +509,115 @@ TEST_F(blob_file_garbage_collector_test, snapshot_scan_throws_when_snapshot_file
         gc_->wait_for_scan_snapshot();
     }, std::exception);
 }
+
+
+class blob_file_gc_state_machine_test : public ::testing::Test {
+protected:
+    blob_file_gc_state_machine state_machine_;
+
+    /**
+     * @brief Verifies that a valid state transition occurs.
+     */
+    void verify_transition(blob_file_gc_state initial_state, blob_file_gc_event event, bool should_throw) {
+        state_machine_.force_set_state(initial_state);
+
+        if (should_throw) {
+            EXPECT_THROW(state_machine_.transition(event), std::logic_error)
+                << "Unexpectedly allowed transition from " 
+                << blob_file_gc_state_machine::to_string(initial_state) 
+                << " with event " << static_cast<int>(event);
+        } else {
+            EXPECT_NO_THROW({
+                blob_file_gc_state new_state = state_machine_.transition(event);
+                EXPECT_NE(new_state, initial_state) 
+                    << "Transition did not change state: " 
+                    << blob_file_gc_state_machine::to_string(initial_state) 
+                    << " -> " << blob_file_gc_state_machine::to_string(new_state);
+            });
+        }
+    }
+};
+
+TEST_F(blob_file_gc_state_machine_test, test_all_state_transitions) {
+    for (int s = static_cast<int>(blob_file_gc_state::not_started);
+         s <= static_cast<int>(blob_file_gc_state::shutdown); ++s) {
+        
+        blob_file_gc_state current_state = static_cast<blob_file_gc_state>(s);
+        
+
+        for (int e = static_cast<int>(blob_file_gc_event::start_blob_scan);
+             e <= static_cast<int>(blob_file_gc_event::reset); ++e) {
+
+            blob_file_gc_event event = static_cast<blob_file_gc_event>(e);
+            auto expected_next_state = state_machine_.get_next_state_if_valid(current_state, event);
+
+            state_machine_.force_set_state(current_state);
+            std::cerr << "[TEST] State: " << blob_file_gc_state_machine::to_string(current_state)
+            << ", Event: " << blob_file_gc_state_machine::to_string(event)
+            << " -> Expected: "
+            << (expected_next_state ? blob_file_gc_state_machine::to_string(*expected_next_state) : "Exception (std::logic_error)")
+            << std::endl;
+
+            if (expected_next_state) {
+                blob_file_gc_state new_state;
+                state_machine_.force_set_state(current_state);
+                EXPECT_NO_THROW(new_state = state_machine_.transition(event))
+                    << "Valid transition failed: " 
+                    << blob_file_gc_state_machine::to_string(current_state)
+                    << " -> " << blob_file_gc_state_machine::to_string(*expected_next_state);
+
+                EXPECT_EQ(new_state, *expected_next_state)
+                    << "Transition result does not match expected state: " 
+                    << blob_file_gc_state_machine::to_string(current_state)
+                    << " -> " << blob_file_gc_state_machine::to_string(new_state);
+            } else {
+                EXPECT_THROW(state_machine_.transition(event), std::logic_error)
+                    << "Invalid transition did not throw: " 
+                    << blob_file_gc_state_machine::to_string(current_state)
+                    << " -> " << blob_file_gc_state_machine::to_string(event);
+            }
+        }
+    }
+}
+
+
+/**
+ * @brief Test: Reset should only be allowed from shutdown.
+ */
+TEST_F(blob_file_gc_state_machine_test, reset_only_allowed_from_shutdown) {
+    for (int s = static_cast<int>(blob_file_gc_state::not_started);
+            s <= static_cast<int>(blob_file_gc_state::shutdown); ++s) {
+
+        blob_file_gc_state current_state = static_cast<blob_file_gc_state>(s);
+        state_machine_.force_set_state(current_state);
+
+        if (current_state == blob_file_gc_state::shutdown) {
+            EXPECT_NO_THROW(state_machine_.transition(blob_file_gc_event::reset))
+                << "Reset should be allowed from shutdown";
+        } else {
+            EXPECT_THROW(state_machine_.transition(blob_file_gc_event::reset), std::logic_error)
+                << "Reset should only be allowed from shutdown, but was allowed from " 
+                << blob_file_gc_state_machine::to_string(current_state);
+        }
+    }
+}
+
+/**
+ * @brief Test: Shutdown should always be allowed.
+ */
+TEST_F(blob_file_gc_state_machine_test, shutdown_always_allowed) {
+    for (int s = static_cast<int>(blob_file_gc_state::not_started);
+            s <= static_cast<int>(blob_file_gc_state::completed); ++s) {
+
+        blob_file_gc_state current_state = static_cast<blob_file_gc_state>(s);
+        state_machine_.force_set_state(current_state);
+
+        EXPECT_NO_THROW(state_machine_.transition(blob_file_gc_event::shutdown))
+            << "Shutdown should always be allowed from " 
+            << blob_file_gc_state_machine::to_string(current_state);
+    }
+}
+    
+        
+
 }  // namespace limestone::testing
