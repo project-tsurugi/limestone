@@ -75,10 +75,7 @@ public:
         external    // Accept scan results from external source
     };
 
-    /**
-     * @brief Constructor initializing the state to `not_started`.
-     */
-    blob_file_gc_state_machine() : current_state_(blob_file_gc_state::not_started) {}
+    blob_file_gc_state_machine() = default;
 
     /**
      * @brief Initiates the BLOB file scan.
@@ -198,7 +195,7 @@ public:
 
 
 private:
-    blob_file_gc_state current_state_; ///< Stores the current state.
+    blob_file_gc_state current_state_ = blob_file_gc_state::not_started; ///< Stores the current state.
     mutable std::mutex mutex_; ///< Mutex to ensure thread-safe state transitions.
     snapshot_scan_mode snapshot_scan_mode_ = snapshot_scan_mode::none;
 };
