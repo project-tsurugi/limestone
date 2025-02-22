@@ -130,12 +130,12 @@ datastore::datastore(configuration const& conf) : location_(conf.data_locations_
 }
 
 datastore::~datastore() noexcept{
-    stop_online_compaction_worker();
-    if (online_compaction_worker_future_.valid()) {
-        online_compaction_worker_future_.wait();
-    }
-    if(blob_file_garbage_collector_) {
-        blob_file_garbage_collector_->shutdown();
+    try {
+        shutdown();
+    } catch (const std::exception &e) {
+        LOG_LP(ERROR) << "Exception in destructor during shutdown: " << e.what();
+    } catch (...) {
+        LOG_LP(ERROR) << "Unknown exception in destructor during shutdown.";
     }
 }
 
