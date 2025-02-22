@@ -202,31 +202,33 @@ void blob_file_garbage_collector::wait_for_cleanup() {
  void blob_file_garbage_collector::set_file_operations(std::unique_ptr<file_operations> file_ops) {
      file_ops_ = std::move(file_ops);
  }
-  
+
  void blob_file_garbage_collector::shutdown() {
-    VLOG_LP(log_trace_fine) << "Calling shutdown...";
+     VLOG_LP(log_trace_fine) << "Calling shutdown...";
+     {
+         std::lock_guard<std::mutex> lock(shutdown_mutex_);
 
-    // Set shutdown flag before notifying waiting threads
-    state_machine_.shutdown();
+         // Set shutdown flag before notifying waiting threads
+         state_machine_.shutdown();
 
-    // Set the shutdown request.
-    shutdown_requested_.store(true, std::memory_order_release);
+         // Set the shutdown request.
+         shutdown_requested_.store(true, std::memory_order_release);
 
-    // Wake up all threads that are waiting in their respective wait() calls.
-    {
-        std::lock_guard<std::mutex> lock(mutex_);
-        blob_file_scan_cv_.notify_all();
-        snapshot_scan_cv_.notify_all();
-        cleanup_cv_.notify_all();
-    }
+         // Wake up all threads that are waiting in their respective wait() calls.
+         {
+             std::lock_guard<std::mutex> lock(mutex_);
+             blob_file_scan_cv_.notify_all();
+             snapshot_scan_cv_.notify_all();
+             cleanup_cv_.notify_all();
+         }
 
-    // Ensure that all threads can join before they enter a wait().
-    wait_for_all_threads();
-    shutdown_requested_.store(false, std::memory_order_release);
-    reset();
-
-    VLOG_LP(log_trace_fine) << "Shutdown complete.";
-}
+         // Ensure that all threads can join before they enter a wait().
+         wait_for_all_threads();
+         shutdown_requested_.store(false, std::memory_order_release);
+         reset();
+     }
+     VLOG_LP(log_trace_fine) << "Shutdown complete.";
+ }
 
 void blob_file_garbage_collector::wait_for_all_threads() {
     if (blob_file_scan_thread_.joinable()) {

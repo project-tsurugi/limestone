@@ -383,6 +383,10 @@ std::future<void> datastore::shutdown() noexcept {
     VLOG_LP(log_info) << "start";
     state_ = state::shutdown;
 
+    if (blob_file_garbage_collector_) {
+        blob_file_garbage_collector_->shutdown();
+    }
+
     stop_online_compaction_worker();
     if (!online_compaction_worker_future_.valid()) {
         VLOG(log_info) << "/:limestone:datastore:shutdown compaction task is not running. skipping task shutdown.";
@@ -398,10 +402,6 @@ std::future<void> datastore::shutdown() noexcept {
         } else {
             fd_for_flock_ = -1;
         }
-    }
-
-    if (blob_file_garbage_collector_) {
-        blob_file_garbage_collector_->shutdown();
     }
 
     return std::async(std::launch::async, [] {
