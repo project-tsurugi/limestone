@@ -266,6 +266,7 @@ void blob_file_garbage_collector::scan_snapshot(const boost::filesystem::path &s
                 }
             }
             VLOG_LP(log_trace_fine) << "Snapshot scan finished.";
+            state_machine_.complete_snapshot_scan(blob_file_gc_state_machine::snapshot_scan_mode::internal);
             finalize_scan_and_cleanup();
         } catch (const limestone_exception &e) {
             LOG_LP(ERROR) << "Exception in snapshot scan thread: " << e.what();
@@ -274,7 +275,6 @@ void blob_file_garbage_collector::scan_snapshot(const boost::filesystem::path &s
         } catch (...) {
             LOG_LP(ERROR) << "Unknown exception in snapshot scan thread.";
         }
-        state_machine_.complete_snapshot_scan(blob_file_gc_state_machine::snapshot_scan_mode::internal);
         snapshot_scan_cv_.notify_all();
     });
 }
