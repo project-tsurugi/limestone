@@ -23,6 +23,8 @@
 
 #include "file_operations.h"
 #include "limestone/api/blob_id_type.h"
+#include "compaction_options.h"
+
 
 namespace limestone::internal {
 using namespace limestone::api;
@@ -82,8 +84,19 @@ status purge_dir(const boost::filesystem::path& dir);
 
 // from datastore_snapshot.cpp
 
-blob_id_type create_compact_pwal_and_get_max_blob_id(const boost::filesystem::path& from_dir, const boost::filesystem::path& to_dir, int num_worker,
-                         const std::set<std::string>& file_names = std::set<std::string>());
+/**
+ * @brief Creates a compacted PWAL (Persistent Write-Ahead Log) and retrieves the maximum blob ID.
+ *
+ * This function performs log compaction using the given compaction options. 
+ * It processes the specified input directory, compacts the logs, and stores 
+ * the result in the target directory.
+ *
+ * @param options The compaction options that specify source and destination directories, 
+ *                number of workers, file set, and garbage collection settings.
+ * @return The maximum blob ID found during the compaction process.
+ */
+limestone::api::blob_id_type create_compact_pwal_and_get_max_blob_id(compaction_options &options);
+
 
 std::set<boost::filesystem::path> filter_epoch_files(const boost::filesystem::path& directory);
 

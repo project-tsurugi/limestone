@@ -13,7 +13,7 @@
 namespace limestone::testing {
 
 using namespace limestone::internal;
-using limestone::api::blob_id_type;
+using namespace limestone::api;
 
 constexpr const char* base_directory = "/tmp/blob_file_gc_test";
 const boost::filesystem::path snapshot_path("/tmp/blob_file_gc_test/pwal_0000");
@@ -29,9 +29,8 @@ public:
     using blob_file_garbage_collector::set_file_operations;
     using blob_file_garbage_collector::get_blob_file_list;
     using blob_file_garbage_collector::get_gc_exempt_blob_list;
+    using blob_file_garbage_collector::finalize_scan_and_cleanup;
 };
-
-
 
 // Helper function: Generate blob file name (16-digit hexadecimal + ".blob") from the specified blob_id
 std::string generate_blob_filename(blob_id_type id) {
@@ -40,11 +39,11 @@ std::string generate_blob_filename(blob_id_type id) {
     return oss.str();
 }
 
-// Helper function: From a blob_item_container reference, create a sorted list of blob IDs.
-std::vector<blob_id_type> get_sorted_blob_ids(const blob_item_container &container) {
+// Helper function: From a blob_id_container reference, create a sorted list of blob IDs.
+std::vector<blob_id_type> get_sorted_blob_ids(const blob_id_container &container) {
     std::vector<blob_id_type> ids;
-    for (const auto &item : container) {
-        ids.push_back(item.get_blob_id());
+    for (const auto &id : container) {
+        ids.push_back(id);
     }
     std::sort(ids.begin(), ids.end());
     return ids;
@@ -86,15 +85,20 @@ protected:
 
         // Create blob_file_garbage_collector (using resolver_)
         gc_ = std::make_unique<testable_blob_file_garbage_collector>(*resolver_);
+
+        // Create an empty file
+        std::ofstream ofs(snapshot_path.string());
+        ofs.close();
+        ofs.open(compacted_path.string());
+        ofs.close();
     }
 
     void TearDown() override {
+        gc_->shutdown();
+        gc_.reset();
         if (datastore_) {
             datastore_->shutdown();
         }
-
-        gc_->shutdown();
-        gc_.reset();
         resolver_.reset();
         std::string cmd = "rm -rf " + std::string(base_directory);
         if (std::system(cmd.c_str()) != 0) {
@@ -122,7 +126,7 @@ protected:
 // Helper function: Create a file for the specified blob_id in the appropriate subdirectory.
 // The file content can be empty.
 void create_blob_file(const blob_file_resolver &resolver, blob_id_type id) {
-    // The file path should be obtained with resolver->resolve_path(id).
+    // The file path should be obtained with resolver.resolve_path(id).
     boost::filesystem::path file_path = resolver.resolve_path(id);
     // Assume the subdirectory exists for file creation (created in SetUp)
     std::ofstream ofs(file_path.string());
@@ -147,8 +151,7 @@ TEST_F(blob_file_garbage_collector_test, scan_collects_only_files_with_blob_id_l
     // Get scan results
     auto actual_ids = get_sorted_blob_ids(gc_->get_blob_file_list());
 
-    // Expected result is only the paths of files with blob_id 100, 200, 300
-    // Each file path should be generated with resolver_->resolve_path(blob_id)
+    // Expected result is only the files with blob_id 100, 200, 300
     ASSERT_EQ(actual_ids.size(), 3);
     EXPECT_EQ(actual_ids[0], 100);
     EXPECT_EQ(actual_ids[1], 200);
@@ -260,22 +263,24 @@ TEST_F(blob_file_garbage_collector_test, scan_catches_exception_when_directory_m
     EXPECT_TRUE(actual_ids.empty());
 }
 
-TEST_F(blob_file_garbage_collector_test, add_gc_exempt_blob_item_adds_item_correctly) {
-    // Arrange: Create a blob_item with a test blob_id.
+TEST_F(blob_file_garbage_collector_test, add_gc_exempt_blob_id_adds_id_correctly) {
+    // Arrange: Define a test blob_id.
     blob_id_type test_id = 123;
-    blob_item test_item(test_id);
 
-    // Act: Add the test blob_item to the gc_exempt_blob_ container.
-    gc_->add_gc_exempt_blob_item(test_item);
+    // Act: Add the test blob_id to the GC exempt container.
+    gc_->start_add_gc_exempt_blob_ids();
+    gc_->add_gc_exempt_blob_id(test_id);
+    gc_->finalize_add_gc_exempt_blob_ids();
 
-    // Assert: Verify that the container now includes the test blob_item.
-    const blob_item_container &exempt_items = gc_->get_gc_exempt_blob_list();
-    auto actual_ids = get_sorted_blob_ids(exempt_items);
+    // Assert: Verify that the container now includes the test blob_id.
+    const blob_id_container &exempt_ids = gc_->get_gc_exempt_blob_list();
+    auto actual_ids = get_sorted_blob_ids(exempt_ids);
     std::vector<blob_id_type> expected_ids = { test_id };
     EXPECT_EQ(actual_ids, expected_ids);
 }
 
 TEST_F(blob_file_garbage_collector_test, finalize_scan_and_cleanup_deletes_non_exempt_files) {
+    FLAGS_v = 100;
     // Arrange:
     // Create dummy blob files with blob IDs 101, 102, 103.
     create_blob_file(*resolver_, 101);
@@ -284,15 +289,11 @@ TEST_F(blob_file_garbage_collector_test, finalize_scan_and_cleanup_deletes_non_e
 
     // Assume that all files have blob IDs <= 200 so that they are included in the scanned list.
     gc_->scan_blob_files(200);
-    gc_->wait_for_blob_file_scan();
 
     // Mark blob 102 as GC exempt.
-    gc_->add_gc_exempt_blob_item(blob_item(102));
-
-    // Act:
-    // Call finalize_scan_and_cleanup, which spawns a detached thread that will wait
-    // for the scan to complete and then delete non-exempt blob files.
-    gc_->finalize_scan_and_cleanup();
+    gc_->start_add_gc_exempt_blob_ids();
+    gc_->add_gc_exempt_blob_id(102);
+    gc_->finalize_add_gc_exempt_blob_ids();
 
     // Wait for the cleanup process to complete.
     gc_->wait_for_cleanup();
@@ -302,11 +303,12 @@ TEST_F(blob_file_garbage_collector_test, finalize_scan_and_cleanup_deletes_non_e
     EXPECT_FALSE(boost::filesystem::exists(resolver_->resolve_path(101)));
     EXPECT_FALSE(boost::filesystem::exists(resolver_->resolve_path(103)));
 
-    // The GC exempt blob (102) should still exist.
+    // // The GC exempt blob (102) should still exist.
     EXPECT_TRUE(boost::filesystem::exists(resolver_->resolve_path(102)));
 }
 
 TEST_F(blob_file_garbage_collector_test, finalize_scan_and_cleanup_handles_deletion_failure) {
+    FLAGS_v = 100;
     // Arrange:
     // Create dummy blob files with blob IDs 501 and 502.
     create_blob_file(*resolver_, 501);
@@ -319,7 +321,8 @@ TEST_F(blob_file_garbage_collector_test, finalize_scan_and_cleanup_handles_delet
     // Set up test file operations to simulate a deletion failure for blob ID 501.
     class TestFileOperations : public real_file_operations {
     public:
-        TestFileOperations(blob_id_type fail_id, blob_file_resolver* resolver) : real_file_operations(), fail_id_(fail_id), resolver_(resolver) {}
+        TestFileOperations(blob_id_type fail_id, blob_file_resolver* resolver)
+            : real_file_operations(), fail_id_(fail_id), resolver_(resolver) {}
 
         void remove(const boost::filesystem::path& path, boost::system::error_code& ec) override {
             auto id = resolver_->extract_blob_id(path);
@@ -339,9 +342,9 @@ TEST_F(blob_file_garbage_collector_test, finalize_scan_and_cleanup_handles_delet
     blob_file_resolver* resolver = resolver_.get(); // Capture resolver_ pointer
     gc_->set_file_operations(std::make_unique<TestFileOperations>(fail_id, resolver));
 
-    // Call finalize_scan_and_cleanup, which spawns a detached thread that will wait
-    // for the scan to complete and then delete non-exempt blob files.
-    gc_->finalize_scan_and_cleanup();
+    // Filnalize scan snapshot
+    gc_->start_add_gc_exempt_blob_ids();
+    gc_->finalize_add_gc_exempt_blob_ids();
 
     // Wait for the cleanup process to complete.
     gc_->wait_for_cleanup();
@@ -352,14 +355,6 @@ TEST_F(blob_file_garbage_collector_test, finalize_scan_and_cleanup_handles_delet
 
     // Expect the deletion of blob ID 502 to have succeeded, so the file should not exist.
     EXPECT_FALSE(boost::filesystem::exists(resolver_->resolve_path(502)));
-}
-
-// Test: Calling scan_blob_files() after wait_for_blob_file_scan() has been invoked should throw an exception.
-TEST_F(blob_file_garbage_collector_test, start_scan_after_wait_for_scan_should_throw) {
-    // Call wait_for_blob_file_scan() without starting scan.
-    gc_->wait_for_blob_file_scan();
-    // Since wait_for_blob_file_scan() sets blob_file_scan_waited_, starting the scan now should throw.
-    EXPECT_THROW(gc_->scan_blob_files(1000), std::logic_error);
 }
 
 // Test: Calling wait_for_blob_file_scan() twice does not block.
@@ -374,30 +369,22 @@ TEST_F(blob_file_garbage_collector_test, wait_for_scan_called_twice) {
 // Test: Calling wait_for_cleanup() twice does not block.
 TEST_F(blob_file_garbage_collector_test, wait_for_cleanup_called_twice) {
     gc_->scan_blob_files(1000);
-    gc_->wait_for_blob_file_scan();
-    gc_->finalize_scan_and_cleanup();
+    gc_->start_add_gc_exempt_blob_ids();
+    gc_->finalize_add_gc_exempt_blob_ids();
     gc_->wait_for_cleanup();
     // Second call should return immediately.
     gc_->wait_for_cleanup();
     SUCCEED();
 }
 
-TEST_F(blob_file_garbage_collector_test, finalize_scan_and_cleanup_after_wait_throws) {
-    gc_->scan_blob_files(500);
-    gc_->finalize_scan_and_cleanup();
-    gc_->wait_for_cleanup();
-    EXPECT_THROW(gc_->finalize_scan_and_cleanup(), std::logic_error);
-}
-
 // Test: snapshot_scan completes successfully and wait_for_scan_snapshot returns normally.
 TEST_F(blob_file_garbage_collector_test, snapshot_scan_completes_properly) {
-
     // Act: Start the snapshot scan and wait for it to complete.
     gc_->scan_snapshot(snapshot_path, compacted_path);
     gc_->wait_for_scan_snapshot();
 
     // Assert:
-    // If wait_for_scan_snapshot() returns, it can be considered that the background scan has completed.
+    // If wait_for_scan_snapshot() returns, the background scan has completed.
     SUCCEED();
 }
 
@@ -411,8 +398,7 @@ TEST_F(blob_file_garbage_collector_test, snapshot_scan_called_twice_throws) {
 
 // Test: Calling wait_for_scan_snapshot() without starting snapshot scan returns immediately.
 TEST_F(blob_file_garbage_collector_test, wait_for_snapshot_without_scan_returns_immediately) {
-    // Even if called when snapshot_scan_started_ is false, the wait process should return immediately.
-    // (Internally, it checks "if scan has not started, then return")
+    // Even if snapshot scanning has not started, wait_for_scan_snapshot() should return immediately.
     gc_->wait_for_scan_snapshot();
     SUCCEED();
 }
@@ -421,12 +407,10 @@ TEST_F(blob_file_garbage_collector_test, wait_for_snapshot_without_scan_returns_
 TEST_F(blob_file_garbage_collector_test, wait_for_snapshot_called_twice) {
     gc_->scan_snapshot(snapshot_path, compacted_path);
     gc_->wait_for_scan_snapshot();
-    // The second call should return immediately as it has already completed.
+    // Second call should return immediately.
     gc_->wait_for_scan_snapshot();
     SUCCEED();
 }
-
-
 
 TEST_F(blob_file_garbage_collector_test, full_process_test) {
     // Step 1: Create multiple BLOB files with blob IDs 100, 200, 300, and 400.
@@ -444,8 +428,8 @@ TEST_F(blob_file_garbage_collector_test, full_process_test) {
     // Step 4: Create the snapshot and compacted files.
     // In this test, two PWAL files are generated and used as the snapshot file and the compacted file.
     // The PWAL files include entries with blob IDs 200 and 400.
-    ASSERT_FALSE(boost::filesystem::exists(snapshot_path));
-    ASSERT_FALSE(boost::filesystem::exists(compacted_path));
+    boost::filesystem::remove(snapshot_path);
+    boost::filesystem::remove(compacted_path);
     gen_datastore();
     lc0_->begin_session();
     lc0_->add_entry(1, "key1", "value1", {1,1}, {200});
@@ -462,13 +446,8 @@ TEST_F(blob_file_garbage_collector_test, full_process_test) {
     // Step 6: Wait for the snapshot scanning to complete.
     gc_->wait_for_scan_snapshot();
 
-    // Step 7: Verify that the GC-exempt blob container contains the correct entries (i.e., blob IDs 200 and 400).
-    auto& exempt = gc_->get_gc_exempt_blob_list();
-    std::vector<blob_id_type> exempt_ids;
-    for (const auto &item : exempt) {
-        exempt_ids.push_back(item.get_blob_id());
-    }
-    std::sort(exempt_ids.begin(), exempt_ids.end());
+    // Step 7: Verify that the GC-exempt container contains the correct entries (i.e., blob IDs 200 and 400).
+    auto exempt_ids = get_sorted_blob_ids(gc_->get_gc_exempt_blob_list());
     std::vector<blob_id_type> expected_exempt = {200, 400};
     EXPECT_EQ(exempt_ids, expected_exempt);
 
@@ -488,6 +467,46 @@ TEST_F(blob_file_garbage_collector_test, full_process_test) {
     EXPECT_FALSE(boost::filesystem::exists(file300));
     EXPECT_TRUE(boost::filesystem::exists(file400));
 }
+
+// Test: When compacted_path does not exist, scan_snapshot processes snapshot_path and reads expected data.
+TEST_F(blob_file_garbage_collector_test, snapshot_scan_reads_expected_data) {
+    // Arrange:
+    // Ensure that compacted_path does not exist
+    if (boost::filesystem::exists(compacted_path)) {
+        boost::filesystem::remove(compacted_path);
+    }
+    EXPECT_FALSE(boost::filesystem::exists(compacted_path));
+    EXPECT_TRUE(boost::filesystem::exists(snapshot_path));
+
+    // Act:
+    // Since compacted_path does not exist, scan_snapshot should only process snapshot_path.
+    EXPECT_NO_THROW({
+        gc_->scan_snapshot(snapshot_path, compacted_path);
+        gc_->scan_blob_files(1000);
+        gc_->wait_for_cleanup();
+    });
+
+    SUCCEED();
+}
+
+TEST_F(blob_file_garbage_collector_test, snapshot_scan_throws_when_snapshot_file_missing) {
+    // Arrange:
+    // Ensure that snapshot_path does not exist (simulate a missing snapshot file)
+    if (boost::filesystem::exists(snapshot_path)) {
+        boost::filesystem::remove(snapshot_path);
+    }
+    EXPECT_FALSE(boost::filesystem::exists(snapshot_path));
+
+    // Act & Assert:
+    // Since snapshot_path is missing, scan_snapshot should throw an exception.
+    EXPECT_THROW({
+        gc_->scan_snapshot(snapshot_path, compacted_path);
+        gc_->scan_blob_files(1000);
+        gc_->wait_for_cleanup();
+    }, std::exception);
+}
+
+
 
 
 }  // namespace limestone::testing

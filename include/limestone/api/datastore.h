@@ -277,7 +277,8 @@ public:
      * @details This version comprises the oldest accessible snapshot, that is,
      *    the datastore may delete anything older than the version included in this snapshot.
      * @details The boundary version must be monotonic, that is,
-     *    it must be greater than or equal to the previous boundary version.     * @param version the target boundary version
+     *    it must be greater than or equal to the previous boundary version.   
+     * @param version the target boundary version
      * @attention this function should be called after the ready() is called.
      * @see switch_safe_snapshot()
      * @note the specified version must be smaller than or equal to the version that was told by the switch_safe_snapshot().
@@ -285,10 +286,34 @@ public:
     void switch_available_boundary_version(write_version_type version);
 
 
+    /**
+     * @brief Adds a list of persistent blob IDs to the datastore.
+     *
+     * This function takes a vector of blob IDs and adds them to the datastore,
+     * ensuring that they are stored persistently.
+     *
+     * NOTE: This method is intended for internal use only. It is used by blob_pool::release
+     * to determine whether a given blob ID should be deleted. Once a blob ID is confirmed
+     * as not subject to deletion, its entry is removed from the persistent tracking.
+     *
+     * @param blob_ids A vector containing the blob IDs to be added.
+     */
     void add_persistent_blob_ids(const std::vector<blob_id_type>& blob_ids);
 
+    /**
+     * @brief Checks and removes persistent blob IDs from the given list.
+     *
+     * This function takes a vector of blob IDs and checks for their persistence.
+     * It is used by blob_pool::release to determine whether a given blob ID should be deleted.
+     * Once a blob ID is confirmed as not subject to deletion, its entry is removed from the persistent tracking.
+     *
+     * NOTE: This method is intended for internal use only.
+     *
+     * @param blob_ids A vector of blob IDs to be checked and potentially removed.
+     * @return A vector of blob IDs that were persistent and have been removed.
+     */
     std::vector<blob_id_type> check_and_remove_persistent_blob_ids(const std::vector<blob_id_type>& blob_ids);
-    
+
 protected:  // for tests
     auto& log_channels_for_tests() const noexcept { return log_channels_; }
     auto epoch_id_informed_for_tests() const noexcept { return epoch_id_informed_.load(); }
@@ -298,11 +323,13 @@ protected:  // for tests
     auto next_blob_id_for_tests() const noexcept { return next_blob_id_.load(); }
     auto& files_for_tests() const noexcept { return files_; }
     void rotate_epoch_file_for_tests() { rotate_epoch_file(); }
-    void set_next_blob_id_for_tests(blob_id_type next_blob_id) noexcept { next_blob_id_ = next_blob_id; }
+    void set_next_blob_id_for_tests(blob_id_type next_blob_id) noexcept { next_blob_id_.store(next_blob_id); }
     std::set<blob_id_type> get_persistent_blob_ids_for_tests() noexcept {
         std::lock_guard<std::mutex> lock(persistent_blob_ids_mutex_);
         return persistent_blob_ids_;
     }
+    write_version_type get_available_boundary_version_for_tests() const noexcept { return available_boundary_version_; }
+    void wait_for_blob_file_garbace_collector_for_tests() const noexcept;
 
     // These virtual methods are hooks for testing thread synchronization.
     // They allow derived classes to inject custom behavior or notifications
@@ -474,6 +501,12 @@ private:
     std::mutex persistent_blob_ids_mutex_;
 
     std::unique_ptr<limestone::internal::blob_file_garbage_collector> blob_file_garbage_collector_;
+
+    // Boundary version for safe snapshots
+    write_version_type available_boundary_version_; 
+
+    // Mutex to protect boundary version updates
+    mutable std::mutex boundary_mutex_;         
 
 };
 

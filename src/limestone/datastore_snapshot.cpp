@@ -60,30 +60,45 @@ static int comp_twisted_key(const std::string_view& a, const std::string_view& b
 [[maybe_unused]]
 static void insert_entry_or_update_to_max(sortdb_wrapper* sortdb, const log_entry& e) {
     bool need_write = true;
-    // skip older entry than already inserted
+    // Skip writing if an older entry is already stored.
     std::string value;
     if (sortdb->get(e.key_sid(), &value)) {
-        write_version_type write_version;
-        e.write_version(write_version);
-        if (write_version < write_version_type(value.substr(1))) {
+        write_version_type stored_write_version;
+        if (e.type() == log_entry::entry_type::normal_with_blob) {
+            // For normal_with_blob, the stored format is:
+            // [0]: entry_type, [1,8]: value_size, [9, ...]: value_etc (which starts with write_version)
+            stored_write_version = write_version_type(value.substr(1 + sizeof(std::size_t)));
+        } else {
+            // For non-normal_with_blob, the stored format is:
+            // [0]: entry_type, [1, ...]: value_etc (which starts with write_version)
+            stored_write_version = write_version_type(value.substr(1));
+        }
+        
+        write_version_type new_write_version;
+        e.write_version(new_write_version);
+        if (new_write_version < stored_write_version) {
             need_write = false;
         }
     }
     if (need_write) {
         std::string db_value;
-        db_value.append(1, static_cast<char>(e.type()));
+        db_value.push_back(static_cast<char>(e.type()));
         if (e.type() == log_entry::entry_type::normal_with_blob) {
+            // For normal_with_blob entries, insert an 8-byte value_size field
+            // (no endian conversion required because only the writing process will read it),
+            // followed by the value data and then the BLOB ID data.
+            // This allows later splitting the stored data into the value part and the blob IDs.
             std::size_t value_size = e.value_etc().size();
-            std::size_t value_size_le = htole64(value_size);
-            db_value.append(reinterpret_cast<const char*>(&value_size_le), sizeof(value_size_le));  // NOLINT(cppcoreguidelines-pro-type-reinterpret-cast)
+            db_value.append(reinterpret_cast<const char*>(&value_size), sizeof(value_size));  // NOLINT(*-reinterpret-cast)
             db_value.append(e.value_etc());
-            db_value.append(e.blob_ids());
+            db_value.append(e.raw_blob_ids());
         } else {
             db_value.append(e.value_etc());
         }
         sortdb->put(e.key_sid(), db_value);
     }
 }
+
 
 
 [[maybe_unused]]
@@ -102,23 +117,23 @@ static void insert_twisted_entry(sortdb_wrapper* sortdb, const log_entry& e) {
         db_value.append(reinterpret_cast<const char*>(&value_size_le), sizeof(value_size_le));  // NOLINT(cppcoreguidelines-pro-type-reinterpret-cast)
 
         db_value.append(value);
-        db_value.append(e.blob_ids());
+        db_value.append(e.raw_blob_ids());
     } else {
         db_value.append(value);
     }
     sortdb->put(db_key, db_value);
 }
 
-static std::pair<epoch_id_type, sorting_context> create_sorted_from_wals(
-    const boost::filesystem::path& from_dir,
-    int num_worker,
-    const std::set<std::string>& file_names = std::set<std::string>()) {
+static std::pair<epoch_id_type, sorting_context> create_sorted_from_wals(compaction_options &options) {
+    auto from_dir = options.get_from_dir();
+    auto file_names = options.get_file_names();
+    auto num_worker = options.get_num_worker();
 #if defined SORT_METHOD_PUT_ONLY
     sorting_context sctx{std::make_unique<sortdb_wrapper>(from_dir, comp_twisted_key)};
 #else
     sorting_context sctx{std::make_unique<sortdb_wrapper>(from_dir)};
 #endif
-    dblog_scan logscan = file_names.empty() ? dblog_scan{from_dir} : dblog_scan{from_dir, file_names};
+    dblog_scan logscan = file_names.empty() ? dblog_scan{from_dir} : dblog_scan{from_dir, options};
 
     epoch_id_type ld_epoch = logscan.last_durable_epoch_in_dir();
 
@@ -129,9 +144,14 @@ static std::pair<epoch_id_type, sorting_context> create_sorted_from_wals(
     const auto add_entry_to_point = insert_entry_or_update_to_max;
     bool works_with_multi_thread = false;
 #endif
-    auto add_entry = [&sctx, &add_entry_to_point](const log_entry& e){
+    auto add_entry = [&sctx, &add_entry_to_point, &options](const log_entry& e){
         switch (e.type()) {
         case log_entry::entry_type::normal_with_blob:
+            if (options.is_gc_enabled()) {
+                options.get_gc_snapshot().sanitize_and_add_entry(e);
+            }
+            add_entry_to_point(sctx.get_sortdb(), e);
+            break;
         case log_entry::entry_type::normal_entry:
         case log_entry::entry_type::remove_entry:
             add_entry_to_point(sctx.get_sortdb(), e);
@@ -187,6 +207,8 @@ static std::string create_value_from_db_key_and_value(const std::string_view& db
 }
 
 static std::pair<std::string, std::string_view> split_db_value_and_blob_ids(const std::string_view raw_db_value) {
+
+#if defined SORT_METHOD_PUT_ONLY
     // The first byte is entry_type
     const char entry_type = raw_db_value[0];
     const std::string_view remaining_data = raw_db_value.substr(1);
@@ -206,6 +228,36 @@ static std::pair<std::string, std::string_view> split_db_value_and_blob_ids(cons
     std::memcpy(&combined_value[1], value_data.data(), value_data.size()); // Copy the remaining data
 
     return {combined_value, blob_ids_part};
+#else
+    // Layout of raw_db_value for normal_with_blob entries:
+    // [0]                     : entry_type (1 byte)
+    // [1, 8]                  : value_etc size (8 bytes, stored directly)
+    // [9, 9 + value_etc_size) : value_etc (value_etc_size bytes)
+    // [9 + value_etc_size, ...) : blob_ids
+
+    // 1. Extract value_etc size from the 8 bytes following the entry_type.
+    // No endian conversion is required.
+    const std::size_t value_etc_size = *reinterpret_cast<const std::size_t*>(raw_db_value.data() + 1);  // NOLINT(cppcoreguidelines-pro-type-reinterpret-cast)
+
+    // 2. The value_etc data starts after the entry_type and size field.
+    // The size field occupies 8 bytes, so the offset is 1 + 8 = 9.
+    const std::size_t value_etc_offset = 1 + sizeof(std::size_t);
+
+    // 3. Create a string to hold the value_etc data.
+    std::string value_etc(value_etc_size, '\0');
+
+    // Copy value_etc data from raw_db_value starting at value_etc_offset for value_etc_size bytes.
+    std::memcpy(value_etc.data(), raw_db_value.data() + value_etc_offset, value_etc_size);
+
+    // 4. The blob_ids part is the remainder of raw_db_value after value_etc.
+    const std::size_t blob_ids_offset = value_etc_offset + value_etc_size;
+    std::string_view blob_ids_part(raw_db_value.data() + blob_ids_offset,
+                                   raw_db_value.size() - blob_ids_offset);
+
+    return {value_etc, blob_ids_part};
+
+#endif
+
 }
 
 
@@ -215,7 +267,9 @@ static std::pair<std::string, std::string_view> split_db_value_and_blob_ids(cons
 
 
 
+
 static void sortdb_foreach(
+    [[maybe_unused]]  compaction_options &options,
     sorting_context& sctx,
     const std::function<void(
         const log_entry::entry_type entry_type,
@@ -257,7 +311,7 @@ static void sortdb_foreach(
                 sctx.update_max_blob_id(log_entry::parse_blob_ids(blob_ids));
                 break;
             }
-            default:
+           default:
                 LOG(ERROR) << "never reach " << static_cast<int>(entry_type);
                 std::abort();
         }
@@ -282,8 +336,8 @@ static void sortdb_foreach(
                 write_snapshot_entry(entry_type, db_key, db_value.substr(1), {});
                 break;
             case log_entry::entry_type::normal_with_blob: {
-                auto [value, blob_ids] = split_db_value_and_blob_ids(db_value);
-                write_snapshot_entry(entry_type, db_key, value.substr(1), blob_ids);
+                auto [value_etc, blob_ids] = split_db_value_and_blob_ids(db_value);
+                write_snapshot_entry(entry_type, db_key, value_etc, blob_ids);
                 sctx.update_max_blob_id(log_entry::parse_blob_ids(blob_ids));
                 break;
             } break;
@@ -295,14 +349,11 @@ static void sortdb_foreach(
 #endif
 }
 
-blob_id_type create_compact_pwal_and_get_max_blob_id(
-    const boost::filesystem::path& from_dir, 
-    const boost::filesystem::path& to_dir, 
-    int num_worker,
-    const std::set<std::string>& file_names) {
-    auto [max_appeared_epoch, sctx] = create_sorted_from_wals(from_dir, num_worker, file_names);
+blob_id_type create_compact_pwal_and_get_max_blob_id(compaction_options &options) {
+    auto [max_appeared_epoch, sctx] = create_sorted_from_wals(options);
 
     boost::system::error_code error;
+    const auto &to_dir = options.get_to_dir();
     const bool result_check = boost::filesystem::exists(to_dir, error);
     if (!result_check || error) {
         const bool result_mkdir = boost::filesystem::create_directory(to_dir, error);
@@ -326,7 +377,7 @@ blob_id_type create_compact_pwal_and_get_max_blob_id(
         log_entry::entry_type entry_type, 
         std::string_view key_sid, 
         std::string_view value_etc, 
-        std::string_view blob_ids) {
+                                                        std::string_view blob_ids) {
         switch (entry_type) {
             case log_entry::entry_type::normal_entry:
                 if (rewind) {
@@ -335,7 +386,7 @@ blob_id_type create_compact_pwal_and_get_max_blob_id(
                     std::memset(value.data(), 0, 16);
                     log_entry::write(ostrm, key_sid, value);
                 } else {
-                    log_entry::write(ostrm, key_sid, value_etc);
+                log_entry::write(ostrm, key_sid, value_etc);
                 }
                 break;
             case log_entry::entry_type::normal_with_blob:
@@ -345,7 +396,7 @@ blob_id_type create_compact_pwal_and_get_max_blob_id(
                     std::memset(value.data(), 0, 16);
                     log_entry::write_with_blob(ostrm, key_sid, value, blob_ids);
                 } else {
-                    log_entry::write_with_blob(ostrm, key_sid, value_etc, blob_ids);
+                log_entry::write_with_blob(ostrm, key_sid, value_etc, blob_ids);
                 }
                 break;
             case log_entry::entry_type::remove_entry:
@@ -356,10 +407,9 @@ blob_id_type create_compact_pwal_and_get_max_blob_id(
                 std::abort();
         }
     };
+    
 
-
-
-    sortdb_foreach(sctx, write_snapshot_entry);
+    sortdb_foreach(options, sctx, write_snapshot_entry);
     //log_entry::end_session(ostrm, epoch);
     if (fclose(ostrm) != 0) {  // NOLINT(*-owning-memory)
         LOG_AND_THROW_IO_EXCEPTION("cannot close snapshot file (" + snapshot_file.string() + ")", errno);
@@ -451,7 +501,8 @@ snapshot::~snapshot() = default;
 blob_id_type datastore::create_snapshot_and_get_max_blob_id() {
     const auto& from_dir = location_;
     std::set<std::string> file_names = assemble_snapshot_input_filenames(compaction_catalog_, from_dir);
-    auto [max_appeared_epoch, sctx] = create_sorted_from_wals(from_dir, recover_max_parallelism_, file_names);
+    compaction_options options(from_dir, recover_max_parallelism_, file_names);
+    auto [max_appeared_epoch, sctx] = create_sorted_from_wals(options);
     epoch_id_switched_.store(max_appeared_epoch);
     epoch_id_informed_.store(max_appeared_epoch);
 
@@ -498,7 +549,7 @@ blob_id_type datastore::create_snapshot_and_get_max_blob_id() {
         }
     };
 
-    sortdb_foreach(sctx, write_snapshot_entry);
+    sortdb_foreach(options, sctx, write_snapshot_entry);
     if (fclose(ostrm) != 0) {  // NOLINT(*-owning-memory)
         LOG_AND_THROW_IO_EXCEPTION("cannot close snapshot file (" + snapshot_file.string() + ")", errno);
     }

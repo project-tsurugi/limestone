@@ -44,6 +44,9 @@ public:
         }
         return this->epoch_number_ < value.epoch_number_;
     }
+    bool operator<=(write_version_type value) const {
+        return (*this < value) || (*this == value);
+    }
     [[nodiscard]] epoch_id_type get_major() const { return epoch_number_; }
     [[nodiscard]] std::uint64_t get_minor() const { return minor_write_version_; }
 

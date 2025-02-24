@@ -32,9 +32,11 @@
 #include "log_entry.h"
 #include "online_compaction.h"
 #include "compaction_catalog.h"
+#include "compaction_options.h"
 #include "blob_file_resolver.h"
 #include "blob_pool_impl.h"
 #include "blob_file_garbage_collector.h"
+#include "blob_file_gc_snapshot.h"
 
 namespace limestone::api {
 using namespace limestone::internal;
@@ -128,12 +130,12 @@ datastore::datastore(configuration const& conf) : location_(conf.data_locations_
 }
 
 datastore::~datastore() noexcept{
-    stop_online_compaction_worker();
-    if (online_compaction_worker_future_.valid()) {
-        online_compaction_worker_future_.wait();
-    }
-    if(blob_file_garbage_collector_) {
-        blob_file_garbage_collector_->shutdown();
+    try {
+        shutdown();
+    } catch (const std::exception &e) {
+        LOG_LP(ERROR) << "Exception in destructor during shutdown: " << e.what();
+    } catch (...) {
+        LOG_LP(ERROR) << "Unknown exception in destructor during shutdown.";
     }
 }
 
@@ -200,6 +202,10 @@ void datastore::ready() {
         }
         blob_file_garbage_collector_ = std::make_unique<blob_file_garbage_collector>(*blob_file_resolver_);
         blob_file_garbage_collector_->scan_blob_files(max_blob_id);
+
+        boost::filesystem::path compacted_file = location_ / limestone::internal::compaction_catalog::get_compacted_filename();
+        boost::filesystem::path snapshot_file = location_ / std::string(snapshot::subdirectory_name_) / std::string(snapshot::file_name_);
+        blob_file_garbage_collector_->scan_snapshot(snapshot_file, compacted_file);
 
         next_blob_id_.store(max_blob_id + 1);
 
@@ -377,6 +383,10 @@ std::future<void> datastore::shutdown() noexcept {
     VLOG_LP(log_info) << "start";
     state_ = state::shutdown;
 
+    if (blob_file_garbage_collector_) {
+        blob_file_garbage_collector_->shutdown();
+    }
+
     stop_online_compaction_worker();
     if (!online_compaction_worker_future_.valid()) {
         VLOG(log_info) << "/:limestone:datastore:shutdown compaction task is not running. skipping task shutdown.";
@@ -392,11 +402,6 @@ std::future<void> datastore::shutdown() noexcept {
         } else {
             fd_for_flock_ = -1;
         }
-    }
-
-    if (blob_file_garbage_collector_) {
-        blob_file_garbage_collector_->shutdown();
-        blob_file_garbage_collector_.reset();
     }
 
     return std::async(std::launch::async, [] {
@@ -654,6 +659,26 @@ void datastore::compact_with_online() {
     TRACE_START;
     check_after_ready(static_cast<const char*>(__func__));
 
+    // get a copy of next_blob_id and boundary_version before rotation
+    blob_id_type next_blob_id_copy = next_blob_id_.load(std::memory_order_acquire);
+    write_version_type boundary_version_copy;
+    {
+        std::lock_guard<std::mutex> lock(boundary_mutex_);
+        boundary_version_copy = available_boundary_version_;
+    }
+
+    // check blob file garbage collection runnable
+    bool blob_file_gc_runnable = false;
+    bool is_active = blob_file_garbage_collector_->is_active();
+    if (boundary_version_copy.get_major() > compaction_catalog_->get_max_epoch_id() && !is_active) {
+        blob_file_gc_runnable = true;
+        blob_file_garbage_collector_->shutdown();
+    }
+    VLOG_LP(log_trace_fine) << "boundary_version_copy.get_major(): " << boundary_version_copy.get_major()
+                            << ", compaction_catalog_->get_max_epoch_id(): " << compaction_catalog_->get_max_epoch_id()
+                            << ", blob_file_garbage_collector_->is_active(): " << is_active
+                            << ", blob_file_gc_runnable: " << blob_file_gc_runnable;
+
     // rotate first
     rotation_result result = rotate_log_files();
 
@@ -683,8 +708,19 @@ void datastore::compact_with_online() {
     boost::filesystem::path compaction_temp_dir = location_ / compaction_catalog::get_compaction_temp_dirname();
     ensure_directory_exists(compaction_temp_dir);
 
+    // Set the appropriate options based on whether blob file GC is executable.
+    VLOG_LP(log_trace_fine) << "blob_file_gc_runnable: " << blob_file_gc_runnable;
+    compaction_options options = [&]() -> compaction_options {
+        if (blob_file_gc_runnable) {
+            auto gc_snapshot = std::make_unique<blob_file_gc_snapshot>(boundary_version_copy);
+            return compaction_options{location_, compaction_temp_dir, recover_max_parallelism_, need_compaction_filenames, std::move(gc_snapshot)};
+        }
+        return compaction_options{location_, compaction_temp_dir, recover_max_parallelism_, need_compaction_filenames};
+    }();
+
     // create a compacted file
-    blob_id_type max_blob_id = create_compact_pwal_and_get_max_blob_id(location_, compaction_temp_dir, recover_max_parallelism_, need_compaction_filenames);
+    blob_id_type max_blob_id = create_compact_pwal_and_get_max_blob_id(options);
+
 
     // handle existing compacted file
     handle_existing_compacted_file(location_);
@@ -723,6 +759,22 @@ void datastore::compact_with_online() {
     remove_file_safely(location_ / compaction_catalog::get_compacted_backup_filename());
 
     LOG_LP(INFO) << "compaction finished";
+
+    // blob files garbage collection
+    if (options.is_gc_enabled()) {
+        LOG_LP(INFO) << "start blob files garbage collection";
+        blob_file_garbage_collector_->scan_blob_files(next_blob_id_copy);
+        log_entry_container log_entries = options.get_gc_snapshot().finalize_snapshot();
+        blob_file_garbage_collector_->start_add_gc_exempt_blob_ids();
+        for (const auto& entry : log_entries) {
+            for (const auto& blob_id : entry.get_blob_ids()) {
+                blob_file_garbage_collector_->add_gc_exempt_blob_id(blob_id);
+            }
+        }
+        blob_file_garbage_collector_->finalize_add_gc_exempt_blob_ids();
+        LOG_LP(INFO) << "blob files garbage collection finished";
+    }
+
     TRACE_END;
 }
 
@@ -737,6 +789,7 @@ std::unique_ptr<blob_pool> datastore::acquire_blob_pool() {
         do {
             current = next_blob_id_.load(std::memory_order_acquire); // Load the current ID atomically.
             if (current == std::numeric_limits<blob_id_type>::max()) {
+                LOG_LP(ERROR) << "Blob ID overflow detected.";
                 return current; // Return max value to indicate overflow.
             }
         } while (!next_blob_id_.compare_exchange_weak(
@@ -767,12 +820,24 @@ blob_file datastore::get_blob_file(blob_id_type reference) {
             available = false;
         }
     }
-    TRACE_END;
+    TRACE_END << "path=" << path.string() << ", available=" << available;
     return blob_file(path, available);
 }
 
-void datastore::switch_available_boundary_version([[maybe_unused]] write_version_type version) {
-     LOG_FIRST_N(ERROR, 1) << "not implemented";
+void datastore::switch_available_boundary_version(write_version_type version) {
+    TRACE_FINE_START << "version=" << version.get_major() << "." << version.get_minor();
+    {
+        std::lock_guard<std::mutex> lock(boundary_mutex_);
+        if (version < available_boundary_version_) {
+            LOG_LP(ERROR) << "The new boundary version (" << version.get_major() << ", " 
+            << version.get_minor() << ") is smaller than the current boundary version (" 
+            << available_boundary_version_.get_major() << ", " 
+            << available_boundary_version_.get_minor() << ")";
+            return;
+        }
+    }
+    available_boundary_version_ = version;
+    TRACE_FINE_END;
 }
 
 void datastore::add_persistent_blob_ids(const std::vector<blob_id_type>& blob_ids) {
@@ -798,6 +863,13 @@ std::vector<blob_id_type> datastore::check_and_remove_persistent_blob_ids(const 
 
     return not_found_blob_ids;
 }
+
+void datastore::wait_for_blob_file_garbace_collector_for_tests() const noexcept {
+    if (blob_file_garbage_collector_) {
+        blob_file_garbage_collector_->wait_for_all_threads();
+    }
+}
+
 
 
 } // namespace limestone::api

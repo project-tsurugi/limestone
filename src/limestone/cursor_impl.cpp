@@ -70,24 +70,19 @@ void cursor_impl::validate_and_read_stream(std::optional<boost::filesystem::ifst
             return;
         }
 
-        // If the stream has reached EOF, close it and exit
-        if (stream->eof()) {
-            DVLOG_LP(log_trace) << stream_name << " stream reached EOF, closing it.";
-            stream->close();
-            stream = std::nullopt;
-            return;
-        }
-
         // If the entry is not yet read, read it
         if (!log_entry) {
             log_entry.emplace();  // Construct a new log_entry
-            if (!log_entry->read(*stream)) {
-                // If reading fails, close the stream and reset the log_entry
-                stream->close();
-                stream = std::nullopt;
-                log_entry = std::nullopt;
-                return;
-            }
+            do {
+                if (!log_entry->read(*stream)) {
+                    // If reading fails, close the stream and reset the log_entry
+                    stream->close();
+                    stream = std::nullopt;
+                    log_entry = std::nullopt;
+                    return;
+                }
+            } while (log_entry->type() != log_entry::entry_type::normal_entry &&
+                     log_entry->type() != log_entry::entry_type::normal_with_blob);
             // Check if the key_sid is in ascending order
             // TODO: Key order violation is detected here and the process is aborted.
             // However, this check should be moved to an earlier point, and if the key order is invalid,
@@ -97,7 +92,12 @@ void cursor_impl::validate_and_read_stream(std::optional<boost::filesystem::ifst
                            << ") is smaller than the previous key_sid (" << previous_key_sid << ")";
                 THROW_LIMESTONE_EXCEPTION("Key order violation detected in " + stream_name);
             }
-
+            // Skip processing if key_sid is the same as previous_key_sid
+            if (!previous_key_sid.empty() && log_entry->key_sid() == previous_key_sid) {
+                DVLOG_LP(log_trace_fine) << stream_name << " log entry key_sid (" << log_entry->key_sid() << ") is same as previous, skipping.";
+                log_entry = std::nullopt;
+                continue;
+            }
             // Update the previous key_sid to the current one
             previous_key_sid = log_entry->key_sid();
         }

@@ -454,7 +454,7 @@ public:
     [[nodiscard]] const std::string& key_sid() const {
         return key_sid_;
     }
-    [[nodiscard]] const std::string& blob_ids() const {
+    [[nodiscard]] const std::string& raw_blob_ids() const {
         return blob_ids_;
     }
     static epoch_id_type write_version_epoch_number(std::string_view value_etc) {
@@ -481,6 +481,53 @@ public:
     [[nodiscard]] std::vector<blob_id_type> get_blob_ids() const {
         return parse_blob_ids(blob_ids_);
     }
+
+    /**
+     * @brief Truncates the value portion of value_etc_, keeping only the write_version header,
+     *        but only for entries of type normal_entry and normal_with_blob.
+     *
+     * For these entry types, value_etc_ contains the write_version header followed by the value.
+     * This method removes any data beyond the header, leaving only the write_version information.
+     * For other entry types, the method does nothing.
+     */
+    void truncate_value_from_normal_entry() {
+        // Process only normal_entry and normal_with_blob entry types.
+        if (entry_type_ != entry_type::normal_entry && entry_type_ != entry_type::normal_with_blob) {
+            return;
+        }
+
+        constexpr std::size_t header_size = sizeof(epoch_id_type) + sizeof(std::uint64_t);
+        if (value_etc_.size() > header_size) {
+            value_etc_.resize(header_size);
+        }
+    }
+
+    /**
+     * @brief Creates a normal_with_blob type log_entry from raw data.
+     *
+     * This method constructs a log_entry instance specifically for entries of type normal_with_blob.
+     * It initializes the key_sid, value_etc, and blob_ids fields from the provided parameters.
+     * Note: The epoch_id field is not explicitly set by this method. If epoch_id is needed,
+     * it should be extracted from the value_etc field (e.g. using write_version_epoch_number(value_etc)).
+     *
+     * @param key_sid A string view representing the key_sid field.
+     * @param value_etc A string view representing the value_etc field.
+     *                  This should contain the write_version header concatenated with the payload.
+     * @param blob_ids A string view representing the blob_ids field (default is empty).
+     * @return log_entry The constructed log_entry with type normal_with_blob.
+     */
+    static log_entry make_normal_with_blob_log_entry(
+        std::string_view key_sid,
+        std::string_view value_etc,
+        std::string_view blob_ids = std::string_view()) {
+        log_entry entry;
+        entry.entry_type_ = entry_type::normal_with_blob;
+        entry.key_sid_ = std::string(key_sid);
+        entry.value_etc_ = std::string(value_etc);
+        entry.blob_ids_ = std::string(blob_ids);
+        return entry;
+    }
+
 
 private:
     entry_type entry_type_{};

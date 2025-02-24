@@ -218,7 +218,8 @@ void compaction(dblog_scan &ds, std::optional<epoch_id_type> epoch) {
     setup_initial_logdir(tmp);
 
     VLOG_LP(log_info) << "making compact pwal file to " << tmp;
-    create_compact_pwal_and_get_max_blob_id(from_dir, tmp, FLAGS_thread_num);
+    compaction_options options{from_dir, tmp, FLAGS_thread_num};
+    create_compact_pwal_and_get_max_blob_id(options);
 
     // epoch file
     VLOG_LP(log_info) << "making compact epoch file to " << tmp;

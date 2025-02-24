@@ -207,6 +207,12 @@ epoch_id_type dblog_scan::scan_pwal_files(  // NOLINT(readability-function-cogni
 
                 try {
                     process_file(p);
+                    if (options_.has_value()) {
+                        compaction_options &opts = options_.value().get();
+                        if (opts.is_gc_enabled()) {
+                            opts.get_gc_snapshot().finalize_local_entries();
+                        }
+                    }
                 } catch (limestone_exception& ex) {
                     VLOG(log_info) << "/:limestone catch runtime_error(" << ex.what() << ")";
                     {
