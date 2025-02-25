@@ -23,7 +23,11 @@
 #include <thread>
 #include <vector>
 #include <memory>
-#include <optional> 
+#include <optional>
+#include <unordered_map>
+#include <stdexcept>
+#include <utility>
+#include <string>
 
 #include "blob_file_resolver.h"
 #include "blob_id_container.h"
@@ -62,6 +66,19 @@ enum class blob_file_gc_event {
 };
 
 /**
+ * @brief A custom hasher for pairs of (blob_file_gc_state, blob_file_gc_event).
+ *
+ * Using a custom hash structure avoids the need to specialize std::hash in the global std namespace.
+ */
+struct state_event_pair_hash {
+    size_t operator()(const std::pair<blob_file_gc_state, blob_file_gc_event>& pair) const noexcept {
+        auto h1 = std::hash<int>()(static_cast<int>(pair.first));
+        auto h2 = std::hash<int>()(static_cast<int>(pair.second));
+        return h1 ^ (h2 << 1U);
+    }
+};
+
+/**
  * @brief Manages the state transitions of the BLOB file garbage collector.
  * 
  * This class ensures that state transitions occur in a valid manner and provides
@@ -69,13 +86,16 @@ enum class blob_file_gc_event {
  */
 class blob_file_gc_state_machine {
 public:
+    /**
+     * @brief Snapshot scan mode to distinguish internal or external snapshot scanning.
+     */
     enum class snapshot_scan_mode {
         none,       // Scan not started yet
         internal,   // BLOB file GC executes scan internally
         external    // Accept scan results from external source
     };
 
-    blob_file_gc_state_machine() = default;
+    blob_file_gc_state_machine();
 
     /**
      * @brief Initiates the BLOB file scan.
@@ -106,17 +126,6 @@ public:
     blob_file_gc_state complete_snapshot_scan(snapshot_scan_mode mode);
 
     /**
-     * @brief Receives updates on the snapshot scan progress.
-     * 
-     * This method is used to report BLOB IDs discovered during an external snapshot scan.
-     * Unlike `start_snapshot_scan()`, this method can be called while another scan is in progress.
-     * 
-     * @return The new state after the transition.
-     * @throws std::logic_error if the transition is invalid.
-     */
-    blob_file_gc_state notify_snapshot_scan_progress();
-
-    /**
      * @brief Marks the cleanup process as completed.
      * @return The new state after the transition.
      * @throws std::logic_error if the transition is invalid.
@@ -134,7 +143,7 @@ public:
      *
      * This method resets both the state and snapshot scan mode to their default values.
      */
-    blob_file_gc_state  reset();
+    blob_file_gc_state reset();
 
     /**
      * @brief Retrieves the current state.
@@ -162,6 +171,9 @@ public:
 
     /**
      * @brief Generic method to handle state transitions.
+     * @param event The event that triggers the transition.
+     * @return The new state.
+     * @throws std::logic_error if the transition is invalid.
      */
     blob_file_gc_state transition(blob_file_gc_event event);
 
@@ -181,7 +193,6 @@ public:
      */
     std::optional<blob_file_gc_state> get_next_state_if_valid(blob_file_gc_state current, blob_file_gc_event event) const;
 
-    
     /**
      * @brief Converts a blob_file_gc_event enum value to a human-readable string.
      *
@@ -193,11 +204,17 @@ public:
      */
     static std::string to_string(blob_file_gc_event event);
 
-
 private:
     blob_file_gc_state current_state_ = blob_file_gc_state::not_started; ///< Stores the current state.
-    mutable std::mutex mutex_; ///< Mutex to ensure thread-safe state transitions.
+    mutable std::mutex mutex_;                                          ///< Mutex to ensure thread-safe state transitions.
     snapshot_scan_mode snapshot_scan_mode_ = snapshot_scan_mode::none;
+
+    // Use our custom hasher here instead of a std::hash specialization.
+    std::unordered_map<
+        std::pair<blob_file_gc_state, blob_file_gc_event>,
+        blob_file_gc_state,
+        state_event_pair_hash
+    > state_transition_map_;
 };
 
 } // namespace limestone::internal
