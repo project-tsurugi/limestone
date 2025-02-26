@@ -118,7 +118,7 @@ status datastore::restore(std::string_view from, bool keep_backup) const noexcep
     // If keep_backup is false, remove the backup files.
     try {
         if (!keep_backup) {
-            for (const auto& entry : boost::filesystem::recursive_directory_iterator(from_dir)) {
+            for (const auto& entry : boost::filesystem::directory_iterator(from_dir)) {
                 try {
                     boost::filesystem::remove_all(entry.path());
                 } catch (const boost::filesystem::filesystem_error& ex) {
@@ -134,6 +134,7 @@ status datastore::restore(std::string_view from, bool keep_backup) const noexcep
 }
     
 // prusik erase
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
 status datastore::restore(std::string_view from, std::vector<file_set_entry>& entries) noexcept{
     VLOG_LP(log_debug) << "restore (from prusik) begin, from directory = " << from;
     auto from_dir = boost::filesystem::path(std::string(from));

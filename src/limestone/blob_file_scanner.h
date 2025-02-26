@@ -38,7 +38,7 @@
       * @param resolver The blob_file_resolver instance to use for file resolution.
       */
      explicit blob_file_scanner(const blob_file_resolver& resolver);
- 
+
      /**
       * @brief Iterator class to traverse the identified BLOB files.
       *
@@ -53,45 +53,44 @@
          using difference_type = std::ptrdiff_t;
          using pointer = const boost::filesystem::path*;
          using reference = const boost::filesystem::path&;
- 
+
          /**
           * @brief Default constructor for the iterator.
           *
           * Constructs an end iterator.
           */
          iterator();
- 
+
          /**
           * @brief Constructor with parameters.
           * @param iter The recursive directory iterator pointing to the current file.
           * @param resolver Pointer to the blob_file_resolver for file validation.
           */
-         iterator(const boost::filesystem::recursive_directory_iterator& iter,
-                  const blob_file_resolver* resolver);
- 
+         iterator(boost::filesystem::recursive_directory_iterator iter, const blob_file_resolver* resolver);
+
          /**
           * @brief Pre-increment operator to move to the next BLOB file.
           * @return Reference to the incremented iterator.
           */
          iterator& operator++();
- 
+
          /**
           * @brief Dereference operator to access the current file path.
           * @return The path of the current BLOB file.
           */
          reference operator*() const;
- 
+
          /**
           * @brief Inequality operator to compare iterators.
           * @param other The iterator to compare with.
           * @return True if iterators are not equal, false otherwise.
           */
          bool operator!=(const iterator& other) const;
- 
+
      private:
-         boost::filesystem::recursive_directory_iterator iter_; ///< Directory iterator.
-         const blob_file_resolver* resolver_; ///< Pointer to the resolver for file validation.
- 
+         boost::filesystem::recursive_directory_iterator iter_;  ///< Directory iterator.
+         const blob_file_resolver* resolver_;                    ///< Pointer to the resolver for file validation.
+
          /**
           * @brief Advances the iterator to the next valid BLOB file.
           *
@@ -99,22 +98,22 @@
           */
          void skip_non_blob_files();
      };
- 
+
      /**
       * @brief Returns an iterator to the beginning of the BLOB files sequence.
       * @return An iterator pointing to the first valid BLOB file.
       */
-     iterator begin() const;
- 
+     [[nodiscard]] iterator begin() const;
+
      /**
       * @brief Returns an iterator to the end of the BLOB files sequence.
       * @return An iterator representing the end of the sequence.
       */
-     iterator end() const;
- 
+     [[nodiscard]] iterator end() const;
+
  private:
-     const blob_file_resolver& resolver_; ///< Reference to the blob_file_resolver instance.
+     const blob_file_resolver& resolver_;  ///< Reference to the blob_file_resolver instance.
  };
- 
+
  } // namespace limestone::internal
  

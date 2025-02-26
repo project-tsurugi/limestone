@@ -477,6 +477,7 @@ TEST_F(rotate_test, get_snapshot_works) { // NOLINT
 
 TEST_F(rotate_test, begin_backup_includes_blob_entries) {
     datastore_->ready();
+    datastore_->switch_epoch(1);
     // Acquire the blob pool from datastore and register data via datastore API.
     auto pool = datastore_->acquire_blob_pool();
     std::string data1 = "test data";

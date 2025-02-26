@@ -24,9 +24,13 @@ namespace limestone::internal {
 
 blob_file_scanner::blob_file_scanner(const blob_file_resolver& resolver) : resolver_(resolver) {}
 
-blob_file_scanner::iterator::iterator() : iter_(), resolver_(nullptr) {}
+blob_file_scanner::iterator::iterator() : resolver_(nullptr) {}
 
-blob_file_scanner::iterator::iterator(const boost::filesystem::recursive_directory_iterator& iter, const blob_file_resolver* resolver) : iter_(iter), resolver_(resolver) { skip_non_blob_files(); }
+blob_file_scanner::iterator::iterator(boost::filesystem::recursive_directory_iterator iter, const blob_file_resolver* resolver)
+    : iter_(std::move(iter)), resolver_(resolver)
+{
+    skip_non_blob_files();
+}
 
 blob_file_scanner::iterator& blob_file_scanner::iterator::operator++() {
     ++iter_;
@@ -51,12 +55,12 @@ blob_file_scanner::iterator& blob_file_scanner::iterator::operator++() {
      }
  }
  
- blob_file_scanner::iterator blob_file_scanner::begin() const {
-     return iterator(boost::filesystem::recursive_directory_iterator(resolver_.get_blob_root()), &resolver_);
- }
+blob_file_scanner::iterator blob_file_scanner::begin() const {
+     return iterator{boost::filesystem::recursive_directory_iterator(resolver_.get_blob_root()), &resolver_};
+}
  
  blob_file_scanner::iterator blob_file_scanner::end() const {
-     return iterator();
+     return {};
  }
 
  }  // namespace limestone::internal
