@@ -37,6 +37,7 @@
 #include "blob_pool_impl.h"
 #include "blob_file_garbage_collector.h"
 #include "blob_file_gc_snapshot.h"
+#include "blob_file_scanner.h"
 
 namespace limestone::api {
 using namespace limestone::internal;
@@ -416,6 +417,13 @@ std::future<void> datastore::shutdown() noexcept {
 backup& datastore::begin_backup() {
     try {
         auto tmp_files = get_files();
+        
+        // Use blob_file_scanner to add blob files to the backup target
+        blob_file_scanner scanner(*blob_file_resolver_);
+        for (const auto& blob_file : scanner) {
+            tmp_files.insert(blob_file);
+        }
+        
         backup_ = std::unique_ptr<backup>(new backup(tmp_files));
         return *backup_;
     } catch (...) {
@@ -423,6 +431,7 @@ backup& datastore::begin_backup() {
     }
     return *backup_; // Required to satisfy the compiler
 }
+
 
 std::unique_ptr<backup_detail> datastore::begin_backup(backup_type btype) {  // NOLINT(readability-function-cognitive-complexity)
     try {
@@ -506,6 +515,18 @@ std::unique_ptr<backup_detail> datastore::begin_backup(backup_type btype) {  // 
                 }
             }
         }
+        // Add blob files to the backup target
+        blob_file_scanner scanner(*blob_file_resolver_);
+        boost::filesystem::path blob_root_path = blob_file_resolver_->get_blob_root();
+        for (const auto& blob_file_path : scanner) {
+            boost::system::error_code ec;
+            boost::filesystem::path rel_path = boost::filesystem::relative(blob_file_path, blob_root_path, ec);
+            if (ec) {
+                LOG_AND_THROW_IO_EXCEPTION("Failed to get relative path for blob file: " + blob_file_path.string(), ec);
+            }
+            entries.emplace_back(blob_file_path.string(), rel_path.string(), false, false);
+        }
+
         return std::unique_ptr<backup_detail>(new backup_detail(entries, epoch_id_switched_.load()));
     } catch (...) {
         HANDLE_EXCEPTION_AND_ABORT();
