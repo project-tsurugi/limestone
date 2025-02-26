@@ -14,20 +14,26 @@
 #include "limestone/api/limestone_exception.h"
 #include "limestone_exception_helper.h"
 
-using limestone::api::limestone_exception;
 
 #define LOGFORMAT_VER 2
 
 namespace limestone::testing {
 
+using namespace limestone::api;
+
 inline constexpr const char* location = "/tmp/rotate_test";
+inline constexpr const char* location_backup = "/tmp/rotate_test_backup";
 
 class rotate_test : public ::testing::Test {
 public:
     void SetUp() {
         limestone::testing::enable_exception_throwing = true;
         boost::filesystem::remove_all(location);
+        boost::filesystem::remove_all(location_backup);
         if (!boost::filesystem::create_directory(location)) {
+            std::cerr << "cannot make directory" << std::endl;
+        }
+        if (!boost::filesystem::create_directory(location_backup)) {
             std::cerr << "cannot make directory" << std::endl;
         }
 #if LOGFORMAT_VER >=1
@@ -42,7 +48,7 @@ public:
         data_locations.emplace_back(location);
         boost::filesystem::path metadata_location{location};
         limestone::api::configuration conf(data_locations, metadata_location);
-
+        datastore_= nullptr;
         datastore_ = std::make_unique<limestone::api::datastore_test>(conf);
     }
 
@@ -50,6 +56,7 @@ public:
         limestone::testing::enable_exception_throwing = false;
         datastore_ = nullptr;
         boost::filesystem::remove_all(location);
+        boost::filesystem::remove_all(location_backup);
     }
 
     bool starts_with(std::string a, std::string b) { return a.substr(0, b.length()) == b; }
@@ -467,5 +474,358 @@ TEST_F(rotate_test, get_snapshot_works) { // NOLINT
     EXPECT_FALSE(cursor->next());
     datastore_->shutdown();
 }
+
+TEST_F(rotate_test, begin_backup_includes_blob_entries) {
+    datastore_->ready();
+    // Acquire the blob pool from datastore and register data via datastore API.
+    auto pool = datastore_->acquire_blob_pool();
+    std::string data1 = "test data";
+    std::string data2 = "more test data";
+    blob_id_type blob_id1 = pool->register_data(data1);
+    blob_id_type blob_id2 = pool->register_data(data2);
+
+    // Retrieve the corresponding BLOB file paths using the datastore API.
+    boost::filesystem::path blob_path1 = datastore_->get_blob_file(blob_id1).path();
+    boost::filesystem::path blob_path2 = datastore_->get_blob_file(blob_id2).path();
+
+
+    // Execute backup using the helper method to run backup while switching epochs.
+    std::unique_ptr<backup_detail> bd = run_backup_with_epoch_switch(backup_type::standard, 44);
+
+    // Get blob_root.
+    boost::filesystem::path blob_root = boost::filesystem::path(location) / "blob";
+    ASSERT_TRUE(boost::filesystem::exists(blob_root));
+
+    // Verify: Check that the backup_detail entries include the expected BLOB file entries.
+    auto entries = bd->entries();
+    bool found_blob1 = false;
+    bool found_blob2 = false;
+    for (const auto &entry : entries) {
+        if (entry.source_path() == blob_path1) {
+            found_blob1 = true;
+            // Verify that destination_path is relative (i.e. not absolute).
+            EXPECT_FALSE(boost::filesystem::path(entry.destination_path()).is_absolute());
+            // Verify that blob_root / destination_path equals source_path.
+            boost::filesystem::path calculated_source = blob_root.parent_path() / entry.destination_path();
+            EXPECT_EQ(calculated_source, entry.source_path());
+            // Verify that is_mutable and is_detached are false.
+            EXPECT_FALSE(entry.is_mutable());
+            EXPECT_FALSE(entry.is_detached());
+        } else if (entry.source_path() == blob_path2) {
+            found_blob2 = true;
+            EXPECT_FALSE(boost::filesystem::path(entry.destination_path()).is_absolute());
+            boost::filesystem::path calculated_source = blob_root.parent_path() / entry.destination_path();
+            EXPECT_EQ(calculated_source, entry.source_path());
+            EXPECT_FALSE(entry.is_mutable());
+            EXPECT_FALSE(entry.is_detached());
+        }
+    }
+    EXPECT_TRUE(found_blob1) << "BLOB file entry for blob_id1 was not found in backup_detail entries.";
+    EXPECT_TRUE(found_blob2) << "BLOB file entry for blob_id2 was not found in backup_detail entries.";
+}
+
+TEST_F(rotate_test, begin_backup_without_argument_includes_blob_entries) {
+    datastore_->ready();
+
+    // Prepare: Acquire the blob pool and register data via datastore API.
+    auto pool = datastore_->acquire_blob_pool();
+    std::string data1 = "test data";
+    std::string data2 = "more test data";
+    blob_id_type blob_id1 = pool->register_data(data1);
+    blob_id_type blob_id2 = pool->register_data(data2);
+
+    // Retrieve the corresponding BLOB file paths using the datastore API.
+    boost::filesystem::path blob_path1 = datastore_->get_blob_file(blob_id1).path();
+    boost::filesystem::path blob_path2 = datastore_->get_blob_file(blob_id2).path();
+
+    // Get blob_root from the blob_file_resolver.
+    boost::filesystem::path blob_root = boost::filesystem::path(location) / "blob";
+    ASSERT_TRUE(boost::filesystem::exists(blob_root)) << "Blob root does not exist.";
+
+    // Execute: Directly call begin_backup() without arguments.
+    backup& bk = datastore_->begin_backup();
+
+    // Get the list of files from the backup object.
+    auto files = bk.files();
+
+    // Verify: Check that the backup files include the expected BLOB file entries.
+    bool found_blob1 = false;
+    bool found_blob2 = false;
+    for (const auto &file : files) {
+        if (file == blob_path1) {
+            found_blob1 = true;
+        } else if (file == blob_path2) {
+            found_blob2 = true;
+        }
+    }
+    EXPECT_TRUE(found_blob1) << "BLOB file for blob_id1 was not found in backup files.";
+    EXPECT_TRUE(found_blob2) << "BLOB file for blob_id2 was not found in backup files.";
+}
+
+
+TEST_F(rotate_test, restore_file_set_entries_with_blob) {
+    // Scenario:
+    // 1. Server start, create channels and write some log entries.
+    // 2. Server restart with fewer channels.
+    // 3. Rotate and perform backup.
+    //    => Check: All files, including BLOB files, are included in the backup target.
+    // 4. Move the backup directory from 'location' to 'location_backup/bk1'.
+    // 5. Restore files from backup using file_set_entry vector built from backup_entries.
+    // 6. Verify that the restored files in 'location' match those in 'location_backup/bk1'.
+
+    // Step 1: Setup log channels, write log entries, and register a BLOB file.
+    {
+        log_channel& channel1_0 = datastore_->create_channel(boost::filesystem::path(location));  // pwal_0000
+        log_channel& channel1_1 = datastore_->create_channel(boost::filesystem::path(location));  // pwal_0001
+        log_channel& unused_1_2 = datastore_->create_channel(boost::filesystem::path(location));   // pwal_0002 unused
+
+        datastore_->ready();
+        datastore_->switch_epoch(42);
+
+        channel1_0.begin_session();
+        channel1_0.add_entry(2, "k0", "v0", {42, 4});
+        channel1_0.end_session();
+
+        channel1_1.begin_session();
+        channel1_1.add_entry(2, "k1", "v1", {42, 4});
+        channel1_1.end_session();
+
+        // Also, register a BLOB file via datastore API.
+        auto blob_pool = datastore_->acquire_blob_pool();
+        std::string blob_data = "blob initial data";
+        blob_id_type blob_id_initial = blob_pool->register_data(blob_data);
+        // The BLOB file is created internally via the API.
+
+        datastore_->switch_epoch(43);
+        datastore_->shutdown();
+    }
+
+    // Step 2: Simulate server restart with fewer channels.
+    regen_datastore();
+    {
+        log_channel& channel2_0 = datastore_->create_channel(boost::filesystem::path(location));  // pwal_0000
+        log_channel& unused_2_1 = datastore_->create_channel(boost::filesystem::path(location));  // pwal_0001 unused
+        log_channel& unused_2_2 = datastore_->create_channel(boost::filesystem::path(location));  // pwal_0002 unused
+
+        datastore_->ready();
+        datastore_->switch_epoch(44);
+
+        channel2_0.begin_session();
+        channel2_0.add_entry(2, "k3", "v3", {44, 4});
+        channel2_0.end_session();
+
+        datastore_->switch_epoch(45);
+        datastore_->shutdown();
+    }
+
+    // Step 3: Perform backup (rotate and backup) using run_backup_with_epoch_switch.
+    std::unique_ptr<backup_detail> bd = run_backup_with_epoch_switch(backup_type::standard, 46);
+    auto backup_entries = bd->entries();
+
+    // At this point, the backup target files are located in 'location'.
+
+    // Step 4: Move the backup directory from 'location' to 'location_backup/bk1'.
+    boost::filesystem::path backup_src = boost::filesystem::path(location);
+    boost::filesystem::path backup_dest = boost::filesystem::path(location_backup) / "bk1";
+    boost::filesystem::remove_all(backup_dest);
+    boost::filesystem::rename(backup_src, backup_dest);
+
+    // Step 5: Build file_set_entry vector based on backup_entries.
+    // This ensures we are using the backup file list obtained in Step 3.
+    std::vector<file_set_entry> fs_entries;
+    for (const auto& entry : backup_entries) {
+        std::cerr << "entry.source_path(): " << entry.source_path() << ", entry.destination_path(): " << entry.destination_path() << std::endl;
+        // For restore, the source file is located at backup_dest / entry.destination_path()
+        boost::filesystem::path src = backup_dest / entry.destination_path();
+        // The destination remains the relative path.
+        std::string dst = entry.destination_path().string();
+        std::cerr << "src: " << src << " dst: " << dst << std::endl;
+        fs_entries.emplace_back(src, dst, false);
+    }
+
+    // Before restore, recreate the original location directory.
+    ASSERT_TRUE(boost::filesystem::create_directory(location));
+
+    // Call the restore API using the file_set_entry vector.
+    status st = datastore_->restore(backup_dest.string(), fs_entries);
+    EXPECT_EQ(st, status::ok) << "Restore operation failed.";
+
+    // Step 6: Verify that the restored files in 'location' match those in 'backup_dest'.
+    std::set<std::string> restored_files;
+    std::set<std::string> backup_files;
+    // Recursively scan the restored directory.
+    for (const auto& entry : boost::filesystem::recursive_directory_iterator(boost::filesystem::path(location))) {
+        if (boost::filesystem::is_regular_file(entry)) {
+            std::string relative_path = boost::filesystem::relative(entry.path(), location).string();
+            restored_files.insert(relative_path);
+        }
+    }
+
+    // Recursively scan the backup destination directory.
+    for (const auto& entry : boost::filesystem::recursive_directory_iterator(backup_dest)) {
+        if (boost::filesystem::is_regular_file(entry)) {
+            std::string relative_path = boost::filesystem::relative(entry.path(), backup_dest).string();
+            // Exclude "epoch" files and "datas/snapshot" directory
+            if (entry.path().filename().string() == "epoch" || relative_path.find("data/snapshot") == 0) continue;
+            backup_files.insert(relative_path);
+        }
+    }
+    EXPECT_EQ(restored_files, backup_files) << "The restored files do not match the backup files.";
+
+    // Additionally, verify binary-level equality for each file.
+    for (const auto& filename : backup_files) {
+        boost::filesystem::path backup_file = backup_dest / filename;
+        boost::filesystem::path restored_file = boost::filesystem::path(location) / filename;
+
+        std::ifstream backup_ifs(backup_file.string(), std::ios::binary);
+        std::ifstream restored_ifs(restored_file.string(), std::ios::binary);
+        ASSERT_TRUE(backup_ifs.good()) << "Failed to open backup file: " << backup_file.string();
+        ASSERT_TRUE(restored_ifs.good()) << "Failed to open restored file: " << restored_file.string();
+
+        std::vector<char> backup_content((std::istreambuf_iterator<char>(backup_ifs)),
+                                         std::istreambuf_iterator<char>());
+        std::vector<char> restored_content((std::istreambuf_iterator<char>(restored_ifs)),
+                                           std::istreambuf_iterator<char>());
+
+        EXPECT_EQ(backup_content, restored_content) << "File content mismatch for " << filename;
+    }
+}
+
+TEST_F(rotate_test, restore_from_directory_with_blob) {
+    // Scenario:
+    // 1. Server start: Create channels, write log entries, and register a BLOB file.
+    // 2. Server restart with fewer channels.
+    // 3. Perform backup using the no-argument begin_backup().
+    //    => Verify: All files, including BLOB files, are included in the backup target.
+    // 4. Copy backup files from 'location' to 'location_backup/bk1' using the backup list.
+    // 5. Restore files from the backup directory using the restore API.
+    // 6. Verify that the restored files in 'location' match those in 'location_backup/bk1'.
+
+    // Step 1: Setup log channels, write log entries, and register a BLOB file.
+    {
+        log_channel& channel1_0 = datastore_->create_channel(boost::filesystem::path(location)); // pwal_0000
+        log_channel& channel1_1 = datastore_->create_channel(boost::filesystem::path(location)); // pwal_0001
+        log_channel& unused_1_2 = datastore_->create_channel(boost::filesystem::path(location));  // pwal_0002 (unused)
+
+        datastore_->ready();
+        datastore_->switch_epoch(42);
+
+        channel1_0.begin_session();
+        channel1_0.add_entry(2, "k0", "v0", {42, 4});
+        channel1_0.end_session();
+
+        channel1_1.begin_session();
+        channel1_1.add_entry(2, "k1", "v1", {42, 4});
+        channel1_1.end_session();
+
+        // Also, register a BLOB file via datastore API.
+        auto blob_pool = datastore_->acquire_blob_pool();
+        std::string blob_data = "blob initial data";
+        blob_id_type blob_id_initial = blob_pool->register_data(blob_data);
+        // To ensure the BLOB file isn't GC-deleted, add an entry referencing it.
+        channel1_1.begin_session();
+        channel1_1.add_entry(2, "k2", "v2", {42, 5}, {blob_id_initial});
+        channel1_1.end_session();
+
+        datastore_->switch_epoch(43);
+        datastore_->shutdown();
+    }
+
+    // Step 2: Simulate server restart with fewer channels.
+    regen_datastore();
+    {
+        log_channel& channel2_0 = datastore_->create_channel(boost::filesystem::path(location)); // pwal_0000
+        log_channel& unused_2_1 = datastore_->create_channel(boost::filesystem::path(location)); // pwal_0001 (unused)
+        log_channel& unused_2_2 = datastore_->create_channel(boost::filesystem::path(location)); // pwal_0002 (unused)
+
+        datastore_->ready();
+        datastore_->switch_epoch(44);
+
+        channel2_0.begin_session();
+        channel2_0.add_entry(2, "k3", "v3", {44, 4});
+        channel2_0.end_session();
+
+        datastore_->switch_epoch(45);
+        datastore_->shutdown();
+    }
+
+    // Step 3: Perform backup using the no-argument begin_backup().
+    backup& backup_obj = datastore_->begin_backup();
+    // Obtain the backup file list from the backup object.
+    // (backup_obj.files() returns a std::vector<boost::filesystem::path>)
+    auto backup_files_list = backup_obj.files();
+
+    // Step 4: Copy backup files from 'location' to 'location_backup/bk1'
+    boost::filesystem::path backup_dest = boost::filesystem::path(location_backup) / "bk1";
+    boost::filesystem::remove_all(backup_dest);
+    ASSERT_TRUE(boost::filesystem::create_directory(backup_dest));
+    for (const auto& file : backup_files_list) {
+        // 'file' is an absolute path in 'location'
+        boost::filesystem::path rel_path = boost::filesystem::relative(file, boost::filesystem::path(location));
+        boost::filesystem::path dest_file = backup_dest / rel_path;
+        boost::filesystem::create_directories(dest_file.parent_path());
+        try {
+            boost::filesystem::copy_file(file, dest_file);
+        } catch (const boost::filesystem::filesystem_error& ex) {
+            FAIL() << "Failed to copy file " << file.string() << " to " << dest_file.string()
+                   << ": " << ex.what();
+        }
+    }
+
+    // Step 5: Restore files from the backup directory using the restore API.
+    // Remove the original 'location' and recreate it.
+    boost::filesystem::remove_all(location);
+    ASSERT_TRUE(boost::filesystem::create_directory(location));
+
+    // Note: restore(from, bool) expects the backup directory path and a flag to keep the backup.
+    // Here, we pass the backup directory (backup_dest.string()).
+    status st = datastore_->restore(backup_dest.string(), true);
+    EXPECT_EQ(st, status::ok) << "Restore operation failed.";
+
+    // Step 6: Verify that the restored files in 'location' match those in 'backup_dest'.
+    std::set<std::string> restored_files;
+    std::set<std::string> expected_files;
+
+    // Recursively scan the restored directory.
+    for (const auto& entry : boost::filesystem::recursive_directory_iterator(boost::filesystem::path(location))) {
+        if (boost::filesystem::is_regular_file(entry)) {
+            std::string rel = boost::filesystem::relative(entry.path(), location).string();
+            // Exclude files that are not part of the backup target.
+            if (entry.path().filename().string() == "epoch" || rel.find("datas/snapshot") == 0)
+                continue;
+            restored_files.insert(rel);
+        }
+    }
+
+    // Recursively scan the backup destination directory.
+    for (const auto& entry : boost::filesystem::recursive_directory_iterator(backup_dest)) {
+        if (boost::filesystem::is_regular_file(entry)) {
+            std::string rel = boost::filesystem::relative(entry.path(), backup_dest).string();
+            if (entry.path().filename().string() == "epoch" || rel.find("datas/snapshot") == 0)
+                continue;
+            expected_files.insert(rel);
+        }
+    }
+    EXPECT_EQ(restored_files, expected_files) << "The restored files do not match the backup files.";
+
+    // Additionally, verify binary-level equality for each file.
+    for (const auto& filename : expected_files) {
+        boost::filesystem::path backup_file = backup_dest / filename;
+        boost::filesystem::path restored_file = boost::filesystem::path(location) / filename;
+
+        std::ifstream backup_ifs(backup_file.string(), std::ios::binary);
+        std::ifstream restored_ifs(restored_file.string(), std::ios::binary);
+        ASSERT_TRUE(backup_ifs.good()) << "Failed to open backup file: " << backup_file.string();
+        ASSERT_TRUE(restored_ifs.good()) << "Failed to open restored file: " << restored_file.string();
+
+        std::vector<char> backup_content((std::istreambuf_iterator<char>(backup_ifs)),
+                                         std::istreambuf_iterator<char>());
+        std::vector<char> restored_content((std::istreambuf_iterator<char>(restored_ifs)),
+                                           std::istreambuf_iterator<char>());
+
+        EXPECT_EQ(backup_content, restored_content) << "File content mismatch for " << filename;
+    }
+}
+
 
 }  // namespace limestone::testing

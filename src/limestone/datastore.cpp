@@ -517,15 +517,18 @@ std::unique_ptr<backup_detail> datastore::begin_backup(backup_type btype) {  // 
         }
         // Add blob files to the backup target
         blob_file_scanner scanner(*blob_file_resolver_);
-        boost::filesystem::path blob_root_path = blob_file_resolver_->get_blob_root();
+        // Use the parent of the blob root as the base for computing the relative path.
+        boost::filesystem::path backup_root = blob_file_resolver_->get_blob_root().parent_path();
         for (const auto& blob_file_path : scanner) {
             boost::system::error_code ec;
-            boost::filesystem::path rel_path = boost::filesystem::relative(blob_file_path, blob_root_path, ec);
+            // Compute relative path with respect to backup_root so that the "blob" directory remains.
+            boost::filesystem::path rel_path = boost::filesystem::relative(blob_file_path, backup_root, ec);
             if (ec) {
                 LOG_AND_THROW_IO_EXCEPTION("Failed to get relative path for blob file: " + blob_file_path.string(), ec);
             }
             entries.emplace_back(blob_file_path.string(), rel_path.string(), false, false);
         }
+        
 
         return std::unique_ptr<backup_detail>(new backup_detail(entries, epoch_id_switched_.load()));
     } catch (...) {

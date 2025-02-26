@@ -69,7 +69,7 @@ status datastore::restore(std::string_view from, bool keep_backup) const noexcep
     VLOG_LP(log_debug) << "restore begin, from directory = " << from << " , keep_backup = " << std::boolalpha << keep_backup;
     auto from_dir = boost::filesystem::path(std::string(from));
 
-    // log_dir version check
+    // Log directory version check: ensure the manifest file exists.
     boost::filesystem::path manifest_path = from_dir / std::string(internal::manifest_file_name);
     try {
         if (!boost::filesystem::exists(manifest_path)) {
@@ -85,37 +85,55 @@ status datastore::restore(std::string_view from, bool keep_backup) const noexcep
 
     if (auto rc = internal::purge_dir(location_); rc != status::ok) { return rc; }
 
+    // Recursively copy files from the backup directory (from_dir) to the current location.
     try {
-        for (const boost::filesystem::path& p : boost::filesystem::directory_iterator(from_dir)) {
+        boost::system::error_code ec;
+        for (const auto& entry : boost::filesystem::recursive_directory_iterator(from_dir)) {
+            if (!boost::filesystem::is_regular_file(entry)) {
+                continue;
+            }
+            // Compute relative path from the backup root (from_dir) to this file.
+            boost::filesystem::path rel_path = boost::filesystem::relative(entry.path(), from_dir, ec);
+            if (ec) {
+                LOG_LP(ERROR) << "Failed to compute relative path for file: " 
+                                << entry.path().string() << " : " << ec.message();
+                return status::err_permission_error;
+            }
+            // Build the destination file path: location_ / relative path.
+            boost::filesystem::path dest_file = location_ / rel_path;
+            // Ensure that the destination directory exists.
+            boost::filesystem::create_directories(dest_file.parent_path());
             try {
-                boost::filesystem::copy_file(p, location_ / p.filename());
-            } catch (boost::filesystem::filesystem_error& ex) {
-                LOG_LP(ERROR) << ex.what() << " file = " << p.string();
+                boost::filesystem::copy_file(entry.path(), dest_file);
+            } catch (const boost::filesystem::filesystem_error& ex) {
+                LOG_LP(ERROR) << ex.what() << " file = " << entry.path().string();
                 return status::err_permission_error;
             }
         }
     } catch (const boost::filesystem::filesystem_error& ex) {
-        LOG_LP(ERROR) << "Failed to iterate directory: " << ex.what();
+        LOG_LP(ERROR) << "Failed to iterate backup directory recursively: " << ex.what();
         return status::err_permission_error;
     }
+
+    // If keep_backup is false, remove the backup files.
     try {
         if (!keep_backup) {
-            for (const boost::filesystem::path& p : boost::filesystem::directory_iterator(from_dir)) {
+            for (const auto& entry : boost::filesystem::recursive_directory_iterator(from_dir)) {
                 try {
-                    boost::filesystem::remove(p);
-                } catch (boost::filesystem::filesystem_error& ex) {
-                    LOG_LP(WARNING) << ex.what() << " file = " << p.string();
+                    boost::filesystem::remove_all(entry.path());
+                } catch (const boost::filesystem::filesystem_error& ex) {
+                    LOG_LP(WARNING) << ex.what() << " file = " << entry.path().string();
                 }
             }
         }
     } catch (const boost::filesystem::filesystem_error& ex) {
-        LOG_LP(ERROR) << "Failed to iterate directory: " << ex.what();
+        LOG_LP(ERROR) << "Failed to iterate backup directory for removal: " << ex.what();
         return status::err_permission_error;
     }
     return status::ok;
 }
-
-// prusik era
+    
+// prusik erase
 status datastore::restore(std::string_view from, std::vector<file_set_entry>& entries) noexcept{
     VLOG_LP(log_debug) << "restore (from prusik) begin, from directory = " << from;
     auto from_dir = boost::filesystem::path(std::string(from));
@@ -169,6 +187,11 @@ status datastore::restore(std::string_view from, std::vector<file_set_entry>& en
             return status::err_not_found;
         }
         try {
+            boost::filesystem::path full_dst = location_ / dst;
+            boost::filesystem::path dst_dir = full_dst.parent_path();
+            if (!boost::filesystem::exists(dst_dir)) {
+                boost::filesystem::create_directories(dst_dir);
+            }            
             boost::filesystem::copy_file(src, location_ / dst);
         } catch (boost::filesystem::filesystem_error& ex) {
             LOG_LP(ERROR) << ex.what() << " file = " << src.string();

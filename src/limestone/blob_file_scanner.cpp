@@ -14,28 +14,24 @@
  * limitations under the License.
  */
 
- #include "blob_file_scanner.h"
- #include "blob_file_resolver.h"
- 
- namespace limestone::internal {
- 
- blob_file_scanner::blob_file_scanner(const blob_file_resolver& resolver)
-     : resolver_(resolver) {}
- 
- blob_file_scanner::iterator::iterator()
-     : iter_(), resolver_(nullptr) {}
- 
- blob_file_scanner::iterator::iterator(
-     const boost::filesystem::recursive_directory_iterator& iter,
-     const blob_file_resolver* resolver)
-     : iter_(iter), resolver_(resolver) {
-     skip_non_blob_files();
- }
- 
- blob_file_scanner::iterator& blob_file_scanner::iterator::operator++() {
-     ++iter_;
-     skip_non_blob_files();
-     return *this;
+#include "blob_file_scanner.h"
+
+#include "blob_file_resolver.h"
+#include "limestone/logging.h"
+#include "logging_helper.h"
+
+namespace limestone::internal {
+
+blob_file_scanner::blob_file_scanner(const blob_file_resolver& resolver) : resolver_(resolver) {}
+
+blob_file_scanner::iterator::iterator() : iter_(), resolver_(nullptr) {}
+
+blob_file_scanner::iterator::iterator(const boost::filesystem::recursive_directory_iterator& iter, const blob_file_resolver* resolver) : iter_(iter), resolver_(resolver) { skip_non_blob_files(); }
+
+blob_file_scanner::iterator& blob_file_scanner::iterator::operator++() {
+    ++iter_;
+    skip_non_blob_files();
+    return *this;
  }
  
  blob_file_scanner::iterator::reference
@@ -62,6 +58,6 @@
  blob_file_scanner::iterator blob_file_scanner::end() const {
      return iterator();
  }
- 
- } // namespace limestone::internal
+
+ }  // namespace limestone::internal
  
