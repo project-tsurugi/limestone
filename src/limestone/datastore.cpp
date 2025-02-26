@@ -195,6 +195,7 @@ void datastore::write_epoch_to_file(epoch_id_type epoch_id) {
 }
 
 void datastore::ready() {
+    TRACE_START;
     try {
         blob_id_type max_blob_id =  create_snapshot_and_get_max_blob_id();
         if (max_blob_id < compaction_catalog_->get_max_blob_id()) {
@@ -215,6 +216,7 @@ void datastore::ready() {
         }
         cleanup_rotated_epoch_files(location_);
         state_ = state::ready;
+        TRACE_END;
     } catch (...) {
         HANDLE_EXCEPTION_AND_ABORT();
     }
