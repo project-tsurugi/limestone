@@ -15,6 +15,7 @@
  */
  
  #include "blob_file_garbage_collector.h"
+ #include "blob_file_scanner.h"
  #include "logging_helper.h"
  #include "cursor_impl.h"
  #include "log_entry.h"
@@ -71,39 +72,31 @@
  }
 
  void blob_file_garbage_collector::scan_directory() {
-     pthread_setname_np(pthread_self(), "lstone_scan_blb");
-     try {
-         // Obtain the root directory from the resolver.
-         boost::filesystem::path root = resolver_->get_blob_root();
-  
-         // Iterate recursively over the root directory.
-         for (boost::filesystem::recursive_directory_iterator it(root), end; it != end; ++it) {
+    pthread_setname_np(pthread_self(), "lstone_scan_blb");
+    try {
+        // Initialize blob_file_scanner with the resolver
+        blob_file_scanner scanner(*resolver_);
+
+        // Iterate over each blob file using the scanner
+        for (const auto& file_path : scanner) {
             if (shutdown_requested_.load(std::memory_order_acquire)) {
                 break;
             }
-            if (boost::filesystem::is_regular_file(it->path())) {
-                 const boost::filesystem::path& file_path = it->path();
-  
-                 // Use blob_file_resolver's function to check if this file is a valid blob file.
-                 if (!resolver_->is_blob_file(file_path)) {
-                     continue;
-                 }
-  
-                 blob_id_type id = resolver_->extract_blob_id(file_path);
-                 VLOG_LP(log_trace) << "Scanned blob file: " << file_path.string();
-                 if (id <= max_existing_blob_id_) {
-                     scanned_blobs_->add_blob_id(id);
-                     VLOG_LP(log_trace) << "Added blob id: " << id;
-                 }
-             }
-         }
-         VLOG_LP(log_trace) << "Blob file scan complete.";
-     } catch (const std::exception &e) {
-         LOG_LP(ERROR) << "Exception in blob_file_garbage_collector::scan_directory: " << e.what();
-     }
-     state_machine_.complete_blob_scan();
-     blob_file_scan_cv_.notify_all();
- }
+
+            blob_id_type id = resolver_->extract_blob_id(file_path);
+            VLOG_LP(log_trace) << "Scanned blob file: " << file_path.string();
+            if (id <= max_existing_blob_id_) {
+                scanned_blobs_->add_blob_id(id);
+                VLOG_LP(log_trace) << "Added blob id: " << id;
+            }
+        }
+        VLOG_LP(log_trace) << "Blob file scan complete.";
+    } catch (const std::exception &e) {
+        LOG_LP(ERROR) << "Exception in blob_file_garbage_collector::scan_directory: " << e.what();
+    }
+    state_machine_.complete_blob_scan();
+    blob_file_scan_cv_.notify_all();
+}
   
  void blob_file_garbage_collector::add_gc_exempt_blob_id(blob_id_type id) {
     VLOG_LP(log_trace) << "Adding blob id to gc_exempt_blob_: " << id;
