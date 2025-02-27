@@ -160,7 +160,7 @@ void log_channel::add_storage(storage_id_type storage_id, write_version_type wri
         TRACE_ABORT;
         HANDLE_EXCEPTION_AND_ABORT();
     }
-    VLOG(50) << "end add_storage() with storage_id=" << storage_id << ", epoch =" << write_version.epoch_number_ << ", minor =" << write_version.minor_write_version_;
+    VLOG(log_trace_fine) << "end add_storage() with storage_id=" << storage_id << ", epoch =" << write_version.epoch_number_ << ", minor =" << write_version.minor_write_version_;
 }
 
 void log_channel::remove_storage(storage_id_type storage_id, write_version_type write_version) {

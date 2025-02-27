@@ -15,6 +15,7 @@
  */
  
  #include "blob_file_garbage_collector.h"
+ #include "blob_file_scanner.h"
  #include "logging_helper.h"
  #include "cursor_impl.h"
  #include "log_entry.h"
@@ -71,42 +72,34 @@
  }
 
  void blob_file_garbage_collector::scan_directory() {
-     pthread_setname_np(pthread_self(), "lstone_scan_blb");
-     try {
-         // Obtain the root directory from the resolver.
-         boost::filesystem::path root = resolver_->get_blob_root();
-  
-         // Iterate recursively over the root directory.
-         for (boost::filesystem::recursive_directory_iterator it(root), end; it != end; ++it) {
+    pthread_setname_np(pthread_self(), "lstone_scan_blb");
+    try {
+        // Initialize blob_file_scanner with the resolver
+        blob_file_scanner scanner(*resolver_);
+
+        // Iterate over each blob file using the scanner
+        for (const auto& file_path : scanner) {
             if (shutdown_requested_.load(std::memory_order_acquire)) {
                 break;
             }
-            if (boost::filesystem::is_regular_file(it->path())) {
-                 const boost::filesystem::path& file_path = it->path();
-  
-                 // Use blob_file_resolver's function to check if this file is a valid blob file.
-                 if (!resolver_->is_blob_file(file_path)) {
-                     continue;
-                 }
-  
-                 blob_id_type id = resolver_->extract_blob_id(file_path);
-                 VLOG_LP(log_trace_fine) << "Scanned blob file: " << file_path.string();
-                 if (id <= max_existing_blob_id_) {
-                     scanned_blobs_->add_blob_id(id);
-                     VLOG_LP(log_trace_fine) << "Added blob id: " << id;
-                 }
-             }
-         }
-         VLOG_LP(log_trace_fine) << "Blob file scan complete.";
-     } catch (const std::exception &e) {
-         LOG_LP(ERROR) << "Exception in blob_file_garbage_collector::scan_directory: " << e.what();
-     }
-     state_machine_.complete_blob_scan();
-     blob_file_scan_cv_.notify_all();
- }
+
+            blob_id_type id = resolver_->extract_blob_id(file_path);
+            VLOG_LP(log_trace) << "Scanned blob file: " << file_path.string();
+            if (id <= max_existing_blob_id_) {
+                scanned_blobs_->add_blob_id(id);
+                VLOG_LP(log_trace) << "Added blob id: " << id;
+            }
+        }
+        VLOG_LP(log_trace) << "Blob file scan complete.";
+    } catch (const std::exception &e) {
+        LOG_LP(ERROR) << "Exception in blob_file_garbage_collector::scan_directory: " << e.what();
+    }
+    state_machine_.complete_blob_scan();
+    blob_file_scan_cv_.notify_all();
+}
   
  void blob_file_garbage_collector::add_gc_exempt_blob_id(blob_id_type id) {
-    VLOG_LP(log_trace_fine) << "Adding blob id to gc_exempt_blob_: " << id;
+    VLOG_LP(log_trace) << "Adding blob id to gc_exempt_blob_: " << id;
     if (state_machine_.get_snapshot_scan_mode() != blob_file_gc_state_machine::snapshot_scan_mode::external) {
         throw std::logic_error("Cannot add GC exempt blob id before starting the scan.");
     }
@@ -121,10 +114,10 @@
          this->wait_for_blob_file_scan();
           
          // Calculate the difference and perform deletion operations
-         VLOG_LP(100) << "Scanned blobs before diff: " << scanned_blobs_->debug_string();
-         VLOG_LP(100) << "GC exempt blobs: " << gc_exempt_blob_->debug_string();
+         VLOG_LP(log_trace_fine) << "Scanned blobs before diff: " << scanned_blobs_->debug_string();
+         VLOG_LP(log_trace_fine) << "GC exempt blobs: " << gc_exempt_blob_->debug_string();
          scanned_blobs_->diff(*gc_exempt_blob_);
-         VLOG_LP(100) << "Scanned blobs after: " << scanned_blobs_->debug_string();
+         VLOG_LP(log_trace_fine) << "Scanned blobs after: " << scanned_blobs_->debug_string();
 
          for (const auto &id : *scanned_blobs_) {
             if (shutdown_requested_.load(std::memory_order_acquire)) {
@@ -132,8 +125,8 @@
             }
              boost::filesystem::path file_path = resolver_->resolve_path(id);
              boost::system::error_code ec;
-             VLOG_LP(log_trace_fine) << "Removing blob id: " << id;
-             VLOG_LP(log_trace_fine) << "Removing blob file: " << file_path.string();
+             VLOG_LP(log_trace) << "Removing blob id: " << id;
+             VLOG_LP(log_trace) << "Removing blob file: " << file_path.string();
              file_ops_->remove(file_path, ec);
              if (ec && ec != boost::system::errc::no_such_file_or_directory) {
                  LOG_LP(ERROR) << "Failed to remove file: " << file_path.string()
@@ -141,7 +134,7 @@
              }
          }
          state_machine_.complete_cleanup();
-         VLOG_LP(log_trace_fine) << "Notifying cleanup_cv_";
+         VLOG_LP(log_trace) << "Notifying cleanup_cv_";
          {
             std::lock_guard<std::mutex> lock(mutex_);
             cleanup_cv_.notify_all();
@@ -150,14 +143,14 @@
  }
   
 void blob_file_garbage_collector::wait_for_blob_file_scan() {
-    VLOG_LP(log_trace_fine) << "entering wait_for_blob_file_scan";
+    VLOG_LP(log_trace) << "entering wait_for_blob_file_scan";
     // If the scan has not been started, return immediately.
     blob_file_gc_state current_state = state_machine_.get_state();
     if (current_state != blob_file_gc_state::scanning_blob_only &&
         current_state != blob_file_gc_state::scanning_both &&
         current_state != blob_file_gc_state::snapshot_scan_completed_blob_not_started &&
         current_state != blob_file_gc_state::snapshot_scan_completed_blob_in_progress) {
-        VLOG_LP(log_trace_fine) << "wait_for_blob_file_scan returning immediately";
+        VLOG_LP(log_trace) << "wait_for_blob_file_scan returning immediately";
         return;
     }
 
@@ -172,24 +165,24 @@ void blob_file_garbage_collector::wait_for_blob_file_scan() {
                shutdown_requested_.load(std::memory_order_acquire);
     });
 
-    VLOG_LP(log_trace_fine) << "Exiting wait_for_blob_file_scan";
+    VLOG_LP(log_trace) << "Exiting wait_for_blob_file_scan";
 }
    
 
   
 void blob_file_garbage_collector::wait_for_cleanup() {
     // If cleanup has not started, return immediately to avoid indefinite blocking.
-    VLOG_LP(log_trace_fine) << "entering wait_for_cleanup";
+    VLOG_LP(log_trace) << "entering wait_for_cleanup";
     blob_file_gc_state current_state = state_machine_.get_state();
     if (current_state == blob_file_gc_state::completed|| 
         current_state == blob_file_gc_state::not_started ||
         current_state == blob_file_gc_state::shutdown) {
-        VLOG_LP(log_trace_fine) << "wait_for_cleanup returning immediately.";
+        VLOG_LP(log_trace) << "wait_for_cleanup returning immediately.";
         return;
     }
 
     // Wait until the cleanup process is complete.
-    VLOG_LP(log_trace_fine) << "Waiting for cleanup_cv_";
+    VLOG_LP(log_trace) << "Waiting for cleanup_cv_";
     std::unique_lock<std::mutex> lock(mutex_);
     cleanup_cv_.wait(lock, [this]() {
         ;
@@ -204,7 +197,7 @@ void blob_file_garbage_collector::wait_for_cleanup() {
  }
 
  void blob_file_garbage_collector::shutdown() {
-     VLOG_LP(log_trace_fine) << "Calling shutdown...";
+     VLOG_LP(log_trace) << "Calling shutdown...";
      {
          std::lock_guard<std::mutex> lock(shutdown_mutex_);
 
@@ -227,7 +220,7 @@ void blob_file_garbage_collector::wait_for_cleanup() {
          shutdown_requested_.store(false, std::memory_order_release);
          reset();
      }
-     VLOG_LP(log_trace_fine) << "Shutdown complete.";
+     VLOG_LP(log_trace) << "Shutdown complete.";
  }
 
 void blob_file_garbage_collector::wait_for_all_threads() {
@@ -260,12 +253,12 @@ void blob_file_garbage_collector::scan_snapshot(const boost::filesystem::path &s
                 if (cur->type() == log_entry::entry_type::normal_with_blob) {
                     auto blob_ids = cur->blob_ids();
                     for (auto id : blob_ids) {
-                        VLOG_LP(log_trace_fine) << "Scanned blob id: " << id;
+                        VLOG_LP(log_trace) << "Scanned blob id: " << id;
                         gc_exempt_blob_->add_blob_id(id);
                     }
                 }
             }
-            VLOG_LP(log_trace_fine) << "Snapshot scan finished.";
+            VLOG_LP(log_trace) << "Snapshot scan finished.";
             state_machine_.complete_snapshot_scan(blob_file_gc_state_machine::snapshot_scan_mode::internal);
             finalize_scan_and_cleanup();
         } catch (const limestone_exception &e) {
@@ -290,19 +283,19 @@ void blob_file_garbage_collector::finalize_add_gc_exempt_blob_ids() {
 }
   
 void blob_file_garbage_collector::wait_for_scan_snapshot() {
-    VLOG_LP(log_trace_fine) << "entering wait_for_scan_snapshot";
+    VLOG_LP(log_trace) << "entering wait_for_scan_snapshot";
     // If the snapshot scan has not started, return immediately.
     blob_file_gc_state current_state = state_machine_.get_state();
     if (current_state != blob_file_gc_state::scanning_snapshot_only &&
         current_state != blob_file_gc_state::scanning_both &&
         current_state != blob_file_gc_state::blob_scan_completed_snapshot_not_started &&
         current_state != blob_file_gc_state::blob_scan_completed_snapshot_in_progress) {
-        VLOG_LP(log_trace_fine) << "wait_for_scan_snapshot returning immediately";
+        VLOG_LP(log_trace) << "wait_for_scan_snapshot returning immediately";
         return;
     }
 
     // Wait until the snapshot scan is complete.
-    VLOG_LP(log_trace_fine) << "Waiting for snapshot_scan_cv_";
+    VLOG_LP(log_trace) << "Waiting for snapshot_scan_cv_";
     std::unique_lock<std::mutex> lock(mutex_);
     snapshot_scan_cv_.wait(lock, [this]() {
         blob_file_gc_state state = state_machine_.get_state();
@@ -313,7 +306,7 @@ void blob_file_garbage_collector::wait_for_scan_snapshot() {
                shutdown_requested_.load(std::memory_order_acquire);
     });
 
-    VLOG_LP(log_trace_fine) << "Exiting wait_for_scan_snapshot";
+    VLOG_LP(log_trace) << "Exiting wait_for_scan_snapshot";
 }
 
 

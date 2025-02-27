@@ -37,6 +37,7 @@
 #include "blob_pool_impl.h"
 #include "blob_file_garbage_collector.h"
 #include "blob_file_gc_snapshot.h"
+#include "blob_file_scanner.h"
 
 namespace limestone::api {
 using namespace limestone::internal;
@@ -195,6 +196,7 @@ void datastore::write_epoch_to_file(epoch_id_type epoch_id) {
 }
 
 void datastore::ready() {
+    TRACE_START;
     try {
         blob_id_type max_blob_id =  create_snapshot_and_get_max_blob_id();
         if (max_blob_id < compaction_catalog_->get_max_blob_id()) {
@@ -215,6 +217,7 @@ void datastore::ready() {
         }
         cleanup_rotated_epoch_files(location_);
         state_ = state::ready;
+        TRACE_END;
     } catch (...) {
         HANDLE_EXCEPTION_AND_ABORT();
     }
@@ -414,6 +417,13 @@ std::future<void> datastore::shutdown() noexcept {
 backup& datastore::begin_backup() {
     try {
         auto tmp_files = get_files();
+        
+        // Use blob_file_scanner to add blob files to the backup target
+        blob_file_scanner scanner(*blob_file_resolver_);
+        for (const auto& blob_file : scanner) {
+            tmp_files.insert(blob_file);
+        }
+        
         backup_ = std::unique_ptr<backup>(new backup(tmp_files));
         return *backup_;
     } catch (...) {
@@ -421,6 +431,7 @@ backup& datastore::begin_backup() {
     }
     return *backup_; // Required to satisfy the compiler
 }
+
 
 std::unique_ptr<backup_detail> datastore::begin_backup(backup_type btype) {  // NOLINT(readability-function-cognitive-complexity)
     try {
@@ -504,6 +515,15 @@ std::unique_ptr<backup_detail> datastore::begin_backup(backup_type btype) {  // 
                 }
             }
         }
+        // Add blob files to the backup target
+        blob_file_scanner scanner(*blob_file_resolver_);
+        // Use the parent of the blob root as the base for computing the relative path.
+        boost::filesystem::path backup_root = blob_file_resolver_->get_blob_root().parent_path();
+        for (const auto& src : scanner) {
+            entries.emplace_back(src, src.filename(), false, false);
+        }
+        
+
         return std::unique_ptr<backup_detail>(new backup_detail(entries, epoch_id_switched_.load()));
     } catch (...) {
         HANDLE_EXCEPTION_AND_ABORT();

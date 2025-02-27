@@ -77,7 +77,7 @@ protected:
 
         // Initialize blob_file_resolver with the blob directory
         resolver_ = std::make_unique<blob_file_resolver>(
-            boost::filesystem::path(blob_directory), 10 /* directory count */);
+            boost::filesystem::path(blob_directory));
 
         // Initialize blob_pool_impl with the resolver and ID generator
         pool_ = std::make_unique<testable_blob_pool_impl>(id_generator_, *resolver_, *datastore_);

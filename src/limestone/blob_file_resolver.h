@@ -18,7 +18,6 @@
 #include <boost/filesystem.hpp>
 #include <sstream>
 #include <iomanip>
-#include <functional>
 #include <vector>
 
 #include <limestone/api/blob_file.h>
@@ -49,17 +48,11 @@ public:
      * The BLOB files are assumed to be stored under `<base_directory>/blob/`.
      * 
      * @param base_directory The base directory for storing BLOB files.
-     * @param directory_count The number of subdirectories to distribute files into.
-     * @param hash_function The function used to map `blob_id` to a directory index.
      */
-    explicit blob_file_resolver(
-        boost::filesystem::path base_directory,
-        std::size_t directory_count = 100,
-        std::function<std::size_t(blob_id_type)> hash_function = [](blob_id_type id) { return id; }
-    ) noexcept
+    explicit blob_file_resolver(boost::filesystem::path base_directory) noexcept
         : blob_directory_(std::move(base_directory) / "blob"),
-          directory_count_(directory_count),
-          hash_function_(std::move(hash_function)) {
+          hash_function_([](blob_id_type id) { return id; })
+    {
         precompute_directory_cache();
     }
 
@@ -151,7 +144,7 @@ private:
     }
 
     boost::filesystem::path blob_directory_;             ///< Full path to the `blob` directory.
-    std::size_t directory_count_;                        ///< Number of directories for distribution.
+    std::size_t directory_count_ = 100;                        ///< Number of directories for distribution.
     std::function<std::size_t(blob_id_type)> hash_function_; ///< Hash function to map blob_id to directory index.
     std::vector<boost::filesystem::path> directory_cache_; ///< Precomputed cache for directory paths.
 };
