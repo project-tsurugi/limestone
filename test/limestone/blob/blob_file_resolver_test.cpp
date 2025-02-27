@@ -20,7 +20,7 @@ protected:
         }
 
         resolver_ = std::make_unique<limestone::internal::blob_file_resolver>(
-            boost::filesystem::path(base_directory), 10 /* directory count */);
+            boost::filesystem::path(base_directory));
     }
 
     virtual void TearDown() {
@@ -41,7 +41,7 @@ TEST_F(blob_file_resolver_test, resolves_correct_path) {
 
     // Expected path
     std::ostringstream dir_name;
-    dir_name << "dir_" << std::setw(2) << std::setfill('0') << (blob_id % 10); // Mod 10 for directory count
+    dir_name << "dir_" << std::setw(2) << std::setfill('0') << (blob_id % 100); // Mod 10 for directory count
     boost::filesystem::path expected_path = boost::filesystem::path(base_directory) / "blob" / dir_name.str();
     expected_path /= "000000000001e240.blob"; // Blob ID in hex: 123456 = 1e240
 
@@ -54,7 +54,7 @@ TEST_F(blob_file_resolver_test, handles_multiple_blob_ids) {
         auto path = resolver_->resolve_path(blob_id);
 
         std::ostringstream dir_name;
-        dir_name << "dir_" << std::setw(2) << std::setfill('0') << (blob_id % 10); // Mod 10 for directory count
+        dir_name << "dir_" << std::setw(2) << std::setfill('0') << (blob_id % 100); // Mod 10 for directory count
         boost::filesystem::path expected_path = boost::filesystem::path(base_directory) / "blob" / dir_name.str();
         std::ostringstream file_name;
         file_name << std::hex << std::setw(16) << std::setfill('0') << blob_id << ".blob";

@@ -69,14 +69,14 @@ protected:
 
         // Create blob_file_resolver
         resolver_ = std::make_unique<blob_file_resolver>(
-            boost::filesystem::path(base_directory), 10 /* directory count */
+            boost::filesystem::path(base_directory)
         );
 
         // Create blob directory (the directory returned by resolver_->get_blob_root())
         boost::filesystem::create_directories(resolver_->get_blob_root());
 
         // Also create subdirectories (referenced in precompute_directory_cache() within resolver_)
-        for (std::size_t i = 0; i < 10; ++i) {
+        for (std::size_t i = 0; i < 100; ++i) {
             std::ostringstream dir_name;
             dir_name << "dir_" << std::setw(2) << std::setfill('0') << i;
             boost::filesystem::path subdir = resolver_->get_blob_root() / dir_name.str();

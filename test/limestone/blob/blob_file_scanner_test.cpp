@@ -39,12 +39,12 @@
  
          // Initialize resolver with the base directory and a threshold of 10
          resolver_ = std::make_unique<limestone::internal::blob_file_resolver>(
-             boost::filesystem::path(base_directory), 10);
+             boost::filesystem::path(base_directory));
          // Initialize scanner with the resolver
          scanner_ = std::make_unique<limestone::internal::blob_file_scanner>(*resolver_);
  
-         // Create 10 subdirectories named dir_00 to dir_09
-         for (std::size_t i = 0; i < 10; ++i) {
+         // Create 100 subdirectories named dir_00 to dir_99
+         for (std::size_t i = 0; i < 100; ++i) {
              std::ostringstream dir_name;
              dir_name << "dir_" << std::setw(2) << std::setfill('0') << i;
              boost::filesystem::create_directories(resolver_->get_blob_root() / dir_name.str());
