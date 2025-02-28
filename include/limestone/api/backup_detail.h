@@ -19,12 +19,15 @@
 #include <set>
 #include <string_view>
 #include <vector>
-
+#include <atomic>  
 #include <boost/filesystem.hpp>
 
 #include <limestone/api/epoch_id_type.h>
 
 namespace limestone::api {
+
+// Forward declaration of datastore_impl (added for backup_detail modifications)
+class datastore_impl;
 
 class datastore;
 
@@ -116,9 +119,14 @@ private:
 
     epoch_id_type log_finish_;
 
-    backup_detail(std::vector<backup_detail::entry>&, epoch_id_type log_finish);
+    // Modified constructor: added datastore_impl& parameter.
+    backup_detail(std::vector<backup_detail::entry>&, epoch_id_type log_finish, datastore_impl& ds_impl);
 
     std::vector<backup_detail::entry> entries_;
+
+    // Added new fields:
+    datastore_impl* ds_impl_{};            // Pointer to the datastore's internal implementation.
+    std::atomic<bool> backup_finished_{false};  // Flag to ensure notify_end_backup is executed only once.
 
     friend class datastore;
 };
@@ -126,4 +134,3 @@ private:
 enum class backup_type { standard, transaction };
 
 } // namespace limestone::api
-
