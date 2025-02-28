@@ -96,6 +96,15 @@ public:
         return std::nullopt;
     }
 
+    /**
+     * @brief Notifies that the backup process has ended.
+     *
+     * This method must be called after the backup process is complete and before the
+     * backup object is destroyed. It is required to call this method regardless of the
+     * outcome of the backup.
+     */
+    void notify_end_backup() noexcept;
+
     const std::vector<backup_detail::entry>& entries() noexcept {
         return entries_;
     }

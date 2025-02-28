@@ -37,5 +37,8 @@ std::vector<boost::filesystem::path>& backup::files() noexcept {
     return files_;
 }
 
+void backup::notify_end_backup() noexcept {
+    // do nothing
+}
 
 } // namespace limestone::api
