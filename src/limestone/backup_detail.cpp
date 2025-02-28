@@ -35,5 +35,9 @@ backup_detail::backup_detail(std::vector<backup_detail::entry>& entries, epoch_i
     configuration_id_ = "0";
 }
 
+void backup_detail::notify_end_backup() noexcept {
+    // do nothing
+}
+
 
 } // namespace limestone::api

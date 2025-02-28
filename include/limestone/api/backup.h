@@ -61,6 +61,15 @@ public:
      */
     std::vector<boost::filesystem::path>& files() noexcept;
 
+    /**
+     * @brief Notifies that the backup process has ended.
+     *
+     * This method must be called after the backup process is complete and before the
+     * backup object is destroyed. It is required to call this method regardless of the
+     * outcome of the backup.
+     */
+    void notify_end_backup() noexcept;
+
 private:
     std::vector<boost::filesystem::path> files_;
 
