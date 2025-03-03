@@ -38,13 +38,14 @@
 #include "blob_file_garbage_collector.h"
 #include "blob_file_gc_snapshot.h"
 #include "blob_file_scanner.h"
-
+#include "datastore_impl.h"
 namespace limestone::api {
 using namespace limestone::internal;
 
-datastore::datastore() noexcept = default;
+datastore::datastore() noexcept: impl_(std::make_unique<datastore_impl>()) {}
 
-datastore::datastore(configuration const& conf) : location_(conf.data_locations_.at(0)) { // NOLINT(readability-function-cognitive-complexity)
+
+datastore::datastore(configuration const& conf) : location_(conf.data_locations_.at(0)), impl_(std::make_unique<datastore_impl>()) { // NOLINT(readability-function-cognitive-complexity)
     try {
         LOG(INFO) << "/:limestone:config:datastore setting log location = " << location_.string();
         boost::system::error_code error;
@@ -424,7 +425,7 @@ backup& datastore::begin_backup() {
             tmp_files.insert(blob_file);
         }
         
-        backup_ = std::unique_ptr<backup>(new backup(tmp_files));
+        backup_ = std::unique_ptr<backup>(new backup(tmp_files, *impl_));
         return *backup_;
     } catch (...) {
         HANDLE_EXCEPTION_AND_ABORT();
@@ -524,7 +525,7 @@ std::unique_ptr<backup_detail> datastore::begin_backup(backup_type btype) {  // 
         }
         
 
-        return std::unique_ptr<backup_detail>(new backup_detail(entries, epoch_id_switched_.load()));
+        return std::unique_ptr<backup_detail>(new backup_detail(entries, epoch_id_switched_.load(), *impl_));
     } catch (...) {
         HANDLE_EXCEPTION_AND_ABORT();
         throw; // Unreachable, but required to satisfy the compiler
@@ -781,7 +782,8 @@ void datastore::compact_with_online() {
     LOG_LP(INFO) << "compaction finished";
 
     // blob files garbage collection
-    if (options.is_gc_enabled()) {
+    VLOG_LP(log_trace_fine) << "options.is_gc_enabled(): " << options.is_gc_enabled() << ", !impl_->is_backup_in_progress(): " << !impl_->is_backup_in_progress();
+    if (options.is_gc_enabled() && !impl_->is_backup_in_progress()) {
         LOG_LP(INFO) << "start blob files garbage collection";
         blob_file_garbage_collector_->scan_blob_files(next_blob_id_copy);
         log_entry_container log_entries = options.get_gc_snapshot().finalize_snapshot();

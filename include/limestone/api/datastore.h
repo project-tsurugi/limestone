@@ -48,6 +48,8 @@ namespace limestone::internal {
 }
 namespace limestone::api {
 
+class datastore_impl;
+
 /**
  * @brief datastore interface to start/stop the services, store log, create snapshot for recover from log files
  * @details this object is not thread-safe except for create_channel().
@@ -506,8 +508,11 @@ private:
     write_version_type available_boundary_version_; 
 
     // Mutex to protect boundary version updates
-    mutable std::mutex boundary_mutex_;         
+    mutable std::mutex boundary_mutex_;
 
+    // Use Pimpl idiom to hide implementation details, improve encapsulation,
+    // and minimize compilation dependencies.
+    std::unique_ptr<datastore_impl> impl_;
 };
 
 } // namespace limestone::api

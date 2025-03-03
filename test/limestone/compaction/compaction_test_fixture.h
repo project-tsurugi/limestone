@@ -78,6 +78,11 @@ protected:
     log_channel* lc0_{};
     log_channel* lc1_{};
     log_channel* lc2_{};
+    boost::filesystem::path path1001_;
+    boost::filesystem::path path1002_;
+    boost::filesystem::path path1003_;
+    boost::filesystem::path path2001_;
+    boost::filesystem::path path2002_;
 
     void run_compact_with_epoch_switch_org(epoch_id_type epoch) {
         std::atomic<bool> compaction_completed(false);
@@ -438,6 +443,76 @@ protected:
             ofs << "dummy_blob_data";
         }
         return path;
+    }
+
+    void prepare_blob_gc_test_data() {
+        // Epoch 3: Prepare initial entries.
+        datastore_->switch_epoch(3);
+    
+        // Create two entries with blob data using lc0.
+        lc0_->begin_session();
+        lc0_->add_entry(1, "blob_key1", "blob_value1", {3, 0}, {1001, 1002});
+        lc0_->add_entry(1, "blob_key2", "blob_value2", {3, 1}, {1003});
+        lc0_->end_session();
+    
+        // Create two entries without blob data using lc0.
+        lc0_->begin_session();
+        lc0_->add_entry(1, "noblob_key1", "noblob_value1", {3, 2});
+        lc0_->add_entry(1, "noblob_key2", "noblob_value2", {3, 3});
+        lc0_->end_session();
+    
+        // Epoch 4: Switch epoch and update some entries with the same keys.
+        datastore_->switch_epoch(4);
+        lc0_->begin_session();
+        // Update "blob_key1" with new blob data.
+        lc0_->add_entry(1, "blob_key1", "blob_value1_epoch2", {4, 0}, {2001, 2002});
+        // Update "noblob_key1" with a new value.
+        lc0_->add_entry(1, "noblob_key1", "noblob_value1_epoch2", {4, 1});
+        lc0_->end_session();
+    
+        // Create dummy blob files for the blob IDs.
+        path1001_ = create_dummy_blob_files(1001);
+        path1002_ = create_dummy_blob_files(1002);
+        path1003_ = create_dummy_blob_files(1003);
+        path2001_ = create_dummy_blob_files(2001);
+        path2002_ = create_dummy_blob_files(2002);
+        datastore_->set_next_blob_id(2003);
+
+        // Set the available boundary version to 5.0
+        datastore_->switch_available_boundary_version({5,0});
+    }
+
+
+    std::unique_ptr<backup_detail> begin_backup_with_epoch_switch(backup_type btype, epoch_id_type epoch) {
+        std::mutex wait_mutex;
+        std::condition_variable wait_cv;
+        bool wait_triggered = false;
+    
+        auto* test_datastore = dynamic_cast<datastore_test*>(datastore_.get());
+        if (test_datastore == nullptr) {
+            throw std::runtime_error("datastore_ must be of type datastore_test");
+        }
+    
+        test_datastore->on_rotate_log_files_callback = [&]() {
+            std::unique_lock<std::mutex> lock(wait_mutex);
+            wait_triggered = true;
+            wait_cv.notify_one();
+        };
+    
+        try {
+            auto future = std::async(std::launch::async, [&]() { return datastore_->begin_backup(btype); });
+    
+            {
+                std::unique_lock<std::mutex> lock(wait_mutex);
+                wait_cv.wait(lock, [&]() { return wait_triggered; });
+            }
+    
+            datastore_->switch_epoch(epoch);
+            return future.get();
+        } catch (const std::exception& e) {
+            std::cerr << "Error: " << e.what() << std::endl;
+            throw;
+        }
     }
 };
 
