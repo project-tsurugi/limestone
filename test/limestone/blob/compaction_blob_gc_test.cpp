@@ -246,4 +246,105 @@ TEST_F(compaction_test, basic_blob_gc_reboot_test) {
     EXPECT_TRUE(boost::filesystem::exists(path2002));
 }
 
+// Test that blob GC is executed when no backup is in progress.
+TEST_F(compaction_test, blob_gc_executes_without_backup_test) {
+    gen_datastore();
+    prepare_blob_gc_test_data();
+    FLAGS_v = 100;
+
+    // Verify blob files exist before compaction.
+    EXPECT_TRUE(boost::filesystem::exists(path1001_));
+    EXPECT_TRUE(boost::filesystem::exists(path1002_));
+    EXPECT_TRUE(boost::filesystem::exists(path1003_));
+    EXPECT_TRUE(boost::filesystem::exists(path2001_));
+    EXPECT_TRUE(boost::filesystem::exists(path2002_));
+    
+    // Perform compaction in epoch 5.
+    run_compact_with_epoch_switch(5);
+    
+    // Verify that GC executed.
+    EXPECT_FALSE(boost::filesystem::exists(path1001_));
+    EXPECT_FALSE(boost::filesystem::exists(path1002_));
+    EXPECT_TRUE(boost::filesystem::exists(path1003_));
+    EXPECT_TRUE(boost::filesystem::exists(path2001_));
+    EXPECT_TRUE(boost::filesystem::exists(path2002_));
+}
+
+// Test that blob GC is skipped during an old backup (using the backup API without arguments).
+TEST_F(compaction_test, blob_gc_skipped_during_old_backup_test) {
+    gen_datastore();
+    prepare_blob_gc_test_data();
+    auto& backup = datastore_->begin_backup();  // old backup API
+    
+    run_compact_with_epoch_switch(5);
+    
+    // Verify that GC was skipped because old backup is in progress.
+    EXPECT_TRUE(boost::filesystem::exists(path1001_));
+    EXPECT_TRUE(boost::filesystem::exists(path1002_));
+    EXPECT_TRUE(boost::filesystem::exists(path1003_));
+    EXPECT_TRUE(boost::filesystem::exists(path2001_));
+    EXPECT_TRUE(boost::filesystem::exists(path2002_));
+    
+    backup.notify_end_backup();
+}
+
+// Test that blob GC is skipped during a new backup (using the backup API with arguments).
+TEST_F(compaction_test, blob_gc_skipped_during_new_backup_test) {
+    gen_datastore();
+    datastore_->switch_epoch(1);
+    auto backup = begin_backup_with_epoch_switch(backup_type::transaction, 2);  // new backup API
+
+    prepare_blob_gc_test_data();
+    
+    run_compact_with_epoch_switch(5);
+    
+    // Verify that GC was skipped because new backup is in progress.
+    EXPECT_TRUE(boost::filesystem::exists(path1001_));
+    EXPECT_TRUE(boost::filesystem::exists(path1002_));
+    EXPECT_TRUE(boost::filesystem::exists(path1003_));
+    EXPECT_TRUE(boost::filesystem::exists(path2001_));
+    EXPECT_TRUE(boost::filesystem::exists(path2002_));
+    
+    // backup->notify_end_backup();
+}
+
+// Test that blob GC is executed after an old backup has ended (using the backup API without arguments).
+TEST_F(compaction_test, blob_gc_executes_after_old_backup_test) {
+    gen_datastore();
+    prepare_blob_gc_test_data();
+    FLAGS_v = 100;
+    auto& backup = datastore_->begin_backup();  // old backup API
+    backup.notify_end_backup();
+    
+    run_compact_with_epoch_switch(5);
+    
+    // Verify that GC executed after the old backup ended.
+    EXPECT_FALSE(boost::filesystem::exists(path1001_));
+    EXPECT_FALSE(boost::filesystem::exists(path1002_));
+    EXPECT_TRUE(boost::filesystem::exists(path1003_));
+    EXPECT_TRUE(boost::filesystem::exists(path2001_));
+    EXPECT_TRUE(boost::filesystem::exists(path2002_));
+}
+
+// Test that blob GC is executed after a new backup has ended (using the backup API with arguments).
+TEST_F(compaction_test, blob_gc_executes_after_new_backup_test) {
+    gen_datastore();
+    datastore_->switch_epoch(1);
+    auto backup = begin_backup_with_epoch_switch(backup_type::transaction, 2);  // new backup API
+
+    prepare_blob_gc_test_data();
+    
+    backup->notify_end_backup();
+    run_compact_with_epoch_switch(5);
+    
+    // Verify that GC executed after the new backup ended.
+    EXPECT_FALSE(boost::filesystem::exists(path1001_));
+    EXPECT_FALSE(boost::filesystem::exists(path1002_));
+    EXPECT_TRUE(boost::filesystem::exists(path1003_));
+    EXPECT_TRUE(boost::filesystem::exists(path2001_));
+    EXPECT_TRUE(boost::filesystem::exists(path2002_));
+}
+
+
+
 }  // namespace limestone::testing
