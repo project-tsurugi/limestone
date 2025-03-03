@@ -38,14 +38,13 @@
 #include "blob_file_garbage_collector.h"
 #include "blob_file_gc_snapshot.h"
 #include "blob_file_scanner.h"
-#include "datastore_impl.h"
+
 namespace limestone::api {
 using namespace limestone::internal;
 
-datastore::datastore() noexcept: impl_(std::make_unique<datastore_impl>()) {}
+datastore::datastore() noexcept = default;
 
-
-datastore::datastore(configuration const& conf) : location_(conf.data_locations_.at(0)), impl_(std::make_unique<datastore_impl>()) { // NOLINT(readability-function-cognitive-complexity)
+datastore::datastore(configuration const& conf) : location_(conf.data_locations_.at(0)) { // NOLINT(readability-function-cognitive-complexity)
     try {
         LOG(INFO) << "/:limestone:config:datastore setting log location = " << location_.string();
         boost::system::error_code error;
@@ -425,7 +424,7 @@ backup& datastore::begin_backup() {
             tmp_files.insert(blob_file);
         }
         
-        backup_ = std::unique_ptr<backup>(new backup(tmp_files, *impl_));
+        backup_ = std::unique_ptr<backup>(new backup(tmp_files));
         return *backup_;
     } catch (...) {
         HANDLE_EXCEPTION_AND_ABORT();
@@ -525,7 +524,7 @@ std::unique_ptr<backup_detail> datastore::begin_backup(backup_type btype) {  // 
         }
         
 
-        return std::unique_ptr<backup_detail>(new backup_detail(entries, epoch_id_switched_.load(), *impl_));
+        return std::unique_ptr<backup_detail>(new backup_detail(entries, epoch_id_switched_.load()));
     } catch (...) {
         HANDLE_EXCEPTION_AND_ABORT();
         throw; // Unreachable, but required to satisfy the compiler
