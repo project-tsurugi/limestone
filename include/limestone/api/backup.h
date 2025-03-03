@@ -17,6 +17,7 @@
 
 #include <vector>
 #include <set>
+#include <atomic>
 
 #include <boost/filesystem.hpp>
 
@@ -24,7 +25,8 @@
 
 namespace limestone::api {
 
-class datastore;
+// Forward declaration of datastore and its internal implementation.
+class datastore_impl;
 
 /**
  * @brief class encapsulating backup operations
@@ -73,7 +75,14 @@ public:
 private:
     std::vector<boost::filesystem::path> files_;
 
-    explicit backup(const std::set<boost::filesystem::path>& files) noexcept;
+    // Pointer to the datastore's internal implementation.
+    datastore_impl* ds_impl_;
+
+    // Flag to ensure notify_end_backup is executed only once.
+    std::atomic<bool> backup_finished_;
+
+    // Private constructor; backup objects are created by datastore.
+    explicit backup(const std::set<boost::filesystem::path>& files, datastore_impl& ds_impl) noexcept;
 
     friend class datastore;
 };
