@@ -782,7 +782,7 @@ void datastore::compact_with_online() {
     LOG_LP(INFO) << "compaction finished";
 
     // blob files garbage collection
-    if (options.is_gc_enabled()) {
+    if (options.is_gc_enabled() && !impl_->is_backup_in_progress()) {
         LOG_LP(INFO) << "start blob files garbage collection";
         blob_file_garbage_collector_->scan_blob_files(next_blob_id_copy);
         log_entry_container log_entries = options.get_gc_snapshot().finalize_snapshot();

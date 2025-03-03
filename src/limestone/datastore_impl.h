@@ -18,6 +18,8 @@
 #include <atomic>
 
 #include "limestone/api/datastore.h"
+#include "limestone/logging.h"
+#include "logging_helper.h"
 
 namespace limestone::api {
 
@@ -31,14 +33,29 @@ public:
     // Default destructor.
     ~datastore_impl() = default;
 
+    // Deleted copy and move constructors and assignment operators.
+    datastore_impl(const datastore_impl&) = delete;
+    datastore_impl& operator=(const datastore_impl&) = delete;
+    datastore_impl(datastore_impl&&) = delete;
+    datastore_impl& operator=(datastore_impl&&) = delete;
+
     // Increments the backup counter.
     void increment_backup_counter() noexcept {
         backup_counter_.fetch_add(1, std::memory_order_acq_rel);
+        LOG_LP(INFO) << "Beginning backup; active backup count: " << backup_counter_.load(std::memory_order_acquire);
     }
 
     // Decrements the backup counter.
     void decrement_backup_counter() noexcept {
         backup_counter_.fetch_sub(1, std::memory_order_acq_rel);
+        LOG_LP(INFO) << "Ending backup; active backup count: " << backup_counter_.load(std::memory_order_acquire);
+    }
+
+    // Returns true if a backup operation is in progress.
+    [[nodiscard]] bool is_backup_in_progress() const noexcept {
+        int count = backup_counter_.load(std::memory_order_acquire);
+        VLOG_LP(log_info) << "Checking if backup is in progress; active backup count: " << count;
+        return count > 0;
     }
 
 private:
@@ -46,4 +63,4 @@ private:
     std::atomic<int> backup_counter_;
 };
 
-} // namespace limestone::api
+}  // namespace limestone::api
