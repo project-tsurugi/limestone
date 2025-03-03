@@ -14,17 +14,13 @@
  * limitations under the License.
  */
 #include <limestone/api/backup.h>
-#include "datastore_impl.h"
 
 namespace limestone::api {
 
-backup::backup(const std::set<boost::filesystem::path>& files, datastore_impl& ds_impl) noexcept
-    : ds_impl_(&ds_impl), backup_finished_(false)
-{
+backup::backup(const std::set<boost::filesystem::path>& files) noexcept {
     for(auto& e : files) {
         files_.emplace_back(e);
     }
-    ds_impl_->increment_backup_counter();
 }
 
 backup::~backup() noexcept = default;
@@ -42,10 +38,7 @@ std::vector<boost::filesystem::path>& backup::files() noexcept {
 }
 
 void backup::notify_end_backup() noexcept {
-    bool expected = false;
-    if (backup_finished_.compare_exchange_strong(expected, true, std::memory_order_acq_rel)) {
-        ds_impl_->decrement_backup_counter();
-    }
+    // do nothing
 }
 
 } // namespace limestone::api
