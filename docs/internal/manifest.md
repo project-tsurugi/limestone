@@ -4,59 +4,82 @@ BLOB対応に伴い、ファイルフォーマットのバージョンを更新�
 ファイルフォーマットのバージョンを記録している`limestone-manifest.json
 に関聯している処理を洗い出し、必要におうじて修正する必要がある。
 
-## ファイルのピックアップ
 
-調査対象のファイルは以下の通り
+### マニフェストファイルの形式
 
-**テストコード以外**
-```
-datastore.cpp
-datastore_restore.cpp
-internal.h
-dblogutil.cpp
-datastore_format.cpp
-datastore.h
-```
-**tテストコード**
-```
-compaction_test_fixture.h
-epoch_file_test.cpp
-dblogutil_compaction_test.cpp
-dblogutil_test.cpp
-rotate_test.cpp
-log_dir_test.cpp
-testdata.cpp
-log_channel_test.cpp
-datastore_test.cpp
-```
+マニフェストファイルは永続化データの形式等の情報を記載したファイルで、 `${log_location}/limestone-manifest.json` に配置される。
 
-## テストコード以外の調査結果
+マニフェストファイルは JSON 形式であり、以下のプロパティを有する。
 
-* datastore.h
-  * とくになし
-* datastore.cpp
-  * コンストラクタでいろいろやっている
-    * マニフェストのパスの設定
-    * ファイルリストへの追加
-    * 2重起動防止のチェック=>マニフェストファイルをロックしている
-    * datastore::begin_backup でマニフェストファイルをバックアップ対象に加えている
+プロパティ名 | 形式 | 設定値 | 概要
+-------------|------|--------|-----
+`format_version` | 十進数文字列 | `"1.0"` | マニフェストファイルの形式を表すバージョン (`major.minor`)
+`persistent_format_version` | 整数 | `1` | 永続化データ形式バージョン
+
+## 永続化データ形式バージョン
+
+### バージョンについて
+
+* Version 0
+  * 最初期バージョン、`limestone-manifest.json` が存在しない場合、Version 0とみなす。
+
+* Version 1
+  * `limestone-manifest.json` 導入時のバージョン
+* Version 2
+  * オンラインコンパクション対応バージョン
+  * コンパクション関聯ファイルが追加された。
+* Version 3
+  * BLOB対応バージョン
+  * blobディレクトリ配下にBLOBファイルが保存されるようになった。
+  * WALファイルに、BLOB付きのエントリが追加された。
+  
+### バージョン間の互換性
+
+* Version 0 対応のTsurugi
+  * 本ドキュメントの対象外
+* Version 1 対応のTsurugi
+  * 起動時に、Version 0のデータをVersion 1に自動アップグレードする。
+  * Version 2のデータを読むことはできない
+    * 起動時にエラーとなる。
+    * 手動ダウグレードは可能(未サポート)
+      * `limestone-manifest.json` を手動で修正し、コンパクション関聯のファイルを削除
+  * Version 3のデータを読むことはできない
+    * 起動時にエラーとなる。
+    * BLOBデータを含む場合、手動でもダウングレード不可
+    * BLOBデータを含まない場合、手動ダウグレードは可能(未サポート)
+      * `limestone-manifest.json` を手動で修正し、コンパクション関聯のファイルと、blobディレクトリを削除
+* Version 2 対応のTsurugi
+  * 起動時に、Version 1のデータをVersion 2に自動アップグレードする。
+  * Version 3のデータを読むことはできない
+    * 起動時にエラーとなる。
+    * BLOBデータを含む場合、手動でもダウングレード不可
+    * BLOBデータを含まない場合、手動ダウグレードは可能(未サポート)
+      * `limestone-manifest.json` を手動で修正し、blobディレクトリを削除
+
+
+## 永続化データ形式バージョンの変更
+
+永続化データ形式バージョンの変更にともなう、ソースコードの修正
+
+### Version 2 から Version 3 への更新
+
 * datastore_restore.cpp
-  * リストアするファイルのバージョンチェックを行っている。
-* dblogutil.cpp
-  * DB起動中にツールを使わないようにマニフェストファイルのロックを取得している。
-* internal.h
-  * マニフェストファイルのパスを定義している
-  * is_supported_version() => サーポートバージョンのチェック
-  * acquire_manifest_lock() ロックの取得
-
+  * `check_manifest(const boost::filesystem::path& manifest_path)`
+    * リスト時のバージョンチェックを行っている。
+    * Version 1 以降であれば、起動時にVersion 3へ自動アップグレードされるので、Version 1以降であることをチェックすればOK
+    * 現行コードからの変更なし
 * datastore_format.cpp
-  * setup_initial_logdir()
-    * 初期ディレクトリの作成 => ここで、manifestファイルを作成する。
-  * check_and_migrate_logdir_format
-    * マニフェストファイルのマイグレーション(バージョン変更)を行う。
-    * マイグレーション中に落ちたときのリカバリなども起こっている。
+  * `setup_initial_logdir(const boost::filesystem::path& logdir`
+    * ここで `limestone-manifest.json` を作成している
+    * Version 3 に変更する。
+  * `check_and_migrate_logdir_format(const boost::filesystem::path& logdir)`
+    * Version 1, 2のときにVersion 3にアップグレードするように変更する。
+    * Version 1では、コンパクションカタログが存在しないので作成する
+    * Version 2では、コンパクションカタログが存在するので、それを使用する。
+      * 既存コードは、この処理がないので追加が必要。
+  * `is_supported_version(const boost::filesystem::path& manifest_path, std::string& errmsg)`
+    * サポートバージョンのチェック
+    * Version 3もサポートバージョンに加える
+* その他
+  * テストコード内でのバージョンチェックを行っている箇所の修正
 
-
-## 変更が必要な箇所のまとめ
-
-* 

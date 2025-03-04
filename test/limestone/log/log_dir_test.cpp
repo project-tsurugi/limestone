@@ -1,13 +1,13 @@
 
-#include <boost/filesystem.hpp>
-
 #include <limestone/logging.h>
 
+#include <boost/filesystem.hpp>
+#include <nlohmann/json.hpp>
+
+#include "compaction_catalog.h"
 #include "dblog_scan.h"
 #include "internal.h"
 #include "log_entry.h"
-#include "compaction_catalog.h"
-
 #include "test_root.h"
 
 using namespace std::literals;
@@ -120,20 +120,26 @@ TEST_F(log_dir_test, reject_directory_of_different_version) {
     EXPECT_THROW({ gen_datastore(); }, std::exception);
 }
 
-TEST_F(log_dir_test, accept__manifest_version_v1) {
+TEST_F(log_dir_test, accept_manifest_version_v1) {
     create_mainfest_file(1);
     gen_datastore();   // success
 }
 
-TEST_F(log_dir_test, accept__manifest_version_v2) {
+TEST_F(log_dir_test, accept_manifest_version_v2) {
     create_mainfest_file(2);
     gen_datastore();   // success
 }
 
-TEST_F(log_dir_test, reject_manifest_version_v3) {
+TEST_F(log_dir_test, accept_manifest_version_v3) {
     create_mainfest_file(3);
+    gen_datastore();   // success
+}
+
+TEST_F(log_dir_test, reject_manifest_version_v4) {
+    create_mainfest_file(4);
     EXPECT_THROW({ gen_datastore(); }, std::exception);
 }
+
 
 TEST_F(log_dir_test, rotate_old_ok_v1_dir) {
     // setup backups
@@ -156,7 +162,7 @@ TEST_F(log_dir_test, rotate_old_rejects_unsupported_data) {
         LOG(FATAL) << "cannot make directory";
     }
     create_file(bk_path / "epoch", epoch_0_str);
-    create_file(bk_path / std::string(limestone::internal::manifest_file_name), data_manifest(3));
+    create_file(bk_path / std::string(limestone::internal::manifest_file_name), data_manifest(4));
 
     gen_datastore();
 
@@ -216,7 +222,7 @@ TEST_F(log_dir_test, rotate_prusik_rejects_unsupported_data) {
         LOG(FATAL) << "cannot make directory";
     }
     create_file(bk_path / "epoch", epoch_0_str);
-    create_file(bk_path / std::string(limestone::internal::manifest_file_name), data_manifest(3));
+    create_file(bk_path / std::string(limestone::internal::manifest_file_name), data_manifest(4));
     // setup entries
     std::vector<limestone::api::file_set_entry> entries;
     entries.emplace_back("epoch", "epoch", false);
@@ -333,6 +339,69 @@ TEST_F(log_dir_test, ut_purge_dir_ok_file1) {
     ASSERT_EQ(internal::purge_dir(location), status::ok);
     ASSERT_TRUE(boost::filesystem::is_empty(location));
 }
+
+TEST_F(log_dir_test, setup_initial_logdir_creates_manifest_file) {
+    // Setup initial logdir
+    limestone::internal::setup_initial_logdir(boost::filesystem::path(location));
+
+    // Check that the manifest file is created
+    EXPECT_TRUE(boost::filesystem::exists(manifest_path));
+
+    // Read the manifest file and verify its contents
+    std::ifstream manifest_file(manifest_path.string());
+    ASSERT_TRUE(manifest_file.is_open());
+    nlohmann::json manifest;
+    manifest_file >> manifest;
+
+    EXPECT_EQ(manifest["format_version"], "1.0");
+    EXPECT_EQ(manifest["persistent_format_version"], 3);
+}
+
+TEST_F(log_dir_test, setup_initial_logdir_creates_compaction_catalog_if_not_exists) {
+    // Ensure that the compaction catalog does not exist before
+    boost::filesystem::remove(compaction_catalog_path);
+
+    // Setup initial logdir
+    limestone::internal::setup_initial_logdir(boost::filesystem::path(location));
+
+    // Check that the compaction catalog is created
+    EXPECT_TRUE(boost::filesystem::exists(compaction_catalog_path));
+}
+
+
+TEST_F(log_dir_test, setup_initial_logdir_does_not_modify_existing_compaction_catalog) {
+    // Create a dummy compaction catalog file to simulate pre-existing catalog
+    create_file(compaction_catalog_path, "{}");
+
+    // Save the current state of the compaction catalog
+    std::ifstream initial_catalog(compaction_catalog_path.string());
+    std::string initial_catalog_content((std::istreambuf_iterator<char>(initial_catalog)),
+                                        std::istreambuf_iterator<char>());
+
+    // Setup initial logdir again
+    limestone::internal::setup_initial_logdir(boost::filesystem::path(location));
+
+    // Verify that the compaction catalog has not been modified
+    std::ifstream modified_catalog(compaction_catalog_path.string());
+    std::string modified_catalog_content((std::istreambuf_iterator<char>(modified_catalog)),
+                                         std::istreambuf_iterator<char>());
+    EXPECT_EQ(initial_catalog_content, modified_catalog_content);
+}
+
+TEST_F(log_dir_test, exists_path_returns_true_for_existing_file) {
+    // Create a file to test
+    create_file(manifest_path, data_manifest());
+
+    // Test that exists_path returns true for an existing file
+    EXPECT_TRUE(limestone::internal::exists_path(manifest_path));
+}
+
+TEST_F(log_dir_test, exists_path_returns_false_for_non_existing_file) {
+    // Test that exists_path returns false for a non-existing file
+    EXPECT_FALSE(limestone::internal::exists_path(manifest_path));
+}
+
+
 
 /* check purge_dir returns err_permission_error: unimplemented.
    because creating the file that cannnot be deleted by test user requires super-user privileges or similar */

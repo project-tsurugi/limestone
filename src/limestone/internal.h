@@ -107,6 +107,8 @@ std::set<std::string> assemble_snapshot_input_filenames(const std::unique_ptr<co
 
 void cleanup_rotated_epoch_files(const boost::filesystem::path& directory);
 
+bool exists_path(const boost::filesystem::path& path);
+
 // filepath.cpp
 
 void remove_trailing_dir_separators(boost::filesystem::path& p);
