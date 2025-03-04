@@ -42,7 +42,7 @@ void setup_initial_logdir(const boost::filesystem::path& logdir) {
     // Create manifest file
     nlohmann::json manifest_v2 = {
         { "format_version", "1.0" },
-        { "persistent_format_version", 2}
+        { "persistent_format_version", 3}
     };
     boost::filesystem::path config = logdir / std::string(manifest_file_name);
     FILE* strm = fopen(config.c_str(), "w");  // NOLINT(*-owning-memory)
@@ -68,11 +68,13 @@ void setup_initial_logdir(const boost::filesystem::path& logdir) {
         std::string err_msg = "Failed to close file: " + config.string();
         LOG_AND_THROW_IO_EXCEPTION(err_msg, errno);
     }
-    // Create compaction catalog file
-    compaction_catalog catalog(logdir);
-    catalog.update_catalog_file(0, 0, {}, {});
+    // Create compaction catalog file if it does not exist
+    boost::filesystem::path catalog_path = logdir / compaction_catalog::get_catalog_filename();
+    if (!exists_path(catalog_path)) {
+        compaction_catalog catalog(logdir);
+        catalog.update_catalog_file(0, 0, {}, {});
+    }
 }
-
 
 static constexpr const char *version_error_prefix = "/:limestone unsupported dbdir persistent format version: "
     "see https://github.com/project-tsurugi/tsurugidb/blob/master/docs/upgrade-guide.md";
@@ -89,7 +91,7 @@ int is_supported_version(const boost::filesystem::path& manifest_path, std::stri
         auto version = manifest["persistent_format_version"];
         if (version.is_number_integer()) {
             int v = version;
-            if (v == 1 || v == 2) {
+            if (1 <= v && v <= 3) {
                 return v;  // supported
             }
             errmsg = "version mismatch: version " + version.dump() + ", server supports version 1 or 2";
@@ -155,9 +157,9 @@ void check_and_migrate_logdir_format(const boost::filesystem::path& logdir) {
         LOG(ERROR) << "/:limestone dbdir is corrupted, can not use.";
         THROW_LIMESTONE_EXCEPTION("logdir corrupted");
     }
-    if (vc == 1) {
-        // migrate to version 2
-        VLOG_LP(log_info) << "migrating from version 1 to version 2";
+    if (vc < 3) {
+        // migrate to version 3
+        VLOG_LP(log_info) << "migrating from version " << vc << " to version 2";
         boost::filesystem::rename(manifest_path, manifest_backup_path, ec);
         if (ec) {
             std::string err_msg = "Failed to rename manifest file: " + manifest_path.string() + " to " + manifest_backup_path.string() + ". Error: " + ec.message();
