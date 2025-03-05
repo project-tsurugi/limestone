@@ -132,6 +132,9 @@ datastore::datastore(configuration const& conf) : location_(conf.data_locations_
 }
 
 datastore::~datastore() noexcept{
+    if (state_ == state::shutdown) {
+        return;
+    }
     try {
         shutdown();
     } catch (const std::exception &e) {
