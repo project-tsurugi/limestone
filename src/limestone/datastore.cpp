@@ -411,9 +411,8 @@ std::future<void> datastore::shutdown() noexcept {
         }
     }
 
+    VLOG(log_info) << "/:limestone:datastore:shutdown end";
     return std::async(std::launch::async, [] {
-        std::this_thread::sleep_for(std::chrono::microseconds(100000));
-        VLOG(log_info) << "/:limestone:datastore:shutdown end";
     });
 }
 
