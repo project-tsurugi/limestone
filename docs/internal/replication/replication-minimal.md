@@ -185,6 +185,8 @@ message response.SessionEnd {
   * エポック番号が不正 (巻き戻りの発生等)
 * 備考
   * このメッセージに ACK が返ってきたら、レプリカ上での当該グループコミットを成功とする
+  * エポック番号は厳密に単調増加するが、番号を飛ばす場合がある
+  * 指定されたエポック番号未満で、グループコミットされていないログエントリが存在する場合、それらも永続化の対象とする (エラーとしない)
 
 ```protobuf
 message request.GroupCommit {
@@ -271,11 +273,11 @@ message response.LogChannelCreate {
   * ログチャネルが作成されていない
 
 ```protobuf
-message request.LogChannelEnd {}
+message request.LogChannelDispose {}
 ```
 
 ```protobuf
-message response.LogChannelEnd {
+message response.LogChannelDispose {
     oneof result {
         Ack success = 1;
         Error error = 2;
@@ -310,10 +312,10 @@ message request.LogEntryWrite {
     repeated LogEntry entry_list = 2; 
 
     // ログチャネル内でのセッションを開始するかどうか
-    bool begin_session = 3;
+    bool session_begin = 3;
 
     // ログチャネル内でのセッションを終了するかどうか
-    bool end_session = 4;
+    bool session_end = 4;
 
     // 書き込み完了後にディスクにフラッシュするかどうか
     bool flush = 5;
@@ -389,11 +391,11 @@ message response.LogEntryWrite {
   * レプリカ側で書き込みに失敗した
 
 ```protobuf
-message request.LogEntryFlush {}
+message request.LogChannelFlush {}
 ```
 
 ```protobuf
-message response.LogEntryFlush {
+message response.LogChannelFlush {
     oneof result {
         Ack success = 1;
         Error error = 2;
