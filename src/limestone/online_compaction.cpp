@@ -43,9 +43,9 @@ std::set<std::string> select_files_for_compaction(const std::set<boost::filesyst
         if (filename.substr(0, 4) == "pwal" && filename.length() > 9 && detached_pwals.find(filename) == detached_pwals.end()) {
             need_compaction_filenames.insert(filename);
             detached_pwals.insert(filename);
-            LOG_LP(INFO) << "Selected file for compaction: " << filename;
+            VLOG_LP(log_debug) << "Selected file for compaction: " << filename;
         } else {
-            LOG_LP(INFO) << "File skipped for compaction: " << filename << " (Reason: " 
+            VLOG_LP(log_debug) << "File skipped for compaction: " << filename << " (Reason: " 
                          << (filename.substr(0, 4) != "pwal" ? "does not start with 'pwal'" :
                             filename.length() <= 9 ? "filename length is 9 or less" : 
                             "file is already detached") << ")";

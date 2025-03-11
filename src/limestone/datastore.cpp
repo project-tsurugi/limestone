@@ -645,7 +645,7 @@ void datastore::online_compaction_worker() {
     ensure_directory_exists(ctrl_dir);
     if (!boost::filesystem::exists(ctrl_dir)) {
         if (!boost::filesystem::create_directory(ctrl_dir)) {
-            LOG_LP(INFO) << "failed to create directory: " << ctrl_dir.string();
+            LOG_LP(ERROR) << "failed to create directory: " << ctrl_dir.string();
             return;
         } 
     }
@@ -710,7 +710,7 @@ void datastore::compact_with_online() {
 
     
     for (const auto& filename : detached_pwals) {
-        LOG_LP(INFO) << "detached_pwals:" << filename;
+        VLOG_LP(log_debug) << "detached_pwals:" << filename;
     }
 
 
@@ -718,13 +718,13 @@ void datastore::compact_with_online() {
     if (need_compaction_filenames.empty() ||
         (need_compaction_filenames.size() == 1 &&
          need_compaction_filenames.find(compaction_catalog::get_compacted_filename()) != need_compaction_filenames.end())) {
-        LOG_LP(INFO) << "no files to compact";
+        VLOG_LP(log_debug) << "no files to compact";
         TRACE_END << "return compact_with_online() without compaction";
         return;
     }
 
     for (const auto& filename : need_compaction_filenames) {
-        LOG_LP(INFO) << "need_compaction_filenames: " << filename;
+        VLOG_LP(log_debug) << "need_compaction_filenames: " << filename;
     }
 
     // create a temporary directory for online compaction
