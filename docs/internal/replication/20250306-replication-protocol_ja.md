@@ -374,3 +374,4 @@ struct response.log_channel_flush_ok = ack;
 // 失敗時
 struct response.log_channel_flush_error = error;
 ```
+
