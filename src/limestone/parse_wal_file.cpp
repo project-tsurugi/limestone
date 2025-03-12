@@ -219,7 +219,7 @@ epoch_id_type dblog_scan::scan_one_pwal_file(  // NOLINT(readability-function-co
         const std::function<void(log_entry&)>& add_entry,
         const error_report_func_t& report_error,
         parse_error& pe) {
-    VLOG_LP(log_info) << "processing pwal file: " << p.filename().string();
+    VLOG_LP(log_debug) << "processing pwal file: " << p.filename().string();
     epoch_id_type current_epoch{UINT64_MAX};
     epoch_id_type max_epoch_of_file{0};
     log_entry::read_error ec{};
@@ -485,7 +485,7 @@ epoch_id_type dblog_scan::scan_one_pwal_file(  // NOLINT(readability-function-co
         pe.value(parse_error::repaired);
         fixed++;
     }
-    VLOG_LP(30) << "fixed: " << fixed;
+    VLOG_LP(log_debug) << "fixed: " << fixed;
     pe.modified(fixed > 0);
     return max_epoch_of_file;
 }

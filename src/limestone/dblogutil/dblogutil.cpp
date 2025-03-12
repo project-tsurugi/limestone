@@ -262,8 +262,8 @@ void compaction(dblog_scan &ds, std::optional<epoch_id_type> epoch) {
 
 int main(char *dir, subcommand mode) {  // NOLINT
     if (FLAGS_verbose) {
-        if (FLAGS_v < log_info) {
-            FLAGS_v = log_info;
+        if (FLAGS_v < log_debug) {
+            FLAGS_v = log_debug;
         }
     }
     std::optional<epoch_id_type> opt_epoch;
