@@ -759,7 +759,7 @@ void datastore::compact_with_online() {
     // check if detached_pwals exist in location_
     for (auto it = detached_pwals.begin(); it != detached_pwals.end();) {
         if (files_in_location.find(*it) == files_in_location.end()) {
-            LOG_LP(WARNING) << "File " << *it << " does not exist in the directory and will be removed from detached_pwals.";
+            VLOG_LP(log_debug) << "File " << *it << " does not exist in the directory and will be removed from detached_pwals.";
             auto p = location_ / *it;
             subtract_file(p);
             it = detached_pwals.erase(it);  // Erase and move to the next iterator
