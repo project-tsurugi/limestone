@@ -37,6 +37,7 @@ TEST(replication_message_test, create_message_with_valid_type_id) {
     
     // Verify that the created message is of the expected type
     EXPECT_EQ(message->get_message_type_id(), limestone::replication::message_type_id::TESTING);
+    EXPECT_EQ(message->get_data_for_testing(), "Test Message Data");
 }
  
 // Test for invalid message type ID (should throw exception)
@@ -170,8 +171,22 @@ TEST(replication_message_test, incomplete_stream_2_bytes) {
     oss.write(reinterpret_cast<const char*>(&type_id), sizeof(type_id));  
     std::istringstream iss(oss.str()); 
     auto message = replication_message::receive(iss);
-    EXPECT_EQ(message->get_message_type_id(), limestone::replication::message_type_id::TESTING);    
+    EXPECT_EQ(message->get_message_type_id(), limestone::replication::message_type_id::TESTING); 
+    EXPECT_EQ(message->get_data_for_testing(), "");   
 }
+
+// Test for incomplete stream with 3 bytes (type information exists but no message body)
+TEST(replication_message_test, incomplete_stream_3_bytes) {
+    std::ostringstream oss;
+    message_type_id type_id = message_type_id::TESTING;
+    oss.write(reinterpret_cast<const char*>(&type_id), sizeof(type_id));  
+    oss << "A";
+    std::istringstream iss(oss.str()); 
+    auto message = replication_message::receive(iss);
+    EXPECT_EQ(message->get_message_type_id(), limestone::replication::message_type_id::TESTING); 
+    EXPECT_EQ(message->get_data_for_testing(), "A");   
+}
+
 
 // Test for receive_uint16 with an empty stream
 TEST(replication_message_test, receive_uint16_empty_stream) {

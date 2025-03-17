@@ -56,7 +56,7 @@
  
  // Write type information to the stream
  void replication_message::write_type_info(std::ostream& os, message_type_id type_id) {
-     os.write(reinterpret_cast<const char*>(&type_id), sizeof(type_id));  // Send type information to the stream
+    send_uint16(os, static_cast<uint16_t>(type_id));  
  }
  
  // Read type information from the stream

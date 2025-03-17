@@ -15,8 +15,9 @@ public:
 
     // Implement the receive_body method (deserialization)
     void receive_body(std::istream& is) override {
-        is >> data;
-        // For test purposes, just read the data
+        std::ostringstream oss;
+        oss << is.rdbuf();
+        data = oss.str();
     }
 
     // Return the message type ID
