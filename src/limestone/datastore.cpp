@@ -697,7 +697,7 @@ void datastore::compact_with_online() {
         blob_file_gc_runnable = true;
         blob_file_garbage_collector_->shutdown();
     }
-    VLOG_LP(log_trace_fine) << "boundary_version_copy.get_major(): " << boundary_version_copy.get_major()
+    VLOG_LP(log_info) << "boundary_version_copy.get_major(): " << boundary_version_copy.get_major()
                             << ", compaction_catalog_->get_max_epoch_id(): " << compaction_catalog_->get_max_epoch_id()
                             << ", blob_file_garbage_collector_->is_active(): " << is_active
                             << ", blob_file_gc_runnable: " << blob_file_gc_runnable;
@@ -732,7 +732,7 @@ void datastore::compact_with_online() {
     ensure_directory_exists(compaction_temp_dir);
 
     // Set the appropriate options based on whether blob file GC is executable.
-    VLOG_LP(log_trace_fine) << "blob_file_gc_runnable: " << blob_file_gc_runnable;
+    VLOG_LP(log_info) << "blob_file_gc_runnable: " << blob_file_gc_runnable;
     compaction_options options = [&]() -> compaction_options {
         if (blob_file_gc_runnable) {
             auto gc_snapshot = std::make_unique<blob_file_gc_snapshot>(boundary_version_copy);
@@ -784,7 +784,7 @@ void datastore::compact_with_online() {
     LOG_LP(INFO) << "compaction finished";
 
     // blob files garbage collection
-    VLOG_LP(log_trace_fine) << "options.is_gc_enabled(): " << options.is_gc_enabled() << ", !impl_->is_backup_in_progress(): " << !impl_->is_backup_in_progress();
+    VLOG_LP(log_info) << "options.is_gc_enabled(): " << options.is_gc_enabled() << ", impl_->is_backup_in_progress(): " << impl_->is_backup_in_progress();
     if (options.is_gc_enabled() && !impl_->is_backup_in_progress()) {
         LOG_LP(INFO) << "start blob files garbage collection";
         blob_file_garbage_collector_->scan_blob_files(next_blob_id_copy);

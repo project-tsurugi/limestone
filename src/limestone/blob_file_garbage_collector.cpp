@@ -114,10 +114,10 @@
          this->wait_for_blob_file_scan();
           
          // Calculate the difference and perform deletion operations
-         VLOG_LP(log_trace_fine) << "Scanned blobs before diff: " << scanned_blobs_->debug_string();
-         VLOG_LP(log_trace_fine) << "GC exempt blobs: " << gc_exempt_blob_->debug_string();
+         VLOG_LP(log_debug) << "Scanned blobs before diff: " << scanned_blobs_->debug_string();
+         VLOG_LP(log_debug) << "GC exempt blobs: " << gc_exempt_blob_->debug_string();
          scanned_blobs_->diff(*gc_exempt_blob_);
-         VLOG_LP(log_trace_fine) << "Scanned blobs after: " << scanned_blobs_->debug_string();
+         VLOG_LP(log_debug) << "Scanned blobs after: " << scanned_blobs_->debug_string();
 
          for (const auto &id : *scanned_blobs_) {
             if (shutdown_requested_.load(std::memory_order_acquire)) {
