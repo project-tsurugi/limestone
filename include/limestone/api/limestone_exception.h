@@ -21,6 +21,7 @@
 #include <string>
 #include <iostream>
 #include <filesystem>
+#include <boost/system/error_code.hpp>
 
 
 namespace limestone::api {
