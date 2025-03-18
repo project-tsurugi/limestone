@@ -26,10 +26,10 @@
      void send_body(std::ostream& os) const override;
      void receive_body(std::istream& is) override;
  
-     message_type_id get_message_type_id() const override;
+     [[nodiscard]] message_type_id get_message_type_id() const override;
  
      // Factory function for creating session_begin_message
-     static std::shared_ptr<replication_message> create();
+     [[nodiscard]] static std::shared_ptr<replication_message> create();
 
 
          // Process the message after it has been received.

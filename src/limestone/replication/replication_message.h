@@ -40,15 +40,21 @@ class replication_message {
 public:
     virtual ~replication_message() = default;
 
+    replication_message(const replication_message&) = delete;
+    replication_message& operator=(const replication_message&) = delete;
+    replication_message(replication_message&&) = delete;
+    replication_message& operator=(replication_message&&) = delete;
+
+
     // Get the message type ID (to be implemented by derived classes)
-    virtual message_type_id get_message_type_id() const = 0;
+    [[nodiscard]] virtual message_type_id get_message_type_id() const = 0;
 
     // Method to serialize and deserialize with type information
     static void send(std::ostream& os, const replication_message& message);
     static std::unique_ptr<replication_message> receive(std::istream& is);
 
     // Create message object based on type ID (factory method)
-    static std::unique_ptr<replication_message> create_message(message_type_id type);
+    [[nodiscard]] static std::unique_ptr<replication_message> create_message(message_type_id type);
 
     // Process the message after it has been received.
     virtual void post_receive() = 0;
@@ -59,10 +65,9 @@ public:
     // Register message type with its factory function
     static void register_message_type(message_type_id type, std::unique_ptr<replication_message> (*factory)());
 
-
-
-
+ 
  protected:
+     replication_message() = default;
      // This function is used to write the type information along with the message data
      static void write_type_info(std::ostream& os, message_type_id type_id);
      static message_type_id read_type_info(std::istream& is);

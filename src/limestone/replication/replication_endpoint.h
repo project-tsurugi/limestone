@@ -42,28 +42,28 @@
      /// the resolved IP and sockaddr_in are generated.
      /// Otherwise, default dummy values ("0.0.0.0" and port 0) remain.
      replication_endpoint();
- 
+
      /// Returns true if the environment variable is defined.
-     bool env_defined() const;
- 
+     [[nodiscard]] bool env_defined() const;
+
      /// Returns true if the endpoint was successfully parsed and resolved.
-     bool is_valid() const;
- 
+     [[nodiscard]] bool is_valid() const;
+
      /// Returns the protocol (currently always TCP).
-     replication_protocol protocol() const;
- 
+     [[nodiscard]] replication_protocol protocol() const;
+
      /// Returns the host part (as provided, either a hostname or an IP address).
-     std::string host() const;
- 
+     [[nodiscard]] std::string host() const;
+
      /// Returns the port number.
-     int port() const;
- 
+     [[nodiscard]] int port() const;
+
      /// Returns the resolved IP address as a numeric string.
-     std::string get_ip_address() const;
- 
+     [[nodiscard]] std::string get_ip_address() const;
+
      /// Returns a sockaddr_in structure that can be used directly with bind() or connect().
-     struct sockaddr_in get_sockaddr() const;
- 
+     [[nodiscard]] struct sockaddr_in get_sockaddr() const;
+
  private:
      bool env_defined_;            // Whether the environment variable is defined.
      bool endpoint_is_valid_;      // Whether the endpoint was successfully parsed and resolved.
