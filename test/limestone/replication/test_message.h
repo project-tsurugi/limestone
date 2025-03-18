@@ -42,17 +42,15 @@ public:
     }
 
 private:
-    // Static variable to ensure registration happens only once
-    static const bool registered;
+    // inline static variable: definition inside the class to ensure single definition across translation units
+    inline static const bool registered = [](){
+        replication_message::register_message_type(message_type_id::TESTING, &test_message::create);
+        return true;
+    }();
 
     std::string data = "Initial Data";
 };
 
 // Static variable to ensure registration happens only once
-const bool test_message::registered = []() {
-    // Register the message type with the message map
-    replication_message::register_message_type(message_type_id::TESTING, &test_message::create);
-    return true;
-}();
 
 }  // namespace limestone::replication
