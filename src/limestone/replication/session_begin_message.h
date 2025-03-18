@@ -40,7 +40,7 @@
 
     // Retrieve internal data for testing purposes.
     // Empty implementation for session_begin_message, returns an empty string.
-    std::string get_data_for_testing() const override {
+    [[nodiscard]] std::string get_data_for_testing() const override {
         return "";
     }
  };

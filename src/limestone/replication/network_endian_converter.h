@@ -18,6 +18,7 @@
  #pragma once
 
  #include <arpa/inet.h>
+ #include <array>
  #include <cstdint>
  #include <cstring>      // std::memcpy
  #include <iostream>
@@ -27,80 +28,78 @@
  
  class network_endian_converter {
  public:
-     // Write to the stream with byte order conversion without using reinterpret_cast
-     static inline void send_uint16(std::ostream& os, uint16_t value) {
+     // Write to the stream with byte order conversion using std::array
+     static inline void send_uint16(std::ostream &os, uint16_t value) {
          uint16_t net_value = htons(value);  // Convert to network byte order
-         char buffer[sizeof(net_value)];
-         std::memcpy(buffer, &net_value, sizeof(net_value));
-         os.write(buffer, sizeof(net_value));
+         std::array<char, sizeof(net_value)> buffer{};
+         std::memcpy(buffer.data(), &net_value, buffer.size());
+         os.write(buffer.data(), buffer.size());
      }
  
-     static inline void send_uint32(std::ostream& os, uint32_t value) {
+     static inline void send_uint32(std::ostream &os, uint32_t value) {
          uint32_t net_value = htonl(value);  // Convert to network byte order
-         char buffer[sizeof(net_value)];
-         std::memcpy(buffer, &net_value, sizeof(net_value));
-         os.write(buffer, sizeof(net_value));
+         std::array<char, sizeof(net_value)> buffer{};
+         std::memcpy(buffer.data(), &net_value, buffer.size());
+         os.write(buffer.data(), buffer.size());
      }
  
-     static inline void send_uint64(std::ostream& os, uint64_t value) {
-         // Use unsigned literal to avoid warnings with bitwise operators
-         uint32_t high = htonl(static_cast<uint32_t>(value >> 32));  
-         uint32_t low = htonl(static_cast<uint32_t>(value & 0xFFFFFFFFULL));  
+     static inline void send_uint64(std::ostream &os, uint64_t value) {
+         uint32_t high = htonl(static_cast<uint32_t>(value >> 32));
+         uint32_t low  = htonl(static_cast<uint32_t>(value & 0xFFFFFFFFULL));
          {
-              char buffer[sizeof(high)];
-              std::memcpy(buffer, &high, sizeof(high));
-              os.write(buffer, sizeof(high));
+             std::array<char, sizeof(high)> buffer{};
+             std::memcpy(buffer.data(), &high, buffer.size());
+             os.write(buffer.data(), buffer.size());
          }
          {
-              char buffer[sizeof(low)];
-              std::memcpy(buffer, &low, sizeof(low));
-              os.write(buffer, sizeof(low));
+             std::array<char, sizeof(low)> buffer{};
+             std::memcpy(buffer.data(), &low, buffer.size());
+             os.write(buffer.data(), buffer.size());
          }
      }
  
-     // Read from the stream with byte order conversion and error checking without using reinterpret_cast
+     // Read from the stream with byte order conversion using std::array
      static inline uint16_t receive_uint16(std::istream &is) {
          uint16_t net_value{};
-         char buffer[sizeof(net_value)] = {};
-         is.read(buffer, sizeof(net_value));
+         std::array<char, sizeof(net_value)> buffer{};
+         is.read(buffer.data(), buffer.size());
          if (!is) {
              LOG_AND_THROW_IO_EXCEPTION("Failed to read uint16_t value from stream", errno);
          }
-         std::memcpy(&net_value, buffer, sizeof(net_value));
+         std::memcpy(&net_value, buffer.data(), buffer.size());
          return ntohs(net_value);  // Convert from network byte order
      }
  
      static inline uint32_t receive_uint32(std::istream &is) {
          uint32_t net_value{};
-         char buffer[sizeof(net_value)] = {};
-         is.read(buffer, sizeof(net_value));
+         std::array<char, sizeof(net_value)> buffer{};
+         is.read(buffer.data(), buffer.size());
          if (!is) {
              LOG_AND_THROW_IO_EXCEPTION("Failed to read uint32_t value from stream", errno);
          }
-         std::memcpy(&net_value, buffer, sizeof(net_value));
+         std::memcpy(&net_value, buffer.data(), buffer.size());
          return ntohl(net_value);  // Convert from network byte order
      }
  
      static inline uint64_t receive_uint64(std::istream &is) {
-         uint32_t high{};
-         uint32_t low{};
+         uint32_t high{}, low{};
          {
-             char buffer[sizeof(high)] = {};
-             is.read(buffer, sizeof(high));
+             std::array<char, sizeof(high)> buffer{};
+             is.read(buffer.data(), buffer.size());
              if (!is) {
                  LOG_AND_THROW_IO_EXCEPTION("Failed to read high 32 bits of uint64_t value from stream", errno);
              }
-             std::memcpy(&high, buffer, sizeof(high));
+             std::memcpy(&high, buffer.data(), buffer.size());
          }
          {
-             char buffer[sizeof(low)] = {};
-             is.read(buffer, sizeof(low));
+             std::array<char, sizeof(low)> buffer{};
+             is.read(buffer.data(), buffer.size());
              if (!is) {
                  LOG_AND_THROW_IO_EXCEPTION("Failed to read low 32 bits of uint64_t value from stream", errno);
              }
-             std::memcpy(&low, buffer, sizeof(low));
+             std::memcpy(&low, buffer.data(), buffer.size());
          }
-         uint64_t value = (static_cast<uint64_t>(ntohl(high)) << 32) | ntohl(low);  // Convert to host byte order
+         uint64_t value = (static_cast<uint64_t>(ntohl(high)) << 32) | ntohl(low);
          return value;
      }
  };

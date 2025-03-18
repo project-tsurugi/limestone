@@ -64,15 +64,15 @@
      /// Returns a sockaddr_in structure that can be used directly with bind() or connect().
      [[nodiscard]] struct sockaddr_in get_sockaddr() const;
 
- private:
-     bool env_defined_;            // Whether the environment variable is defined.
-     bool endpoint_is_valid_;      // Whether the endpoint was successfully parsed and resolved.
-     replication_protocol protocol_; // Protocol type (currently only TCP).
-     std::string host_;            // Host part extracted from the environment variable.
-     int port_;                    // Port number extracted from the environment variable.
- 
-     std::string resolved_ip_;     // Resolved IP address (numeric string) or default.
-     struct sockaddr_in sockaddr_; // Pre-generated sockaddr_in structure.
+     private:
+     bool env_defined_{false};            // Whether the environment variable is defined.
+     bool endpoint_is_valid_{false};      // Whether the endpoint was successfully parsed and resolved.
+     replication_protocol protocol_{replication_protocol::TCP}; // Protocol type (currently only TCP).
+     std::string host_{};                // Host part extracted from the environment variable.
+     int port_{0};                      // Port number extracted from the environment variable.
+  
+     std::string resolved_ip_{"0.0.0.0"}; // Resolved IP address (numeric string) or default.
+     struct sockaddr_in sockaddr_{};    // Pre-generated sockaddr_in structure.
  
      /// Parses the endpoint string using a regular expression and performs name resolution.
      /// Expected format: "tcp://<host>:<port>".

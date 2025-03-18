@@ -60,7 +60,7 @@ public:
     virtual void post_receive() = 0;
 
     // Retrieve internal data for testing purposes.
-    virtual std::string get_data_for_testing() const = 0;
+    [[nodiscard]] virtual std::string get_data_for_testing() const = 0;
 
     // Register message type with its factory function
     static void register_message_type(message_type_id type, std::unique_ptr<replication_message> (*factory)());
