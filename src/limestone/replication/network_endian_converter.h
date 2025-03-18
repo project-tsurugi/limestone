@@ -44,8 +44,9 @@
      }
  
      static inline void send_uint64(std::ostream &os, uint64_t value) {
-         uint32_t high = htonl(static_cast<uint32_t>(value >> 32));
-         uint32_t low  = htonl(static_cast<uint32_t>(value & 0xFFFFFFFFULL));
+        constexpr uint64_t mask32 = 0xFFFFFFFFULL;
+        uint32_t high = htonl(static_cast<uint32_t>(value >> 32U));
+        uint32_t low  = htonl(static_cast<uint32_t>(value & mask32));
          {
              std::array<char, sizeof(high)> buffer{};
              std::memcpy(buffer.data(), &high, buffer.size());
@@ -82,26 +83,28 @@
      }
  
      static inline uint64_t receive_uint64(std::istream &is) {
-         uint32_t high{}, low{};
-         {
-             std::array<char, sizeof(high)> buffer{};
-             is.read(buffer.data(), buffer.size());
-             if (!is) {
-                 LOG_AND_THROW_IO_EXCEPTION("Failed to read high 32 bits of uint64_t value from stream", errno);
-             }
-             std::memcpy(&high, buffer.data(), buffer.size());
-         }
-         {
-             std::array<char, sizeof(low)> buffer{};
-             is.read(buffer.data(), buffer.size());
-             if (!is) {
-                 LOG_AND_THROW_IO_EXCEPTION("Failed to read low 32 bits of uint64_t value from stream", errno);
-             }
-             std::memcpy(&low, buffer.data(), buffer.size());
-         }
-         uint64_t value = (static_cast<uint64_t>(ntohl(high)) << 32) | ntohl(low);
-         return value;
-     }
+        uint32_t high{};
+        uint32_t low{};
+        {
+            std::array<char, sizeof(high)> buffer{};
+            is.read(buffer.data(), buffer.size());
+            if (!is) {
+                LOG_AND_THROW_IO_EXCEPTION("Failed to read high 32 bits of uint64_t value from stream", errno);
+            }
+            std::memcpy(&high, buffer.data(), buffer.size());
+        }
+        {
+            std::array<char, sizeof(low)> buffer{};
+            is.read(buffer.data(), buffer.size());
+            if (!is) {
+                LOG_AND_THROW_IO_EXCEPTION("Failed to read low 32 bits of uint64_t value from stream", errno);
+            }
+            std::memcpy(&low, buffer.data(), buffer.size());
+        }
+        uint64_t value = (static_cast<uint64_t>(ntohl(high)) << 32U)
+                         | static_cast<uint64_t>(ntohl(low));
+        return value;
+    }
  };
  
  }  // namespace limestone::replication

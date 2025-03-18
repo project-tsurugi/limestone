@@ -23,11 +23,7 @@
 
 namespace limestone::replication {
 
-replication_endpoint::replication_endpoint()
-    : env_defined_(false), endpoint_is_valid_(false),
-      protocol_(replication_protocol::TCP), host_("0.0.0.0"), port_(0),
-      resolved_ip_("0.0.0.0"),  sockaddr_{} 
-{
+replication_endpoint::replication_endpoint() {
     // Prepare default dummy sockaddr_in.
     std::memset(&sockaddr_, 0, sizeof(sockaddr_));
     sockaddr_.sin_family = AF_INET;

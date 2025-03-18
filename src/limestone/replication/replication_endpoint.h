@@ -68,8 +68,8 @@
      bool env_defined_{false};            // Whether the environment variable is defined.
      bool endpoint_is_valid_{false};      // Whether the endpoint was successfully parsed and resolved.
      replication_protocol protocol_{replication_protocol::TCP}; // Protocol type (currently only TCP).
-     std::string host_{};                // Host part extracted from the environment variable.
-     int port_{0};                      // Port number extracted from the environment variable.
+     std::string host_{"0.0.0.0"};        // Host part extracted from the environment variable.
+     int port_{0};                        // Port number extracted from the environment variable.
   
      std::string resolved_ip_{"0.0.0.0"}; // Resolved IP address (numeric string) or default.
      struct sockaddr_in sockaddr_{};    // Pre-generated sockaddr_in structure.
