@@ -16,7 +16,7 @@
 
 #include "gtest/gtest.h"
 #include "limestone/api/limestone_exception.h"
-#include "replication/network_io.h"
+#include "replication/socket_io.h"
 #include "test_message.h"
 
 namespace limestone::testing {

@@ -16,7 +16,7 @@
 
 #include "gtest/gtest.h"
 #include "limestone/api/limestone_exception.h"
-#include "replication/network_io.h"
+#include "replication/socket_io.h"
 #include "test_message.h"
 
 namespace limestone::testing {
@@ -26,10 +26,10 @@ using limestone::api::limestone_exception;
 
 
 // Test for receive_uint16 with an empty stream
-TEST(network_io_test, receive_uint16_empty_stream) {
+TEST(socket_io_test, receive_uint16_empty_stream) {
    std::istringstream iss("");
    try {
-       network_io::receive_uint16(iss);
+       socket_io::receive_uint16(iss);
        FAIL() << "Expected limestone_exception, but none was thrown.";
    } catch (const limestone_exception& ex) {
        // Check that the error message contains the expected substring
@@ -40,11 +40,11 @@ TEST(network_io_test, receive_uint16_empty_stream) {
 }
 
 // Test for receive_uint16 with an insufficient stream (only 1 byte)
-TEST(network_io_test, receive_uint16_insufficient_stream) {
+TEST(socket_io_test, receive_uint16_insufficient_stream) {
    // 1 byte provided, but 2 bytes are needed for uint16_t
    std::istringstream iss("A");
    try {
-    network_io::receive_uint16(iss);
+    socket_io::receive_uint16(iss);
        FAIL() << "Expected limestone_exception, but none was thrown.";
    } catch (const limestone_exception& ex) {
        std::string expected_substring = "Failed to read uint16_t value from stream";
@@ -54,10 +54,10 @@ TEST(network_io_test, receive_uint16_insufficient_stream) {
 }
 
 // Test for receive_uint32 with an empty stream
-TEST(network_io_test, receive_uint32_empty_stream) {
+TEST(socket_io_test, receive_uint32_empty_stream) {
    std::istringstream iss("");
    try {
-    network_io::receive_uint32(iss);
+    socket_io::receive_uint32(iss);
        FAIL() << "Expected limestone_exception, but none was thrown.";
    } catch (const limestone_exception& ex) {
        std::string expected_substring = "Failed to read uint32_t value from stream";
@@ -67,11 +67,11 @@ TEST(network_io_test, receive_uint32_empty_stream) {
 }
 
 // Test for receive_uint32 with an insufficient stream (only 3 bytes)
-TEST(network_io_test, receive_uint32_insufficient_stream) {
+TEST(socket_io_test, receive_uint32_insufficient_stream) {
    // 3 bytes provided, but 4 bytes are needed for uint32_t
    std::istringstream iss("ABC");
    try {
-    network_io::receive_uint32(iss);
+    socket_io::receive_uint32(iss);
        FAIL() << "Expected limestone_exception, but none was thrown.";
    } catch (const limestone_exception& ex) {
        std::string expected_substring = "Failed to read uint32_t value from stream";
@@ -81,10 +81,10 @@ TEST(network_io_test, receive_uint32_insufficient_stream) {
 }
 
 // Test for receive_uint64 with an empty stream
-TEST(network_io_test, receive_uint64_empty_stream) {
+TEST(socket_io_test, receive_uint64_empty_stream) {
    std::istringstream iss("");
    try {
-    network_io::receive_uint64(iss);
+    socket_io::receive_uint64(iss);
        FAIL() << "Expected limestone_exception, but none was thrown.";
    } catch (const limestone_exception& ex) {
        // The first read (for high 32 bits) should fail
@@ -95,11 +95,11 @@ TEST(network_io_test, receive_uint64_empty_stream) {
 }
 
 // Test for receive_uint64 with insufficient stream for the high 32 bits
-TEST(network_io_test, receive_uint64_insufficient_stream_for_high) {
+TEST(socket_io_test, receive_uint64_insufficient_stream_for_high) {
    // Only 3 bytes provided; 4 bytes are needed for the high 32 bits of uint64_t
    std::istringstream iss("ABC");
    try {
-    network_io::receive_uint64(iss);
+    socket_io::receive_uint64(iss);
        FAIL() << "Expected limestone_exception, but none was thrown.";
    } catch (const limestone_exception& ex) {
        std::string expected_substring = "Failed to read high 32 bits of uint64_t value from stream";
@@ -109,12 +109,12 @@ TEST(network_io_test, receive_uint64_insufficient_stream_for_high) {
 }
 
 // Test for receive_uint64 with insufficient stream for the low 32 bits
-TEST(network_io_test, receive_uint64_insufficient_stream_for_low) {
+TEST(socket_io_test, receive_uint64_insufficient_stream_for_low) {
    // Provide 5 bytes: 4 bytes for high 32 bits and 1 byte for low 32 bits (insufficient for low part)
    std::string data(5, 'A');
    std::istringstream iss(data);
    try {
-    network_io::receive_uint64(iss);
+    socket_io::receive_uint64(iss);
        FAIL() << "Expected limestone_exception, but none was thrown.";
    } catch (const limestone_exception& ex) {
        std::string expected_substring = "Failed to read low 32 bits of uint64_t value from stream";
@@ -124,7 +124,7 @@ TEST(network_io_test, receive_uint64_insufficient_stream_for_low) {
 }
 
 // Test for byte order conversion with streams
-TEST(network_io_test, byte_order_conversion_with_streams) {
+TEST(socket_io_test, byte_order_conversion_with_streams) {
     uint16_t host16 = 0x1234;  // 16-bit value
     uint32_t host32 = 0x12345678;  // 32-bit value
     uint64_t host64 = 0x1234567890ABCDEF;  // 64-bit value
@@ -133,17 +133,17 @@ TEST(network_io_test, byte_order_conversion_with_streams) {
     std::ostringstream oss;
     
     // Write 16-bit, 32-bit, and 64-bit values to the stream
-    network_io::send_uint16(oss, host16);
-    network_io::send_uint32(oss, host32);
-    network_io::send_uint64(oss, host64);
+    socket_io::send_uint16(oss, host16);
+    socket_io::send_uint32(oss, host32);
+    socket_io::send_uint64(oss, host64);
     
     // Create an input stream from the serialized data
     std::istringstream iss(oss.str());
     
     // Read 16-bit, 32-bit, and 64-bit values from the stream
-    uint16_t network16 = network_io::receive_uint16(iss);
-    uint32_t network32 = network_io::receive_uint32(iss);
-    uint64_t network64 = network_io::receive_uint64(iss);
+    uint16_t network16 = socket_io::receive_uint16(iss);
+    uint32_t network32 = socket_io::receive_uint32(iss);
+    uint64_t network64 = socket_io::receive_uint64(iss);
     
     // Verify that the deserialized values match the original values
     EXPECT_EQ(network16, host16);
@@ -152,10 +152,10 @@ TEST(network_io_test, byte_order_conversion_with_streams) {
 }
 
 // Test for receive_uint8 with an empty stream
-TEST(network_io_test, receive_uint8_empty_stream) {
+TEST(socket_io_test, receive_uint8_empty_stream) {
     std::istringstream iss("");
     try {
-        network_io::receive_uint8(iss);
+        socket_io::receive_uint8(iss);
         FAIL() << "Expected limestone_exception, but none was thrown.";
     } catch (const limestone_exception& ex) {
         std::string expected = "Failed to read uint8_t from stream";
@@ -165,21 +165,21 @@ TEST(network_io_test, receive_uint8_empty_stream) {
 }
 
 // Test for uint8 round-trip
-TEST(network_io_test, uint8_round_trip) {
+TEST(socket_io_test, uint8_round_trip) {
     uint8_t original = 0xAB;
     std::ostringstream oss;
-    network_io::send_uint8(oss, original);
+    socket_io::send_uint8(oss, original);
 
     std::istringstream iss(oss.str());
-    uint8_t result = network_io::receive_uint8(iss);
+    uint8_t result = socket_io::receive_uint8(iss);
     EXPECT_EQ(result, original);
 }
 
 // Test for receive_string with an empty stream (length)
-TEST(network_io_test, receive_string_empty_stream) {
+TEST(socket_io_test, receive_string_empty_stream) {
     std::istringstream iss("");
     try {
-        network_io::receive_string(iss);
+        socket_io::receive_string(iss);
         FAIL() << "Expected limestone_exception, but none was thrown.";
     } catch (const limestone_exception& ex) {
         std::string expected = "Failed to read uint32_t value from stream";
@@ -189,12 +189,12 @@ TEST(network_io_test, receive_string_empty_stream) {
 }
 
 // Test for receive_string with insufficient body
-TEST(network_io_test, receive_string_insufficient_body) {
+TEST(socket_io_test, receive_string_insufficient_body) {
     std::ostringstream oss;
-    network_io::send_uint32(oss, 5); // length = 5, but no data
+    socket_io::send_uint32(oss, 5); // length = 5, but no data
     std::istringstream iss(oss.str());
     try {
-        network_io::receive_string(iss);
+        socket_io::receive_string(iss);
         FAIL() << "Expected limestone_exception, but none was thrown.";
     } catch (const limestone_exception& ex) {
         std::string expected = "Failed to read string body from stream";
@@ -204,24 +204,24 @@ TEST(network_io_test, receive_string_insufficient_body) {
 }
 
 // Test for string round-trip (binary data)
-TEST(network_io_test, string_round_trip) {
+TEST(socket_io_test, string_round_trip) {
     std::string original = std::string("Hello\0World", 11);
     std::ostringstream oss;
-    network_io::send_string(oss, original);
+    socket_io::send_string(oss, original);
 
     std::istringstream iss(oss.str());
-    std::string result = network_io::receive_string(iss);
+    std::string result = socket_io::receive_string(iss);
     EXPECT_EQ(result, original);
 }
 
 // Test for round-trip of an empty string
-TEST(network_io_test, string_round_trip_empty) {
+TEST(socket_io_test, string_round_trip_empty) {
     std::string original{};
     std::ostringstream oss;
-    network_io::send_string(oss, original);
+    socket_io::send_string(oss, original);
 
     std::istringstream iss(oss.str());
-    std::string result = network_io::receive_string(iss);
+    std::string result = socket_io::receive_string(iss);
     EXPECT_EQ(result.size(), 0u);
     EXPECT_EQ(result, original);
 }

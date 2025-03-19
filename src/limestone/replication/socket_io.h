@@ -26,7 +26,7 @@
  
  namespace limestone::replication {
  
- class network_io {
+ class socket_io {
  public:
      // Write to the stream with byte order conversion using std::array
      static inline void send_uint16(std::ostream &os, uint16_t value) {

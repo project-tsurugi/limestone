@@ -16,11 +16,11 @@
 
 #include "replication/session_begin_message.h"
 #include "gtest/gtest.h"
-#include "replication/network_io.h"
+#include "replication/socket_io.h"
 
 namespace limestone::testing {
 
-using limestone::replication::network_io;
+using limestone::replication::socket_io;
 
 // Test default send_body produces expected fields
 TEST(session_begin_message_test, default_body_serialization) {
@@ -30,10 +30,10 @@ TEST(session_begin_message_test, default_body_serialization) {
     msg.send_body(oss);
 
     std::istringstream iss(oss.str());
-    uint8_t connection_type = network_io::receive_uint8(iss);
-    uint64_t protocol_version = network_io::receive_uint64(iss);
-    std::string configuration_id = network_io::receive_string(iss);
-    uint64_t epoch_number = network_io::receive_uint64(iss);
+    uint8_t connection_type = socket_io::receive_uint8(iss);
+    uint64_t protocol_version = socket_io::receive_uint64(iss);
+    std::string configuration_id = socket_io::receive_string(iss);
+    uint64_t epoch_number = socket_io::receive_uint64(iss);
 
     EXPECT_EQ(connection_type, replication::CONNECTION_TYPE_CONTROL_CHANNEL);
     EXPECT_EQ(protocol_version, replication::protocol_version);
