@@ -18,6 +18,7 @@
 
 #include <arpa/inet.h>
 
+#include <cstdint>
 #include <iostream>
 #include <memory>
 #include <unordered_map>
@@ -34,6 +35,13 @@ enum class message_type_id : uint16_t {
     GROUP_COMMIT = 3,
     LOG_ENTRY = 4
 };
+
+enum connection_type : uint8_t {
+    CONNECTION_TYPE_CONTROL_CHANNEL = 0,
+    CONNECTION_TYPE_LOG_CHANNEL = 1
+};
+
+constexpr uint64_t protocol_version = 1;
 
 // Abstract class representing a replication message
 class replication_message {
@@ -58,9 +66,6 @@ public:
 
     // Process the message after it has been received.
     virtual void post_receive() = 0;
-
-    // Retrieve internal data for testing purposes.
-    [[nodiscard]] virtual std::string get_data_for_testing() const = 0;
 
     // Register message type with its factory function
     static void register_message_type(message_type_id type, std::unique_ptr<replication_message> (*factory)());

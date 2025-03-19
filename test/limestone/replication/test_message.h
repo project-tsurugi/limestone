@@ -36,11 +36,9 @@ public:
         data = "Processed " + data;
     }
 
-    // Retrieve internal data for testing purposes.
-    std::string get_data_for_testing() const override {
+    std::string get_data() const {
         return data;
     }
-
 private:
     // inline static variable: definition inside the class to ensure single definition across translation units
     inline static const bool registered = [](){

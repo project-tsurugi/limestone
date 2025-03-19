@@ -16,7 +16,7 @@
  */
 
 #include "replication_message.h"
-#include "network_endian_converter.h"
+#include "network_io.h"
 #include "../limestone_exception_helper.h"
 
  namespace limestone::replication {
@@ -57,12 +57,12 @@
  
  // Write type information to the stream
  void replication_message::write_type_info(std::ostream& os, message_type_id type_id) {
-    network_endian_converter::send_uint16(os, static_cast<uint16_t>(type_id));  
+    network_io::send_uint16(os, static_cast<uint16_t>(type_id));  
  }
  
  // Read type information from the stream
  message_type_id replication_message::read_type_info(std::istream& is) {
-    uint16_t value = network_endian_converter::receive_uint16(is);
+    uint16_t value = network_io::receive_uint16(is);
     return static_cast<message_type_id>(value);
  }
  

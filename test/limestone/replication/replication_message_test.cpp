@@ -14,15 +14,15 @@
  * limitations under the License.
  */
 
- #include "gtest/gtest.h"
- #include "replication/network_endian_converter.h"
- #include "test_message.h" 
- #include "limestone/api/limestone_exception.h"
- 
- namespace limestone::testing {
- 
- using namespace limestone::replication;
- using limestone::api::limestone_exception;
+#include "gtest/gtest.h"
+#include "limestone/api/limestone_exception.h"
+#include "replication/network_io.h"
+#include "test_message.h"
+
+namespace limestone::testing {
+
+using namespace limestone::replication;
+using limestone::api::limestone_exception;
  
 // Test for creating a message using the message type ID
 TEST(replication_message_test, create_message_with_valid_type_id) {
@@ -38,7 +38,9 @@ TEST(replication_message_test, create_message_with_valid_type_id) {
     
     // Verify that the created message is of the expected type
     EXPECT_EQ(message->get_message_type_id(), limestone::replication::message_type_id::TESTING);
-    EXPECT_EQ(message->get_data_for_testing(), "Test Message Data");
+    auto test_msg = dynamic_cast<test_message*>(message.get());
+    ASSERT_NE(test_msg, nullptr) << "Failed to cast to test_message";
+    EXPECT_EQ(test_msg->get_data(), "Test Message Data");
 }
  
 // Test for invalid message type ID (should throw exception)
@@ -143,23 +145,26 @@ TEST(replication_message_test, incomplete_stream_2_bytes) {
    std::ostringstream oss;
    message_type_id type_id = message_type_id::TESTING;
    oss.write(reinterpret_cast<const char*>(&type_id), sizeof(type_id));  
-   std::istringstream iss(oss.str()); 
+   std::istringstream iss(oss.str());
    auto message = replication_message::receive(iss);
-   EXPECT_EQ(message->get_message_type_id(), limestone::replication::message_type_id::TESTING); 
-   EXPECT_EQ(message->get_data_for_testing(), "");   
+   EXPECT_EQ(message->get_message_type_id(), limestone::replication::message_type_id::TESTING);
+   auto test_msg = dynamic_cast<test_message*>(message.get());
+   ASSERT_NE(test_msg, nullptr) << "Failed to cast to test_message";
+   EXPECT_EQ(test_msg->get_data(), "");
 }
 
 // Test for incomplete stream with 3 bytes (type information exists but no message body)
 TEST(replication_message_test, incomplete_stream_3_bytes) {
-   std::ostringstream oss;
-   message_type_id type_id = message_type_id::TESTING;
-   oss.write(reinterpret_cast<const char*>(&type_id), sizeof(type_id));  
-   oss << "A";
-   std::istringstream iss(oss.str()); 
-   auto message = replication_message::receive(iss);
-   EXPECT_EQ(message->get_message_type_id(), limestone::replication::message_type_id::TESTING); 
-   EXPECT_EQ(message->get_data_for_testing(), "A");   
+    std::ostringstream oss;
+    message_type_id type_id = message_type_id::TESTING;
+    oss.write(reinterpret_cast<const char*>(&type_id), sizeof(type_id));
+    oss << "A";
+    std::istringstream iss(oss.str());
+    auto message = replication_message::receive(iss);
+    EXPECT_EQ(message->get_message_type_id(), limestone::replication::message_type_id::TESTING);
+    auto test_msg = dynamic_cast<test_message*>(message.get());
+    ASSERT_NE(test_msg, nullptr) << "Failed to cast to test_message";
+    EXPECT_EQ(test_msg->get_data(), "A");
 }
- 
- }  // namespace limestone::testing
- 
+
+}  // namespace limestone::testing

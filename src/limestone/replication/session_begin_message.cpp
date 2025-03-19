@@ -14,28 +14,39 @@
  * limitations under the License.
  */
 
- #include "session_begin_message.h"
+#include "session_begin_message.h"
 
- namespace limestone::replication {
- 
+#include "network_io.h"
+
+namespace limestone::replication {
+
+void session_begin_message::set_param(std::string configuration_id, uint64_t epoch_number) {
+    configuration_id_ = std::move(configuration_id);
+    epoch_number_ = epoch_number;
+ }
+
  // Send the actual session begin message data
  void session_begin_message::send_body(std::ostream& os) const {
-     os << "Session Begin Data";  // Implement actual serialization logic here
+    network_io::send_uint8(os, connection_type_);
+    network_io::send_uint64(os, protocol_version_);
+    network_io::send_string(os, configuration_id_);
+    network_io::send_uint64(os, epoch_number_);
  }
- 
+
  // Deserialize the session begin message data
  void session_begin_message::receive_body(std::istream& is) {
-     std::string data;
-     is >> data;
-     // Implement actual deserialization logic here
+     connection_type_ = network_io::receive_uint8(is);
+     protocol_version_ = network_io::receive_uint64(is);
+     configuration_id_ = network_io::receive_string(is);
+     epoch_number_ = network_io::receive_uint64(is);
  }
- 
+
  message_type_id session_begin_message::get_message_type_id() const {
      return message_type_id::SESSION_BEGIN;
  }
  
- std::shared_ptr<replication_message> session_begin_message::create() {
-     return std::make_shared<session_begin_message>();
+ std::unique_ptr<replication_message> session_begin_message::create() {
+     return std::make_unique<session_begin_message>();
  }
  
  }  // namespace limestone::replication

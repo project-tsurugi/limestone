@@ -26,7 +26,7 @@
  
  namespace limestone::replication {
  
- class network_endian_converter {
+ class network_io {
  public:
      // Write to the stream with byte order conversion using std::array
      static inline void send_uint16(std::ostream &os, uint16_t value) {
@@ -103,6 +103,45 @@
         }
         uint64_t value = (static_cast<uint64_t>(ntohl(high)) << 32U)
                          | static_cast<uint64_t>(ntohl(low));
+        return value;
+    }
+
+    static inline void send_string(std::ostream &os, const std::string &value) {
+        send_uint32(os, static_cast<uint32_t>(value.size()));
+        os.write(value.data(), value.size());
+        if (!os) {
+            LOG_AND_THROW_IO_EXCEPTION("Failed to write string to stream", errno);
+        }
+    }
+    
+    static inline std::string receive_string(std::istream &is) {
+        uint32_t len = receive_uint32(is);
+        std::string result;
+        result.resize(len);
+        is.read(result.data(), len);
+        if (!is) {
+            LOG_AND_THROW_IO_EXCEPTION("Failed to read string body from stream", errno);
+        }
+        return result;
+    }
+
+    static inline void send_uint8(std::ostream &os, uint8_t value) {
+        std::array<char, sizeof(value)> buffer{};
+        std::memcpy(buffer.data(), &value, buffer.size());
+        os.write(buffer.data(), buffer.size());
+        if (!os) {
+            LOG_AND_THROW_IO_EXCEPTION("Failed to write uint8_t to stream", errno);
+        }
+    }
+    
+    static inline uint8_t receive_uint8(std::istream &is) {
+        uint8_t value{};
+        std::array<char, sizeof(value)> buffer{};
+        is.read(buffer.data(), buffer.size());
+        if (!is) {
+            LOG_AND_THROW_IO_EXCEPTION("Failed to read uint8_t from stream", errno);
+        }
+        std::memcpy(&value, buffer.data(), buffer.size());
         return value;
     }
  };
