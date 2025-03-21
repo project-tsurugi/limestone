@@ -26,19 +26,19 @@ void session_begin_message::set_param(std::string configuration_id, uint64_t epo
  }
 
  // Send the actual session begin message data
- void session_begin_message::send_body(std::ostream& os) const {
-    socket_io::send_uint8(os, connection_type_);
-    socket_io::send_uint64(os, protocol_version_);
-    socket_io::send_string(os, configuration_id_);
-    socket_io::send_uint64(os, epoch_number_);
+ void session_begin_message::send_body(socket_io& io) const {
+    io.send_uint8(connection_type_);
+    io.send_uint64(protocol_version_);
+    io.send_string(configuration_id_);
+    io.send_uint64(epoch_number_);
  }
 
  // Deserialize the session begin message data
- void session_begin_message::receive_body(std::istream& is) {
-     connection_type_ = socket_io::receive_uint8(is);
-     protocol_version_ = socket_io::receive_uint64(is);
-     configuration_id_ = socket_io::receive_string(is);
-     epoch_number_ = socket_io::receive_uint64(is);
+ void session_begin_message::receive_body(socket_io& io) {
+     connection_type_ = io.receive_uint8();
+     protocol_version_ = io.receive_uint64();
+     configuration_id_ = io.receive_string();
+     epoch_number_ = io.receive_uint64();
  }
 
  message_type_id session_begin_message::get_message_type_id() const {

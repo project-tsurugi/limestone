@@ -25,20 +25,10 @@ using limestone::replication::socket_io;
 // Test default send_body produces expected fields
 TEST(session_begin_message_test, default_body_serialization) {
     replication::session_begin_message msg;
-
-    std::ostringstream oss;
-    msg.send_body(oss);
-
-    std::istringstream iss(oss.str());
-    uint8_t connection_type = socket_io::receive_uint8(iss);
-    uint64_t protocol_version = socket_io::receive_uint64(iss);
-    std::string configuration_id = socket_io::receive_string(iss);
-    uint64_t epoch_number = socket_io::receive_uint64(iss);
-
-    EXPECT_EQ(connection_type, replication::CONNECTION_TYPE_CONTROL_CHANNEL);
-    EXPECT_EQ(protocol_version, replication::protocol_version);
-    EXPECT_EQ(configuration_id, "");
-    EXPECT_EQ(epoch_number, 0u);
+    EXPECT_EQ(msg.get_connection_type(), replication::CONNECTION_TYPE_CONTROL_CHANNEL);
+    EXPECT_EQ(msg.get_protocol_version(), replication::protocol_version);
+    EXPECT_EQ(msg.get_configuration_id(), "");
+    EXPECT_EQ(msg.get_epoch_number(), 0u);
 }
 
 // Test set_param affects internal state via getters
@@ -63,11 +53,11 @@ TEST(session_begin_message_test, replication_message_round_trip) {
     replication::session_begin_message original;
     original.set_param("roundtrip", 100);
 
-    std::ostringstream oss;
-    replication::replication_message::send(oss, original);
+    socket_io out("");
+    replication::replication_message::send(out, original);
 
-    std::istringstream iss(oss.str());
-    auto received_base = replication::replication_message::receive(iss);
+    socket_io in(out.get_out_string());
+    auto received_base = replication::replication_message::receive(in);
     auto received = dynamic_cast<replication::session_begin_message*>(received_base.get());
     ASSERT_NE(received, nullptr);
 

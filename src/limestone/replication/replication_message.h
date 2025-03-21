@@ -19,11 +19,11 @@
 #include <arpa/inet.h>
 
 #include <cstdint>
-#include <iostream>
 #include <memory>
 #include <unordered_map>
 
 #include "../limestone_exception_helper.h"
+#include "socket_io.h"
 
 namespace limestone::replication {
 
@@ -58,8 +58,8 @@ public:
     [[nodiscard]] virtual message_type_id get_message_type_id() const = 0;
 
     // Method to serialize and deserialize with type information
-    static void send(std::ostream& os, const replication_message& message);
-    static std::unique_ptr<replication_message> receive(std::istream& is);
+    static void send(socket_io& io, const replication_message& message);
+    static std::unique_ptr<replication_message> receive(socket_io& io);
 
     // Create message object based on type ID (factory method)
     [[nodiscard]] static std::unique_ptr<replication_message> create_message(message_type_id type);
@@ -74,13 +74,12 @@ public:
  protected:
      replication_message() = default;
      // This function is used to write the type information along with the message data
-     static void write_type_info(std::ostream& os, message_type_id type_id);
-     static message_type_id read_type_info(std::istream& is);
+     static void write_type_info(socket_io& io, message_type_id type_id);
  
      // send_body and receive_body should not be accessed externally, so make them protected
      // These are only intended to be overridden by derived classes
-     virtual void send_body(std::ostream& os) const = 0;
-     virtual void receive_body(std::istream& is) = 0;
+     virtual void send_body(socket_io& io) const = 0;
+     virtual void receive_body(socket_io& io) = 0;
  
  
 

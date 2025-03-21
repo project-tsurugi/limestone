@@ -33,37 +33,32 @@
  }
  
  // Send method with type information (cannot be overridden)
- void replication_message::send(std::ostream& os, const replication_message& message) {
+ void replication_message::send(socket_io& io, const replication_message& message) {
      message_type_id type_id = message.get_message_type_id();  // Get the message type ID
-     write_type_info(os, type_id);  // Send type information first
-     message.send_body(os);  // Call the derived class's send method to send the actual data
+     io.send_uint16(static_cast<uint16_t>(type_id));  // Send type information first
+     message.send_body(io);  // Call the derived class's send method to send the actual data
  }
  
  // Receive method with type information (cannot be overridden)
- std::unique_ptr<replication_message> replication_message::receive(std::istream& is) {
+ std::unique_ptr<replication_message> replication_message::receive(socket_io& io) {
     // Read the message type ID from the stream with error checking and byte order conversion
-    message_type_id type_id = read_type_info(is);
+    uint16_t value = io.receive_uint16();
+    auto type_id = static_cast<message_type_id>(value);
     
     // Create the message using the appropriate factory function.
     // The factory function now returns a std::unique_ptr<replication_message>
     std::unique_ptr<replication_message> message = create_message(type_id);
     
     // Deserialize the message body using the derived class's implementation
-    message->receive_body(is);
+    message->receive_body(io);
     
     // Return the newly created message object
     return message;
 }
  
  // Write type information to the stream
- void replication_message::write_type_info(std::ostream& os, message_type_id type_id) {
-    socket_io::send_uint16(os, static_cast<uint16_t>(type_id));  
- }
- 
- // Read type information from the stream
- message_type_id replication_message::read_type_info(std::istream& is) {
-    uint16_t value = socket_io::receive_uint16(is);
-    return static_cast<message_type_id>(value);
+ void replication_message::write_type_info(socket_io& io, message_type_id type_id) {
+    io.send_uint16(static_cast<uint16_t>(type_id));
  }
  
  // Create message object based on type ID

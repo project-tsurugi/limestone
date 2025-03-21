@@ -28,9 +28,8 @@ class replica_server {
 public:
 
     // Initialize the replica server (e.g., open necessary files, set up state)
-    void initialize(boost::filesystem::path location);
-
-
+    void initialize(const boost::filesystem::path& location);
+    
     // Start the listener on the provided address
     bool start_listener(const struct sockaddr_in &listen_addr);
 

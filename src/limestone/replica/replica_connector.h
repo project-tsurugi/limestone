@@ -19,7 +19,7 @@
  #include <memory>
  #include <string>
  #include <cstdint>
- #include "replication_message.h"
+ #include "replication/replication_message.h"
  
  namespace limestone::replication {
  
@@ -44,7 +44,7 @@
      void close_session();
  
  private:
-     int socket_fd_ = -1;
+    std::unique_ptr<socket_io> socket_io_{};
  };
  
  } // namespace limestone::replication

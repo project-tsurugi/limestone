@@ -27,14 +27,14 @@ using limestone::api::limestone_exception;
 // Test for creating a message using the message type ID
 TEST(replication_message_test, create_message_with_valid_type_id) {
     // Create a stream and write type information and message data
-    std::ostringstream oss;
+    socket_io out("");
     message_type_id type_id = message_type_id::TESTING;
-    oss.write(reinterpret_cast<const char*>(&type_id), sizeof(type_id));  // Write the message type ID
-    oss << "Test Message Data";  // Write some dummy message data
+    out.send_uint16(static_cast<uint16_t>(type_id));  // Write the message type ID
+    out.send_string("Test Message Data");  // Write some dummy message data
     
-    std::istringstream iss(oss.str());  // Create an input stream from the serialized data
+    socket_io in(out.get_out_string());
     // Deserialize the message
-    auto message = replication_message::receive(iss);
+    auto message = replication_message::receive(in);
     
     // Verify that the created message is of the expected type
     EXPECT_EQ(message->get_message_type_id(), limestone::replication::message_type_id::TESTING);
@@ -46,17 +46,17 @@ TEST(replication_message_test, create_message_with_valid_type_id) {
 // Test for invalid message type ID (should throw exception)
 TEST(replication_message_test, create_message_with_invalid_type_id) {
     // Create a stream and write invalid type information (e.g., type_id = 999)
-    std::ostringstream oss;
+
+    socket_io out("");
     message_type_id invalid_type_id = static_cast<message_type_id>(999);  // Invalid type ID
-    oss.write(reinterpret_cast<const char*>(&invalid_type_id), sizeof(invalid_type_id));  // Write invalid type ID
-    oss << "Invalid Test Message Data";  // Write some dummy message data
-    
-    std::istringstream iss(oss.str());  // Create an input stream from the serialized data
-    
+    out.send_uint16(static_cast<uint16_t>(invalid_type_id));  // Write invalid type ID
+    out.send_string("Invalid Test Message Data");  // Write some dummy message data
+
+    socket_io in(out.get_out_string());
     
     // Expect the runtime_error exception with the expected message
     try {
-        auto message = replication_message::receive(iss);
+        auto message = replication_message::receive(in);
         FAIL() << "Expected std::runtime_error, but no exception was thrown.";
     } catch (const limestone_exception& e) {
         // Verify that the exception message starts with the expected string
@@ -72,13 +72,13 @@ TEST(replication_message_test, create_message_with_invalid_type_id) {
      test_message msg;
  
      // Serialize message to stringstream (or other suitable stream) with type info
-     std::ostringstream oss;
-     replication_message::send(oss, msg);  // Send with type info
-     std::string serialized_data = oss.str();
+     socket_io out("");
+     replication_message::send(out, msg);  // Send with type info
+     std::string serialized_data = out.get_out_string();
  
      // Deserialize message from stringstream
-     std::istringstream iss(serialized_data);
-     auto deserialized_msg = replication_message::receive(iss);  // Receive with type info
+     socket_io in(serialized_data);
+     auto deserialized_msg = replication_message::receive(in);  // Receive with type info
 
      // Verify that the deserialized message type matches the original message
      EXPECT_EQ(deserialized_msg->get_message_type_id(), msg.get_message_type_id());
@@ -99,13 +99,14 @@ TEST(replication_message_test, send_body_receive_body) {
     test_message msg;
 
     // Prepare an output stream to serialize the message
-    std::ostringstream oss;
-    msg.send_body(oss);  // Call the protected send_body method
+    socket_io out("");
+    msg.send_body(out);  // Call the protected send_body method
+
 
     // Prepare an input stream to deserialize the message
-    std::istringstream iss(oss.str());
     test_message deserialized_msg;
-    deserialized_msg.receive_body(iss);  // Call the protected receive_body method
+    socket_io in(out.get_out_string());
+    deserialized_msg.receive_body(in);  // Call the protected receive_body method
 
     // Verify that the deserialized message data matches the original message
     EXPECT_EQ(deserialized_msg.get_message_type_id(), msg.get_message_type_id());
@@ -114,13 +115,13 @@ TEST(replication_message_test, send_body_receive_body) {
  
 // Test for incomplete stream with 0 bytes
 TEST(replication_message_test, incomplete_stream_0_bytes) {
-   std::istringstream iss("");
+   socket_io io("");
    try {
-       auto message = replication_message::receive(iss);
+       auto message = replication_message::receive(io);
        FAIL() << "Expected limestone_io_exception, but none was thrown.";
    } catch (const limestone_io_exception& ex) {
        // Check that the error message contains the expected substring
-       std::string expected_substring = "Failed to read uint16_t value from stream";
+       std::string expected_substring = "Failed to read uint16_t from input stream";
        EXPECT_NE(std::string(ex.what()).find(expected_substring), std::string::npos)
            << "Error message was: " << ex.what();
    }
@@ -128,13 +129,13 @@ TEST(replication_message_test, incomplete_stream_0_bytes) {
 
 // Test for incomplete stream with 1 byte (only part of type information)
 TEST(replication_message_test, incomplete_stream_1_byte) {
-   std::istringstream iss("A");
+   socket_io io("A");
    try {
-       auto message = replication_message::receive(iss);
+       auto message = replication_message::receive(io);
        FAIL() << "Expected limestone_io_exception, but none was thrown.";
    } catch (const limestone_io_exception& ex) {
        std::cerr << ex.what() << std::endl;
-       std::string expected_substring = "Failed to read uint16_t value from stream";
+       std::string expected_substring = "Failed to read uint16_t from input stream";
        EXPECT_NE(std::string(ex.what()).find(expected_substring), std::string::npos)
            << "Error message was: " << ex.what();
    }
@@ -142,29 +143,35 @@ TEST(replication_message_test, incomplete_stream_1_byte) {
 
 // Test for incomplete stream with 2 bytes (type information exists but no message body)
 TEST(replication_message_test, incomplete_stream_2_bytes) {
-   std::ostringstream oss;
-   message_type_id type_id = message_type_id::TESTING;
-   oss.write(reinterpret_cast<const char*>(&type_id), sizeof(type_id));  
-   std::istringstream iss(oss.str());
-   auto message = replication_message::receive(iss);
-   EXPECT_EQ(message->get_message_type_id(), limestone::replication::message_type_id::TESTING);
-   auto test_msg = dynamic_cast<test_message*>(message.get());
-   ASSERT_NE(test_msg, nullptr) << "Failed to cast to test_message";
-   EXPECT_EQ(test_msg->get_data(), "");
+    socket_io out("");
+    message_type_id type_id = message_type_id::TESTING;
+    out.send_uint16(static_cast<uint16_t>(type_id));  // Write the message type ID
+    socket_io in(out.get_out_string());
+    try {
+        auto message = replication_message::receive(in);
+        FAIL() << "Expected limestone_io_exception, but none was thrown.";
+    } catch (const limestone_io_exception& ex) {
+        std::cerr << ex.what() << std::endl;
+        std::string expected_substring = "Failed to read uint32_t from input stream";
+        EXPECT_NE(std::string(ex.what()).find(expected_substring), std::string::npos) << "Error message was: " << ex.what();
+    }
 }
 
 // Test for incomplete stream with 3 bytes (type information exists but no message body)
 TEST(replication_message_test, incomplete_stream_3_bytes) {
-    std::ostringstream oss;
+    socket_io out("");
     message_type_id type_id = message_type_id::TESTING;
-    oss.write(reinterpret_cast<const char*>(&type_id), sizeof(type_id));
-    oss << "A";
-    std::istringstream iss(oss.str());
-    auto message = replication_message::receive(iss);
-    EXPECT_EQ(message->get_message_type_id(), limestone::replication::message_type_id::TESTING);
-    auto test_msg = dynamic_cast<test_message*>(message.get());
-    ASSERT_NE(test_msg, nullptr) << "Failed to cast to test_message";
-    EXPECT_EQ(test_msg->get_data(), "A");
+    out.send_uint16(static_cast<uint16_t>(type_id));  // Write the message type ID
+    out.send_uint8('A');  // Write an extra byte
+    socket_io in(out.get_out_string());
+    try {
+        auto message = replication_message::receive(in);
+        FAIL() << "Expected limestone_io_exception, but none was thrown.";
+    } catch (const limestone_io_exception& ex) {
+        std::cerr << ex.what() << std::endl;
+        std::string expected_substring = "Failed to read uint32_t from input stream";
+        EXPECT_NE(std::string(ex.what()).find(expected_substring), std::string::npos) << "Error message was: " << ex.what();
+    }
 }
 
 }  // namespace limestone::testing

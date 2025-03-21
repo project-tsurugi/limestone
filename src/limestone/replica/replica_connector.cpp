@@ -22,21 +22,20 @@
  #include <unistd.h>
  #include <cstring>
  #include <sstream>
- #include "network_io.h"
  #include "limestone_exception_helper.h"
- #include "replication_message.h"
+ #include "replication/replication_message.h"
+ #include "replication/socket_io.h"
  
  namespace limestone::replication {
  
  replica_connector::~replica_connector() {
-     if (socket_fd_ != -1) {
-         close_session();
-     }
+    close_session();
  }
  
  bool replica_connector::connect_to_server(const std::string &host, uint16_t port) {
      // Prepare address info hints
-     struct addrinfo hints, *res = nullptr;
+     struct addrinfo hints{};
+     struct addrinfo *res = nullptr;
      std::memset(&hints, 0, sizeof(hints));
      hints.ai_family = AF_INET;       // IPv4
      hints.ai_socktype = SOCK_STREAM; // TCP
@@ -48,55 +47,35 @@
          return false;
      }
  
-     socket_fd_ = ::socket(res->ai_family, res->ai_socktype, res->ai_protocol);
+     int socket_fd_ = ::socket(res->ai_family, res->ai_socktype, res->ai_protocol);
      if (socket_fd_ < 0) {
          LOG_LP(ERROR) << "Failed to create socket";
-         freeaddrinfo(res);
+         freeaddrinfo(res); // TODO: freeaddrinfoに失敗したときのリカバリ
          return false;
      }
  
      if (::connect(socket_fd_, res->ai_addr, res->ai_addrlen) < 0) {
          LOG_LP(ERROR) << "Failed to connect to server: " << strerror(errno);
          freeaddrinfo(res);
-         ::close(socket_fd_);
+         ::close(socket_fd_); // TODO: closeに失敗したときのリカバリ
          socket_fd_ = -1;
          return false;
      }
  
      freeaddrinfo(res);
+     socket_io_ = std::make_unique<socket_io>(socket_fd_);
      return true;
  }
  
  bool replica_connector::send_message(const replication_message &msg) {
      // Serialize the message into a string using the replication_message::send method.
-     std::ostringstream oss;
-     replication_message::send(oss, msg);
-     std::string data = oss.str();
- 
-     ssize_t bytes_sent = ::send(socket_fd_, data.data(), data.size(), 0);
-     if (bytes_sent < 0 || static_cast<size_t>(bytes_sent) != data.size()) {
-         LOG_LP(ERROR) << "Failed to send complete message: " << strerror(errno);
-         return false;
-     }
-     return true;
+     replication_message::send(*socket_io_, msg);
+     return socket_io_->flush();
  }
  
  std::unique_ptr<replication_message> replica_connector::receive_message() {
-     // For simplicity, use a fixed buffer size.
-     // Note: In a production implementation, proper message framing should be used.
-     constexpr size_t buffer_size = 4096;
-     char buffer[buffer_size];
-     ssize_t bytes_received = ::recv(socket_fd_, buffer, buffer_size, 0);
-     if (bytes_received <= 0) {
-         LOG_LP(ERROR) << "Failed to receive message: " << strerror(errno);
-         return nullptr;
-     }
- 
-     std::string data(buffer, bytes_received);
-     std::istringstream iss(data);
      try {
-         auto msg = replication_message::receive(iss);
-         return msg;
+         return replication_message::receive(*socket_io_);
      } catch (const std::exception &ex) {
          LOG_LP(ERROR) << "Exception during message reception: " << ex.what();
          return nullptr;
@@ -104,10 +83,9 @@
  }
  
  void replica_connector::close_session() {
-     if (socket_fd_ != -1) {
-         ::close(socket_fd_);
-         socket_fd_ = -1;
-     }
+    if (socket_io_) {
+        socket_io_->close();
+    }
  }
  
  } // namespace limestone::replication

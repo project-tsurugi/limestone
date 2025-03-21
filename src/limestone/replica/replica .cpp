@@ -27,15 +27,19 @@ void show_usage(const std::string& program_name) {
 }
 
 int main(int argc, char* argv[]) {
-    const std::string program_name = boost::filesystem::path(argv[0]).filename().string();
+    // Convert argv to vector<string> to avoid direct pointer arithmetic.
+    std::vector<std::string> args(argv, argv + argc);
     
-    if (argc != 2) {
+    // Retrieve program name from args[0].
+    const std::string program_name = boost::filesystem::path(args[0]).filename().string();
+    
+    if (args.size() != 2) {
         show_usage(program_name);
         return 1;
     }
 
-    // Check logdir
-    boost::filesystem::path log_dir_path(argv[1]);
+    // Check logdir using args[1]
+    boost::filesystem::path log_dir_path(args[1]);
     if (!boost::filesystem::exists(log_dir_path)) {
         std::cerr << "Error: Directory does not exist: " << log_dir_path.string() << std::endl;
         show_usage(program_name);
@@ -48,7 +52,7 @@ int main(int argc, char* argv[]) {
     }
 
     limestone::replication::replication_endpoint endpoint{};
-    if(endpoint.env_defined()) {
+    if (endpoint.env_defined()) {
         std::cout << "Endpoint: " << endpoint.host() << ":" << endpoint.port() << std::endl;
     } else {
         std::cerr << "Error: TSURUGI_REPLICATION_ENDPOINT environment variable is not set." << std::endl;
@@ -62,7 +66,6 @@ int main(int argc, char* argv[]) {
     }
 
     limestone::replication::replica_server server{};
-
 
     server.initialize(log_dir_path);        
 
