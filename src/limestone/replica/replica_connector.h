@@ -27,8 +27,14 @@
  public:
      replica_connector() = default;
      ~replica_connector();
- 
-     // Connect to the replica server at the given host and port.
+
+    // Deleted copy constructor and assignment operator to prevent copying.
+    replica_connector(const replica_connector&) = delete;
+    replica_connector& operator=(const replica_connector&) = delete;
+    replica_connector(replica_connector&&) noexcept = default;
+    replica_connector& operator=(replica_connector&&) noexcept = default;
+
+    // Connect to the replica server at the given host and port.
      // Returns true on success, false otherwise.
      bool connect_to_server(const std::string &host, uint16_t port);
  

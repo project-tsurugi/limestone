@@ -45,8 +45,14 @@ public:
 
     ~socket_io();
 
+    // Deleted copy constructor and assignment operator to prevent copying.
+    socket_io(const socket_io &) = delete;
+    socket_io &operator=(const socket_io &) = delete;
+    socket_io(socket_io &&) noexcept = default;
+    socket_io &operator=(socket_io &&) noexcept = default;
+
     // Write raw data to the socket (real mode) or to the output stream (string mode) using MSG_NOSIGNAL.
-    bool write_raw(const std::string &data) const;
+    [[nodiscard]] bool write_raw(const std::string &data) const;
 
     // Send methods: serialize the given value and write it to the internal output buffer.
     void send_uint16(uint16_t value);
@@ -67,7 +73,7 @@ public:
     bool flush();
 
     // Getters for the output buffer contents
-    std::string get_out_string() const;
+    [[nodiscard]] std::string get_out_string() const;
 
     // Close the socket file descriptor (real mode) or clear the input and output streams (string mode).
     void close();

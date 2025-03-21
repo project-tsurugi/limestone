@@ -39,7 +39,7 @@ public:
     // Handle a single client connection
     void handle_client(int client_fd);
 
-protected:
+private:
     std::unique_ptr<limestone::api::datastore> datastore_{};
     int sockfd_{-1};
 };

@@ -45,11 +45,15 @@ public:
     [[nodiscard]] uint64_t get_epoch_number() const { return epoch_number_; }
 
 private:
-    // Register SESSION_BEGIN in replication_message factory map
+    // Register SESSION_BEGIN in replication_message factory map.
+    // The static initialization here is intentional. If an exception occurs,
+    // the program should terminate immediately. We ignore the clang-tidy warning 
+    // (cert-err58-cpp) as this behavior is desired.
+    // NOLINTNEXTLINE(cert-err58-cpp)
     inline static const bool registered_ = []() {
-        replication_message::register_message_type(message_type_id::SESSION_BEGIN, &session_begin_message::create);
+        replication_message::register_message_type(message_type_id::SESSION_BEGIN, &session_begin_message::create); 
         return true;
-    }();
+    }(); 
 
     uint8_t connection_type_ = CONNECTION_TYPE_CONTROL_CHANNEL;
     uint64_t protocol_version_ = 1;
