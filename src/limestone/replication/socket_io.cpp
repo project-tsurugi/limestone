@@ -1,9 +1,29 @@
+/*
+ * Copyright 2022-2025 Project Tsurugi.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ * 
+ */
+
 #include "socket_io.h"
-#include "../limestone_exception_helper.h"
+
+#include <poll.h>
+
+#include <array>
 #include <cstring>
 #include <memory>
-#include <array>
 
+#include "../limestone_exception_helper.h"
 namespace limestone::replication {
 
 // Constructor for real socket mode.
@@ -32,19 +52,50 @@ socket_io::~socket_io() {
     close();
 }
 
-bool socket_io::write_raw(const std::string &data) const{
-    if (is_string_mode_) {
-        // In string mode, writing is buffered.
+
+bool socket_io::wait_for_writable() const {
+    struct pollfd pfd{ socket_fd_, POLLOUT, 0 };
+    while (true) {
+        int ret = poll(&pfd, 1, 10000);
+        if (ret < 0) {
+            if (errno == EINTR) continue;
+            LOG_LP(ERROR) << "poll() failed: " << strerror(errno);
+            return false;
+        }
+        if (ret == 0) {
+            LOG_LP(ERROR) << "poll() timed out: socket not writable";
+            return false;
+        }
+        return true;
+    }
+}
+
+bool socket_io::send_raw(const std::string &data) const {
+    std::string_view buffer{data};
+
+    while (!buffer.empty()) {
+        ssize_t sent = ::send(socket_fd_, buffer.data(), buffer.size(), MSG_NOSIGNAL);
+        if (sent >= 0) {
+            buffer.remove_prefix(static_cast<size_t>(sent));
+            continue;
+        }
+
+        int err = errno;
+        if (err == EINTR) {
+            continue;
+        }
+
+        if (err == EAGAIN || err == EWOULDBLOCK) {
+            if (!wait_for_writable()) {
+                return false;
+            }
+            continue;
+        }
+
+        LOG_LP(ERROR) << "send() failed: " << strerror(err);
         return false;
     }
-    // In real socket mode: send data using send() with MSG_NOSIGNAL to avoid SIGPIPE.
-    // TODO: 全部送るまでループする。
-    // TODO: TCP_NODELAYをつけるかつけないかを指定可能にする。
-    ssize_t bytes_sent = ::send(socket_fd_, data.data(), data.size(), MSG_NOSIGNAL);
-    if (bytes_sent < 0 || static_cast<size_t>(bytes_sent) != data.size()) {
-        LOG_LP(ERROR) << "Failed to send complete data: " << strerror(errno);
-        return false;
-    }
+
     return true;
 }
 
@@ -159,7 +210,7 @@ bool socket_io::flush() {
     if (data.empty()) {
         return true;
     }
-    bool ret = write_raw(data);
+    bool ret = send_raw(data);
     out_stream_->str("");
     out_stream_->clear();
     return ret;

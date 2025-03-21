@@ -13,6 +13,16 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
+#include "replication/socket_io.h"
+
+#include <arpa/inet.h>
+#include <fcntl.h>
+#include <netinet/in.h>
+#include <sys/socket.h>
+#include <unistd.h>
+
+#include <random>
+#include <thread>
 
 #include "gtest/gtest.h"
 #include "limestone/api/limestone_exception.h"
@@ -272,6 +282,168 @@ TEST(socket_io_test, string_round_trip_empty) {
     std::string result = io_receive.receive_string();
     EXPECT_EQ(result.size(), 0u);
     EXPECT_EQ(result, original);
+}
+
+// Utility function to create and bind a listening socket.
+int create_server_socket(uint16_t port) {
+    int listen_fd = ::socket(AF_INET, SOCK_STREAM, 0);
+    EXPECT_NE(listen_fd, -1) << "Failed to create socket: " << strerror(errno);
+
+    sockaddr_in addr{};
+    addr.sin_family = AF_INET;
+    addr.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+    addr.sin_port = htons(port);
+
+    int reuse = 1;
+    EXPECT_EQ(::setsockopt(listen_fd, SOL_SOCKET, SO_REUSEADDR, &reuse, sizeof(reuse)), 0)
+        << "Failed to set SO_REUSEADDR: " << strerror(errno);
+
+    EXPECT_EQ(::bind(listen_fd, reinterpret_cast<sockaddr*>(&addr), sizeof(addr)), 0)
+        << "Failed to bind: " << strerror(errno);
+
+    EXPECT_EQ(::listen(listen_fd, 1), 0)
+        << "Failed to listen: " << strerror(errno);
+
+    return listen_fd;
+}
+
+// Test for socket-based communication (round-trip test)
+TEST(socket_io_test, socket_round_trip) {
+    const uint16_t test_port = 12345;
+    const std::string test_message = "Test socket_io message";
+
+    int listen_fd = create_server_socket(test_port);
+
+    // Start server thread to accept a connection and read data
+    std::thread server_thread([&]() {
+        sockaddr_in client_addr{};
+        socklen_t addr_len = sizeof(client_addr);
+        int conn_fd = ::accept(listen_fd, reinterpret_cast<sockaddr*>(&client_addr), &addr_len);
+        EXPECT_NE(conn_fd, -1) << "Failed to accept connection: " << strerror(errno);
+
+        socket_io server_io(conn_fd);
+        std::string received_message = server_io.receive_string();
+        EXPECT_EQ(received_message, test_message);
+
+        server_io.send_string("ACK");
+        server_io.flush();
+
+        server_io.close();
+    });
+
+    // Give server a moment to start listening
+    std::this_thread::sleep_for(std::chrono::milliseconds(100));
+
+    // Client-side socket creation and connection
+    int client_fd = ::socket(AF_INET, SOCK_STREAM, 0);
+    EXPECT_NE(client_fd, -1) << "Failed to create client socket: " << strerror(errno);
+
+    sockaddr_in server_addr{};
+    server_addr.sin_family = AF_INET;
+    server_addr.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+    server_addr.sin_port = htons(test_port);
+
+    EXPECT_EQ(::connect(client_fd, reinterpret_cast<sockaddr*>(&server_addr), sizeof(server_addr)), 0)
+        << "Failed to connect to server: " << strerror(errno);
+
+    socket_io client_io(client_fd);
+    client_io.send_string(test_message);
+    EXPECT_TRUE(client_io.flush());
+
+    std::string reply = client_io.receive_string();
+    EXPECT_EQ(reply, "ACK");
+
+    client_io.close();
+
+    server_thread.join();
+    ::close(listen_fd);
+}
+
+TEST(socket_io_test, socket_round_trip_large_nonblocking) {
+    const uint16_t test_port = 12345;
+
+    int listen_fd = ::socket(AF_INET, SOCK_STREAM, 0);
+    ASSERT_NE(listen_fd, -1);
+
+    sockaddr_in server_addr{};
+    server_addr.sin_family = AF_INET;
+    server_addr.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+    server_addr.sin_port = htons(test_port);
+
+    int reuse = 1;
+    ASSERT_EQ(::setsockopt(listen_fd, SOL_SOCKET, SO_REUSEADDR, &reuse, sizeof(reuse)), 0);
+    ASSERT_EQ(::bind(listen_fd, reinterpret_cast<sockaddr*>(&server_addr), sizeof(server_addr)), 0);
+    ASSERT_EQ(::listen(listen_fd, 1), 0);
+
+    // Start server thread
+    std::thread server_thread([&]() {
+        sockaddr_in client_addr{};
+        socklen_t addr_len = sizeof(client_addr);
+        int conn_fd = ::accept(listen_fd, reinterpret_cast<sockaddr*>(&client_addr), &addr_len);
+        ASSERT_NE(conn_fd, -1);
+
+        socket_io server_io(conn_fd);
+        std::string received_message = server_io.receive_string();
+        server_io.send_string(received_message);
+        ASSERT_TRUE(server_io.flush());
+
+        server_io.close();
+    });
+
+    // Client setup
+    int client_fd = ::socket(AF_INET, SOCK_STREAM, 0);
+    ASSERT_NE(client_fd, -1);
+
+    // Set socket to non-blocking mode
+    int flags = fcntl(client_fd, F_GETFL, 0);
+    ASSERT_NE(flags, -1);
+    ASSERT_EQ(fcntl(client_fd, F_SETFL, flags | O_NONBLOCK), 0);
+
+    int connect_ret = ::connect(client_fd, reinterpret_cast<sockaddr*>(&server_addr), sizeof(server_addr));
+    if (connect_ret == -1 && errno != EINPROGRESS) {
+        FAIL() << "connect failed: " << strerror(errno);
+    }
+
+    // Retrieve send buffer size
+    int sndbuf_size = 0;
+    socklen_t optlen = sizeof(sndbuf_size);
+    ASSERT_EQ(::getsockopt(client_fd, SOL_SOCKET, SO_SNDBUF, &sndbuf_size, &optlen), 0);
+
+    const size_t large_message_size = static_cast<size_t>(sndbuf_size) * 10;
+
+    // Generate large binary data quickly (each 4-byte chunk has a unique value)
+    std::string large_message;
+    large_message.resize(large_message_size);
+    
+    uint32_t* data_ptr = reinterpret_cast<uint32_t*>(large_message.data());
+    size_t num_chunks = large_message_size / sizeof(uint32_t);
+    
+    for (size_t i = 0; i < num_chunks; ++i) {
+        data_ptr[i] = static_cast<uint32_t>(i);
+    }
+    
+    // Handle remaining bytes if any
+    size_t remaining_bytes = large_message_size % sizeof(uint32_t);
+    if (remaining_bytes) {
+        char* byte_ptr = large_message.data() + num_chunks * sizeof(uint32_t);
+        for (size_t i = 0; i < remaining_bytes; ++i) {
+            byte_ptr[i] = static_cast<char>(i & 0xFF);
+        }
+    }
+
+    socket_io client_io(client_fd);
+
+    // The first call to send() implicitly waits until connection established or fails
+    client_io.send_string(large_message);
+    ASSERT_TRUE(client_io.flush());
+
+    // Now receive response
+    std::string reply = client_io.receive_string();
+    EXPECT_EQ(reply, large_message);
+
+    client_io.close();
+    server_thread.join();
+    ::close(listen_fd);
 }
 
 

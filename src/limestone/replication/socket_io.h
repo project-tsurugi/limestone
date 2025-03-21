@@ -51,8 +51,18 @@ public:
     socket_io(socket_io &&) noexcept = default;
     socket_io &operator=(socket_io &&) noexcept = default;
 
-    // Write raw data to the socket (real mode) or to the output stream (string mode) using MSG_NOSIGNAL.
-    [[nodiscard]] bool write_raw(const std::string &data) const;
+    /**
+     * Sends raw binary data over the socket.
+     *
+     * NOTE: This method includes logic to handle partial writes and EAGAIN/EWOULDBLOCK errors
+     * using poll() for compatibility with unit tests using non-blocking sockets.
+     *
+     * However, socket_io is designed primarily for use with blocking sockets.
+     * Do NOT use this method in production with non-blocking sockets, as its non-blocking
+     * behavior is intended solely for unit testing purposes and is not fully configurable
+     * (e.g., timeout values are fixed, EINTR handling is not extensively tested).
+     */
+    [[nodiscard]] bool send_raw(const std::string &data) const;
 
     // Send methods: serialize the given value and write it to the internal output buffer.
     void send_uint16(uint16_t value);
@@ -68,7 +78,7 @@ public:
     [[nodiscard]] uint8_t receive_uint8();
     [[nodiscard]] std::string receive_string();
 
-    // Flush method: in real socket mode, flush the output buffer by sending its content via write_raw().
+    // Flush method: in real socket mode, flush the output buffer by sending its content via send_raw().
     // In string mode, flush() does nothing.
     bool flush();
 
@@ -79,6 +89,8 @@ public:
     void close();
 
 private:
+    [[nodiscard]] bool wait_for_writable() const;
+
     bool is_string_mode_;  // true: string mode, false: real socket mode.
     int socket_fd_;        // Valid in real socket mode; -1 in string mode.
 
