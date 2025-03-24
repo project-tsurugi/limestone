@@ -14,7 +14,7 @@
  * limitations under the License.
  */
 
-#include "replication/session_begin_message.h"
+#include "replication/message_session_begin.h"
 #include "gtest/gtest.h"
 #include "replication/socket_io.h"
 
@@ -23,8 +23,8 @@ namespace limestone::testing {
 using limestone::replication::socket_io;
 
 // Test default send_body produces expected fields
-TEST(session_begin_message_test, default_body_serialization) {
-    replication::session_begin_message msg;
+TEST(message_session_begin_test, default_body_serialization) {
+    replication::message_session_begin msg;
     EXPECT_EQ(msg.get_connection_type(), replication::CONNECTION_TYPE_CONTROL_CHANNEL);
     EXPECT_EQ(msg.get_protocol_version(), replication::protocol_version);
     EXPECT_EQ(msg.get_configuration_id(), "");
@@ -32,8 +32,8 @@ TEST(session_begin_message_test, default_body_serialization) {
 }
 
 // Test set_param affects internal state via getters
-TEST(session_begin_message_test, set_param_getters) {
-    replication::session_begin_message msg;
+TEST(message_session_begin_test, set_param_getters) {
+    replication::message_session_begin msg;
     msg.set_param("config123", 42);
 
     EXPECT_EQ(msg.get_configuration_id(), "config123");
@@ -43,14 +43,14 @@ TEST(session_begin_message_test, set_param_getters) {
 }
 
 // Test get_message_type_id returns SESSION_BEGIN
-TEST(session_begin_message_test, get_message_type_id) {
-    replication::session_begin_message msg;
+TEST(message_session_begin_test, get_message_type_id) {
+    replication::message_session_begin msg;
     EXPECT_EQ(msg.get_message_type_id(), replication::message_type_id::SESSION_BEGIN);
 }
 
 // Test integration via replication_message::send/receive using getters to validate internal state
-TEST(session_begin_message_test, replication_message_round_trip) {
-    replication::session_begin_message original;
+TEST(message_session_begin_test, replication_message_round_trip) {
+    replication::message_session_begin original;
     original.set_param("roundtrip", 100);
 
     socket_io out("");
@@ -58,7 +58,7 @@ TEST(session_begin_message_test, replication_message_round_trip) {
 
     socket_io in(out.get_out_string());
     auto received_base = replication::replication_message::receive(in);
-    auto received = dynamic_cast<replication::session_begin_message*>(received_base.get());
+    auto received = dynamic_cast<replication::message_session_begin*>(received_base.get());
     ASSERT_NE(received, nullptr);
 
     // Validate internal state using getters

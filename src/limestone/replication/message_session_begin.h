@@ -21,7 +21,7 @@
 namespace limestone::replication {
 
 // Derived class implementing the pure virtual functions of replication_message
-class session_begin_message : public replication_message {
+class message_session_begin : public replication_message {
 public:
     void set_param(std::string configuration_id, uint64_t epoch_number);
 
@@ -30,9 +30,9 @@ public:
     [[nodiscard]] message_type_id get_message_type_id() const override;
 
     // Process the message after it has been received.
-    // Empty implementation for session_begin_message
+    // Empty implementation for message_session_begin
     void post_receive() override {
-        // No specific processing needed for session_begin_message
+        // No specific processing needed for message_session_begin
     }
 
     // Factory function for creating session_begin_message
@@ -51,14 +51,14 @@ private:
     // (cert-err58-cpp) as this behavior is desired.
     // NOLINTNEXTLINE(cert-err58-cpp)
     inline static const bool registered_ = []() {
-        replication_message::register_message_type(message_type_id::SESSION_BEGIN, &session_begin_message::create); 
+        replication_message::register_message_type(message_type_id::SESSION_BEGIN, &message_session_begin::create); 
         return true;
     }(); 
 
     uint8_t connection_type_ = CONNECTION_TYPE_CONTROL_CHANNEL;
-    uint64_t protocol_version_ = 1;
+    uint64_t protocol_version_ = 1;  // TODO: プロトコル共通のヘッダファイルに定数値で定義する。
     std::string configuration_id_{};
     uint64_t epoch_number_{};
-};;
+};
 
 }  // namespace limestone::replication

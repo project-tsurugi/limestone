@@ -59,6 +59,6 @@ private:
     std::map<storage_id_type, write_version_type> clear_storage;
     
     std::atomic<blob_id_type> max_blob_id_{0};
-};;
+};
 
 } // namespace limestone::internal

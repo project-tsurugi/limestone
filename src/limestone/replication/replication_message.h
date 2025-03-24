@@ -33,7 +33,9 @@ enum class message_type_id : uint16_t {
     SESSION_BEGIN = 1,
     SESSION_END = 2,
     GROUP_COMMIT = 3,
-    LOG_ENTRY = 4
+    LOG_ENTRY = 4,
+    SESSION_BEGIN_ACK = 5,    
+    COMMON_ACK = 6   
 };
 
 enum connection_type : uint8_t {

@@ -14,19 +14,19 @@
  * limitations under the License.
  */
 
-#include "session_begin_message.h"
+#include "message_session_begin.h"
 
 #include "socket_io.h"
 
 namespace limestone::replication {
 
-void session_begin_message::set_param(std::string configuration_id, uint64_t epoch_number) {
+void message_session_begin::set_param(std::string configuration_id, uint64_t epoch_number) {
     configuration_id_ = std::move(configuration_id);
     epoch_number_ = epoch_number;
  }
 
  // Send the actual session begin message data
- void session_begin_message::send_body(socket_io& io) const {
+ void message_session_begin::send_body(socket_io& io) const {
     io.send_uint8(connection_type_);
     io.send_uint64(protocol_version_);
     io.send_string(configuration_id_);
@@ -34,19 +34,19 @@ void session_begin_message::set_param(std::string configuration_id, uint64_t epo
  }
 
  // Deserialize the session begin message data
- void session_begin_message::receive_body(socket_io& io) {
+ void message_session_begin::receive_body(socket_io& io) {
      connection_type_ = io.receive_uint8();
      protocol_version_ = io.receive_uint64();
      configuration_id_ = io.receive_string();
      epoch_number_ = io.receive_uint64();
  }
 
- message_type_id session_begin_message::get_message_type_id() const {
+ message_type_id message_session_begin::get_message_type_id() const {
      return message_type_id::SESSION_BEGIN;
  }
  
- std::unique_ptr<replication_message> session_begin_message::create() {
-     return std::make_unique<session_begin_message>();
+ std::unique_ptr<replication_message> message_session_begin::create() {
+     return std::make_unique<message_session_begin>();
  }
  
  }  // namespace limestone::replication
