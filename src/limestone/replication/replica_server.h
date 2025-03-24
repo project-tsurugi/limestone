@@ -18,7 +18,7 @@
 
 #include <boost/filesystem.hpp>
 #include <limestone/api/datastore.h>
-#include "replication/replication_endpoint.h"
+#include "replication_endpoint.h"
 #include "limestone_exception_helper.h"
 
 

@@ -18,7 +18,7 @@
 #include <boost/filesystem.hpp>
 #include <string>
 #include "replication/replication_endpoint.h"
-#include "replica_server.h"
+#include "replication/replica_server.h"
 
 void show_usage(const std::string& program_name) {
     std::cerr << "Usage: " << program_name << " <logdir>" << std::endl;

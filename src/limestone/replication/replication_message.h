@@ -22,7 +22,7 @@
 #include <memory>
 #include <unordered_map>
 
-#include "../limestone_exception_helper.h"
+#include "limestone_exception_helper.h"
 #include "socket_io.h"
 
 namespace limestone::replication {

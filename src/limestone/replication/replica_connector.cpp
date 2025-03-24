@@ -23,8 +23,8 @@
  #include <cstring>
  #include <sstream>
  #include "limestone_exception_helper.h"
- #include "replication/replication_message.h"
- #include "replication/socket_io.h"
+ #include "replication_message.h"
+ #include "socket_io.h"
  
  namespace limestone::replication {
  

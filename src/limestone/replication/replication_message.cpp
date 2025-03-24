@@ -17,7 +17,7 @@
 
 #include "replication_message.h"
 #include "socket_io.h"
-#include "../limestone_exception_helper.h"
+#include "limestone_exception_helper.h"
 
  namespace limestone::replication {
  

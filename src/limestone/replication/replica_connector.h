@@ -19,7 +19,7 @@
  #include <memory>
  #include <string>
  #include <cstdint>
- #include "replication/replication_message.h"
+ #include "replication_message.h"
  
  namespace limestone::replication {
  

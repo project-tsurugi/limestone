@@ -12,6 +12,9 @@ set_target_properties(${package_name}
                 INSTALL_RPATH "\$ORIGIN"
                 OUTPUT_NAME ${export_name}
 )
+target_include_directories(${package_name}
+        PRIVATE ./limestone
+)
 
 if(${RECOVERY_SORTER_KVSLIB_UPPERCASE} STREQUAL "ROCKSDB")
     set(sort_lib RocksDB::RocksDB)
@@ -69,7 +72,6 @@ file(GLOB DBLOGUTIL_SOURCES
 
 add_executable(dblogutil ${DBLOGUTIL_SOURCES})
 target_include_directories(dblogutil
-        PRIVATE .
         PRIVATE ./limestone
         )
 target_link_libraries(dblogutil PRIVATE limestone-impl PRIVATE glog::glog gflags::gflags)
@@ -87,7 +89,6 @@ file(GLOB REPLICA_SOURCES
 
 add_executable(replica ${REPLICA_SOURCES})
 target_include_directories(replica
-        PRIVATE .
         PRIVATE ./limestone
 )
 target_link_libraries(replica PRIVATE limestone-impl PRIVATE glog::glog)

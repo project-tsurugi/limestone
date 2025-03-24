@@ -23,7 +23,7 @@
 #include <cstddef>   // for std::ptrdiff_t
 #include <iterator>  // for std::next
 
-#include "../limestone_exception_helper.h"
+#include "limestone_exception_helper.h"
 
 namespace limestone::replication {
 
