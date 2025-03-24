@@ -14,19 +14,24 @@
  * limitations under the License.
  */
 
- #include "replica_server.h"
- #include <netinet/tcp.h> 
- #include <glog/logging.h>
- #include <limestone/logging.h>
- #include "logging_helper.h"
- 
- namespace limestone::replication {
- 
- void replica_server::initialize(const boost::filesystem::path& location) {
-     std::vector<boost::filesystem::path> data_locations{};
-     data_locations.emplace_back(location);
-     const boost::filesystem::path& metadata_location = location;
-     limestone::api::configuration conf(data_locations, metadata_location);
+#include "replica_server.h"
+
+#include <glog/logging.h>
+#include <limestone/logging.h>
+#include <netinet/tcp.h>
+#include <poll.h>
+#include <sys/eventfd.h>
+
+#include "logging_helper.h"
+
+namespace limestone::replication {
+
+void replica_server::initialize(const boost::filesystem::path& location) {
+    std::vector<boost::filesystem::path> data_locations{};
+    data_locations.emplace_back(location);
+    const boost::filesystem::path& metadata_location = location;
+    limestone::api::configuration conf(data_locations, metadata_location);
+    datastore_ = std::make_unique<limestone::api::datastore>(conf);
  }
  
  bool replica_server::start_listener(const struct sockaddr_in &listen_addr) {
@@ -60,19 +65,67 @@
          LOG_LP(ERROR) << "Error: Failed to listen on socket";
          return false;
      }
- 
+
      return true;
  }
  
  void replica_server::accept_loop() {
-     while (true) {
-         int client_fd = ::accept(sockfd_, nullptr, nullptr);
-         if (client_fd < 0) {
-             break;
-         }
-         std::thread(&replica_server::handle_client, this, client_fd).detach();
-     }
- }
+    {
+        std::lock_guard<std::mutex> lock(shutdown_mutex_);
+        event_fd_ = ::eventfd(0, EFD_NONBLOCK);
+        if (event_fd_ < 0) {
+            LOG_LP(ERROR) << "Error: Failed to create eventfd: " << strerror(errno);
+            return;
+        }
+    }
+
+    while (true) {
+        std::array<pollfd, 2> fds{};
+        {
+            std::lock_guard<std::mutex> lock(shutdown_mutex_);
+            fds[0].fd = sockfd_;
+            fds[1].fd = event_fd_;
+        }
+        fds[0].events = POLLIN;
+        fds[1].events = POLLIN;
+
+        int ret = ::poll(fds.data(), static_cast<nfds_t>(fds.size()), -1);
+        if (ret < 0) {
+            if (errno == EINTR) continue;
+            LOG_LP(ERROR) << "poll() failed: " << strerror(errno);
+            break;
+        }
+
+        if ((static_cast<unsigned>(fds[1].revents) & static_cast<unsigned>(POLLIN)) != 0) {
+            uint64_t value = 0;
+            {
+                std::lock_guard<std::mutex> lock(shutdown_mutex_);
+                ::read(event_fd_, &value, sizeof(value));
+            }
+            break;
+        }
+
+        if ((static_cast<unsigned>(fds[0].revents) & static_cast<unsigned>(POLLIN)) != 0) {
+            int client_fd = -1;
+            {
+                std::lock_guard<std::mutex> lock(shutdown_mutex_);
+                client_fd = ::accept(sockfd_, nullptr, nullptr);
+            }
+            if (client_fd < 0) {
+                LOG_LP(ERROR) << "accept() failed: " << strerror(errno);
+                break;
+            }
+            std::thread(&replica_server::handle_client, this, client_fd).detach();
+        }
+    }
+
+    {
+        std::lock_guard<std::mutex> lock(shutdown_mutex_);
+        ::close(event_fd_);
+        event_fd_ = -1;
+    }
+}
+
  
  void replica_server::handle_client(int client_fd) {
      // Enable TCP keep‑alive.
@@ -88,6 +141,19 @@
      
      ::close(client_fd);
  }
+ 
+ void replica_server::shutdown() {
+    std::lock_guard<std::mutex> lock(shutdown_mutex_);
+    if (event_fd_ >= 0) {
+        uint64_t v = 1;
+        ::write(event_fd_, &v, sizeof(v));
+    }
+    if (sockfd_ >= 0) {
+        ::shutdown(sockfd_, SHUT_RDWR);
+        ::close(sockfd_);
+        sockfd_ = -1;
+    }
+}
  
  } // namespace limestone::replication
  

@@ -47,23 +47,23 @@
          return false;
      }
  
-     int socket_fd_ = ::socket(res->ai_family, res->ai_socktype, res->ai_protocol);
-     if (socket_fd_ < 0) {
+     int socket_fd = ::socket(res->ai_family, res->ai_socktype, res->ai_protocol);
+     if (socket_fd < 0) {
          LOG_LP(ERROR) << "Failed to create socket";
          freeaddrinfo(res); // TODO: freeaddrinfoに失敗したときのリカバリ
          return false;
      }
  
-     if (::connect(socket_fd_, res->ai_addr, res->ai_addrlen) < 0) {
+     if (::connect(socket_fd, res->ai_addr, res->ai_addrlen) < 0) {
          LOG_LP(ERROR) << "Failed to connect to server: " << strerror(errno);
          freeaddrinfo(res);
-         ::close(socket_fd_); // TODO: closeに失敗したときのリカバリ
-         socket_fd_ = -1;
+         ::close(socket_fd); // TODO: closeに失敗したときのリカバリ
+         socket_fd = -1;
          return false;
      }
  
      freeaddrinfo(res);
-     socket_io_ = std::make_unique<socket_io>(socket_fd_);
+     socket_io_ = std::make_unique<socket_io>(socket_fd);
      return true;
  }
  

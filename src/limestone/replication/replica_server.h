@@ -26,12 +26,11 @@ namespace limestone::replication {
 
 class replica_server {
 public:
-
     // Initialize the replica server (e.g., open necessary files, set up state)
     void initialize(const boost::filesystem::path& location);
     
     // Start the listener on the provided address
-    bool start_listener(const struct sockaddr_in &listen_addr);
+    bool start_listener(const struct sockaddr_in& listen_addr);
 
     // Accept loop runs in its own thread
     void accept_loop();
@@ -39,8 +38,19 @@ public:
     // Handle a single client connection
     void handle_client(int client_fd);
 
+    /**
+     * Request shutdown of the accept loop and close the listening socket.
+     *
+     * @note This method is provided primarily for testing purposes to stop accept_loop().
+     *       It has not been evaluated for production use and may not provide sufficient
+     *       functionality or safety guarantees for a production environment.
+     */
+    void shutdown();
+
 private:
     std::unique_ptr<limestone::api::datastore> datastore_{};
+    std::mutex shutdown_mutex_;
+    int event_fd_{-1};
     int sockfd_{-1};
 };
 
