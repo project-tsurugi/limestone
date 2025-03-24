@@ -34,13 +34,22 @@ enum class message_type_id : uint16_t {
     SESSION_END = 2,
     GROUP_COMMIT = 3,
     LOG_ENTRY = 4,
-    SESSION_BEGIN_ACK = 5,    
-    COMMON_ACK = 6   
+    SESSION_BEGIN_ACK = 5,
+    COMMON_ACK        = 6,
+    COMMON_ERROR      = 7 
 };
 
+// Enum to define connection types
 enum connection_type : uint8_t {
     CONNECTION_TYPE_CONTROL_CHANNEL = 0,
     CONNECTION_TYPE_LOG_CHANNEL = 1
+};
+
+// Response discriminator for replication responses
+enum class response_type : uint8_t {
+    RESPONSE_TYPE_ACK = 0,
+    RESPONSE_TYPE_ERROR = 1,
+    RESPONSE_TYPE_SESSION_BEGIN_ACK = 2
 };
 
 constexpr uint64_t protocol_version = 1;
