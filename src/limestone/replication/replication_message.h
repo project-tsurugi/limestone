@@ -27,16 +27,23 @@
 
 namespace limestone::replication {
 
-// Enum to define message types
 enum class message_type_id : uint16_t {
-    TESTING = 0,  // for testing purposes only
+    // Control‑channel requests
     SESSION_BEGIN = 1,
     SESSION_END = 2,
     GROUP_COMMIT = 3,
-    LOG_ENTRY = 4,
-    SESSION_BEGIN_ACK = 5,
-    COMMON_ACK        = 6,
-    COMMON_ERROR      = 7 
+
+    // Log‑channel requests
+    LOG_CHANNEL_CREATE = 4,
+    LOG_ENTRY = 5,
+
+    // Responses
+    SESSION_BEGIN_ACK = 6,
+    COMMON_ACK = 7,
+    COMMON_ERROR = 8,
+
+    // For testing only
+    TESTING = 9999
 };
 
 // Enum to define connection types
@@ -48,8 +55,7 @@ enum connection_type : uint8_t {
 // Response discriminator for replication responses
 enum class response_type : uint8_t {
     RESPONSE_TYPE_ACK = 0,
-    RESPONSE_TYPE_ERROR = 1,
-    RESPONSE_TYPE_SESSION_BEGIN_ACK = 2
+    RESPONSE_TYPE_ERROR = 1
 };
 
 constexpr uint64_t protocol_version = 1;
