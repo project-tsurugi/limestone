@@ -21,7 +21,7 @@
 #include <netinet/tcp.h>
 #include <poll.h>
 #include <sys/eventfd.h>
-
+#include "message_error.h"
 #include "logging_helper.h"
 
 namespace limestone::replication {
@@ -127,22 +127,52 @@ void replica_server::initialize(const boost::filesystem::path& location) {
 }
 
  
- void replica_server::handle_client(int client_fd) {
-     // Enable TCP keep‑alive.
-     int opt = 1;
-     if (setsockopt(client_fd, SOL_SOCKET, SO_KEEPALIVE, &opt, sizeof(opt)) < 0) {
-         LOG_LP(FATAL) << "Warning: failed to set SO_KEEPALIVE: " << strerror(errno) << "\n";
-     }
-     
-     // Disable Nagle’s algorithm for lower latency.
-     if (setsockopt(client_fd, IPPROTO_TCP, TCP_NODELAY, &opt, sizeof(opt)) < 0) {
-         LOG_LP(FATAL) << "Warning: failed to set TCP_NODELAY: " << strerror(errno) << "\n";
-     }
-     
-     ::close(client_fd);
- }
- 
- void replica_server::shutdown() {
+void replica_server::register_handler(message_type_id type, handler_fn handler) noexcept {
+    handlers_.emplace(type, std::move(handler));
+}
+
+void replica_server::clear_handlers() noexcept {
+    std::lock_guard<std::mutex> lock(shutdown_mutex_);
+    handlers_.clear();
+}
+
+void replica_server::handle_client(int client_fd) {
+    int opt = 1;
+    if (setsockopt(client_fd, SOL_SOCKET, SO_KEEPALIVE, &opt, sizeof(opt)) < 0) {
+        LOG_LP(FATAL) << "Warning: failed to set SO_KEEPALIVE: " << strerror(errno);
+    }
+    if (setsockopt(client_fd, IPPROTO_TCP, TCP_NODELAY, &opt, sizeof(opt)) < 0) {
+        LOG_LP(FATAL) << "Warning: failed to set TCP_NODELAY: " << strerror(errno);
+    }
+
+    socket_io io(client_fd);
+    try {
+        auto msg = replication_message::receive(io);
+        message_type_id type = msg->get_message_type_id();
+
+        auto it = handlers_.find(type);
+        if (it != handlers_.end()) {
+            it->second(client_fd, std::move(msg));
+        } else {
+            LOG_LP(ERROR) << "Unexpected message type: " << static_cast<uint16_t>(type);
+            auto error = std::make_unique<message_error>();
+            error->set_error(1, "Unexpected message type");
+            replication_message::send(io, *error);
+            io.flush();
+        }
+    } catch (const std::exception& ex) {
+        // TODO: currently minimal error handling — just log and close connection.
+        // Future improvements:
+        //   - Differentiate exception types: protocol errors vs I/O errors vs internal errors.
+        //   - Return COMMON_ERROR response to client for recoverable protocol errors.
+        //   - Introduce a dedicated replication_exception hierarchy for richer error reporting.
+        LOG_LP(ERROR) << "handle_client error: " << ex.what();
+    }
+
+    ::close(client_fd);
+}
+
+void replica_server::shutdown() {
     std::lock_guard<std::mutex> lock(shutdown_mutex_);
     if (event_fd_ >= 0) {
         uint64_t v = 1;
@@ -154,6 +184,6 @@ void replica_server::initialize(const boost::filesystem::path& location) {
         sockfd_ = -1;
     }
 }
- 
+
  } // namespace limestone::replication
  

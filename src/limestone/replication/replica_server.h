@@ -13,45 +13,68 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-
 #pragma once
 
+#include <functional>
+#include <memory>
+#include <unordered_map>
+#include <mutex>
 #include <boost/filesystem.hpp>
+#include "replication_message.h"
 #include <limestone/api/datastore.h>
-#include "replication_endpoint.h"
 #include "limestone_exception_helper.h"
-
 
 namespace limestone::replication {
 
 class replica_server {
 public:
-    // Initialize the replica server (e.g., open necessary files, set up state)
+    using handler_fn = std::function<void(int, std::unique_ptr<replication_message>)>;
+
+    /**
+     * Initialize internal datastore and metadata from the given filesystem path.
+     * @param location filesystem path used for storing replication data and metadata.
+     */
     void initialize(const boost::filesystem::path& location);
-    
-    // Start the listener on the provided address
+
+    /**
+     * Bind and listen on the specified IPv4 address for incoming replication clients.
+     * @return true if listener was successfully started; false on error.
+     */
     bool start_listener(const struct sockaddr_in& listen_addr);
 
-    // Accept loop runs in its own thread
+    /**
+     * Run the accept loop in the current thread, dispatching each new client connection
+     * to handle_client(). Exits immediately when shutdown() is called.
+     */
     void accept_loop();
 
-    // Handle a single client connection
+    /**
+     * Process a single client connection: configure socket options, receive exactly one
+     * replication_message, invoke the registered handler (or return an error), then close.
+     */
     void handle_client(int client_fd);
 
     /**
-     * Request shutdown of the accept loop and close the listening socket.
-     *
-     * @note This method is provided primarily for testing purposes to stop accept_loop().
-     *       It has not been evaluated for production use and may not provide sufficient
-     *       functionality or safety guarantees for a production environment.
+     * Register a handler function for a specific message_type_id.
+     */
+    void register_handler(message_type_id type, handler_fn handler) noexcept;
+
+    /**
+     * Clear all registered handlers. Intended for testing only.
+     */
+    void clear_handlers() noexcept;
+
+    /**
+     * Signal the accept_loop() to exit and close the listening socket.
      */
     void shutdown();
 
 private:
-    std::unique_ptr<limestone::api::datastore> datastore_{};
-    std::mutex shutdown_mutex_;
-    int event_fd_{-1};
-    int sockfd_{-1};
+    std::unordered_map<message_type_id, handler_fn> handlers_; ///< message dispatch table
+    std::unique_ptr<limestone::api::datastore> datastore_;      ///< underlying datastore instance
+    std::mutex shutdown_mutex_;                                 ///< protects socket and event_fd lifetimes
+    int event_fd_{-1};                                          ///< eventfd used to unblock poll()
+    int sockfd_{-1};                                            ///< listening socket file descriptor
 };
 
-}   // namespace limestone::replication
+} // namespace limestone::replication

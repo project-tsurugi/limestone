@@ -12,9 +12,14 @@
 #include <boost/filesystem.hpp>
 #include <thread>
 
+#include "replication/message_error.h"
+#include "replication/message_session_begin.h"
 #include "replication/replica_connector.h"
-
+#include "replication/socket_io.h"
 namespace limestone::testing {
+
+using namespace limestone::replication;
+
 
 static uint16_t get_free_port() {
     int sock = ::socket(AF_INET, SOCK_STREAM, 0);
@@ -126,5 +131,60 @@ static uint16_t get_free_port() {
     accept_thread.join();
 }
 
- }  // namespace limestone::testing
+TEST_F(replica_server_test, no_handler_returns_error) {
+    replication::replica_server server;
+    server.initialize(location1);
+    server.clear_handlers();
+    uint16_t port = get_free_port();
+    auto addr = make_listen_addr(port);
+    ASSERT_TRUE(server.start_listener(addr));
+
+    std::thread server_thread([&server]() { server.accept_loop(); });
+
+    replication::replica_connector client;
+    ASSERT_TRUE(client.connect_to_server("127.0.0.1", port));
+
+    auto request = message_session_begin::create();
+    static_cast<message_session_begin*>(request.get())->set_param("config", 42);
+    EXPECT_TRUE(client.send_message(*request));
+
+    auto response = client.receive_message();
+    ASSERT_NE(response, nullptr);
+    EXPECT_EQ(response->get_message_type_id(), message_type_id::COMMON_ERROR);
+
+    client.close_session();
+    server.shutdown();
+    server_thread.join();
+}
+
+TEST_F(replica_server_test, registered_handler_is_called) {
+    replication::replica_server server;
+    server.initialize(location1);
+    uint16_t port = get_free_port();
+    auto addr = make_listen_addr(port);
+    ASSERT_TRUE(server.start_listener(addr));
+
+    std::promise<bool> invoked;
+    server.register_handler(message_type_id::SESSION_BEGIN,
+        [&invoked](int, std::unique_ptr<replication_message>) {
+            invoked.set_value(true);
+        });
+
+    std::thread server_thread([&server]() { server.accept_loop(); });
+
+    replication::replica_connector client;
+    ASSERT_TRUE(client.connect_to_server("127.0.0.1", port));
+    auto request = message_session_begin::create();
+    static_cast<message_session_begin*>(request.get())->set_param("config", 100);
+    EXPECT_TRUE(client.send_message(*request));
+
+    client.close_session();
+    EXPECT_TRUE(invoked.get_future().get());
+
+    server.shutdown();
+    server_thread.join();
+}
+
+
+}  // namespace limestone::testing
  

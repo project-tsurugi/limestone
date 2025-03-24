@@ -14,7 +14,7 @@
  * limitations under the License.
  */
 
-#include "replication/session_begin_message.h"
+#include "replication/message_session_begin.h"
 #include "gtest/gtest.h"
 #include "replication/socket_io.h"
 
