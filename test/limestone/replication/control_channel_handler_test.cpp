@@ -28,17 +28,21 @@
  class dummy_server  {};
  
  class testable_control_handler : public control_channel_handler {
- public:
-     using control_channel_handler::control_channel_handler;
- 
-     validation_result call_validate(std::unique_ptr<replication_message> m) {
-         return validate_initial(std::move(m));
-     }
- 
-     void call_send_initial_ack(socket_io& io) const {
-         send_initial_ack(io);
-     }
- };
+    public:
+        using control_channel_handler::control_channel_handler;
+    
+        validation_result call_validate(std::unique_ptr<replication_message> m) {
+            return validate_initial(std::move(m));
+        }
+    
+        validation_result call_assign() {
+            return assign_log_channel();
+        }
+    
+        void call_send_initial_ack(socket_io& io) const {
+            send_initial_ack(io);
+        }
+    };
  
  TEST(control_channel_handler_test, validate_session_begin_success) {
      dummy_server server;
@@ -51,20 +55,33 @@
      EXPECT_TRUE(result.ok());
  }
  
- TEST(control_channel_handler_test, validate_fails_on_second_session_begin) {
-     dummy_server server;
-     testable_control_handler handler(reinterpret_cast<replica_server&>(server));
- 
-     auto first = std::make_unique<message_session_begin>();
-     first->set_param("conf", 1);
-     EXPECT_TRUE(handler.call_validate(std::move(first)).ok());
- 
-     auto second = std::make_unique<message_session_begin>();
-     second->set_param("conf", 2);
-     auto result = handler.call_validate(std::move(second));
-     EXPECT_FALSE(result.ok());
-     EXPECT_EQ(result.error_code(), 1);
- }
+ TEST(control_channel_handler_test, assign_fails_on_second_call) {
+    dummy_server server;
+    testable_control_handler handler(reinterpret_cast<replica_server&>(server));
+
+    // First call succeeds
+    auto result1 = handler.call_assign();
+    EXPECT_TRUE(result1.ok());
+
+    // Second call fails (SESSION_BEGIN is considered already received)
+    auto result2 = handler.call_assign();
+    EXPECT_FALSE(result2.ok());
+    EXPECT_EQ(result2.error_code(), 1);
+}
+
+TEST(control_channel_handler_test, validate_succeeds_after_assign) {
+    dummy_server server;
+    testable_control_handler handler(reinterpret_cast<replica_server&>(server));
+
+    EXPECT_TRUE(handler.call_assign().ok());
+
+    auto msg = std::make_unique<message_session_begin>();
+    msg->set_param("conf", 42);  // 必要に応じて
+    auto result = handler.call_validate(std::move(msg));
+
+    EXPECT_TRUE(result.ok());
+}
+
  
  TEST(control_channel_handler_test, validate_fails_on_wrong_type) {
      dummy_server server;

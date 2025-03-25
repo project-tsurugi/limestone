@@ -15,21 +15,26 @@
  */
 
 #include "replication/channel_handler_base.h"
+
 #include <pthread.h>
 
 namespace limestone::replication {
 
-channel_handler_base::channel_handler_base(replica_server& server) noexcept
-    : server_(server) {}
+channel_handler_base::channel_handler_base(replica_server& server) noexcept : server_(server) {}
 
 void channel_handler_base::run(socket_io& io, std::unique_ptr<replication_message> first_request) {
-    pthread_setname_np(pthread_self(), thread_name());
-
-    auto result = validate_initial(std::move(first_request));
-    if (!result.ok()) {
-        send_error(io, result);
+    auto assignment_result = assign_log_channel();
+    if (!assignment_result.ok()) {
+        send_error(io, assignment_result);
         return;
     }
+
+    auto validation_result = validate_initial(std::move(first_request));
+    if (!validation_result.ok()) {
+        send_error(io, validation_result);
+        return;
+    }
+
     send_initial_ack(io);
     process_loop(io);
 }

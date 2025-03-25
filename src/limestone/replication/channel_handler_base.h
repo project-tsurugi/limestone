@@ -14,15 +14,16 @@
  * limitations under the License.
  */
 
-#pragma once
+ #pragma once
 
 #include <memory>
-#include "replication_message.h"
-#include "socket_io.h"
+
 #include "message_ack.h"
 #include "message_error.h"
-#include "validation_result.h"
 #include "replica_server.h"
+#include "replication_message.h"
+#include "socket_io.h"
+#include "validation_result.h"
 
 namespace limestone::replication {
 
@@ -41,6 +42,15 @@ public:
     void run(socket_io& io, std::unique_ptr<replication_message> first_request);
 
 protected:
+    /**
+     * @brief Check whether the channel can be accepted, and set thread name if accepted.
+     *        Returns success() if the channel can be created, or error(code, message) if it must be rejected.
+     *
+     * This method is called once after the thread is started and before message validation begins.
+     * If the channel cannot be accepted (e.g., due to resource limits), the thread name is not set.
+     */
+    virtual validation_result assign_log_channel() = 0;
+
     // Validate initial request; return ok() or error()
     virtual validation_result validate_initial(std::unique_ptr<replication_message> request) = 0;
 
@@ -56,13 +66,13 @@ protected:
     // Handle subsequent messages in the processing loop
     virtual void dispatch(replication_message& message, socket_io& io) = 0;
 
-    // Provide thread name for the current channel handler
-    [[nodiscard]] virtual const char* thread_name() const = 0;
+    // Protected getter for replica_server
+    replica_server& get_server() const { return server_; }
 
     // Main receive-dispatch loop
     void process_loop(socket_io& io);
 
-private:    
+private:
     replica_server& server_;
 };
 

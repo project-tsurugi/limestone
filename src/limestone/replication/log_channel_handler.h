@@ -1,0 +1,54 @@
+/*
+ * Copyright 2022-2025 Project Tsurugi.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+#pragma once
+
+#include <atomic>
+
+#include "channel_handler_base.h"
+
+namespace limestone::replication {
+
+class log_channel_handler : public channel_handler_base {
+public:
+    static constexpr int MAX_LOG_CHANNEL_COUNT = 100000;
+
+    explicit log_channel_handler(replica_server &server) noexcept;
+    ~log_channel_handler() override = default;
+
+        /**
+     * @brief Set the internal log_channel_id_counter to a specific value for testing.
+     * This method is for testing purposes only.
+     */
+    void set_log_channel_id_counter_for_test(int value);
+protected:
+    // Assign a log channel and set the thread name.
+    validation_result assign_log_channel() override; 
+
+    // Validate the initial message of the channel.
+    validation_result validate_initial(std::unique_ptr<replication_message> request) override;
+    
+    // Send the initial acknowledgement message.
+    void send_initial_ack(socket_io &io) const override;
+    
+    // Dispatch further messages.
+    void dispatch(replication_message &message, socket_io &io) override;
+    
+private:
+    std::atomic<int> log_channel_id_counter{0};
+};
+
+} // namespace limestone::replication

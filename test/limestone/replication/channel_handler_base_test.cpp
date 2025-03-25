@@ -15,9 +15,13 @@ class test_handler : public channel_handler_base {
 public:
     test_handler(dummy_server& server, bool valid)
         : channel_handler_base(reinterpret_cast<replica_server&>(server)), valid_(valid), dispatched_(false) {}
-    const char* thread_name() const override { return "test-handler"; }
 
 protected:
+    validation_result assign_log_channel() override {
+        pthread_setname_np(pthread_self(), "test-handler");
+        return validation_result::success();
+    }
+
     validation_result validate_initial(std::unique_ptr<replication_message>) override {
         return valid_ ? validation_result::success()
                       : validation_result::error(42, "bad request");
@@ -31,7 +35,6 @@ protected:
         dispatched_ = true;
         throw std::runtime_error("stop loop");
     }
-
 
 public:
     bool dispatched() const { return dispatched_; }
@@ -58,7 +61,7 @@ TEST(channel_handler_base_test, run_sends_initial_ack_and_dispatches) {
 
     char name[16];
     pthread_getname_np(pthread_self(), name, sizeof(name));
-    EXPECT_STREQ(name, handler.thread_name());
+    EXPECT_STREQ(name, "test-handler");
 }
 
 TEST(channel_handler_base_test, run_sends_error_on_validation_failure) {
@@ -77,7 +80,7 @@ TEST(channel_handler_base_test, run_sends_error_on_validation_failure) {
 
     char name[16];
     pthread_getname_np(pthread_self(), name, sizeof(name));
-    EXPECT_STREQ(name, handler.thread_name());
+    EXPECT_STREQ(name, "test-handler");
 }
 
 TEST(channel_handler_base_test, send_ack_in_loop) {
@@ -86,8 +89,13 @@ TEST(channel_handler_base_test, send_ack_in_loop) {
     public:
         explicit ack_handler(dummy_server& s)
             : channel_handler_base(reinterpret_cast<replica_server&>(s)) {}
-        const char* thread_name() const override { return "ack-handler"; }
+
     protected:
+        validation_result assign_log_channel() override {
+            pthread_setname_np(pthread_self(), "ack-handler");
+            return validation_result::success();
+        }
+
         validation_result validate_initial(std::unique_ptr<replication_message>) override {
             return validation_result::success();
         }
@@ -113,7 +121,41 @@ TEST(channel_handler_base_test, send_ack_in_loop) {
 
     char name[16];
     pthread_getname_np(pthread_self(), name, sizeof(name));
-    EXPECT_STREQ(name, handler.thread_name());
+    EXPECT_STREQ(name, "ack-handler");
+}
+
+TEST(channel_handler_base_test, run_sends_error_when_assign_fails) {
+    dummy_server server;
+
+    class failing_handler : public channel_handler_base {
+    public:
+        explicit failing_handler(dummy_server& s)
+            : channel_handler_base(reinterpret_cast<replica_server&>(s)) {}
+
+    protected:
+        validation_result assign_log_channel() override {
+            return validation_result::error(99, "assign failed");
+        }
+
+        validation_result validate_initial(std::unique_ptr<replication_message>) override {
+            return validation_result::success();  // 呼ばれないはず
+        }
+
+        void send_initial_ack(socket_io&) const override {}
+        void dispatch(replication_message&, socket_io&) override {}
+    };
+
+    failing_handler handler(server);
+    socket_io io("");
+
+    handler.run(io, std::make_unique<message_ack>());
+
+    socket_io reader(io.get_out_string());
+    auto msg = replication_message::receive(reader);
+    auto* err = dynamic_cast<message_error*>(msg.get());
+    ASSERT_NE(err, nullptr);
+    EXPECT_EQ(err->get_error_code(), 99);
+    EXPECT_EQ(err->get_error_message(), "assign failed");
 }
 
 }  // namespace limestone::testing
