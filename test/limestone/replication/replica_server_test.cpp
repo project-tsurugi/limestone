@@ -160,6 +160,7 @@ TEST_F(replica_server_test, no_handler_returns_error) {
 TEST_F(replica_server_test, registered_handler_is_called) {
     replication::replica_server server;
     server.initialize(location1);
+    server.clear_handlers();
     uint16_t port = get_free_port();
     auto addr = make_listen_addr(port);
     ASSERT_TRUE(server.start_listener(addr));
