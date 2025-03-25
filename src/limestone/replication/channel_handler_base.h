@@ -29,6 +29,13 @@ namespace limestone::replication {
 class channel_handler_base {
 public:
     explicit channel_handler_base(replica_server& server) noexcept;
+    virtual ~channel_handler_base() = default;
+
+    // Delete copy and move operations to follow special member functions guideline.
+    channel_handler_base(const channel_handler_base&) = delete;
+    channel_handler_base& operator=(const channel_handler_base&) = delete;
+    channel_handler_base(channel_handler_base&&) = delete;
+    channel_handler_base& operator=(channel_handler_base&&) = delete;
 
     // Validate first request, send initial ACK or Error, then start processing loop
     void run(socket_io& io, std::unique_ptr<replication_message> first_request);
@@ -50,11 +57,12 @@ protected:
     virtual void dispatch(replication_message& message, socket_io& io) = 0;
 
     // Provide thread name for the current channel handler
-    virtual const char* thread_name() const = 0;
+    [[nodiscard]] virtual const char* thread_name() const = 0;
 
     // Main receive-dispatch loop
     void process_loop(socket_io& io);
 
+private:    
     replica_server& server_;
 };
 

@@ -20,22 +20,22 @@
  #include "replication/channel_handler_base.h"
  #include "replication/message_session_begin.h"
  #include "replication/message_session_begin_ack.h"
- 
- namespace limestone::replication {
- 
- class control_channel_handler : public channel_handler_base {
- public:
-     explicit control_channel_handler(replica_server& server) noexcept;
- 
- protected:
-     validation_result validate_initial(std::unique_ptr<replication_message> request) override;
-     void send_initial_ack(socket_io& io) const override;
-     void dispatch(replication_message& message, socket_io& io) override;
-     const char* thread_name() const override { return "limestone-ctrl"; }
- 
- private:
-     std::atomic<bool> has_received_session_begin_{false};
- };
- 
- }  // namespace limestone::replication
+
+namespace limestone::replication {
+
+class control_channel_handler : public channel_handler_base {
+public:
+    explicit control_channel_handler(replica_server& server) noexcept;
+
+protected:
+    validation_result validate_initial(std::unique_ptr<replication_message> request) override;
+    void send_initial_ack(socket_io& io) const override;
+    void dispatch(replication_message& message, socket_io& io) override;
+    [[nodiscard]] const char* thread_name() const override { return "limestone-ctrl"; }
+
+private:
+    std::atomic<bool> has_received_session_begin_{false};
+};
+
+}  // namespace limestone::replication
  
