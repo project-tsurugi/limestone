@@ -23,6 +23,7 @@
 #include <sys/eventfd.h>
 
 #include "control_channel_handler.h"
+#include "log_channel_handler.h"
 #include "logging_helper.h"
 #include "message_error.h"
 
@@ -43,6 +44,15 @@ void replica_server::initialize(const boost::filesystem::path& location) {
             control_channel_handler handler(*this);
             handler.run(io, std::move(msg));
         });
+
+    // Register log channel handler
+    register_handler(
+        message_type_id::LOG_CHANNEL_CREATE,
+        [this](int fd, std::unique_ptr<replication_message> msg) {
+            socket_io io(fd);
+            log_channel_handler handler(*this);
+            handler.run(io, std::move(msg));
+        });        
  }
  
  bool replica_server::start_listener(const struct sockaddr_in &listen_addr) {
