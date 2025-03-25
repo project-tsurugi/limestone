@@ -67,7 +67,7 @@ protected:
     virtual void dispatch(replication_message& message, socket_io& io) = 0;
 
     // Protected getter for replica_server
-    replica_server& get_server() const { return server_; }
+    [[nodiscard]] replica_server& get_server() const { return server_; }
 
     // Main receive-dispatch loop
     void process_loop(socket_io& io);

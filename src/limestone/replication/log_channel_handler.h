@@ -29,11 +29,18 @@ public:
     explicit log_channel_handler(replica_server &server) noexcept;
     ~log_channel_handler() override = default;
 
-        /**
+    // Delete copy and move constructors and assignment operators
+    log_channel_handler(const log_channel_handler &) = delete;
+    log_channel_handler &operator=(const log_channel_handler &) = delete;
+    log_channel_handler(log_channel_handler &&) = delete;
+    log_channel_handler &operator=(log_channel_handler &&) = delete;
+
+    /**
      * @brief Set the internal log_channel_id_counter to a specific value for testing.
      * This method is for testing purposes only.
      */
     void set_log_channel_id_counter_for_test(int value);
+
 protected:
     // Assign a log channel and set the thread name.
     validation_result assign_log_channel() override; 
