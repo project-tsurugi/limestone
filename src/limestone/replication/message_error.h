@@ -36,6 +36,11 @@ public:
     [[nodiscard]] const std::string& get_error_message() const { return error_message_; }
 
 private:
+    // Register COMMON_ACK in replication_message factory map.
+    // The static initialization here is intentional. If an exception occurs,
+    // the program should terminate immediately. We ignore the clang-tidy warning 
+    // (cert-err58-cpp) as this behavior is desired.
+    // NOLINTNEXTLINE(cert-err58-cpp)
     inline static const bool registered_ = []() {
         replication_message::register_message_type(
             message_type_id::COMMON_ERROR, &message_error::create);
