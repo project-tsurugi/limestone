@@ -42,12 +42,14 @@ void channel_handler_base::run(socket_io& io, std::unique_ptr<replication_messag
 void channel_handler_base::send_ack(socket_io& io) const {
     message_ack ack;
     replication_message::send(io, ack);
+    io.flush();
 }
 
 void channel_handler_base::send_error(socket_io& io, const validation_result& result) const {
     message_error err;
     err.set_error(result.error_code(), result.error_message());
     replication_message::send(io, err);
+    io.flush();
 }
 
 void channel_handler_base::process_loop(socket_io& io) {

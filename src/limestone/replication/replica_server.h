@@ -26,6 +26,8 @@
 
 namespace limestone::replication {
 
+class channel_handler_base;
+
 class replica_server {
 public:
     using handler_fn = std::function<void(int, std::unique_ptr<replication_message>)>;
@@ -57,7 +59,7 @@ public:
     /**
      * Register a handler function for a specific message_type_id.
      */
-    void register_handler(message_type_id type, handler_fn handler) noexcept;
+    void register_handler(message_type_id type, std::shared_ptr<channel_handler_base> handler) noexcept;
 
     /**
      * Clear all registered handlers. Intended for testing only.
@@ -70,11 +72,11 @@ public:
     void shutdown();
 
 private:
-    std::unordered_map<message_type_id, handler_fn> handlers_; ///< message dispatch table
-    std::unique_ptr<limestone::api::datastore> datastore_;      ///< underlying datastore instance
-    std::mutex shutdown_mutex_;                                 ///< protects socket and event_fd lifetimes
-    int event_fd_{-1};                                          ///< eventfd used to unblock poll()
-    int sockfd_{-1};                                            ///< listening socket file descriptor
+    std::unordered_map<message_type_id, std::shared_ptr<channel_handler_base>> handlers_;  ///< message dispatch table
+    std::unique_ptr<limestone::api::datastore> datastore_;                                 ///< underlying datastore instance
+    std::mutex shutdown_mutex_;                                                            ///< protects socket and event_fd lifetimes
+    int event_fd_{-1};                                                                     ///< eventfd used to unblock poll()
+    int sockfd_{-1};                                                                       ///< listening socket file descriptor
 };
 
 } // namespace limestone::replication

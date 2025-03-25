@@ -12,6 +12,7 @@
 #include <boost/filesystem.hpp>
 #include <thread>
 
+#include "replication/channel_handler_base.h"
 #include "replication/message_error.h"
 #include "replication/message_session_begin.h"
 #include "replication/replica_connector.h"
@@ -64,6 +65,23 @@ static uint16_t get_free_port() {
          }
          boost::filesystem::remove_all(base_location);
      }
+ };
+
+ class test_session_handler : public limestone::replication::channel_handler_base {
+ public:
+     test_session_handler(limestone::replication::replica_server& server, std::promise<bool>& invoked) noexcept : channel_handler_base(server), invoked_(invoked) {}
+
+ protected:
+     limestone::replication::validation_result assign_log_channel() override { return limestone::replication::validation_result::success(); }
+     limestone::replication::validation_result validate_initial(std::unique_ptr<limestone::replication::replication_message> /*req*/) override {
+         invoked_.set_value(true);
+         return limestone::replication::validation_result::success();
+     }
+     void send_initial_ack(limestone::replication::socket_io& /*io*/) const override {}
+     void dispatch(limestone::replication::replication_message& /*msg*/, limestone::replication::socket_io& /*io*/) override {}
+
+ private:
+     std::promise<bool>& invoked_;
  };
 
  TEST_F(replica_server_test, initialize_does_not_throw) {
@@ -166,10 +184,9 @@ TEST_F(replica_server_test, registered_handler_is_called) {
     ASSERT_TRUE(server.start_listener(addr));
 
     std::promise<bool> invoked;
-    server.register_handler(message_type_id::SESSION_BEGIN,
-        [&invoked](int, std::unique_ptr<replication_message>) {
-            invoked.set_value(true);
-        });
+    
+    auto handler = std::make_shared<test_session_handler>(server, invoked);
+    server.register_handler(replication::message_type_id::SESSION_BEGIN, handler);
 
     std::thread server_thread([&server]() { server.accept_loop(); });
 

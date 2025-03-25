@@ -14,7 +14,7 @@
  * limitations under the License.
  */
 
- #pragma once
+#pragma once
 
 #include <memory>
 
@@ -26,6 +26,7 @@
 #include "validation_result.h"
 
 namespace limestone::replication {
+    class replica_server;
 
 class channel_handler_base {
 public:

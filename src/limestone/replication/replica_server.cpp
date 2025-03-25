@@ -22,6 +22,7 @@
 #include <poll.h>
 #include <sys/eventfd.h>
 
+#include "channel_handler_base.h"
 #include "control_channel_handler.h"
 #include "log_channel_handler.h"
 #include "logging_helper.h"
@@ -37,22 +38,11 @@ void replica_server::initialize(const boost::filesystem::path& location) {
     datastore_ = std::make_unique<limestone::api::datastore>(conf);
 
     // Register control channel handler
-    register_handler(
-        message_type_id::SESSION_BEGIN,
-        [this](int fd, std::unique_ptr<replication_message> msg) {
-            socket_io io(fd);
-            control_channel_handler handler(*this);
-            handler.run(io, std::move(msg));
-        });
-
-    // Register log channel handler
-    register_handler(
-        message_type_id::LOG_CHANNEL_CREATE,
-        [this](int fd, std::unique_ptr<replication_message> msg) {
-            socket_io io(fd);
-            log_channel_handler handler(*this);
-            handler.run(io, std::move(msg));
-        });        
+    auto ctrl = std::make_shared<control_channel_handler>(*this);
+    register_handler(message_type_id::SESSION_BEGIN, ctrl);
+    
+    auto log = std::make_shared<log_channel_handler>(*this);
+    register_handler(message_type_id::LOG_CHANNEL_CREATE, log);      
  }
  
  bool replica_server::start_listener(const struct sockaddr_in &listen_addr) {
@@ -148,7 +138,7 @@ void replica_server::initialize(const boost::filesystem::path& location) {
 }
 
  
-void replica_server::register_handler(message_type_id type, handler_fn handler) noexcept {
+void replica_server::register_handler(message_type_id type, std::shared_ptr<channel_handler_base> handler) noexcept {
     handlers_.emplace(type, std::move(handler));
 }
 
@@ -171,9 +161,9 @@ void replica_server::handle_client(int client_fd) {
         auto msg = replication_message::receive(io);
         message_type_id type = msg->get_message_type_id();
 
-        auto it = handlers_.find(type);
-        if (it != handlers_.end()) {
-            it->second(client_fd, std::move(msg));
+        if (auto it = handlers_.find(type); it != handlers_.end()) {
+            socket_io io(client_fd);
+            it->second->run(io, std::move(msg));
         } else {
             LOG_LP(ERROR) << "Unexpected message type: " << static_cast<uint16_t>(type);
             auto error = std::make_unique<message_error>();

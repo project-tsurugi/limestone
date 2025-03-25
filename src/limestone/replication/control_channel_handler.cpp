@@ -55,6 +55,7 @@ validation_result control_channel_handler::validate_initial(std::unique_ptr<repl
      message_session_begin_ack ack;
      ack.set_session_secret("server_.get_session_secret()"); // TODO: actual secret
      replication_message::send(io, ack);
+     io.flush();
  }
  
  void control_channel_handler::dispatch(replication_message& /*message*/, socket_io& /*io*/) {
