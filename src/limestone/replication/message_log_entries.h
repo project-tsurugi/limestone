@@ -1,11 +1,15 @@
 #pragma once
 
-#include "replication_message.h"
-#include <vector>
-#include <string_view>
+#include <limestone/api/blob_id_type.h>
+#include <limestone/api/epoch_id_type.h>
 #include <limestone/api/storage_id_type.h>
 #include <limestone/api/write_version_type.h>
-#include <limestone/api/blob_id_type.h>
+
+#include <string_view>
+#include <vector>
+
+#include "log_entry.h"
+#include "replication_message.h"
 
 namespace limestone::replication {
 
@@ -14,6 +18,8 @@ class message_log_entries : public replication_message {
 using storage_id_type = limestone::api::storage_id_type;
 using write_version_type = limestone::api::write_version_type;
 using blob_id_type = limestone::api::blob_id_type;
+using entry_type = limestone::api::log_entry::entry_type;
+using epoch_id_type = limestone::api::epoch_id_type;
 
 
 public:
@@ -25,6 +31,7 @@ public:
     // Internal class to represent each entry
     struct entry {
         // Entry data structure that holds necessary information for each log entry
+        entry_type type{};
         storage_id_type storage_id{};
         std::string key{};
         std::string value{};
@@ -49,6 +56,9 @@ public:
 
     // Override method to send message body to socket
     void send_body(socket_io& io) const override;
+
+    // Setter
+    void set_epoch_id(epoch_id_type epoch);
 
     // Override method to receive message body from socket
     void receive_body(socket_io& io) override;
@@ -81,6 +91,8 @@ public:
     void add_remove_storage(storage_id_type storage_id, write_version_type write_version);
 
 private:
+    epoch_id_type epoch_id_{};  // Epoch ID for the log entries
+
     // Internal structure to hold log entries (private)
     std::vector<entry> entries_;
 

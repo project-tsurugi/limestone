@@ -8,7 +8,8 @@ using epoch_id_type = limestone::api::epoch_id_type;
 
 void message_log_entries::send_body(socket_io& io) const {
     // Send the number of entries
-    io.send_uint32(static_cast<uint32_t>(entries_.size()));
+    io.send_uint32(static_cast<uint32_t>(epoch_id_)); // TODO: オーバーフローのチェックが必要
+    io.send_uint32(static_cast<uint32_t>(entries_.size())); // TODO: オーバーフローのチェックが必要
 
     // Send each entry
     for (const auto& entry : entries_) {
@@ -19,7 +20,7 @@ void message_log_entries::send_body(socket_io& io) const {
         io.send_uint64(entry.write_version.get_minor());
         
         // Send the blob list
-        io.send_uint32(static_cast<uint32_t>(entry.blob_ids.size()));
+        io.send_uint32(static_cast<uint32_t>(entry.blob_ids.size())); // TODO: オーバーフローのチェックが必要
         for (const auto& blob_id : entry.blob_ids) {
             io.send_uint64(blob_id);
         }
@@ -31,6 +32,7 @@ void message_log_entries::send_body(socket_io& io) const {
 
 void message_log_entries::receive_body(socket_io& io) {
     // Receive the number of entries
+    epoch_id_ = io.receive_uint32();
     uint32_t entry_count = io.receive_uint32();
 
     // Clear existing entries and reserve space
@@ -61,6 +63,10 @@ void message_log_entries::receive_body(socket_io& io) {
 
     // Receive the operation flags (session begin, end, flush)
     operation_flags_ = io.receive_uint8();
+}
+
+void message_log_entries::set_epoch_id(epoch_id_type epoch) {
+    epoch_id_ = epoch;
 }
 
 void message_log_entries::set_session_begin_flag(bool flag) {

@@ -130,7 +130,7 @@ void socket_io::send_uint8(uint8_t value) {
 }
 
 void socket_io::send_string(const std::string &value) {
-    send_uint32(static_cast<uint32_t>(value.size()));
+    send_uint32(static_cast<uint32_t>(value.size()));  // TODO: Check for overflow
     out_stream_->write(value.data(), static_cast<std::streamsize>(value.size()));
 }
 
