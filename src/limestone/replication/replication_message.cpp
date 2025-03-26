@@ -35,14 +35,14 @@
  // Send method with type information (cannot be overridden)
  void replication_message::send(socket_io& io, const replication_message& message) {
      message_type_id type_id = message.get_message_type_id();  // Get the message type ID
-     io.send_uint16(static_cast<uint16_t>(type_id));  // Send type information first
+     io.send_uint8(static_cast<uint8_t>(type_id));  // Send type information first
      message.send_body(io);  // Call the derived class's send method to send the actual data
  }
  
  // Receive method with type information (cannot be overridden)
  std::unique_ptr<replication_message> replication_message::receive(socket_io& io) {
     // Read the message type ID from the stream with error checking and byte order conversion
-    uint16_t value = io.receive_uint16();
+    uint8_t value = io.receive_uint8();
     auto type_id = static_cast<message_type_id>(value);
     
     // Create the message using the appropriate factory function.

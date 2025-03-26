@@ -27,24 +27,24 @@
 
 namespace limestone::replication {
 
-enum class message_type_id : uint16_t {
+enum class message_type_id : uint8_t {
     // Control‑channel requests
-    SESSION_BEGIN = 100,
-    SESSION_END = 101,
-    GROUP_COMMIT = 102,
-    GC_BOUNDARY_SWITCH = 103,
+    SESSION_BEGIN = 0x01,
+    SESSION_END = 0x02,
+    GROUP_COMMIT = 0x03,
+    GC_BOUNDARY_SWITCH = 0x04,
 
     // Log‑channel requests
-    LOG_CHANNEL_CREATE = 200,
-    LOG_ENTRY = 201,
+    LOG_CHANNEL_CREATE = 0x10,
+    LOG_ENTRY = 0x11,
 
     // Responses
-    SESSION_BEGIN_ACK = 300,
-    COMMON_ACK = 301,
-    COMMON_ERROR = 302,
+    SESSION_BEGIN_ACK = 0x20,
+    COMMON_ACK = 0x21,
+    COMMON_ERROR = 0x22,
 
     // For testing only
-    TESTING = 9999
+    TESTING = 0xff
 };
 
 // Enum to define connection types
