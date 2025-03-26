@@ -45,7 +45,7 @@ socket_io::socket_io(const std::string &initial)
       out_stream_(std::make_unique<std::ostringstream>(std::ios_base::out))
 {
     // Create std::istringstream from the initial string.
-    in_stream_ = std::unique_ptr<std::istream>( new std::istringstream(initial) );
+    in_stream_ = std::unique_ptr<std::istream>(new std::istringstream(initial) );
 }
 
 socket_io::~socket_io() {
@@ -234,6 +234,14 @@ void socket_io::close() {
             socket_fd_ = -1;
         }
     }
+}
+
+std::ostream& socket_io::get_out_stream() {
+    return *out_stream_;
+}
+
+std::istream& socket_io::get_in_stream() {
+    return *in_stream_;
 }
 
 }  // namespace limestone::replication

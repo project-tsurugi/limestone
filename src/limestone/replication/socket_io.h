@@ -88,6 +88,9 @@ public:
     // Close the socket file descriptor (real mode) or clear the input and output streams (string mode).
     void close();
 
+protected:
+    [[nodiscard]] std::ostream& get_out_stream(); 
+    [[nodiscard]] std::istream& get_in_stream();
 private:
     [[nodiscard]] bool wait_for_writable() const;
 
