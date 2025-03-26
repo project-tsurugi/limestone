@@ -35,7 +35,7 @@ public:
     [[nodiscard]] const std::string& get_session_secret() const { return session_secret_; }
 
 private:
-    // Register COMMON_ACK in replication_message factory map.
+    // Register SESSION_BEGIN_ACK in replication_message factory map.
     // The static initialization here is intentional. If an exception occurs,
     // the program should terminate immediately. We ignore the clang-tidy warning 
     // (cert-err58-cpp) as this behavior is desired.

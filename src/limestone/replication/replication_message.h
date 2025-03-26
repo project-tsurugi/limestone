@@ -29,18 +29,19 @@ namespace limestone::replication {
 
 enum class message_type_id : uint16_t {
     // Control‑channel requests
-    SESSION_BEGIN = 1,
-    SESSION_END = 2,
-    GROUP_COMMIT = 3,
+    SESSION_BEGIN = 100,
+    SESSION_END = 101,
+    GROUP_COMMIT = 102,
+    GC_BOUNDARY_SWITCH = 103,
 
     // Log‑channel requests
-    LOG_CHANNEL_CREATE = 4,
-    LOG_ENTRY = 5,
+    LOG_CHANNEL_CREATE = 200,
+    LOG_ENTRY = 201,
 
     // Responses
-    SESSION_BEGIN_ACK = 6,
-    COMMON_ACK = 7,
-    COMMON_ERROR = 8,
+    SESSION_BEGIN_ACK = 300,
+    COMMON_ACK = 301,
+    COMMON_ERROR = 302,
 
     // For testing only
     TESTING = 9999

@@ -14,42 +14,40 @@
  * limitations under the License.
  */
 
+
+
 #pragma once
 
 #include "replication_message.h"
 
 namespace limestone::replication {
 
-class message_log_channel_create : public replication_message {
+class message_gc_boundary_switch : public replication_message {
 public:
-    void set_secret(std::string secret);
+    explicit message_gc_boundary_switch(uint16_t write_version = 0);
 
     [[nodiscard]] message_type_id get_message_type_id() const override;
     void send_body(socket_io& io) const override;
     void receive_body(socket_io& io) override;
-    void post_receive() override {}
+    void post_receive() override;
 
     [[nodiscard]] static std::unique_ptr<replication_message> create();
 
-    [[nodiscard]] uint8_t get_connection_type() const { return connection_type_; }
-    [[nodiscard]] const std::string& get_secret() const { return secret_; }
-
+    [[nodiscard]] uint16_t write_version() const;
+    
 private:
-    // Register LOG_CHANNEL_CREATE in replication_message factory map.
+    // Register GC_BOUNDARY_SWITCH in replication_message factory map.
     // The static initialization here is intentional. If an exception occurs,
     // the program should terminate immediately. We ignore the clang-tidy warning 
     // (cert-err58-cpp) as this behavior is desired.
     // NOLINTNEXTLINE(cert-err58-cpp)
     inline static const bool registered_ = []() {
-        replication_message::register_message_type(
-            message_type_id::LOG_CHANNEL_CREATE,
-            &message_log_channel_create::create);
+        replication_message::register_message_type(message_type_id::GC_BOUNDARY_SWITCH, &message_gc_boundary_switch::create);
         return true;
     }();
-
-    uint8_t connection_type_ = CONNECTION_TYPE_LOG_CHANNEL;
-    std::string secret_;
+    uint16_t write_version_;
 };
 
-}  // namespace limestone::replication
+} // namespace limestone::replication
+
 

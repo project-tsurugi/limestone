@@ -14,7 +14,7 @@
  * limitations under the License.
  */
 
- #pragma once
+#pragma once
 
 #include "replication_message.h"
 
