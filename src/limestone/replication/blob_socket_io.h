@@ -12,6 +12,8 @@ using limestone::api::blob_id_type;
 
 class blob_socket_io : public socket_io {
 public:
+    static constexpr std::size_t blob_buffer_size = 64UL * 1024UL;
+    
     // Real‑socket constructor
     blob_socket_io(int fd, blob_file_resolver& resolver);
 
@@ -23,7 +25,6 @@ public:
     blob_id_type receive_blob();
 private:
     void safe_close(FILE *fp);
-    static constexpr std::size_t blob_buffer_size = 64UL * 1024UL;
     blob_file_resolver &blob_resolver_;
 };
 
