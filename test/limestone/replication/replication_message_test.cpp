@@ -29,7 +29,7 @@ TEST(replication_message_test, create_message_with_valid_type_id) {
     // Create a stream and write type information and message data
     socket_io out("");
     message_type_id type_id = message_type_id::TESTING;
-    out.send_uint16(static_cast<uint16_t>(type_id));  // Write the message type ID
+    out.send_uint8(static_cast<uint16_t>(type_id));  // Write the message type ID
     out.send_string("Test Message Data");  // Write some dummy message data
     
     socket_io in(out.get_out_string());
@@ -48,8 +48,8 @@ TEST(replication_message_test, create_message_with_invalid_type_id) {
     // Create a stream and write invalid type information (e.g., type_id = 999)
 
     socket_io out("");
-    message_type_id invalid_type_id = static_cast<message_type_id>(999);  // Invalid type ID
-    out.send_uint16(static_cast<uint16_t>(invalid_type_id));  // Write invalid type ID
+    message_type_id invalid_type_id = static_cast<message_type_id>(0xfe);  // Invalid type ID
+    out.send_uint8(static_cast<uint16_t>(invalid_type_id));  // Write invalid type ID
     out.send_string("Invalid Test Message Data");  // Write some dummy message data
 
     socket_io in(out.get_out_string());
@@ -121,7 +121,7 @@ TEST(replication_message_test, incomplete_stream_0_bytes) {
        FAIL() << "Expected limestone_io_exception, but none was thrown.";
    } catch (const limestone_io_exception& ex) {
        // Check that the error message contains the expected substring
-       std::string expected_substring = "Failed to read uint16_t from input stream";
+       std::string expected_substring = "Failed to read uint8_t from input stream";
        EXPECT_NE(std::string(ex.what()).find(expected_substring), std::string::npos)
            << "Error message was: " << ex.what();
    }
@@ -129,13 +129,16 @@ TEST(replication_message_test, incomplete_stream_0_bytes) {
 
 // Test for incomplete stream with 1 byte (only part of type information)
 TEST(replication_message_test, incomplete_stream_1_byte) {
-   socket_io io("A");
+    socket_io out("");
+    message_type_id type_id = message_type_id::TESTING;
+    out.send_uint8(static_cast<uint8_t>(type_id));  // Write the message type ID
+    socket_io in(out.get_out_string());
    try {
-       auto message = replication_message::receive(io);
+       auto message = replication_message::receive(in);
        FAIL() << "Expected limestone_io_exception, but none was thrown.";
    } catch (const limestone_io_exception& ex) {
        std::cerr << ex.what() << std::endl;
-       std::string expected_substring = "Failed to read uint16_t from input stream";
+       std::string expected_substring = "Failed to read uint32_t from input stream";
        EXPECT_NE(std::string(ex.what()).find(expected_substring), std::string::npos)
            << "Error message was: " << ex.what();
    }
@@ -145,7 +148,8 @@ TEST(replication_message_test, incomplete_stream_1_byte) {
 TEST(replication_message_test, incomplete_stream_2_bytes) {
     socket_io out("");
     message_type_id type_id = message_type_id::TESTING;
-    out.send_uint16(static_cast<uint16_t>(type_id));  // Write the message type ID
+    out.send_uint8(static_cast<uint8_t>(type_id));  // Write the message type ID
+    out.send_uint8('A');  // Write an extra byte
     socket_io in(out.get_out_string());
     try {
         auto message = replication_message::receive(in);
@@ -161,8 +165,9 @@ TEST(replication_message_test, incomplete_stream_2_bytes) {
 TEST(replication_message_test, incomplete_stream_3_bytes) {
     socket_io out("");
     message_type_id type_id = message_type_id::TESTING;
-    out.send_uint16(static_cast<uint16_t>(type_id));  // Write the message type ID
+    out.send_uint8(static_cast<uint8_t>(type_id));  // Write the message type ID
     out.send_uint8('A');  // Write an extra byte
+    out.send_uint8('B');  // Write an extra byte
     socket_io in(out.get_out_string());
     try {
         auto message = replication_message::receive(in);
