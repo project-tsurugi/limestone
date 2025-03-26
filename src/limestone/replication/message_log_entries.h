@@ -13,14 +13,14 @@
 
 namespace limestone::replication {
 
+    using limestone::api::storage_id_type;
+    using limestone::api::write_version_type;
+    using limestone::api::blob_id_type;
+    using limestone::api::log_entry;
+    using limestone::api::epoch_id_type;
+    
+    
 class message_log_entries : public replication_message {
-
-using storage_id_type = limestone::api::storage_id_type;
-using write_version_type = limestone::api::write_version_type;
-using blob_id_type = limestone::api::blob_id_type;
-using entry_type = limestone::api::log_entry::entry_type;
-using epoch_id_type = limestone::api::epoch_id_type;
-
 
 public:
     // Define flag values as constants
@@ -31,7 +31,7 @@ public:
     // Internal class to represent each entry
     struct entry {
         // Entry data structure that holds necessary information for each log entry
-        entry_type type{};
+        log_entry::entry_type type{};
         storage_id_type storage_id{};
         std::string key{};
         std::string value{};

@@ -43,7 +43,7 @@ public:
     // for testing purposes.
     explicit socket_io(const std::string &initial);
 
-    ~socket_io();
+    virtual ~socket_io();
 
     // Deleted copy constructor and assignment operator to prevent copying.
     socket_io(const socket_io &) = delete;

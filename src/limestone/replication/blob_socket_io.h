@@ -10,6 +10,8 @@ namespace limestone::replication {
 using limestone::internal::blob_file_resolver;    
 using limestone::api::blob_id_type;
 
+// TODO socket_ioから、blob_sokcet_ioを派生するのはソースコードの修正を少なくするためで、
+// 本当は、socket_ioクラスにblob_socket_ioの機能を組み込むべき。
 class blob_socket_io : public socket_io {
 public:
     static constexpr std::size_t blob_buffer_size = 64UL * 1024UL;

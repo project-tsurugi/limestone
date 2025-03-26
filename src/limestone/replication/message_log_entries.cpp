@@ -1,14 +1,15 @@
 #include "message_log_entries.h"
 #include "socket_io.h"
+#include "blob_socket_io.h"
 #include <cassert>
 
 namespace limestone::replication {
 
-using epoch_id_type = limestone::api::epoch_id_type;
+using limestone::api::epoch_id_type;
 
 void message_log_entries::send_body(socket_io& io) const {
     // Send the number of entries
-    io.send_uint32(static_cast<uint32_t>(epoch_id_)); // TODO: オーバーフローのチェックが必要
+    io.send_uint64(static_cast<uint64_t>(epoch_id_)); 
     io.send_uint32(static_cast<uint32_t>(entries_.size())); // TODO: オーバーフローのチェックが必要
 
     // Send each entry
@@ -21,8 +22,10 @@ void message_log_entries::send_body(socket_io& io) const {
         
         // Send the blob list
         io.send_uint32(static_cast<uint32_t>(entry.blob_ids.size())); // TODO: オーバーフローのチェックが必要
+        auto* blob_io_ptr = dynamic_cast<blob_socket_io*>(&io);
+        assert(blob_io_ptr);
         for (const auto& blob_id : entry.blob_ids) {
-            io.send_uint64(blob_id);
+            blob_io_ptr->send_blob(blob_id);
         }
     }
 
@@ -32,7 +35,7 @@ void message_log_entries::send_body(socket_io& io) const {
 
 void message_log_entries::receive_body(socket_io& io) {
     // Receive the number of entries
-    epoch_id_ = io.receive_uint32();
+    epoch_id_ = io.receive_uint64();
     uint32_t entry_count = io.receive_uint32();
 
     // Clear existing entries and reserve space
@@ -53,8 +56,10 @@ void message_log_entries::receive_body(socket_io& io) {
         // Receive blob list
         uint32_t blob_count = io.receive_uint32();
         new_entry.blob_ids.resize(blob_count);
+        auto* blob_io_ptr = dynamic_cast<blob_socket_io*>(&io);
+        assert(blob_io_ptr);
         for (uint32_t j = 0; j < blob_count; ++j) {
-            new_entry.blob_ids[j] = io.receive_uint64();
+            new_entry.blob_ids[j] = blob_io_ptr->receive_blob();
         }
 
         // Add the entry to the vector
