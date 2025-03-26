@@ -36,8 +36,6 @@ void message_gc_boundary_switch::receive_body(socket_io& io) {
     write_version_ = io.receive_uint16();
 }
 
-void message_gc_boundary_switch::post_receive() {}
-
 std::unique_ptr<replication_message> message_gc_boundary_switch::create() {
     return std::make_unique<message_gc_boundary_switch>();
 }

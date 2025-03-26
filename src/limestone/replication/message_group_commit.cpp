@@ -35,8 +35,6 @@ void message_group_commit::receive_body(socket_io& io) {
     epoch_number_ = io.receive_uint64();
 }
 
-void message_group_commit::post_receive() {}
-
 std::unique_ptr<replication_message> message_group_commit::create() {
     return std::make_unique<message_group_commit>();
 }

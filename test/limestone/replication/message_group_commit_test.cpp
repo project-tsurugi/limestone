@@ -20,5 +20,9 @@ TEST(message_group_commit_test, round_trip) {
     EXPECT_EQ(received->epoch_number(), 123456789);
 }
 
+TEST(message_group_commit_test, post_receive_throws) {
+    message_group_commit msg(999);
+    EXPECT_THROW(msg.post_receive(), std::logic_error);
+}
 
 }  // namespace limestone::testing

@@ -46,4 +46,9 @@ TEST(message_error_test, invalid_response_type_throws) {
     EXPECT_THROW(replication_message::receive(in), std::runtime_error);
 }
 
+TEST(message_error_test, post_receive_throws) {
+    message_error msg;
+    EXPECT_THROW(msg.post_receive(), std::logic_error);
+}
+
 } // namespace limestone::testing

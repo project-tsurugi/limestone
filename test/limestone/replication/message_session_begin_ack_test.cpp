@@ -44,6 +44,13 @@
      socket_io in(out.get_out_string());
      EXPECT_THROW(replication_message::receive(in), std::runtime_error);
  }
+
+ TEST(message_session_begin_ack_test, post_receive_throws) {
+    message_session_begin_ack msg;
+    msg.set_session_secret("dummy");
+    EXPECT_THROW(msg.post_receive(), std::logic_error);
+}
+
  
  } // namespace limestone::testing
  

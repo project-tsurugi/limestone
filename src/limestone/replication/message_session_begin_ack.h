@@ -28,7 +28,6 @@ public:
     [[nodiscard]] message_type_id get_message_type_id() const override;
     void send_body(socket_io& io) const override;
     void receive_body(socket_io& io) override;
-    void post_receive() override {}
 
     [[nodiscard]] static std::unique_ptr<replication_message> create();
 

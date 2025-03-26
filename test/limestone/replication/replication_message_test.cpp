@@ -174,4 +174,23 @@ TEST(replication_message_test, incomplete_stream_3_bytes) {
     }
 }
 
+class dummy_message : public replication_message {
+public:
+    message_type_id get_message_type_id() const override { return message_type_id::TESTING; }
+    void send_body(socket_io&) const override {}
+    void receive_body(socket_io&) override {}
+};
+
+TEST(replication_message_test, post_receive_throws_if_not_overridden) {
+    dummy_message msg;
+    try {
+        msg.post_receive();
+        FAIL() << "Expected std::logic_error";
+    } catch (const std::logic_error& e) {
+        EXPECT_STREQ(e.what(), "post_receive() must be implemented or explicitly marked as empty");
+    } catch (...) {
+        FAIL() << "Expected std::logic_error";
+    }
+}
+
 }  // namespace limestone::testing

@@ -68,4 +68,10 @@ TEST(message_session_begin_test, replication_message_round_trip) {
     EXPECT_EQ(received->get_epoch_number(), 100u);
 }
 
+TEST(message_session_begin_test, post_receive_throws) {
+    replication::message_session_begin msg;
+    msg.set_param("cfg", 1);
+    EXPECT_NO_THROW(msg.post_receive());
+}
+
 }  // namespace limestone::testing

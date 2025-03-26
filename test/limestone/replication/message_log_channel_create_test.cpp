@@ -60,5 +60,11 @@
      EXPECT_THROW(replication_message::receive(in), std::runtime_error);
  }
  
+ TEST(message_log_channel_create_test, post_receive_throws) {
+    message_log_channel_create msg;
+    EXPECT_THROW(msg.post_receive(), std::logic_error);
+}
+
+
  }  // namespace limestone::testing
  

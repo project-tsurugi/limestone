@@ -20,4 +20,9 @@ TEST(message_gc_boundary_switch_test, round_trip) {
     EXPECT_EQ(received->write_version(), 42);
 }
 
+TEST(message_gc_boundary_switch_test, post_receive_throws) {
+    message_gc_boundary_switch msg(123);
+    EXPECT_THROW(msg.post_receive(), std::logic_error);
+}
+
 }  // namespace limestone::testing

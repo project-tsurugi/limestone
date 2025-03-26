@@ -44,4 +44,9 @@ TEST(message_ack_test, invalid_body_throws) {
     EXPECT_THROW(replication_message::receive(in), std::runtime_error);
 }
 
+TEST(message_ack_test, post_receive_throws) {
+    message_ack msg;
+    EXPECT_THROW(msg.post_receive(), std::logic_error);
+}
+
 }  // namespace limestone::testing
