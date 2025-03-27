@@ -3,6 +3,7 @@
 #include <gtest/gtest.h>
 
 #include <boost/filesystem.hpp>
+#include <fstream>
 
 #include "blob_file_resolver.h"
 #include "log_entry.h"
