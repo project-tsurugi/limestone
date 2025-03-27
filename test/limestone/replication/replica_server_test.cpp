@@ -72,7 +72,7 @@ static uint16_t get_free_port() {
      test_session_handler(limestone::replication::replica_server& server, std::promise<bool>& invoked) noexcept : channel_handler_base(server), invoked_(invoked) {}
 
  protected:
-     limestone::replication::validation_result assign_log_channel() override { return limestone::replication::validation_result::success(); }
+     limestone::replication::validation_result authorize() override { return limestone::replication::validation_result::success(); }
      limestone::replication::validation_result validate_initial(std::unique_ptr<limestone::replication::replication_message> /*req*/) override {
          invoked_.set_value(true);
          return limestone::replication::validation_result::success();

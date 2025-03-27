@@ -28,7 +28,7 @@ public:
     explicit control_channel_handler(replica_server& server) noexcept;
 
 protected:
-    validation_result assign_log_channel() override;
+    validation_result authorize() override;
     validation_result validate_initial(std::unique_ptr<replication_message> request) override;
     void send_initial_ack(socket_io& io) const override;
     void dispatch(replication_message& message, socket_io& io) override;

@@ -17,7 +17,7 @@ public:
         : channel_handler_base(reinterpret_cast<replica_server&>(server)), valid_(valid), dispatched_(false) {}
 
 protected:
-    validation_result assign_log_channel() override {
+    validation_result authorize() override {
         pthread_setname_np(pthread_self(), "test-handler");
         return validation_result::success();
     }
@@ -91,7 +91,7 @@ TEST(channel_handler_base_test, send_ack_in_loop) {
             : channel_handler_base(reinterpret_cast<replica_server&>(s)) {}
 
     protected:
-        validation_result assign_log_channel() override {
+        validation_result authorize() override {
             pthread_setname_np(pthread_self(), "ack-handler");
             return validation_result::success();
         }
@@ -133,7 +133,7 @@ TEST(channel_handler_base_test, run_sends_error_when_assign_fails) {
             : channel_handler_base(reinterpret_cast<replica_server&>(s)) {}
 
     protected:
-        validation_result assign_log_channel() override {
+        validation_result authorize() override {
             return validation_result::error(99, "assign failed");
         }
 

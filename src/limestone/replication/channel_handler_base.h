@@ -50,7 +50,7 @@ protected:
      * This method is called once after the thread is started and before message validation begins.
      * If the channel cannot be accepted (e.g., due to resource limits), the thread name is not set.
      */
-    virtual validation_result assign_log_channel() = 0;
+    virtual validation_result authorize() = 0;
 
     // Validate initial request; return ok() or error()
     virtual validation_result validate_initial(std::unique_ptr<replication_message> request) = 0;

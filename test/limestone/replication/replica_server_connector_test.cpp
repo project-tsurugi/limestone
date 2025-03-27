@@ -43,7 +43,7 @@ public:
     explicit testing_echo_handler(limestone::replication::replica_server& server) noexcept : channel_handler_base(server) {}
 
 protected:
-    validation_result assign_log_channel() override { return validation_result::success(); }
+    validation_result authorize() override { return validation_result::success(); }
 
     validation_result validate_initial(std::unique_ptr<replication_message> request) override {
         // Store the incoming message so send_initial_ack can echo it
@@ -185,7 +185,7 @@ TEST_F(replica_server_connector_test, control_handler_rejects_second_session_beg
     auto first_response = client1.receive_message();
     ASSERT_NE(first_response, nullptr);
     EXPECT_EQ(first_response->get_message_type_id(), replication::message_type_id::SESSION_BEGIN_ACK);
-    client1.close_session();
+    
 
     // Second session — should get ERROR
     replication::replica_connector client2;
@@ -201,7 +201,7 @@ TEST_F(replica_server_connector_test, control_handler_rejects_second_session_beg
     // error_message contains “already received”
     EXPECT_NE(err->get_error_message().find("already received"), std::string::npos);
     
-
+    client1.close_session();
     client2.close_session();
     server.shutdown();
     server_thread.join();

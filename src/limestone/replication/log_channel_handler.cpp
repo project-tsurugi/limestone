@@ -22,7 +22,7 @@
 #include "message_log_channel_create.h"
 #include "validation_result.h"
 #include "socket_io.h"
-
+#include "logging_helper.h"
 #include <glog/logging.h>
 
 namespace limestone::replication {
@@ -58,7 +58,7 @@ void log_channel_handler::dispatch(replication_message& /*message*/, socket_io& 
      send_ack(io);
 }
 
-validation_result log_channel_handler::assign_log_channel() {
+validation_result log_channel_handler::authorize() {
     int id = log_channel_id_counter.fetch_add(1, std::memory_order_seq_cst);
     if (id >= MAX_LOG_CHANNEL_COUNT) {
         LOG(ERROR) << "Exceeded maximum number of log channels: " << MAX_LOG_CHANNEL_COUNT;

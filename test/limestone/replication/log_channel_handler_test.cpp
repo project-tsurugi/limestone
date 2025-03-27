@@ -20,7 +20,7 @@ public:
     using log_channel_handler::validate_initial;
     using log_channel_handler::send_initial_ack;
     using log_channel_handler::set_log_channel_id_counter_for_test;
-    using log_channel_handler::assign_log_channel;
+    using log_channel_handler::authorize;
 };
 
 TEST(log_channel_handler_test, validate_log_channel_create_success) {
@@ -32,7 +32,7 @@ TEST(log_channel_handler_test, validate_log_channel_create_success) {
     EXPECT_TRUE(result.ok());
 }
 
-TEST(log_channel_handler_test, assign_log_channel_succeeds_then_fails_at_limit_boundary) {
+TEST(log_channel_handler_test, authorize_succeeds_then_fails_at_limit_boundary) {
     dummy_server server;
     testable_log_handler handler(reinterpret_cast<replica_server&>(server));
 
@@ -40,7 +40,7 @@ TEST(log_channel_handler_test, assign_log_channel_succeeds_then_fails_at_limit_b
     handler.set_log_channel_id_counter_for_test(log_channel_handler::MAX_LOG_CHANNEL_COUNT - 1);
 
     // First call: should succeed and assign the final valid ID
-    auto result1 = handler.assign_log_channel();
+    auto result1 = handler.authorize();
     EXPECT_TRUE(result1.ok());
 
     char name[16];
@@ -48,18 +48,18 @@ TEST(log_channel_handler_test, assign_log_channel_succeeds_then_fails_at_limit_b
     EXPECT_STREQ(name, "logch99999");  // last valid thread name
 
     // Second call: should fail because it exceeds the maximum allowed count
-    auto result2 = handler.assign_log_channel();
+    auto result2 = handler.authorize();
     EXPECT_FALSE(result2.ok());
     EXPECT_EQ(result2.error_code(), 1);
     EXPECT_EQ(result2.error_message(), "Too many log channels: cannot assign more");
 }
 
-TEST(log_channel_handler_test, assign_log_channel_fails_when_exceeded) {
+TEST(log_channel_handler_test, authorize_fails_when_exceeded) {
     dummy_server server;
     testable_log_handler handler(reinterpret_cast<replica_server&>(server));
 
     handler.set_log_channel_id_counter_for_test(log_channel_handler::MAX_LOG_CHANNEL_COUNT);
-    auto result = handler.assign_log_channel();
+    auto result = handler.authorize();
     EXPECT_FALSE(result.ok());
     EXPECT_EQ(result.error_code(), 1);
 }

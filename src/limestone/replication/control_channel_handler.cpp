@@ -14,22 +14,26 @@
  * limitations under the License.
  */
 
- #include "replication/control_channel_handler.h"
- #include "socket_io.h"
- #include "limestone_exception_helper.h"
+#include "replication/control_channel_handler.h"
+#include "socket_io.h"
+#include "limestone_exception_helper.h"
+#include "logging_helper.h"
 
 namespace limestone::replication {
 
 control_channel_handler::control_channel_handler(replica_server& server) noexcept
      : channel_handler_base(server) {}
 
-validation_result control_channel_handler::assign_log_channel() {
+validation_result control_channel_handler::authorize() {
+    TRACE_START;
     bool expected = false;
     if (!has_received_session_begin_.compare_exchange_strong(expected, true)) {
+        LOG_LP(ERROR) << "SESSION_BEGIN message was already received";
         return validation_result::error(1, "SESSION_BEGIN message was already received");
     }
 
     pthread_setname_np(pthread_self(), "limestone-ctrl");
+    TRACE_END << "Thread name set to limestone-ctrl";
     return validation_result::success();
 }
 

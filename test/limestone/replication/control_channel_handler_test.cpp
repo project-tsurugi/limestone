@@ -36,7 +36,7 @@
         }
     
         validation_result call_assign() {
-            return assign_log_channel();
+            return authorize();
         }
     
         void call_send_initial_ack(socket_io& io) const {

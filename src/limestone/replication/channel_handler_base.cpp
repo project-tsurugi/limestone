@@ -23,7 +23,7 @@ namespace limestone::replication {
 channel_handler_base::channel_handler_base(replica_server& server) noexcept : server_(server) {}
 
 void channel_handler_base::run(socket_io& io, std::unique_ptr<replication_message> first_request) {
-    auto assignment_result = assign_log_channel();
+    auto assignment_result = authorize();
     if (!assignment_result.ok()) {
         send_error(io, assignment_result);
         return;
