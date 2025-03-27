@@ -46,7 +46,16 @@ void replica_server::initialize(const boost::filesystem::path& location) {
  }
  
  bool replica_server::start_listener(const struct sockaddr_in &listen_addr) {
-     // Create a TCP socket and assign to sockfd_.
+    {
+        std::lock_guard<std::mutex> lock(shutdown_mutex_);
+        event_fd_ = ::eventfd(0, EFD_NONBLOCK);
+        if (event_fd_ < 0) {
+            LOG_LP(ERROR) << "Error: Failed to create eventfd: " << strerror(errno);
+            return false;
+        }
+    }
+    
+    // Create a TCP socket and assign to sockfd_.
      sockfd_ = ::socket(AF_INET, SOCK_STREAM, 0);
      if (sockfd_ < 0) {
          LOG_LP(ERROR) << "Error: Failed to create socket";
@@ -81,14 +90,7 @@ void replica_server::initialize(const boost::filesystem::path& location) {
  }
  
  void replica_server::accept_loop() {
-    {
-        std::lock_guard<std::mutex> lock(shutdown_mutex_);
-        event_fd_ = ::eventfd(0, EFD_NONBLOCK);
-        if (event_fd_ < 0) {
-            LOG_LP(ERROR) << "Error: Failed to create eventfd: " << strerror(errno);
-            return;
-        }
-    }
+
 
     while (true) {
         std::array<pollfd, 2> fds{};

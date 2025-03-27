@@ -203,6 +203,67 @@ TEST_F(replica_server_test, registered_handler_is_called) {
     server_thread.join();
 }
 
+TEST_F(replica_server_test, shutdown_before_accept_loop_starts) {
+    replication::replica_server server;
+    server.initialize(location1);
+    uint16_t port = get_free_port();
+    auto addr = make_listen_addr(port);
+    ASSERT_TRUE(server.start_listener(addr));
+
+    // Call shutdown before starting the accept loop
+    EXPECT_NO_THROW(server.shutdown());
+
+    // Start the accept loop after shutdown
+    std::thread accept_thread([&server]() {
+        server.accept_loop();
+    });
+
+    // Try connecting to the server again, should be a failure after shutdown
+    replication::replica_connector client;
+    EXPECT_FALSE(client.connect_to_server("127.0.0.1", port));
+
+    // Join the accept thread
+    accept_thread.join();
+}
+
+TEST_F(replica_server_test, listener_restart_multiple_times) {
+    replication::replica_server server;
+    server.initialize(location1);
+    
+    uint16_t port = get_free_port();
+    auto addr = make_listen_addr(port);
+
+    // Start listener for the first time
+    ASSERT_TRUE(server.start_listener(addr));
+
+    // Try to connect to the server
+    std::thread accept_thread([&server]() {
+        server.accept_loop();
+    });
+
+    replication::replica_connector client;
+    EXPECT_TRUE(client.connect_to_server("127.0.0.1", port));
+    client.close_session();
+
+    // Shutdown the server
+    server.shutdown();
+    accept_thread.join();
+
+    // Restart listener for the second time
+    ASSERT_TRUE(server.start_listener(addr));
+
+    std::thread accept_thread_2([&server]() {
+        server.accept_loop();
+    });
+
+    EXPECT_TRUE(client.connect_to_server("127.0.0.1", port));
+    client.close_session();
+
+    // Shutdown the server again
+    server.shutdown();
+    accept_thread_2.join();
+}
+
 
 }  // namespace limestone::testing
  
