@@ -74,7 +74,7 @@ public:
 private:
     std::unordered_map<message_type_id, std::shared_ptr<channel_handler_base>> handlers_;  ///< message dispatch table
     std::unique_ptr<limestone::api::datastore> datastore_;                                 ///< underlying datastore instance
-    std::mutex shutdown_mutex_;                                                            ///< protects socket and event_fd lifetimes
+    std::mutex state_mutex_;                                                            ///< mutex for thread safety
     int event_fd_{-1};                                                                     ///< eventfd used to unblock poll()
     int sockfd_{-1};                                                                       ///< listening socket file descriptor
 };

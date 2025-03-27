@@ -27,6 +27,7 @@
 #include "log_channel_handler.h"
 #include "logging_helper.h"
 #include "message_error.h"
+#include "limestone_exception_helper.h"
 
 namespace limestone::replication {
 
@@ -47,7 +48,7 @@ void replica_server::initialize(const boost::filesystem::path& location) {
  
  bool replica_server::start_listener(const struct sockaddr_in &listen_addr) {
     {
-        std::lock_guard<std::mutex> lock(shutdown_mutex_);
+        std::lock_guard<std::mutex> lock(state_mutex_);
         event_fd_ = ::eventfd(0, EFD_NONBLOCK);
         if (event_fd_ < 0) {
             LOG_LP(ERROR) << "Error: Failed to create eventfd: " << strerror(errno);
@@ -95,7 +96,7 @@ void replica_server::initialize(const boost::filesystem::path& location) {
     while (true) {
         std::array<pollfd, 2> fds{};
         {
-            std::lock_guard<std::mutex> lock(shutdown_mutex_);
+            std::lock_guard<std::mutex> lock(state_mutex_);
             fds[0].fd = sockfd_;
             fds[1].fd = event_fd_;
         }
@@ -112,7 +113,7 @@ void replica_server::initialize(const boost::filesystem::path& location) {
         if ((static_cast<unsigned>(fds[1].revents) & static_cast<unsigned>(POLLIN)) != 0) {
             uint64_t value = 0;
             {
-                std::lock_guard<std::mutex> lock(shutdown_mutex_);
+                std::lock_guard<std::mutex> lock(state_mutex_);
                 ::read(event_fd_, &value, sizeof(value));
             }
             break;
@@ -121,19 +122,20 @@ void replica_server::initialize(const boost::filesystem::path& location) {
         if ((static_cast<unsigned>(fds[0].revents) & static_cast<unsigned>(POLLIN)) != 0) {
             int client_fd = -1;
             {
-                std::lock_guard<std::mutex> lock(shutdown_mutex_);
+                std::lock_guard<std::mutex> lock(state_mutex_);
                 client_fd = ::accept(sockfd_, nullptr, nullptr);
             }
             if (client_fd < 0) {
                 LOG_LP(ERROR) << "accept() failed: " << strerror(errno);
                 break;
             }
+            TRACE << "Accepted new client connection: " << client_fd;
             std::thread(&replica_server::handle_client, this, client_fd).detach();
         }
     }
 
     {
-        std::lock_guard<std::mutex> lock(shutdown_mutex_);
+        std::lock_guard<std::mutex> lock(state_mutex_);
         ::close(event_fd_);
         event_fd_ = -1;
     }
@@ -141,15 +143,25 @@ void replica_server::initialize(const boost::filesystem::path& location) {
 
  
 void replica_server::register_handler(message_type_id type, std::shared_ptr<channel_handler_base> handler) noexcept {
-    handlers_.emplace(type, std::move(handler));
+    TRACE_START << "type: " << static_cast<uint16_t>(type);
+    {
+        std::lock_guard<std::mutex> lock(state_mutex_);
+        handlers_.emplace(type, std::move(handler));
+        TRACE_END << "hanlers contains " << handlers_.size() << " handlers";
+}
 }
 
 void replica_server::clear_handlers() noexcept {
-    std::lock_guard<std::mutex> lock(shutdown_mutex_);
-    handlers_.clear();
+    TRACE_START;
+    {
+        std::lock_guard<std::mutex> lock(state_mutex_);
+        handlers_.clear();
+        TRACE_END << "hanlers contains " << handlers_.size() << " handlers";
+    }
 }
 
 void replica_server::handle_client(int client_fd) {
+    TRACE_START << "client_fd: " << client_fd;
     int opt = 1;
     if (setsockopt(client_fd, SOL_SOCKET, SO_KEEPALIVE, &opt, sizeof(opt)) < 0) {
         LOG_LP(FATAL) << "Warning: failed to set SO_KEEPALIVE: " << strerror(errno);
@@ -162,10 +174,17 @@ void replica_server::handle_client(int client_fd) {
     try {
         auto msg = replication_message::receive(io);
         message_type_id type = msg->get_message_type_id();
-
-        if (auto it = handlers_.find(type); it != handlers_.end()) {
+        
+        std::shared_ptr<channel_handler_base> handler;
+        {
+            std::lock_guard<std::mutex> lock(state_mutex_);
+            if (auto it = handlers_.find(type); it != handlers_.end()) {
+                handler = it->second;  
+            }
+        }
+        if (handler) {
             socket_io io(client_fd);
-            it->second->run(io, std::move(msg));
+            handler->run(io, std::move(msg));
         } else {
             LOG_LP(ERROR) << "Unexpected message type: " << static_cast<uint16_t>(type);
             auto error = std::make_unique<message_error>();
@@ -183,10 +202,11 @@ void replica_server::handle_client(int client_fd) {
     }
 
     ::close(client_fd);
+    TRACE_END;
 }
 
 void replica_server::shutdown() {
-    std::lock_guard<std::mutex> lock(shutdown_mutex_);
+    std::lock_guard<std::mutex> lock(state_mutex_);
     if (event_fd_ >= 0) {
         uint64_t v = 1;
         ::write(event_fd_, &v, sizeof(v));
