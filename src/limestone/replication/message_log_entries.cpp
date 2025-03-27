@@ -1,8 +1,10 @@
 #include "message_log_entries.h"
-#include "socket_io.h"
-#include "blob_socket_io.h"
+
 #include <cassert>
 
+#include "blob_socket_io.h"
+#include "limestone_exception_helper.h"
+#include "socket_io.h"
 namespace limestone::replication {
 
 using limestone::api::epoch_id_type;
@@ -25,7 +27,9 @@ void message_log_entries::send_body(socket_io& io) const {
         io.send_uint32(static_cast<uint32_t>(entry.blob_ids.size())); // TODO: オーバーフローのチェックが必要
         if (!entry.blob_ids.empty()) {
             auto* blob_io = dynamic_cast<blob_socket_io*>(&io);
-            assert(blob_io);
+            if (!blob_io) {
+                LOG_LP(FATAL) << "Cannot process blob entries without blob_socket_io";
+            }
             for (const auto& blob_id : entry.blob_ids) {
                 blob_io->send_blob(blob_id);
             }
@@ -61,7 +65,9 @@ void message_log_entries::receive_body(socket_io& io) {
         uint32_t blob_count = io.receive_uint32();
         if (blob_count > 0) {
             auto* blob_io = dynamic_cast<blob_socket_io*>(&io);
-            assert(blob_io);
+            if (!blob_io) {
+                LOG_LP(FATAL) << "Cannot process blob entries without blob_socket_io";
+            }
             new_entry.blob_ids.resize(blob_count);
             for (uint32_t j = 0; j < blob_count; ++j) {
                 new_entry.blob_ids[j] = blob_io->receive_blob();
