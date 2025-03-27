@@ -21,8 +21,12 @@
 #include "limestone/logging.h"
 #include "logging_helper.h"
 #include "replication/replication_endpoint.h"
-
+#include "replication/replica_connector.h"
+#include "limestone_exception_helper.h"
+#include "replication/message_session_begin.h"
 namespace limestone::api {
+
+using namespace limestone::replication;    
 
 // Internal implementation class for datastore (Pimpl idiom).
 // This header is for internal use only.
@@ -77,11 +81,61 @@ public:
         LOG_LP(INFO) << "Replica disabled";
     }
 
+    // Method to open the control channel
+    [[nodiscard]] bool open_control_channel() {
+        TRACE_START;
+        // Use replication_endpoint_ to retrieve connection details
+        if (!replication_endpoint_.is_valid()) {
+            LOG_LP(ERROR) << "Invalid replication endpoint.";
+            replica_exists_.store(false, std::memory_order_release);
+            return false;
+        }
+
+        std::string host = replication_endpoint_.host();  // Get the host
+        int port = replication_endpoint_.port();          // Get the port
+
+        // Create the control channel connection
+        control_channel_ = std::make_shared<replica_connector>();
+        if (!control_channel_->connect_to_server(host, port)) {
+            LOG_LP(ERROR) << "Failed to connect to control channel at " << host << ":" << port;
+            replica_exists_.store(false, std::memory_order_release);
+            return false;
+        }
+
+        auto request = message_session_begin::create();
+        if (!control_channel_->send_message(*request)) {
+            LOG_LP(ERROR) << "Failed to send session begin message.";
+            control_channel_->close_session();
+            return false;
+        }
+
+        auto response = control_channel_->receive_message();
+        if (response == nullptr || response->get_message_type_id() != message_type_id::SESSION_BEGIN_ACK) {
+            LOG_LP(ERROR) << "Failed to receive session begin acknowledgment.";
+            control_channel_->close_session();
+            return false;
+        }
+
+        LOG_LP(INFO) << "Control channel successfully opened to " << host << ":" << port;
+        TRACE_END;
+        return true;
+    }
+
+    // Getter for control_channel_
+    std::shared_ptr<replica_connector> get_control_channel() const noexcept {
+        return control_channel_;
+    }
+    
+
 private:
     // Atomic counter for tracking active backup operations.
     std::atomic<int> backup_counter_;
     std::atomic<bool> replica_exists_;
 
+    // Private field to hold the control channel
+    std::shared_ptr<replica_connector> control_channel_;
+
+    // Replication endpoint to retrieve connection info
     replication::replication_endpoint replication_endpoint_;
 };
 

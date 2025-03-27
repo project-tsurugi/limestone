@@ -71,6 +71,7 @@ bool socket_io::wait_for_writable() const {
 }
 
 bool socket_io::send_raw(const std::string &data) const {
+    TRACE_START;
     std::string_view buffer{data};
 
     while (!buffer.empty()) {
@@ -95,7 +96,7 @@ bool socket_io::send_raw(const std::string &data) const {
         LOG_LP(ERROR) << "send() failed: " << strerror(err);
         return false;
     }
-
+    TRACE_END;
     return true;
 }
 
@@ -203,6 +204,7 @@ std::string socket_io::receive_string() {
 }
 
 bool socket_io::flush() {
+    TRACE_START;
     if (is_string_mode_) {
         return true;
     }
@@ -213,6 +215,7 @@ bool socket_io::flush() {
     bool ret = send_raw(data);
     out_stream_->str("");
     out_stream_->clear();
+    TRACE_END << "ret = " << ret;
     return ret;
 }
 
