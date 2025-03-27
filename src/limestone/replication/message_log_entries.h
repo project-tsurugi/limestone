@@ -59,6 +59,9 @@ public:
 
     // Getter
     [[nodiscard]] epoch_id_type get_epoch_id() const;
+    [[nodiscard]] bool has_session_begin_flag() const;
+    [[nodiscard]] bool has_session_end_flag() const;
+    [[nodiscard]] bool has_flush_flag() const;
 
     // Override method to receive message body from socket
     void receive_body(socket_io& io) override;

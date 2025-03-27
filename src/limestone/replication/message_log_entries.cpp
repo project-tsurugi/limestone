@@ -23,10 +23,12 @@ void message_log_entries::send_body(socket_io& io) const {
         
         // Send the blob list
         io.send_uint32(static_cast<uint32_t>(entry.blob_ids.size())); // TODO: オーバーフローのチェックが必要
-        auto* blob_io_ptr = dynamic_cast<blob_socket_io*>(&io);
-        assert(blob_io_ptr);
-        for (const auto& blob_id : entry.blob_ids) {
-            blob_io_ptr->send_blob(blob_id);
+        if (!entry.blob_ids.empty()) {
+            auto* blob_io = dynamic_cast<blob_socket_io*>(&io);
+            assert(blob_io);
+            for (const auto& blob_id : entry.blob_ids) {
+                blob_io->send_blob(blob_id);
+            }
         }
     }
 
@@ -57,11 +59,13 @@ void message_log_entries::receive_body(socket_io& io) {
 
         // Receive blob list
         uint32_t blob_count = io.receive_uint32();
-        new_entry.blob_ids.resize(blob_count);
-        auto* blob_io_ptr = dynamic_cast<blob_socket_io*>(&io);
-        assert(blob_io_ptr);
-        for (uint32_t j = 0; j < blob_count; ++j) {
-            new_entry.blob_ids[j] = blob_io_ptr->receive_blob();
+        if (blob_count > 0) {
+            auto* blob_io = dynamic_cast<blob_socket_io*>(&io);
+            assert(blob_io);
+            new_entry.blob_ids.resize(blob_count);
+            for (uint32_t j = 0; j < blob_count; ++j) {
+                new_entry.blob_ids[j] = blob_io->receive_blob();
+            }
         }
 
         // Add the entry to the vector
@@ -71,6 +75,23 @@ void message_log_entries::receive_body(socket_io& io) {
     // Receive the operation flags (session begin, end, flush)
     operation_flags_ = io.receive_uint8();
 }
+
+epoch_id_type message_log_entries::get_epoch_id() const {
+    return epoch_id_;
+}
+
+bool message_log_entries::has_session_begin_flag() const {
+    return (operation_flags_ & SESSION_BEGIN_FLAG) != 0;
+}
+
+bool message_log_entries::has_session_end_flag() const {
+    return (operation_flags_ & SESSION_END_FLAG) != 0;
+}
+
+bool message_log_entries::has_flush_flag() const {
+    return (operation_flags_ & FLUSH_FLAG) != 0;
+}
+
 
 void message_log_entries::set_session_begin_flag(bool flag) {
     if (flag) {
