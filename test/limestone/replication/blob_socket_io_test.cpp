@@ -151,5 +151,58 @@ TEST_F(blob_socket_io_test, round_trip_boundary_blob) {
     }
 }
 
+TEST_F(blob_socket_io_test, receive_creates_missing_parent_directory) {
+    blob_id_type blob_id = 42424242;
+    auto path = resolver_->resolve_path(blob_id);
+    auto parent = path.parent_path();
+    auto grandparent = parent.parent_path();
+
+    // Prepare source file and wire
+    boost::filesystem::create_directories(parent);
+    std::ofstream ofs(path.string(), std::ios::binary);
+    ofs << "test_data";
+    ofs.close();
+
+    blob_socket_io sender("", *resolver_);
+    sender.send_blob(blob_id);
+    std::string wire = sender.get_out_string();
+
+    // Remove only the immediate parent directory
+    boost::filesystem::remove_all(parent);
+    // Ensure grandparent still exists
+    boost::filesystem::create_directories(grandparent);
+
+    blob_socket_io receiver(wire, *resolver_);
+    EXPECT_EQ(receiver.receive_blob(), blob_id);
+
+    std::ifstream ifs(path.string(), std::ios::binary);
+    std::ostringstream oss;
+    oss << ifs.rdbuf();
+    EXPECT_EQ(oss.str(), "test_data");
+}
+
+TEST_F(blob_socket_io_test, receive_fails_when_grandparent_missing) {
+    blob_id_type blob_id = 42424243;
+    auto path = resolver_->resolve_path(blob_id);
+    auto parent = path.parent_path();
+    auto grandparent = parent.parent_path();
+
+    // Prepare source file and wire
+    boost::filesystem::create_directories(parent);
+    std::ofstream ofs(path.string(), std::ios::binary);
+    ofs << "test_data";
+    ofs.close();
+
+    blob_socket_io sender("", *resolver_);
+    sender.send_blob(blob_id);
+    std::string wire = sender.get_out_string();
+
+    // Remove grandparent (and thus the parent)
+    boost::filesystem::remove_all(grandparent);
+
+    blob_socket_io receiver(wire, *resolver_);
+    EXPECT_THROW(receiver.receive_blob(), std::runtime_error);
+}
+
 
 }  // namespace limestone::testing

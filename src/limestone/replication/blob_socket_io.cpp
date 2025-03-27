@@ -89,6 +89,23 @@ blob_id_type blob_socket_io::receive_blob() {
     uint32_t remaining = receive_uint32();
 
     auto path = blob_resolver_.resolve_path(blob_id);
+    auto parent = path.parent_path();
+
+    if (!boost::filesystem::exists(parent)) {
+        try {
+            boost::filesystem::create_directory(parent);
+        } catch (const boost::filesystem::filesystem_error &e) {
+            LOG_AND_THROW_IO_EXCEPTION(
+                "Failed to create directory for blob file: " + parent.string(),
+                e.code().value()
+            );
+        }
+    } else if (!boost::filesystem::is_directory(parent)) {
+        LOG_AND_THROW_IO_EXCEPTION(
+            "Expected directory at path for blob file: " + parent.string(),
+            EIO
+        );
+    }
 
     FILE* fp = std::fopen(path.string().c_str(), "wb"); // NOLINT(cppcoreguidelines-owning-memory)
     if (!fp) {
