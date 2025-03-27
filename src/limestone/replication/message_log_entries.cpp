@@ -14,6 +14,7 @@ void message_log_entries::send_body(socket_io& io) const {
 
     // Send each entry
     for (const auto& entry : entries_) {
+        io.send_uint8(static_cast<uint8_t>(entry.type));
         io.send_uint64(entry.storage_id);
         io.send_string(entry.key);
         io.send_string(entry.value);
@@ -45,6 +46,7 @@ void message_log_entries::receive_body(socket_io& io) {
     // Receive each entry
     for (uint32_t i = 0; i < entry_count; ++i) {
         entry new_entry;
+        new_entry.type = static_cast<log_entry::entry_type>(io.receive_uint8());
         new_entry.storage_id = io.receive_uint64();
         new_entry.key = io.receive_string();
         new_entry.value = io.receive_string();
@@ -70,36 +72,33 @@ void message_log_entries::receive_body(socket_io& io) {
     operation_flags_ = io.receive_uint8();
 }
 
-void message_log_entries::set_epoch_id(epoch_id_type epoch) {
-    epoch_id_ = epoch;
-}
-
 void message_log_entries::set_session_begin_flag(bool flag) {
     if (flag) {
-        operation_flags_ |= static_cast<std::uint8_t>(~static_cast<std::uint8_t>(SESSION_BEGIN_FLAG)); 
+        operation_flags_ |= static_cast<std::uint8_t>(SESSION_BEGIN_FLAG);
     } else {
-        operation_flags_ &= static_cast<std::uint8_t>(~static_cast<std::uint8_t>(SESSION_BEGIN_FLAG)); 
+        operation_flags_ &= static_cast<std::uint8_t>(~static_cast<std::uint8_t>(SESSION_BEGIN_FLAG));
     }
 }
 
 void message_log_entries::set_session_end_flag(bool flag) {
     if (flag) {
-        operation_flags_ |= static_cast<std::uint8_t>(~static_cast<std::uint8_t>(SESSION_END_FLAG)); 
+        operation_flags_ |= static_cast<std::uint8_t>(SESSION_END_FLAG);
     } else {
-        operation_flags_ &= static_cast<std::uint8_t>(~static_cast<std::uint8_t>(SESSION_END_FLAG)); 
+        operation_flags_ &= static_cast<std::uint8_t>(~static_cast<std::uint8_t>(SESSION_END_FLAG));
     }
 }
 
 void message_log_entries::set_flush_flag(bool flag) {
     if (flag) {
-        operation_flags_ |= static_cast<std::uint8_t>(~static_cast<std::uint8_t>(FLUSH_FLAG)); 
+        operation_flags_ |= static_cast<std::uint8_t>(FLUSH_FLAG);
     } else {
-        operation_flags_ &= static_cast<std::uint8_t>(~static_cast<std::uint8_t>(FLUSH_FLAG)); 
+        operation_flags_ &= static_cast<std::uint8_t>(~static_cast<std::uint8_t>(FLUSH_FLAG));
     }
 }
 
 void message_log_entries::add_normal_entry(storage_id_type storage_id, std::string_view key, std::string_view value, write_version_type write_version) {
     entry new_entry;
+    new_entry.type = log_entry::entry_type::normal_entry;
     new_entry.storage_id = storage_id;
     new_entry.key = std::string(key);
     new_entry.value = std::string(value);
@@ -109,6 +108,7 @@ void message_log_entries::add_normal_entry(storage_id_type storage_id, std::stri
 
 void message_log_entries::add_normal_with_blob(storage_id_type storage_id, std::string_view key, std::string_view value, write_version_type write_version, const std::vector<blob_id_type>& large_objects) {
     entry new_entry;
+    new_entry.type = log_entry::entry_type::normal_with_blob;
     new_entry.storage_id = storage_id;
     new_entry.key = std::string(key);
     new_entry.value = std::string(value);
@@ -119,6 +119,7 @@ void message_log_entries::add_normal_with_blob(storage_id_type storage_id, std::
 
 void message_log_entries::add_remove_entry(storage_id_type storage_id, std::string_view key, write_version_type write_version) {
     entry new_entry;
+    new_entry.type = log_entry::entry_type::remove_entry;
     new_entry.storage_id = storage_id;
     new_entry.key = std::string(key);
     new_entry.write_version = write_version;
@@ -127,6 +128,7 @@ void message_log_entries::add_remove_entry(storage_id_type storage_id, std::stri
 
 void message_log_entries::add_clear_storage(storage_id_type storage_id, write_version_type write_version) {
     entry new_entry;
+    new_entry.type = log_entry::entry_type::clear_storage;
     new_entry.storage_id = storage_id;
     new_entry.write_version = write_version;
     entries_.push_back(std::move(new_entry));
@@ -134,6 +136,7 @@ void message_log_entries::add_clear_storage(storage_id_type storage_id, write_ve
 
 void message_log_entries::add_add_storage(storage_id_type storage_id, write_version_type write_version) {
     entry new_entry;
+    new_entry.type = log_entry::entry_type::add_storage;
     new_entry.storage_id = storage_id;
     new_entry.write_version = write_version;
     entries_.push_back(std::move(new_entry));
@@ -141,9 +144,19 @@ void message_log_entries::add_add_storage(storage_id_type storage_id, write_vers
 
 void message_log_entries::add_remove_storage(storage_id_type storage_id, write_version_type write_version) {
     entry new_entry;
+    new_entry.type = log_entry::entry_type::remove_storage;
     new_entry.storage_id = storage_id;
     new_entry.write_version = write_version;
     entries_.push_back(std::move(new_entry));
+}
+
+const std::vector<message_log_entries::entry>& message_log_entries::get_entries() const {
+    return entries_;
+}
+
+
+std::unique_ptr<replication_message> message_log_entries::create() {
+    return std::make_unique<message_log_entries>(epoch_id_type{0});
 }
 
 }  // namespace limestone::replication

@@ -40,7 +40,7 @@ public:
         // Add other fields as needed based on entry type
     };
     // Constructor
-    message_log_entries() = default;
+    explicit message_log_entries(epoch_id_type epoch_id) : epoch_id_(epoch_id) {}
     ~message_log_entries() override = default;
 
     // Delete copy and move constructors and assignment operators
@@ -57,8 +57,8 @@ public:
     // Override method to send message body to socket
     void send_body(socket_io& io) const override;
 
-    // Setter
-    void set_epoch_id(epoch_id_type epoch);
+    // Getter
+    [[nodiscard]] epoch_id_type get_epoch_id() const;
 
     // Override method to receive message body from socket
     void receive_body(socket_io& io) override;
@@ -90,7 +90,25 @@ public:
     // Add remove storage entry
     void add_remove_storage(storage_id_type storage_id, write_version_type write_version);
 
+    [[nodiscard]] const std::vector<entry>& get_entries() const;
+
+    /**
+     * @brief Factory method to create an instance of message_log_entries.
+     * @return a unique_ptr to the newly created message_log_entries object.
+     */
+    [[nodiscard]] static std::unique_ptr<replication_message> create();
+    
 private:
+    // Register LOG_ENTRY in replication_message factory map.
+    // The static initialization here is intentional. If an exception occurs,
+    // the program should terminate immediately. We ignore the clang-tidy warning
+    // (cert-err58-cpp) as this behavior is desired.
+    // NOLINTNEXTLINE(cert-err58-cpp)
+    inline static const bool registered_ = []() {
+        replication_message::register_message_type(message_type_id::LOG_ENTRY, &message_log_entries::create);
+        return true;
+    }();
+
     epoch_id_type epoch_id_{};  // Epoch ID for the log entries
 
     // Internal structure to hold log entries (private)
