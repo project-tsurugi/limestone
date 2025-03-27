@@ -20,6 +20,7 @@
 #include "limestone/api/datastore.h"
 #include "limestone/logging.h"
 #include "logging_helper.h"
+#include "replication/replication_endpoint.h"
 
 namespace limestone::api {
 
@@ -28,8 +29,13 @@ namespace limestone::api {
 class datastore_impl {
 public:
     // Default constructor initializes the backup counter to zero.
-    datastore_impl() : backup_counter_(0) {}
-
+    datastore_impl()
+        : backup_counter_(0), replica_exists_(false) {
+        bool has_replica = replication_endpoint_.is_valid();
+        replica_exists_.store(has_replica, std::memory_order_release);
+        LOG_LP(INFO) << "Replica " << (has_replica ? "enabled" : "disabled")
+                        << "; endpoint valid: " << replication_endpoint_.is_valid();
+    }
     // Default destructor.
     ~datastore_impl() = default;
 
@@ -58,9 +64,25 @@ public:
         return count > 0;
     }
 
+    // Returns true if a replica exists.
+    [[nodiscard]] bool has_replica() const noexcept {
+        bool exists = replica_exists_.load(std::memory_order_acquire);
+        VLOG_LP(log_info) << "Checking replica existence; replica exists: " << exists;
+        return exists;
+    }
+
+    // Disables the replica.
+    void disable_replica() noexcept {
+        replica_exists_.store(false, std::memory_order_release);
+        LOG_LP(INFO) << "Replica disabled";
+    }
+
 private:
     // Atomic counter for tracking active backup operations.
     std::atomic<int> backup_counter_;
+    std::atomic<bool> replica_exists_;
+
+    replication::replication_endpoint replication_endpoint_;
 };
 
 }  // namespace limestone::api
