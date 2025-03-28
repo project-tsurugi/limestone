@@ -138,6 +138,9 @@ TEST_F(datastore_replication_test, open_control_channel_via_datastore_ready) {
     datastore_->ready();
     EXPECT_NE(datastore_->get_impl()->get_control_channel(), nullptr);
     EXPECT_TRUE(datastore_->get_impl()->has_replica());
+
+    EXPECT_NE(lc0_->get_replica_connector_for_test(), nullptr);
+    EXPECT_NE(lc1_->get_replica_connector_for_test(), nullptr);
 }
 
 
@@ -149,6 +152,9 @@ TEST_F(datastore_replication_test, not_open_control_channel_via_datastore_ready)
     datastore_->ready();
     EXPECT_EQ(datastore_->get_impl()->get_control_channel(), nullptr);
     EXPECT_FALSE(datastore_->get_impl()->has_replica());
+
+    EXPECT_EQ(lc0_->get_replica_connector_for_test(), nullptr);
+    EXPECT_EQ(lc1_->get_replica_connector_for_test(), nullptr);
 }
 
 TEST_F(datastore_replication_test, fail_open_control_channel_via_datastore_ready) {
@@ -161,5 +167,14 @@ TEST_F(datastore_replication_test, fail_open_control_channel_via_datastore_ready
         datastore_->ready();
     }, "Failed to open replication control channel.");
 }
+
+
+TEST_F(datastore_replication_test, open_control_channel_via_datastore_ready2) {
+    stop_replica_server();
+    EXPECT_DEATH({
+        gen_datastore();
+    }, "Failed to create log channel connector.");
+}
+
 
 }  // namespace limestone::testing

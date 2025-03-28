@@ -14,7 +14,13 @@
  * limitations under the License.
  */
 #include "datastore_impl.h"
+#include "limestone/logging.h"
+#include "logging_helper.h"
 
+#include "replication/replica_connector.h"
+#include "limestone_exception_helper.h"
+#include "replication/message_session_begin.h"
+#include "replication/message_log_channel_create.h"
 namespace limestone::api {
 
 // Default constructor initializes the backup counter to zero.
@@ -71,7 +77,7 @@ bool datastore_impl::open_control_channel() {
         return false;
     }
 
-    std::string host = replication_endpoint_.host();  // Get the host
+    std::string host = replication_endpoint_.host();  
     int port = replication_endpoint_.port();          // Get the port
 
     // Create the control channel connection
@@ -85,6 +91,7 @@ bool datastore_impl::open_control_channel() {
     auto request = message_session_begin::create();
     if (!control_channel_->send_message(*request)) {
         LOG_LP(ERROR) << "Failed to send session begin message.";
+        replica_exists_.store(false, std::memory_order_release);
         control_channel_->close_session();
         return false;
     }
@@ -92,6 +99,7 @@ bool datastore_impl::open_control_channel() {
     auto response = control_channel_->receive_message();
     if (response == nullptr || response->get_message_type_id() != message_type_id::SESSION_BEGIN_ACK) {
         LOG_LP(ERROR) << "Failed to receive session begin acknowledgment.";
+        replica_exists_.store(false, std::memory_order_release);
         control_channel_->close_session();
         return false;
     }
@@ -108,6 +116,43 @@ bool datastore_impl::is_replication_configured() const noexcept {
 // Getter for control_channel_
 std::shared_ptr<replica_connector> datastore_impl::get_control_channel() const noexcept {
     return control_channel_;
+}
+
+std::unique_ptr<replication::replica_connector> datastore_impl::create_log_channel_connector() {
+    TRACE_START;
+    if (replica_exists_.load(std::memory_order_acquire) == false) {
+        TRACE_END << "No replica exists, cannot create log channel connector.";
+        return nullptr;
+    }
+    auto connector = std::make_unique<replica_connector>();
+
+    std::string host = replication_endpoint_.host();  
+    int port = replication_endpoint_.port();          
+    if (!connector->connect_to_server(host, port)) {
+        LOG_LP(ERROR) << "Failed to connect to control channel at " << host << ":" << port;
+        replica_exists_.store(false, std::memory_order_release);
+        return nullptr;
+    }
+
+    auto request = message_log_channel_create::create();
+    if (!connector->send_message(*request)) {
+        LOG_LP(ERROR) << "Failed to send log channel create message.";
+        replica_exists_.store(false, std::memory_order_release);
+        connector->close_session();
+        return nullptr;
+    }
+
+    auto response = connector->receive_message();
+    if (response == nullptr || response->get_message_type_id() != message_type_id::COMMON_ACK) {
+        LOG_LP(ERROR) << "Failed to receive acknowledgment.";
+        replica_exists_.store(false, std::memory_order_release);
+        connector->close_session();
+        return nullptr;
+    }
+
+    LOG_LP(INFO) << "Log channel successfully created to " << host << ":" << port;
+    TRACE_END;
+    return connector;
 }
 
 }  // namespace limestone::api

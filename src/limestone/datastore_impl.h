@@ -19,15 +19,8 @@
 #include <memory>
 
 #include "limestone/api/datastore.h"
-#include "limestone/logging.h"
-#include "logging_helper.h"
 #include "replication/replication_endpoint.h"
-#include "replication/replica_connector.h"
-#include "limestone_exception_helper.h"
-#include "replication/message_session_begin.h"
-
-namespace limestone::api
-{
+namespace limestone::api{
 
     using namespace limestone::replication;
 
@@ -75,6 +68,8 @@ namespace limestone::api
          */
         [[nodiscard]] bool is_replication_configured() const noexcept;
 
+
+        [[nodiscard]] std::unique_ptr<replication::replica_connector> create_log_channel_connector();
     private:
         // Atomic counter for tracking active backup operations.
         std::atomic<int> backup_counter_;

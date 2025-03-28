@@ -252,6 +252,15 @@ log_channel& datastore::create_channel(const boost::filesystem::path& location) 
     
     auto id = log_channel_id_.fetch_add(1);
     log_channels_.emplace_back(std::unique_ptr<log_channel>(new log_channel(location, id, *this)));  // constructor of log_channel is private
+    
+    if (impl_->has_replica()) {
+        auto connector = impl_->create_log_channel_connector();
+        if (connector) {
+            log_channels_.back()->set_replica_connector(std::move(connector));
+        } else {
+            LOG_LP(FATAL) << "Failed to create log channel connector.";
+        }
+    }
     TRACE_END << "id=" << id;
     return *log_channels_.at(id);
 }
