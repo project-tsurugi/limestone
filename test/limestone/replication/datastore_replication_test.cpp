@@ -50,6 +50,7 @@ protected:
     }
 
     void TearDown() override {
+        unsetenv("TSURUGI_REPLICATION_ENDPOINT");
         stop_replica_server(); 
         std::string cmd = "rm -rf " + std::string(base);;
         if (std::system(cmd.c_str()) != 0) {
@@ -169,7 +170,7 @@ TEST_F(datastore_replication_test, fail_open_control_channel_via_datastore_ready
 }
 
 
-TEST_F(datastore_replication_test, open_control_channel_via_datastore_ready2) {
+TEST_F(datastore_replication_test, replica_death_before_create_log_channel) {
     stop_replica_server();
     EXPECT_DEATH({
         gen_datastore();
