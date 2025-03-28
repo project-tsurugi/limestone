@@ -213,4 +213,20 @@ std::string log_channel::do_rotate_file(epoch_id_type epoch) {
     return new_name;
 }
 
+void log_channel::set_replica_connector(std::unique_ptr<replication::replica_connector> connector) {
+    std::lock_guard<std::mutex> lock(mtx_replica_connector_);
+    replica_connector_ = std::move(connector);
+}
+
+void log_channel::disable_replica_connector() {
+    std::lock_guard<std::mutex> lock(mtx_replica_connector_);
+    replica_connector_.reset();
+}
+
+replication::replica_connector* log_channel::get_replica_connector_for_test() {
+    std::lock_guard<std::mutex> lock(mtx_replica_connector_);
+    return replica_connector_.get();
+}
+
+
 } // namespace limestone::api

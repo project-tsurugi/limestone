@@ -29,6 +29,7 @@
 #include <limestone/api/blob_id_type.h>
 #include <limestone/api/storage_id_type.h>
 #include <limestone/api/write_version_type.h>
+#include "replication/replica_connector.h"
 
 namespace limestone::api {
 
@@ -174,6 +175,29 @@ public:
      */
     [[nodiscard]] auto finished_epoch_id() const noexcept { return finished_epoch_id_.load(); }
 
+    /**
+     * @brief Sets the replica connector instance. Ownership is transferred.
+     * @param connector A unique_ptr to a replica_connector instance.
+     * @note This method is for internal use only and is not part of the public API.
+     *       Do not use this method in production code.
+     */
+    void set_replica_connector(std::unique_ptr<replication::replica_connector> connector);
+
+    /**
+     * @brief Disables the current replica connector by resetting the unique_ptr.
+     * @note This method is for internal use only and is not part of the public API.
+     *       Do not use this method in production code.
+     */
+    void disable_replica_connector();
+
+    /**
+     * @brief Test-only getter for the replica_connector instance.
+     * @return A raw pointer to the replica_connector instance.
+     * @note This method is intended for testing purposes only.
+     *       Do NOT use this method in production code.
+     */
+    replication::replica_connector* get_replica_connector_for_test();
+
 private:
     datastore& envelope_;
 
@@ -192,6 +216,9 @@ private:
     std::atomic_uint64_t finished_epoch_id_{0};
 
     std::string do_rotate_file(epoch_id_type epoch = 0);
+
+    std::unique_ptr<replication::replica_connector> replica_connector_;
+    std::mutex mtx_replica_connector_;
 
 protected: // Protected to allow testing with derived classes
     log_channel(boost::filesystem::path location, std::size_t id, datastore& envelope) noexcept;
