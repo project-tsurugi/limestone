@@ -120,7 +120,7 @@ std::shared_ptr<replica_connector> datastore_impl::get_control_channel() const n
 
 std::unique_ptr<replication::replica_connector> datastore_impl::create_log_channel_connector() {
     TRACE_START;
-    if (replica_exists_.load(std::memory_order_acquire) == false) {
+    if (!replica_exists_.load(std::memory_order_acquire)) {
         TRACE_END << "No replica exists, cannot create log channel connector.";
         return nullptr;
     }
