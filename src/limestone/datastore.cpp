@@ -221,6 +221,13 @@ void datastore::ready() {
         }
         cleanup_rotated_epoch_files(location_);
         state_ = state::ready;
+        if (impl_ ->is_replication_configured()) {
+            if (impl_->open_control_channel()) {
+                LOG_LP(INFO) << "Replication control channel opened successfully.";
+            } else {
+                LOG_LP(FATAL) << "Failed to open replication control channel.";
+            }
+        }
         TRACE_END;
     } catch (...) {
         HANDLE_EXCEPTION_AND_ABORT();
@@ -238,12 +245,14 @@ std::shared_ptr<snapshot> datastore::shared_snapshot() const {
 }
 
 log_channel& datastore::create_channel(const boost::filesystem::path& location) {
+    TRACE_START;
     check_before_ready(static_cast<const char*>(__func__));
     
     std::lock_guard<std::mutex> lock(mtx_channel_);
     
     auto id = log_channel_id_.fetch_add(1);
     log_channels_.emplace_back(std::unique_ptr<log_channel>(new log_channel(location, id, *this)));  // constructor of log_channel is private
+    TRACE_END << "id=" << id;
     return *log_channels_.at(id);
 }
 

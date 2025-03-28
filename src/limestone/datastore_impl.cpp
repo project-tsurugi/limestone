@@ -101,6 +101,10 @@ bool datastore_impl::open_control_channel() {
     return true;
 }
 
+bool datastore_impl::is_replication_configured() const noexcept {
+    return replication_endpoint_.env_defined();
+}
+
 // Getter for control_channel_
 std::shared_ptr<replica_connector> datastore_impl::get_control_channel() const noexcept {
     return control_channel_;

@@ -26,57 +26,65 @@
 #include "limestone_exception_helper.h"
 #include "replication/message_session_begin.h"
 
-namespace limestone::api {
+namespace limestone::api
+{
 
-using namespace limestone::replication;
+    using namespace limestone::replication;
 
-// Internal implementation class for datastore (Pimpl idiom).
-// This header is for internal use only.
-class datastore_impl {
-public:
-    // Default constructor initializes the backup counter to zero.
-    datastore_impl();
+    // Internal implementation class for datastore (Pimpl idiom).
+    // This header is for internal use only.
+    class datastore_impl
+    {
+    public:
+        // Default constructor initializes the backup counter to zero.
+        datastore_impl();
 
-    // Default destructor.
-    ~datastore_impl();
+        // Default destructor.
+        ~datastore_impl();
 
-    // Deleted copy and move constructors and assignment operators.
-    datastore_impl(const datastore_impl&) = delete;
-    datastore_impl& operator=(const datastore_impl&) = delete;
-    datastore_impl(datastore_impl&&) = delete;
-    datastore_impl& operator=(datastore_impl&&) = delete;
+        // Deleted copy and move constructors and assignment operators.
+        datastore_impl(const datastore_impl &) = delete;
+        datastore_impl &operator=(const datastore_impl &) = delete;
+        datastore_impl(datastore_impl &&) = delete;
+        datastore_impl &operator=(datastore_impl &&) = delete;
 
-    // Increments the backup counter.
-    void increment_backup_counter() noexcept;
+        // Increments the backup counter.
+        void increment_backup_counter() noexcept;
 
-    // Decrements the backup counter.
-    void decrement_backup_counter() noexcept;
+        // Decrements the backup counter.
+        void decrement_backup_counter() noexcept;
 
-    // Returns true if a backup operation is in progress.
-    [[nodiscard]] bool is_backup_in_progress() const noexcept;
+        // Returns true if a backup operation is in progress.
+        [[nodiscard]] bool is_backup_in_progress() const noexcept;
 
-    // Returns true if a replica exists.
-    [[nodiscard]] bool has_replica() const noexcept;
+        // Returns true if a replica exists.
+        [[nodiscard]] bool has_replica() const noexcept;
 
-    // Disables the replica.
-    void disable_replica() noexcept;
+        // Disables the replica.
+        void disable_replica() noexcept;
 
-    // Method to open the control channel
-    [[nodiscard]] bool open_control_channel();
+        // Method to open the control channel
+        [[nodiscard]] bool open_control_channel();
 
-    // Getter for control_channel_
-    [[nodiscard]] std::shared_ptr<replica_connector> get_control_channel() const noexcept;
+        // Getter for control_channel_
+        [[nodiscard]] std::shared_ptr<replica_connector> get_control_channel() const noexcept;
 
-private:
-    // Atomic counter for tracking active backup operations.
-    std::atomic<int> backup_counter_;
-    std::atomic<bool> replica_exists_;
+        /**
+         * @brief Checks if the replication endpoint is configured.
+         * @return true if a replication endpoint is defined via the environment variable, false otherwise.
+         */
+        [[nodiscard]] bool is_replication_configured() const noexcept;
 
-    // Private field to hold the control channel
-    std::shared_ptr<replica_connector> control_channel_;
+    private:
+        // Atomic counter for tracking active backup operations.
+        std::atomic<int> backup_counter_;
+        std::atomic<bool> replica_exists_;
 
-    // Replication endpoint to retrieve connection info
-    replication::replication_endpoint replication_endpoint_;
-};
+        // Private field to hold the control channel
+        std::shared_ptr<replica_connector> control_channel_;
 
-}  // namespace limestone::api
+        // Replication endpoint to retrieve connection info
+        replication::replication_endpoint replication_endpoint_;
+    };
+
+} // namespace limestone::api
