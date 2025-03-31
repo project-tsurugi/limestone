@@ -13,7 +13,7 @@ void message_log_entries::send_body(socket_io& io) const {
     TRACE_START << "epcoh id =" << epoch_id_ << ", entries size = " << entries_.size();
     auto size = entries_.size();
     io.send_uint64(static_cast<uint64_t>(epoch_id_)); 
-    uint32_t entry_count = static_cast<uint32_t>(size);
+    auto entry_count = static_cast<uint32_t>(size);
     io.send_uint32(static_cast<uint32_t>(entry_count)); // TODO: オーバーフローのチェックが必要
 
     // Send each entry

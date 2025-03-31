@@ -1,4 +1,3 @@
-#include <limestone/api/datastore.h>
 #include "log_channel_impl.h"
 #include "replication/replica_connector.h"
 #include "replication/message_log_entries.h"
@@ -8,9 +7,8 @@
 namespace limestone::api {
 
 
-log_channel_impl::log_channel_impl(datastore& envelope)
-    : envelope_(envelope) {
-}    
+log_channel_impl::log_channel_impl() = default;
+log_channel_impl::~log_channel_impl() = default;
 
 void log_channel_impl::send_replica_message(uint64_t epoch_id, const std::function<void(replication::message_log_entries&)>& modifier) {
     std::lock_guard<std::mutex> lock(mtx_replica_connector_);

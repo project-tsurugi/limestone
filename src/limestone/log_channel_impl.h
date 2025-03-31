@@ -33,8 +33,8 @@ class datastore;
 
 class log_channel_impl {
 public:
-    log_channel_impl(datastore& envelope);
-    ~log_channel_impl() = default;
+    log_channel_impl();
+    ~log_channel_impl();
 
     /**
      * @brief Sets the replica connector instance. Ownership is transferred.
@@ -65,7 +65,6 @@ public:
 private:
     std::unique_ptr<replication::replica_connector> replica_connector_;
     std::mutex mtx_replica_connector_;
-    datastore& envelope_;
 };
 
 }  // namespace limestone::api

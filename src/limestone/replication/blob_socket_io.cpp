@@ -89,7 +89,7 @@ blob_id_type blob_socket_io::receive_blob() {
     blob_id_type blob_id = receive_uint64();
     uint32_t remaining = receive_uint32();
     auto blob_file = datastore_.get_blob_file(blob_id);
-    auto path = blob_file.path();
+    auto& path = blob_file.path();
     auto parent = path.parent_path();
 
     if (!boost::filesystem::exists(parent)) {
