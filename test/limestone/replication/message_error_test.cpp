@@ -48,7 +48,7 @@ TEST(message_error_test, invalid_response_type_throws) {
 
 TEST(message_error_test, post_receive_throws) {
     message_error msg;
-    EXPECT_THROW(msg.post_receive(), std::logic_error);
-}
+    socket_io io("");
+    EXPECT_THROW(msg.post_receive(io), std::logic_error);}
 
 } // namespace limestone::testing

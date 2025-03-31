@@ -46,7 +46,8 @@ TEST(message_ack_test, invalid_body_throws) {
 
 TEST(message_ack_test, post_receive_throws) {
     message_ack msg;
-    EXPECT_THROW(msg.post_receive(), std::logic_error);
+    socket_io io("");
+    EXPECT_THROW(msg.post_receive(io), std::logic_error);
 }
 
 }  // namespace limestone::testing

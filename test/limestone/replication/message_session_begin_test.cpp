@@ -71,7 +71,9 @@ TEST(message_session_begin_test, replication_message_round_trip) {
 TEST(message_session_begin_test, post_receive_throws) {
     replication::message_session_begin msg;
     msg.set_param("cfg", 1);
-    EXPECT_NO_THROW(msg.post_receive());
+    socket_io io("");
+    msg.post_receive(io); 
+    SUCCEED();
 }
 
 }  // namespace limestone::testing

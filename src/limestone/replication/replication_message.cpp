@@ -70,7 +70,7 @@
      LOG_AND_THROW_EXCEPTION("Unknown message type ID");
  }
 
-void replication_message::post_receive() {
+void replication_message::post_receive(socket_io& /*io*/) {
     throw std::logic_error("post_receive() must be implemented or explicitly marked as empty");
 }
  

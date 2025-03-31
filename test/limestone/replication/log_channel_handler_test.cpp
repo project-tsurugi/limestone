@@ -84,7 +84,7 @@ TEST(log_channel_handler_test, validate_fails_on_failed_cast) {
         }
         void send_body(socket_io&) const override {}
         void receive_body(socket_io&) override {}
-        void post_receive() override {}
+        void post_receive(socket_io& /*io*/) override {}
     };
 
     auto msg = std::make_unique<bad_message>();

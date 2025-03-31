@@ -189,7 +189,8 @@ public:
 TEST(replication_message_test, post_receive_throws_if_not_overridden) {
     dummy_message msg;
     try {
-        msg.post_receive();
+        socket_io io("");
+        msg.post_receive(io);
         FAIL() << "Expected std::logic_error";
     } catch (const std::logic_error& e) {
         EXPECT_STREQ(e.what(), "post_receive() must be implemented or explicitly marked as empty");

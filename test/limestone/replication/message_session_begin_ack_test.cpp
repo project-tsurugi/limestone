@@ -48,7 +48,8 @@
  TEST(message_session_begin_ack_test, post_receive_throws) {
     message_session_begin_ack msg;
     msg.set_session_secret("dummy");
-    EXPECT_THROW(msg.post_receive(), std::logic_error);
+    socket_io io("");
+    EXPECT_THROW(msg.post_receive(io), std::logic_error);
 }
 
  

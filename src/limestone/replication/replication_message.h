@@ -83,7 +83,7 @@ public:
     [[nodiscard]] static std::unique_ptr<replication_message> create_message(message_type_id type);
 
     // Process the message after it has been received.
-    virtual void post_receive();
+    virtual void post_receive(socket_io& io);
 
     // Register message type with its factory function
     static void register_message_type(message_type_id type, std::unique_ptr<replication_message> (*factory)());

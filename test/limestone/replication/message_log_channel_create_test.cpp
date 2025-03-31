@@ -62,7 +62,8 @@
  
  TEST(message_log_channel_create_test, post_receive_throws) {
     message_log_channel_create msg;
-    EXPECT_THROW(msg.post_receive(), std::logic_error);
+    socket_io io("");
+    EXPECT_THROW(msg.post_receive(io), std::logic_error);
 }
 
 
