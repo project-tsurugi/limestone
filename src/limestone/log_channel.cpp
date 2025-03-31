@@ -40,9 +40,6 @@ log_channel::log_channel(boost::filesystem::path location, std::size_t id, datas
     impl_ = std::make_unique<log_channel_impl>();
 }
 
-log_channel::~log_channel() = default;
-
-
 void log_channel::begin_session() {
     try {
         // Synchronize `current_epoch_id_` with `epoch_id_switched_`.

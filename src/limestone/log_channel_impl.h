@@ -36,6 +36,11 @@ public:
     log_channel_impl();
     ~log_channel_impl();
 
+    log_channel_impl(const log_channel_impl&) = delete;
+    log_channel_impl& operator=(const log_channel_impl&) = delete;
+    log_channel_impl(log_channel_impl&&) = delete;
+    log_channel_impl& operator=(log_channel_impl&&) = delete;
+    
     /**
      * @brief Sets the replica connector instance. Ownership is transferred.
      * @param connector A unique_ptr to a replica_connector instance.

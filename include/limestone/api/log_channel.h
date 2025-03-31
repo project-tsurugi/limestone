@@ -44,9 +44,7 @@ class log_channel_impl;
 class log_channel {
 
 public:
-    ~log_channel();
-
-    /**
+   /**
      * @brief join a persistence session for the current epoch in this channel
      * @attention this function is not thread-safe.
      * @exception limestone_exception if I/O error occurs
