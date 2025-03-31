@@ -17,69 +17,69 @@
 
 #include <atomic>
 #include <memory>
-
-#include "limestone/api/datastore.h"
+#include <limestone/api/datastore.h>
+#include "replication/replica_connector.h"
 #include "replication/replication_endpoint.h"
-namespace limestone::api{
 
-    using namespace limestone::replication;
+namespace limestone::api {
 
-    // Internal implementation class for datastore (Pimpl idiom).
-    // This header is for internal use only.
-    class datastore_impl
-    {
-    public:
-        // Default constructor initializes the backup counter to zero.
-        datastore_impl();
+using namespace limestone::replication;    
 
-        // Default destructor.
-        ~datastore_impl();
+// Internal implementation class for datastore (Pimpl idiom).
+// This header is for internal use only.
+class datastore_impl {
+public:
+    // Default constructor initializes the backup counter to zero.
+    datastore_impl();
 
-        // Deleted copy and move constructors and assignment operators.
-        datastore_impl(const datastore_impl &) = delete;
-        datastore_impl &operator=(const datastore_impl &) = delete;
-        datastore_impl(datastore_impl &&) = delete;
-        datastore_impl &operator=(datastore_impl &&) = delete;
+    // Default destructor.
+    ~datastore_impl();
 
-        // Increments the backup counter.
-        void increment_backup_counter() noexcept;
+    // Deleted copy and move constructors and assignment operators.
+    datastore_impl(const datastore_impl &) = delete;
+    datastore_impl &operator=(const datastore_impl &) = delete;
+    datastore_impl(datastore_impl &&) = delete;
+    datastore_impl &operator=(datastore_impl &&) = delete;
 
-        // Decrements the backup counter.
-        void decrement_backup_counter() noexcept;
+    // Increments the backup counter.
+    void increment_backup_counter() noexcept;
 
-        // Returns true if a backup operation is in progress.
-        [[nodiscard]] bool is_backup_in_progress() const noexcept;
+    // Decrements the backup counter.
+    void decrement_backup_counter() noexcept;
 
-        // Returns true if a replica exists.
-        [[nodiscard]] bool has_replica() const noexcept;
+    // Returns true if a backup operation is in progress.
+    [[nodiscard]] bool is_backup_in_progress() const noexcept;
 
-        // Disables the replica.
-        void disable_replica() noexcept;
+    // Returns true if a replica exists.
+    [[nodiscard]] bool has_replica() const noexcept;
 
-        // Method to open the control channel
-        [[nodiscard]] bool open_control_channel();
+    // Disables the replica.
+    void disable_replica() noexcept;
 
-        // Getter for control_channel_
-        [[nodiscard]] std::shared_ptr<replica_connector> get_control_channel() const noexcept;
+    // Method to open the control channel
+    [[nodiscard]] bool open_control_channel();
 
-        /**
-         * @brief Checks if the replication endpoint is configured.
-         * @return true if a replication endpoint is defined via the environment variable, false otherwise.
-         */
-        [[nodiscard]] bool is_replication_configured() const noexcept;
+    // Getter for control_channel_
+    [[nodiscard]] std::shared_ptr<replica_connector> get_control_channel() const noexcept;
 
+    /**
+     * @brief Checks if the replication endpoint is configured.
+     * @return true if a replication endpoint is defined via the environment variable, false otherwise.
+     */
+    [[nodiscard]] bool is_replication_configured() const noexcept;
 
-        [[nodiscard]] std::unique_ptr<replication::replica_connector> create_log_channel_connector();
-    private:
-        // Atomic counter for tracking active backup operations.
-        std::atomic<int> backup_counter_;
-        std::atomic<bool> replica_exists_;
+    [[nodiscard]] std::unique_ptr<replication::replica_connector> create_log_channel_connector(datastore &ds);
 
-        // Private field to hold the control channel
-        std::shared_ptr<replica_connector> control_channel_;
+private:
+    // Atomic counter for tracking active backup operations.
+    std::atomic<int> backup_counter_;
+    std::atomic<bool> replica_exists_;
 
-        // Replication endpoint to retrieve connection info
-        replication::replication_endpoint replication_endpoint_;
-    };
+    // Private field to hold the control channel
+    std::shared_ptr<replica_connector> control_channel_;
 
-} // namespace limestone::api
+    // Replication endpoint to retrieve connection info
+    replication::replication_endpoint replication_endpoint_;
+};
+
+}  // namespace limestone::api

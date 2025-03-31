@@ -18,25 +18,34 @@ constexpr const char* base_directory = "/tmp/blob_socket_io_test";
 class blob_socket_io_test : public ::testing::Test {
 
 // TODO: エラー系のテストが不足していｔ，カバレッジが低い。    
-    
+
+
+
 protected:
     void SetUp() override {
         system(("rm -rf " + std::string(base_directory)).c_str());
         system(("mkdir -p " + std::string(base_directory)).c_str());
-        resolver_ = std::make_unique<blob_file_resolver>(boost::filesystem::path(base_directory));
+
+        std::vector<boost::filesystem::path> data_locations{};
+        data_locations.emplace_back(base_directory);
+        boost::filesystem::path metadata_location_path{base_directory};
+        limestone::api::configuration conf(data_locations, metadata_location_path);
+
+        datastore_ = std::make_unique<limestone::api::datastore_test>(conf);        
     }
 
     void TearDown() override {
-        resolver_.reset();
+        datastore_.reset();
         system(("rm -rf " + std::string(base_directory)).c_str());
     }
 
-    std::unique_ptr<blob_file_resolver> resolver_;
+
+    std::unique_ptr<api::datastore_test> datastore_;
 };
 
 TEST_F(blob_socket_io_test, round_trip_blob) {
     blob_id_type blob_id = 123456789;
-    auto path = resolver_->resolve_path(blob_id);
+    auto path = datastore_->get_blob_file(blob_id).path();
 
     // create source file
     boost::filesystem::create_directories(path.parent_path());
@@ -45,7 +54,7 @@ TEST_F(blob_socket_io_test, round_trip_blob) {
     ofs.close();
 
     // send via socket_io in string‑mode
-    blob_socket_io sender("", *resolver_);
+    blob_socket_io sender("", *datastore_);
     sender.send_blob(blob_id);
     std::string wire = sender.get_out_string();
 
@@ -53,7 +62,7 @@ TEST_F(blob_socket_io_test, round_trip_blob) {
     boost::filesystem::remove(path);
 
     // receive into resolver directory
-    blob_socket_io receiver(wire, *resolver_);
+    blob_socket_io receiver(wire, *datastore_);
     EXPECT_EQ(receiver.receive_blob(), blob_id);
 
     // verify content
@@ -65,10 +74,10 @@ TEST_F(blob_socket_io_test, round_trip_blob) {
 
 TEST_F(blob_socket_io_test, unsupported_path_type_throws) {
     blob_id_type blob_id = 987654321;
-    auto dir = resolver_->resolve_path(blob_id);
+    auto dir = datastore_->get_blob_file(blob_id).path();
     boost::filesystem::create_directories(dir);
 
-    blob_socket_io io("", *resolver_);
+    blob_socket_io io("", *datastore_);
     EXPECT_THROW(io.send_blob(blob_id), std::runtime_error);
 }
 
@@ -77,7 +86,7 @@ TEST_F(blob_socket_io_test, round_trip_large_blob) {
     constexpr std::size_t file_size = blob_socket_io::blob_buffer_size * 10 + 1234;
 
     blob_id_type blob_id = 555555;
-    auto path = resolver_->resolve_path(blob_id);
+    auto path = datastore_->get_blob_file(blob_id).path();
 
     boost::filesystem::create_directories(path.parent_path());
     std::ofstream ofs(path.string(), std::ios::binary);
@@ -87,13 +96,13 @@ TEST_F(blob_socket_io_test, round_trip_large_blob) {
     }
     ofs.close();
 
-    blob_socket_io sender("", *resolver_);
+    blob_socket_io sender("", *datastore_);
     sender.send_blob(blob_id);
     std::string wire = sender.get_out_string();
 
     // Ensure receive_blob actually writes the file
     boost::filesystem::remove(path);
-    blob_socket_io receiver(wire, *resolver_);
+    blob_socket_io receiver(wire, *datastore_);
 
     EXPECT_EQ(receiver.receive_blob(), blob_id);
     std::ifstream ifs(path.string(), std::ios::binary);
@@ -121,7 +130,7 @@ TEST_F(blob_socket_io_test, round_trip_boundary_blob) {
         SCOPED_TRACE("file_size=" + std::to_string(size));
 
         blob_id_type blob_id = static_cast<blob_id_type>(1000 + size);
-        auto path = resolver_->resolve_path(blob_id);
+        auto path = datastore_->get_blob_file(blob_id).path();
         boost::filesystem::create_directories(path.parent_path());
 
         // Write patterned data
@@ -131,12 +140,12 @@ TEST_F(blob_socket_io_test, round_trip_boundary_blob) {
         }
         ofs.close();
 
-        blob_socket_io sender("", *resolver_);
+        blob_socket_io sender("", *datastore_);
         sender.send_blob(blob_id);
         std::string wire = sender.get_out_string();
 
         boost::filesystem::remove(path);
-        blob_socket_io receiver(wire, *resolver_);
+        blob_socket_io receiver(wire, *datastore_);
         EXPECT_EQ(receiver.receive_blob(), blob_id);
 
         std::vector<char> data(size);
@@ -153,7 +162,7 @@ TEST_F(blob_socket_io_test, round_trip_boundary_blob) {
 
 TEST_F(blob_socket_io_test, receive_creates_missing_parent_directory) {
     blob_id_type blob_id = 42424242;
-    auto path = resolver_->resolve_path(blob_id);
+    auto path = datastore_->get_blob_file(blob_id).path();
     auto parent = path.parent_path();
     auto grandparent = parent.parent_path();
 
@@ -163,7 +172,7 @@ TEST_F(blob_socket_io_test, receive_creates_missing_parent_directory) {
     ofs << "test_data";
     ofs.close();
 
-    blob_socket_io sender("", *resolver_);
+    blob_socket_io sender("", *datastore_);
     sender.send_blob(blob_id);
     std::string wire = sender.get_out_string();
 
@@ -172,7 +181,7 @@ TEST_F(blob_socket_io_test, receive_creates_missing_parent_directory) {
     // Ensure grandparent still exists
     boost::filesystem::create_directories(grandparent);
 
-    blob_socket_io receiver(wire, *resolver_);
+    blob_socket_io receiver(wire, *datastore_);
     EXPECT_EQ(receiver.receive_blob(), blob_id);
 
     std::ifstream ifs(path.string(), std::ios::binary);
@@ -183,7 +192,7 @@ TEST_F(blob_socket_io_test, receive_creates_missing_parent_directory) {
 
 TEST_F(blob_socket_io_test, receive_fails_when_grandparent_missing) {
     blob_id_type blob_id = 42424243;
-    auto path = resolver_->resolve_path(blob_id);
+    auto path = datastore_->get_blob_file(blob_id).path();
     auto parent = path.parent_path();
     auto grandparent = parent.parent_path();
 
@@ -193,14 +202,14 @@ TEST_F(blob_socket_io_test, receive_fails_when_grandparent_missing) {
     ofs << "test_data";
     ofs.close();
 
-    blob_socket_io sender("", *resolver_);
+    blob_socket_io sender("", *datastore_);
     sender.send_blob(blob_id);
     std::string wire = sender.get_out_string();
 
     // Remove grandparent (and thus the parent)
     boost::filesystem::remove_all(grandparent);
 
-    blob_socket_io receiver(wire, *resolver_);
+    blob_socket_io receiver(wire, *datastore_);
     EXPECT_THROW(receiver.receive_blob(), std::runtime_error);
 }
 

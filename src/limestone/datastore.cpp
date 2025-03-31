@@ -28,7 +28,6 @@
 
 #include <limestone/api/datastore.h>
 #include "internal.h"
-#include "rotation_result.h"
 #include "log_entry.h"
 #include "online_compaction.h"
 #include "compaction_catalog.h"
@@ -39,6 +38,7 @@
 #include "blob_file_gc_snapshot.h"
 #include "blob_file_scanner.h"
 #include "datastore_impl.h"
+#include "log_channel_impl.h"
 namespace limestone::api {
 using namespace limestone::internal;
 
@@ -254,9 +254,9 @@ log_channel& datastore::create_channel(const boost::filesystem::path& location) 
     log_channels_.emplace_back(std::unique_ptr<log_channel>(new log_channel(location, id, *this)));  // constructor of log_channel is private
     
     if (impl_->has_replica()) {
-        auto connector = impl_->create_log_channel_connector();
+        auto connector = impl_->create_log_channel_connector(*this);
         if (connector) {
-            log_channels_.back()->set_replica_connector(std::move(connector));
+            log_channels_.back()->get_impl()->set_replica_connector(std::move(connector));
         } else {
             LOG_LP(FATAL) << "Failed to create log channel connector.";
         }

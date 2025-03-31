@@ -12,14 +12,15 @@
 
 namespace limestone::replication {
 
-blob_socket_io::blob_socket_io(int fd, blob_file_resolver &resolver)
-    : socket_io(fd), blob_resolver_(resolver) {}
+blob_socket_io::blob_socket_io(int fd, datastore &ds)
+    : socket_io(fd), datastore_(ds) {}
 
-blob_socket_io::blob_socket_io(const std::string &initial, blob_file_resolver &resolver)
-    : socket_io(initial), blob_resolver_(resolver) {}
+blob_socket_io::blob_socket_io(const std::string &initial, datastore &ds)
+    : socket_io(initial), datastore_(ds) {}
 
 void blob_socket_io::send_blob(const blob_id_type blob_id) {
-    auto path = blob_resolver_.resolve_path(blob_id);
+    auto blob_file = datastore_.get_blob_file(blob_id);
+    auto path = blob_file.path();
     auto status = boost::filesystem::symlink_status(path);
     if (boost::filesystem::is_symlink(status)) {
         path = boost::filesystem::canonical(path);
@@ -87,8 +88,8 @@ void blob_socket_io::send_blob(const blob_id_type blob_id) {
 blob_id_type blob_socket_io::receive_blob() {
     blob_id_type blob_id = receive_uint64();
     uint32_t remaining = receive_uint32();
-
-    auto path = blob_resolver_.resolve_path(blob_id);
+    auto blob_file = datastore_.get_blob_file(blob_id);
+    auto path = blob_file.path();
     auto parent = path.parent_path();
 
     if (!boost::filesystem::exists(parent)) {

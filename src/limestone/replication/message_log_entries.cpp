@@ -10,9 +10,11 @@ namespace limestone::replication {
 using limestone::api::epoch_id_type;
 
 void message_log_entries::send_body(socket_io& io) const {
-    // Send the number of entries
+    TRACE_START << "epcoh id =" << epoch_id_ << ", entries size = " << entries_.size();
+    auto size = entries_.size();
     io.send_uint64(static_cast<uint64_t>(epoch_id_)); 
-    io.send_uint32(static_cast<uint32_t>(entries_.size())); // TODO: オーバーフローのチェックが必要
+    uint32_t entry_count = static_cast<uint32_t>(size);
+    io.send_uint32(static_cast<uint32_t>(entry_count)); // TODO: オーバーフローのチェックが必要
 
     // Send each entry
     for (const auto& entry : entries_) {
@@ -38,6 +40,7 @@ void message_log_entries::send_body(socket_io& io) const {
 
     // Send the operation flags (session begin, end, flush)
     io.send_uint8(operation_flags_);
+    TRACE_END;
 }
 
 void message_log_entries::receive_body(socket_io& io) {

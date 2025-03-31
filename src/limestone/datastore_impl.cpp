@@ -21,6 +21,7 @@
 #include "limestone_exception_helper.h"
 #include "replication/message_session_begin.h"
 #include "replication/message_log_channel_create.h"
+
 namespace limestone::api {
 
 // Default constructor initializes the backup counter to zero.
@@ -118,7 +119,7 @@ std::shared_ptr<replica_connector> datastore_impl::get_control_channel() const n
     return control_channel_;
 }
 
-std::unique_ptr<replication::replica_connector> datastore_impl::create_log_channel_connector() {
+std::unique_ptr<replication::replica_connector> datastore_impl::create_log_channel_connector(datastore& ds) {
     TRACE_START;
     if (!replica_exists_.load(std::memory_order_acquire)) {
         TRACE_END << "No replica exists, cannot create log channel connector.";
@@ -128,7 +129,7 @@ std::unique_ptr<replication::replica_connector> datastore_impl::create_log_chann
 
     std::string host = replication_endpoint_.host();  
     int port = replication_endpoint_.port();          
-    if (!connector->connect_to_server(host, port)) {
+    if (!connector->connect_to_server(host, port, ds)) {  
         LOG_LP(ERROR) << "Failed to connect to control channel at " << host << ":" << port;
         replica_exists_.store(false, std::memory_order_release);
         return nullptr;

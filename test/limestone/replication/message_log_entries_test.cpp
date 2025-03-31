@@ -9,28 +9,35 @@
 #include "log_entry.h"
 #include "replication/blob_socket_io.h"
 #include "replication/socket_io.h"
+#include "test_root.h"
 
 namespace limestone::testing {
 
 using namespace limestone::replication;
 using limestone::api::log_entry;
 
-static const std::string k_tmp_dir = "/tmp/message_log_entries_test";
+static const std::string base_directory = "/tmp/message_log_entries_test";
 
 class message_log_entries_test : public ::testing::Test {
 protected:
     void SetUp() override {
-        boost::filesystem::remove_all(k_tmp_dir);
-        boost::filesystem::create_directories(k_tmp_dir);
-        resolver_ = std::make_unique<internal::blob_file_resolver>(boost::filesystem::path(k_tmp_dir));
+        boost::filesystem::remove_all(base_directory);
+        boost::filesystem::create_directories(base_directory);
+        
+        std::vector<boost::filesystem::path> data_locations{};
+        data_locations.emplace_back(base_directory);
+        boost::filesystem::path metadata_location_path{base_directory};
+        limestone::api::configuration conf(data_locations, metadata_location_path);
+
+        datastore_ = std::make_unique<limestone::api::datastore_test>(conf);        
     }
 
     void TearDown() override {
-        resolver_.reset();
-        boost::filesystem::remove_all(k_tmp_dir);
+        datastore_.reset();
+        boost::filesystem::remove_all(base_directory);
     }
 
-    std::unique_ptr<internal::blob_file_resolver> resolver_;
+    std::unique_ptr<api::datastore_test> datastore_;
 };
 
 TEST_F(message_log_entries_test, serialize_and_deserialize_log_entries) {
@@ -38,11 +45,11 @@ TEST_F(message_log_entries_test, serialize_and_deserialize_log_entries) {
     original.add_normal_entry(1, "key1", "value1", {100, 1});
     original.add_normal_entry(2, "key2", "value2", {200, 2});
 
-    blob_socket_io blob_out("", *resolver_);
+    blob_socket_io blob_out("", *datastore_);
     replication_message::send(blob_out, original);
     std::string wire = blob_out.get_out_string();
 
-    blob_socket_io blob_in(wire, *resolver_);
+    blob_socket_io blob_in(wire, *datastore_);
     std::unique_ptr<replication_message> result = replication_message::receive(blob_in);
 
     ASSERT_EQ(result->get_message_type_id(), message_type_id::LOG_ENTRY);
@@ -78,11 +85,11 @@ TEST_F(message_log_entries_test, create_message_via_factory) {
 
 TEST_F(message_log_entries_test, epoch_id_round_trip) {
     message_log_entries original{12345};
-    blob_socket_io out("", *resolver_);
+    blob_socket_io out("", *datastore_);
     replication_message::send(out, original);
     std::string wire = out.get_out_string();
 
-    blob_socket_io in(wire, *resolver_);
+    blob_socket_io in(wire, *datastore_);
     auto received = replication_message::receive(in);
     auto* msg = dynamic_cast<message_log_entries*>(received.get());
     ASSERT_NE(msg, nullptr);
@@ -97,8 +104,8 @@ TEST_F(message_log_entries_test, serialize_and_deserialize_normal_with_blob) {
     std::vector<limestone::api::blob_id_type> blobs = {blob1, blob2};
 
     // Create dummy blob files
-    auto path1 = resolver_->resolve_path(blob1);
-    auto path2 = resolver_->resolve_path(blob2);
+    auto path1 = datastore_->get_blob_file(blob1).path();
+    auto path2 = datastore_->get_blob_file(blob2).path();
     boost::filesystem::create_directories(path1.parent_path());
     boost::filesystem::create_directories(path2.parent_path());
     std::ofstream(path1.string(), std::ios::binary) << "foo";
@@ -107,7 +114,7 @@ TEST_F(message_log_entries_test, serialize_and_deserialize_normal_with_blob) {
     original.add_normal_with_blob(5, "key", "value", {7, 8}, blobs);
 
     // Serialize
-    blob_socket_io out("", *resolver_);
+    blob_socket_io out("", *datastore_);
     replication_message::send(out, original);
     std::string wire = out.get_out_string();
 
@@ -116,7 +123,7 @@ TEST_F(message_log_entries_test, serialize_and_deserialize_normal_with_blob) {
     boost::filesystem::remove(path2);
 
     // Deserialize
-    blob_socket_io in(wire, *resolver_);
+    blob_socket_io in(wire, *datastore_);
     auto received_msg = replication_message::receive(in);
     ASSERT_EQ(received_msg->get_message_type_id(), message_type_id::LOG_ENTRY);
 
@@ -155,11 +162,11 @@ TEST_F(message_log_entries_test, serialize_and_deserialize_various_entry_types) 
     original.add_add_storage(40, {7, 8});
     original.add_remove_storage(50, {9, 10});
 
-    blob_socket_io out("", *resolver_);
+    blob_socket_io out("", *datastore_);
     replication_message::send(out, original);
     std::string wire = out.get_out_string();
 
-    blob_socket_io in(wire, *resolver_);
+    blob_socket_io in(wire, *datastore_);
     auto received = replication_message::receive(in);
     ASSERT_EQ(received->get_message_type_id(), message_type_id::LOG_ENTRY);
 
@@ -266,7 +273,7 @@ TEST_F(message_log_entries_test, mixed_socket_io_blob_socket_io_round_trip) {
         replication_message::send(out, original);
         std::string wire = out.get_out_string();
 
-        blob_socket_io in(wire, *resolver_);
+        blob_socket_io in(wire, *datastore_);
         auto received = replication_message::receive(in);
         auto* msg = dynamic_cast<message_log_entries*>(received.get());
         ASSERT_NE(msg, nullptr);
@@ -274,7 +281,7 @@ TEST_F(message_log_entries_test, mixed_socket_io_blob_socket_io_round_trip) {
         EXPECT_EQ(msg->get_entries().size(), 1u);
     }
     {
-        blob_socket_io out("", *resolver_);
+        blob_socket_io out("", *datastore_);
         replication_message::send(out, original);
         std::string wire = out.get_out_string();
 
@@ -303,14 +310,14 @@ TEST_F(message_log_entries_test, mixed_socket_io_blob_socket_io_round_trip) {
 TEST_F(message_log_entries_test, receiving_blob_entry_with_socket_io_should_fail) {
     message_log_entries original{42};
     limestone::api::blob_id_type blob_id = 999;
-    auto path = resolver_->resolve_path(blob_id);
+    auto path = datastore_->get_blob_file(blob_id).path();
     boost::filesystem::create_directories(path.parent_path());
     std::ofstream(path.string(), std::ios::binary) << "dummy";
 
     original.add_normal_with_blob(1, "key", "value", {1, 1}, {blob_id});
 
     // Serialize with blob_socket_io (OK)
-    blob_socket_io blob_out("", *resolver_);
+    blob_socket_io blob_out("", *datastore_);
     replication_message::send(blob_out, original);
     std::string wire = blob_out.get_out_string();
 

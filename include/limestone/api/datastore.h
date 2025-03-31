@@ -40,6 +40,7 @@
 #include <limestone/api/write_version_type.h>
 #include <limestone/api/tag_repository.h>
 #include <limestone/api/restore_progress.h>
+#include <limestone/api/rotation_result.h>
 
 namespace limestone::internal {
     class compaction_catalog;
@@ -49,6 +50,8 @@ namespace limestone::internal {
 namespace limestone::api {
 
 class datastore_impl;
+class backup;
+class log_channel;
 
 /**
  * @brief datastore interface to start/stop the services, store log, create snapshot for recover from log files

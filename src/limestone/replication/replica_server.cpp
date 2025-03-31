@@ -28,6 +28,7 @@
 #include "logging_helper.h"
 #include "message_error.h"
 #include "limestone_exception_helper.h"
+#include "blob_socket_io.h"
 
 namespace limestone::replication {
 
@@ -147,8 +148,8 @@ void replica_server::register_handler(message_type_id type, std::shared_ptr<chan
     {
         std::lock_guard<std::mutex> lock(state_mutex_);
         handlers_.emplace(type, std::move(handler));
-        TRACE_END << "hanlers contains " << handlers_.size() << " handlers";
-}
+    }
+    TRACE_END << "hanlers contains " << handlers_.size() << " handlers";
 }
 
 void replica_server::clear_handlers() noexcept {
@@ -156,8 +157,8 @@ void replica_server::clear_handlers() noexcept {
     {
         std::lock_guard<std::mutex> lock(state_mutex_);
         handlers_.clear();
-        TRACE_END << "hanlers contains " << handlers_.size() << " handlers";
     }
+    TRACE_END << "hanlers contains " << handlers_.size() << " handlers";
 }
 
 void replica_server::handle_client(int client_fd) {
@@ -170,7 +171,7 @@ void replica_server::handle_client(int client_fd) {
         LOG_LP(FATAL) << "Warning: failed to set TCP_NODELAY: " << strerror(errno);
     }
 
-    socket_io io(client_fd);
+    blob_socket_io io(client_fd, *datastore_);
     try {
         auto msg = replication_message::receive(io);
         message_type_id type = msg->get_message_type_id();
@@ -183,7 +184,6 @@ void replica_server::handle_client(int client_fd) {
             }
         }
         if (handler) {
-            socket_io io(client_fd);
             handler->run(io, std::move(msg));
         } else {
             LOG_LP(ERROR) << "Unexpected message type: " << static_cast<uint16_t>(type);
