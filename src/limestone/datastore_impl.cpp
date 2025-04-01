@@ -21,6 +21,7 @@
 #include "limestone_exception_helper.h"
 #include "replication/message_session_begin.h"
 #include "replication/message_log_channel_create.h"
+#include "replication/message_group_commit.h"
 
 namespace limestone::api {
 
@@ -108,6 +109,27 @@ bool datastore_impl::open_control_channel() {
     LOG_LP(INFO) << "Control channel successfully opened to " << host << ":" << port;
     TRACE_END;
     return true;
+}
+
+void datastore_impl::propagate_group_commit(uint64_t epoch_id) {
+    if (replica_exists_.load(std::memory_order_acquire)) {
+        TRACE_START << "epoch_id=" << epoch_id;
+        message_group_commit message{epoch_id};
+        if (!control_channel_->send_message(message)) {
+            LOG_LP(ERROR) << "Failed to send switch epoch message to replica.";
+            TRACE_END << "Failed to send switch epoch message.";
+            return;
+        }
+        // Wait for the acknowledgment
+        if (!control_channel_->receive_message()) {
+            LOG_LP(ERROR) << "Failed to receive acknowledgment for switch epoch message.";
+            control_channel_->close_session();
+            replica_exists_.store(false, std::memory_order_release);
+            TRACE_ABORT << "Failed to receive acknowledgment for switch epoch message.";
+            return;
+        }
+        TRACE_END;
+    }
 }
 
 bool datastore_impl::is_replication_configured() const noexcept {

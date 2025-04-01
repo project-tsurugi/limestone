@@ -387,7 +387,7 @@ protected:  // for tests
 
 private:
     std::function<void(epoch_id_type)> write_epoch_callback_{
-        [this](epoch_id_type epoch) { this->write_epoch_to_file(epoch); }
+        [this](epoch_id_type epoch) { this->persist_and_propagate_epoch_id(epoch); }
     };
 
     std::vector<std::unique_ptr<log_channel>> log_channels_;
@@ -494,7 +494,7 @@ private:
     // File descriptor for file lock (flock) on the manifest file
     int fd_for_flock_{-1};
 
-    virtual void write_epoch_to_file(epoch_id_type epoch_id);
+    virtual void persist_and_propagate_epoch_id(epoch_id_type epoch_id);
 
     int epoch_write_counter = 0;
 

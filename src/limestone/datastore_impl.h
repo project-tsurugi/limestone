@@ -62,6 +62,9 @@ public:
     // Getter for control_channel_
     [[nodiscard]] std::shared_ptr<replica_connector> get_control_channel() const noexcept;
 
+    // Propagates the group commit message to the replica
+    void propagate_group_commit(uint64_t epoch_id);
+
     /**
      * @brief Checks if the replication endpoint is configured.
      * @return true if a replication endpoint is defined via the environment variable, false otherwise.

@@ -178,5 +178,4 @@ TEST_F(datastore_replication_test, replica_death_before_create_log_channel) {
     }, "Failed to create log channel connector.");
 }
 
-
 }  // namespace limestone::testing
