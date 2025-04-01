@@ -88,6 +88,9 @@ public:
     // Close the socket file descriptor (real mode) or clear the input and output streams (string mode).
     void close();
 
+    // Check if the end of the input stream has been reached.
+    [[nodiscard]] bool eof();
+
 protected:
     [[nodiscard]] std::ostream& get_out_stream(); 
     [[nodiscard]] std::istream& get_in_stream();

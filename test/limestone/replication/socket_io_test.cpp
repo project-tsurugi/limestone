@@ -33,6 +33,12 @@ namespace limestone::testing {
 using namespace limestone::replication;
 using limestone::api::limestone_exception;
 
+// Test subclass for socket_io to allow access to protected methods
+class testable_socket_io : public limestone::replication::socket_io {
+public:
+    using limestone::replication::socket_io::get_in_stream;  
+    using limestone::replication::socket_io::socket_io;     
+};
 
 // Test for receive_uint16 with an empty stream
 TEST(socket_io_test, receive_uint16_empty_stream) {
@@ -446,5 +452,68 @@ TEST(socket_io_test, socket_round_trip_large_nonblocking) {
     ::close(listen_fd);
 }
 
+// Test for EOF on an empty stream
+TEST(socket_io_test, eof_empty_stream) {
+    testable_socket_io io("");
+    EXPECT_FALSE(io.eof());
+    // Attempt to read data from the stream
+    char buffer;
+    io.get_in_stream().read(&buffer, 1);
+
+    // Now check for EOF after attempting to read
+    EXPECT_TRUE(io.eof()) << "Expected EOF, but the stream was not at EOF.";
+}
+
+// Test for not EOF when data is available in the stream
+TEST(socket_io_test, eof_data_available) {
+    socket_io io("Test data");
+    EXPECT_FALSE(io.eof()) << "Expected not EOF, but the stream reached EOF prematurely.";
+}
+
+// Test for EOF when the stream ends before receiving expected data
+TEST(socket_io_test, eof_incomplete_data) {
+    socket_io io("A");  // Only one byte, expecting two bytes for uint16_t
+    try {
+        [[maybe_unused]] uint16_t value = io.receive_uint16();
+        FAIL() << "Expected limestone_exception, but none was thrown.";
+    } catch (const limestone_exception& ex) {
+        std::string expected_substring = "Failed to read uint16_t from input stream";
+        EXPECT_NE(std::string(ex.what()).find(expected_substring), std::string::npos)
+            << "Error message was: " << ex.what();
+    }
+
+    // Now check for EOF since there was not enough data
+    EXPECT_TRUE(io.eof()) << "Expected EOF after incomplete data, but the stream was not at EOF.";
+}
+
+// Test for EOF in string mode after the stream is closed
+TEST(socket_io_test, eof_after_close_string_mode) {
+    testable_socket_io io("AAA");
+    io.close();  // Close the stream
+
+    // Attempt to read data from the stream
+    char buffer;
+    io.get_in_stream().read(&buffer, 1);
+
+    // Check that EOF is not true in string mode after closing the stream
+    EXPECT_FALSE(io.eof()) << "Expected not EOF after stream close in string mode, but it was EOF.";
+}
+
+// Test for EOF after the stream is closed in socket mode
+TEST(socket_io_test, eof_after_close_socket_mode) {
+    // Create a socket in a server-client setup or mock it
+    int server_fd = ::socket(AF_INET, SOCK_STREAM, 0);
+    EXPECT_NE(server_fd, -1);
+
+    testable_socket_io io(server_fd);
+    io.close();  // Close the socket
+
+    // Attempt to read data from the stream
+    char buffer;
+    io.get_in_stream().read(&buffer, 1);
+
+    // Check that EOF is true after closing the stream in socket mode
+    EXPECT_TRUE(io.eof()) << "Expected EOF after stream close in socket mode, but it was not EOF.";
+}
 
 }  // namespace limestone::testing

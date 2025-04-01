@@ -247,4 +247,8 @@ std::istream& socket_io::get_in_stream() {
     return *in_stream_;
 }
 
+bool socket_io::eof() {
+    return in_stream_->eof();
+}
+
 }  // namespace limestone::replication
