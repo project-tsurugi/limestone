@@ -32,11 +32,14 @@ public:
     void post_receive(socket_io& /*io*/) override {
         // For testing, simply update the data to indicate processing.
         data = "Processed " + data;
+        post_receive_called = true;
     }
 
     std::string get_data() const {
         return data;
     }
+
+    inline static bool post_receive_called = false;
 private:
     // inline static variable: definition inside the class to ensure single definition across translation units
     inline static const bool registered = [](){

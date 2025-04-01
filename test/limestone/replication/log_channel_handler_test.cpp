@@ -36,7 +36,7 @@ public:
     using log_channel_handler::send_initial_ack;
     using log_channel_handler::set_log_channel_id_counter_for_test;
     using log_channel_handler::authorize;
-    using log_channel_handler::dispatch;
+    using log_channel_handler::process_loop;
 };
 
 TEST_F(log_channel_handler_test, validate_initial_and_dispatch_succeeds) {
@@ -51,11 +51,13 @@ TEST_F(log_channel_handler_test, validate_initial_and_dispatch_succeeds) {
     const auto& channel = handler.get_log_channel();
     EXPECT_NE(&channel, nullptr);
 
+    socket_io out("");
     test_message test_msg{};
-    socket_io io("");
-    replication_message::send(io, test_msg);
-    handler.dispatch(test_msg, io);
-    EXPECT_EQ(test_msg.get_data(), "Processed Initial Data");
+    replication_message::send(out, test_msg);
+    socket_io in(out.get_out_string());
+    test_message::post_receive_called = false;
+    EXPECT_THROW({ handler.process_loop(in); }, limestone_io_exception); // Exception is thrown when the stream becomes unreadable, but it is ignored
+    ASSERT_EQ(test_message::post_receive_called, true);
 }
 
 TEST_F(log_channel_handler_test, authorize_succeeds_then_fails_at_limit_boundary) {
