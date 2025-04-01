@@ -71,6 +71,12 @@ public:
      */
     void shutdown();
 
+    /**
+     * Get the underlying datastore instance.
+     * @return the underlying datastore instance.
+     */
+    limestone::api::datastore& get_datastore();
+
 private:
     std::unordered_map<message_type_id, std::shared_ptr<channel_handler_base>> handlers_;  ///< message dispatch table
     std::unique_ptr<limestone::api::datastore> datastore_;                                 ///< underlying datastore instance

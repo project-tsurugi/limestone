@@ -218,5 +218,9 @@ void replica_server::shutdown() {
     }
 }
 
+limestone::api::datastore& replica_server::get_datastore() {
+    return *datastore_;
+}
+
  } // namespace limestone::replication
  

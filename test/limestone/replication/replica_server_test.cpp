@@ -264,6 +264,12 @@ TEST_F(replica_server_test, listener_restart_multiple_times) {
     accept_thread_2.join();
 }
 
+TEST_F(replica_server_test, get_datastore_returns_valid_instance) {
+    replication::replica_server server;
+    server.initialize(location1);
+    
+    auto& ds = server.get_datastore();
+    EXPECT_NE(&ds, nullptr);
+}
 
 }  // namespace limestone::testing
- 
