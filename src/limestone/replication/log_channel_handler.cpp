@@ -27,8 +27,8 @@
 
 namespace limestone::replication {
 
-log_channel_handler::log_channel_handler(replica_server &server) noexcept
-    : channel_handler_base(server), log_channel_(nullptr)
+log_channel_handler::log_channel_handler(replica_server &server, socket_io& io) noexcept
+    : channel_handler_base(server, io), log_channel_(nullptr)
 {}
 
 validation_result log_channel_handler::validate_initial(std::unique_ptr<replication_message> request) {
@@ -53,8 +53,8 @@ validation_result log_channel_handler::validate_initial(std::unique_ptr<replicat
     return validation_result::success();
 }
 
-void log_channel_handler::send_initial_ack(socket_io &io) const {
-    send_ack(io);
+void log_channel_handler::send_initial_ack() const {
+    send_ack();
 }
 
 void log_channel_handler::dispatch(replication_message& message, handler_resources& resources) {

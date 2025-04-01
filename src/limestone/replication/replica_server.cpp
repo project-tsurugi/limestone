@@ -44,12 +44,14 @@ void replica_server::initialize(const boost::filesystem::path& location) {
     limestone::api::configuration conf(data_locations, metadata_location);
     datastore_ = std::make_unique<limestone::api::datastore>(conf);
 
-    // Register control channel handler
-    auto ctrl = std::make_shared<control_channel_handler>(*this);
-    register_handler(message_type_id::SESSION_BEGIN, ctrl);
+    // ファクトリを登録（socket_ioは後で渡す）
+    handler_factories_[message_type_id::SESSION_BEGIN] = [this](socket_io& io) {
+        return std::make_shared<control_channel_handler>(*this, io);
+    };
     
-    auto log = std::make_shared<log_channel_handler>(*this);
-    register_handler(message_type_id::LOG_CHANNEL_CREATE, log);
+    handler_factories_[message_type_id::LOG_CHANNEL_CREATE] = [this](socket_io& io) {
+        return std::make_shared<log_channel_handler>(*this, io);
+    };
 
     // To ensure memory visibility across threads, since datastore_ and location_ might be accessed from other threads,
     // an atomic_thread_fence is used.
@@ -152,22 +154,23 @@ void replica_server::initialize(const boost::filesystem::path& location) {
 }
 
  
-void replica_server::register_handler(message_type_id type, std::shared_ptr<channel_handler_base> handler) noexcept {
+void replica_server::register_handler(message_type_id type, std::function<std::shared_ptr<channel_handler_base>(socket_io&)> factory) noexcept {
     TRACE_START << "type: " << static_cast<uint16_t>(type);
     {
         std::lock_guard<std::mutex> lock(state_mutex_);
-        handlers_.emplace(type, std::move(handler));
+        handler_factories_.emplace(type, std::move(factory));
     }
-    TRACE_END << "hanlers contains " << handlers_.size() << " handlers";
+    TRACE_END << "handler_factories contains " << handler_factories_.size() << " factories";
 }
+
 
 void replica_server::clear_handlers() noexcept {
     TRACE_START;
     {
         std::lock_guard<std::mutex> lock(state_mutex_);
-        handlers_.clear();
+        handler_factories_.clear();
     }
-    TRACE_END << "hanlers contains " << handlers_.size() << " handlers";
+    TRACE_END << "hanlers contains " << handler_factories_.size() << " handlers";
 }
 
 void replica_server::handle_client(int client_fd) {
@@ -188,12 +191,14 @@ void replica_server::handle_client(int client_fd) {
         std::shared_ptr<channel_handler_base> handler;
         {
             std::lock_guard<std::mutex> lock(state_mutex_);
-            if (auto it = handlers_.find(type); it != handlers_.end()) {
-                handler = it->second;  
+            // ファクトリを取り出してインスタンスを生成（socket_ioを渡す）
+            auto factory_it = handler_factories_.find(type);
+            if (factory_it != handler_factories_.end()) {
+                handler = factory_it->second(io);  // socket_ioを渡す
             }
         }
         if (handler) {
-            handler->run(io, std::move(msg));
+            handler->run(std::move(msg));
         } else {
             LOG_LP(ERROR) << "Unexpected message type: " << static_cast<uint16_t>(type);
             auto error = std::make_unique<message_error>();
@@ -237,6 +242,12 @@ boost::filesystem::path replica_server::get_location() const noexcept {
     // Ensure memory visibility across threads
     atomic_thread_fence(std::memory_order_acquire);
     return location_;
+}
+
+bool replica_server::mark_control_channel_created() noexcept {
+    bool expected = false;
+    bool ret = control_channel_created_.compare_exchange_strong(expected, true);
+    return ret;
 }
 
  } // namespace limestone::replication

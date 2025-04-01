@@ -70,7 +70,7 @@ static uint16_t get_free_port() {
 
  class test_session_handler : public limestone::replication::channel_handler_base {
  public:
-     test_session_handler(limestone::replication::replica_server& server, std::promise<bool>& invoked) noexcept : channel_handler_base(server), invoked_(invoked) {}
+     test_session_handler(limestone::replication::replica_server& server, socket_io& io, std::promise<bool>& invoked) noexcept : channel_handler_base(server, io), invoked_(invoked) {}
 
  protected:
      limestone::replication::validation_result authorize() override { return limestone::replication::validation_result::success(); }
@@ -78,7 +78,7 @@ static uint16_t get_free_port() {
          invoked_.set_value(true);
          return limestone::replication::validation_result::success();
      }
-     void send_initial_ack(limestone::replication::socket_io& /*io*/) const override {}
+     void send_initial_ack() const override {}
      void dispatch(limestone::replication::replication_message& /*msg*/, limestone::replication::handler_resources& /*resources*/) override {}
 
  private:
@@ -186,8 +186,11 @@ TEST_F(replica_server_test, registered_handler_is_called) {
 
     std::promise<bool> invoked;
     
-    auto handler = std::make_shared<test_session_handler>(server, invoked);
-    server.register_handler(replication::message_type_id::SESSION_BEGIN, handler);
+    server.register_handler(replication::message_type_id::SESSION_BEGIN,
+        [&server, &invoked](socket_io& io) {
+            return std::make_shared<test_session_handler>(server, io, invoked);
+        });
+    
 
     std::thread server_thread([&server]() { server.accept_loop(); });
 
@@ -203,6 +206,7 @@ TEST_F(replica_server_test, registered_handler_is_called) {
     server.shutdown();
     server_thread.join();
 }
+
 
 TEST_F(replica_server_test, shutdown_before_accept_loop_starts) {
     replication::replica_server server;
@@ -279,6 +283,13 @@ TEST_F(replica_server_test, get_location_returns_correct_path) {
     
     auto location = server.get_location();
     EXPECT_EQ(location.string(), location1.string());
+}
+
+TEST_F(replica_server_test, mark_control_channel_created_sets_flag) {
+    replication::replica_server server;
+    server.initialize(location1);
+
+    EXPECT_TRUE(server.mark_control_channel_created());
 }
 
 }  // namespace limestone::testing

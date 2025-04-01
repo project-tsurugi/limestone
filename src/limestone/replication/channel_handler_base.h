@@ -31,7 +31,7 @@ namespace limestone::replication {
 
 class channel_handler_base {
 public:
-    explicit channel_handler_base(replica_server& server) noexcept;
+    explicit channel_handler_base(replica_server& server, socket_io& io) noexcept;
     virtual ~channel_handler_base() = default;
 
     // Delete copy and move operations to follow special member functions guideline.
@@ -41,7 +41,7 @@ public:
     channel_handler_base& operator=(channel_handler_base&&) = delete;
 
     // Validate first request, send initial ACK or Error, then start processing loop
-    void run(socket_io& io, std::unique_ptr<replication_message> first_request);
+    void run(std::unique_ptr<replication_message> first_request);
 
 protected:
     /**
@@ -57,13 +57,13 @@ protected:
     virtual validation_result validate_initial(std::unique_ptr<replication_message> request) = 0;
 
     // Send initial ACK; must be implemented by subclass
-    virtual void send_initial_ack(socket_io& io) const = 0;
+    virtual void send_initial_ack() const = 0;
 
     // Send generic ACK anywhere (e.g., within processing loop)
-    void send_ack(socket_io& io) const;
+    void send_ack() const;
 
     // Send error response
-    void send_error(socket_io& io, const validation_result& result) const;
+    void send_error(const validation_result& result) const;
 
     // Handle subsequent messages in the processing loop
     virtual void dispatch(replication_message& message, handler_resources& resources) = 0;
@@ -72,10 +72,13 @@ protected:
     [[nodiscard]] replica_server& get_server() const { return server_; }
 
     // Main receive-dispatch loop
-    void process_loop(socket_io& io);
-
+    void process_loop();
+protected:
+    // Socket I/O object for communication
+    socket_io& get_socket_io() const { return socket_io_; }
 private:
     replica_server& server_;
+    socket_io& socket_io_;
 };
 
 }  // namespace limestone::replication

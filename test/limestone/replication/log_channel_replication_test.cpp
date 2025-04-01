@@ -42,7 +42,7 @@ constexpr const char* replica = "/tmp/log_channel_replication_test/replica";
 
 class test_echo_log_channel_handler : public log_channel_handler {
 public:
-    explicit test_echo_log_channel_handler(replica_server& server) noexcept : log_channel_handler(server) {}
+    explicit test_echo_log_channel_handler(replica_server& server, socket_io& io) noexcept : log_channel_handler(server, io) {}
 
 protected:
     void dispatch(replication_message& message, handler_resources& resources) override {
@@ -101,21 +101,27 @@ protected:
     }
 
     void start_replica_server(uint16_t port) {
-        // Start the replica server in a separate thread
         server_.initialize(boost::filesystem::path(replica));
-
-        // Reregister handlers
         server_.clear_handlers();
-        auto ctrl = std::make_shared<control_channel_handler>(server_);
-        server_.register_handler(message_type_id::SESSION_BEGIN, ctrl);
-        auto log = std::make_shared<test_echo_log_channel_handler>(server_);
-        server_.register_handler(message_type_id::LOG_CHANNEL_CREATE, log);      
-
+    
+        server_.register_handler(message_type_id::SESSION_BEGIN,
+            [this](socket_io& io) {
+                return std::make_shared<control_channel_handler>(server_, io);
+            });
+    
+        server_.register_handler(message_type_id::LOG_CHANNEL_CREATE,
+            [this](socket_io& io) {
+                return std::make_shared<test_echo_log_channel_handler>(server_, io);
+            });
+    
         auto addr = make_listen_addr(port);
         ASSERT_TRUE(server_.start_listener(addr));
-
-        server_thread_ = std::make_unique<std::thread>([this, port]() { server_.accept_loop(); });
+    
+        server_thread_ = std::make_unique<std::thread>([this]() {
+            server_.accept_loop();
+        });
     }
+    
 
     void stop_replica_server() {
         if (server_thread_ && server_thread_->joinable()) {

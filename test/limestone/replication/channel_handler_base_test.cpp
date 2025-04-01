@@ -13,8 +13,8 @@ class dummy_server {};
 
 class test_handler : public channel_handler_base {
 public:
-    test_handler(dummy_server& server, bool valid)
-        : channel_handler_base(reinterpret_cast<replica_server&>(server)), valid_(valid), dispatched_(false) {}
+    test_handler(dummy_server& server, socket_io& io, bool valid)
+        : channel_handler_base(reinterpret_cast<replica_server&>(server), io), valid_(valid), dispatched_(false) {}
     using channel_handler_base::get_server;
 protected:
     validation_result authorize() override {
@@ -27,8 +27,8 @@ protected:
                       : validation_result::error(42, "bad request");
     }
 
-    void send_initial_ack(socket_io& io) const override {
-        io.send_string("ACK_SENT");
+    void send_initial_ack() const override {
+        get_socket_io().send_string("ACK_SENT");
     }
 
     void dispatch(replication_message&, handler_resources& resources) override {
@@ -45,15 +45,16 @@ private:
 };
 
 TEST(channel_handler_base_test, run_sends_initial_ack_and_dispatches) {
+    socket_io preparer("");
     dummy_server server;
-    test_handler handler(server, true);
+    
 
     message_ack dummy_msg;
-    socket_io preparer("");
+
     replication_message::send(preparer, dummy_msg);
     socket_io io(preparer.get_out_string());
-
-    EXPECT_THROW(handler.run(io, std::make_unique<message_ack>()), std::runtime_error);
+    test_handler handler(server, io, true);
+    EXPECT_THROW(handler.run(std::make_unique<message_ack>()), std::runtime_error);
 
     socket_io ack_io(io.get_out_string());
     EXPECT_EQ(ack_io.receive_string(), "ACK_SENT");
@@ -66,10 +67,11 @@ TEST(channel_handler_base_test, run_sends_initial_ack_and_dispatches) {
 
 TEST(channel_handler_base_test, run_sends_error_on_validation_failure) {
     dummy_server server;
-    test_handler handler(server, false);
-
     socket_io out("");
-    handler.run(out, std::make_unique<message_ack>());
+    test_handler handler(server, out, false);
+
+    
+    handler.run(std::make_unique<message_ack>());
 
     socket_io in(out.get_out_string());
     auto resp = replication_message::receive(in);
@@ -85,10 +87,18 @@ TEST(channel_handler_base_test, run_sends_error_on_validation_failure) {
 
 TEST(channel_handler_base_test, send_ack_in_loop) {
     dummy_server server;
+
+    message_ack dummy_msg;
+    socket_io preparer("");
+    replication_message::send(preparer, dummy_msg);
+    socket_io io(preparer.get_out_string());
+    std::cerr << preparer.get_out_string() << std::endl;
+    std::cerr << "io = " << io.get_out_string() << std::endl;
+
     class ack_handler : public channel_handler_base {
     public:
-        explicit ack_handler(dummy_server& s)
-            : channel_handler_base(reinterpret_cast<replica_server&>(s)) {}
+        explicit ack_handler(dummy_server& s, socket_io& io)
+            : channel_handler_base(reinterpret_cast<replica_server&>(s), io) {}
 
     protected:
         validation_result authorize() override {
@@ -100,20 +110,14 @@ TEST(channel_handler_base_test, send_ack_in_loop) {
             return validation_result::success();
         }
 
-        void send_initial_ack(socket_io&) const override {}
+        void send_initial_ack() const override {}
         void dispatch(replication_message&, handler_resources& resources) override {
-            send_ack(resources.get_socket_io());
+            send_ack();
             throw std::runtime_error("stop loop");
         }
-    } handler(server);
+    } handler(server, io);
 
-    message_ack dummy_msg;
-    socket_io preparer("");
-    replication_message::send(preparer, dummy_msg);
-    socket_io io(preparer.get_out_string());
-    std::cerr << preparer.get_out_string() << std::endl;
-    std::cerr << "io = " << io.get_out_string() << std::endl;
-    EXPECT_THROW(handler.run(io, std::make_unique<message_ack>()), std::runtime_error);
+    EXPECT_THROW(handler.run(std::make_unique<message_ack>()), std::runtime_error);
     std::cerr << "io = " << io.get_out_string() << std::endl;
 
     socket_io in(io.get_out_string());
@@ -131,8 +135,8 @@ TEST(channel_handler_base_test, run_sends_error_when_assign_fails) {
 
     class failing_handler : public channel_handler_base {
     public:
-        explicit failing_handler(dummy_server& s)
-            : channel_handler_base(reinterpret_cast<replica_server&>(s)) {}
+        explicit failing_handler(dummy_server& s, socket_io& io)
+            : channel_handler_base(reinterpret_cast<replica_server&>(s), io) {}
 
     protected:
         validation_result authorize() override {
@@ -143,14 +147,14 @@ TEST(channel_handler_base_test, run_sends_error_when_assign_fails) {
             return validation_result::success();  // 呼ばれないはず
         }
 
-        void send_initial_ack(socket_io&) const override {}
+        void send_initial_ack() const override {}
         void dispatch(replication_message&, handler_resources&) override {}
     };
 
-    failing_handler handler(server);
     socket_io io("");
+    failing_handler handler(server, io);
 
-    handler.run(io, std::make_unique<message_ack>());
+    handler.run(std::make_unique<message_ack>());
 
     socket_io reader(io.get_out_string());
     auto msg = replication_message::receive(reader);
@@ -163,7 +167,8 @@ TEST(channel_handler_base_test, run_sends_error_when_assign_fails) {
 
 TEST(channel_handler_base_test, get_server) {
     dummy_server server;
-    test_handler handler(server, true);
+    socket_io io("");
+    test_handler handler(server, io, true);
     replica_server& got_server = handler.get_server();
 
     EXPECT_EQ(reinterpret_cast<void*>(&got_server), reinterpret_cast<void*>(&server));

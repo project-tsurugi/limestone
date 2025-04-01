@@ -14,39 +14,45 @@
  * limitations under the License.
  */
 
- #include "replication/control_channel_handler.h"
- #include "replication/message_session_begin.h"
- #include "replication/message_session_begin_ack.h"
- #include "replication/message_ack.h"
- #include "replication/socket_io.h"
- #include "gtest/gtest.h"
- 
- namespace limestone::testing {
- 
- using namespace limestone::replication;
- 
- class dummy_server  {};
- 
- class testable_control_handler : public control_channel_handler {
-    public:
-        using control_channel_handler::control_channel_handler;
-    
-        validation_result call_validate(std::unique_ptr<replication_message> m) {
-            return validate_initial(std::move(m));
-        }
-    
-        validation_result call_assign() {
-            return authorize();
-        }
-    
-        void call_send_initial_ack(socket_io& io) const {
-            send_initial_ack(io);
-        }
+#include "replication/control_channel_handler.h"
+
+#include "gtest/gtest.h"
+#include "replication/message_ack.h"
+#include "replication/message_session_begin.h"
+#include "replication/message_session_begin_ack.h"
+#include "replication/socket_io.h"
+
+namespace limestone::testing {
+
+using namespace limestone::replication;
+
+class control_channel_handler_test : public ::testing::Test {
+protected:
+    static constexpr const char* base_location = "/tmp/control_channel_handler_test";
+
+    void SetUp() override {
+        boost::filesystem::remove_all(base_location);
+        boost::filesystem::create_directories(base_location);
+    }
+
+    void TearDown() override { boost::filesystem::remove_all(base_location); }
+};
+
+class testable_control_handler : public control_channel_handler {
+public:
+    using control_channel_handler::control_channel_handler;
+
+    validation_result call_validate(std::unique_ptr<replication_message> m) { return validate_initial(std::move(m)); }
+
+    validation_result call_assign() { return authorize(); }
+
+    void call_send_initial_ack(socket_io& io) const { send_initial_ack(); }
     };
  
- TEST(control_channel_handler_test, validate_session_begin_success) {
-     dummy_server server;
-     testable_control_handler handler(reinterpret_cast<replica_server&>(server));
+ TEST_F(control_channel_handler_test, validate_session_begin_success) {
+     replica_server server{};
+     socket_io io("");
+     testable_control_handler handler(reinterpret_cast<replica_server&>(server), io);
  
      auto msg = std::make_unique<message_session_begin>();
      msg->set_param("conf", 1);
@@ -55,9 +61,10 @@
      EXPECT_TRUE(result.ok());
  }
  
- TEST(control_channel_handler_test, assign_fails_on_second_call) {
-    dummy_server server;
-    testable_control_handler handler(reinterpret_cast<replica_server&>(server));
+ TEST_F(control_channel_handler_test, assign_fails_on_second_call) {
+    replica_server server;
+    socket_io io("");
+    testable_control_handler handler(reinterpret_cast<replica_server&>(server), io);
 
     // First call succeeds
     auto result1 = handler.call_assign();
@@ -69,9 +76,10 @@
     EXPECT_EQ(result2.error_code(), 1);
 }
 
-TEST(control_channel_handler_test, validate_succeeds_after_assign) {
-    dummy_server server;
-    testable_control_handler handler(reinterpret_cast<replica_server&>(server));
+TEST_F(control_channel_handler_test, validate_succeeds_after_assign) {
+    replica_server server;
+    socket_io io("");
+    testable_control_handler handler(reinterpret_cast<replica_server&>(server), io);
 
     EXPECT_TRUE(handler.call_assign().ok());
 
@@ -83,9 +91,10 @@ TEST(control_channel_handler_test, validate_succeeds_after_assign) {
 }
 
  
- TEST(control_channel_handler_test, validate_fails_on_wrong_type) {
-     dummy_server server;
-     testable_control_handler handler(reinterpret_cast<replica_server&>(server));
+ TEST_F(control_channel_handler_test, validate_fails_on_wrong_type) {
+    replica_server server;
+     socket_io io("");
+     testable_control_handler handler(reinterpret_cast<replica_server&>(server), io);
  
      auto wrong = std::make_unique<message_ack>();
      auto result = handler.call_validate(std::move(wrong));
@@ -93,10 +102,11 @@ TEST(control_channel_handler_test, validate_succeeds_after_assign) {
      EXPECT_EQ(result.error_code(), 2);
  }
  
- TEST(control_channel_handler_test, validate_fails_on_failed_cast) {
-     dummy_server server;
-     testable_control_handler handler(reinterpret_cast<replica_server&>(server));
- 
+ TEST_F(control_channel_handler_test, validate_fails_on_failed_cast) {
+    replica_server server;
+     socket_io io("");
+     testable_control_handler handler(reinterpret_cast<replica_server&>(server), io);
+
      class bad_message : public replication_message {
          message_type_id get_message_type_id() const override {
              return message_type_id::SESSION_BEGIN;
@@ -112,10 +122,10 @@ TEST(control_channel_handler_test, validate_succeeds_after_assign) {
      EXPECT_EQ(result.error_code(), 3);
  }
  
- TEST(control_channel_handler_test, send_initial_ack_outputs_session_secret) {
-     dummy_server server;
-     testable_control_handler handler(reinterpret_cast<replica_server&>(server));
+ TEST_F(control_channel_handler_test, send_initial_ack_outputs_session_secret) {
+    replica_server server;
      socket_io io("");
+     testable_control_handler handler(reinterpret_cast<replica_server&>(server), io);
  
      handler.call_send_initial_ack(io);
  

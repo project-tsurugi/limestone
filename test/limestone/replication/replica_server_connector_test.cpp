@@ -22,7 +22,7 @@ using namespace limestone::replication;
 
 class testing_echo_handler : public limestone::replication::channel_handler_base {
 public:
-    explicit testing_echo_handler(limestone::replication::replica_server& server) noexcept : channel_handler_base(server) {}
+    explicit testing_echo_handler(limestone::replication::replica_server& server, socket_io& io) noexcept : channel_handler_base(server, io) {}
 
 protected:
     validation_result authorize() override { return validation_result::success(); }
@@ -33,10 +33,10 @@ protected:
         return validation_result::success();
     }
 
-    void send_initial_ack(socket_io& io) const override {
+    void send_initial_ack() const override {
         // Echo the very first request
-        replication_message::send(io, *first_msg_);
-        io.flush();
+        replication_message::send(get_socket_io(), *first_msg_);
+        get_socket_io() .flush();
     }
 
     void dispatch(replication_message& /*message*/, handler_resources& /*resources*/) override {
@@ -67,8 +67,11 @@ TEST_F(replica_server_connector_test, echo_test_message_between_server_and_conne
     server.clear_handlers();
 
     // Register shared handler instance instead of lambda
-    auto echo_handler = std::make_shared<testing_echo_handler>(server);
-    server.register_handler(replication::message_type_id::TESTING, echo_handler);
+    server.register_handler(replication::message_type_id::TESTING,
+        [&server](socket_io& io) {
+            return std::make_shared<testing_echo_handler>(server, io);
+        });
+    
 
     uint16_t port = get_free_port();
     auto addr = make_listen_addr(port);

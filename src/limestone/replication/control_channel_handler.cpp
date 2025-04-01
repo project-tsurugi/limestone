@@ -21,17 +21,16 @@
 
 namespace limestone::replication {
 
-control_channel_handler::control_channel_handler(replica_server& server) noexcept
-     : channel_handler_base(server) {}
+control_channel_handler::control_channel_handler(replica_server& server, socket_io& io) noexcept
+     : channel_handler_base(server, io) {}
 
 validation_result control_channel_handler::authorize() {
     TRACE_START;
-    bool expected = false;
-    if (!has_received_session_begin_.compare_exchange_strong(expected, true)) {
-        LOG_LP(ERROR) << "SESSION_BEGIN message was already received";
-        return validation_result::error(1, "SESSION_BEGIN message was already received");
+    // TODO その他の認証を実装する
+    if (!get_server().mark_control_channel_created()) {
+        LOG_LP(ERROR) << "Control channel already created";
+        return validation_result::error(1, "Control channel already created");
     }
-
     pthread_setname_np(pthread_self(), "limestone-ctrl");
     TRACE_END << "Thread name set to limestone-ctrl";
     return validation_result::success();
@@ -55,11 +54,11 @@ validation_result control_channel_handler::validate_initial(std::unique_ptr<repl
     return validation_result::success();
 }
  
- void control_channel_handler::send_initial_ack(socket_io& io) const {
+ void control_channel_handler::send_initial_ack() const {
      message_session_begin_ack ack;
      ack.set_session_secret("server_.get_session_secret()"); // TODO: actual secret
-     replication_message::send(io, ack);
-     io.flush();
+     replication_message::send(get_socket_io(), ack);
+     get_socket_io().flush();
  }
  
  void control_channel_handler::dispatch(replication_message& /*message*/, handler_resources& /*resources*/) {

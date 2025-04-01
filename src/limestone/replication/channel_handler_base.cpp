@@ -20,42 +20,42 @@
 
 namespace limestone::replication {
 
-channel_handler_base::channel_handler_base(replica_server& server) noexcept : server_(server) {}
+channel_handler_base::channel_handler_base(replica_server& server, socket_io& io) noexcept : server_(server), socket_io_(io) {}
 
-void channel_handler_base::run(socket_io& io, std::unique_ptr<replication_message> first_request) {
+void channel_handler_base::run(std::unique_ptr<replication_message> first_request) {
     auto assignment_result = authorize();
     if (!assignment_result.ok()) {
-        send_error(io, assignment_result);
+        send_error(assignment_result);
         return;
     }
 
     auto validation_result = validate_initial(std::move(first_request));
     if (!validation_result.ok()) {
-        send_error(io, validation_result);
+        send_error(validation_result);
         return;
     }
 
-    send_initial_ack(io);
-    process_loop(io);
+    send_initial_ack();
+    process_loop();
 }
 
-void channel_handler_base::send_ack(socket_io& io) const {
+void channel_handler_base::send_ack() const {
     message_ack ack;
-    replication_message::send(io, ack);
-    io.flush();
+    replication_message::send(socket_io_, ack);
+    socket_io_.flush();
 }
 
-void channel_handler_base::send_error(socket_io& io, const validation_result& result) const {
+void channel_handler_base::send_error(const validation_result& result) const {
     message_error err;
     err.set_error(result.error_code(), result.error_message());
-    replication_message::send(io, err);
-    io.flush();
+    replication_message::send(socket_io_, err);
+    socket_io_.flush();
 }
 
-void channel_handler_base::process_loop(socket_io& io) {
+void channel_handler_base::process_loop() {
     while (true) {
-        auto message = replication_message::receive(io);
-        handler_resources resources{io};
+        auto message = replication_message::receive(socket_io_);
+        handler_resources resources{socket_io_};
         dispatch(*message, resources);
     }
 }

@@ -29,7 +29,7 @@ class log_channel_handler : public channel_handler_base {
 public:
     static constexpr int MAX_LOG_CHANNEL_COUNT = 100000;
 
-    explicit log_channel_handler(replica_server &server) noexcept;
+    explicit log_channel_handler(replica_server &server, socket_io& io) noexcept;
     ~log_channel_handler() override = default;
 
     // Delete copy and move constructors and assignment operators
@@ -57,7 +57,7 @@ protected:
     validation_result validate_initial(std::unique_ptr<replication_message> request) override;
     
     // Send the initial acknowledgement message.
-    void send_initial_ack(socket_io &io) const override;
+    void send_initial_ack() const override;
     
     // Dispatch further messages.
     void dispatch(replication_message &message, handler_resources& resources) override;

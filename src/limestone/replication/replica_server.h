@@ -24,6 +24,7 @@
 #include <limestone/api/datastore.h>
 #include "limestone_exception_helper.h"
 
+
 namespace limestone::replication {
 
 class channel_handler_base;
@@ -59,7 +60,7 @@ public:
     /**
      * Register a handler function for a specific message_type_id.
      */
-    void register_handler(message_type_id type, std::shared_ptr<channel_handler_base> handler) noexcept;
+    void register_handler(message_type_id type, std::function<std::shared_ptr<channel_handler_base>(socket_io&)> factory) noexcept;
 
     /**
      * Clear all registered handlers. Intended for testing only.
@@ -83,13 +84,20 @@ public:
      */
     [[nodiscard]] boost::filesystem::path get_location() const noexcept;
 
+    /**
+     * @brief Attempts to mark the control channel as created.
+     * @return true if the flag was not set and is now set successfully, false if it was already set.
+     */
+    [[nodiscard]] bool mark_control_channel_created() noexcept;
 private:
-    boost::filesystem::path location_;                                                     ///< filesystem path for datastore
-    std::unordered_map<message_type_id, std::shared_ptr<channel_handler_base>> handlers_;  ///< message dispatch table
-    std::unique_ptr<limestone::api::datastore> datastore_;                                 ///< underlying datastore instance
-    std::mutex state_mutex_;                                                               ///< mutex for thread safety
-    int event_fd_{-1};                                                                     ///< eventfd used to unblock poll()
-    int sockfd_{-1};                                                                       ///< listening socket file descriptor
+    boost::filesystem::path location_;                      ///< filesystem path for datastore
+    std::unordered_map<message_type_id, std::function<std::shared_ptr<channel_handler_base>(socket_io&)>> handler_factories_;
+                                                            ///< factories for creating handlers
+    std::unique_ptr<limestone::api::datastore> datastore_;  ///< underlying datastore instance
+    std::mutex state_mutex_;                                ///< mutex for thread safety
+    int event_fd_{-1};                                      ///< eventfd used to unblock poll()
+    int sockfd_{-1};                                        ///< listening socket file descriptor
+    std::atomic<bool> control_channel_created_{false};      ///< flag to indicate if control channel is created
 };
 
 } // namespace limestone::replication
