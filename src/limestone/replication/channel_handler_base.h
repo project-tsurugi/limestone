@@ -16,6 +16,8 @@
 
 #pragma once
 
+#include <limestone/api/datastore.h>
+
 #include <memory>
 
 #include "message_ack.h"
@@ -26,7 +28,9 @@
 #include "validation_result.h"
 
 namespace limestone::replication {
-    class replica_server;
+
+using limestone::api::datastore;
+
 
 class channel_handler_base {
 public:
@@ -72,6 +76,9 @@ protected:
 
     // Main receive-dispatch loop
     void process_loop(socket_io& io);
+
+    // Get the datastore from the server
+    [[nodiscard]] datastore& get_datastore();
 
 private:
     replica_server& server_;
