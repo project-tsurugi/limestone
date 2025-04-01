@@ -15,7 +15,7 @@ class test_handler : public channel_handler_base {
 public:
     test_handler(dummy_server& server, bool valid)
         : channel_handler_base(reinterpret_cast<replica_server&>(server)), valid_(valid), dispatched_(false) {}
-
+    using channel_handler_base::get_server;
 protected:
     validation_result authorize() override {
         pthread_setname_np(pthread_self(), "test-handler");
@@ -156,6 +156,15 @@ TEST(channel_handler_base_test, run_sends_error_when_assign_fails) {
     ASSERT_NE(err, nullptr);
     EXPECT_EQ(err->get_error_code(), 99);
     EXPECT_EQ(err->get_error_message(), "assign failed");
+}
+
+
+TEST(channel_handler_base_test, get_server) {
+    dummy_server server;
+    test_handler handler(server, true);
+    replica_server& got_server = handler.get_server();
+
+    EXPECT_EQ(reinterpret_cast<void*>(&got_server), reinterpret_cast<void*>(&server));
 }
 
 }  // namespace limestone::testing

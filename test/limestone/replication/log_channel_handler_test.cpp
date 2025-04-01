@@ -1,18 +1,33 @@
-#include "replication/channel_handler_base.h"
-#include "replication/validation_result.h"
-#include "replication/message_ack.h"
-#include "replication/message_error.h"
-#include "replication/socket_io.h"
 #include "replication/log_channel_handler.h"
-#include "replication/message_log_channel_create.h"
-#include "gtest/gtest.h"
+
 #include <pthread.h>
 
+#include "gtest/gtest.h"
+#include "replication/channel_handler_base.h"
+#include "replication/message_ack.h"
+#include "replication/message_error.h"
+#include "replication/message_log_channel_create.h"
+#include "replication/replica_server.h"
+#include "replication/socket_io.h"
+#include "replication/validation_result.h"
+#include "test_message.h"
 namespace limestone::testing {
 
 using namespace limestone::replication;
 
 class dummy_server {};
+
+class log_channel_handler_test : public ::testing::Test {
+protected:
+    static constexpr const char* base_location = "/tmp/replica_server_test";
+
+    void SetUp() override {
+        boost::filesystem::remove_all(base_location);
+        boost::filesystem::create_directories(base_location);
+    }
+
+    void TearDown() override { boost::filesystem::remove_all(base_location); }
+};
 
 class testable_log_handler : public log_channel_handler {
 public:
@@ -21,18 +36,29 @@ public:
     using log_channel_handler::send_initial_ack;
     using log_channel_handler::set_log_channel_id_counter_for_test;
     using log_channel_handler::authorize;
+    using log_channel_handler::dispatch;
 };
 
-TEST(log_channel_handler_test, validate_log_channel_create_success) {
-    dummy_server server;
+TEST_F(log_channel_handler_test, validate_initial_and_dispatch_succeeds) {
+    replica_server server{};
+    server.initialize(base_location);
     testable_log_handler handler(reinterpret_cast<replica_server&>(server));
 
     auto msg = std::make_unique<message_log_channel_create>();
     auto result = handler.validate_initial(std::move(msg));
     EXPECT_TRUE(result.ok());
+
+    const auto& channel = handler.get_log_channel();
+    EXPECT_NE(&channel, nullptr);
+
+    test_message test_msg{};
+    socket_io io("");
+    replication_message::send(io, test_msg);
+    handler.dispatch(test_msg, io);
+    EXPECT_EQ(test_msg.get_data(), "Processed Initial Data");
 }
 
-TEST(log_channel_handler_test, authorize_succeeds_then_fails_at_limit_boundary) {
+TEST_F(log_channel_handler_test, authorize_succeeds_then_fails_at_limit_boundary) {
     dummy_server server;
     testable_log_handler handler(reinterpret_cast<replica_server&>(server));
 
@@ -54,7 +80,7 @@ TEST(log_channel_handler_test, authorize_succeeds_then_fails_at_limit_boundary) 
     EXPECT_EQ(result2.error_message(), "Too many log channels: cannot assign more");
 }
 
-TEST(log_channel_handler_test, authorize_fails_when_exceeded) {
+TEST_F(log_channel_handler_test, authorize_fails_when_exceeded) {
     dummy_server server;
     testable_log_handler handler(reinterpret_cast<replica_server&>(server));
 
@@ -64,7 +90,7 @@ TEST(log_channel_handler_test, authorize_fails_when_exceeded) {
     EXPECT_EQ(result.error_code(), 1);
 }
 
-TEST(log_channel_handler_test, validate_fails_on_wrong_type) {
+TEST_F(log_channel_handler_test, validate_fails_on_wrong_type) {
     dummy_server server;
     testable_log_handler handler(reinterpret_cast<replica_server&>(server));
 
@@ -74,7 +100,7 @@ TEST(log_channel_handler_test, validate_fails_on_wrong_type) {
     EXPECT_EQ(result.error_code(), 2);
 }
 
-TEST(log_channel_handler_test, validate_fails_on_failed_cast) {
+TEST_F(log_channel_handler_test, validate_fails_on_failed_cast) {
     dummy_server server;
     testable_log_handler handler(reinterpret_cast<replica_server&>(server));
 
@@ -93,7 +119,7 @@ TEST(log_channel_handler_test, validate_fails_on_failed_cast) {
     EXPECT_EQ(result.error_code(), 3);
 }
 
-TEST(log_channel_handler_test, send_initial_ack_sends_ack_message) {
+TEST_F(log_channel_handler_test, send_initial_ack_sends_ack_message) {
     dummy_server server;
     testable_log_handler handler(reinterpret_cast<replica_server&>(server));
     socket_io io("");

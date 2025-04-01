@@ -42,7 +42,7 @@ public:
      * Bind and listen on the specified IPv4 address for incoming replication clients.
      * @return true if listener was successfully started; false on error.
      */
-    bool start_listener(const struct sockaddr_in& listen_addr);
+    [[nodiscard]] bool start_listener(const struct sockaddr_in& listen_addr);
 
     /**
      * Run the accept loop in the current thread, dispatching each new client connection
@@ -75,13 +75,13 @@ public:
      * Get the underlying datastore instance.
      * @return the underlying datastore instance.
      */
-    limestone::api::datastore& get_datastore();
+    [[nodiscard]] limestone::api::datastore& get_datastore();
 
     /**
      * Get the location of the datastore.
      * @return the filesystem path for the datastore.
      */
-    boost::filesystem::path get_location() const noexcept;
+    [[nodiscard]] boost::filesystem::path get_location() const noexcept;
 
 private:
     boost::filesystem::path location_;                                                     ///< filesystem path for datastore

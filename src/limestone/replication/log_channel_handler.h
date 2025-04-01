@@ -16,12 +16,15 @@
 
 #pragma once
 
+#include <limestone/api/log_channel.h>
+
 #include <atomic>
 
 #include "channel_handler_base.h"
 
 namespace limestone::replication {
 
+using limestone::api::log_channel;
 class log_channel_handler : public channel_handler_base {
 public:
     static constexpr int MAX_LOG_CHANNEL_COUNT = 100000;
@@ -41,6 +44,11 @@ public:
      */
     void set_log_channel_id_counter_for_test(int value);
 
+    /**
+     * @brief Get the log channel associated with this handler.
+     */
+    [[nodiscard]] log_channel& get_log_channel();
+
 protected:
     // Assign a log channel and set the thread name.
     validation_result authorize() override; 
@@ -56,6 +64,7 @@ protected:
     
 private:
     std::atomic<int> log_channel_id_counter{0};
+    log_channel* log_channel_;
 };
 
 } // namespace limestone::replication

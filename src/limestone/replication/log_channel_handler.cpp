@@ -45,6 +45,10 @@ validation_result log_channel_handler::validate_initial(std::unique_ptr<replicat
 
     // TODO その他のバリデーション処理を入れる
 
+    auto& server = get_server();
+    auto& ds = get_server().get_datastore();    
+    log_channel_ = &ds.create_channel(server.get_location());
+
     // Perform additional validation as needed
     return validation_result::success();
 }
@@ -75,5 +79,8 @@ void log_channel_handler::set_log_channel_id_counter_for_test(int value) {
     log_channel_id_counter.store(value, std::memory_order_seq_cst);
 }
 
+log_channel& log_channel_handler::get_log_channel() {
+    return *log_channel_;
+}
 
 } // namespace limestone::replication
