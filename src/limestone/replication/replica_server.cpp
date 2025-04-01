@@ -33,6 +33,11 @@
 namespace limestone::replication {
 
 void replica_server::initialize(const boost::filesystem::path& location) {
+    location_ = location;
+    if (location_.empty()) {
+        LOG_LP(FATAL) << "Error: Invalid location for replica server";
+        throw limestone_exception(exception_type::initialization_failure, "Invalid location for replica server");
+    }
     std::vector<boost::filesystem::path> data_locations{};
     data_locations.emplace_back(location);
     const boost::filesystem::path& metadata_location = location;
@@ -44,9 +49,9 @@ void replica_server::initialize(const boost::filesystem::path& location) {
     register_handler(message_type_id::SESSION_BEGIN, ctrl);
     
     auto log = std::make_shared<log_channel_handler>(*this);
-    register_handler(message_type_id::LOG_CHANNEL_CREATE, log);      
- }
- 
+    register_handler(message_type_id::LOG_CHANNEL_CREATE, log);
+}
+
  bool replica_server::start_listener(const struct sockaddr_in &listen_addr) {
     {
         std::lock_guard<std::mutex> lock(state_mutex_);
@@ -220,6 +225,10 @@ void replica_server::shutdown() {
 
 limestone::api::datastore& replica_server::get_datastore() {
     return *datastore_;
+}
+
+boost::filesystem::path replica_server::get_location() const noexcept {
+    return location_;
 }
 
  } // namespace limestone::replication

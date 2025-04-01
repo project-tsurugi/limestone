@@ -272,4 +272,12 @@ TEST_F(replica_server_test, get_datastore_returns_valid_instance) {
     EXPECT_NE(&ds, nullptr);
 }
 
+TEST_F(replica_server_test, get_location_returns_correct_path) {
+    replication::replica_server server;
+    server.initialize(location1);
+    
+    auto location = server.get_location();
+    EXPECT_EQ(location.string(), location1.string());
+}
+
 }  // namespace limestone::testing

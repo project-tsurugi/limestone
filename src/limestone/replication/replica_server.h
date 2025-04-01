@@ -77,10 +77,17 @@ public:
      */
     limestone::api::datastore& get_datastore();
 
+    /**
+     * Get the location of the datastore.
+     * @return the filesystem path for the datastore.
+     */
+    boost::filesystem::path get_location() const noexcept;
+
 private:
+    boost::filesystem::path location_;                                                     ///< filesystem path for datastore
     std::unordered_map<message_type_id, std::shared_ptr<channel_handler_base>> handlers_;  ///< message dispatch table
     std::unique_ptr<limestone::api::datastore> datastore_;                                 ///< underlying datastore instance
-    std::mutex state_mutex_;                                                            ///< mutex for thread safety
+    std::mutex state_mutex_;                                                               ///< mutex for thread safety
     int event_fd_{-1};                                                                     ///< eventfd used to unblock poll()
     int sockfd_{-1};                                                                       ///< listening socket file descriptor
 };
