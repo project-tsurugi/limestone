@@ -50,6 +50,10 @@ void replica_server::initialize(const boost::filesystem::path& location) {
     
     auto log = std::make_shared<log_channel_handler>(*this);
     register_handler(message_type_id::LOG_CHANNEL_CREATE, log);
+
+    // To ensure memory visibility across threads, since datastore_ and location_ might be accessed from other threads,
+    // an atomic_thread_fence is used.
+    atomic_thread_fence(std::memory_order_release);
 }
 
  bool replica_server::start_listener(const struct sockaddr_in &listen_addr) {
@@ -224,10 +228,14 @@ void replica_server::shutdown() {
 }
 
 limestone::api::datastore& replica_server::get_datastore() {
+    // Ensure memory visibility across threads
+    atomic_thread_fence(std::memory_order_acquire);
     return *datastore_;
 }
 
 boost::filesystem::path replica_server::get_location() const noexcept {
+    // Ensure memory visibility across threads
+    atomic_thread_fence(std::memory_order_acquire);
     return location_;
 }
 
