@@ -28,7 +28,7 @@
 namespace limestone::replication {
 
 log_channel_handler::log_channel_handler(replica_server &server) noexcept
-    : channel_handler_base(server)
+    : channel_handler_base(server), log_channel_(nullptr)
 {}
 
 validation_result log_channel_handler::validate_initial(std::unique_ptr<replication_message> request) {
