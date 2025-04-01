@@ -1,7 +1,7 @@
 #include "replication/message_group_commit.h"
 #include "replication/message_gc_boundary_switch.h"
 #include "replication/replication_message.h"
-#include "replication/socket_io.h"
+#include "replication/handler_resources.h"
 #include "gtest/gtest.h"
 
 namespace limestone::testing {
@@ -23,7 +23,8 @@ TEST(message_group_commit_test, round_trip) {
 TEST(message_group_commit_test, post_receive_throws) {
     message_group_commit msg(999);
     socket_io io("");
-    EXPECT_THROW(msg.post_receive(io), std::logic_error);
+    handler_resources resources{io};
+    EXPECT_THROW(msg.post_receive(resources), std::logic_error);
 
 }
 

@@ -103,7 +103,7 @@ TEST(control_channel_handler_test, validate_succeeds_after_assign) {
          }
          void send_body(socket_io&) const override {}
          void receive_body(socket_io&) override {}
-         void post_receive(socket_io& /*io*/) override {}
+         void post_receive(handler_resources&) override {}
      };
  
      auto msg = std::make_unique<bad_message>();

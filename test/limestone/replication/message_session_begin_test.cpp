@@ -16,10 +16,11 @@
 
 #include "replication/message_session_begin.h"
 #include "gtest/gtest.h"
+#include "replication/handler_resources.h"
 #include "replication/socket_io.h"
-
 namespace limestone::testing {
 
+using limestone::replication::handler_resources;
 using limestone::replication::socket_io;
 
 // Test default send_body produces expected fields
@@ -72,7 +73,8 @@ TEST(message_session_begin_test, post_receive_throws) {
     replication::message_session_begin msg;
     msg.set_param("cfg", 1);
     socket_io io("");
-    msg.post_receive(io); 
+    handler_resources resources{io};
+    msg.post_receive(resources);
     SUCCEED();
 }
 

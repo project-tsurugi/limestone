@@ -31,7 +31,7 @@ protected:
         io.send_string("ACK_SENT");
     }
 
-    void dispatch(replication_message&, socket_io& io) override {
+    void dispatch(replication_message&, handler_resources& resources) override {
         dispatched_ = true;
         throw std::runtime_error("stop loop");
     }
@@ -101,8 +101,8 @@ TEST(channel_handler_base_test, send_ack_in_loop) {
         }
 
         void send_initial_ack(socket_io&) const override {}
-        void dispatch(replication_message&, socket_io& io) override {
-            send_ack(io);
+        void dispatch(replication_message&, handler_resources& resources) override {
+            send_ack(resources.get_socket_io());
             throw std::runtime_error("stop loop");
         }
     } handler(server);
@@ -111,8 +111,10 @@ TEST(channel_handler_base_test, send_ack_in_loop) {
     socket_io preparer("");
     replication_message::send(preparer, dummy_msg);
     socket_io io(preparer.get_out_string());
-
+    std::cerr << preparer.get_out_string() << std::endl;
+    std::cerr << "io = " << io.get_out_string() << std::endl;
     EXPECT_THROW(handler.run(io, std::make_unique<message_ack>()), std::runtime_error);
+    std::cerr << "io = " << io.get_out_string() << std::endl;
 
     socket_io in(io.get_out_string());
     auto response = replication_message::receive(in);
@@ -142,7 +144,7 @@ TEST(channel_handler_base_test, run_sends_error_when_assign_fails) {
         }
 
         void send_initial_ack(socket_io&) const override {}
-        void dispatch(replication_message&, socket_io&) override {}
+        void dispatch(replication_message&, handler_resources&) override {}
     };
 
     failing_handler handler(server);

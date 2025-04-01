@@ -60,7 +60,7 @@ protected:
     void send_initial_ack(socket_io &io) const override;
     
     // Dispatch further messages.
-    void dispatch(replication_message &message, socket_io &io) override;
+    void dispatch(replication_message &message, handler_resources& resources) override;
     
 private:
     std::atomic<int> log_channel_id_counter{0};

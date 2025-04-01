@@ -24,6 +24,7 @@
 
 #include "limestone_exception_helper.h"
 #include "socket_io.h"
+#include "handler_resources.h"
 
 namespace limestone::replication {
 
@@ -83,7 +84,7 @@ public:
     [[nodiscard]] static std::unique_ptr<replication_message> create_message(message_type_id type);
 
     // Process the message after it has been received.
-    virtual void post_receive(socket_io& io);
+    virtual void post_receive(handler_resources& resources);
 
     // Register message type with its factory function
     static void register_message_type(message_type_id type, std::unique_ptr<replication_message> (*factory)());

@@ -62,7 +62,7 @@ validation_result control_channel_handler::validate_initial(std::unique_ptr<repl
      io.flush();
  }
  
- void control_channel_handler::dispatch(replication_message& /*message*/, socket_io& /*io*/) {
+ void control_channel_handler::dispatch(replication_message& /*message*/, handler_resources& /*resources*/) {
      // TODO: implement control message dispatch logic
  }
 

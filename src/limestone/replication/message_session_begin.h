@@ -31,7 +31,7 @@ public:
 
     // Process the message after it has been received.
     // Empty implementation for message_session_begin
-    void post_receive(socket_io& /*io*/) override {
+    void post_receive(handler_resources& /*resources*/) override {
         // No specific processing needed for message_session_begin
     }
 

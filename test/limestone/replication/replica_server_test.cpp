@@ -17,6 +17,7 @@
 #include "replication/message_session_begin.h"
 #include "replication/replica_connector.h"
 #include "replication/socket_io.h"
+#include "replication/handler_resources.h"
 namespace limestone::testing {
 
 using namespace limestone::replication;
@@ -78,7 +79,7 @@ static uint16_t get_free_port() {
          return limestone::replication::validation_result::success();
      }
      void send_initial_ack(limestone::replication::socket_io& /*io*/) const override {}
-     void dispatch(limestone::replication::replication_message& /*msg*/, limestone::replication::socket_io& /*io*/) override {}
+     void dispatch(limestone::replication::replication_message& /*msg*/, limestone::replication::handler_resources& /*resources*/) override {}
 
  private:
      std::promise<bool>& invoked_;

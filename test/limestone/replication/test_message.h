@@ -29,7 +29,7 @@ public:
     }
 
     // Process the message after it has been received.
-    void post_receive(socket_io& /*io*/) override {
+    void post_receive(handler_resources& /*resources*/) override {
         // For testing, simply update the data to indicate processing.
         data = "Processed " + data;
         post_receive_called = true;

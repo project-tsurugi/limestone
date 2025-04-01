@@ -39,13 +39,15 @@ constexpr const char* base = "/tmp/log_channel_replication_test";
 constexpr const char* master = "/tmp/log_channel_replication_test/master";
 constexpr const char* replica = "/tmp/log_channel_replication_test/replica";
 
+
 class test_echo_log_channel_handler : public log_channel_handler {
 public:
     explicit test_echo_log_channel_handler(replica_server& server) noexcept : log_channel_handler(server) {}
 
 protected:
-    void dispatch(replication_message& message, socket_io& io) override { 
-        replication_message::send(io, message); 
+    void dispatch(replication_message& message, handler_resources& resources) override {
+        auto& io = resources.get_socket_io();
+        replication_message::send(io, message);
         io.flush();
     }
 };

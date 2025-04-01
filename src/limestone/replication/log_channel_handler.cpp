@@ -57,8 +57,8 @@ void log_channel_handler::send_initial_ack(socket_io &io) const {
     send_ack(io);
 }
 
-void log_channel_handler::dispatch(replication_message& message, socket_io& io) {
-    message.post_receive(io);
+void log_channel_handler::dispatch(replication_message& message, handler_resources& resources) {
+    message.post_receive(resources);
 }
 
 validation_result log_channel_handler::authorize() {

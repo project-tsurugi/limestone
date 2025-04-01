@@ -16,8 +16,8 @@
 
 #include "gtest/gtest.h"
 #include "limestone/api/limestone_exception.h"
-#include "replication/socket_io.h"
 #include "test_message.h"
+#include "replication/handler_resources.h"
 
 namespace limestone::testing {
 
@@ -190,7 +190,8 @@ TEST(replication_message_test, post_receive_throws_if_not_overridden) {
     dummy_message msg;
     try {
         socket_io io("");
-        msg.post_receive(io);
+        handler_resources resources{io};
+        msg.post_receive(resources);
         FAIL() << "Expected std::logic_error";
     } catch (const std::logic_error& e) {
         EXPECT_STREQ(e.what(), "post_receive() must be implemented or explicitly marked as empty");

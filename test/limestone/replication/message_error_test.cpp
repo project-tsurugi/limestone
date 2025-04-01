@@ -16,7 +16,7 @@
 
 #include "replication/message_error.h"
 #include "replication/replication_message.h"
-#include "replication/socket_io.h"
+#include "replication/handler_resources.h"
 #include "gtest/gtest.h"
 
 namespace limestone::testing {
@@ -49,6 +49,8 @@ TEST(message_error_test, invalid_response_type_throws) {
 TEST(message_error_test, post_receive_throws) {
     message_error msg;
     socket_io io("");
-    EXPECT_THROW(msg.post_receive(io), std::logic_error);}
+    handler_resources resources{io};
+    EXPECT_THROW(msg.post_receive(resources), std::logic_error);
+}
 
 } // namespace limestone::testing

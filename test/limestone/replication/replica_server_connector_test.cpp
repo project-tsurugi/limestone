@@ -39,7 +39,7 @@ protected:
         io.flush();
     }
 
-    void dispatch(replication_message& /*message*/, socket_io& /*io*/) override {
+    void dispatch(replication_message& /*message*/, handler_resources& /*resources*/) override {
         // No further dispatch
     }
 

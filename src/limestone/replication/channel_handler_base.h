@@ -24,6 +24,7 @@
 #include "replication_message.h"
 #include "socket_io.h"
 #include "validation_result.h"
+#include "handler_resources.h"
 
 namespace limestone::replication {
     class replica_server;
@@ -65,7 +66,7 @@ protected:
     void send_error(socket_io& io, const validation_result& result) const;
 
     // Handle subsequent messages in the processing loop
-    virtual void dispatch(replication_message& message, socket_io& io) = 0;
+    virtual void dispatch(replication_message& message, handler_resources& resources) = 0;
 
     // Protected getter for replica_server
     [[nodiscard]] replica_server& get_server() const { return server_; }

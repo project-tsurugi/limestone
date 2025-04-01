@@ -55,7 +55,8 @@ void channel_handler_base::send_error(socket_io& io, const validation_result& re
 void channel_handler_base::process_loop(socket_io& io) {
     while (true) {
         auto message = replication_message::receive(io);
-        dispatch(*message, io);
+        handler_resources resources{io};
+        dispatch(*message, resources);
     }
 }
 

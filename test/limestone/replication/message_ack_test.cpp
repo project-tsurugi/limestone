@@ -18,7 +18,7 @@
 
 #include "gtest/gtest.h"
 #include "replication/replication_message.h"
-#include "replication/socket_io.h"
+#include "replication/handler_resources.h"
 
 namespace limestone::testing {
 
@@ -47,7 +47,8 @@ TEST(message_ack_test, invalid_body_throws) {
 TEST(message_ack_test, post_receive_throws) {
     message_ack msg;
     socket_io io("");
-    EXPECT_THROW(msg.post_receive(io), std::logic_error);
+    handler_resources resources{io};
+    EXPECT_THROW(msg.post_receive(resources), std::logic_error);
 }
 
 }  // namespace limestone::testing
