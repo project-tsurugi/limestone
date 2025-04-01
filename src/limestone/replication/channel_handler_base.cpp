@@ -20,7 +20,6 @@
 
 namespace limestone::replication {
 
-
 channel_handler_base::channel_handler_base(replica_server& server) noexcept : server_(server) {}
 
 void channel_handler_base::run(socket_io& io, std::unique_ptr<replication_message> first_request) {
@@ -58,10 +57,6 @@ void channel_handler_base::process_loop(socket_io& io) {
         auto message = replication_message::receive(io);
         dispatch(*message, io);
     }
-}
-
-datastore& channel_handler_base::get_datastore() {
-    return server_.get_datastore();
 }
 
 }  // namespace limestone::replication
