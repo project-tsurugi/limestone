@@ -64,7 +64,7 @@ protected:
     
 private:
     std::atomic<int> log_channel_id_counter{0};
-    log_channel* log_channel_;
+    log_channel* log_channel_{nullptr}; 
 };
 
 } // namespace limestone::replication

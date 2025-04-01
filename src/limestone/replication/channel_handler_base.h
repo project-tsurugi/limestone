@@ -73,9 +73,9 @@ protected:
 
     // Main receive-dispatch loop
     void process_loop();
-protected:
+
     // Socket I/O object for communication
-    socket_io& get_socket_io() const { return socket_io_; }
+    [[nodiscard]] socket_io& get_socket_io() const { return socket_io_; }
 private:
     replica_server& server_;
     socket_io& socket_io_;

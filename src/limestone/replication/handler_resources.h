@@ -21,8 +21,13 @@ namespace limestone::replication {
 
 class handler_resources {
 public:
-    handler_resources(socket_io& io) : socket_io_(io) {}
+    explicit handler_resources(socket_io& io) : socket_io_(io) {}
     virtual ~handler_resources() = default;
+
+    handler_resources(const handler_resources&) = delete;
+    handler_resources& operator=(const handler_resources&) = delete;
+    handler_resources(handler_resources&&) = delete;
+    handler_resources& operator=(handler_resources&&) = delete;
 
     [[nodiscard]] socket_io& get_socket_io() const { return socket_io_; }
 
