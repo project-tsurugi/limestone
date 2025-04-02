@@ -76,6 +76,10 @@ protected:
 
     // Socket I/O object for communication
     [[nodiscard]] socket_io& get_socket_io() const { return socket_io_; }
+
+    // Get the handler resources
+    [[nodiscard]] virtual std::unique_ptr<handler_resources> create_handler_resources();
+
 private:
     replica_server& server_;
     socket_io& socket_io_;

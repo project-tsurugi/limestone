@@ -31,7 +31,7 @@ TEST_F(handler_resources_test, returns_correct_server_and_channel) {
     EXPECT_EQ(&resources.get_socket_io(), &io); 
 }
 
-TEST(handler_resources_test, returns_correct_socket) {
+TEST_F(handler_resources_test, returns_correct_socket) {
     socket_io io("dummy");
     handler_resources resources{io};
 

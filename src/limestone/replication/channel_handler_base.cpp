@@ -52,11 +52,15 @@ void channel_handler_base::send_error(const validation_result& result) const {
     socket_io_.flush();
 }
 
+std::unique_ptr<handler_resources> channel_handler_base::create_handler_resources() {
+    return std::make_unique<handler_resources>(socket_io_);
+}
+
 void channel_handler_base::process_loop() {
     while (true) {
         auto message = replication_message::receive(socket_io_);
-        handler_resources resources{socket_io_};
-        dispatch(*message, resources);
+        auto resources = create_handler_resources();
+        dispatch(*message, *resources);
     }
 }
 
