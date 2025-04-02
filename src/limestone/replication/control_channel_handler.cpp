@@ -18,11 +18,12 @@
 #include "socket_io.h"
 #include "limestone_exception_helper.h"
 #include "logging_helper.h"
+#include "control_channel_handler_resources.h"
 
 namespace limestone::replication {
 
 control_channel_handler::control_channel_handler(replica_server& server, socket_io& io) noexcept
-     : channel_handler_base(server, io) {}
+     : channel_handler_base(server, io), server_(server) {}
 
 validation_result control_channel_handler::authorize() {
     TRACE_START;
@@ -61,9 +62,13 @@ validation_result control_channel_handler::validate_initial(std::unique_ptr<repl
      get_socket_io().flush();
  }
  
- void control_channel_handler::dispatch(replication_message& /*message*/, handler_resources& /*resources*/) {
-     // TODO: implement control message dispatch logic
+ void control_channel_handler::dispatch(replication_message &message, handler_resources& resources) {
+    message.post_receive(resources);
  }
+
+ std::unique_ptr<handler_resources> control_channel_handler::create_handler_resources() {
+    return std::make_unique<control_channel_handler_resources>(get_socket_io(), server_.get_datastore());
+}
 
  }  // namespace limestone::replication
  

@@ -32,6 +32,9 @@ protected:
     validation_result validate_initial(std::unique_ptr<replication_message> request) override;
     void send_initial_ack() const override;
     void dispatch(replication_message& message, handler_resources& resources) override;
+    std::unique_ptr<handler_resources> create_handler_resources() override;
+private:
+    replica_server& server_;
 };
 
 }  // namespace limestone::replication

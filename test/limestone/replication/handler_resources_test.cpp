@@ -1,5 +1,6 @@
 #include <gtest/gtest.h>
-#include <limestone/replication/log_channel_handler_resources.h>
+#include "replication/log_channel_handler_resources.h"
+#include "replication/control_channel_handler_resources.h"
 
 namespace limestone::testing {
 
@@ -36,6 +37,18 @@ TEST_F(handler_resources_test, returns_correct_socket) {
 
     EXPECT_EQ(&resources.get_socket_io(), &io);
 }
+
+TEST_F(handler_resources_test, returns_correct_datastore) {
+    replica_server server{};
+    server.initialize(base_location);
+    auto& ds = server.get_datastore();
+
+    socket_io io("dummy");
+    control_channel_handler_resources resources(io, ds);
+
+    EXPECT_EQ(&resources.get_datastore(), &ds);
+}
+
 
 }  // namespace limestone::testing
 

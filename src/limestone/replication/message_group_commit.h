@@ -33,6 +33,7 @@ public:
 
     [[nodiscard]] uint64_t epoch_number() const;
 
+    void post_receive(handler_resources& resources) override;
 private:
     // Register GROUP_COMMIT in replication_message factory map.
     // The static initialization here is intentional. If an exception occurs,

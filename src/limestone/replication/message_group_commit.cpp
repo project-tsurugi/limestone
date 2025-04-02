@@ -17,7 +17,7 @@
 #include "replication/message_group_commit.h"
 #include "socket_io.h"
 #include "limestone_exception_helper.h"
-
+#include "control_channel_handler_resources.h"
 namespace limestone::replication {
 
 message_group_commit::message_group_commit(uint64_t epoch_number)
@@ -41,6 +41,12 @@ std::unique_ptr<replication_message> message_group_commit::create() {
 
 uint64_t message_group_commit::epoch_number() const {
     return epoch_number_;
+}
+
+void message_group_commit::post_receive(handler_resources& resources) {
+    auto& cch_resources = dynamic_cast<control_channel_handler_resources&>(resources);
+    auto& datastore = cch_resources.get_datastore();
+    datastore.switch_epoch(epoch_number_);
 }
 
 } // namespace limestone::replication
