@@ -5,6 +5,8 @@
 #include "blob_socket_io.h"
 #include "limestone_exception_helper.h"
 #include "socket_io.h"
+#include "log_channel_handler_resources.h"
+#include "limestone/api/log_channel.h"
 namespace limestone::replication {
 
 using limestone::api::epoch_id_type;
@@ -187,6 +189,47 @@ const std::vector<message_log_entries::entry>& message_log_entries::get_entries(
 
 std::unique_ptr<replication_message> message_log_entries::create() {
     return std::make_unique<message_log_entries>(epoch_id_type{0});
+}
+
+void message_log_entries::post_receive(handler_resources& resources) {
+    auto& log_channel_handler = dynamic_cast<log_channel_handler_resources&>(resources);
+    auto& log_channel = log_channel_handler.get_log_channel();
+    if (has_session_begin_flag()) {
+        log_channel.begin_session();
+    }
+    for (const auto& entry : entries_) {
+        switch (entry.type) {
+            case log_entry::entry_type::normal_entry:
+                log_channel.add_entry(entry.storage_id, entry.key, entry.value, entry.write_version);
+                break;
+            case log_entry::entry_type::normal_with_blob:
+                log_channel.add_entry(entry.storage_id, entry.key, entry.value, entry.write_version, entry.blob_ids);
+                break;
+            case log_entry::entry_type::remove_entry:
+                log_channel.remove_entry(entry.storage_id, entry.key, entry.write_version);
+                break;
+            case log_entry::entry_type::clear_storage:
+                log_channel.truncate_storage(entry.storage_id, entry.write_version);
+                break;
+            case log_entry::entry_type::add_storage:
+                log_channel.add_storage(entry.storage_id, entry.write_version);
+                break;
+            case log_entry::entry_type::remove_storage:
+                log_channel.remove_storage(entry.storage_id, entry.write_version);
+                break;
+            case log_entry::entry_type::this_id_is_not_used:
+            case log_entry::entry_type::marker_begin:
+            case log_entry::entry_type::marker_end:
+            case log_entry::entry_type::marker_durable:
+            case log_entry::entry_type::marker_invalidated_begin:
+                std::string msg = "Invalid entry type: " + std::to_string(static_cast<int>(entry.type));
+                LOG_AND_THROW_EXCEPTION(msg);
+                break;
+        }
+    }
+    if (has_session_end_flag() || has_flush_flag()) {
+        log_channel.end_session();
+    }
 }
 
 }  // namespace limestone::replication

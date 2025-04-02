@@ -100,7 +100,18 @@ public:
      * @return a unique_ptr to the newly created message_log_entries object.
      */
     [[nodiscard]] static std::unique_ptr<replication_message> create();
-    
+
+    /**
+     * @brief Performs post-receive operations for the message log entry.
+     *
+     * This method is invoked immediately after a message is received.
+     * It uses the provided resources to handle any required post-reception processes,
+     * such as message processing, cleanup, or further delegation of the received data.
+     *
+     * @param resources The resources needed to process the received message.
+     */
+    void post_receive(handler_resources& resources) override;
+
 private:
     // Register LOG_ENTRY in replication_message factory map.
     // The static initialization here is intentional. If an exception occurs,
