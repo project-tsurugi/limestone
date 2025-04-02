@@ -7,6 +7,7 @@
 #include "socket_io.h"
 #include "log_channel_handler_resources.h"
 #include "limestone/api/log_channel.h"
+#include "message_ack.h"
 namespace limestone::replication {
 
 using limestone::api::epoch_id_type;
@@ -192,8 +193,8 @@ std::unique_ptr<replication_message> message_log_entries::create() {
 }
 
 void message_log_entries::post_receive(handler_resources& resources) {
-    auto& log_channel_handler = dynamic_cast<log_channel_handler_resources&>(resources);
-    auto& log_channel = log_channel_handler.get_log_channel();
+    auto& lch_resources = dynamic_cast<log_channel_handler_resources&>(resources);
+    auto& log_channel = lch_resources.get_log_channel();
     if (has_session_begin_flag()) {
         log_channel.begin_session();
     }
@@ -229,6 +230,10 @@ void message_log_entries::post_receive(handler_resources& resources) {
     }
     if (has_session_end_flag() || has_flush_flag()) {
         log_channel.end_session();
+        message_ack ack;
+        socket_io& io = lch_resources.get_socket_io();
+        replication_message::send(io, ack);
+        io.flush();
     }
 }
 

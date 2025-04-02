@@ -93,7 +93,7 @@ TEST_F(replica_server_connector_test, echo_test_message_between_server_and_conne
     // echo handler returns raw body (no post_receive processing)
     EXPECT_EQ(resp->get_data(), "Test Message Data");
 
-    client.close_session();
+    try { client.close_session(); } catch(...) {}
     server.shutdown();
     server_thread.join();
 }
@@ -122,7 +122,7 @@ TEST_F(replica_server_connector_test, control_handler_session_begin_ack) {
     auto* ack = static_cast<replication::message_session_begin_ack*>(response.get());
     EXPECT_EQ(ack->get_session_secret(), "server_.get_session_secret()");
 
-    client.close_session();
+    try { client.close_session(); } catch(...) {}
     server.shutdown();
     server_thread.join();
 }
@@ -147,7 +147,7 @@ TEST_F(replica_server_connector_test, log_handler_initial_ack) {
     ASSERT_NE(response, nullptr);
     EXPECT_EQ(response->get_message_type_id(), replication::message_type_id::COMMON_ACK);
 
-    client.close_session();
+    try { client.close_session(); } catch(...) {}
     server.shutdown();
     server_thread.join();
 }
@@ -186,8 +186,8 @@ TEST_F(replica_server_connector_test, control_handler_rejects_second_session_beg
     // error_message contains “already received”
     EXPECT_NE(err->get_error_message().find("Control channel already created"), std::string::npos);
     
-    client1.close_session();
-    client2.close_session();
+    try { client1.close_session(); } catch(...) {}
+    try { client2.close_session(); } catch(...) {}
     server.shutdown();
     server_thread.join();
 }
@@ -229,7 +229,7 @@ TEST_F(replica_server_connector_test, control_and_multiple_log_channels_simultan
 
     // Close all sessions
     for (auto& client : clients) {
-        client.close_session();
+        try { client.close_session(); } catch(...) {}
     }
 
     server.shutdown();

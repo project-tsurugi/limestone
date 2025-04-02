@@ -4,29 +4,36 @@
 
 #include <boost/filesystem.hpp>
 #include <fstream>
-
+#include "replication/replica_connector.h"
+#include "replication/replica_server.h"
+#include "replication_test_helper.h"
 #include "blob_file_resolver.h"
 #include "log_entry.h"
 #include "replication/blob_socket_io.h"
 #include "replication/socket_io.h"
 #include "test_root.h"
+#include "replication/message_log_channel_create.h"
+#include "replication/message_session_begin.h"
 
 namespace limestone::testing {
 
 using namespace limestone::replication;
 using limestone::api::log_entry;
 
-static const std::string base_directory = "/tmp/message_log_entries_test";
+
+static constexpr const char* base_location = "/tmp/message_log_entries_test";
+static constexpr const char* master = "/tmp/message_log_entries_test/master";
+static constexpr const char* replica = "/tmp/message_log_entries_test/replica";
 
 class message_log_entries_test : public ::testing::Test {
 protected:
     void SetUp() override {
-        boost::filesystem::remove_all(base_directory);
-        boost::filesystem::create_directories(base_directory);
+        boost::filesystem::remove_all(base_location);
+        boost::filesystem::create_directories(base_location);
         
         std::vector<boost::filesystem::path> data_locations{};
-        data_locations.emplace_back(base_directory);
-        boost::filesystem::path metadata_location_path{base_directory};
+        data_locations.emplace_back(base_location);
+        boost::filesystem::path metadata_location_path{base_location};
         limestone::api::configuration conf(data_locations, metadata_location_path);
 
         datastore_ = std::make_unique<limestone::api::datastore_test>(conf);        
@@ -34,7 +41,7 @@ protected:
 
     void TearDown() override {
         datastore_.reset();
-        boost::filesystem::remove_all(base_directory);
+        boost::filesystem::remove_all(base_location);
     }
 
     std::unique_ptr<api::datastore_test> datastore_;
@@ -329,6 +336,100 @@ TEST_F(message_log_entries_test, receiving_blob_entry_with_socket_io_should_fail
         },
         ".*"
     );
+}
+
+
+TEST_F(message_log_entries_test, write_all_entry_type_to_pwal) {
+    // Setup datastore for master(client)
+    std::vector<boost::filesystem::path> data_locations{};
+    data_locations.emplace_back(master);
+    boost::filesystem::path metadata_location_path{master};
+    limestone::api::configuration conf(data_locations, metadata_location_path);
+    auto ds = std::make_unique<limestone::api::datastore_test>(conf);
+
+    // Setup replica server
+    replication::replica_server server;
+    server.initialize(replica);
+
+    uint16_t port = get_free_port();
+    auto addr = make_listen_addr(port);
+    ASSERT_TRUE(server.start_listener(addr));
+
+    std::thread server_thread([&server]() {
+        try {
+            server.accept_loop();
+        } catch (const std::exception& ex) {
+            std::cerr << "Exception in server.accept_loop(): " << ex.what() << std::endl;
+            throw;
+        } catch (...) {
+            std::cerr << "Unknown exception in server.accept_loop()." << std::endl;
+            throw;
+        }
+    });
+
+    // Hold all clients open until the end
+    std::vector<replica_connector> clients;
+
+    // 1) Open control session
+    clients.emplace_back();
+    ASSERT_TRUE(clients.back().connect_to_server("127.0.0.1", port, *ds));
+    {
+        auto request = message_session_begin::create();
+        EXPECT_TRUE(clients.back().send_message(*request));
+        auto response = clients.back().receive_message();
+        ASSERT_NE(response, nullptr);
+        EXPECT_EQ(response->get_message_type_id(), message_type_id::SESSION_BEGIN_ACK);
+    }
+
+    // 2) Open five log channel sessions
+    clients.emplace_back();
+    ASSERT_TRUE(clients.back().connect_to_server("127.0.0.1", port, *ds));
+    auto request = message_log_channel_create::create();
+    EXPECT_TRUE(clients.back().send_message(*request));
+
+    // wwait for the ack response
+    EXPECT_EQ(clients.back().receive_message()->get_message_type_id(), message_type_id::COMMON_ACK);
+
+    // 3) Send log entries
+
+    auto path99 = ds->get_blob_file(99).path();
+    boost::filesystem::create_directories(path99.parent_path());
+    std::ofstream ofs(path99.string());
+    ofs << "Dummy data for blob 456";
+    ofs.close();
+
+    message_log_entries msg{100};
+    msg.set_session_begin_flag(true);
+
+    msg.add_normal_entry(1, "key1", "value1", {100, 1});
+    msg.add_normal_with_blob(2, "key2", "value2", {200, 2},{99});
+    msg.add_remove_entry(3, "key3", {300, 3});
+    msg.add_clear_storage(4, {400, 4});
+    msg.add_add_storage(5, {500, 5});
+    msg.add_remove_storage(6, {600, 6});
+    
+    msg.set_flush_flag(true);
+    msg.set_session_end_flag(true);
+
+
+    ds->ready();
+    clients.back().send_message(msg);
+    // wwait for the ack response
+    EXPECT_EQ(clients.back().receive_message()->get_message_type_id(), message_type_id::COMMON_ACK);
+
+    // shutdown the server
+    server.shutdown();
+    server_thread.join();
+
+    // Check pwal log entries
+    auto log_entries = read_log_file(std::string(replica) + "/pwal_0000");
+    EXPECT_EQ(log_entries.size(), 6);
+    EXPECT_TRUE(AssertLogEntry(log_entries[0], 1, "key1", "value1", 100, 1, {}, log_entry::entry_type::normal_entry));
+    EXPECT_TRUE(AssertLogEntry(log_entries[1], 2, "key2", "value2", 200, 2, {99}, log_entry::entry_type::normal_with_blob));
+    EXPECT_TRUE(AssertLogEntry(log_entries[2], 3, "key3", "", 300, 3, {}, log_entry::entry_type::remove_entry));
+    EXPECT_TRUE(AssertLogEntry(log_entries[3], 4, "", "", 400, 4, {}, log_entry::entry_type::clear_storage));
+    EXPECT_TRUE(AssertLogEntry(log_entries[4], 5, "", "", 500, 5, {}, log_entry::entry_type::add_storage));
+    EXPECT_TRUE(AssertLogEntry(log_entries[5], 6, "", "", 600, 6, {}, log_entry::entry_type::remove_storage));
 }
 
 }  // namespace limestone::testing

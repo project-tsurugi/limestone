@@ -18,32 +18,10 @@
 #include "replication/replica_connector.h"
 #include "replication/socket_io.h"
 #include "replication/handler_resources.h"
+#include "replication_test_helper.h"
 namespace limestone::testing {
 
 using namespace limestone::replication;
-
-
-static uint16_t get_free_port() {
-    int sock = ::socket(AF_INET, SOCK_STREAM, 0);
-    sockaddr_in addr{};
-    addr.sin_family = AF_INET;
-    addr.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
-    addr.sin_port = 0;
-    ::bind(sock, reinterpret_cast<sockaddr*>(&addr), sizeof(addr));
-    socklen_t len = sizeof(addr);
-    ::getsockname(sock, reinterpret_cast<sockaddr*>(&addr), &len);
-    uint16_t port = ntohs(addr.sin_port);
-    ::close(sock);
-    return port;
- }
- 
- static sockaddr_in make_listen_addr(uint16_t port) {
-     sockaddr_in addr{};
-     addr.sin_family = AF_INET;
-     addr.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
-     addr.sin_port = htons(port);
-     return addr;
- }
 
  class replica_server_test : public ::testing::Test {
  public:
