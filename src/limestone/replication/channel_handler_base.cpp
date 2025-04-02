@@ -57,9 +57,9 @@ std::unique_ptr<handler_resources> channel_handler_base::create_handler_resource
 }
 
 void channel_handler_base::process_loop() {
+    auto resources = create_handler_resources();
     while (true) {
         auto message = replication_message::receive(socket_io_);
-        auto resources = create_handler_resources();
         dispatch(*message, *resources);
     }
 }

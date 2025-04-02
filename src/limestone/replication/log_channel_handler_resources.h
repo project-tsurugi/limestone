@@ -27,17 +27,14 @@ class log_channel_handler_resources : public handler_resources {
 public:
     log_channel_handler_resources(
         socket_io& io,
-        replica_server& server,
         log_channel& channel)
-        : handler_resources(io), server_(server), channel_(channel) {}
+        : handler_resources(io)
+        , channel_(channel) {}
 
-    [[nodiscard]] replica_server& get_server() const { return server_; }
     [[nodiscard]] log_channel& get_log_channel() const { return channel_; }
 
 private:
-    replica_server& server_;
     log_channel& channel_;
 };
-    
 
 }  // namespace limestone::replication

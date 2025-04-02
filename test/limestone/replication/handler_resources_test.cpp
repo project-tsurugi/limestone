@@ -24,9 +24,8 @@ TEST_F(handler_resources_test, returns_correct_server_and_channel) {
     auto& channel = ds.create_channel(base_location);
     socket_io io("");
 
-    log_channel_handler_resources resources{io, server, channel};
+    log_channel_handler_resources resources{io, channel};
 
-    EXPECT_EQ(&resources.get_server(), &server);
     EXPECT_EQ(&resources.get_log_channel(), &channel);
     EXPECT_EQ(&resources.get_socket_io(), &io); 
 }

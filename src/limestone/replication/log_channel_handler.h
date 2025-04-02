@@ -21,6 +21,7 @@
 #include <atomic>
 
 #include "channel_handler_base.h"
+#include "log_channel_handler_resources.h"
 
 namespace limestone::replication {
 
@@ -61,6 +62,9 @@ protected:
     
     // Dispatch further messages.
     void dispatch(replication_message &message, handler_resources& resources) override;
+
+    // Get the handler resources.
+    std::unique_ptr<handler_resources> create_handler_resources() override;
     
 private:
     std::atomic<int> log_channel_id_counter{0};
