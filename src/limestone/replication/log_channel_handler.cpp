@@ -28,8 +28,7 @@
 namespace limestone::replication {
 
 log_channel_handler::log_channel_handler(replica_server &server, socket_io& io) noexcept
-    : channel_handler_base(server, io), log_channel_(nullptr)
-{}
+    : channel_handler_base(server, io){}
 
 validation_result log_channel_handler::validate_initial(std::unique_ptr<replication_message> request) {
     if (request->get_message_type_id() != message_type_id::LOG_CHANNEL_CREATE) {
