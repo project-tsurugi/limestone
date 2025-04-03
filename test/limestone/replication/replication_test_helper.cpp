@@ -7,6 +7,7 @@
 #include "log_entry.h"
 #include <limestone/api/storage_id_type.h>
 #include <limestone/api/write_version_type.h>
+#include "internal.h"
 namespace limestone::testing
 {
 
@@ -14,6 +15,8 @@ using limestone::api::log_entry;
 using limestone::api::epoch_id_type;
 using limestone::api::storage_id_type;
 using limestone::api::write_version_type;
+using limestone::internal::last_durable_epoch;
+using limestone::internal::epoch_file_name;
 
 uint16_t get_free_port() {
     int sock = ::socket(AF_INET, SOCK_STREAM, 0);
@@ -217,6 +220,14 @@ std::vector<log_entry> read_log_file(boost::filesystem::path log_path) {
     }
     // If all checks pass, return success
     return ::testing::AssertionSuccess();
+}
+
+epoch_id_type get_epoch(boost::filesystem::path location) {
+    auto epoch = last_durable_epoch(location / std::string(epoch_file_name));
+    if (!epoch.has_value()) {
+        return 0;
+    }
+    return epoch.value();
 }
 
 }  // namespace limestone::testing

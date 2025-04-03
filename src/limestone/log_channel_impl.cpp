@@ -6,7 +6,6 @@
 
 namespace limestone::api {
 
-using limestone::replication::replication_message;
 using limestone::replication::message_type_id;
 
 log_channel_impl::log_channel_impl() = default;

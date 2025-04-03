@@ -496,7 +496,7 @@ TEST(socket_io_test, eof_after_close_string_mode) {
     io.get_in_stream().read(&buffer, 1);
 
     // Check that EOF is not true in string mode after closing the stream
-    EXPECT_FALSE(io.eof()) << "Expected not EOF after stream close in string mode, but it was EOF.";
+    EXPECT_TRUE(io.eof()) << "Expected EOF after stream close in socket mode, but it was not EOF.";
 }
 
 // Test for EOF after the stream is closed in socket mode

@@ -112,6 +112,9 @@ bool datastore_impl::open_control_channel() {
 }
 
 void datastore_impl::propagate_group_commit(uint64_t epoch_id) {
+    if (!is_master_) {
+        return;
+    }
     if (replica_exists_.load(std::memory_order_acquire)) {
         TRACE_START << "epoch_id=" << epoch_id;
         message_group_commit message{epoch_id};

@@ -1,18 +1,22 @@
-#include "gtest/gtest.h"
-#include "test_root.h"
-#include <boost/process.hpp>
-#include <boost/filesystem.hpp>
-#include <iostream>
-#include <thread>
-#include <unistd.h>
+#include <limestone/api/log_channel.h>
+#include <pthread.h>
 #include <signal.h>
+#include <unistd.h>
+
+#include <boost/filesystem.hpp>
+#include <boost/process.hpp>
+#include <iostream>
+#include <iterator>
 #include <mutex>
-#include "replication_test_helper.h"
+#include <thread>
+
+#include "gtest/gtest.h"
+#include "internal.h"
 #include "replication/replica_server.h"
 #include "replication/replication_endpoint.h"
-#include  <limestone/api/log_channel.h>
-#include "internal.h"
-#include <pthread.h>
+#include "replication_test_helper.h"
+#include "test_root.h"
+#include <limestone/api/storage_id_type.h>
 
 namespace limestone::testing {
 
@@ -21,12 +25,21 @@ using limestone::api::log_channel;
 using limestone::api::datastore;
 using limestone::internal::epoch_file_name;
 using limestone::internal::last_durable_epoch;
+using limestone::api::storage_id_type;
 
-static constexpr const bool server_execute_as_thread = true;
+static constexpr const bool server_execute_as_thread = false;
 
 static constexpr const char* base_location = "/tmp/scenario_test";
 static constexpr const char* master_location = "/tmp/scenario_test/master";
 static constexpr const char* replica_location = "/tmp/scenario_test/replica";
+
+
+struct snapshot_entry {
+    std::string key;
+    std::string value;
+    storage_id_type storage_id;
+};
+
 
 class scenario_test : public ::testing::Test {
 protected:
@@ -136,17 +149,31 @@ protected:
         }
     }
 
-    void gen_datastore() {
+    void gen_datastore(const char* location) {
         std::vector<boost::filesystem::path> data_locations{};
-        data_locations.emplace_back(master_location);
-        boost::filesystem::path metadata_location_path{master_location};
+        data_locations.emplace_back(location);
+        boost::filesystem::path metadata_location_path{location};
         limestone::api::configuration conf(data_locations, metadata_location_path);
 
         ds = std::make_unique<limestone::api::datastore_test>(conf);
 
-        lc0_ = &ds->create_channel(master_location);
-        lc1_ = &ds->create_channel(master_location);
+        lc0_ = &ds->create_channel(location);
+        lc1_ = &ds->create_channel(location);
         ds->ready();
+    }
+
+    auto get_snapshot_entries() {
+        auto snapshot = ds->get_snapshot();
+        auto cursor = snapshot->get_cursor();
+        std::vector<snapshot_entry> snapshot_entries;
+        while (cursor->next()) {
+            snapshot_entry entry{};
+            cursor->key(entry.key);
+            cursor->value(entry.value);
+            entry.storage_id = cursor->storage();
+            snapshot_entries.emplace_back(entry);
+        }
+        return snapshot_entries;
     }
 
     auto read_master_pwal00() { return read_log_file(master_location, "pwal_0000"); }
@@ -176,41 +203,97 @@ protected:
     std::unique_ptr<api::datastore_test> ds;
     log_channel* lc0_{};
     log_channel* lc1_{};
-
 };
 
-TEST_F(scenario_test, test_process_running) {
-    // FLAGS_v = 50;
-    // gen_datastore();
-    // ds->switch_epoch(1);
-    // lc0_->begin_session();
-    // lc0_->add_entry(1, "k1", "v1", {1, 0});
-    // lc0_->end_session();
+TEST_F(scenario_test, minimal_test) {
+    // Replica is already initialized in SetUp
+    // Start the master
+    gen_datastore(master_location);
+    ds->switch_epoch(1);
+    
+    // Verify that PWAL is transferred to the replica
+    lc0_->begin_session();
+    lc0_->add_entry(1, "k1", "v1", {1, 0});
+    lc0_->end_session();
 
-    // {
-    //     auto master_entries = read_master_pwal00();
-    //     ASSERT_EQ(master_entries.size(), 1);
-    //     EXPECT_TRUE(AssertLogEntry(master_entries[0], 1, "k1", "v1", 1, 0, {}, log_entry::entry_type::normal_entry));
+    {
+        auto master_entries = read_master_pwal00();
+        ASSERT_EQ(master_entries.size(), 1);
+        EXPECT_TRUE(AssertLogEntry(master_entries[0], 1, "k1", "v1", 1, 0, {}, log_entry::entry_type::normal_entry));
 
-    //     auto replica_entries = read_replica_pwal00();
-    //     ASSERT_EQ(replica_entries.size(), 1);
-    //     EXPECT_TRUE(AssertLogEntry(replica_entries[0], 1, "k1", "v1", 1, 0, {}, log_entry::entry_type::normal_entry));
+        auto replica_entries = read_replica_pwal00();
+        ASSERT_EQ(replica_entries.size(), 1);
+        EXPECT_TRUE(AssertLogEntry(replica_entries[0], 1, "k1", "v1", 1, 0, {}, log_entry::entry_type::normal_entry));
+    }
 
-    // }
+    // Verify that group commit is transferred
+    ds->switch_epoch(2);
+    EXPECT_EQ(get_master_epoch(), 1);
+    EXPECT_EQ(get_replica_epoch(), 1);
 
-    // ds->switch_epoch(2);
-    // EXPECT_EQ(get_master_epoch(), 1);
-    // EXPECT_EQ(get_replica_epoch(), 1);
+    // Write PWAL in the next epoch
+    lc0_->begin_session();
+    lc0_->add_entry(1, "k2", "v2", {2, 0});
+    lc0_->end_session();
 
-    // lc0_->begin_session();
-    // lc0_->add_entry(1, "k1", "v1", {1, 0});
-    // lc0_->end_session();
+    // Verify that writing PWAL alone does not advance the epoch
+    EXPECT_EQ(get_master_epoch(), 1);
+    EXPECT_EQ(get_replica_epoch(), 1);
 
-    // ds->switch_epoch(3);
-    // EXPECT_EQ(get_master_epoch(), 2);
-    // EXPECT_EQ(get_replica_epoch(), 2);
+    // Verify that the PWAL write is transferred to the replica
+    {
+        auto master_entries = read_master_pwal00();
+        ASSERT_EQ(master_entries.size(), 2);
+        EXPECT_TRUE(AssertLogEntry(master_entries[0], 1, "k1", "v1", 1, 0, {}, log_entry::entry_type::normal_entry));
+        EXPECT_TRUE(AssertLogEntry(master_entries[1], 1, "k2", "v2", 2, 0, {}, log_entry::entry_type::normal_entry));
 
+        auto replica_entries = read_replica_pwal00();
+        ASSERT_EQ(replica_entries.size(), 2);
+        EXPECT_TRUE(AssertLogEntry(replica_entries[0], 1, "k1", "v1", 1, 0, {}, log_entry::entry_type::normal_entry));
+        EXPECT_TRUE(AssertLogEntry(replica_entries[1], 1, "k2", "v2", 2, 0, {}, log_entry::entry_type::normal_entry));
+    }
 
+    // Verify that group commit is transferred
+    ds->switch_epoch(3);
+    EXPECT_EQ(get_master_epoch(), 2);
+    EXPECT_EQ(get_replica_epoch(), 2);
+
+    // Stop the master
+    ds.reset();
+    
+    // Stop the replica
+    stop_replica();
+
+    // Start the master without a replica
+    unsetenv("TSURUGI_REPLICATION_ENDPOINT");
+    gen_datastore(master_location);
+
+    // Verify the snapshot
+    {
+        auto snapshot_entries = get_snapshot_entries();
+        ASSERT_EQ(snapshot_entries.size(), 2);
+        EXPECT_EQ(snapshot_entries[0].key, "k1");
+        EXPECT_EQ(snapshot_entries[0].value, "v1");
+        EXPECT_EQ(snapshot_entries[0].storage_id, 1);
+        EXPECT_EQ(snapshot_entries[1].key, "k2");
+        EXPECT_EQ(snapshot_entries[1].value, "v2");
+        EXPECT_EQ(snapshot_entries[1].storage_id, 1);
+    }
+    // Stop the master and restart it with the replica's data
+    ds.reset();
+    gen_datastore(replica_location);
+
+    // Verify the snapshot again
+    {
+        auto snapshot_entries = get_snapshot_entries();
+        ASSERT_EQ(snapshot_entries.size(), 2);
+        EXPECT_EQ(snapshot_entries[0].key, "k1");
+        EXPECT_EQ(snapshot_entries[0].value, "v1");
+        EXPECT_EQ(snapshot_entries[0].storage_id, 1);
+        EXPECT_EQ(snapshot_entries[1].key, "k2");
+        EXPECT_EQ(snapshot_entries[1].value, "v2");
+        EXPECT_EQ(snapshot_entries[1].storage_id, 1);
+    }
 }
 
 }  // namespace limestone::testing

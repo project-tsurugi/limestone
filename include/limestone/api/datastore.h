@@ -332,6 +332,18 @@ public:
      */
     datastore_impl* get_impl() noexcept { return impl_.get(); }
 
+    /**
+     * @brief Writes the specified epoch id to the epoch file and notifies replicas if needed.
+     *
+     * This function writes the specified epoch id into the epoch file.
+     * If there are any replicas that require the epoch id to be updated, they will be notified.
+     *
+     * NOTE: This method is intended for internal use only.
+     *
+     * @param epoch_id The epoch id to be written and, if necessary, propagated to replicas.
+     */
+    virtual void persist_and_propagate_epoch_id(epoch_id_type epoch_id);
+
 protected:  // for tests
     auto& log_channels_for_tests() const noexcept { return log_channels_; }
     auto epoch_id_informed_for_tests() const noexcept { return epoch_id_informed_.load(); }
@@ -507,8 +519,7 @@ private:
     // File descriptor for file lock (flock) on the manifest file
     int fd_for_flock_{-1};
 
-    virtual void persist_and_propagate_epoch_id(epoch_id_type epoch_id);
-
+    
     int epoch_write_counter = 0;
 
     std::unique_ptr<limestone::internal::blob_file_resolver> blob_file_resolver_;

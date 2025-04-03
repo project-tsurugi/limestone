@@ -112,8 +112,8 @@ TEST_F(replica_connector_test, receive_returns_null_when_server_closes_immediate
 
     replication::replica_connector client;
     ASSERT_TRUE(client.connect_to_server("127.0.0.1", port));
-    auto result = client.receive_message();
-    EXPECT_EQ(result, nullptr);
+
+    EXPECT_DEATH({ auto result = client.receive_message(); }, ".I/O Error.*");
 
     client.close_session();
     server_thread.join();

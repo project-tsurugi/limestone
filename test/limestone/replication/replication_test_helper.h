@@ -27,6 +27,7 @@ sockaddr_in make_listen_addr(uint16_t port);
 // 共通化する。
 std::vector<log_entry> read_log_file(boost::filesystem::path log_path);
 std::vector<log_entry> read_log_file(boost::filesystem::path dir_path, const std::string& filename);
+epoch_id_type get_epoch(boost::filesystem::path location);
 void print_log_entry(const log_entry& entry);
 ::testing::AssertionResult AssertLogEntry(const log_entry& entry, const std::optional<storage_id_type>& expected_storage_id, const std::optional<std::string>& expected_key,
     const std::optional<std::string>& expected_value, const std::optional<epoch_id_type>& expected_epoch_number,

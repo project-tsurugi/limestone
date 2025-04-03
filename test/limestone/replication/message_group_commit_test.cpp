@@ -5,6 +5,7 @@
 #include "replication/control_channel_handler_resources.h"
 #include "gtest/gtest.h"
 #include "test_root.h"
+#include "replication_test_helper.h"
 
 namespace limestone::testing {
 
@@ -52,7 +53,7 @@ TEST_F(message_group_commit_test, post_receive) {
     socket_io io("");
     control_channel_handler_resources resources(io, *datastore_);
     msg.post_receive(resources);
-    EXPECT_EQ(datastore_->epoch_id_switched(), 999);
+    EXPECT_EQ(get_epoch(base_location), 999);
 }
 
 }  // namespace limestone::testing

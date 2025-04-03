@@ -15,10 +15,11 @@
  */
 
 #include "replication/message_group_commit.h"
-#include "socket_io.h"
+
+#include "control_channel_handler_resources.h"
 #include "limestone_exception_helper.h"
 #include "replication/message_ack.h"
-#include "control_channel_handler_resources.h"
+#include "socket_io.h"
 namespace limestone::replication {
 
 message_group_commit::message_group_commit(uint64_t epoch_number)
@@ -45,18 +46,19 @@ uint64_t message_group_commit::epoch_number() const {
 }
 
 void message_group_commit::post_receive(handler_resources& resources) {
+    TRACE_START << "epoch_number: " << epoch_number_;
+    // Check if the epoch number is valid
     // switch the epoch in the datastore
     auto& cch_resources = dynamic_cast<control_channel_handler_resources&>(resources);
     auto& datastore = cch_resources.get_datastore();
-    datastore.switch_epoch(epoch_number_);
+    datastore.persist_and_propagate_epoch_id(epoch_number_);
 
     // Send acknowledgment
     message_ack ack;
     socket_io& io = cch_resources.get_socket_io();
     replication_message::send(io, ack);
     io.flush();
+    TRACE_END;
 }
 
-
-
-} // namespace limestone::replication
+}  // namespace limestone::replication
