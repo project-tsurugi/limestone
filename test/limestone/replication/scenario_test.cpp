@@ -18,7 +18,7 @@ using namespace limestone::replication;
 using limestone::api::log_channel;
 using limestone::api::datastore;
 
-static constexpr const bool server_execute_as_thread = true;
+static constexpr const bool server_execute_as_thread = false;
 
 static constexpr const char* base_location = "/tmp/scenario_test";
 static constexpr const char* master_location = "/tmp/scenario_test/master";
@@ -50,7 +50,7 @@ protected:
         stop_replica();
 
         // cleanup datastore
-        datastore_.reset();
+        ds.reset();
 
         // cleanup test directories
         boost::filesystem::remove_all(base_location);
@@ -133,11 +133,24 @@ protected:
         boost::filesystem::path metadata_location_path{master_location};
         limestone::api::configuration conf(data_locations, metadata_location_path);
 
-        datastore_ = std::make_unique<limestone::api::datastore_test>(conf);
+        ds = std::make_unique<limestone::api::datastore_test>(conf);
 
-        lc0_ = &datastore_->create_channel(master_location);
-        lc1_ = &datastore_->create_channel(master_location);
-        datastore_->ready();
+        lc0_ = &ds->create_channel(master_location);
+        lc1_ = &ds->create_channel(master_location);
+        ds->ready();
+    }
+
+    auto read_master_pwal00() {
+        return read_log_file(master_location, "pwal_0000");
+    }
+    auto read_master_pwal01() {
+        return read_log_file(master_location, "pwal_0001");
+    }
+    auto read_replica_pwal00() {
+        return read_log_file(replica_location, "pwal_0000");
+    }
+    auto read_replica_pwal01() {
+        return read_log_file(replica_location, "pwal_0001");
     }
 
 protected:
@@ -149,16 +162,31 @@ protected:
     std::thread replica_thread_;  
 
     // for master
-    std::unique_ptr<api::datastore_test> datastore_;
+    std::unique_ptr<api::datastore_test> ds;
     log_channel* lc0_{};
     log_channel* lc1_{};
 
 };
 
-
 TEST_F(scenario_test, test_process_running) {
     gen_datastore();
-    SUCCEED();
+    ds->switch_epoch(1);
+    lc0_->begin_session();
+    lc0_->add_entry(1, "k1", "v1", {1, 0});
+    lc0_->end_session();
+
+    {
+        auto master_entries = read_master_pwal00();
+        ASSERT_EQ(master_entries.size(), 1);
+        EXPECT_TRUE(AssertLogEntry(master_entries[0], 1, "k1", "v1", 1, 0, {}, log_entry::entry_type::normal_entry));
+
+        auto replica_entries = read_replica_pwal00();
+        ASSERT_EQ(replica_entries.size(), 1);
+        EXPECT_TRUE(AssertLogEntry(replica_entries[0], 1, "k1", "v1", 1, 0, {}, log_entry::entry_type::normal_entry));
+    }
+
+
+
 }
 
 }  // namespace limestone::testing

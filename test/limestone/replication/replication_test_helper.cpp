@@ -119,6 +119,10 @@ void print_log_entry(const log_entry& entry) {
     }
 }
 
+std::vector<log_entry> read_log_file(boost::filesystem::path dir_path, const std::string& filename) {
+    boost::filesystem::path log_path = dir_path / filename;
+    return read_log_file(log_path);
+}
 
 std::vector<log_entry> read_log_file(boost::filesystem::path log_path) {
     std::vector<log_entry> log_entries;
