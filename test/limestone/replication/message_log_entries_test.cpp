@@ -14,6 +14,7 @@
 #include "test_root.h"
 #include "replication/message_log_channel_create.h"
 #include "replication/message_session_begin.h"
+#include "replication/log_channel_handler_resources.h"
 
 namespace limestone::testing {
 
@@ -32,8 +33,8 @@ protected:
         boost::filesystem::create_directories(base_location);
         
         std::vector<boost::filesystem::path> data_locations{};
-        data_locations.emplace_back(base_location);
-        boost::filesystem::path metadata_location_path{base_location};
+        data_locations.emplace_back(replica);
+        boost::filesystem::path metadata_location_path{replica};
         limestone::api::configuration conf(data_locations, metadata_location_path);
 
         datastore_ = std::make_unique<limestone::api::datastore_test>(conf);        
@@ -338,14 +339,47 @@ TEST_F(message_log_entries_test, receiving_blob_entry_with_socket_io_should_fail
     );
 }
 
+TEST_F(message_log_entries_test, post_receive) {
+    auto& lc = datastore_->create_channel(replica);
+    datastore_->ready();
+    socket_io io("");
+    log_channel_handler_resources resources(io, lc);
 
-TEST_F(message_log_entries_test, write_all_entry_type_to_pwal) {
+    // 正常系
+    message_log_entries msg{100};
+    msg.set_session_begin_flag(true);
+    msg.add_normal_entry(1, "key1", "value1", {100, 1});
+    msg.add_normal_with_blob(2, "key2", "value2", {200, 2},{99});
+    msg.add_remove_entry(3, "key3", {300, 3});
+    msg.add_clear_storage(4, {400, 4});
+    msg.add_add_storage(5, {500, 5});
+    msg.add_remove_storage(6, {600, 6});
+    msg.set_flush_flag(true);
+    msg.set_session_end_flag(true);
+
+    msg.post_receive(resources);
+
+    auto log_entries = read_log_file(std::string(replica) + "/pwal_0000");
+    EXPECT_EQ(log_entries.size(), 6);
+    EXPECT_TRUE(AssertLogEntry(log_entries[0], 1, "key1", "value1", 100, 1, {}, log_entry::entry_type::normal_entry));
+    EXPECT_TRUE(AssertLogEntry(log_entries[1], 2, "key2", "value2", 200, 2, {99}, log_entry::entry_type::normal_with_blob));
+    EXPECT_TRUE(AssertLogEntry(log_entries[2], 3, "key3", "", 300, 3, {}, log_entry::entry_type::remove_entry));
+    EXPECT_TRUE(AssertLogEntry(log_entries[3], 4, "", "", 400, 4, {}, log_entry::entry_type::clear_storage));
+    EXPECT_TRUE(AssertLogEntry(log_entries[4], 5, "", "", 500, 5, {}, log_entry::entry_type::add_storage));
+    EXPECT_TRUE(AssertLogEntry(log_entries[5], 6, "", "", 600, 6, {}, log_entry::entry_type::remove_storage));
+}
+
+
+TEST_F(message_log_entries_test, write_all_entry_type_to_pwal_via_replication_channel) {
     // Setup datastore for master(client)
     std::vector<boost::filesystem::path> data_locations{};
     data_locations.emplace_back(master);
     boost::filesystem::path metadata_location_path{master};
     limestone::api::configuration conf(data_locations, metadata_location_path);
     auto ds = std::make_unique<limestone::api::datastore_test>(conf);
+
+    // Stop the datastore_ created in SetUp because it conflicts with the replica server
+    datastore_.reset();
 
     // Setup replica server
     replication::replica_server server;
