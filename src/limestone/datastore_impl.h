@@ -73,10 +73,19 @@ public:
 
     [[nodiscard]] std::unique_ptr<replication::replica_connector> create_log_channel_connector(datastore &ds);
 
+    // Getter for the datastore role (master or replica)
+    [[nodiscard]] bool is_master() const noexcept;
+
+    // Set the role to replica (switch from master to replica)
+    void set_replica_role() noexcept;
+
 private:
     // Atomic counter for tracking active backup operations.
     std::atomic<int> backup_counter_;
     std::atomic<bool> replica_exists_;
+
+    // Role flag (true = master, false = replica)
+    bool is_master_ = true;
 
     // Private field to hold the control channel
     std::shared_ptr<replica_connector> control_channel_;

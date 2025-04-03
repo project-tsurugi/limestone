@@ -222,7 +222,7 @@ void datastore::ready() {
         }
         cleanup_rotated_epoch_files(location_);
         state_ = state::ready;
-        if (impl_ ->is_replication_configured()) {
+        if (impl_ ->is_replication_configured() && impl_->is_master()) {
             if (impl_->open_control_channel()) {
                 LOG_LP(INFO) << "Replication control channel opened successfully.";
             } else {
@@ -254,7 +254,7 @@ log_channel& datastore::create_channel(const boost::filesystem::path& location) 
     auto id = log_channel_id_.fetch_add(1);
     log_channels_.emplace_back(std::unique_ptr<log_channel>(new log_channel(location, id, *this)));  // constructor of log_channel is private
     
-    if (impl_->has_replica()) {
+    if (impl_->has_replica() && impl_->is_master()) {
         auto connector = impl_->create_log_channel_connector(*this);
         if (connector) {
             log_channels_.back()->get_impl()->set_replica_connector(std::move(connector));

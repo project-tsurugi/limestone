@@ -74,6 +74,8 @@ int main(int argc, char* argv[]) {
         return 1;
     }
 
+    std::cout << "[replica] initialized and listening" << std::endl;
+
     server.accept_loop();
 
     return 0;

@@ -178,4 +178,12 @@ std::unique_ptr<replication::replica_connector> datastore_impl::create_log_chann
     return connector;
 }
 
+void datastore_impl::set_replica_role() noexcept {
+    is_master_ = false;
+}
+
+bool datastore_impl::is_master() const noexcept {
+    return is_master_;
+}
+
 }  // namespace limestone::api

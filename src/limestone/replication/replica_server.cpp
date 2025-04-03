@@ -29,6 +29,7 @@
 #include "message_error.h"
 #include "limestone_exception_helper.h"
 #include "blob_socket_io.h"
+#include "datastore_impl.h"
 
 namespace limestone::replication {
 
@@ -43,8 +44,8 @@ void replica_server::initialize(const boost::filesystem::path& location) {
     const boost::filesystem::path& metadata_location = location;
     limestone::api::configuration conf(data_locations, metadata_location);
     datastore_ = std::make_unique<limestone::api::datastore>(conf);
+    datastore_->get_impl()->set_replica_role();
 
-    // ファクトリを登録（socket_ioは後で渡す）
     handler_factories_[message_type_id::SESSION_BEGIN] = [this](socket_io& io) {
         return std::make_shared<control_channel_handler>(*this, io);
     };

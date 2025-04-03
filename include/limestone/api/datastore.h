@@ -319,6 +319,19 @@ public:
      */
     std::vector<blob_id_type> check_and_remove_persistent_blob_ids(const std::vector<blob_id_type>& blob_ids);
 
+    /**
+     * @brief Retrieves a pointer to the underlying datastore implementation.
+     *
+     * This method returns a non-owning pointer to the internal
+     * datastore_impl instance.
+     *
+     *
+     * NOTE: This method is intended for internal use only.
+     * 
+     * @return A pointer to the datastore implementation.
+     */
+    datastore_impl* get_impl() noexcept { return impl_.get(); }
+
 protected:  // for tests
     auto& log_channels_for_tests() const noexcept { return log_channels_; }
     auto epoch_id_informed_for_tests() const noexcept { return epoch_id_informed_.load(); }
@@ -335,7 +348,7 @@ protected:  // for tests
     }
     write_version_type get_available_boundary_version_for_tests() const noexcept { return available_boundary_version_; }
     void wait_for_blob_file_garbace_collector_for_tests() const noexcept;
-    datastore_impl* get_impl_for_tests() noexcept { return impl_.get(); }
+
 
     // These virtual methods are hooks for testing thread synchronization.
     // They allow derived classes to inject custom behavior or notifications
