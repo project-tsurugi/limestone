@@ -11,14 +11,18 @@
 #include "replication/replica_server.h"
 #include "replication/replication_endpoint.h"
 #include  <limestone/api/log_channel.h>
+#include "internal.h"
+#include <pthread.h>
 
 namespace limestone::testing {
 
 using namespace limestone::replication;
 using limestone::api::log_channel;
 using limestone::api::datastore;
+using limestone::internal::epoch_file_name;
+using limestone::internal::last_durable_epoch;
 
-static constexpr const bool server_execute_as_thread = false;
+static constexpr const bool server_execute_as_thread = true;
 
 static constexpr const char* base_location = "/tmp/scenario_test";
 static constexpr const char* master_location = "/tmp/scenario_test/master";
@@ -27,6 +31,8 @@ static constexpr const char* replica_location = "/tmp/scenario_test/replica";
 class scenario_test : public ::testing::Test {
 protected:
     void SetUp() override {
+        pthread_setname_np(pthread_self(), "master_main");
+
         // prepare test directories
         boost::filesystem::remove_all(base_location);
         boost::filesystem::create_directories(master_location);
@@ -70,6 +76,7 @@ protected:
         std::future<void> wait_initialized = initialized.get_future();
     
         std::thread out_thread([&]() {
+            pthread_setname_np(pthread_self(), "out_thread");
             std::string out_line;
             while (std::getline(*out_stream_, out_line)) {
                 std::cout << "tgreplica> " << out_line << std::endl;
@@ -84,6 +91,7 @@ protected:
         });
     
         std::thread err_thread([&]() {
+            pthread_setname_np(pthread_self(), "err_thread");
             std::string err_line;
             while (std::getline(*err_stream_, err_line)) {
                 std::cerr << "tgreplica> " << err_line << std::endl;
@@ -108,6 +116,7 @@ protected:
             return 1;
         }
         replica_thread_ = std::thread([this]() {
+            pthread_setname_np(pthread_self(), "replica_main");
             server.accept_loop(); 
         });
         return 0;
@@ -140,17 +149,19 @@ protected:
         ds->ready();
     }
 
-    auto read_master_pwal00() {
-        return read_log_file(master_location, "pwal_0000");
-    }
-    auto read_master_pwal01() {
-        return read_log_file(master_location, "pwal_0001");
-    }
-    auto read_replica_pwal00() {
-        return read_log_file(replica_location, "pwal_0000");
-    }
-    auto read_replica_pwal01() {
-        return read_log_file(replica_location, "pwal_0001");
+    auto read_master_pwal00() { return read_log_file(master_location, "pwal_0000"); }
+    auto read_master_pwal01() { return read_log_file(master_location, "pwal_0001"); }
+    auto read_replica_pwal00() { return read_log_file(replica_location, "pwal_0000"); }
+    auto read_replica_pwal01() { return read_log_file(replica_location, "pwal_0001"); }
+    auto get_master_epoch() {return get_epoch(master_location);}
+    auto get_replica_epoch() {return get_epoch(replica_location);}
+private:
+    epoch_id_type get_epoch(boost::filesystem::path location) {
+        auto epoch = last_durable_epoch(location / std::string(epoch_file_name));
+        if (!epoch.has_value()) {
+            return -1;
+        }
+        return epoch.value();
     }
 
 protected:
@@ -169,6 +180,7 @@ protected:
 };
 
 TEST_F(scenario_test, test_process_running) {
+    FLAGS_v = 50;
     gen_datastore();
     ds->switch_epoch(1);
     lc0_->begin_session();
@@ -183,8 +195,20 @@ TEST_F(scenario_test, test_process_running) {
         auto replica_entries = read_replica_pwal00();
         ASSERT_EQ(replica_entries.size(), 1);
         EXPECT_TRUE(AssertLogEntry(replica_entries[0], 1, "k1", "v1", 1, 0, {}, log_entry::entry_type::normal_entry));
+
     }
 
+    ds->switch_epoch(2);
+    EXPECT_EQ(get_master_epoch(), 1);
+    EXPECT_EQ(get_replica_epoch(), 1);
+
+    lc0_->begin_session();
+    lc0_->add_entry(1, "k1", "v1", {1, 0});
+    lc0_->end_session();
+
+    ds->switch_epoch(3);
+    EXPECT_EQ(get_master_epoch(), 2);
+    EXPECT_EQ(get_replica_epoch(), 2);
 
 
 }

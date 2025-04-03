@@ -109,7 +109,7 @@ std::unique_ptr<replication_message> replica_connector::receive_message() {
     try {
         return replication_message::receive(*socket_io_);
     } catch (const std::exception &ex) {
-        LOG_LP(ERROR) << "Exception during message reception: " << ex.what();
+        LOG_LP(FATAL) << "Exception during message reception: " << ex.what();
         return nullptr;
     }
 }

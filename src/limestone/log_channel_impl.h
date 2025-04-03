@@ -62,10 +62,23 @@ public:
      */
     replication::replica_connector* get_replica_connector();
 
-
+    /**
+     * Sends a message to replica, modifying the message using the provided modifier.
+     *
+     * This method creates a `message_log_entries` object and applies the provided
+     * `modifier` lambda to modify the message before sending it. The modifier lambda allows
+     * the caller to set flags, add entries, or make other modifications to the message content.
+     *
+     * The function handles the creation of the message, while the lambda is responsible for
+     * modifying the content of the message (e.g., setting flags or adding entries). If the system
+     * is in a state where message sending is possible, the message is transmitted to the replica.
+     * If the message includes session end or flush flags, the function will wait for an acknowledgment (ACK) response.
+     *
+     * @param epoch_id The epoch identifier to be associated with the message.
+     * @param modifier A lambda function that modifies the `message_log_entries`. The lambda should take a reference
+     *                 to the `message_log_entries` object and apply any required changes (e.g., setting flags, adding entries).
+     */
     void send_replica_message(uint64_t epoch_id, const std::function<void(replication::message_log_entries&)>& modifier);
-  
-
 
 private:
     std::unique_ptr<replication::replica_connector> replica_connector_;
