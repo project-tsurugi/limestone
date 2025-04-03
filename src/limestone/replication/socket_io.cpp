@@ -206,6 +206,8 @@ std::string socket_io::receive_string() {
 bool socket_io::flush() {
     TRACE_START;
     if (is_string_mode_) {
+        std::string data = out_stream_->str();
+        in_stream_ = std::make_unique<std::istringstream>(data);
         return true;
     }
     std::string data = out_stream_->str();

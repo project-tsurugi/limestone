@@ -367,6 +367,10 @@ TEST_F(message_log_entries_test, post_receive) {
     EXPECT_TRUE(AssertLogEntry(log_entries[3], 4, "", "", 400, 4, {}, log_entry::entry_type::clear_storage));
     EXPECT_TRUE(AssertLogEntry(log_entries[4], 5, "", "", 500, 5, {}, log_entry::entry_type::add_storage));
     EXPECT_TRUE(AssertLogEntry(log_entries[5], 6, "", "", 600, 6, {}, log_entry::entry_type::remove_storage));
+
+    auto ack_str = io.get_out_string();
+    auto ack = replication_message::receive(io);
+    ASSERT_EQ(ack->get_message_type_id(), message_type_id::COMMON_ACK);
 }
 
 
