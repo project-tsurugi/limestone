@@ -103,54 +103,81 @@ void replica_server::initialize(const boost::filesystem::path& location) {
      return true;
  }
  
- void replica_server::accept_loop() {
-
+ replica_server::poll_result replica_server::poll_shutdown_event_or_client() {
+    std::array<pollfd, 2> fds{};
+    {
+        std::lock_guard<std::mutex> lock(state_mutex_);
+        fds[0].fd = sockfd_;
+        fds[1].fd = event_fd_;
+    }
+    fds[0].events = POLLIN;
+    fds[1].events = POLLIN;
 
     while (true) {
-        std::array<pollfd, 2> fds{};
-        {
-            std::lock_guard<std::mutex> lock(state_mutex_);
-            fds[0].fd = sockfd_;
-            fds[1].fd = event_fd_;
-        }
-        fds[0].events = POLLIN;
-        fds[1].events = POLLIN;
-
         int ret = ::poll(fds.data(), static_cast<nfds_t>(fds.size()), -1);
         if (ret < 0) {
             if (errno == EINTR) continue;
             LOG_LP(ERROR) << "poll() failed: " << strerror(errno);
-            break;
+            return poll_result::poll_error;
         }
 
         if ((static_cast<unsigned>(fds[1].revents) & static_cast<unsigned>(POLLIN)) != 0) {
-            uint64_t value = 0;
-            while (true) {
-                ssize_t n = ::read(event_fd_, &value, sizeof(value));
-                if (n == sizeof(value)) {
-                    break;
-                } else if (n < 0 && (errno == EINTR || errno == EAGAIN)) {
-                    continue;
-                } else {
-                    LOG_LP(ERROR) << "Failed to read from eventfd in accept_loop: " << strerror(errno);
-                    break;  // It is not desirable for data to remain in eventfd, but since shutdown will follow, this is acceptable.
-                }
-            }
-            break;  // Exit the poll loop
+            return poll_result::shutdown_event;
         }
 
         if ((static_cast<unsigned>(fds[0].revents) & static_cast<unsigned>(POLLIN)) != 0) {
-            int client_fd = -1;
-            {
-                std::lock_guard<std::mutex> lock(state_mutex_);
-                client_fd = ::accept(sockfd_, nullptr, nullptr);
-            }
-            if (client_fd < 0) {
-                LOG_LP(ERROR) << "accept() failed: " << strerror(errno);
-                break;
-            }
-            TRACE << "Accepted new client connection: " << client_fd;
-            std::thread(&replica_server::handle_client, this, client_fd).detach();
+            return poll_result::client_event;
+        }
+    }
+}
+
+// NOLINTNEXTLINE(readability-make-member-function-const) 
+void replica_server::handle_shutdown_event() {
+    uint64_t value = 0;
+    while (true) {
+        ssize_t n = ::read(event_fd_, &value, sizeof(value));
+        if (n == sizeof(value)) {
+            break;
+        }
+        if (n < 0 && (errno == EINTR || errno == EAGAIN)) {
+            continue;
+        }
+        if (n != sizeof(value)) {
+            LOG_LP(ERROR) << "Failed to read from eventfd in accept_loop: " << strerror(errno);
+            break;
+        }
+    }
+}
+
+void replica_server::accept_new_client() {
+    int client_fd = -1;
+    {
+        std::lock_guard<std::mutex> lock(state_mutex_);
+        client_fd = ::accept(sockfd_, nullptr, nullptr);
+    }
+    if (client_fd < 0) {
+        LOG_LP(ERROR) << "accept() failed: " << strerror(errno);
+        return;
+    }
+    TRACE << "Accepted new client connection: " << client_fd;
+    std::thread(&replica_server::handle_client, this, client_fd).detach();
+}
+
+void replica_server::accept_loop() {
+    while (true) {
+        poll_result result = poll_shutdown_event_or_client();
+
+        if (result == poll_result::poll_error) {
+            break;
+        }
+
+        if (result == poll_result::shutdown_event) {
+            handle_shutdown_event();
+            break;
+        }
+
+        if (result == poll_result::client_event) {
+            accept_new_client();
         }
     }
 
@@ -161,7 +188,6 @@ void replica_server::initialize(const boost::filesystem::path& location) {
     }
 }
 
- 
 void replica_server::register_handler(message_type_id type, std::function<std::shared_ptr<channel_handler_base>(socket_io&)> factory) noexcept {
     TRACE_START << "type: " << static_cast<uint16_t>(type);
     {
@@ -236,12 +262,12 @@ void replica_server::shutdown() {
             // Although write failure is highly unlikely, error handling is implemented
             if (n == sizeof(v)) {
                 break;  // Write succeeded
-            } else if (n < 0 && errno == EINTR) {
-                continue;  // Retry due to interruption
-            } else {
-                LOG_LP(FATAL) << "eventfd write failed in shutdown: " << strerror(errno);
-                break;
             }
+            if (n < 0 && errno == EINTR) {
+                continue;  // Retry due to interruption
+            }
+            LOG_LP(FATAL) << "eventfd write failed in shutdown: " << strerror(errno);
+            break;
         }
     }
     if (sockfd_ >= 0) {

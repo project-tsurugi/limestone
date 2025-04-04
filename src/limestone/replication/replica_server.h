@@ -98,6 +98,16 @@ private:
     int event_fd_{-1};                                      ///< eventfd used to unblock poll()
     int sockfd_{-1};                                        ///< listening socket file descriptor
     std::atomic<bool> control_channel_created_{false};      ///< flag to indicate if control channel is created
+
+    enum class poll_result {
+        shutdown_event,
+        client_event,
+        poll_error,
+    };
+
+    poll_result poll_shutdown_event_or_client();
+    void handle_shutdown_event();
+    void accept_new_client();
 };
 
 } // namespace limestone::replication
