@@ -125,11 +125,18 @@ void replica_server::initialize(const boost::filesystem::path& location) {
 
         if ((static_cast<unsigned>(fds[1].revents) & static_cast<unsigned>(POLLIN)) != 0) {
             uint64_t value = 0;
-            {
-                std::lock_guard<std::mutex> lock(state_mutex_);
-                ::read(event_fd_, &value, sizeof(value));
+            while (true) {
+                ssize_t n = ::read(event_fd_, &value, sizeof(value));
+                if (n == sizeof(value)) {
+                    break;
+                } else if (n < 0 && (errno == EINTR || errno == EAGAIN)) {
+                    continue;
+                } else {
+                    LOG_LP(ERROR) << "Failed to read from eventfd in accept_loop: " << strerror(errno);
+                    break;  // It is not desirable for data to remain in eventfd, but since shutdown will follow, this is acceptable.
+                }
             }
-            break;
+            break;  // Exit the poll loop
         }
 
         if ((static_cast<unsigned>(fds[0].revents) & static_cast<unsigned>(POLLIN)) != 0) {
@@ -224,7 +231,18 @@ void replica_server::shutdown() {
     std::lock_guard<std::mutex> lock(state_mutex_);
     if (event_fd_ >= 0) {
         uint64_t v = 1;
-        ::write(event_fd_, &v, sizeof(v));
+        while (true) {
+            ssize_t n = ::write(event_fd_, &v, sizeof(v));
+            // Although write failure is highly unlikely, error handling is implemented
+            if (n == sizeof(v)) {
+                break;  // Write succeeded
+            } else if (n < 0 && errno == EINTR) {
+                continue;  // Retry due to interruption
+            } else {
+                LOG_LP(FATAL) << "eventfd write failed in shutdown: " << strerror(errno);
+                break;
+            }
+        }
     }
     if (sockfd_ >= 0) {
         ::shutdown(sockfd_, SHUT_RDWR);
