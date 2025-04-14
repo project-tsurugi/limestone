@@ -4,6 +4,20 @@
 
 * この文書は、Tsurugi のレプリケーション最小構成 (仮コード: `REP-0.0`) における、マスター・レプリカ間の具体的な通信内容について記述する
 
+## 2025-04-14 追記
+
+現時点での実装との相違点は以下の通り。
+
+* TCP ソケットのステートが未実装
+* 
+* 以下のプロトコルが未実装
+  * プロトコル：レプリケーションセッション終了
+  * プロトコル：セーフスナップショット切り替え
+  * プロトコル：GC境界切り替え
+  * ログチャネル破棄
+  * プロトコル：ログチャネル書き出し
+    * ログエントリ送付の`LOG_OPERATION_FLUSH`で代替
+
 ## デザインコンセプト
 
 * すべての通信は、マスターからレプリカへのリクエスト・レスポンス形式で行う
@@ -33,9 +47,9 @@
   // 文字列 (または、バイト列) 型
   struct string {
       // 文字列のバイト数
-      u32 size;
+      u4 size;
       // 文字列のバイト列
-      u8[size] data;
+      u1[size] data;
   }
   ```
 
@@ -45,8 +59,8 @@
 
 ```c
 struct string {
-    u32 size;
-    u8[size] data;
+    u4 size;
+    u1[size] data;
 }
 ```
 
@@ -311,7 +325,7 @@ struct log_entry {
     u8 storage_id;
     string key;
     string value;
-    u6 blob_list_size;
+    u4 blob_list_size;
     blob_entry[blob_list_size] blob_list;
 }
 ```
