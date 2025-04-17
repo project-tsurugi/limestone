@@ -29,7 +29,10 @@
 #include "log_entry.h"
 #include "replication/message_log_entries.h"
 #include "log_channel_impl.h"
+#include "now_nsec.h"
 namespace limestone::api {
+
+using limestone::internal::now_nsec;
 
 log_channel::log_channel(boost::filesystem::path location, std::size_t id, datastore& envelope) noexcept
     : envelope_(envelope), location_(std::move(location)), id_(id)
@@ -62,6 +65,7 @@ void log_channel::begin_session() {
             std::atomic_thread_fence(std::memory_order_acq_rel);
         } while (current_epoch_id_.load() != envelope_.epoch_id_switched_.load());
         TRACE_START << "current_epoch_id_=" << current_epoch_id_.load();
+        uint64_t start = now_nsec();
 
         auto log_file = file_path();
         strm_ = fopen(log_file.c_str(), "a");  // NOLINT(*-owning-memory)
@@ -75,9 +79,12 @@ void log_channel::begin_session() {
         }
         uint64_t epoch_id = current_epoch_id_.load();
         log_entry::begin_session(strm_, static_cast<epoch_id_type>(epoch_id));
+        uint64_t start_replication = now_nsec();
         impl_->send_replica_message(epoch_id, [&](replication::message_log_entries &msg) {
             msg.set_session_begin_flag(true);
         });
+        uint64_t end = now_nsec();
+        LOG_LP(INFO) << "log_channel::begin_session() took " << (end - start) / 1000 << "us, replication took " << (end - start_replication) / 1000 << "us";
         TRACE_END;
     } catch (...) {
         TRACE_ABORT;
@@ -88,6 +95,7 @@ void log_channel::begin_session() {
 void log_channel::end_session() {
     try {
         TRACE_START << "current_epoch_id_=" << current_epoch_id_.load();
+        uint64_t start = now_nsec();
         if (fflush(strm_) != 0) {
             LOG_AND_THROW_IO_EXCEPTION("fflush failed", errno);
         }
@@ -103,10 +111,13 @@ void log_channel::end_session() {
         if (fclose(strm_) != 0) {  // NOLINT(*-owning-memory)
             LOG_AND_THROW_IO_EXCEPTION("fclose failed", errno);
         }
+        uint64_t start_replication = now_nsec();
         impl_->send_replica_message(finished_epoch_id_.load(), [&](replication::message_log_entries &msg) {
             msg.set_session_end_flag(true);
             msg.set_flush_flag(true);
         });
+        uint64_t end = now_nsec();
+        LOG_LP(INFO) << "log_channel::end_session() took " << (end - start) / 1000 << "us, replication took " << (end - start_replication) / 1000 << "us";
         TRACE_END;
     } catch (...) {
         TRACE_ABORT;
@@ -126,10 +137,14 @@ void log_channel::abort_session([[maybe_unused]] status status_code, [[maybe_unu
 void log_channel::add_entry(storage_id_type storage_id, std::string_view key, std::string_view value, write_version_type write_version) {
     TRACE_START << "storage_id=" << storage_id << ", key=" << key << ",value = " << value << ", epoch =" << write_version.epoch_number_ << ", minor =" << write_version.minor_write_version_;
     try {
+        uint64_t start = now_nsec();
         log_entry::write(strm_, storage_id, key, value, write_version);
+        uint64_t start_replication = now_nsec();
         impl_->send_replica_message(current_epoch_id_.load(), [&](replication::message_log_entries &msg) {
             msg.add_normal_entry(storage_id, key, value, write_version);
         });
+        uint64_t end = now_nsec();
+        LOG_LP(INFO) << "log_channel::add_entry() took " << (end - start) / 1000 << "us, replication took " << (end - start_replication) / 1000 << "us";
     } catch (...) {
         TRACE_ABORT;
         HANDLE_EXCEPTION_AND_ABORT();
@@ -144,11 +159,15 @@ void log_channel::add_entry([[maybe_unused]] storage_id_type storage_id, [[maybe
         return;
     }
     try {
+        uint64_t start = now_nsec();
         log_entry::write_with_blob(strm_, storage_id, key, value, write_version, large_objects);
         envelope_.add_persistent_blob_ids(large_objects);
+        uint64_t start_replication = now_nsec();
         impl_->send_replica_message(current_epoch_id_.load(), [&](replication::message_log_entries &msg) {
             msg.add_normal_with_blob(storage_id, key, value, write_version, large_objects);
         });
+        uint64_t end = now_nsec();
+        LOG_LP(INFO) << "log_channel::add_entry(blob) took " << (end - start) / 1000 << "us, replication took " << (end - start_replication) / 1000 << "us";
     } catch (...) {
         TRACE_ABORT;
         HANDLE_EXCEPTION_AND_ABORT();
@@ -159,10 +178,14 @@ void log_channel::add_entry([[maybe_unused]] storage_id_type storage_id, [[maybe
 void log_channel::remove_entry(storage_id_type storage_id, std::string_view key, write_version_type write_version) {
     TRACE_START << "storage_id=" << storage_id << ", key=" << key << ", epoch =" << write_version.epoch_number_ << ", minor =" << write_version.minor_write_version_;
     try {
+        uint64_t start = now_nsec();
         log_entry::write_remove(strm_, storage_id, key, write_version);
+        uint64_t start_replication = now_nsec();
         impl_->send_replica_message(current_epoch_id_.load(), [&](replication::message_log_entries &msg) {
             msg.add_remove_entry(storage_id, key, write_version);
         });
+        uint64_t end = now_nsec();
+        LOG_LP(INFO) << "log_channel::remove_entry() took " << (end - start) / 1000 << "us, replication took " << (end - start_replication) / 1000 << "us";
     } catch (...) {
         TRACE_ABORT;
         HANDLE_EXCEPTION_AND_ABORT();
@@ -173,10 +196,14 @@ void log_channel::remove_entry(storage_id_type storage_id, std::string_view key,
 void log_channel::add_storage(storage_id_type storage_id, write_version_type write_version) {
     TRACE_START << "storage_id=" << storage_id << ", epoch =" << write_version.epoch_number_ << ", minor =" << write_version.minor_write_version_;
     try {
+        uint64_t start = now_nsec();
         log_entry::write_add_storage(strm_, storage_id, write_version);
+        uint64_t start_replication = now_nsec();
         impl_->send_replica_message(current_epoch_id_.load(), [&](replication::message_log_entries &msg) {
             msg.add_add_storage(storage_id, write_version);
         });
+        uint64_t end = now_nsec();
+        LOG_LP(INFO) << "log_channel::add_storage() took " << (end - start) / 1000 << "us, replication took " << (end - start_replication) / 1000 << "us";
     } catch (...) {
         TRACE_ABORT;
         HANDLE_EXCEPTION_AND_ABORT();
@@ -188,10 +215,14 @@ void log_channel::add_storage(storage_id_type storage_id, write_version_type wri
 void log_channel::remove_storage(storage_id_type storage_id, write_version_type write_version) {
     TRACE_START << "storage_id=" << storage_id << ", epoch =" << write_version.epoch_number_ << ", minor =" << write_version.minor_write_version_;
     try {
+        uint64_t start = now_nsec();
         log_entry::write_remove_storage(strm_, storage_id, write_version);
+        uint64_t start_replication = now_nsec();
         impl_->send_replica_message(current_epoch_id_.load(), [&](replication::message_log_entries &msg) {
             msg.add_remove_storage(storage_id, write_version);
         });
+        uint64_t end = now_nsec();
+        LOG_LP(INFO) << "log_channel::remove_storage() took " << (end - start) / 1000 << "us, replication took " << (end - start_replication) / 1000 << "us";
     } catch (...) {
         TRACE_ABORT;
         HANDLE_EXCEPTION_AND_ABORT();
@@ -202,10 +233,14 @@ void log_channel::remove_storage(storage_id_type storage_id, write_version_type 
 void log_channel::truncate_storage(storage_id_type storage_id, write_version_type write_version) {
     TRACE_START << "storage_id=" << storage_id << ", epoch =" << write_version.epoch_number_ << ", minor =" << write_version.minor_write_version_;
     try {
+        uint64_t start = now_nsec();
         log_entry::write_clear_storage(strm_, storage_id, write_version);
+        uint64_t start_replication = now_nsec();
         impl_->send_replica_message(current_epoch_id_.load(), [&](replication::message_log_entries &msg) {
             msg.add_clear_storage(storage_id, write_version);
         });
+        uint64_t end = now_nsec();
+        LOG_LP(INFO) << "log_channel::truncate_storage() took " << (end - start) / 1000 << "us, replication took " << (end - start_replication) / 1000 << "us";
     } catch (...) {
         TRACE_ABORT;
         HANDLE_EXCEPTION_AND_ABORT();

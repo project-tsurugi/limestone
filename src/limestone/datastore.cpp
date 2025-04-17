@@ -39,6 +39,7 @@
 #include "blob_file_scanner.h"
 #include "datastore_impl.h"
 #include "log_channel_impl.h"
+#include "now_nsec.h"
 namespace limestone::api {
 using namespace limestone::internal;
 
@@ -179,6 +180,7 @@ static void write_epoch_to_file_internal(const std::string& file_path, epoch_id_
 
 void datastore::persist_and_propagate_epoch_id(epoch_id_type epoch_id) {
     TRACE_START << "epoch_id=" << epoch_id;
+    uint64_t start = now_nsec();
     if (++epoch_write_counter >= max_entries_in_epoch_file) {
         write_epoch_to_file_internal(tmp_epoch_file_path_.string(), epoch_id, file_write_mode::overwrite);
 
@@ -196,7 +198,10 @@ void datastore::persist_and_propagate_epoch_id(epoch_id_type epoch_id) {
     } else {
         write_epoch_to_file_internal(epoch_file_path_.string(), epoch_id, file_write_mode::append);
     }
+    uint64_t start_replication = now_nsec();
     impl_->propagate_group_commit(epoch_id);
+    uint64_t end = now_nsec();
+    LOG_LP(INFO) << "datastore::persist_and_propagate_epoch_id() took " << (end - start) / 1000 << "us, replication took " << (end - start_replication) / 1000 << "us";
     TRACE_END;
 }
 
@@ -270,6 +275,7 @@ epoch_id_type datastore::last_epoch() const noexcept { return static_cast<epoch_
 
 void datastore::switch_epoch(epoch_id_type new_epoch_id) {
     TRACE_FINE_START << "new_epoch_id=" << new_epoch_id;
+    uint64_t start = now_nsec();
     try {
         check_after_ready(static_cast<const char*>(__func__));
         auto neid = static_cast<std::uint64_t>(new_epoch_id);
@@ -286,6 +292,8 @@ void datastore::switch_epoch(epoch_id_type new_epoch_id) {
         TRACE_FINE_ABORT;
         HANDLE_EXCEPTION_AND_ABORT();
     }
+    uint64_t end = now_nsec();
+    LOG_LP(INFO) << "datastore::switch_epoch() took " << (end - start) / 1000 << "us";
     TRACE_FINE_END;
 }
 
