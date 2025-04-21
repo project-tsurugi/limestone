@@ -275,7 +275,6 @@ epoch_id_type datastore::last_epoch() const noexcept { return static_cast<epoch_
 
 void datastore::switch_epoch(epoch_id_type new_epoch_id) {
     TRACE_FINE_START << "new_epoch_id=" << new_epoch_id;
-    uint64_t start = now_nsec();
     try {
         check_after_ready(static_cast<const char*>(__func__));
         auto neid = static_cast<std::uint64_t>(new_epoch_id);
@@ -292,8 +291,6 @@ void datastore::switch_epoch(epoch_id_type new_epoch_id) {
         TRACE_FINE_ABORT;
         HANDLE_EXCEPTION_AND_ABORT();
     }
-    uint64_t end = now_nsec();
-    LOG_LP(INFO) << "datastore::switch_epoch() took " << (end - start) / 1000 << "us";
     TRACE_FINE_END;
 }
 
