@@ -14,16 +14,17 @@
  * limitations under the License.
  */
 
-
+#include "replica_connector.h"
 
 #include <netdb.h>
+#include <netinet/tcp.h>
 #include <sys/socket.h>
 #include <sys/types.h>
 #include <unistd.h>
 
 #include <cstring>
 #include <sstream>
-#include "replica_connector.h"
+
 #include "blob_socket_io.h"
 #include "limestone_exception_helper.h"
 #include "replication_message.h"
@@ -59,6 +60,14 @@ bool replica_connector::connect_to_server_common(const std::string &host, uint16
         freeaddrinfo(*res);
         ::close(socket_fd);
         return false;
+    }
+
+    int opt = 1;
+    if (setsockopt(socket_fd, SOL_SOCKET, SO_KEEPALIVE, &opt, sizeof(opt)) < 0) {
+        LOG_LP(FATAL) << "Warning: failed to set SO_KEEPALIVE: " << strerror(errno);
+    }
+    if (setsockopt(socket_fd, IPPROTO_TCP, TCP_NODELAY, &opt, sizeof(opt)) < 0) {
+        LOG_LP(FATAL) << "Warning: failed to set TCP_NODELAY: " << strerror(errno);
     }
 
     return true;
