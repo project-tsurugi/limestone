@@ -42,7 +42,7 @@ void setup_initial_logdir(const boost::filesystem::path& logdir) {
     // Create manifest file
     nlohmann::json manifest_v2 = {
         { "format_version", "1.0" },
-        { "persistent_format_version", 3}
+        { "persistent_format_version", 4}
     };
     boost::filesystem::path config = logdir / std::string(manifest_file_name);
     FILE* strm = fopen(config.c_str(), "w");  // NOLINT(*-owning-memory)
@@ -91,10 +91,10 @@ int is_supported_version(const boost::filesystem::path& manifest_path, std::stri
         auto version = manifest["persistent_format_version"];
         if (version.is_number_integer()) {
             int v = version;
-            if (1 <= v && v <= 3) {
+            if (1 <= v && v <= 4) {
                 return v;  // supported
             }
-            errmsg = "version mismatch: version " + version.dump() + ", server supports version 1 or 2";
+            errmsg = "version mismatch: version " + version.dump() + ", server supports version are 1 through 4";
             return 0;
         }
         errmsg = "invalid manifest file, invalid persistent_format_version: " + version.dump();
@@ -157,9 +157,9 @@ void check_and_migrate_logdir_format(const boost::filesystem::path& logdir) {
         LOG(ERROR) << "/:limestone dbdir is corrupted, can not use.";
         THROW_LIMESTONE_EXCEPTION("logdir corrupted");
     }
-    if (vc < 3) {
-        // migrate to version 3
-        VLOG_LP(log_info) << "migrating from version " << vc << " to version 2";
+    if (vc < 4) {
+        // migrate to version 4
+        VLOG_LP(log_info) << "migrating from version " << vc << " to version 4";
         boost::filesystem::rename(manifest_path, manifest_backup_path, ec);
         if (ec) {
             std::string err_msg = "Failed to rename manifest file: " + manifest_path.string() + " to " + manifest_backup_path.string() + ". Error: " + ec.message();
