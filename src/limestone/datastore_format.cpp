@@ -94,7 +94,7 @@ int is_supported_version(const boost::filesystem::path& manifest_path, std::stri
             if (1 <= v && v <= 4) {
                 return v;  // supported
             }
-            errmsg = "version mismatch: version " + version.dump() + ", server supports version are 1 through 4";
+            errmsg = "version mismatch: version " + version.dump() + ", server supports versions 1 through 4";
             return 0;
         }
         errmsg = "invalid manifest file, invalid persistent_format_version: " + version.dump();
