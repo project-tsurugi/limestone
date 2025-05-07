@@ -31,7 +31,9 @@ void race_condition_test_manager::set_random_seed(unsigned int seed) {
 void race_condition_test_manager::run() {
     std::lock_guard<std::mutex> lock(mutex_);
     size_t thread_id_counter = 100;
-    for (const auto& [method, count] : test_methods_) {
+    for (const auto p : test_methods_) {
+        auto method = p.first;
+        size_t count = p.second;
         for (size_t i = 0; i < count; ++i) {
             size_t current_id = thread_id_counter++;
             threads_.emplace_back([this, method, current_id]() {
