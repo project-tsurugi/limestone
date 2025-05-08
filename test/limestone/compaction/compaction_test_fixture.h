@@ -348,7 +348,7 @@ protected:
         return ::testing::AssertionFailure() << oss.str();
     }
 
-    void create_mainfest_file(int persistent_format_version = 1) {
+    void create_manifest_file(int persistent_format_version = 1) {
         create_file(manifest_path, data_manifest(persistent_format_version));
         if (persistent_format_version > 1) {
             compaction_catalog catalog{location};
