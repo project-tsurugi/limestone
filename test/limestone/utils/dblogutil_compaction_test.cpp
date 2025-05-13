@@ -6,7 +6,7 @@
 #include <boost/filesystem.hpp>
 
 #include "dblog_scan.h"
-#include "internal.h"
+#include "manifest.h"
 #include "log_entry.h"
 
 #include "test_root.h"
@@ -110,7 +110,7 @@ TEST_F(dblogutil_compaction_test, case1force) {
     dir /= "log";
     boost::filesystem::create_directory(dir);
     create_file(dir / "epoch", data_case1_epoch);
-    create_file(dir / std::string(manifest_file_name), data_manifest());
+    create_file(dir / std::string(manifest::file_name), data_manifest());
     create_file(dir / "pwal_0000", data_case1_pwal0);
     create_file(dir / "pwal_0001", data_case1_pwal1);
     std::string command;
@@ -128,7 +128,7 @@ TEST_F(dblogutil_compaction_test, case1prompt) {
     dir /= "log";
     boost::filesystem::create_directory(dir);
     create_file(dir / "epoch", data_case1_epoch);
-    create_file(dir / std::string(manifest_file_name), data_manifest());
+    create_file(dir / std::string(manifest::file_name), data_manifest());
     create_file(dir / "pwal_0000", data_case1_pwal0);
     create_file(dir / "pwal_0001", data_case1_pwal1);
     std::string command;
@@ -177,7 +177,7 @@ TEST_F(dblogutil_compaction_test, rejects_symlink) {
     dir /= "log";
     boost::filesystem::create_directory(dir);
     create_file(dir / "epoch", data_case1_epoch);
-    create_file(dir / std::string(manifest_file_name), data_manifest());
+    create_file(dir / std::string(manifest::file_name), data_manifest());
     create_file(dir / "pwal_0000", data_case1_pwal0);
     create_file(dir / "pwal_0001", data_case1_pwal1);
 

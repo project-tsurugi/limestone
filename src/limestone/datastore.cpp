@@ -39,6 +39,7 @@
 #include "blob_file_scanner.h"
 #include "datastore_impl.h"
 #include "log_channel_impl.h"
+#include "manifest.h"
 namespace limestone::api {
 using namespace limestone::internal;
 
@@ -50,7 +51,7 @@ datastore::datastore(configuration const& conf) : location_(conf.data_locations_
         LOG(INFO) << "/:limestone:config:datastore setting log location = " << location_.string();
         boost::system::error_code error;
         const bool result_check = boost::filesystem::exists(location_, error);
-        boost::filesystem::path manifest_path = boost::filesystem::path(location_) / std::string(internal::manifest_file_name);
+        boost::filesystem::path manifest_path = boost::filesystem::path(location_) / std::string(internal::manifest::file_name);
         boost::filesystem::path compaction_catalog_path= boost::filesystem::path(location_) / compaction_catalog::get_catalog_filename();
         if (!result_check || error) {
             const bool result_mkdir = boost::filesystem::create_directory(location_, error);
@@ -76,7 +77,7 @@ datastore::datastore(configuration const& conf) : location_(conf.data_locations_
         internal::check_and_migrate_logdir_format(location_);
 
         // acquire lock for manifest file
-        fd_for_flock_ = internal::acquire_manifest_lock(location_);
+        fd_for_flock_ = manifest::acquire_lock(location_);
         if (fd_for_flock_ == -1) {
             if (errno == EWOULDBLOCK) {
                 std::string err_msg = "another process is using the log directory: " + location_.string();
@@ -519,7 +520,7 @@ std::unique_ptr<backup_detail> datastore::begin_backup(backup_type btype) {  // 
                     break;
                 }
                 case 'l': {
-                    if (filename == internal::manifest_file_name) {
+                    if (filename == internal::manifest::file_name) {
                         entries.emplace_back(ent.string(), dst, true, false);
                     } else {
                         // unknown type

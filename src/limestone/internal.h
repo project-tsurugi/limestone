@@ -59,24 +59,14 @@ std::optional<epoch_id_type> last_durable_epoch(const boost::filesystem::path& f
 
 // from datastore_format.cpp
 
-inline constexpr const std::string_view manifest_file_name = "limestone-manifest.json";
-inline constexpr const std::string_view manifest_file_backup_name = "limestone-manifest.json.back";
-
 void setup_initial_logdir(const boost::filesystem::path& logdir);
-
-/**
- * @returns positive-integer: ok supported, zero: not supported, negative-integer: error, corrupted
- */
-int is_supported_version(const boost::filesystem::path& manifest_path, std::string& errmsg);
 
 // Validates the manifest file in the specified log directory and performs repair or migration if necessary.
 void check_and_migrate_logdir_format(const boost::filesystem::path& logdir);
 
-// Acquires an exclusive lock on the manifest file.
-// Returns the file descriptor on success, or -1 on failure.
-// Note: This function does not log errors or handle them internally.
-//       The caller must check the return value and use errno for error handling.
-int acquire_manifest_lock(const boost::filesystem::path& logdir);
+// Ensures that the compaction catalog exists in the specified log directory.
+void ensure_compaction_catalog(const boost::filesystem::path& logdir);
+
 
 // from datastore_restore.cpp
 
@@ -106,8 +96,6 @@ std::set<std::string> assemble_snapshot_input_filenames(const std::unique_ptr<co
 std::set<std::string> assemble_snapshot_input_filenames(const std::unique_ptr<compaction_catalog>& compaction_catalog, const boost::filesystem::path& location);
 
 void cleanup_rotated_epoch_files(const boost::filesystem::path& directory);
-
-bool exists_path(const boost::filesystem::path& path);
 
 // filepath.cpp
 

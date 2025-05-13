@@ -25,6 +25,7 @@
 #include "internal.h"
 #include "log_entry.h"
 #include "limestone_exception_helper.h"
+#include "manifest.h"
 
 using namespace limestone::api;
 using namespace limestone::internal;
@@ -290,7 +291,7 @@ int main(char *dir, subcommand mode) {  // NOLINT
     }
     try {
         check_and_migrate_logdir_format(p);
-        int lock_fd = acquire_manifest_lock(p);
+        int lock_fd = manifest::acquire_lock(p);
         if (lock_fd == -1) {
             LOG(ERROR) << "Log directory " << p
                        << " is already in use by another process. Operation aborted.";

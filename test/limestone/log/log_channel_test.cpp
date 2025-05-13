@@ -18,6 +18,7 @@
 #include "internal.h"
 #include "log_entry.h"
 #include "test_root.h"
+#include "manifest.h"
 #include "limestone/api/epoch_id_type.h"
 
 #define LOGFORMAT_VER 2
@@ -97,7 +98,7 @@ TEST_F(log_channel_test, number_and_backup) {
 #endif
     EXPECT_EQ(files.at(i++).string(), std::string(location) + "/epoch");
 #if LOGFORMAT_VER >= 1
-    EXPECT_EQ(files.at(i++).string(), std::string(location) + "/" + std::string(limestone::internal::manifest_file_name));
+    EXPECT_EQ(files.at(i++).string(), std::string(location) + "/" + std::string(limestone::internal::manifest::file_name));
 #endif
     EXPECT_EQ(files.at(i++).string(), std::string(location) + "/pwal_0000");
     EXPECT_EQ(files.at(i++).string(), std::string(location) + "/pwal_0001");

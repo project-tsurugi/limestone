@@ -8,6 +8,7 @@
 #include "dblog_scan.h"
 #include "internal.h"
 #include "log_entry.h"
+#include "manifest.h"
 #include "test_root.h"
 
 using namespace std::literals;
@@ -26,7 +27,7 @@ extern const std::string_view data_nondurable;
 class log_dir_test : public ::testing::Test {
 public:
 static constexpr const char* location = "/tmp/log_dir_test";
-const boost::filesystem::path manifest_path = boost::filesystem::path(location) / std::string(limestone::internal::manifest_file_name);
+const boost::filesystem::path manifest_path = boost::filesystem::path(location) / std::string(limestone::internal::manifest::file_name);
 const boost::filesystem::path compaction_catalog_path = boost::filesystem::path(location) / "compaction_catalog";
 
     void SetUp() {
@@ -153,7 +154,7 @@ TEST_F(log_dir_test, rotate_old_ok_v1_dir) {
         LOG(FATAL) << "cannot make directory";
     }
     create_file(bk_path / "epoch", epoch_0_str);
-    create_file(bk_path / std::string(limestone::internal::manifest_file_name), data_manifest(1));
+    create_file(bk_path / std::string(limestone::internal::manifest::file_name), data_manifest(1));
 
     gen_datastore();
 
@@ -167,7 +168,7 @@ TEST_F(log_dir_test, rotate_old_rejects_unsupported_data) {
         LOG(FATAL) << "cannot make directory";
     }
     create_file(bk_path / "epoch", epoch_0_str);
-    create_file(bk_path / std::string(limestone::internal::manifest_file_name), data_manifest(5));
+    create_file(bk_path / std::string(limestone::internal::manifest::file_name), data_manifest(5));
 
     gen_datastore();
 
@@ -194,7 +195,7 @@ TEST_F(log_dir_test, rotate_old_rejects_corrupted_dir) {
         LOG(FATAL) << "cannot make directory";
     }
     create_file(bk_path / "epoch", epoch_0_str);
-    create_file(bk_path / std::string(limestone::internal::manifest_file_name),
+    create_file(bk_path / std::string(limestone::internal::manifest::file_name),
                 "{ \"answer\": 42 }");
 
     gen_datastore();
@@ -209,11 +210,11 @@ TEST_F(log_dir_test, rotate_prusik_ok_v1_dir) {
         LOG(FATAL) << "cannot make directory";
     }
     create_file(bk_path / "epoch", epoch_0_str);
-    create_file(bk_path / std::string(limestone::internal::manifest_file_name), data_manifest(1));
+    create_file(bk_path / std::string(limestone::internal::manifest::file_name), data_manifest(1));
     // setup entries
     std::vector<limestone::api::file_set_entry> entries;
     entries.emplace_back("epoch", "epoch", false);
-    entries.emplace_back(std::string(limestone::internal::manifest_file_name), std::string(limestone::internal::manifest_file_name), false);
+    entries.emplace_back(std::string(limestone::internal::manifest::file_name), std::string(limestone::internal::manifest::file_name), false);
 
     gen_datastore();
 
@@ -227,11 +228,11 @@ TEST_F(log_dir_test, rotate_prusik_rejects_unsupported_data) {
         LOG(FATAL) << "cannot make directory";
     }
     create_file(bk_path / "epoch", epoch_0_str);
-    create_file(bk_path / std::string(limestone::internal::manifest_file_name), data_manifest(5));
+    create_file(bk_path / std::string(limestone::internal::manifest::file_name), data_manifest(5));
     // setup entries
     std::vector<limestone::api::file_set_entry> entries;
     entries.emplace_back("epoch", "epoch", false);
-    entries.emplace_back(std::string(limestone::internal::manifest_file_name), std::string(limestone::internal::manifest_file_name), false);
+    entries.emplace_back(std::string(limestone::internal::manifest::file_name), std::string(limestone::internal::manifest::file_name), false);
 
     gen_datastore();
 
@@ -261,12 +262,12 @@ TEST_F(log_dir_test, rotate_prusik_rejects_corrupted_dir) {
         LOG(FATAL) << "cannot make directory";
     }
     create_file(bk_path / "epoch", epoch_0_str);
-    create_file(bk_path / std::string(limestone::internal::manifest_file_name),
+    create_file(bk_path / std::string(limestone::internal::manifest::file_name),
                 "{ \"answer\": 42 }");
     // setup entries
     std::vector<limestone::api::file_set_entry> entries;
     entries.emplace_back("epoch", "epoch", false);
-    entries.emplace_back(std::string(limestone::internal::manifest_file_name), std::string(limestone::internal::manifest_file_name), false);
+    entries.emplace_back(std::string(limestone::internal::manifest::file_name), std::string(limestone::internal::manifest::file_name), false);
 
     gen_datastore();
 
@@ -398,12 +399,12 @@ TEST_F(log_dir_test, exists_path_returns_true_for_existing_file) {
     create_file(manifest_path, data_manifest());
 
     // Test that exists_path returns true for an existing file
-    EXPECT_TRUE(limestone::internal::exists_path(manifest_path));
+    EXPECT_TRUE(boost::filesystem::exists(manifest_path));
 }
 
 TEST_F(log_dir_test, exists_path_returns_false_for_non_existing_file) {
     // Test that exists_path returns false for a non-existing file
-    EXPECT_FALSE(limestone::internal::exists_path(manifest_path));
+    EXPECT_FALSE(boost::filesystem::exists(manifest_path));
 }
 
 
