@@ -20,6 +20,8 @@
 #include <nlohmann/json.hpp>
 #include <string_view>
 
+#include "file_operations.h"
+
 namespace limestone::internal {
 
 class manifest {
@@ -34,13 +36,23 @@ public:
     static constexpr const char *version_error_prefix = "/:limestone unsupported dbdir persistent format version: "
             "see https://github.com/project-tsurugi/tsurugidb/blob/master/docs/upgrade-guide.md";
 
-
     /**
      * @brief Initializes the manifest.
      *
      * @param logdir The path specifying the directory to be used for logging.
      */
     static void create_initial(const boost::filesystem::path& logdir);
+
+    /**
+     * @brief Initializes the manifest, with an injectable file-ops backend.
+     *
+     * @note  This overload is intended for unit tests or special environments
+     *        where the behavior of file operations must be stubbed or mocked.
+     *
+     * @param logdir The path specifying the directory to be used for logging.
+     * @param ops    Custom file_operations implementation (e.g. a test stub).
+     */
+    static void create_initial(const boost::filesystem::path& logdir, file_operations& ops);
 
     /**
      * @brief Acquires an exclusive lock on the manifest file.
@@ -53,6 +65,19 @@ public:
      */
     static int acquire_lock(const boost::filesystem::path& logdir);
 
+
+    /**
+     * @brief Acquires an exclusive lock on the manifest file, with injectable I/O backend.
+     *
+     * @note This overload is intended for unit tests or special environments
+     *       where the file-opening and locking behavior must be stubbed or mocked.
+     *
+     * @param logdir The path to the log directory containing the manifest file.
+     * @param ops    Custom file_operations implementation (e.g. a test stub).
+     * @return The file descriptor on success; returns -1 on failure, with errno set.
+     */
+    static int acquire_lock(const boost::filesystem::path& logdir, file_operations& ops);
+
     /**
      * @brief Checks whether the manifest at the given path has a supported format version.
      *
@@ -63,12 +88,27 @@ public:
     static int is_supported_version(const boost::filesystem::path& manifest_path, std::string& errmsg);
 
 
-    // Validates the manifest file in the specified log directory and performs repair or migration if necessary.
+    /**
+     * @brief Validates the manifest file in the specified log directory and performs repair or migration if necessary.
+     *
+     * @param logdir Path to the log directory containing the manifest file.
+     */
     static void check_and_migrate(const boost::filesystem::path& logdir);
+
+    /**
+     * @brief Validates and migrates the manifest file, with injectable I/O backend.
+     *
+     * @note This overload is intended for unit tests or special environments
+     *       where file-system operations (rename/remove) must be stubbed or mocked.
+     *
+     * @param logdir Path to the log directory containing the manifest file.
+     * @param ops    Custom file_operations implementation (e.g. a test stub).
+     */ 
+    static void check_and_migrate(const boost::filesystem::path& logdir, file_operations& ops);
+
 
 private:
     static bool exists_path(const boost::filesystem::path& path);
 };
 
 } // namespace limestone::internal
-

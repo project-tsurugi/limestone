@@ -28,46 +28,56 @@
 namespace limestone::internal {
 
 void manifest::create_initial(const boost::filesystem::path& logdir) {
-    nlohmann::json manifest_v2 = {
+    real_file_operations default_ops;
+    create_initial(logdir, default_ops);
+}    
+
+void manifest::create_initial(const boost::filesystem::path& logdir, file_operations& ops) {
+    nlohmann::json manifest_json = {
         {"format_version", "1.0"},
         {"persistent_format_version", 4}
     };
     boost::filesystem::path config = logdir / std::string(file_name);
 
-    FILE* strm = fopen(config.c_str(), "w");  // NOLINT(*-owning-memory)
+    FILE* strm = ops.fopen(config.c_str(), "w");  // NOLINT(*-owning-memory)
     if (!strm) {
         std::string err_msg = "Failed to open file for writing: " + config.string();
         LOG_AND_THROW_IO_EXCEPTION(err_msg, errno);
     }
-    std::string manifest_str = manifest_v2.dump(4);
-    auto ret = fwrite(manifest_str.c_str(), manifest_str.length(), 1, strm);
+    std::string manifest_str = manifest_json.dump(4);
+    auto ret = ops.fwrite(manifest_str.c_str(), manifest_str.length(), 1, strm);
     if (ret != 1) {
         std::string err_msg = "Failed to write to file: " + config.string();
         LOG_AND_THROW_IO_EXCEPTION(err_msg, errno);
     }
-    if (fflush(strm) != 0) {
+    if (ops.fflush(strm) != 0) {
         std::string err_msg = "Failed to flush file buffer: " + config.string();
         LOG_AND_THROW_IO_EXCEPTION(err_msg, errno);
     }
-    if (fsync(fileno(strm)) != 0) {
+    if (ops.fsync(fileno(strm)) != 0) {
         std::string err_msg = "Failed to sync file to disk: " + config.string();
         LOG_AND_THROW_IO_EXCEPTION(err_msg, errno);
     }
-    if (fclose(strm) != 0) {  // NOLINT(*-owning-memory)
+    if (ops.fclose(strm) != 0) {  // NOLINT(*-owning-memory)
         std::string err_msg = "Failed to close file: " + config.string();
         LOG_AND_THROW_IO_EXCEPTION(err_msg, errno);
     }
 }
 
 int manifest::acquire_lock(const boost::filesystem::path& logdir) {
+    real_file_operations default_ops;
+    return acquire_lock(logdir, default_ops);
+}
+
+int manifest::acquire_lock(const boost::filesystem::path& logdir, file_operations& ops) {
     boost::filesystem::path manifest_path = logdir / std::string(file_name);
-    int fd = ::open(manifest_path.c_str(), O_RDWR);// NOLINT(hicpp-vararg, cppcoreguidelines-pro-type-vararg)
+    int fd = ops.open(manifest_path.c_str(), O_RDWR);// NOLINT(hicpp-vararg, cppcoreguidelines-pro-type-vararg)
     if (fd == -1) {
         return -1;
     }
 
-    if (::flock(fd, LOCK_EX | LOCK_NB) == -1) {
-        ::close(fd);
+    if (ops.flock(fd, LOCK_EX | LOCK_NB) == -1) {
+        ops.close(fd);
         return -1;
     }
     VLOG_LP(log_info) << "acquired lock on manifest file: " << manifest_path.string();
@@ -102,6 +112,11 @@ int manifest::is_supported_version(const boost::filesystem::path& manifest_path,
 }
 
 void manifest::check_and_migrate(const boost::filesystem::path& logdir) {
+    real_file_operations default_ops;
+    check_and_migrate(logdir, default_ops);
+}
+
+void manifest::check_and_migrate(const boost::filesystem::path& logdir, file_operations& ops) {
     boost::filesystem::path manifest_path = logdir / std::string(file_name);
     boost::filesystem::path manifest_backup_path = logdir / std::string(backup_file_name);
     boost::system::error_code ec;
@@ -109,7 +124,7 @@ void manifest::check_and_migrate(const boost::filesystem::path& logdir) {
     if (!exists_path(manifest_path) && exists_path(manifest_backup_path)) {
         VLOG_LP(log_info) << "Manifest file is missing, but a backup file exists at " << manifest_backup_path.string()
                           << ". Using the backup file as the manifest by renaming it to " << manifest_path.string();
-        boost::filesystem::rename(manifest_backup_path, manifest_path, ec);
+        ops.rename(manifest_backup_path, manifest_path, ec);
         if (ec) {
             std::string err_msg =
                 "Failed to rename manifest backup from " + manifest_backup_path.string() + " to " + manifest_path.string();
@@ -119,7 +134,7 @@ void manifest::check_and_migrate(const boost::filesystem::path& logdir) {
 
     if (exists_path(manifest_path) && exists_path(manifest_backup_path)) {
         VLOG_LP(log_info) << "both manifest and backup manifest file exists, removing backup manifest file";
-        boost::filesystem::remove(manifest_backup_path, ec);
+        ops.remove(manifest_backup_path, ec);
         if (ec) {
             std::string err_msg = "Failed to remove backup manifest file: " + manifest_backup_path.string();
             LOG_AND_THROW_IO_EXCEPTION(err_msg, ec);
@@ -131,7 +146,7 @@ void manifest::check_and_migrate(const boost::filesystem::path& logdir) {
         THROW_LIMESTONE_EXCEPTION(std::string(version_error_prefix) + " (version mismatch: version 0, server supports version 1)");
     }
     std::string errmsg;
-    int vc = manifest::is_supported_version(manifest_path, errmsg);
+    int vc = is_supported_version(manifest_path, errmsg);
     if (vc == 0) {
         LOG(ERROR) << version_error_prefix << " (" << errmsg << ")";
         THROW_LIMESTONE_EXCEPTION("logdir version mismatch");
@@ -144,14 +159,14 @@ void manifest::check_and_migrate(const boost::filesystem::path& logdir) {
     if (vc < 4) {
         // migrate to version 4
         VLOG_LP(log_info) << "migrating from version " << vc << " to version 4";
-        boost::filesystem::rename(manifest_path, manifest_backup_path, ec);
+        ops.rename(manifest_path, manifest_backup_path, ec);
         if (ec) {
             std::string err_msg = "Failed to rename manifest file: " + manifest_path.string() + " to " + manifest_backup_path.string() + ". Error: " + ec.message();
             LOG_AND_THROW_IO_EXCEPTION(err_msg, ec);
         }
         create_initial(logdir);
         VLOG_LP(log_info) << "migration done";
-        boost::filesystem::remove(manifest_backup_path, ec);
+        ops.remove(manifest_backup_path, ec);
         if (ec) {
             std::string err_msg = "Failed to remove backup manifest file: " + manifest_backup_path.string() + ". Error: " + ec.message();
             LOG_AND_THROW_IO_EXCEPTION(err_msg, ec);
