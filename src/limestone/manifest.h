@@ -27,7 +27,6 @@ namespace limestone::internal {
 class manifest {
 public:
     manifest() = default;
-    ~manifest() noexcept = default;
 
     // Manifest file names as static constants
     static constexpr std::string_view file_name        = "limestone-manifest.json";

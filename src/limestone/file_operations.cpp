@@ -79,7 +79,7 @@ int real_file_operations::flock(int fd, int operation) {
 }
 
 int real_file_operations::open(const char* filename, int flags) {
-    return ::open(filename, flags);
+    return ::open(filename, flags); // NOLINT(cppcoreguidelines-pro-type-vararg,hicpp-vararg)
 }
 
 int real_file_operations::close(int fd) {
