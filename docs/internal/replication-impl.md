@@ -259,3 +259,78 @@ persistent_callbackが呼ばれるようになる。
 
 * ソケットバッファのサイズ
 
+
+
+## configuration_id
+
+### 基本方針
+
+* `configuration_id`とはレプリカが正しいマスタと接続しているかを確認するために使用するID
+* レプリケーション機能の(利用)有無にかかわらず、データストアの初期化時にUUIDを生成する。
+  このUUIDを、`instance_uuid`と呼ぶ。
+* `instance_uuid`は`limestone-manifest.json`に記録する。
+* 現状の、`limestone-manifest.json`は以下の通り(固定値)
+    ```json
+    {
+        "format_version": "1.0",
+        "persistent_format_version": 3
+    }
+    ```  
+* これを以下のように変更する。
+  * "format_version"は、`limestone-manifest.json`のフォーマットバージョンを表す。これを"1.0"から"1.1"に変更する。
+  * 新たに項目、"instance_uuid"を追加する。
+  * "instance_uuid"はRFC 4122 バージョン4の 36 文字表記（16進数32桁＋ハイフン4個）とする。
+    * `boost::uuids::to_string`で出力される文字列を使用する。
+  * 例
+  ```json
+  {
+      "format_version": "1.1",
+      "persistent_format_version": 3,
+      "instance_uuid": "550e8400-e29b-41d4-a716-446655440000"
+  } 
+  ```
+
+* **configuration_id** は、`limestone-manifest.json` を
+  **正規化した JSON 文字列そのもの** を指す。
+  - 構成要素: `format_version`, `persistent_format_version`, `instance_uuid`
+  - これらのいずれかが異なれば別インスタンスとみなす。
+  - 将来、`limestone-manifest.json` に新たな項目を追加する場合は、その項目を
+    `configuration_id` に含める必要があるかを個別に検討する。
+  - 正規化の方法については実装時に決定するものとしここでは議論しない。  
+
+* マイグレーション方針
+  * 起動時に、"format_version": "1.0"であれば、無条件に"format_version": "1.1"に変更し、"instance_uuid"を追加する。
+  * `limestone-manifest.json`を安全に更新するための仕組みは、"persistent_format_version"のマイグレーション用に作成したロジックをそのまま使用する。
+
+* バックアップ、リストア
+  * バックアップ、リストア対象の変更はないので、特に考慮しなくてもよい。
+  * リストア時には`limestone-manifest.json`のマイグレーションは行わない。リストア後の最初の起動で必要なら`limestone-manifest.json`のマイグレーションを行われる。
+
+* レプリカの起動時に、`limestone-manifest.json`のマイグレーションを行う。
+* マスタからレプリカに接続する場合、レプリカはマスタから送信されたconfiguration_idが、自らのconfiguration_idと一致するかを確認する。一致しない場合、接続に失敗する。
+* レプリカがデータファイルをもたない場合は、configuration_idのチェックのうち、`instance_uuid`のチェックを行わない。
+* "format_version", "persistent_format_version"は想定通りかをチェックを行う。
+* サーバから送られた`instance_uuid`を用いて `limestone-manifest.json`を生成する。
+
+
+### 実装方針
+
+既存コードを次のように修正する。
+
+* 新規に`limestone-manifest.json`を作成する場合は、上記のように生成する。
+* 初期化時に、`limestone-manifest.json`を読み、"persistent_format_version"のチェックを行っている処理に次の処理を追加する。
+  * "format_version": "1.0",の場合、"format_version": "1.1"に変更し、"instance_uuid"を追加する。
+* configuration_idは`datastore`クラスのフィールドとして保持する。
+  * 具体的な内容は実装時に決定する。ここでは議論しない。
+
+
+#### テスト項目
+
+UT作成時にテストを漏らさないためのメモ。この他にもテストが必要なので、
+これだけテストすればよいという意味ではない。
+
+
+- v1.0 manifest で起動 → v1.1 + instance_uuid が自動生成される
+- マスタ v1.1 とレプリカ v1.0 → レプリカ側で自動マイグレーション後に接続成功
+- configuration_id 不一致 → 接続拒否 (ログに理由)
+- レプリカ無ファイル → 初回接続で manifest が生成され、再起動不要

@@ -30,8 +30,8 @@ TEST(message_ack_test, round_trip) {
     replication_message::send(out, original);
 
     socket_io in(out.get_out_string());
-    auto received = dynamic_cast<message_ack*>(
-        replication_message::receive(in).get());
+    auto received_ptr = replication_message::receive(in);
+    auto* received = dynamic_cast<message_ack*>(received_ptr.get());
     ASSERT_NE(received, nullptr);
 }
 
