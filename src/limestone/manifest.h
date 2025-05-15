@@ -131,7 +131,7 @@ public:
      *
      * @return std::string The JSON representation of the object's state.
      */
-    std::string to_json_string() const;
+    [[nodiscard]] std::string to_json_string() const;
 
     /**
      * @brief Constructs a manifest object from a JSON string.
@@ -144,14 +144,14 @@ public:
      * @return A manifest object populated with data extracted from the JSON string.
      * @throws std::runtime_error if the JSON parsing fails or if the JSON does not represent a valid manifest.
      */
-    static manifest from_json_string(const std::string& json_str);
+    [[nodiscard]] static manifest from_json_string(const std::string& json_str);
 
     /**
      * @brief Returns the format version of the manifest.
      *
      * @return const reference to the format version string.
      */
-    const std::string& get_format_version() const;
+    [[nodiscard]] const std::string& get_format_version() const;
 
     /**
      * @brief Sets the format version of the manifest.
@@ -165,7 +165,7 @@ public:
      *
      * @return persistent format version as integer.
      */
-    int get_persistent_format_version() const;
+    [[nodiscard]] int get_persistent_format_version() const;
 
     /**
      * @brief Sets the persistent format version of the manifest.
