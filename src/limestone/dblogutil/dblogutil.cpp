@@ -290,8 +290,8 @@ int main(char *dir, subcommand mode) {  // NOLINT
         log_and_exit(64);
     }
     try {
-        check_and_migrate_logdir_format(p);
         int lock_fd = manifest::acquire_lock(p);
+        check_and_migrate_logdir_format(p);
         if (lock_fd == -1) {
             LOG(ERROR) << "Log directory " << p
                        << " is already in use by another process. Operation aborted.";

@@ -80,7 +80,7 @@ TEST_F(log_dir_test, newly_created_directory_contains_manifest_file) {
 TEST_F(log_dir_test, reject_directory_without_manifest_file) {
     create_file(boost::filesystem::path(location) / "epoch", epoch_0_str);
 
-    EXPECT_THROW({ gen_datastore(); }, std::exception);
+    EXPECT_DEATH({ gen_datastore(); }, "failed to acquire lock for manifest in directory");  
 }
 
 TEST_F(log_dir_test, reject_directory_with_broken_manifest_file) {
