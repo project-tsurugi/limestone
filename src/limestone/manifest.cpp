@@ -175,13 +175,67 @@ void manifest::check_and_migrate(const boost::filesystem::path& logdir, file_ope
 }
 
 bool manifest::exists_path(const boost::filesystem::path& path) {
+    real_file_operations default_ops;
+    return exists_path_with_ops(path, default_ops);
+}
+
+
+bool manifest::exists_path_with_ops(const boost::filesystem::path& path, file_operations& ops) {
     boost::system::error_code ec;
-    bool ret = boost::filesystem::exists(path, ec);
+    bool ret = ops.exists(path, ec);
     if (!ret && ec != boost::system::errc::no_such_file_or_directory) {
         std::string err_msg = "Failed to check if file exists: " + path.string();
         LOG_AND_THROW_IO_EXCEPTION(err_msg, ec);
     }
     return ret;
 }
+
+// setter/getter
+void manifest::set_format_version(const std::string& version) {
+    format_version_ = version;
+}
+const std::string& manifest::get_format_version() const {
+    return format_version_;
+}
+void manifest::set_persistent_format_version(int version) {
+    persistent_format_version_ = version;   
+}
+int manifest::get_persistent_format_version() const {
+    return persistent_format_version_;       
+}
+
+std::string manifest::to_json_string() const {
+    nlohmann::json j = {
+        {"format_version", format_version_},
+        {"persistent_format_version", persistent_format_version_}
+    };
+    return j.dump();
+}
+
+
+manifest manifest::from_json_string(const std::string& json_str) {
+    try {
+        nlohmann::json j = nlohmann::json::parse(json_str);
+
+        manifest m;
+        try {
+            m.set_format_version(j.at("format_version").get<std::string>());
+        } catch (const std::exception& e) {
+            LOG_AND_THROW_EXCEPTION(std::string("missing or invalid 'format_version' in manifest json: ") + e.what());
+        }
+        try {
+            m.set_persistent_format_version(j.at("persistent_format_version").get<int>());
+        } catch (const std::exception& e) {
+            LOG_AND_THROW_EXCEPTION(std::string("missing or invalid 'persistent_format_version' in manifest json: ") + e.what());
+        }
+        return m;
+
+    } catch (const nlohmann::json::parse_error& e) {
+        LOG_AND_THROW_EXCEPTION(std::string("failed to parse manifest json (invalid JSON format): ") + e.what());
+    }
+}
+
+
+
 
 } // namespace limestone::internal

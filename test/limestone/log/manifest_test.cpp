@@ -488,5 +488,129 @@ TEST_F(manifest_test, check_and_migrate_throws_on_corrupted_manifest) {
     }
 }
 
+class exists_error_file_ops : public limestone::internal::real_file_operations {
+public:
+    bool exists(const boost::filesystem::path& path, boost::system::error_code& ec) override {
+        ec = boost::system::errc::make_error_code(boost::system::errc::permission_denied); // 例: permission_denied
+        return false;
+    }
+};
+
+class manifest_test_access : public limestone::internal::manifest {
+public:
+    using limestone::internal::manifest::exists_path_with_ops;
+};
+
+TEST_F(manifest_test, exists_path_throws_on_filesystem_error) {
+    boost::filesystem::path some_path = "/tmp/xxx";
+    exists_error_file_ops ops;
+    EXPECT_THROW(
+        manifest_test_access::exists_path_with_ops(some_path, ops),
+        limestone::api::limestone_io_exception
+    );
+}
+
+// Test that getter/setter for format_version work correctly
+TEST_F(manifest_test, format_version_getter_setter) {
+    manifest m;
+    m.set_format_version("1.5");
+    EXPECT_EQ(m.get_format_version(), "1.5");
+}
+
+// Test that getter/setter for persistent_format_version work correctly
+TEST_F(manifest_test, persistent_format_version_getter_setter) {
+    manifest m;
+    m.set_persistent_format_version(42);
+    EXPECT_EQ(m.get_persistent_format_version(), 42);
+}
+
+// Test to_json_string produces valid JSON string
+TEST_F(manifest_test, to_json_string_outputs_valid_json) {
+    manifest m;
+    m.set_format_version("A.B.C");
+    m.set_persistent_format_version(777);
+
+    std::string json_str = m.to_json_string();
+    nlohmann::json j = nlohmann::json::parse(json_str);
+
+    ASSERT_TRUE(j.contains("format_version"));
+    EXPECT_EQ(j["format_version"].get<std::string>(), "A.B.C");
+
+    ASSERT_TRUE(j.contains("persistent_format_version"));
+    EXPECT_EQ(j["persistent_format_version"].get<int>(), 777);
+}
+
+// Test from_json_string parses valid JSON and populates fields
+TEST_F(manifest_test, from_json_string_parses_json_and_sets_fields) {
+    nlohmann::json j = {
+        {"format_version", "2.3.4"},
+        {"persistent_format_version", 1234}
+    };
+    std::string json_str = j.dump();
+
+    manifest m = manifest::from_json_string(json_str);
+
+    EXPECT_EQ(m.get_format_version(), "2.3.4");
+    EXPECT_EQ(m.get_persistent_format_version(), 1234);
+}
+
+// Test to_json_string and from_json_string are consistent (round-trip)
+TEST_F(manifest_test, to_json_string_and_from_json_string_round_trip) {
+    manifest m1;
+    m1.set_format_version("9.9.9");
+    m1.set_persistent_format_version(999);
+
+    std::string json_str = m1.to_json_string();
+    manifest m2 = manifest::from_json_string(json_str);
+
+    EXPECT_EQ(m1.get_format_version(), m2.get_format_version());
+    EXPECT_EQ(m1.get_persistent_format_version(), m2.get_persistent_format_version());
+}
+
+// Test from_json_string throws when format_version is missing
+TEST_F(manifest_test, from_json_string_throws_if_format_version_missing) {
+    nlohmann::json j = {{"persistent_format_version", 4}};
+    std::string json_str = j.dump();
+
+    EXPECT_THROW(
+        manifest::from_json_string(json_str),
+        limestone::api::limestone_exception
+    );
+}
+
+// Test from_json_string throws when persistent_format_version is missing
+TEST_F(manifest_test, from_json_string_throws_if_persistent_format_version_missing) {
+    nlohmann::json j = {{"format_version", "X.Y.Z"}};
+    std::string json_str = j.dump();
+
+    EXPECT_THROW(
+        manifest::from_json_string(json_str),
+        limestone::api::limestone_exception
+    );
+}
+
+// Test from_json_string throws when JSON is invalid
+TEST_F(manifest_test, from_json_string_throws_on_invalid_json) {
+    std::string json_str = "{ not: json }";
+    EXPECT_THROW(
+        manifest::from_json_string(json_str),
+        limestone::api::limestone_exception
+    );
+}
+
+// Test from_json_string throws when types are invalid
+TEST_F(manifest_test, from_json_string_throws_on_invalid_type) {
+    nlohmann::json j = {
+        {"format_version", 123}, // not a string
+        {"persistent_format_version", "abc"} // not an int
+    };
+    std::string json_str = j.dump();
+
+    EXPECT_THROW(
+        manifest::from_json_string(json_str),
+        limestone::api::limestone_exception
+    );
+}
+
 
 }  // namespace limestone::testing

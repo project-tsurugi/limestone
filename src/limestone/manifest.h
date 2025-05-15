@@ -105,9 +105,80 @@ public:
      */ 
     static void check_and_migrate(const boost::filesystem::path& logdir, file_operations& ops);
 
+    /**
+     * @brief Converts the current object state to a JSON formatted string.
+     *
+     * This function serializes the object's internal state into a JSON string,
+     * allowing for easy data interchange or logging in a standardized format.
+     *
+     * @return std::string The JSON representation of the object's state.
+     */
+    std::string to_json_string() const;
+
+    /**
+     * @brief Constructs a manifest object from a JSON string.
+     *
+     * This function parses the provided JSON-formatted string and converts it into
+     * a manifest object. It ensures that the JSON string adheres to the expected format
+     * for a manifest, performing necessary validations and transformations.
+     *
+     * @param json_str A valid JSON string representing the manifest.
+     * @return A manifest object populated with data extracted from the JSON string.
+     * @throws std::runtime_error if the JSON parsing fails or if the JSON does not represent a valid manifest.
+     */
+    static manifest from_json_string(const std::string& json_str);
+
+    /**
+     * @brief Returns the format version of the manifest.
+     *
+     * @return const reference to the format version string.
+     */
+    const std::string& get_format_version() const;
+
+    /**
+     * @brief Sets the format version of the manifest.
+     *
+     * @param value The format version string to set.
+     */
+    void set_format_version(const std::string& version);
+
+    /**
+     * @brief Returns the persistent format version of the manifest.
+     *
+     * @return persistent format version as integer.
+     */
+    int get_persistent_format_version() const;
+
+    /**
+     * @brief Sets the persistent format version of the manifest.
+     *
+     * @param value The persistent format version to set.
+     */
+    void set_persistent_format_version(int version);
+
+protected:
+    /**
+     * @brief Internal helper for testing: checks whether a file exists using the specified file_operations.
+     *
+     * This overload is intended solely for unit tests or test-specific stubs.
+     * Production code should always use exists_path(const boost::filesystem::path& path).
+     *
+     * @param path The file path to check.
+     * @param ops  The file_operations implementation to use (e.g. a test stub).
+     * @return true if the file exists, false otherwise.
+     * @throws limestone_io_exception on I/O errors (other than file not found).
+     *
+     * @note This function is protected and exists only for testing purposes.
+     *       Do not call it from production code except in tests.
+     */
+    static bool exists_path_with_ops(const boost::filesystem::path& path, file_operations& ops);
 
 private:
     static bool exists_path(const boost::filesystem::path& path);
+
+    std::string format_version_;
+    int persistent_format_version_;
 };
+
 
 } // namespace limestone::internal
