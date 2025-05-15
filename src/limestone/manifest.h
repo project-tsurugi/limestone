@@ -33,25 +33,41 @@ public:
     static constexpr const char *version_error_prefix = "/:limestone unsupported dbdir persistent format version: "
             "see https://github.com/project-tsurugi/tsurugidb/blob/master/docs/upgrade-guide.md";
 
-            /**
+    /**
      * @brief Default format version for new manifest files.
      * @note Update this value when upgrading the manifest format version.
      */
-    static constexpr const char* default_format_version = "1.0";
+    static constexpr const char* default_format_version = "1.1";
 
     /**
      * @brief Default persistent format version for new manifest files.
      * @note Update this value when upgrading the manifest persistent format version.
      */
-    static constexpr int default_persistent_format_version = 4;
+    static constexpr int default_persistent_format_version = 5;
 
-        /**
+    /**
      * @brief Constructs a manifest object with the default version information.
      *
      * Initializes the manifest using the current default format version and persistent format version.
      * These defaults are defined as static constexpr members of this class.
      */
     manifest();
+
+    public:
+    /**
+     * @brief Constructs a manifest object with specified values (for testing or advanced use).
+     *
+     * This constructor allows explicit setting of all manifest fields for testing or special purposes.
+     *
+     * @param format_version           The format version string.
+     * @param persistent_format_version The persistent format version as integer.
+     * @param instance_uuid            The instance UUID string (RFC 4122 version 4 format).
+     *
+     * @note This constructor is intended primarily for unit tests or advanced usage. 
+     *       Production code should normally use the default constructor and standard initialization methods.
+     */
+    manifest(const std::string& format_version, int persistent_format_version, const std::string& instance_uuid);
+
 
     /**
      * @brief Initializes the manifest.
@@ -154,13 +170,6 @@ public:
     [[nodiscard]] const std::string& get_format_version() const;
 
     /**
-     * @brief Sets the format version of the manifest.
-     *
-     * @param value The format version string to set.
-     */
-    void set_format_version(const std::string& version);
-
-    /**
      * @brief Returns the persistent format version of the manifest.
      *
      * @return persistent format version as integer.
@@ -168,11 +177,13 @@ public:
     [[nodiscard]] int get_persistent_format_version() const;
 
     /**
-     * @brief Sets the persistent format version of the manifest.
+     * @brief Returns the instance UUID of the manifest.
      *
-     * @param value The persistent format version to set.
+     * @return const reference to the instance UUID string (RFC 4122 version 4 format).
      */
-    void set_persistent_format_version(int version);
+    [[nodiscard]] const std::string& get_instance_uuid() const;
+
+
 
 protected:
     /**
@@ -194,8 +205,10 @@ protected:
 private:
     static bool exists_path(const boost::filesystem::path& path);
 
+
     std::string format_version_;
     int persistent_format_version_;
+    std::string instance_uuid_;
 };
 
 

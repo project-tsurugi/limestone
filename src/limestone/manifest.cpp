@@ -1,5 +1,5 @@
 /*
- * Copyright 2023-2023 Project Tsurugi.
+ * Copyright 2023-2025 Project Tsurugi.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -14,22 +14,35 @@
  * limitations under the License.
  */
 
- #include "manifest.h"
-#include <sys/file.h>
+#include "manifest.h"
+
 #include <fcntl.h>
+#include <glog/logging.h>
+#include <sys/file.h>
 #include <unistd.h>
+
+#include <boost/uuid/uuid.hpp>
+#include <boost/uuid/uuid_generators.hpp>
+#include <boost/uuid/uuid_io.hpp>
 #include <fstream>
 #include <sstream>
-#include <glog/logging.h>
-#include "logging_helper.h"
-#include "limestone_exception_helper.h"
+
 #include "compaction_catalog.h"
+#include "limestone_exception_helper.h"
+#include "logging_helper.h"
 
 namespace limestone::internal {
 
 manifest::manifest()
     : format_version_(default_format_version)
     , persistent_format_version_(default_persistent_format_version)
+    , instance_uuid_(boost::uuids::to_string(boost::uuids::random_generator()()))
+{}
+
+manifest::manifest(const std::string& format_version, int persistent_format_version, const std::string& instance_uuid)
+    : format_version_(format_version)
+    , persistent_format_version_(persistent_format_version)
+    , instance_uuid_(instance_uuid)
 {}
 
 void manifest::create_initial(const boost::filesystem::path& logdir) {
@@ -101,7 +114,7 @@ int manifest::is_supported_version(const boost::filesystem::path& manifest_path,
         std::string json_str((std::istreambuf_iterator<char>(istrm)), std::istreambuf_iterator<char>());
         manifest m = manifest::from_json_string(json_str);
         int v = m.get_persistent_format_version();
-        if (1 <= v && v <= 4) {
+        if (1 <= v && v <= manifest::default_persistent_format_version) {
             return v;  // Supported version
         }
         errmsg = "version mismatch: version " + std::to_string(v) + ", server supports versions 1 through 4";
@@ -194,17 +207,14 @@ bool manifest::exists_path_with_ops(const boost::filesystem::path& path, file_op
 }
 
 // setter/getter
-void manifest::set_format_version(const std::string& version) {
-    format_version_ = version;
-}
 const std::string& manifest::get_format_version() const {
     return format_version_;
 }
-void manifest::set_persistent_format_version(int version) {
-    persistent_format_version_ = version;   
-}
 int manifest::get_persistent_format_version() const {
     return persistent_format_version_;       
+}
+const std::string& manifest::get_instance_uuid() const {
+    return instance_uuid_;
 }
 
 std::string manifest::to_json_string() const {
@@ -212,27 +222,42 @@ std::string manifest::to_json_string() const {
         {"format_version", format_version_},
         {"persistent_format_version", persistent_format_version_}
     };
+    if (format_version_ != "1.0") {
+        j["instance_uuid"] = instance_uuid_;
+    }
     return j.dump();
 }
+
 
 
 manifest manifest::from_json_string(const std::string& json_str) {
     try {
         nlohmann::json j = nlohmann::json::parse(json_str);
 
-        manifest m;
+        std::string format_version;
+        int persistent_format_version;
+        std::string instance_uuid;
+
         try {
-            m.set_format_version(j.at("format_version").get<std::string>());
+            format_version = j.at("format_version").get<std::string>();
         } catch (const std::exception& e) {
             LOG_AND_THROW_EXCEPTION(std::string("missing or invalid 'format_version' in manifest json: ") + e.what());
         }
         try {
-            m.set_persistent_format_version(j.at("persistent_format_version").get<int>());
+            persistent_format_version = j.at("persistent_format_version").get<int>();
         } catch (const std::exception& e) {
             LOG_AND_THROW_EXCEPTION(std::string("missing or invalid 'persistent_format_version' in manifest json: ") + e.what());
         }
-        return m;
-
+        if (format_version == "1.0") {
+            instance_uuid = "";
+        } else {
+            try {
+                instance_uuid = j.at("instance_uuid").get<std::string>();
+            } catch (const std::exception& e) {
+                LOG_AND_THROW_EXCEPTION(std::string("missing or invalid 'instance_uuid' in manifest json: ") + e.what());
+            }
+        }
+        return manifest(format_version, persistent_format_version, instance_uuid);
     } catch (const nlohmann::json::parse_error& e) {
         LOG_AND_THROW_EXCEPTION(std::string("failed to parse manifest json (invalid JSON format): ") + e.what());
     }

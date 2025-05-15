@@ -1,9 +1,12 @@
+#include "manifest.h"
+
 #include <gtest/gtest.h>
+
 #include <boost/filesystem.hpp>
 #include <fstream>
 #include <nlohmann/json.hpp>
+#include <regex>
 
-#include "manifest.h"
 #include "limestone/api/limestone_exception.h"
 
 namespace limestone::testing {
@@ -40,10 +43,10 @@ TEST_F(manifest_test, create_initial_creates_manifest_file_with_correct_content)
     ASSERT_NO_THROW(ifs >> j);
 
     ASSERT_TRUE(j.contains("format_version"));
-    EXPECT_EQ(j["format_version"].get<std::string>(), "1.0");
+    EXPECT_EQ(j["format_version"].get<std::string>(), manifest::default_format_version);
 
     ASSERT_TRUE(j.contains("persistent_format_version"));
-    EXPECT_EQ(j["persistent_format_version"].get<int>(), 4);
+    EXPECT_EQ(j["persistent_format_version"].get<int>(), manifest::default_persistent_format_version);
 }
 
 // Tests that create_initial() throws limestone_io_exception when logdir path is a file
@@ -355,7 +358,7 @@ TEST_F(manifest_test, check_and_migrate_migrates_old_version_to_latest) {
     // After migration: new manifest has version 4, backup removed
     std::ifstream ifs((logdir / std::string(manifest::file_name)).string());
     nlohmann::json updated; ifs >> updated;
-    EXPECT_EQ(updated["persistent_format_version"].get<int>(), 4);
+    EXPECT_EQ(updated["persistent_format_version"].get<int>(), manifest::default_persistent_format_version);
 
     auto backup_path = logdir / std::string(manifest::backup_file_name);
     EXPECT_FALSE(boost::filesystem::exists(backup_path));
@@ -510,25 +513,22 @@ TEST_F(manifest_test, exists_path_throws_on_filesystem_error) {
     );
 }
 
-// Test that getter/setter for format_version work correctly
-TEST_F(manifest_test, format_version_getter_setter) {
+// Test that get_format_version returns default value for a new manifest
+TEST_F(manifest_test, format_version_getter_returns_default) {
     manifest m;
-    m.set_format_version("1.5");
-    EXPECT_EQ(m.get_format_version(), "1.5");
+    EXPECT_EQ(m.get_format_version(), "1.1");  // default_format_version で良い
 }
 
-// Test that getter/setter for persistent_format_version work correctly
-TEST_F(manifest_test, persistent_format_version_getter_setter) {
+
+// Test that get_persistent_format_version returns default value for a new manifest
+TEST_F(manifest_test, persistent_format_version_getter_returns_default) {
     manifest m;
-    m.set_persistent_format_version(42);
-    EXPECT_EQ(m.get_persistent_format_version(), 42);
+    EXPECT_EQ(m.get_persistent_format_version(), manifest::default_persistent_format_version);  // default_persistent_format_version
 }
 
 // Test to_json_string produces valid JSON string
 TEST_F(manifest_test, to_json_string_outputs_valid_json) {
-    manifest m;
-    m.set_format_version("A.B.C");
-    m.set_persistent_format_version(777);
+    manifest m("A.B.C", 777, "123e4567-e89b-12d3-a456-426614174000");
 
     std::string json_str = m.to_json_string();
     nlohmann::json j = nlohmann::json::parse(json_str);
@@ -540,11 +540,13 @@ TEST_F(manifest_test, to_json_string_outputs_valid_json) {
     EXPECT_EQ(j["persistent_format_version"].get<int>(), 777);
 }
 
+
 // Test from_json_string parses valid JSON and populates fields
 TEST_F(manifest_test, from_json_string_parses_json_and_sets_fields) {
     nlohmann::json j = {
         {"format_version", "2.3.4"},
-        {"persistent_format_version", 1234}
+        {"persistent_format_version", 1234},
+        {"instance_uuid", "01234567-89ab-cdef-0123-456789abcdef"}
     };
     std::string json_str = j.dump();
 
@@ -552,20 +554,21 @@ TEST_F(manifest_test, from_json_string_parses_json_and_sets_fields) {
 
     EXPECT_EQ(m.get_format_version(), "2.3.4");
     EXPECT_EQ(m.get_persistent_format_version(), 1234);
+    EXPECT_EQ(m.get_instance_uuid(), "01234567-89ab-cdef-0123-456789abcdef");
 }
 
 // Test to_json_string and from_json_string are consistent (round-trip)
 TEST_F(manifest_test, to_json_string_and_from_json_string_round_trip) {
-    manifest m1;
-    m1.set_format_version("9.9.9");
-    m1.set_persistent_format_version(999);
+    manifest m1("9.9.9", 999, "01234567-89ab-cdef-0123-456789abcdef");
 
     std::string json_str = m1.to_json_string();
     manifest m2 = manifest::from_json_string(json_str);
 
     EXPECT_EQ(m1.get_format_version(), m2.get_format_version());
     EXPECT_EQ(m1.get_persistent_format_version(), m2.get_persistent_format_version());
+    EXPECT_EQ(m1.get_instance_uuid(), m2.get_instance_uuid());
 }
+
 
 // Test from_json_string throws when format_version is missing
 TEST_F(manifest_test, from_json_string_throws_if_format_version_missing) {
@@ -611,6 +614,62 @@ TEST_F(manifest_test, from_json_string_throws_on_invalid_type) {
         limestone::api::limestone_exception
     );
 }
+
+TEST_F(manifest_test, to_json_string_format_1_0_no_instance_uuid) {
+    manifest m("1.0", 4, "");
+    std::string json_str = m.to_json_string();
+    nlohmann::json j = nlohmann::json::parse(json_str);
+    EXPECT_FALSE(j.contains("instance_uuid"));
+}
+
+
+TEST_F(manifest_test, to_json_string_format_1_1_outputs_instance_uuid) {
+    manifest m("1.1", 4, "01234567-89ab-cdef-0123-456789abcdef");
+    std::string json_str = m.to_json_string();
+    nlohmann::json j = nlohmann::json::parse(json_str);
+    EXPECT_TRUE(j.contains("instance_uuid"));
+    EXPECT_EQ(j["instance_uuid"].get<std::string>(), "01234567-89ab-cdef-0123-456789abcdef");
+}
+
+
+TEST_F(manifest_test, default_constructor_generates_valid_uuid) {
+    manifest m;
+    std::string uuid = m.get_instance_uuid();
+    // UUID の形式（8-4-4-4-12の36文字/ハイフン区切り）をざっくり正規表現で
+    std::regex uuid_regex(
+        "^[a-fA-F0-9]{8}-"
+        "[a-fA-F0-9]{4}-"
+        "[a-fA-F0-9]{4}-"
+        "[a-fA-F0-9]{4}-"
+        "[a-fA-F0-9]{12}$"
+    );
+    EXPECT_TRUE(std::regex_match(uuid, uuid_regex)) << "Generated UUID: " << uuid;
+}
+
+TEST_F(manifest_test, from_json_string_format_1_0_no_instance_uuid) {
+    nlohmann::json j = {
+        {"format_version", "1.0"},
+        {"persistent_format_version", 4}
+    };
+    std::string json_str = j.dump();
+    manifest m = manifest::from_json_string(json_str);
+    EXPECT_EQ(m.get_format_version(), "1.0");
+    EXPECT_EQ(m.get_instance_uuid(), "");
+}
+
+TEST_F(manifest_test, from_json_string_format_1_1_missing_instance_uuid_throws) {
+    nlohmann::json j = {
+        {"format_version", "1.1"},
+        {"persistent_format_version", 4}
+        // instance_uuid 欠落
+    };
+    std::string json_str = j.dump();
+    EXPECT_THROW(
+        manifest::from_json_string(json_str),
+        limestone::api::limestone_exception
+    );
+}
+
 
 
 }  // namespace limestone::testing
