@@ -27,16 +27,23 @@
 
 namespace limestone::internal {
 
+manifest::manifest()
+    : format_version_(default_format_version)
+    , persistent_format_version_(default_persistent_format_version)
+{}
+
 void manifest::create_initial(const boost::filesystem::path& logdir) {
     real_file_operations default_ops;
     create_initial(logdir, default_ops);
 }    
 
 void manifest::create_initial(const boost::filesystem::path& logdir, file_operations& ops) {
-    nlohmann::json manifest_json = {
-        {"format_version", "1.0"},
-        {"persistent_format_version", 4}
-    };
+    // Create a manifest instance with the default version information
+    manifest m;
+
+    // Serialize the manifest object to a JSON string
+    std::string manifest_str = m.to_json_string();
+
     boost::filesystem::path config = logdir / std::string(file_name);
 
     FILE* strm = ops.fopen(config.c_str(), "w");  // NOLINT(*-owning-memory)
@@ -44,7 +51,6 @@ void manifest::create_initial(const boost::filesystem::path& logdir, file_operat
         std::string err_msg = "Failed to open file for writing: " + config.string();
         LOG_AND_THROW_IO_EXCEPTION(err_msg, errno);
     }
-    std::string manifest_str = manifest_json.dump(4);
     auto ret = ops.fwrite(manifest_str.c_str(), manifest_str.length(), 1, strm);
     if (ret != 1) {
         std::string err_msg = "Failed to write to file: " + config.string();
@@ -90,22 +96,18 @@ int manifest::is_supported_version(const boost::filesystem::path& manifest_path,
         errmsg = "cannot open for read " + manifest_path.string();
         return 0;
     }
-    nlohmann::json manifest;
+
     try {
-        istrm >> manifest;
-        auto version = manifest["persistent_format_version"];
-        if (version.is_number_integer()) {
-            int v = version;
-            if (1 <= v && v <= 4) {
-                return v;  // supported
-            }
-            errmsg = "version mismatch: version " + version.dump() + ", server supports versions 1 through 4";
-            return 0;
+        std::string json_str((std::istreambuf_iterator<char>(istrm)), std::istreambuf_iterator<char>());
+        manifest m = manifest::from_json_string(json_str);
+        int v = m.get_persistent_format_version();
+        if (1 <= v && v <= 4) {
+            return v;  // Supported version
         }
-        errmsg = "invalid manifest file, invalid persistent_format_version: " + version.dump();
-        return -1;
-    } catch (nlohmann::json::exception& e) {
-        errmsg = "invalid manifest file, JSON parse error: ";
+        errmsg = "version mismatch: version " + std::to_string(v) + ", server supports versions 1 through 4";
+        return 0;
+    } catch (const std::exception& e) {
+        errmsg = "invalid manifest file, parse error: ";
         errmsg.append(e.what());
         return -1;
     }
@@ -133,7 +135,7 @@ void manifest::check_and_migrate(const boost::filesystem::path& logdir, file_ope
     }
 
     if (exists_path(manifest_path) && exists_path(manifest_backup_path)) {
-        VLOG_LP(log_info) << "both manifest and backup manifest file exists, removing backup manifest file";
+        VLOG_LP(log_info) << "Both manifest and backup manifest file exist, removing backup manifest file";
         ops.remove(manifest_backup_path, ec);
         if (ec) {
             std::string err_msg = "Failed to remove backup manifest file: " + manifest_backup_path.string();
@@ -142,9 +144,10 @@ void manifest::check_and_migrate(const boost::filesystem::path& logdir, file_ope
     }
 
     if (!exists_path(manifest_path)) {
-        VLOG_LP(log_info) << "no manifest file in logdir, maybe v0";
+        VLOG_LP(log_info) << "No manifest file in logdir, maybe v0";
         THROW_LIMESTONE_EXCEPTION(std::string(version_error_prefix) + " (version mismatch: version 0, server supports version 1)");
     }
+
     std::string errmsg;
     int vc = is_supported_version(manifest_path, errmsg);
     if (vc == 0) {
@@ -156,16 +159,15 @@ void manifest::check_and_migrate(const boost::filesystem::path& logdir, file_ope
         LOG(ERROR) << "/:limestone dbdir is corrupted, can not use.";
         THROW_LIMESTONE_EXCEPTION("logdir corrupted");
     }
-    if (vc < 4) {
-        // migrate to version 4
-        VLOG_LP(log_info) << "migrating from version " << vc << " to version 4";
+    if (vc < default_persistent_format_version) {
+        VLOG_LP(log_info) << "Migrating from version " << vc << " to version " << default_persistent_format_version;
         ops.rename(manifest_path, manifest_backup_path, ec);
         if (ec) {
             std::string err_msg = "Failed to rename manifest file: " + manifest_path.string() + " to " + manifest_backup_path.string() + ". Error: " + ec.message();
             LOG_AND_THROW_IO_EXCEPTION(err_msg, ec);
         }
-        create_initial(logdir);
-        VLOG_LP(log_info) << "migration done";
+        create_initial(logdir, ops);
+        VLOG_LP(log_info) << "Migration done";
         ops.remove(manifest_backup_path, ec);
         if (ec) {
             std::string err_msg = "Failed to remove backup manifest file: " + manifest_backup_path.string() + ". Error: " + ec.message();
@@ -173,6 +175,7 @@ void manifest::check_and_migrate(const boost::filesystem::path& logdir, file_ope
         }
     }
 }
+
 
 bool manifest::exists_path(const boost::filesystem::path& path) {
     real_file_operations default_ops;

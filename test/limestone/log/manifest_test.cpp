@@ -272,7 +272,7 @@ TEST_F(manifest_test, is_supported_version_returns_negative_on_json_parse_error)
     std::string errmsg;
     int v = manifest::is_supported_version(path, errmsg);
     EXPECT_LT(v, 0);
-    EXPECT_NE(errmsg.find("JSON parse error"), std::string::npos);
+    EXPECT_NE(errmsg.find("parse error"), std::string::npos);
 }
 
 TEST_F(manifest_test, is_supported_version_returns_zero_when_file_not_openable) {

@@ -26,14 +26,32 @@ namespace limestone::internal {
 
 class manifest {
 public:
-    manifest() = default;
-
     // Manifest file names as static constants
     static constexpr std::string_view file_name        = "limestone-manifest.json";
     static constexpr std::string_view backup_file_name = "limestone-manifest.json.back";
 
     static constexpr const char *version_error_prefix = "/:limestone unsupported dbdir persistent format version: "
             "see https://github.com/project-tsurugi/tsurugidb/blob/master/docs/upgrade-guide.md";
+
+            /**
+     * @brief Default format version for new manifest files.
+     * @note Update this value when upgrading the manifest format version.
+     */
+    static constexpr const char* default_format_version = "1.0";
+
+    /**
+     * @brief Default persistent format version for new manifest files.
+     * @note Update this value when upgrading the manifest persistent format version.
+     */
+    static constexpr int default_persistent_format_version = 4;
+
+        /**
+     * @brief Constructs a manifest object with the default version information.
+     *
+     * Initializes the manifest using the current default format version and persistent format version.
+     * These defaults are defined as static constexpr members of this class.
+     */
+    manifest();
 
     /**
      * @brief Initializes the manifest.
