@@ -112,18 +112,16 @@ constexpr auto shrink_array(std::array<char, M> arr) {
 
 // N.B. use consteval in C++20
 
-// NOLINTNEXTLINE
+// NOLINTBEGIN
 #define _LOCATION_PREFIX_TO_STREAM(stream)  \
     if (constexpr auto __tmplp = location_prefix(__PRETTY_FUNCTION__, __FUNCTION__); false) {} else \
     if (constexpr auto __tmplplen = std::string_view{__tmplp.data()}.length(); false) {} else \
     if (static constexpr auto __tmplptrim = shrink_array<__tmplplen>(__tmplp); false) {} else \
     stream << std::string_view{__tmplptrim.data(), __tmplplen}
-// NOLINTNEXTLINE
 #define LOG_LP(x)   _LOCATION_PREFIX_TO_STREAM(LOG(x))
-// NOLINTNEXTLINE
 #define VLOG_LP(x)  _LOCATION_PREFIX_TO_STREAM(VLOG(x))
-// NOLINTNEXTLINE
 #define DVLOG_LP(x) _LOCATION_PREFIX_TO_STREAM(DVLOG(x))
+// NOLINTEND
 
 // Cached thread name retrieval
 inline std::string getThreadName() {
