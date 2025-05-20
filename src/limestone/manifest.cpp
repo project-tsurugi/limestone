@@ -39,10 +39,10 @@ manifest::manifest()
     , instance_uuid_(boost::uuids::to_string(boost::uuids::random_generator()()))
 {}
 
-manifest::manifest(const std::string& format_version, int persistent_format_version, const std::string& instance_uuid)
-    : format_version_(format_version)
+manifest::manifest(std::string format_version, int persistent_format_version, std::string instance_uuid)
+    : format_version_(std::move(format_version))
     , persistent_format_version_(persistent_format_version)
-    , instance_uuid_(instance_uuid)
+    , instance_uuid_(std::move(instance_uuid))
 {}
 
 void manifest::create_initial(const boost::filesystem::path& logdir) {
@@ -235,7 +235,7 @@ manifest manifest::from_json_string(const std::string& json_str) {
         nlohmann::json j = nlohmann::json::parse(json_str);
 
         std::string format_version;
-        int persistent_format_version;
+        int persistent_format_version = 0;
         std::string instance_uuid;
 
         try {
@@ -257,7 +257,7 @@ manifest manifest::from_json_string(const std::string& json_str) {
                 LOG_AND_THROW_EXCEPTION(std::string("missing or invalid 'instance_uuid' in manifest json: ") + e.what());
             }
         }
-        return manifest(format_version, persistent_format_version, instance_uuid);
+        return {format_version, persistent_format_version, instance_uuid};
     } catch (const nlohmann::json::parse_error& e) {
         LOG_AND_THROW_EXCEPTION(std::string("failed to parse manifest json (invalid JSON format): ") + e.what());
     }

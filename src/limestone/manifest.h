@@ -53,7 +53,6 @@ public:
      */
     manifest();
 
-    public:
     /**
      * @brief Constructs a manifest object with specified values (for testing or advanced use).
      *
@@ -66,7 +65,7 @@ public:
      * @note This constructor is intended primarily for unit tests or advanced usage. 
      *       Production code should normally use the default constructor and standard initialization methods.
      */
-    manifest(const std::string& format_version, int persistent_format_version, const std::string& instance_uuid);
+    manifest(std::string format_version, int persistent_format_version, std::string instance_uuid);
 
 
     /**
