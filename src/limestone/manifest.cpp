@@ -36,7 +36,7 @@ namespace limestone::internal {
 manifest::manifest()
     : format_version_(default_format_version)
     , persistent_format_version_(default_persistent_format_version)
-    , instance_uuid_(boost::uuids::to_string(boost::uuids::random_generator()()))
+    , instance_uuid_(generate_instance_uuid())
 {}
 
 manifest::manifest(std::string format_version, int persistent_format_version, std::string instance_uuid)
@@ -54,34 +54,41 @@ void manifest::create_initial(const boost::filesystem::path& logdir, file_operat
     // Create a manifest instance with the default version information
     manifest m;
 
-    // Serialize the manifest object to a JSON string
+    boost::filesystem::path config = logdir / std::string(file_name);
+    write_file_safely(config, m, ops);
+}
+
+void manifest::write_file_safely(
+    const boost::filesystem::path& file_path,
+    const limestone::internal::manifest& m,
+    file_operations& ops
+) {
     std::string manifest_str = m.to_json_string();
 
-    boost::filesystem::path config = logdir / std::string(file_name);
-
-    FILE* strm = ops.fopen(config.c_str(), "w");  // NOLINT(*-owning-memory)
+    FILE* strm = ops.fopen(file_path.c_str(), "w");  // NOLINT(*-owning-memory)
     if (!strm) {
-        std::string err_msg = "Failed to open file for writing: " + config.string();
+        std::string err_msg = "Failed to open file for writing: " + file_path.string();
         LOG_AND_THROW_IO_EXCEPTION(err_msg, errno);
     }
     auto ret = ops.fwrite(manifest_str.c_str(), manifest_str.length(), 1, strm);
     if (ret != 1) {
-        std::string err_msg = "Failed to write to file: " + config.string();
+        std::string err_msg = "Failed to write to file: " + file_path.string();
         LOG_AND_THROW_IO_EXCEPTION(err_msg, errno);
     }
     if (ops.fflush(strm) != 0) {
-        std::string err_msg = "Failed to flush file buffer: " + config.string();
+        std::string err_msg = "Failed to flush file buffer: " + file_path.string();
         LOG_AND_THROW_IO_EXCEPTION(err_msg, errno);
     }
     if (ops.fsync(fileno(strm)) != 0) {
-        std::string err_msg = "Failed to sync file to disk: " + config.string();
+        std::string err_msg = "Failed to sync file to disk: " + file_path.string();
         LOG_AND_THROW_IO_EXCEPTION(err_msg, errno);
     }
     if (ops.fclose(strm) != 0) {  // NOLINT(*-owning-memory)
-        std::string err_msg = "Failed to close file: " + config.string();
+        std::string err_msg = "Failed to close file: " + file_path.string();
         LOG_AND_THROW_IO_EXCEPTION(err_msg, errno);
     }
 }
+
 
 int manifest::acquire_lock(const boost::filesystem::path& logdir) {
     real_file_operations default_ops;
@@ -136,24 +143,18 @@ void manifest::check_and_migrate(const boost::filesystem::path& logdir, file_ope
     boost::filesystem::path manifest_backup_path = logdir / std::string(backup_file_name);
     boost::system::error_code ec;
 
-    if (!exists_path(manifest_path) && exists_path(manifest_backup_path)) {
-        VLOG_LP(log_info) << "Manifest file is missing, but a backup file exists at " << manifest_backup_path.string()
-                          << ". Using the backup file as the manifest by renaming it to " << manifest_path.string();
+    boost::optional<manifest> manifest_backup = manifest::load_manifest_from_path(manifest_backup_path, ops);
+    boost::optional<manifest> manifest = manifest::load_manifest_from_path(manifest_path, ops);
+
+    if (!manifest && manifest_backup) {
+        VLOG_LP(log_info) << "Manifest file is missing or corrupted, but a backup file exists at " << manifest_backup_path.string()
+                          << ". Recovering manifest from backup by renaming it to " << manifest_path.string();
         ops.rename(manifest_backup_path, manifest_path, ec);
         if (ec) {
-            std::string err_msg =
-                "Failed to rename manifest backup from " + manifest_backup_path.string() + " to " + manifest_path.string();
+            std::string err_msg = "Failed to rename manifest backup from " + manifest_backup_path.string() + " to " + manifest_path.string();
             LOG_AND_THROW_IO_EXCEPTION(err_msg, ec);
         }
-    }
-
-    if (exists_path(manifest_path) && exists_path(manifest_backup_path)) {
-        VLOG_LP(log_info) << "Both manifest and backup manifest file exist, removing backup manifest file";
-        ops.remove(manifest_backup_path, ec);
-        if (ec) {
-            std::string err_msg = "Failed to remove backup manifest file: " + manifest_backup_path.string();
-            LOG_AND_THROW_IO_EXCEPTION(err_msg, ec);
-        }
+        manifest = manifest_backup;
     }
 
     if (!exists_path(manifest_path)) {
@@ -161,31 +162,73 @@ void manifest::check_and_migrate(const boost::filesystem::path& logdir, file_ope
         THROW_LIMESTONE_EXCEPTION(std::string(version_error_prefix) + " (version mismatch: version 0, server supports version 1)");
     }
 
+    if (!manifest) {
+        std::string err_msg = "Manifest file exists but is corrupted or cannot be parsed: " + manifest_path.string();
+        LOG_AND_THROW_IO_EXCEPTION(err_msg, ec);
+    }
+
+    if (manifest_backup) {
+        VLOG_LP(log_info) << "Removing backup manifest file: " << manifest_backup_path.string();
+        ops.remove(manifest_backup_path, ec);
+        if (ec) {
+            std::string err_msg = "Failed to remove backup manifest file: " + manifest_backup_path.string();
+            LOG_AND_THROW_IO_EXCEPTION(err_msg, ec);
+        }
+    }
+
+
+    
     std::string errmsg;
     int vc = is_supported_version(manifest_path, errmsg);
     if (vc == 0) {
         LOG(ERROR) << version_error_prefix << " (" << errmsg << ")";
         THROW_LIMESTONE_EXCEPTION("logdir version mismatch");
     }
-    if (vc < 0) {
-        VLOG_LP(log_info) << errmsg;
-        LOG(ERROR) << "/:limestone dbdir is corrupted, can not use.";
-        THROW_LIMESTONE_EXCEPTION("logdir corrupted");
+
+
+    int persistent_version = manifest->get_persistent_format_version();
+    if (persistent_version < default_persistent_format_version) {
+        VLOG_LP(log_info) << "Migrating manifest file (safe double-write: backup then main)"
+                          << " from version " << persistent_version << " to " << default_persistent_format_version;
+        migrate_manifest(manifest_path, manifest_backup_path, *manifest, ops);
     }
-    if (vc < default_persistent_format_version) {
-        VLOG_LP(log_info) << "Migrating from version " << vc << " to version " << default_persistent_format_version;
-        ops.rename(manifest_path, manifest_backup_path, ec);
-        if (ec) {
-            std::string err_msg = "Failed to rename manifest file: " + manifest_path.string() + " to " + manifest_backup_path.string() + ". Error: " + ec.message();
-            LOG_AND_THROW_IO_EXCEPTION(err_msg, ec);
-        }
-        create_initial(logdir, ops);
-        VLOG_LP(log_info) << "Migration done";
-        ops.remove(manifest_backup_path, ec);
-        if (ec) {
-            std::string err_msg = "Failed to remove backup manifest file: " + manifest_backup_path.string() + ". Error: " + ec.message();
-            LOG_AND_THROW_IO_EXCEPTION(err_msg, ec);
-        }
+}
+
+// NOTE:
+// If this function (migrate_manifest) is interrupted before completion (e.g., process kill),
+// one of the following states may result:
+//
+// 1. BothOld          : both manifest and backup files have old content
+// 2. MainOldBackupNew : manifest file has old content, backup file has new content
+// 3. BothNew          : both manifest and backup files have new content
+// 4. MainNew          : manifest file has new content, backup file deleted (normal case)
+// 5. BackupCorrupt    : backup file is corrupt, manifest file has old content
+// 6. MainCorrupt      : manifest file is corrupt, backup file has new content
+void manifest::migrate_manifest(
+    const boost::filesystem::path& manifest_path,
+    const boost::filesystem::path& manifest_backup_path,
+    const manifest& old_manifest,
+    file_operations& ops
+) {
+    boost::system::error_code ec;
+    std::string instance_uuid = old_manifest.get_instance_uuid();
+    if (instance_uuid.empty()) {
+        instance_uuid = generate_instance_uuid();
+    }
+
+    manifest new_manifest(
+        default_format_version,
+        default_persistent_format_version,
+        instance_uuid
+    );
+
+    write_file_safely(manifest_backup_path, new_manifest, ops);
+    write_file_safely(manifest_path, new_manifest, ops);
+
+    ops.remove(manifest_backup_path, ec);
+    if (ec) {
+        std::string err_msg = "Failed to remove backup manifest file: " + manifest_backup_path.string() + ". Error: " + ec.message();
+        LOG_AND_THROW_IO_EXCEPTION(err_msg, ec);
     }
 }
 
@@ -263,7 +306,26 @@ manifest manifest::from_json_string(const std::string& json_str) {
     }
 }
 
+boost::optional<manifest> manifest::load_manifest_from_path(const boost::filesystem::path& path, file_operations& ops) {
+    if (!exists_path_with_ops(path, ops)) {
+        return boost::none;
+    }
+    try {
+        std::ifstream istrm(path.string());
+        if (!istrm) {
+            return boost::none;
+        }
+        std::string json_str((std::istreambuf_iterator<char>(istrm)), std::istreambuf_iterator<char>());
+        manifest m = manifest::from_json_string(json_str);
+        return m;
+    } catch (...) {
+        return boost::none;
+    }
+}
 
+std::string manifest::generate_instance_uuid() {
+    return boost::uuids::to_string(boost::uuids::random_generator()());
+}
 
 
 } // namespace limestone::internal

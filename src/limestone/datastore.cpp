@@ -75,7 +75,6 @@ datastore::datastore(configuration const& conf) : location_(conf.data_locations_
             }
         }
 
-        internal::check_and_migrate_logdir_format(location_);
 
         // acquire lock for manifest file
         fd_for_flock_ = manifest::acquire_lock(location_);
@@ -90,6 +89,7 @@ datastore::datastore(configuration const& conf) : location_(conf.data_locations_
             throw limestone_io_exception(exception_type::initialization_failure, err_msg, errno);
         }
 
+        internal::check_and_migrate_logdir_format(location_);
 
         add_file(compaction_catalog_path);
         compaction_catalog_ = std::make_unique<compaction_catalog>(compaction_catalog::from_catalog_file(location_));

@@ -435,25 +435,6 @@ TEST_F(manifest_test, check_and_migrate_remove_backup_failure_when_both_exist) {
     }
 }
 
-// rename manifest->backup fails during migration
-TEST_F(manifest_test, check_and_migrate_rename_manifest_to_backup_failure) {
-    // Prepare: manifest with older version
-    auto manifest_path = logdir / std::string(manifest::file_name);
-    nlohmann::json j = { {"format_version", "1.0"}, {"persistent_format_version", 2} };
-    std::ofstream(manifest_path.string()) << j.dump();
-
-    migrate_file_ops ops;
-    ops.fail_rename_manifest_to_backup = true;
-    try {
-        manifest::check_and_migrate(logdir, ops);
-        FAIL() << "Expected limestone_io_exception";
-    } catch (const limestone::api::limestone_io_exception& e) {
-        std::string what = e.what();
-        EXPECT_NE(what.find("Failed to rename manifest file"), std::string::npos);
-        EXPECT_NE(what.find(std::string(manifest::file_name)), std::string::npos);
-    }
-}
-
 // remove backup after migration fails
 TEST_F(manifest_test, check_and_migrate_remove_backup_after_migration_failure) {
     // Prepare: manifest with older version
@@ -487,7 +468,7 @@ TEST_F(manifest_test, check_and_migrate_throws_on_corrupted_manifest) {
         FAIL() << "Expected limestone_exception for corrupted manifest";
     } catch (const limestone::api::limestone_exception& e) {
         std::string what = e.what();
-        EXPECT_NE(what.find("logdir corrupted"), std::string::npos);
+        EXPECT_NE(what.find("Manifest file exists but is corrupted or cannot be parsed:"), std::string::npos);
     }
 }
 
@@ -670,6 +651,59 @@ TEST_F(manifest_test, from_json_string_format_1_1_missing_instance_uuid_throws) 
     );
 }
 
+TEST_F(manifest_test, load_manifest_from_path_returns_valid_manifest) {
+    nlohmann::json j = {
+        {"format_version", "1.2.3"},
+        {"persistent_format_version", 77},
+        {"instance_uuid", "abcdefab-cdef-1234-5678-abcdefabcdef"}
+    };
+    auto manifest_path = logdir / std::string(manifest::file_name);
+    std::ofstream(manifest_path.string()) << j.dump();
+
+    real_file_operations ops;
+    auto loaded = manifest::load_manifest_from_path(manifest_path, ops);
+    ASSERT_TRUE(loaded);
+    EXPECT_EQ(loaded->get_format_version(), "1.2.3");
+    EXPECT_EQ(loaded->get_persistent_format_version(), 77);
+    EXPECT_EQ(loaded->get_instance_uuid(), "abcdefab-cdef-1234-5678-abcdefabcdef");
+}
+
+TEST_F(manifest_test, load_manifest_from_path_returns_none_if_file_not_exist) {
+    auto manifest_path = logdir / "nonexistent-manifest.json";
+    real_file_operations ops;
+    auto loaded = manifest::load_manifest_from_path(manifest_path, ops);
+    EXPECT_FALSE(loaded);
+}
+
+TEST_F(manifest_test, load_manifest_from_path_returns_none_if_invalid_json) {
+    auto manifest_path = logdir / std::string(manifest::file_name);
+    std::ofstream(manifest_path.string()) << "{ invalid json ";
+    real_file_operations ops;
+    auto loaded = manifest::load_manifest_from_path(manifest_path, ops);
+    EXPECT_FALSE(loaded);
+}
+
+TEST_F(manifest_test, load_manifest_from_path_returns_none_if_missing_required_fields) {
+    nlohmann::json j = { {"format_version", "1.1"} };
+    auto manifest_path = logdir / std::string(manifest::file_name);
+    std::ofstream(manifest_path.string()) << j.dump();
+    real_file_operations ops;
+    auto loaded = manifest::load_manifest_from_path(manifest_path, ops);
+    EXPECT_FALSE(loaded);
+}
+
+TEST_F(manifest_test, load_manifest_from_path_returns_none_if_open_ifstream_fails) {
+    auto manifest_path = logdir / std::string(manifest::file_name);
+    std::ofstream(manifest_path.string()) << "dummy";
+    struct : public real_file_operations {
+        std::unique_ptr<std::ifstream> open_ifstream(const std::string& /*path*/) override {
+            return nullptr;  
+        }
+    } ops;
+
+    auto loaded = manifest::load_manifest_from_path(manifest_path, ops);
+    EXPECT_FALSE(loaded);
+}
 
 
 }  // namespace limestone::testing

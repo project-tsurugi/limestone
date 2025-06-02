@@ -17,6 +17,7 @@
 #pragma once
 
 #include <boost/filesystem.hpp>
+#include <boost/optional.hpp>
 #include <nlohmann/json.hpp>
 #include <string_view>
 
@@ -182,7 +183,18 @@ public:
      */
     [[nodiscard]] const std::string& get_instance_uuid() const;
 
-
+    /**
+     * @brief Loads a manifest object from the specified file path.
+     *
+     * This function attempts to read and parse a manifest file from the given path.
+     * If the file does not exist or parsing fails, boost::none is returned.
+     * On success, a valid manifest object is returned via boost::optional.
+     *
+     * @param path The file system path to the manifest file.
+     * @param ops  The file operations implementation to use (e.g., real or test).
+     * @return boost::optional<manifest>  The manifest object if the file exists and is valid, boost::none otherwise.
+     */
+    static boost::optional<manifest> load_manifest_from_path(const boost::filesystem::path& path, file_operations& ops);
 
 protected:
     /**
@@ -203,7 +215,10 @@ protected:
 
 private:
     static bool exists_path(const boost::filesystem::path& path);
-
+    static void write_file_safely(const boost::filesystem::path& file_path, const manifest& m, file_operations& ops); // safe atomic write for manifest
+    static void migrate_manifest(const boost::filesystem::path& manifest_path, const boost::filesystem::path& manifest_backup_path,
+                                 const manifest& old_manifest, file_operations& ops);
+    static std::string generate_instance_uuid();
 
     std::string format_version_;
     int persistent_format_version_;
