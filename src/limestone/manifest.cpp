@@ -97,6 +97,12 @@ int manifest::acquire_lock(const boost::filesystem::path& logdir) {
 
 int manifest::acquire_lock(const boost::filesystem::path& logdir, file_operations& ops) {
     boost::filesystem::path manifest_path = logdir / std::string(file_name);
+
+    if (!exists_path(manifest_path)) {
+        VLOG_LP(log_info) << "No manifest file in logdir, maybe v0";
+        THROW_LIMESTONE_EXCEPTION(std::string(version_error_prefix) + " (version mismatch: version 0, server supports version 1)");
+    }
+
     int fd = ops.open(manifest_path.c_str(), O_RDWR);// NOLINT(hicpp-vararg, cppcoreguidelines-pro-type-vararg)
     if (fd == -1) {
         return -1;
@@ -155,11 +161,6 @@ void manifest::check_and_migrate(const boost::filesystem::path& logdir, file_ope
             LOG_AND_THROW_IO_EXCEPTION(err_msg, ec);
         }
         manifest = manifest_backup;
-    }
-
-    if (!exists_path(manifest_path)) {
-        VLOG_LP(log_info) << "No manifest file in logdir, maybe v0";
-        THROW_LIMESTONE_EXCEPTION(std::string(version_error_prefix) + " (version mismatch: version 0, server supports version 1)");
     }
 
     if (!manifest) {

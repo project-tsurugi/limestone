@@ -75,7 +75,6 @@ datastore::datastore(configuration const& conf) : location_(conf.data_locations_
             }
         }
 
-
         // acquire lock for manifest file
         fd_for_flock_ = manifest::acquire_lock(location_);
         if (fd_for_flock_ == -1) {

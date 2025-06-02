@@ -201,6 +201,7 @@ public:
 };
 
 TEST_F(manifest_test, acquire_lock_open_fails) {
+    manifest::create_initial(logdir);
     lock_file_ops ops;
     ops.simulate_open_fail = true;
     int ret = manifest::acquire_lock(logdir, ops);
