@@ -79,6 +79,12 @@ public:
     // Set the role to replica (switch from master to replica)
     void set_replica_role() noexcept;
 
+    // Getter for REPLICATION_ASYNC_SESSION_CLOSE environment variable presence
+    [[nodiscard]] bool is_async_session_close_enabled() const noexcept;
+
+    // Getter for REPLICATION_ASYNC_GROUP_COMMIT environment variable presence
+    [[nodiscard]] bool is_async_group_commit_enabled() const noexcept;
+
 private:
     // Atomic counter for tracking active backup operations.
     std::atomic<int> backup_counter_;
@@ -92,6 +98,10 @@ private:
 
     // Replication endpoint to retrieve connection info
     replication::replication_endpoint replication_endpoint_;
+
+    // Environment variable flags
+    bool async_session_close_enabled_;
+    bool async_group_commit_enabled_;
 };
 
 }  // namespace limestone::api

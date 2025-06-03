@@ -16,6 +16,8 @@
 #include "datastore_impl.h"
 #include "limestone/logging.h"
 #include "logging_helper.h"
+#include <cstdlib>
+#include <iostream>
 
 #include "replication/replica_connector.h"
 #include "limestone_exception_helper.h"
@@ -27,7 +29,16 @@ namespace limestone::api {
 
 // Default constructor initializes the backup counter to zero.
 datastore_impl::datastore_impl()
-    : backup_counter_(0), replica_exists_(false) {
+    : backup_counter_(0)
+    , replica_exists_(false)
+    , async_session_close_enabled_(std::getenv("REPLICATION_ASYNC_SESSION_CLOSE") != nullptr)
+    , async_group_commit_enabled_(std::getenv("REPLICATION_ASYNC_GROUP_COMMIT") != nullptr)
+{
+    LOG_LP(INFO) << "REPLICATION_ASYNC_SESSION_CLOSE: "
+                 << (async_session_close_enabled_ ? "enabled" : "disabled");
+    LOG_LP(INFO) << "REPLICATION_ASYNC_GROUP_COMMIT: "
+                 << (async_group_commit_enabled_ ? "enabled" : "disabled");
+
     bool has_replica = replication_endpoint_.is_valid();
     replica_exists_.store(has_replica, std::memory_order_release);
     LOG_LP(INFO) << "Replica " << (has_replica ? "enabled" : "disabled")
@@ -187,6 +198,14 @@ void datastore_impl::set_replica_role() noexcept {
 
 bool datastore_impl::is_master() const noexcept {
     return is_master_;
+}
+
+bool datastore_impl::is_async_session_close_enabled() const noexcept {
+    return async_session_close_enabled_;
+}
+
+bool datastore_impl::is_async_group_commit_enabled() const noexcept {
+    return async_group_commit_enabled_;
 }
 
 }  // namespace limestone::api
