@@ -202,8 +202,18 @@ void datastore::persist_epoch_id(epoch_id_type epoch_id) {
 }
 
 void datastore::persist_and_propagate_epoch_id(epoch_id_type epoch_id) {
-    persist_epoch_id(epoch_id);
-    impl_->propagate_group_commit(epoch_id);
+    TRACE_START << "epoch_id=" << epoch_id;
+    if (impl_->is_async_group_commit_enabled()) {
+        auto fut1 = std::async(std::launch::async, [this, epoch_id] {
+            persist_epoch_id(epoch_id);
+        });
+            impl_->propagate_group_commit(epoch_id);
+        fut1.wait();
+    } else {
+        persist_epoch_id(epoch_id);
+        impl_->propagate_group_commit(epoch_id);
+    }
+    TRACE_END;
 }
 
 void datastore::ready() {
