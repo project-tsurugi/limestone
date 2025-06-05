@@ -179,7 +179,7 @@ static void write_epoch_to_file_internal(const std::string& file_path, epoch_id_
     }
 }
 
-void datastore::persist_and_propagate_epoch_id(epoch_id_type epoch_id) {
+void datastore::persist_epoch_id(epoch_id_type epoch_id) {
     TRACE_START << "epoch_id=" << epoch_id;
     if (++epoch_write_counter >= max_entries_in_epoch_file) {
         write_epoch_to_file_internal(tmp_epoch_file_path_.string(), epoch_id, file_write_mode::overwrite);
@@ -198,7 +198,21 @@ void datastore::persist_and_propagate_epoch_id(epoch_id_type epoch_id) {
     } else {
         write_epoch_to_file_internal(epoch_file_path_.string(), epoch_id, file_write_mode::append);
     }
-    impl_->propagate_group_commit(epoch_id);
+    TRACE_END;
+}
+
+void datastore::persist_and_propagate_epoch_id(epoch_id_type epoch_id) {
+    TRACE_START << "epoch_id=" << epoch_id;
+    if (impl_->is_async_group_commit_enabled()) {
+        auto fut1 = std::async(std::launch::async, [this, epoch_id] {
+            persist_epoch_id(epoch_id);
+        });
+            impl_->propagate_group_commit(epoch_id);
+        fut1.wait();
+    } else {
+        persist_epoch_id(epoch_id);
+        impl_->propagate_group_commit(epoch_id);
+    }
     TRACE_END;
 }
 

@@ -179,6 +179,8 @@ public:
 
     [[nodiscard]] log_channel_impl* get_impl() const noexcept;
 private:
+    void finalize_session_file();
+
     datastore& envelope_;
 
     boost::filesystem::path location_;

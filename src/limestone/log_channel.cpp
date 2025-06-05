@@ -14,21 +14,24 @@
  * limitations under the License.
  */
 
-#include <chrono>
-#include <sstream>
-#include <iomanip>
-
 #include <glog/logging.h>
-#include <limestone/logging.h>
-#include "logging_helper.h"
-#include "limestone_exception_helper.h"
-
-#include <limestone/api/log_channel.h>
 #include <limestone/api/datastore.h>
+#include <limestone/api/log_channel.h>
+#include <limestone/logging.h>
+
+#include <chrono>
+#include <future>
+#include <iomanip>
+#include <sstream>
+#include <thread>
+
 #include "internal.h"
-#include "log_entry.h"
-#include "replication/message_log_entries.h"
+#include "datastore_impl.h"
+#include "limestone_exception_helper.h"
 #include "log_channel_impl.h"
+#include "log_entry.h"
+#include "logging_helper.h"
+#include "replication/message_log_entries.h"
 namespace limestone::api {
 
 log_channel::log_channel(boost::filesystem::path location, std::size_t id, datastore& envelope) noexcept
@@ -85,28 +88,41 @@ void log_channel::begin_session() {
     }
 }
 
+void log_channel::finalize_session_file() {
+    if (fflush(strm_) != 0) {
+        LOG_AND_THROW_IO_EXCEPTION("fflush failed", errno);
+    }
+    if (fsync(fileno(strm_)) != 0) {
+        LOG_AND_THROW_IO_EXCEPTION("fsync failed", errno);
+    }
+    envelope_.on_end_session_finished_epoch_id_store(); // for testing
+    finished_epoch_id_.store(current_epoch_id_.load());
+    envelope_.update_min_epoch_id();
+    envelope_.on_end_session_current_epoch_id_store(); // for testing
+    current_epoch_id_.store(UINT64_MAX);
+
+    if (fclose(strm_) != 0) {  // NOLINT(*-owning-memory)
+        LOG_AND_THROW_IO_EXCEPTION("fclose failed", errno);
+    }
+}
+
 void log_channel::end_session() {
     try {
         TRACE_START << "current_epoch_id_=" << current_epoch_id_.load();
-        if (fflush(strm_) != 0) {
-            LOG_AND_THROW_IO_EXCEPTION("fflush failed", errno);
+        if (envelope_.impl_->is_async_session_close_enabled()) {
+            auto fut = std::async(std::launch::async, [this]() { this->finalize_session_file(); });
+            impl_->send_replica_message(finished_epoch_id_.load(), [&](replication::message_log_entries &msg) {
+                msg.set_session_end_flag(true);
+                msg.set_flush_flag(true);
+            });
+            fut.wait();
+        } else {
+            finalize_session_file();
+            impl_->send_replica_message(finished_epoch_id_.load(), [&](replication::message_log_entries &msg) {
+                msg.set_session_end_flag(true);
+                msg.set_flush_flag(true);
+            });
         }
-        if (fsync(fileno(strm_)) != 0) {
-            LOG_AND_THROW_IO_EXCEPTION("fsync failed", errno);
-        }
-        envelope_.on_end_session_finished_epoch_id_store(); // for testing
-        finished_epoch_id_.store(current_epoch_id_.load());
-        envelope_.update_min_epoch_id();
-        envelope_.on_end_session_current_epoch_id_store(); // for testing
-        current_epoch_id_.store(UINT64_MAX);
-
-        if (fclose(strm_) != 0) {  // NOLINT(*-owning-memory)
-            LOG_AND_THROW_IO_EXCEPTION("fclose failed", errno);
-        }
-        impl_->send_replica_message(finished_epoch_id_.load(), [&](replication::message_log_entries &msg) {
-            msg.set_session_end_flag(true);
-            msg.set_flush_flag(true);
-        });
         TRACE_END;
     } catch (...) {
         TRACE_ABORT;

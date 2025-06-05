@@ -411,6 +411,8 @@ protected:  // for tests
     }
 
 private:
+    void persist_epoch_id(epoch_id_type epoch_id);
+
     std::function<void(epoch_id_type)> write_epoch_callback_{
         [this](epoch_id_type epoch) { this->persist_and_propagate_epoch_id(epoch); }
     };
