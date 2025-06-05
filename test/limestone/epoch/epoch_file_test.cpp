@@ -14,19 +14,19 @@
  * limitations under the License.
  */
 
-#include <thread>
-#include <sys/stat.h>  
+#include <limestone/api/datastore.h>
+#include <limestone/logging.h>
+#include <sys/stat.h>
 
 #include <boost/filesystem.hpp>
+#include <thread>
 
-#include <limestone/logging.h>
-#include <limestone/api/datastore.h>
-
+#include "compaction_catalog.h"
 #include "dblog_scan.h"
 #include "internal.h"
 #include "log_entry.h"
+#include "manifest.h"
 #include "online_compaction.h"
-#include "compaction_catalog.h"
 #include "test_root.h"
 
 using namespace std::literals;
@@ -46,7 +46,7 @@ extern const std::string_view data_nondurable;
 class epoch_file_test : public ::testing::Test {
 public:
     static constexpr const char* location = "/tmp/epoch_file_test";
-    const boost::filesystem::path manifest_path = boost::filesystem::path(location) / std::string(limestone::internal::manifest_file_name);
+    const boost::filesystem::path manifest_path = boost::filesystem::path(location) / std::string(limestone::internal::manifest::file_name);
     const boost::filesystem::path compaction_catalog_path = boost::filesystem::path(location) / "compaction_catalog";
     const boost::filesystem::path epoch_file_path = boost::filesystem::path(location) / std::string(limestone::internal::epoch_file_name);
     const boost::filesystem::path tmp_epoch_file_path = boost::filesystem::path(location) / std::string(limestone::internal::tmp_epoch_file_name);

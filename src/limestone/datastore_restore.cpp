@@ -22,6 +22,7 @@
 #include "blob_file_resolver.h"
 #include "internal.h"
 #include "logging_helper.h"
+#include "manifest.h"
 
 namespace limestone::internal {
 
@@ -47,9 +48,10 @@ status purge_dir(const boost::filesystem::path& dir) {
     return status::ok;
 }
 
+
 static status check_manifest(const boost::filesystem::path& manifest_path) {
     std::string ver_err;
-    int vc = internal::is_supported_version(manifest_path, ver_err);
+    int vc = internal::manifest::is_supported_version(manifest_path, ver_err);
     if (vc == 0) {
         LOG(ERROR) << version_error_prefix << " (" << ver_err << ")";
         return status::err_broken_data;
@@ -72,7 +74,7 @@ static status check_manifest(const boost::filesystem::path& manifest_path) {
 static status validate_manifest_files(const boost::filesystem::path& from_dir, const std::vector<file_set_entry>& entries) {
     int manifest_count = 0;
     for (auto & ent : entries) {
-        if (ent.destination_path().string() != internal::manifest_file_name) {
+        if (ent.destination_path().string() != internal::manifest::file_name) {
             continue;
         }
         boost::filesystem::path src{ent.source_path()};
@@ -159,7 +161,7 @@ status datastore::restore(std::string_view from, bool keep_backup) const noexcep
     auto from_dir = boost::filesystem::path(std::string(from));
 
     // log_dir version check
-    boost::filesystem::path manifest_path = from_dir / std::string(internal::manifest_file_name);
+    boost::filesystem::path manifest_path = from_dir / std::string(internal::manifest::file_name);
     try {
         if (!boost::filesystem::exists(manifest_path)) {
             VLOG_LP(log_info) << "no manifest file in backup";

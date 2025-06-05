@@ -39,7 +39,7 @@
 #include "blob_file_scanner.h"
 #include "datastore_impl.h"
 #include "log_channel_impl.h"
-#include "now_nsec.h"
+#include "manifest.h"
 namespace limestone::api {
 using namespace limestone::internal;
 
@@ -51,7 +51,7 @@ datastore::datastore(configuration const& conf) : location_(conf.data_locations_
         LOG(INFO) << "/:limestone:config:datastore setting log location = " << location_.string();
         boost::system::error_code error;
         const bool result_check = boost::filesystem::exists(location_, error);
-        boost::filesystem::path manifest_path = boost::filesystem::path(location_) / std::string(internal::manifest_file_name);
+        boost::filesystem::path manifest_path = boost::filesystem::path(location_) / std::string(internal::manifest::file_name);
         boost::filesystem::path compaction_catalog_path= boost::filesystem::path(location_) / compaction_catalog::get_catalog_filename();
         if (!result_check || error) {
             const bool result_mkdir = boost::filesystem::create_directory(location_, error);
@@ -74,10 +74,9 @@ datastore::datastore(configuration const& conf) : location_(conf.data_locations_
                 add_file(manifest_path);
             }
         }
-        internal::check_and_migrate_logdir_format(location_);
 
         // acquire lock for manifest file
-        fd_for_flock_ = internal::acquire_manifest_lock(location_);
+        fd_for_flock_ = manifest::acquire_lock(location_);
         if (fd_for_flock_ == -1) {
             if (errno == EWOULDBLOCK) {
                 std::string err_msg = "another process is using the log directory: " + location_.string();
@@ -88,6 +87,8 @@ datastore::datastore(configuration const& conf) : location_(conf.data_locations_
             LOG(FATAL) << "/:limestone:config:datastore " << err_msg;
             throw limestone_io_exception(exception_type::initialization_failure, err_msg, errno);
         }
+
+        internal::check_and_migrate_logdir_format(location_);
 
         add_file(compaction_catalog_path);
         compaction_catalog_ = std::make_unique<compaction_catalog>(compaction_catalog::from_catalog_file(location_));
@@ -178,9 +179,8 @@ static void write_epoch_to_file_internal(const std::string& file_path, epoch_id_
     }
 }
 
-void datastore::persist_and_propagate_epoch_id(epoch_id_type epoch_id) {
+void datastore::persist_epoch_id(epoch_id_type epoch_id) {
     TRACE_START << "epoch_id=" << epoch_id;
-    uint64_t start = now_nsec();
     if (++epoch_write_counter >= max_entries_in_epoch_file) {
         write_epoch_to_file_internal(tmp_epoch_file_path_.string(), epoch_id, file_write_mode::overwrite);
 
@@ -198,10 +198,21 @@ void datastore::persist_and_propagate_epoch_id(epoch_id_type epoch_id) {
     } else {
         write_epoch_to_file_internal(epoch_file_path_.string(), epoch_id, file_write_mode::append);
     }
-    uint64_t start_replication = now_nsec();
-    impl_->propagate_group_commit(epoch_id);
-    uint64_t end = now_nsec();
-    LOG_LP(INFO) << "datastore::persist_and_propagate_epoch_id() took " << (end - start) / 1000 << "us, replication took " << (end - start_replication) / 1000 << "us";
+    TRACE_END;
+}
+
+void datastore::persist_and_propagate_epoch_id(epoch_id_type epoch_id) {
+    TRACE_START << "epoch_id=" << epoch_id;
+    if (impl_->is_async_group_commit_enabled()) {
+        auto fut1 = std::async(std::launch::async, [this, epoch_id] {
+            persist_epoch_id(epoch_id);
+        });
+            impl_->propagate_group_commit(epoch_id);
+        fut1.wait();
+    } else {
+        persist_epoch_id(epoch_id);
+        impl_->propagate_group_commit(epoch_id);
+    }
     TRACE_END;
 }
 
@@ -524,7 +535,7 @@ std::unique_ptr<backup_detail> datastore::begin_backup(backup_type btype) {  // 
                     break;
                 }
                 case 'l': {
-                    if (filename == internal::manifest_file_name) {
+                    if (filename == internal::manifest::file_name) {
                         entries.emplace_back(ent.string(), dst, true, false);
                     } else {
                         // unknown type
