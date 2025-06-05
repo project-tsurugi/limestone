@@ -14,16 +14,18 @@
  * limitations under the License.
  */
 #include "datastore_impl.h"
-#include "limestone/logging.h"
-#include "logging_helper.h"
+
 #include <cstdlib>
 #include <iostream>
 
-#include "replication/replica_connector.h"
+#include "limestone/logging.h"
 #include "limestone_exception_helper.h"
-#include "replication/message_session_begin.h"
-#include "replication/message_log_channel_create.h"
+#include "logging_helper.h"
+#include "now_nsec.h"
 #include "replication/message_group_commit.h"
+#include "replication/message_log_channel_create.h"
+#include "replication/message_session_begin.h"
+#include "replication/replica_connector.h"
 
 namespace limestone::api {
 
@@ -123,6 +125,7 @@ bool datastore_impl::open_control_channel() {
 }
 
 void datastore_impl::propagate_group_commit(uint64_t epoch_id) {
+    uint64_t start = limestone::internal::now_nsec();
     if (!is_master_) {
         return;
     }
@@ -144,6 +147,8 @@ void datastore_impl::propagate_group_commit(uint64_t epoch_id) {
         }
         TRACE_END;
     }
+    uint64_t end = limestone::internal::now_nsec();
+    LOG_LP(INFO) << "datastore_impl::propagate_group_commit() took " << (end - start) / 1000 << "us";
 }
 
 bool datastore_impl::is_replication_configured() const noexcept {

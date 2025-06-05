@@ -25,12 +25,13 @@
 #include <sstream>
 #include <thread>
 
-#include "internal.h"
 #include "datastore_impl.h"
+#include "internal.h"
 #include "limestone_exception_helper.h"
 #include "log_channel_impl.h"
 #include "log_entry.h"
 #include "logging_helper.h"
+#include "now_nsec.h"
 #include "replication/message_log_entries.h"
 namespace limestone::api {
 
@@ -89,6 +90,7 @@ void log_channel::begin_session() {
 }
 
 void log_channel::finalize_session_file() {
+    uint64_t start = limestone::internal::now_nsec();
     if (fflush(strm_) != 0) {
         LOG_AND_THROW_IO_EXCEPTION("fflush failed", errno);
     }
@@ -104,11 +106,14 @@ void log_channel::finalize_session_file() {
     if (fclose(strm_) != 0) {  // NOLINT(*-owning-memory)
         LOG_AND_THROW_IO_EXCEPTION("fclose failed", errno);
     }
+    uint64_t end = limestone::internal::now_nsec();
+    LOG_LP(INFO) << "log_channel::finalize_session_file() took " << (end - start) / 1000 << "us";
 }
 
 void log_channel::end_session() {
     try {
         TRACE_START << "current_epoch_id_=" << current_epoch_id_.load();
+        uint64_t start = limestone::internal::now_nsec();
         if (envelope_.impl_->is_async_session_close_enabled()) {
             auto fut = std::async(std::launch::async, [this]() { this->finalize_session_file(); });
             impl_->send_replica_message(finished_epoch_id_.load(), [&](replication::message_log_entries &msg) {
@@ -123,6 +128,8 @@ void log_channel::end_session() {
                 msg.set_flush_flag(true);
             });
         }
+        uint64_t end = limestone::internal::now_nsec();
+        LOG_LP(INFO) << "log_channel::end_session() took " << (end - start) / 1000 << "us";
         TRACE_END;
     } catch (...) {
         TRACE_ABORT;
