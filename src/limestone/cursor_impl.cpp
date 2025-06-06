@@ -145,6 +145,11 @@ bool cursor_impl::is_relevant_entry(const limestone::api::log_entry& entry) {
 }
 
 bool cursor_impl::next() {
+    static bool first_call = true;
+    if (first_call) {
+        start_time_ = std::chrono::steady_clock::now();
+        first_call = false;
+    }
     while (true) {
         // Read from the snapshot stream if the snapshot_log_entry_ is empty
         if (!snapshot_log_entry_) {
@@ -159,6 +164,11 @@ bool cursor_impl::next() {
         // Case 1: Both snapshot and compacted are empty, return false
         if (!snapshot_log_entry_ && !compacted_log_entry_) {
             DVLOG_LP(log_trace) << "Both snapshot and compacted streams are closed";
+            // --- ここで経過時間をログ出力 ---
+            auto end_time = std::chrono::steady_clock::now();
+            auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(end_time - start_time_).count();
+            LOG(INFO) << "[cursor_impl] next() total elapsed time: " << duration << " ms";
+            first_call = true; // 次回のためにリセット
             return false;
         }
 

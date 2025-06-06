@@ -23,6 +23,7 @@
 #include <limestone/api/cursor.h>
 #include <limestone/api/blob_id_type.h>
 #include "log_entry.h"
+#include <chrono>
 
 
 namespace limestone::internal {
@@ -49,6 +50,7 @@ private:
     std::string previous_snapshot_key_sid;
     std::string previous_compacted_key_sid;
     std::map<limestone::api::storage_id_type, limestone::api::write_version_type> clear_storage_; 
+    std::chrono::steady_clock::time_point start_time_; // 追加
 
 protected:
     void open(const boost::filesystem::path& file, std::optional<boost::filesystem::ifstream>& stream);
