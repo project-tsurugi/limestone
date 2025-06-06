@@ -11,6 +11,9 @@ set_target_properties(${package_name}
                 INSTALL_RPATH "\$ORIGIN"
                 OUTPUT_NAME ${export_name}
 )
+target_include_directories(${package_name}
+        PRIVATE ./limestone
+)
 
 if(${RECOVERY_SORTER_KVSLIB_UPPERCASE} STREQUAL "ROCKSDB")
     set(sort_lib RocksDB::RocksDB)
@@ -68,7 +71,6 @@ file(GLOB DBLOGUTIL_SOURCES
 
 add_executable(dblogutil ${DBLOGUTIL_SOURCES})
 target_include_directories(dblogutil
-        PRIVATE .
         PRIVATE ./limestone
         )
 target_link_libraries(dblogutil PRIVATE limestone-impl PRIVATE glog::glog gflags::gflags)
@@ -78,3 +80,20 @@ set_target_properties(dblogutil
                 RUNTIME_OUTPUT_NAME "tglogutil"
 )
 install_custom(dblogutil dblogutil)
+
+# replica command
+file(GLOB REPLICA_SOURCES
+        "limestone/replica/*.cpp"
+)
+
+add_executable(replica ${REPLICA_SOURCES})
+target_include_directories(replica
+        PRIVATE ./limestone
+)
+target_link_libraries(replica PRIVATE limestone-impl PRIVATE glog::glog)
+set_target_properties(replica
+        PROPERTIES
+                INSTALL_RPATH "\$ORIGIN/../${CMAKE_INSTALL_LIBDIR}"
+                RUNTIME_OUTPUT_NAME "tgreplica"
+)
+install_custom(replica replica)
