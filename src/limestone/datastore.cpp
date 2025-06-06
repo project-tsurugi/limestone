@@ -202,7 +202,27 @@ void datastore::write_epoch_to_file(epoch_id_type epoch_id) {
 void datastore::ready() {
     TRACE_START;
     try {
+#if 0
         blob_id_type max_blob_id =  create_snapshot_and_get_max_blob_id();
+#else
+        blob_id_type max_blob_id = 0;
+        bool skip_build_snapshot = false;
+        if (auto* envstr = std::getenv("LIMESTONE_SKIP_BUILD_SNAPSHOT");
+            envstr != nullptr && *envstr != '\0') {
+            if (std::strcmp(envstr, "1") == 0) {
+                skip_build_snapshot = true;
+            } else if (std::strcmp(envstr, "0") == 0) {
+                skip_build_snapshot = false;
+            } else {
+                LOG(INFO) << "invalid value for LIMESTONE_SKIP_BUILD_SNAPSHOT";
+            }
+        }
+        if (skip_build_snapshot) {
+            LOG(INFO) << "skipping build snapshot";
+        } else {
+            max_blob_id = create_snapshot_and_get_max_blob_id();
+        }
+#endif
         if (max_blob_id < compaction_catalog_->get_max_blob_id()) {
             max_blob_id = compaction_catalog_->get_max_blob_id();
         }
