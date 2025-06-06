@@ -37,6 +37,13 @@ std::unique_ptr<cursor> cursor_impl::create_cursor(const boost::filesystem::path
     return cursor_instance;
 }
 
+std::pair<std::unique_ptr<cursor>, long> cursor_impl::create_chunk_cursor(
+    const boost::filesystem::path& snapshot_file, const std::map<limestone::api::storage_id_type, limestone::api::write_version_type>& clear_storage, long offset) {
+    auto cursor_instance = std::unique_ptr<cursor>(new cursor(snapshot_file, offset));
+    cursor_instance->pimpl->set_clear_storage(clear_storage);
+    return std::make_pair(std::move(cursor_instance), cursor_instance->pimpl->verify_chunk_mark());
+}
+
 cursor_impl::cursor_impl(const boost::filesystem::path& snapshot_file) 
     : compacted_istrm_(std::nullopt) {
     open(snapshot_file, snapshot_istrm_);
@@ -47,11 +54,31 @@ cursor_impl::cursor_impl(const boost::filesystem::path& snapshot_file, const boo
     open(compacted_file, compacted_istrm_); 
 }
 
-void cursor_impl::open(const boost::filesystem::path& file, std::optional<boost::filesystem::ifstream>& stream) {
+cursor_impl::cursor_impl(const boost::filesystem::path& snapshot_file, long offset)
+    : compacted_istrm_(std::nullopt) {
+    open(snapshot_file, snapshot_istrm_, offset);
+    chunked_read_ = true;
+}
+
+void cursor_impl::open(const boost::filesystem::path& file, std::optional<boost::filesystem::ifstream>& stream, long chunk) {
     stream.emplace(file, std::ios_base::in | std::ios_base::binary);
     if (!stream->is_open() || !stream->good()) {
         LOG_AND_THROW_EXCEPTION("Failed to open file: " + file.string());
     }
+    if (chunk >= 0) {
+        stream->seekg(chunk, std::ios::beg);
+    }
+}
+
+long cursor_impl::verify_chunk_mark() {
+    log_entry le;
+    if (!le.read(*snapshot_istrm_)) {
+        throw std::runtime_error("read");
+    }
+    if (le.type() != log_entry::entry_type::marker_chunk) {
+        throw std::runtime_error("read chunk");
+    }
+    return static_cast<long>(le.epoch_id());
 }
 
 void cursor_impl::close() {
@@ -74,7 +101,7 @@ void cursor_impl::validate_and_read_stream(std::optional<boost::filesystem::ifst
         if (!log_entry) {
             log_entry.emplace();  // Construct a new log_entry
             do {
-                if (!log_entry->read(*stream)) {
+                if (!log_entry->read(*stream) || (log_entry->type() == log_entry::entry_type::marker_chunk && chunked_read_)) {
                     // If reading fails, close the stream and reset the log_entry
                     stream->close();
                     stream = std::nullopt;

@@ -56,6 +56,9 @@ public:
         clear_storage = 7,
         add_storage = 8,
         remove_storage = 9,
+
+        // file structure for snapshot
+        marker_chunk = 42,
     };
     class read_error {
     public:
@@ -119,6 +122,11 @@ public:
         write_uint8(strm, static_cast<std::uint8_t>(type));
         write_uint64le(strm, static_cast<std::uint64_t>(epoch));
     }
+    static void chunk(FILE* strm, epoch_id_type epoch) {
+        entry_type type = entry_type::marker_chunk;
+        write_uint8(strm, static_cast<std::uint8_t>(type));
+        write_uint64le(strm, static_cast<std::uint64_t>(epoch));
+    }
 
 // for writer (entry)
     void write(FILE* strm) {
@@ -152,6 +160,9 @@ public:
             break;
         case entry_type::remove_storage:
             write_remove_storage(strm, key_sid_, value_etc_);
+            break;
+        case entry_type::marker_chunk:
+            chunk(strm, epoch_id_);
             break;
         case entry_type::this_id_is_not_used:
             break;
@@ -412,6 +423,7 @@ public:
         case entry_type::marker_end:
         case entry_type::marker_durable:
         case entry_type::marker_invalidated_begin:
+        case entry_type::marker_chunk:  // FIXME: read long, not epoch
             epoch_id_ = static_cast<epoch_id_type>(read_uint64le(strm, ec));
             if (ec) return false;
             break;

@@ -522,11 +522,15 @@ blob_id_type datastore::create_snapshot_and_get_max_blob_id() {
     if (!ostrm) {
         LOG_AND_THROW_IO_EXCEPTION("cannot create snapshot file", errno);
     }
+    long prev_chunk_marker = 0;  // or tellg
+    log_entry::chunk(ostrm, -1);
     log_entry::begin_session(ostrm, 0);
     setvbuf(ostrm, nullptr, _IOFBF, 128L * 1024L);  // NOLINT, NB. glibc may ignore size when _IOFBF and buffer=NULL
 
     const bool should_write_remove_entry = !compaction_catalog_->get_compacted_files().empty();
-    auto write_snapshot_entry = [&ostrm, should_write_remove_entry](
+    long size_count = 0;
+    auto write_snapshot_entry = [&ostrm, should_write_remove_entry,
+                                 &size_count, &prev_chunk_marker](
         log_entry::entry_type entry_type, 
         std::string_view key_sid, 
         std::string_view value_etc, 
@@ -546,6 +550,21 @@ blob_id_type datastore::create_snapshot_and_get_max_blob_id() {
         default:
             LOG(ERROR) << "Unexpected entry type: " << static_cast<int>(entry_type);
             std::abort();
+        }
+        if (++size_count >= 128 * 1024L) {
+            std::fflush(ostrm);
+            auto pos = std::ftell(ostrm);
+            if (std::fseek(ostrm, prev_chunk_marker, SEEK_SET) != 0) {
+                LOG_AND_THROW_IO_EXCEPTION("cannot fseek to modify chunk marker", errno);
+            }
+            log_entry::chunk(ostrm, pos);
+            std::fflush(ostrm);
+            if (std::fseek(ostrm, pos, SEEK_SET) != 0) {
+                LOG_AND_THROW_IO_EXCEPTION("cannot fseek to tail", errno);
+            }
+            log_entry::chunk(ostrm, -1);
+            prev_chunk_marker = pos;
+            size_count = 0;
         }
     };
 

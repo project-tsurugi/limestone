@@ -32,13 +32,19 @@ class cursor_impl {
 public:
     explicit cursor_impl(const boost::filesystem::path& snapshot_file);
     explicit cursor_impl(const boost::filesystem::path& snapshot_file, const boost::filesystem::path& compacted_file);
+    explicit cursor_impl(const boost::filesystem::path& snapshot_file, long);
 
     static std::unique_ptr<cursor> create_cursor(const boost::filesystem::path& snapshot_file,
                                                   const std::map<limestone::api::storage_id_type, limestone::api::write_version_type>& clear_storage);
     static std::unique_ptr<cursor> create_cursor(const boost::filesystem::path& snapshot_file, const boost::filesystem::path& compacted_file,
                                                   const std::map<limestone::api::storage_id_type, limestone::api::write_version_type>& clear_storage);
+    static std::pair<std::unique_ptr<cursor>, long> create_chunk_cursor(
+            const boost::filesystem::path& snapshot_file,
+            const std::map<limestone::api::storage_id_type, limestone::api::write_version_type>& clear_storage,
+            long offset);
 
     void set_clear_storage(const std::map<limestone::api::storage_id_type, limestone::api::write_version_type>& clear_storage);
+    long verify_chunk_mark();
 
 private:
     limestone::api::log_entry log_entry_;
@@ -49,9 +55,10 @@ private:
     std::string previous_snapshot_key_sid;
     std::string previous_compacted_key_sid;
     std::map<limestone::api::storage_id_type, limestone::api::write_version_type> clear_storage_; 
+    bool chunked_read_ = false;
 
 protected:
-    void open(const boost::filesystem::path& file, std::optional<boost::filesystem::ifstream>& stream);
+    void open(const boost::filesystem::path& file, std::optional<boost::filesystem::ifstream>& stream, long offset = -1);
     void close();
 
     bool next();

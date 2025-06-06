@@ -32,6 +32,9 @@ cursor::cursor(const boost::filesystem::path& snapshot_file)
 cursor::cursor(const boost::filesystem::path& snapshot_file, const boost::filesystem::path& compacted_file)
     : pimpl(std::make_unique<limestone::internal::cursor_impl>(snapshot_file, compacted_file)) {}
 
+cursor::cursor(const boost::filesystem::path& snapshot_file, long offset)
+    : pimpl(std::make_unique<limestone::internal::cursor_impl>(snapshot_file, offset)) {}
+
 cursor::~cursor() noexcept {
     // TODO: handle close failure
     pimpl->close();

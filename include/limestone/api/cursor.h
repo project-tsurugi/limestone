@@ -84,6 +84,7 @@ private:
 
     explicit cursor(const boost::filesystem::path& snapshot_file);
     explicit cursor(const boost::filesystem::path& snapshot_file, const boost::filesystem::path& compacted_file);
+    explicit cursor(const boost::filesystem::path& snapshot_file, long);
 
     friend class internal::cursor_impl;
 };

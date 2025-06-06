@@ -65,6 +65,16 @@ public:
     [[nodiscard]] std::unique_ptr<cursor> get_cursor() const;
 
     /**
+     * @brief create a cursor for the firest entry of chunk
+     * @details the returned cursor will point to the target element by calling cursor::next().
+     * If such an entry does not exist, cursor::next() will return false.
+     * @param offset file offset of chunk head
+     * @attention this function is thread-safe.
+     * @return pair of unique pointer of the cursor and next chunk offset
+     */
+    [[nodiscard]] std::pair<std::unique_ptr<cursor>, long> get_chunk_cursor(long offset) const;
+
+    /**
      * @brief create a cursor for an entry at a given location on the snapshot and returns it
      * @details the returned cursor will point to the target element by calling cursor::next().
      * If such an entry does not exist, cursor::next() will return false.

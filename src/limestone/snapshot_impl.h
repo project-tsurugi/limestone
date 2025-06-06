@@ -33,6 +33,7 @@ class snapshot_impl {
 public:
     explicit snapshot_impl(boost::filesystem::path location, std::map<storage_id_type, write_version_type> clear_storage) noexcept;
     [[nodiscard]] std::unique_ptr<cursor> get_cursor() const;
+    [[nodiscard]] std::pair<std::unique_ptr<cursor>, long> get_chunk_cursor(long) const;
 
 private:
     boost::filesystem::path location_;
