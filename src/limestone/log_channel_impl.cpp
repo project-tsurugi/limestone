@@ -19,13 +19,14 @@ log_channel_impl::~log_channel_impl() = default;
 // preventing unnecessary message creation and avoiding redundant code in the caller. This helps keep the code concise
 // and reduces the chances of errors caused by missing the `if` check.
 void log_channel_impl::send_replica_message(uint64_t epoch_id, const std::function<void(replication::message_log_entries&)>& modifier) {
-    uint64_t start = limestone::internal::now_nsec();
     std::lock_guard<std::mutex> lock(mtx_replica_connector_);
     
     // If replica_connector_ is invalid, exit the function
     if (!replica_connector_) {
         return; 
     }
+
+    uint64_t start = limestone::internal::now_nsec();
 
     // Create and modify the message
     replication::message_log_entries message{epoch_id};
@@ -46,9 +47,9 @@ void log_channel_impl::send_replica_message(uint64_t epoch_id, const std::functi
             LOG_LP(FATAL) << "Protocol error: expected ACK message, but received " << static_cast<int>(mid);
             replica_connector_.reset();
         }
+        uint64_t end = limestone::internal::now_nsec();
+        LOG_LP(INFO) << "log_channel_impl::send_replica_message() took " << (end - start) / 1000 << "us";
     }
-    uint64_t end = limestone::internal::now_nsec();
-    LOG_LP(INFO) << "log_channel_impl::send_replica_message() took " << (end - start) / 1000 << "us";
 }
 
 void log_channel_impl::set_replica_connector(std::unique_ptr<replication::replica_connector> connector) {
