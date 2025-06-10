@@ -139,7 +139,7 @@ public:
 
     void operator()(FILE* file) const {
         if (file && file_ops_->fclose(file) != 0) {
-            VLOG_LP(log_error) << "Error closing file." << std::endl;
+            VLOG_LP(log_error) << "Error closing file.";
         }
     }
 
