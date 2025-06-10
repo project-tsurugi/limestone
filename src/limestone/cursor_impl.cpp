@@ -146,7 +146,7 @@ bool cursor_impl::is_relevant_entry(const limestone::api::log_entry& entry) {
         return true;
 }
 
-bool cursor_impl::next() {
+bool cursor_impl::next() { // NOLINT(readability-function-cognitive-complexity)
     while (true) {
         // Read from the snapshot stream if the snapshot_log_entry_ is empty
         if (!snapshot_log_entry_) {
