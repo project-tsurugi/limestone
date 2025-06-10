@@ -146,7 +146,7 @@ bool cursor_impl::is_relevant_entry(const limestone::api::log_entry& entry) {
         return true;
 }
 
-bool cursor_impl::next() { // NOLINT(readability-function-cognitive-complexity)
+bool cursor_impl::next() { 
     while (true) {
         // Read from the snapshot stream if the snapshot_log_entry_ is empty
         if (!snapshot_log_entry_) {
@@ -181,12 +181,8 @@ bool cursor_impl::next() { // NOLINT(readability-function-cognitive-complexity)
                 compacted_log_entry_ = std::nullopt;
             } else {
                 // If key_sid is equal, snapshot is always newer by design
-                if (snapshot_log_entry_->type() == log_entry::entry_type::remove_entry) {
-                    // Deleted → skip both
-                    snapshot_log_entry_ = std::nullopt;
-                    compacted_log_entry_ = std::nullopt;
-                    continue;  // skip this entry
-                }
+                // Note: If snapshot contains a remove_entry, it will be filtered out 
+                // by the type check at the end of the method
                 log_entry_ = std::move(snapshot_log_entry_.value());
                 snapshot_log_entry_ = std::nullopt;
                 compacted_log_entry_ = std::nullopt;
