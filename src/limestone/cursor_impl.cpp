@@ -186,11 +186,10 @@ bool cursor_impl::next() {
                     snapshot_log_entry_ = std::nullopt;
                     compacted_log_entry_ = std::nullopt;
                     continue;  // skip this entry
-                } else {
-                    log_entry_ = std::move(snapshot_log_entry_.value());
-                    snapshot_log_entry_ = std::nullopt;
-                    compacted_log_entry_ = std::nullopt;
                 }
+                log_entry_ = std::move(snapshot_log_entry_.value());
+                snapshot_log_entry_ = std::nullopt;
+                compacted_log_entry_ = std::nullopt;
             }
         }
 
