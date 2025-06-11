@@ -45,8 +45,6 @@ readability-*,\
 -readability-named-parameter,\
 -readability-magic-numbers,\
 -readability-qualified-auto,\
--readability-redundant-inline-specifier,\
--readability-redundant-member-init,\
 -readability-convert-member-functions-to-static,\
 "
 CheckOptions:
