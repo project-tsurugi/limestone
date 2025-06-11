@@ -647,7 +647,7 @@ int64_t datastore::current_unix_epoch_in_millis() {
 }
 
 void datastore::online_compaction_worker() {
-    LOG_LP(INFO) << "online compaction worker started..." << std::endl;
+    LOG_LP(INFO) << "online compaction worker started...";
 
     boost::filesystem::path ctrl_dir = location_ / "ctrl";
     boost::filesystem::path start_file = ctrl_dir / "start_compaction";
