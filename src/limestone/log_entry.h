@@ -174,7 +174,7 @@ public:
         write_bytes(strm, key.data(), key_len);
 
         write_uint64le(strm, static_cast<std::uint64_t>(write_version.epoch_number_));
-        write_uint64le(strm, static_cast<std::uint64_t>(write_version.minor_write_version_));
+        write_uint64le(strm, write_version.minor_write_version_);
         write_bytes(strm, value.data(), value_len);
     }
 
