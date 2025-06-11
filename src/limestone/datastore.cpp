@@ -13,35 +13,33 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-#include <thread>
-#include <chrono>
-#include <iomanip>
-#include <stdexcept>
-#include <future>
+#include <glog/logging.h>
+#include <limestone/api/datastore.h>
+#include <limestone/logging.h>
 
 #include <boost/filesystem/fstream.hpp>
+#include <chrono>
+#include <future>
+#include <iomanip>
+#include <stdexcept>
+#include <thread>
 
-#include <glog/logging.h>
-#include <limestone/logging.h>
-#include "logging_helper.h"
-#include "limestone_exception_helper.h"
-
-#include <limestone/api/datastore.h>
-#include "internal.h"
-#include "log_entry.h"
-#include "online_compaction.h"
-#include "compaction_catalog.h"
-#include "compaction_options.h"
-#include "blob_file_resolver.h"
-#include "blob_pool_impl.h"
 #include "blob_file_garbage_collector.h"
 #include "blob_file_gc_snapshot.h"
+#include "blob_file_resolver.h"
 #include "blob_file_scanner.h"
+#include "blob_pool_impl.h"
+#include "compaction_catalog.h"
+#include "compaction_options.h"
 #include "datastore_impl.h"
-#include "manifest.h"
+#include "internal.h"
+#include "limestone_exception_helper.h"
 #include "log_channel_impl.h"
+#include "log_entry.h"
+#include "logging_helper.h"
 #include "manifest.h"
 #include "now_nsec.h"
+#include "online_compaction.h"
 
 namespace {
 

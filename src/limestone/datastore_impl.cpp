@@ -14,10 +14,6 @@
  * limitations under the License.
  */
 #include "datastore_impl.h"
-#include "limestone/logging.h"
-#include "logging_helper.h"
-#include <cstdlib>
-#include <iostream>
 
 #include <cstdlib>
 #include <iostream>
