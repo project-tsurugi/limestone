@@ -51,7 +51,11 @@ void blob_socket_io::send_blob(const blob_id_type blob_id) {
         LOG_AND_THROW_IO_EXCEPTION("Blob file too large: " + path.string(), EIO);
     }
     auto remaining = static_cast<uint32_t>(pos);
-    std::rewind(fp);
+    if (std::fseek(fp, 0, SEEK_SET) != 0) {
+        int ec = errno;
+        safe_close(fp);
+        LOG_AND_THROW_IO_EXCEPTION("Failed to rewind blob file: " + path.string(), ec);
+    }
 
     send_uint64(blob_id);
     send_uint32(remaining);

@@ -79,6 +79,7 @@ bool replication_endpoint::parse_endpoint(const std::string &endpoint_str) {
         return false;
     }
     std::array<char, INET_ADDRSTRLEN> ipstr{};
+    // NOLINTNEXTLINE(bugprone-casting-through-void, cppcoreguidelines-pro-type-cstyle-cast)
     auto* ipv4 = static_cast<struct sockaddr_in*>(static_cast<void*>(res->ai_addr));
     inet_ntop(AF_INET, &(ipv4->sin_addr), ipstr.data(), ipstr.size());
     resolved_ip_ = std::string(ipstr.data());

@@ -22,11 +22,15 @@
 
 // NOLINTBEGIN(performance-avoid-endl)
 
+namespace {
+
 void show_usage(const std::string& program_name) {
     std::cerr << "Usage: " << program_name << " <logdir>" << std::endl;
     std::cerr << "Note: The environment variable TSURUGI_REPLICATION_ENDPOINT must be set with the endpoint URL." << std::endl;
     std::cerr << "      For example: tcp://localhost:1234" << std::endl;
 }
+
+} // namespace
 
 int main(int argc, char* argv[]) {
     // Convert argv to vector<string> to avoid direct pointer arithmetic.

@@ -83,16 +83,16 @@ void replica_server::initialize(const boost::filesystem::path& location) {
          LOG_LP(ERROR) << "Error: Failed to set socket options";
          return false;
      }
-     
+
      // Bind the socket to the provided address.
-     // Avoid reinterpret_cast by using two static_casts.
+     // NOLINTNEXTLINE(bugprone-casting-through-void, cppcoreguidelines-pro-type-cstyle-cast)
      auto addr_ptr = static_cast<const struct sockaddr*>(static_cast<const void*>(&listen_addr));
      if (bind(sockfd_, addr_ptr, sizeof(listen_addr)) < 0) {
          ::close(sockfd_);
          LOG_LP(ERROR) << "Error: Failed to bind socket to the specified address";
          return false;
      }
-     
+
      // Listen on the socket.
      if (::listen(sockfd_, SOMAXCONN) < 0) {
          ::close(sockfd_);
