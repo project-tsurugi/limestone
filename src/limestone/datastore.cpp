@@ -39,6 +39,43 @@
 #include "blob_file_gc_snapshot.h"
 #include "blob_file_scanner.h"
 #include "datastore_impl.h"
+
+namespace {
+
+using namespace limestone;
+using namespace limestone::api;
+
+enum class file_write_mode {
+    append,
+    overwrite
+};
+
+void write_epoch_to_file_internal(const std::string& file_path, epoch_id_type epoch_id, file_write_mode mode) {
+    const char* fopen_mode = (mode == file_write_mode::append) ? "a" : "w";
+    std::unique_ptr<FILE, void (*)(FILE*)> file_ptr(fopen(file_path.c_str(), fopen_mode), [](FILE* fp) {
+        if (fp) {
+            if (fclose(fp) != 0) { // NOLINT(cppcoreguidelines-owning-memory)
+                LOG_AND_THROW_IO_EXCEPTION("fclose failed", errno);
+            }
+        }
+    });  
+    if (!file_ptr) {
+        LOG_AND_THROW_IO_EXCEPTION("fopen failed for file: " + file_path, errno);
+    }
+
+    log_entry::durable_epoch(file_ptr.get(), epoch_id);
+
+    if (fflush(file_ptr.get()) != 0) {
+        LOG_AND_THROW_IO_EXCEPTION("fflush failed for file: " + file_path, errno);
+    }
+    if (fsync(fileno(file_ptr.get())) != 0) {
+        LOG_AND_THROW_IO_EXCEPTION("fsync failed for file: " + file_path, errno);
+    }
+}
+
+} // namespace
+
+
 namespace limestone::api {
 using namespace limestone::internal;
 
@@ -149,33 +186,7 @@ void datastore::recover() const noexcept {
     check_before_ready(static_cast<const char*>(__func__));
 }
 
-enum class file_write_mode {
-    append,
-    overwrite
-};
 
-static void write_epoch_to_file_internal(const std::string& file_path, epoch_id_type epoch_id, file_write_mode mode) {
-    const char* fopen_mode = (mode == file_write_mode::append) ? "a" : "w";
-    std::unique_ptr<FILE, void (*)(FILE*)> file_ptr(fopen(file_path.c_str(), fopen_mode), [](FILE* fp) {
-        if (fp) {
-            if (fclose(fp) != 0) { // NOLINT(cppcoreguidelines-owning-memory)
-                LOG_AND_THROW_IO_EXCEPTION("fclose failed", errno);
-            }
-        }
-    });  
-    if (!file_ptr) {
-        LOG_AND_THROW_IO_EXCEPTION("fopen failed for file: " + file_path, errno);
-    }
-
-    log_entry::durable_epoch(file_ptr.get(), epoch_id);
-
-    if (fflush(file_ptr.get()) != 0) {
-        LOG_AND_THROW_IO_EXCEPTION("fflush failed for file: " + file_path, errno);
-    }
-    if (fsync(fileno(file_ptr.get())) != 0) {
-        LOG_AND_THROW_IO_EXCEPTION("fsync failed for file: " + file_path, errno);
-    }
-}
 
 void datastore::write_epoch_to_file(epoch_id_type epoch_id) {
     TRACE_START << "epoch_id=" << epoch_id;
@@ -202,10 +213,7 @@ void datastore::write_epoch_to_file(epoch_id_type epoch_id) {
 void datastore::ready() {
     TRACE_START;
     try {
-        blob_id_type max_blob_id =  create_snapshot_and_get_max_blob_id();
-        if (max_blob_id < compaction_catalog_->get_max_blob_id()) {
-            max_blob_id = compaction_catalog_->get_max_blob_id();
-        }
+        blob_id_type max_blob_id = std::max(create_snapshot_and_get_max_blob_id(), compaction_catalog_->get_max_blob_id());
         blob_file_garbage_collector_ = std::make_unique<blob_file_garbage_collector>(*blob_file_resolver_);
         blob_file_garbage_collector_->scan_blob_files(max_blob_id);
 
@@ -288,9 +296,7 @@ void datastore::update_min_epoch_id(bool from_switch_epoch) {  // NOLINT(readabi
         on_update_min_epoch_id_finished_epoch_id_load(); // for testing
         auto finished_epoch = e->finished_epoch_id_.load();
         if (working_epoch > finished_epoch && working_epoch != UINT64_MAX) {
-            if ((working_epoch - 1) < upper_limit) {
-                upper_limit = working_epoch - 1;
-            }
+            upper_limit = std::min(upper_limit, working_epoch - 1);
         }
         if (max_finished_epoch < finished_epoch && finished_epoch <= upper_limit) {
             max_finished_epoch = finished_epoch;
@@ -300,10 +306,7 @@ void datastore::update_min_epoch_id(bool from_switch_epoch) {  // NOLINT(readabi
     TRACE_FINE << "epoch_id_switched_ = " << epoch_id_switched_.load() << ", upper_limit = " << upper_limit << ", max_finished_epoch = " << max_finished_epoch;
 
     // update recorded_epoch_
-    auto to_be_epoch = upper_limit;
-    if (to_be_epoch > static_cast<std::uint64_t>(max_finished_epoch)) {
-        to_be_epoch = static_cast<std::uint64_t>(max_finished_epoch);
-    }
+    auto to_be_epoch = std::min(upper_limit, static_cast<std::uint64_t>(max_finished_epoch));
 
     TRACE_FINE << "update epoch file part start with to_be_epoch = " << to_be_epoch;
     on_update_min_epoch_id_epoch_id_to_be_recorded_load();  // for testing
@@ -422,7 +425,7 @@ backup& datastore::begin_backup() {
         auto tmp_files = get_files();
         
         // Use blob_file_scanner to add blob files to the backup target
-        blob_file_scanner scanner(*blob_file_resolver_);
+        blob_file_scanner scanner(blob_file_resolver_.get());
         for (const auto& blob_file : scanner) {
             tmp_files.insert(blob_file);
         }
@@ -519,7 +522,7 @@ std::unique_ptr<backup_detail> datastore::begin_backup(backup_type btype) {  // 
             }
         }
         // Add blob files to the backup target
-        blob_file_scanner scanner(*blob_file_resolver_);
+        blob_file_scanner scanner(blob_file_resolver_.get());
         // Use the parent of the blob root as the base for computing the relative path.
         boost::filesystem::path backup_root = blob_file_resolver_->get_blob_root().parent_path();
         for (const auto& src : scanner) {
@@ -636,7 +639,7 @@ int64_t datastore::current_unix_epoch_in_millis() {
 }
 
 void datastore::online_compaction_worker() {
-    LOG_LP(INFO) << "online compaction worker started..." << std::endl;
+    LOG_LP(INFO) << "online compaction worker started...";
 
     boost::filesystem::path ctrl_dir = location_ / "ctrl";
     boost::filesystem::path start_file = ctrl_dir / "start_compaction";
@@ -697,7 +700,7 @@ void datastore::compact_with_online() {
         blob_file_gc_runnable = true;
         blob_file_garbage_collector_->shutdown();
     }
-    VLOG_LP(log_trace_fine) << "boundary_version_copy.get_major(): " << boundary_version_copy.get_major()
+    VLOG_LP(log_info) << "boundary_version_copy.get_major(): " << boundary_version_copy.get_major()
                             << ", compaction_catalog_->get_max_epoch_id(): " << compaction_catalog_->get_max_epoch_id()
                             << ", blob_file_garbage_collector_->is_active(): " << is_active
                             << ", blob_file_gc_runnable: " << blob_file_gc_runnable;
@@ -732,7 +735,7 @@ void datastore::compact_with_online() {
     ensure_directory_exists(compaction_temp_dir);
 
     // Set the appropriate options based on whether blob file GC is executable.
-    VLOG_LP(log_trace_fine) << "blob_file_gc_runnable: " << blob_file_gc_runnable;
+    VLOG_LP(log_info) << "blob_file_gc_runnable: " << blob_file_gc_runnable;
     compaction_options options = [&]() -> compaction_options {
         if (blob_file_gc_runnable) {
             auto gc_snapshot = std::make_unique<blob_file_gc_snapshot>(boundary_version_copy);
@@ -772,9 +775,7 @@ void datastore::compact_with_online() {
     // update compaction catalog
     compacted_file_info compacted_file_info{compacted_file.filename().string(), 1};
     detached_pwals.erase(compacted_file.filename().string());
-    if (compaction_catalog_->get_max_blob_id() > max_blob_id) {
-        max_blob_id = compaction_catalog_->get_max_blob_id();
-    }
+    max_blob_id = std::max(max_blob_id, compaction_catalog_->get_max_blob_id());
     compaction_catalog_->update_catalog_file(result.get_epoch_id(), max_blob_id, {compacted_file_info}, detached_pwals);
     add_file(compacted_file);
 
@@ -784,7 +785,7 @@ void datastore::compact_with_online() {
     LOG_LP(INFO) << "compaction finished";
 
     // blob files garbage collection
-    VLOG_LP(log_trace_fine) << "options.is_gc_enabled(): " << options.is_gc_enabled() << ", !impl_->is_backup_in_progress(): " << !impl_->is_backup_in_progress();
+    VLOG_LP(log_info) << "options.is_gc_enabled(): " << options.is_gc_enabled() << ", impl_->is_backup_in_progress(): " << impl_->is_backup_in_progress();
     if (options.is_gc_enabled() && !impl_->is_backup_in_progress()) {
         LOG_LP(INFO) << "start blob files garbage collection";
         blob_file_garbage_collector_->scan_blob_files(next_blob_id_copy);
@@ -809,19 +810,20 @@ std::unique_ptr<blob_pool> datastore::acquire_blob_pool() {
     // This function uses a CAS (Compare-And-Swap) loop to ensure atomic updates to the ID.
     // If the maximum value for blob IDs is reached, the function returns the max value, signaling an overflow condition.
     auto id_generator = [this]() {
-        blob_id_type current = 0;
-        do {
-            current = next_blob_id_.load(std::memory_order_acquire); // Load the current ID atomically.
+        while (true) {
+            blob_id_type current = next_blob_id_.load(std::memory_order_acquire); // Load the current ID atomically.
             if (current == std::numeric_limits<blob_id_type>::max()) {
                 LOG_LP(ERROR) << "Blob ID overflow detected.";
                 return current; // Return max value to indicate overflow.
             }
-        } while (!next_blob_id_.compare_exchange_weak(
-            current, 
-            current + 1,
-            std::memory_order_acq_rel, // Ensure atomicity of the update with acquire-release semantics.
-            std::memory_order_acquire));
-        return current; // Return the successfully updated ID.
+            if (next_blob_id_.compare_exchange_weak(
+                    current,
+                    current + 1,
+                    std::memory_order_acq_rel, // Ensure atomicity of the update with acquire-release semantics.
+                    std::memory_order_acquire)) {
+                return current; // Return the successfully updated ID.
+            }
+        }
     };
 
     // Create a blob_pool_impl instance by passing the ID generator lambda and blob_file_resolver.

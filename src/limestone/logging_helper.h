@@ -38,7 +38,7 @@ constexpr std::string_view find_fullname(std::string_view prettyname, std::strin
     size_t start_pos = std::string_view::npos;
     int tv_nest = 0;  // "<...>" nest level
     for (auto i = static_cast<ssize_t>(fn_pos); i >= 0; i--) {
-        switch (prettyname[i]) {
+        switch (prettyname[i]) {  // NOLINT(cppcoreguidelines-missing-switch-default
             case '>': tv_nest++; continue;
             case '<': tv_nest--; continue;
             case ' ': if (tv_nest <= 0) start_pos = i+1; break;

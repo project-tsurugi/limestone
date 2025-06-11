@@ -75,7 +75,7 @@
     pthread_setname_np(pthread_self(), "lstone_scan_blb");
     try {
         // Initialize blob_file_scanner with the resolver
-        blob_file_scanner scanner(*resolver_);
+        blob_file_scanner scanner(resolver_);
 
         // Iterate over each blob file using the scanner
         for (const auto& file_path : scanner) {
@@ -114,10 +114,10 @@
          this->wait_for_blob_file_scan();
           
          // Calculate the difference and perform deletion operations
-         VLOG_LP(log_trace_fine) << "Scanned blobs before diff: " << scanned_blobs_->debug_string();
-         VLOG_LP(log_trace_fine) << "GC exempt blobs: " << gc_exempt_blob_->debug_string();
+         VLOG_LP(log_debug) << "Scanned blobs before diff: " << scanned_blobs_->debug_string();
+         VLOG_LP(log_debug) << "GC exempt blobs: " << gc_exempt_blob_->debug_string();
          scanned_blobs_->diff(*gc_exempt_blob_);
-         VLOG_LP(log_trace_fine) << "Scanned blobs after: " << scanned_blobs_->debug_string();
+         VLOG_LP(log_debug) << "Scanned blobs after: " << scanned_blobs_->debug_string();
 
          for (const auto &id : *scanned_blobs_) {
             if (shutdown_requested_.load(std::memory_order_acquire)) {
