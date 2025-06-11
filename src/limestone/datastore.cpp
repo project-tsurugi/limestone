@@ -39,6 +39,43 @@
 #include "blob_file_gc_snapshot.h"
 #include "blob_file_scanner.h"
 #include "datastore_impl.h"
+
+namespace {
+
+using namespace limestone;
+using namespace limestone::api;
+
+enum class file_write_mode {
+    append,
+    overwrite
+};
+
+void write_epoch_to_file_internal(const std::string& file_path, epoch_id_type epoch_id, file_write_mode mode) {
+    const char* fopen_mode = (mode == file_write_mode::append) ? "a" : "w";
+    std::unique_ptr<FILE, void (*)(FILE*)> file_ptr(fopen(file_path.c_str(), fopen_mode), [](FILE* fp) {
+        if (fp) {
+            if (fclose(fp) != 0) { // NOLINT(cppcoreguidelines-owning-memory)
+                LOG_AND_THROW_IO_EXCEPTION("fclose failed", errno);
+            }
+        }
+    });  
+    if (!file_ptr) {
+        LOG_AND_THROW_IO_EXCEPTION("fopen failed for file: " + file_path, errno);
+    }
+
+    log_entry::durable_epoch(file_ptr.get(), epoch_id);
+
+    if (fflush(file_ptr.get()) != 0) {
+        LOG_AND_THROW_IO_EXCEPTION("fflush failed for file: " + file_path, errno);
+    }
+    if (fsync(fileno(file_ptr.get())) != 0) {
+        LOG_AND_THROW_IO_EXCEPTION("fsync failed for file: " + file_path, errno);
+    }
+}
+
+} // namespace
+
+
 namespace limestone::api {
 using namespace limestone::internal;
 
@@ -149,33 +186,7 @@ void datastore::recover() const noexcept {
     check_before_ready(static_cast<const char*>(__func__));
 }
 
-enum class file_write_mode {
-    append,
-    overwrite
-};
 
-static void write_epoch_to_file_internal(const std::string& file_path, epoch_id_type epoch_id, file_write_mode mode) {
-    const char* fopen_mode = (mode == file_write_mode::append) ? "a" : "w";
-    std::unique_ptr<FILE, void (*)(FILE*)> file_ptr(fopen(file_path.c_str(), fopen_mode), [](FILE* fp) {
-        if (fp) {
-            if (fclose(fp) != 0) { // NOLINT(cppcoreguidelines-owning-memory)
-                LOG_AND_THROW_IO_EXCEPTION("fclose failed", errno);
-            }
-        }
-    });  
-    if (!file_ptr) {
-        LOG_AND_THROW_IO_EXCEPTION("fopen failed for file: " + file_path, errno);
-    }
-
-    log_entry::durable_epoch(file_ptr.get(), epoch_id);
-
-    if (fflush(file_ptr.get()) != 0) {
-        LOG_AND_THROW_IO_EXCEPTION("fflush failed for file: " + file_path, errno);
-    }
-    if (fsync(fileno(file_ptr.get())) != 0) {
-        LOG_AND_THROW_IO_EXCEPTION("fsync failed for file: " + file_path, errno);
-    }
-}
 
 void datastore::write_epoch_to_file(epoch_id_type epoch_id) {
     TRACE_START << "epoch_id=" << epoch_id;

@@ -26,7 +26,9 @@
 #include "dblog_scan.h"
 #include "log_entry.h"
 
-namespace limestone::internal {
+namespace {
+
+using namespace limestone;
 using namespace limestone::api;
 
 void invalidate_epoch_snippet(boost::filesystem::fstream& strm, std::streampos fpos_head_of_epoch_snippet) {
@@ -41,6 +43,11 @@ void invalidate_epoch_snippet(boost::filesystem::fstream& strm, std::streampos f
         LOG_LP(ERROR) << "I/O error at marking epoch snippet header";
     }
 }
+} // namespace
+
+
+namespace limestone::internal {
+using namespace limestone::api;
 
 // LOGFORMAT_v1 pWAL syntax
 

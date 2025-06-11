@@ -29,6 +29,20 @@
 #include "log_entry.h"
 #include "sortdb_wrapper.h"
 
+namespace {
+using namespace limestone;
+using namespace limestone::api;
+
+bool log_error_and_throw(log_entry::read_error& e) {
+    LOG_AND_THROW_EXCEPTION("this pwal file is broken: " + e.message());
+    return false;
+}
+
+}
+
+
+
+
 namespace limestone::internal {
 using namespace limestone::api;
 
@@ -91,11 +105,6 @@ epoch_id_type dblog_scan::last_durable_epoch_in_dir() {
 }
 
 
-
-static bool log_error_and_throw(log_entry::read_error& e) {
-    LOG_AND_THROW_EXCEPTION("this pwal file is broken: " + e.message());
-    return false;
-}
 
 void dblog_scan::detach_wal_files(bool skip_empty_files) {
     // rotate_attached_wal_files
