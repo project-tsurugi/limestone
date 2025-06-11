@@ -82,7 +82,8 @@ void cursor_impl::validate_and_read_stream(std::optional<boost::filesystem::ifst
                     return;
                 }
             } while (log_entry->type() != log_entry::entry_type::normal_entry &&
-                     log_entry->type() != log_entry::entry_type::normal_with_blob);
+                     log_entry->type() != log_entry::entry_type::normal_with_blob 
+                     && log_entry->type() != log_entry::entry_type::remove_entry);
             // Check if the key_sid is in ascending order
             // TODO: Key order violation is detected here and the process is aborted.
             // However, this check should be moved to an earlier point, and if the key order is invalid,
@@ -112,6 +113,7 @@ void cursor_impl::validate_and_read_stream(std::optional<boost::filesystem::ifst
         log_entry = std::nullopt;
     }
 }
+
 
 bool cursor_impl::is_relevant_entry(const limestone::api::log_entry& entry) {
         // Step 1: Check if the entry is one of normal_entry, remove_entry, or normal_with_blob
@@ -144,7 +146,7 @@ bool cursor_impl::is_relevant_entry(const limestone::api::log_entry& entry) {
         return true;
 }
 
-bool cursor_impl::next() {
+bool cursor_impl::next() { 
     while (true) {
         // Read from the snapshot stream if the snapshot_log_entry_ is empty
         if (!snapshot_log_entry_) {
@@ -178,20 +180,25 @@ bool cursor_impl::next() {
                 log_entry_ = std::move(compacted_log_entry_.value());
                 compacted_log_entry_ = std::nullopt;
             } else {
-                // If key_sid is equal, use snapshot_log_entry_, but reset both entries
+                // If key_sid is equal, snapshot is always newer by design
+                // Note: If snapshot contains a remove_entry, it will be filtered out 
+                // by the type check at the end of the method
                 log_entry_ = std::move(snapshot_log_entry_.value());
                 snapshot_log_entry_ = std::nullopt;
                 compacted_log_entry_ = std::nullopt;
             }
         }
+
         // Check if the current log_entry_ is a normal entry or normal_with_blob
         if (log_entry_.type() == log_entry::entry_type::normal_entry ||
             log_entry_.type() == log_entry::entry_type::normal_with_blob) {
             return true;
         }
+
         // If it's not a normal entry, continue the loop to skip it and read the next entry
     }
 }
+
 
 
 limestone::api::storage_id_type cursor_impl::storage() const noexcept {
