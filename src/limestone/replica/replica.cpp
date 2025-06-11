@@ -20,6 +20,8 @@
 #include "replication/replication_endpoint.h"
 #include "replication/replica_server.h"
 
+// NOLINTBEGIN(performance-avoid-endl)
+
 void show_usage(const std::string& program_name) {
     std::cerr << "Usage: " << program_name << " <logdir>" << std::endl;
     std::cerr << "Note: The environment variable TSURUGI_REPLICATION_ENDPOINT must be set with the endpoint URL." << std::endl;
@@ -81,3 +83,4 @@ int main(int argc, char* argv[]) {
     return 0;
 }
 
+// NOLINTEND(performance-avoid-endl)
