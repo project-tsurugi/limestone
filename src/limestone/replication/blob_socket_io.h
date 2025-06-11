@@ -17,6 +17,12 @@ class blob_socket_io : public socket_io {
 public:
     static constexpr std::size_t blob_buffer_size = 64UL * 1024UL;
     
+    // Disallow copy and move operations
+    blob_socket_io(const blob_socket_io&) = delete;
+    blob_socket_io& operator=(const blob_socket_io&) = delete;
+    blob_socket_io(blob_socket_io&&) = delete;
+    blob_socket_io& operator=(blob_socket_io&&) = delete;
+
     // Real‑socket constructor
     blob_socket_io(int fd, datastore& ds);
 
