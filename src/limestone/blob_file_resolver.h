@@ -93,10 +93,11 @@ public:
         }
         for (size_t i = 0; i < 16; ++i) {
             char c = filename[i];
+            // NOLINTNEXTLINE(readability-simplify-boolean-expr)
             if (!((c >= '0' && c <= '9') ||
                   (c >= 'A' && c <= 'F') ||
                   (c >= 'a' && c <= 'f'))) {
-                return false;
+                return false; 
             }
         }
         return true;

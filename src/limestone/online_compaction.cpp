@@ -45,10 +45,15 @@ std::set<std::string> select_files_for_compaction(const std::set<boost::filesyst
             detached_pwals.insert(filename);
             VLOG_LP(log_debug) << "Selected file for compaction: " << filename;
         } else {
-            VLOG_LP(log_debug) << "File skipped for compaction: " << filename << " (Reason: " 
-                         << (filename.substr(0, 4) != "pwal" ? "does not start with 'pwal'" :
-                            filename.length() <= 9 ? "filename length is 9 or less" : 
-                            "file is already detached") << ")";
+            std::string reason;
+            if (filename.substr(0, 4) != "pwal") {
+                reason = "does not start with 'pwal'";
+            } else if (filename.length() <= 9) {
+                reason = "filename length is 9 or less";
+            } else {
+                reason = "file is already detached";
+            }
+            VLOG_LP(log_debug) << "File skipped for compaction: " << filename << " (Reason: " << reason << ")";
         }
     }
     return need_compaction_filenames;
