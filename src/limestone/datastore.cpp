@@ -213,10 +213,7 @@ void datastore::write_epoch_to_file(epoch_id_type epoch_id) {
 void datastore::ready() {
     TRACE_START;
     try {
-        blob_id_type max_blob_id =  create_snapshot_and_get_max_blob_id();
-        if (max_blob_id < compaction_catalog_->get_max_blob_id()) {
-            max_blob_id = compaction_catalog_->get_max_blob_id();
-        }
+        blob_id_type max_blob_id = std::max(create_snapshot_and_get_max_blob_id(), compaction_catalog_->get_max_blob_id());
         blob_file_garbage_collector_ = std::make_unique<blob_file_garbage_collector>(*blob_file_resolver_);
         blob_file_garbage_collector_->scan_blob_files(max_blob_id);
 
@@ -299,9 +296,7 @@ void datastore::update_min_epoch_id(bool from_switch_epoch) {  // NOLINT(readabi
         on_update_min_epoch_id_finished_epoch_id_load(); // for testing
         auto finished_epoch = e->finished_epoch_id_.load();
         if (working_epoch > finished_epoch && working_epoch != UINT64_MAX) {
-            if ((working_epoch - 1) < upper_limit) {
-                upper_limit = working_epoch - 1;
-            }
+            upper_limit = std::min(upper_limit, working_epoch - 1);
         }
         if (max_finished_epoch < finished_epoch && finished_epoch <= upper_limit) {
             max_finished_epoch = finished_epoch;
@@ -311,10 +306,7 @@ void datastore::update_min_epoch_id(bool from_switch_epoch) {  // NOLINT(readabi
     TRACE_FINE << "epoch_id_switched_ = " << epoch_id_switched_.load() << ", upper_limit = " << upper_limit << ", max_finished_epoch = " << max_finished_epoch;
 
     // update recorded_epoch_
-    auto to_be_epoch = upper_limit;
-    if (to_be_epoch > static_cast<std::uint64_t>(max_finished_epoch)) {
-        to_be_epoch = static_cast<std::uint64_t>(max_finished_epoch);
-    }
+    auto to_be_epoch = std::min(upper_limit, static_cast<std::uint64_t>(max_finished_epoch));
 
     TRACE_FINE << "update epoch file part start with to_be_epoch = " << to_be_epoch;
     on_update_min_epoch_id_epoch_id_to_be_recorded_load();  // for testing
@@ -783,9 +775,7 @@ void datastore::compact_with_online() {
     // update compaction catalog
     compacted_file_info compacted_file_info{compacted_file.filename().string(), 1};
     detached_pwals.erase(compacted_file.filename().string());
-    if (compaction_catalog_->get_max_blob_id() > max_blob_id) {
-        max_blob_id = compaction_catalog_->get_max_blob_id();
-    }
+    max_blob_id = std::max(max_blob_id, compaction_catalog_->get_max_blob_id());
     compaction_catalog_->update_catalog_file(result.get_epoch_id(), max_blob_id, {compacted_file_info}, detached_pwals);
     add_file(compacted_file);
 
