@@ -809,19 +809,20 @@ std::unique_ptr<blob_pool> datastore::acquire_blob_pool() {
     // This function uses a CAS (Compare-And-Swap) loop to ensure atomic updates to the ID.
     // If the maximum value for blob IDs is reached, the function returns the max value, signaling an overflow condition.
     auto id_generator = [this]() {
-        blob_id_type current = 0;
-        do {
-            current = next_blob_id_.load(std::memory_order_acquire); // Load the current ID atomically.
+        while (true) {
+            blob_id_type current = next_blob_id_.load(std::memory_order_acquire); // Load the current ID atomically.
             if (current == std::numeric_limits<blob_id_type>::max()) {
                 LOG_LP(ERROR) << "Blob ID overflow detected.";
                 return current; // Return max value to indicate overflow.
             }
-        } while (!next_blob_id_.compare_exchange_weak(
-            current, 
-            current + 1,
-            std::memory_order_acq_rel, // Ensure atomicity of the update with acquire-release semantics.
-            std::memory_order_acquire));
-        return current; // Return the successfully updated ID.
+            if (next_blob_id_.compare_exchange_weak(
+                    current,
+                    current + 1,
+                    std::memory_order_acq_rel, // Ensure atomicity of the update with acquire-release semantics.
+                    std::memory_order_acquire)) {
+                return current; // Return the successfully updated ID.
+            }
+        }
     };
 
     // Create a blob_pool_impl instance by passing the ID generator lambda and blob_file_resolver.

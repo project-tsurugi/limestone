@@ -73,6 +73,7 @@ void cursor_impl::validate_and_read_stream(std::optional<boost::filesystem::ifst
         // If the entry is not yet read, read it
         if (!log_entry) {
             log_entry.emplace();  // Construct a new log_entry
+            // NOLINTNEXTLINE(cppcoreguidelines-avoid-do-while)
             do {
                 if (!log_entry->read(*stream)) {
                     // If reading fails, close the stream and reset the log_entry
