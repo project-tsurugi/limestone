@@ -522,7 +522,7 @@ std::unique_ptr<backup_detail> datastore::begin_backup(backup_type btype) {  // 
             }
         }
         // Add blob files to the backup target
-        blob_file_scanner scanner(*blob_file_resolver_);
+        blob_file_scanner scanner(blob_file_resolver_.get());
         // Use the parent of the blob root as the base for computing the relative path.
         boost::filesystem::path backup_root = blob_file_resolver_->get_blob_root().parent_path();
         for (const auto& src : scanner) {
