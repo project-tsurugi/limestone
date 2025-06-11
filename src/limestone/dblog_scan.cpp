@@ -204,7 +204,7 @@ epoch_id_type dblog_scan::scan_pwal_files(  // NOLINT(readability-function-cogni
     std::vector<std::thread> workers;
     workers.reserve(thread_num_);
     for (int i = 0; i < thread_num_; i++) {
-        workers.emplace_back(std::thread([&](){
+        workers.emplace_back([&](){
             for (;;) {
                 boost::filesystem::path p;
                 {
@@ -234,7 +234,7 @@ epoch_id_type dblog_scan::scan_pwal_files(  // NOLINT(readability-function-cogni
                     break;
                 }
             }
-        }));
+        });
     }
     for (int i = 0; i < thread_num_; i++) {
         workers[i].join();
