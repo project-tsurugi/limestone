@@ -37,7 +37,7 @@
       * @brief Constructor.
       * @param resolver The blob_file_resolver instance to use for file resolution.
       */
-     explicit blob_file_scanner(const blob_file_resolver& resolver);
+     explicit blob_file_scanner(const blob_file_resolver* resolver);
 
      /**
       * @brief Iterator class to traverse the identified BLOB files.
@@ -112,8 +112,7 @@
      [[nodiscard]] iterator end() const;
 
  private:
-     const blob_file_resolver& resolver_;  ///< Reference to the blob_file_resolver instance.
+     const blob_file_resolver* resolver_;  ///< Reference to the blob_file_resolver instance.
  };
 
  } // namespace limestone::internal
- 

@@ -27,6 +27,8 @@
 #include "limestone_exception_helper.h"
 #include "manifest.h"
 
+// NOLINTBEGIN(performance-avoid-endl)
+
 using namespace limestone::api;
 using namespace limestone::internal;
 
@@ -53,12 +55,14 @@ enum subcommand {
     cmd_compaction,
 };
 
+namespace {
+
+using namespace limestone;
+
 void log_and_exit(int error) {
     VLOG(10) << "exiting with code " << error;
     exit(error);
 }
-
-namespace limestone {
 
 void inspect(dblog_scan &ds, std::optional<epoch_id_type> epoch) {
     std::cout << "persistent-format-version: 1" << std::endl;
@@ -165,12 +169,13 @@ void repair(dblog_scan &ds, std::optional<epoch_id_type> epoch) {
     }
 }
 
-static boost::filesystem::path make_work_dir_next_to(const boost::filesystem::path& target_dir) {
+
+boost::filesystem::path make_work_dir_next_to(const boost::filesystem::path& target_dir) {
     // assume: already checked existence and is_dir
     return make_tmp_dir_next_to(target_dir, ".work_XXXXXX");
 }
 
-static boost::filesystem::path make_backup_dir_next_to(const boost::filesystem::path& target_dir) {
+boost::filesystem::path make_backup_dir_next_to(const boost::filesystem::path& target_dir) {
     return make_tmp_dir_next_to(target_dir, ".backup_XXXXXX");
 }
 
@@ -261,9 +266,13 @@ void compaction(dblog_scan &ds, std::optional<epoch_id_type> epoch) {
     std::cout << "compaction was successfully completed: " << from_dir << std::endl;
 }
 
+}
+
+namespace limestone {
+
 int main(char *dir, subcommand mode) {  // NOLINT
     if (FLAGS_verbose) {
-        if (FLAGS_v < log_debug) {
+        if (FLAGS_v < log_debug) { // NOLINT(readability-use-std-min-max)
             FLAGS_v = log_debug;
         }
     }
@@ -349,3 +358,4 @@ int main(int argc, char *argv[]) {  // NOLINT
     }
     return limestone::main(argv[2], mode);  // NOLINT(*-pointer-arithmetic)
 }
+// NOLINTEND(performance-avoid-endl)

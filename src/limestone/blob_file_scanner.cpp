@@ -22,7 +22,8 @@
 
 namespace limestone::internal {
 
-blob_file_scanner::blob_file_scanner(const blob_file_resolver& resolver) : resolver_(resolver) {}
+blob_file_scanner::blob_file_scanner(const blob_file_resolver* resolver)
+    : resolver_(resolver) {}
 
 blob_file_scanner::iterator::iterator() : resolver_(nullptr) {}
 
@@ -56,7 +57,7 @@ blob_file_scanner::iterator& blob_file_scanner::iterator::operator++() {
  }
  
 blob_file_scanner::iterator blob_file_scanner::begin() const {
-     return iterator{boost::filesystem::recursive_directory_iterator(resolver_.get_blob_root()), &resolver_};
+    return iterator{boost::filesystem::recursive_directory_iterator(resolver_->get_blob_root()), resolver_};
 }
  
  blob_file_scanner::iterator blob_file_scanner::end() const {
@@ -64,4 +65,3 @@ blob_file_scanner::iterator blob_file_scanner::begin() const {
  }
 
  }  // namespace limestone::internal
- 
