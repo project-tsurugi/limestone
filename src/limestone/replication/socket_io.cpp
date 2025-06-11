@@ -229,10 +229,10 @@ void socket_io::close() {
     flush();
     if (!is_string_mode_) {
         if (socket_fd_ != -1) {
-            int ret = 0;
-            do {
+            int ret = ::close(socket_fd_);
+            while (ret == -1 && errno == EINTR) {
                 ret = ::close(socket_fd_);
-            } while (ret == -1 && errno == EINTR);
+            }
             if (ret == -1 && errno != EBADF) {
                 LOG_LP(WARNING) << "close() failed: " << strerror(errno);
             }
