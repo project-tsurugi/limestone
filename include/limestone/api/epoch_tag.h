@@ -59,13 +59,13 @@ public:
     [[nodiscard]] std::chrono::system_clock::time_point timestamp() const noexcept { return timestamp_; }
 
 private:
-    const std::string name_;
+    std::string name_;
 
-    const std::string comments_;
+    std::string comments_;
 
-    const epoch_id_type epoch_id_;
+    epoch_id_type epoch_id_;
 
-    const std::chrono::system_clock::time_point timestamp_;
+    std::chrono::system_clock::time_point timestamp_;
 
     epoch_tag(std::string_view name, std::string_view comments, epoch_id_type epoch_id, std::chrono::system_clock::time_point timestamp) noexcept
         : name_(std::string(name)), comments_(std::string(comments)), epoch_id_(epoch_id), timestamp_(timestamp) {

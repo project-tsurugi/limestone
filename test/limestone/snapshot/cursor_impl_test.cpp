@@ -75,6 +75,8 @@ private:
     std::vector<std::tuple<limestone::api::storage_id_type, std::string, std::string, limestone::api::write_version_type>> entries_;
 };
 
+
+
 class cursor_impl_test : public ::testing::Test {
 protected:
     static constexpr const char* location = "/tmp/cursor_impl_test";
@@ -132,6 +134,16 @@ protected:
             boost::filesystem::rename(pwal_file, new_file);
         } else {
             std::cerr << "Error: pwal_0000 file not found for renaming." << std::endl;
+        }
+    }
+
+    void rename_pwal_to(const std::string& name) {
+        boost::filesystem::path pwal_file = boost::filesystem::path(location) / "pwal_0000";
+        boost::filesystem::path target_file = boost::filesystem::path(location) / name;
+        if (boost::filesystem::exists(pwal_file)) {
+            boost::filesystem::rename(pwal_file, target_file);
+        } else {
+            FAIL() << "pwal_0000 file not found for renaming";
         }
     }
 };
@@ -619,5 +631,99 @@ TEST_F(cursor_impl_test, skip_duplicate_key) {
     // There should be no further entries.
     EXPECT_FALSE(cursor.next()) << "Expected no further entries";
 }
+
+TEST_F(cursor_impl_test, snapshot_only_normal_entry_returns) {
+    create_log_file("snapshot_only", {
+        {1, "key1", "value_from_snapshot", {1, 1}},
+    });
+
+    boost::filesystem::path snapshot_file = boost::filesystem::path(location) / "snapshot_only";
+    cursor_impl_testable cursor(snapshot_file);
+
+    ASSERT_TRUE(cursor.next()) << "normal_entry in snapshot should be returned";
+    std::string key, value;
+    cursor.key(key);
+    cursor.value(value);
+    EXPECT_EQ(key, "key1");
+    EXPECT_EQ(value, "value_from_snapshot");
+    EXPECT_FALSE(cursor.next()) << "Only one entry expected";
+}
+
+
+TEST_F(cursor_impl_test, compacted_only_normal_entry_returns) {
+    create_log_file("compacted_only", {
+        {1, "key1", "value_from_compacted", {1, 0}},
+    });
+
+    boost::filesystem::path snapshot_file = boost::filesystem::path(location) / "empty_snapshot";
+    std::ofstream(snapshot_file.string()).close(); // 空ファイル
+
+    boost::filesystem::path compacted_file = boost::filesystem::path(location) / "compacted_only";
+
+    cursor_impl_testable cursor(snapshot_file, compacted_file);
+
+    ASSERT_TRUE(cursor.next()) << "normal_entry in compacted should be returned";
+    std::string key, value;
+    cursor.key(key);
+    cursor.value(value);
+    EXPECT_EQ(key, "key1");
+    EXPECT_EQ(value, "value_from_compacted");
+    EXPECT_FALSE(cursor.next());
+}
+
+TEST_F(cursor_impl_test, snapshot_only_remove_entry_skipped) {
+    lc0_->begin_session();
+    lc0_->remove_entry(1, "key1", {1, 1});
+    lc0_->end_session();
+    rename_pwal_to("snapshot_remove");
+
+    boost::filesystem::path snapshot_file = boost::filesystem::path(location) / "snapshot_remove";
+    cursor_impl_testable cursor(snapshot_file);
+
+    EXPECT_FALSE(cursor.next()) << "remove_entry in snapshot should be skipped";
+}
+
+TEST_F(cursor_impl_test, snapshot_and_compacted_normal_entry_uses_snapshot) {
+    create_log_file("compacted_normal", {
+        {1, "key1", "value_from_compacted", {1, 0}},
+    });
+
+    create_log_file("snapshot_normal", {
+        {1, "key1", "value_from_snapshot", {1, 1}},
+    });
+
+    boost::filesystem::path snapshot_file = boost::filesystem::path(location) / "snapshot_normal";
+    boost::filesystem::path compacted_file = boost::filesystem::path(location) / "compacted_normal";
+
+    cursor_impl_testable cursor(snapshot_file, compacted_file);
+
+    ASSERT_TRUE(cursor.next()) << "snapshot entry should override compacted";
+    std::string key, value;
+    cursor.key(key);
+    cursor.value(value);
+    EXPECT_EQ(key, "key1");
+    EXPECT_EQ(value, "value_from_snapshot");
+    EXPECT_FALSE(cursor.next());
+}
+
+TEST_F(cursor_impl_test, snapshot_remove_entry_overrides_compacted_normal) {
+    create_log_file("compacted_normal2", {
+        {1, "key1", "value_from_compacted", {1, 0}},
+    });
+
+    lc0_->begin_session();
+    lc0_->remove_entry(1, "key1", {1, 1});
+    lc0_->end_session();
+    rename_pwal_to("snapshot_remove2");
+
+    boost::filesystem::path snapshot_file = boost::filesystem::path(location) / "snapshot_remove2";
+    boost::filesystem::path compacted_file = boost::filesystem::path(location) / "compacted_normal2";
+
+    cursor_impl_testable cursor(snapshot_file, compacted_file);
+
+    EXPECT_FALSE(cursor.next()) << "remove_entry in snapshot should override compacted normal_entry";
+}
+
+
 
 }  // namespace limestone::testing

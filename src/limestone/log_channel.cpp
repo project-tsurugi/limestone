@@ -25,8 +25,8 @@
 #include <sstream>
 #include <thread>
 
-#include "datastore_impl.h"
 #include "internal.h"
+#include "datastore_impl.h"
 #include "limestone_exception_helper.h"
 #include "log_channel_impl.h"
 #include "log_entry.h"
@@ -60,6 +60,7 @@ void log_channel::begin_session() {
         //
         // This loop detects such inconsistencies and repeats until `current_epoch_id_`
         // matches the latest value of `epoch_id_switched_`, ensuring consistency.
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-do-while)
         do {
             envelope_.on_begin_session_current_epoch_id_store(); // for testing
             current_epoch_id_.store(envelope_.epoch_id_switched_.load());

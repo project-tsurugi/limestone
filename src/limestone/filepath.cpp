@@ -25,11 +25,14 @@ namespace limestone::internal {
 void remove_trailing_dir_separators(boost::filesystem::path& p) {
     std::string str = p.string();
     std::size_t prev_len{};
-    do {
+    while (true) {
         prev_len = str.size();
         p.remove_trailing_separator();  // remove only one char
         str = p.string();
-    } while (str.size() < prev_len);
+        if (str.size() >= prev_len) {
+            break;
+        }
+    }
 }
 
 boost::filesystem::path make_tmp_dir_next_to(const boost::filesystem::path& target_dir, const char* suffix) {

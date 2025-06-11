@@ -33,7 +33,7 @@ socket_streambuf::socket_streambuf(int socket_fd) : socket_fd_(socket_fd) {
     socklen_t optlen = sizeof(rcv_buf_size);
     if (getsockopt(socket_fd_, SOL_SOCKET, SO_RCVBUF, &rcv_buf_size, &optlen) != 0) {
         LOG_LP(WARNING) << "getsockopt(SO_RCVBUF) failed: " << strerror(errno)
-                        << ", using default 1024 bytes." << std::endl;
+                        << ", using default 1024 bytes.";
     }
     // Resize the buffer to the received size.
     buffer_.resize(static_cast<std::size_t>(rcv_buf_size));

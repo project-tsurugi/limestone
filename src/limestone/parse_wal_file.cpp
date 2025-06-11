@@ -26,7 +26,9 @@
 #include "dblog_scan.h"
 #include "log_entry.h"
 
-namespace limestone::internal {
+namespace {
+
+using namespace limestone;
 using namespace limestone::api;
 
 void invalidate_epoch_snippet(boost::filesystem::fstream& strm, std::streampos fpos_head_of_epoch_snippet) {
@@ -41,6 +43,11 @@ void invalidate_epoch_snippet(boost::filesystem::fstream& strm, std::streampos f
         LOG_LP(ERROR) << "I/O error at marking epoch snippet header";
     }
 }
+} // namespace
+
+
+namespace limestone::internal {
+using namespace limestone::api;
 
 // LOGFORMAT_v1 pWAL syntax
 
@@ -94,7 +101,7 @@ void invalidate_epoch_snippet(boost::filesystem::fstream& strm, std::streampos f
 //   marker_begin                  = 0x02 epoch
 //   marker_invalidated_begin      = 0x06 epoch
 //   normal_entry                  = 0x01 key_length value_length storage_id key(key_length) write_version_major write_version_minor value(value_length)
-//   normal_with_blog              = 0x0a key_length value_length storage_id key(key_length) write_version_major write_version_minor value(value_length) FIXME
+//   normal_with_blog              = 0x0a key_length value_length storage_id key(key_length) write_version_major write_version_minor value(value_length) blob_ids
 //   remove_entry                  = 0x05 key_length storage_id key(key_length) writer_version_major writer_version_minor
 //   marker_durable                = 0x04 epoch
 //   marker_end                    = 0x03 epoch
@@ -113,7 +120,7 @@ void invalidate_epoch_snippet(boost::filesystem::fstream& strm, std::streampos f
 //                                 | 0x01 key_length value_length storage_id key(key_length) byte(0-15)
 //                                 | 0x01 key_length value_length storage_id key(<key_length)
 //                                 | 0x01 byte(0-15)
-//   SHORT_normal_with_blob        = 0x0a key_length value_length storage_id key(key_length) write_version_major write_version_minor value(<value_length) FIXME
+//   SHORT_normal_with_blob        = 0x0a key_length value_length storage_id key(key_length) write_version_major write_version_minor value(<value_length) blob_ids
 //   SHORT_remove_entry            = 0x05 key_length storage_id key(key_length) byte(0-15)
 //                                 | 0x05 key_length storage_id key(<key_length)
 //                                 | 0x05 byte(0-11)
@@ -129,11 +136,27 @@ void invalidate_epoch_snippet(boost::filesystem::fstream& strm, std::streampos f
     class lex_token {
     public:
         enum class token_type {
-            eof,
-            normal_entry = 1, marker_begin, marker_end, marker_durable, remove_entry, marker_invalidated_begin,
-            clear_storage, add_storage, remove_storage, normal_with_blob,
-            SHORT_normal_entry = 101, SHORT_marker_begin, SHORT_marker_end, SHORT_marker_durable, SHORT_remove_entry, SHORT_marker_inv_begin,
-            SHORT_clear_storage, SHORT_add_storage, SHORT_remove_storage, SHORT_normal_with_blob,
+            eof = 0,
+            normal_entry = 1,
+            marker_begin = 2,
+            marker_end = 3,
+            marker_durable = 4,
+            remove_entry = 5,
+            marker_invalidated_begin = 6,
+            clear_storage = 7,
+            add_storage = 8,
+            remove_storage = 9,
+            normal_with_blob = 10,
+            SHORT_normal_entry = 101,
+            SHORT_marker_begin = 102,
+            SHORT_marker_end = 103,
+            SHORT_marker_durable = 104,
+            SHORT_remove_entry = 105,
+            SHORT_marker_inv_begin = 106,
+            SHORT_clear_storage = 107,
+            SHORT_add_storage = 108,
+            SHORT_remove_storage = 109,
+            SHORT_normal_with_blob = 110,
             UNKNOWN_TYPE_entry = 1001,
         };
 
