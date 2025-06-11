@@ -40,13 +40,13 @@ public:
     restore_progress() = delete;
 
 private:
-    const status status_;
+    status status_;
 
-    const status_kind comments_;
+    status_kind comments_;
 
-    const std::string source_;
+    std::string source_;
 
-    const float progress_;
+    float progress_;
 
     friend class datastore;
 };

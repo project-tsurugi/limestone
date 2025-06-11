@@ -41,6 +41,7 @@ available options:
 * `-DBUILD_SHARED_LIBS=OFF` - create static libraries instead of shared libraries
 * `-DBUILD_TESTS=OFF` - don't build test programs
 * `-DBUILD_DOCUMENTS=OFF` - don't build documents by doxygen
+* `-DBUILD_STRICT=OFF` - don't treat compile warnings as build errors
 * `-DINSTALL_EXAMPLES=ON` - install example applications
 * `-DRECOVERY_SORTER_KVSLIB=<library>` - select the eKVS library using at recovery process. (`LEVELDB` or `ROCKSDB` (default), case-insensitive)
 * `-DRECOVERY_SORTER_PUT_ONLY=OFF` - don't use (faster) put-only method at recovery process

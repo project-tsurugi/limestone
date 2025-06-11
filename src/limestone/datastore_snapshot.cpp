@@ -35,20 +35,22 @@
 #include "snapshot_impl.h"
 #include "sorting_context.h"
 
-namespace limestone::internal {
+namespace  {
+using namespace limestone;
+using namespace limestone::internal;
 
 constexpr std::size_t write_version_size = sizeof(epoch_id_type) + sizeof(std::uint64_t);
 static_assert(write_version_size == 16);
 
 [[maybe_unused]]
-static void store_bswap64_value(void *dest, const void *src) {
+void store_bswap64_value(void *dest, const void *src) {
     auto* p64_dest = reinterpret_cast<std::uint64_t*>(dest);  // NOLINT(*-reinterpret-cast)
     auto* p64_src = reinterpret_cast<const std::uint64_t*>(src);  // NOLINT(*-reinterpret-cast)
     *p64_dest = __bswap_64(*p64_src);
 }
 
 [[maybe_unused]]
-static int comp_twisted_key(const std::string_view& a, const std::string_view& b) {
+int comp_twisted_key(const std::string_view& a, const std::string_view& b) {
     std::size_t a_strlen = a.size() - write_version_size;
     std::size_t b_strlen = b.size() - write_version_size;
     std::string_view a_str(a.data() + write_version_size, a_strlen);
@@ -58,7 +60,7 @@ static int comp_twisted_key(const std::string_view& a, const std::string_view& b
 }
 
 [[maybe_unused]]
-static void insert_entry_or_update_to_max(sortdb_wrapper* sortdb, const log_entry& e) {
+void insert_entry_or_update_to_max(sortdb_wrapper* sortdb, const log_entry& e) {
     bool need_write = true;
     // Skip writing if an older entry is already stored.
     std::string value;
@@ -102,7 +104,7 @@ static void insert_entry_or_update_to_max(sortdb_wrapper* sortdb, const log_entr
 
 
 [[maybe_unused]]
-static void insert_twisted_entry(sortdb_wrapper* sortdb, const log_entry& e) {
+void insert_twisted_entry(sortdb_wrapper* sortdb, const log_entry& e) {
     // key_sid: storage_id[8] key[*], value_etc: epoch[8]LE minor_version[8]LE value[*], type: type[1]
     // db_key: epoch[8]BE minor_version[8]BE storage_id[8] key[*], db_value: type[1] value[*]
     std::string db_key(write_version_size + e.key_sid().size(), '\0');
@@ -124,7 +126,7 @@ static void insert_twisted_entry(sortdb_wrapper* sortdb, const log_entry& e) {
     sortdb->put(db_key, db_value);
 }
 
-static std::pair<epoch_id_type, sorting_context> create_sorted_from_wals(compaction_options &options) {
+std::pair<epoch_id_type, sorting_context> create_sorted_from_wals(compaction_options &options) {
     auto from_dir = options.get_from_dir();
     auto file_names = options.get_file_names();
     auto num_worker = options.get_num_worker();
@@ -190,7 +192,7 @@ static std::pair<epoch_id_type, sorting_context> create_sorted_from_wals(compact
 
 
 [[maybe_unused]]
-static write_version_type extract_write_version(const std::string_view& db_key) {
+write_version_type extract_write_version(const std::string_view& db_key) {
     std::string wv(write_version_size, '\0');
     store_bswap64_value(&wv[0], &db_key[0]);  // NOLINT(readability-container-data-pointer)
     store_bswap64_value(&wv[8], &db_key[8]); 
@@ -198,7 +200,7 @@ static write_version_type extract_write_version(const std::string_view& db_key) 
 }
 
 [[maybe_unused]]
-static std::string create_value_from_db_key_and_value(const std::string_view& db_key, const std::string_view& db_value) {
+std::string create_value_from_db_key_and_value(const std::string_view& db_key, const std::string_view& db_value) {
     std::string value(write_version_size + db_value.size() - 1, '\0');
     store_bswap64_value(&value[0], &db_key[0]);  // NOLINT(readability-container-data-pointer)
     store_bswap64_value(&value[8], &db_key[8]);
@@ -206,7 +208,7 @@ static std::string create_value_from_db_key_and_value(const std::string_view& db
     return value;
 }
 
-static std::pair<std::string, std::string_view> split_db_value_and_blob_ids(const std::string_view raw_db_value) {
+std::pair<std::string, std::string_view> split_db_value_and_blob_ids(const std::string_view raw_db_value) {
 
 #if defined SORT_METHOD_PUT_ONLY
     // The first byte is entry_type
@@ -268,7 +270,7 @@ static std::pair<std::string, std::string_view> split_db_value_and_blob_ids(cons
 
 
 
-static void sortdb_foreach(
+void sortdb_foreach(
     [[maybe_unused]]  compaction_options &options,
     sorting_context& sctx,
     const std::function<void(
@@ -348,6 +350,10 @@ static void sortdb_foreach(
     });
 #endif
 }
+
+}  // namespace
+
+namespace limestone::internal {
 
 blob_id_type create_compact_pwal_and_get_max_blob_id(compaction_options &options) {
     auto [max_appeared_epoch, sctx] = create_sorted_from_wals(options);

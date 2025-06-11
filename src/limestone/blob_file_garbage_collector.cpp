@@ -75,7 +75,7 @@
     pthread_setname_np(pthread_self(), "lstone_scan_blb");
     try {
         // Initialize blob_file_scanner with the resolver
-        blob_file_scanner scanner(*resolver_);
+        blob_file_scanner scanner(resolver_);
 
         // Iterate over each blob file using the scanner
         for (const auto& file_path : scanner) {

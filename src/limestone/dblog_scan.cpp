@@ -29,6 +29,20 @@
 #include "log_entry.h"
 #include "sortdb_wrapper.h"
 
+namespace {
+using namespace limestone;
+using namespace limestone::api;
+
+bool log_error_and_throw(log_entry::read_error& e) {
+    LOG_AND_THROW_EXCEPTION("this pwal file is broken: " + e.message());
+    return false;
+}
+
+}
+
+
+
+
 namespace limestone::internal {
 using namespace limestone::api;
 
@@ -92,11 +106,6 @@ epoch_id_type dblog_scan::last_durable_epoch_in_dir() {
 
 
 
-static bool log_error_and_throw(log_entry::read_error& e) {
-    LOG_AND_THROW_EXCEPTION("this pwal file is broken: " + e.message());
-    return false;
-}
-
 void dblog_scan::detach_wal_files(bool skip_empty_files) {
     // rotate_attached_wal_files
     std::vector<boost::filesystem::path> attached_files;
@@ -138,24 +147,24 @@ epoch_id_type dblog_scan::scan_pwal_files(  // NOLINT(readability-function-cogni
             auto ec_value = ec.value();
             switch (ec_value) {
             case parse_error::ok:
-                VLOG(30) << "OK: " << p;
+                VLOG(log_debug) << "OK: " << p;
                 break;
             case parse_error::repaired:
-                VLOG(30) << "REPAIRED: " << p;
+                VLOG(log_debug) << "REPAIRED: " << p;
                 break;
             case parse_error::broken_after_marked:
                 if (!is_detached_wal(p)) {
-                    VLOG(30) << "MARKED BUT TAIL IS BROKEN (NOT DETACHED): " << p;
+                    VLOG(log_debug) << "MARKED BUT TAIL IS BROKEN (NOT DETACHED): " << p;
                     if (fail_fast_) {
                         THROW_LIMESTONE_EXCEPTION("the end of non-detached file is broken");
                     }
                 } else {
-                    VLOG(30) << "MARKED BUT TAIL IS BROKEN (DETACHED): " << p;
+                    VLOG(log_debug) << "MARKED BUT TAIL IS BROKEN (DETACHED): " << p;
                     ec.value(ec.modified() ? parse_error::repaired : parse_error::ok);
                 }
                 break;
             case parse_error::broken_after:
-                VLOG(30) << "TAIL IS BROKEN: " << p;
+                VLOG(log_debug) << "TAIL IS BROKEN: " << p;
                 if (!is_detached_wal(p)) {
                     if (fail_fast_) {
                         THROW_LIMESTONE_EXCEPTION("the end of non-detached file is broken");
@@ -163,11 +172,11 @@ epoch_id_type dblog_scan::scan_pwal_files(  // NOLINT(readability-function-cogni
                 }
                 break;
             case parse_error::nondurable_entries:
-                VLOG(30) << "CONTAINS NONDURABLE ENTRY: " << p;
+                VLOG(log_debug) << "CONTAINS NONDURABLE ENTRY: " << p;
                 break;
             case parse_error::unexpected:
             case parse_error::failed:
-                VLOG(30) << "ERROR: " << p;
+                VLOG(log_debug) << "ERROR: " << p;
                 if (fail_fast_) {
                     THROW_LIMESTONE_EXCEPTION(ec.message());
                 }
@@ -195,7 +204,7 @@ epoch_id_type dblog_scan::scan_pwal_files(  // NOLINT(readability-function-cogni
     std::vector<std::thread> workers;
     workers.reserve(thread_num_);
     for (int i = 0; i < thread_num_; i++) {
-        workers.emplace_back(std::thread([&](){
+        workers.emplace_back([&](){
             for (;;) {
                 boost::filesystem::path p;
                 {
@@ -225,7 +234,7 @@ epoch_id_type dblog_scan::scan_pwal_files(  // NOLINT(readability-function-cogni
                     break;
                 }
             }
-        }));
+        });
     }
     for (int i = 0; i < thread_num_; i++) {
         workers[i].join();

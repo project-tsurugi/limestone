@@ -1,5 +1,5 @@
 /*
- * Copyright 2023-2023 Project Tsurugi.
+ * Copyright 2023-2025 Project Tsurugi.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -38,7 +38,7 @@ constexpr std::string_view find_fullname(std::string_view prettyname, std::strin
     size_t start_pos = std::string_view::npos;
     int tv_nest = 0;  // "<...>" nest level
     for (auto i = static_cast<ssize_t>(fn_pos); i >= 0; i--) {
-        switch (prettyname[i]) {
+        switch (prettyname[i]) {  // NOLINT(cppcoreguidelines-missing-switch-default
             case '>': tv_nest++; continue;
             case '<': tv_nest--; continue;
             case ' ': if (tv_nest <= 0) start_pos = i+1; break;
@@ -92,6 +92,13 @@ constexpr auto location_prefix(const char (&prettyname)[N], const char (&funcnam
     return location_prefix<std::max(N, M)>(sv);
 }
 
+template<size_t N, size_t M>
+constexpr auto shrink_array(std::array<char, M> arr) {
+    std::array<char, N> buf{};
+    for (size_t i = 0; i < N; i++) { buf.at(i) = arr.at(i); }
+    return buf;
+}
+
 // To force compile-time evaluation of constexpr location_prefix in C++17,
 // the result is once stored to the temporary constexpr variable.
 
@@ -105,14 +112,16 @@ constexpr auto location_prefix(const char (&prettyname)[N], const char (&funcnam
 
 // N.B. use consteval in C++20
 
-// NOLINTNEXTLINE
-#define _LOCATION_PREFIX_TO_STREAM(stream)  if (constexpr auto __tmplp = location_prefix(__PRETTY_FUNCTION__, __FUNCTION__); false) {} else stream << __tmplp.data()
-// NOLINTNEXTLINE
+// NOLINTBEGIN
+#define _LOCATION_PREFIX_TO_STREAM(stream)  \
+    if (constexpr auto __tmplp = location_prefix(__PRETTY_FUNCTION__, __FUNCTION__); false) {} else \
+    if (constexpr auto __tmplplen = std::string_view{__tmplp.data()}.length(); false) {} else \
+    if (static constexpr auto __tmplptrim = shrink_array<__tmplplen>(__tmplp); false) {} else \
+    stream << std::string_view{__tmplptrim.data(), __tmplplen}
 #define LOG_LP(x)   _LOCATION_PREFIX_TO_STREAM(LOG(x))
-// NOLINTNEXTLINE
 #define VLOG_LP(x)  _LOCATION_PREFIX_TO_STREAM(VLOG(x))
-// NOLINTNEXTLINE
 #define DVLOG_LP(x) _LOCATION_PREFIX_TO_STREAM(DVLOG(x))
+// NOLINTEND
 
 // Cached thread name retrieval
 inline std::string getThreadName() {

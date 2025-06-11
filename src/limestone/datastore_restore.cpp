@@ -47,7 +47,15 @@ status purge_dir(const boost::filesystem::path& dir) {
     return status::ok;
 }
 
-static status check_manifest(const boost::filesystem::path& manifest_path) {
+} // namespace limestone::internal
+
+
+namespace {
+   
+using namespace limestone;
+using namespace limestone::internal;
+
+status check_manifest(const boost::filesystem::path& manifest_path) {
     std::string ver_err;
     int vc = internal::is_supported_version(manifest_path, ver_err);
     if (vc == 0) {
@@ -69,7 +77,7 @@ static status check_manifest(const boost::filesystem::path& manifest_path) {
  * @param entries The list of file entries.
  * @return status::ok if validation succeeds, otherwise an error status.
  */
-static status validate_manifest_files(const boost::filesystem::path& from_dir, const std::vector<file_set_entry>& entries) {
+status validate_manifest_files(const boost::filesystem::path& from_dir, const std::vector<file_set_entry>& entries) {
     int manifest_count = 0;
     for (auto & ent : entries) {
         if (ent.destination_path().string() != internal::manifest_file_name) {
@@ -90,14 +98,14 @@ static status validate_manifest_files(const boost::filesystem::path& from_dir, c
             LOG_LP(ERROR) << "Filesystem error: " << ex.what() << " file = " << src.string();
             return status::err_permission_error;
         }
-        if (auto rc = internal::check_manifest(src); rc != status::ok) {
+        if (auto rc = check_manifest(src); rc != status::ok) {
             return rc;
         }
         manifest_count++;
     }
     if (manifest_count < 1) {  // XXX: change to != 1 ??
         VLOG_LP(log_info) << "no manifest file in backup";
-        LOG(ERROR) << internal::version_error_prefix << " (version mismatch: version 0, server supports version 1)";
+        LOG(ERROR) << version_error_prefix << " (version mismatch: version 0, server supports version 1)";
         return status::err_broken_data;
     }
     return status::ok;
@@ -111,7 +119,7 @@ static status validate_manifest_files(const boost::filesystem::path& from_dir, c
  * @param location The target restore location.
  * @return status::ok if copy succeeds, otherwise an error status.
  */
-static status copy_backup_files(const boost::filesystem::path& from_dir, const std::vector<file_set_entry>& entries, const boost::filesystem::path& location) {
+status copy_backup_files(const boost::filesystem::path& from_dir, const std::vector<file_set_entry>& entries, const boost::filesystem::path& location) {
     blob_file_resolver resolver{location};
 
     for (auto & ent : entries) {
@@ -149,7 +157,7 @@ static status copy_backup_files(const boost::filesystem::path& from_dir, const s
 
 
 
-}  // namespace limestone::internal
+}  // namespace
 
 namespace limestone::api {
 
@@ -170,7 +178,7 @@ status datastore::restore(std::string_view from, bool keep_backup) const noexcep
         LOG_LP(ERROR) << "Filesystem error: " << ex.what() << " file = " << manifest_path.string();
         return status::err_permission_error;
     }
-    if (auto rc = internal::check_manifest(manifest_path); rc != status::ok) { return rc; }
+    if (auto rc = check_manifest(manifest_path); rc != status::ok) { return rc; }
 
     if (auto rc = internal::purge_dir(location_); rc != status::ok) { return rc; }
 
@@ -218,9 +226,9 @@ status datastore::restore(std::string_view from, std::vector<file_set_entry>& en
     VLOG_LP(log_debug) << "restore (from prusik) begin, from directory = " << from;
     auto from_dir = boost::filesystem::path(std::string(from));
 
-    if (auto rc = internal::validate_manifest_files(from_dir, entries); rc != status::ok) { return rc; }
+    if (auto rc = validate_manifest_files(from_dir, entries); rc != status::ok) { return rc; }
     if (auto rc = internal::purge_dir(location_); rc != status::ok) { return rc; }
-    if (auto rc = internal::copy_backup_files(from_dir, entries, location_); rc != status::ok) { return rc; }
+    if (auto rc = copy_backup_files(from_dir, entries, location_); rc != status::ok) { return rc; }
 
     return status::ok;
 }

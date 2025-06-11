@@ -1,8 +1,5 @@
 # ファイルフォーマットの更新
 
-BLOB対応に伴い、ファイルフォーマットのバージョンを更新する必要がある。
-ファイルフォーマットのバージョンを記録している`limestone-manifest.json
-に関聯している処理を洗い出し、必要におうじて修正する必要がある。
 
 
 ### マニフェストファイルの形式
@@ -25,6 +22,7 @@ BLOB対応に伴い、ファイルフォーマットのバージョンを更新�
 
 * Version 1
   * `limestone-manifest.json` 導入時のバージョン
+  * GA-1はこのバージョン 
 * Version 2
   * オンラインコンパクション対応バージョン
   * コンパクション関聯ファイルが追加された。
@@ -32,7 +30,11 @@ BLOB対応に伴い、ファイルフォーマットのバージョンを更新�
   * BLOB対応バージョン
   * blobディレクトリ配下にBLOBファイルが保存されるようになった。
   * WALファイルに、BLOB付きのエントリが追加された。
-  
+* Version 4
+  * Limestoneのデータフォーマットは変更なし
+  * jogasakiが管理するテーブル・インデックスのメタデータが拡張され、
+    それにともなって永続化データが前方互換でなくなくなったため。Limestoneで管理しているバージョンを更新。
+
 ### バージョン間の互換性
 
 * Version 0 対応のTsurugi
@@ -48,6 +50,9 @@ BLOB対応に伴い、ファイルフォーマットのバージョンを更新�
     * BLOBデータを含む場合、手動でもダウングレード不可
     * BLOBデータを含まない場合、手動ダウグレードは可能(未サポート)
       * `limestone-manifest.json` を手動で修正し、コンパクション関聯のファイルと、blobディレクトリを削除
+  * Version 4以降のデータを読むことはできない
+    * 起動時にエラーとなる。
+    * 手動でもダウングレード不可
 * Version 2 対応のTsurugi
   * 起動時に、Version 1のデータをVersion 2に自動アップグレードする。
   * Version 3のデータを読むことはできない
@@ -55,6 +60,16 @@ BLOB対応に伴い、ファイルフォーマットのバージョンを更新�
     * BLOBデータを含む場合、手動でもダウングレード不可
     * BLOBデータを含まない場合、手動ダウグレードは可能(未サポート)
       * `limestone-manifest.json` を手動で修正し、blobディレクトリを削除
+  * Version 4以降のデータを読むことはできない
+    * 起動時にエラーとなる。
+    * 手動でもダウングレード不可
+* Version 3 対応のTsurugi
+  * 起動時に、Version 1,2のデータをVersion 3に自動アップグレードする。
+  * Version 4のデータを読むことはできない
+    * 起動時にエラーとなる。
+    * 手動でもダウングレード不可
+* Version 4 対応のTsurugi
+  * 起動時に、Version 1〜3のデータをVersion 4に自動アップグレードする。
 
 
 ## 永続化データ形式バージョンの変更
@@ -65,7 +80,7 @@ BLOB対応に伴い、ファイルフォーマットのバージョンを更新�
 
 * datastore_restore.cpp
   * `check_manifest(const boost::filesystem::path& manifest_path)`
-    * リスト時のバージョンチェックを行っている。
+    * リストア時のバージョンチェックを行っている。
     * Version 1 以降であれば、起動時にVersion 3へ自動アップグレードされるので、Version 1以降であることをチェックすればOK
     * 現行コードからの変更なし
 * datastore_format.cpp
@@ -83,3 +98,21 @@ BLOB対応に伴い、ファイルフォーマットのバージョンを更新�
 * その他
   * テストコード内でのバージョンチェックを行っている箇所の修正
 
+### Version 3 から Version 4 への更新
+
+* datastore_restore.cpp
+  * `check_manifest(const boost::filesystem::path& manifest_path)`
+    * リストア時のバージョンチェックを行っている。
+    * Version 1 以降であれば、起動時にVersion 4へ自動アップグレードされるので、Version 1以降であることをチェックすればOK
+    * 現行コードからの変更なし
+* datastore_format.cpp
+  * `setup_initial_logdir(const boost::filesystem::path& logdir`
+    * ここで `limestone-manifest.json` を作成している
+    * Version 4 に変更する。
+  * `check_and_migrate_logdir_format(const boost::filesystem::path& logdir)`
+    * Version 1〜3のときにVersion 4にアップグレードするように変更する。
+  * `is_supported_version(const boost::filesystem::path& manifest_path, std::string& errmsg)`
+    * サポートバージョンのチェック
+    * Version 4もサポートバージョンに加える
+* その他
+  * テストコード内でのバージョンチェックを行っている箇所の修正

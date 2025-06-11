@@ -146,7 +146,7 @@ TEST_F(blob_pool_impl_test, register_file_fails_if_pool_released) {
 
     // Attempt to register a file
     EXPECT_THROW_WITH_PARTIAL_MESSAGE(
-        pool_->register_file("/tmp/blob_pool_impl_test/nonexistent_file", false),
+        (void) pool_->register_file("/tmp/blob_pool_impl_test/nonexistent_file", false),
         std::logic_error,
         "This pool is already released.");
 
@@ -159,7 +159,7 @@ TEST_F(blob_pool_impl_test, register_file_fails_if_source_does_not_exist) {
 
     // Register a non-existent file and verify the exception message
     EXPECT_THROW_WITH_PARTIAL_MESSAGE(
-        pool_->register_file(test_source, false),
+        (void) pool_->register_file(test_source, false),
         limestone_blob_exception,
         "Source file does not exist: /tmp/blob_pool_impl_test/nonexistent_file"
     );
@@ -186,7 +186,7 @@ TEST_F(blob_pool_impl_test, register_file_rename_fails_with_cross_device_link) {
     pool_->set_file_operations(custom_ops);
 
     // Perform the registration and verify handle_cross_filesystem_move is invoked
-    EXPECT_NO_THROW(pool_->register_file(source_path, true));
+    EXPECT_NO_THROW((void) pool_->register_file(source_path, true));
     EXPECT_FALSE(boost::filesystem::exists(source_path)); // Should be removed after cross-device move
     EXPECT_TRUE(boost::filesystem::exists(target_path));  // File should exist at target path
 
@@ -246,7 +246,7 @@ TEST_F(blob_pool_impl_test, register_file_rename_fails_with_other_error) {
 
     // Perform the registration and expect an exception
     EXPECT_THROW_WITH_PARTIAL_MESSAGE(
-        pool_->register_file(source_path, true),
+        (void) pool_->register_file(source_path, true),
         limestone_blob_exception,
         "Failed to rename file: "
     );
@@ -279,7 +279,7 @@ TEST_F(blob_pool_impl_test, register_file_copy_file_fails) {
 
     // Perform the registration and expect an exception
     EXPECT_THROW_WITH_PARTIAL_MESSAGE(
-        pool_->register_file(source_path, false),
+        (void) pool_->register_file(source_path, false),
         limestone_blob_exception,
         "Failed to synchronize destination file to disk: "
     );
@@ -313,7 +313,7 @@ TEST_F(blob_pool_impl_test, register_file_fails_if_directory_creation_fails) {
 
 
     EXPECT_THROW_WITH_PARTIAL_MESSAGE(
-        pool_->register_file(test_source, false),
+        (void) pool_->register_file(test_source, false),
         limestone_blob_exception,
         "Failed to create directories: " 
     );
@@ -1103,7 +1103,7 @@ TEST_F(blob_pool_impl_test, register_data_fails_if_pool_released) {
     pool_->release();
 
     EXPECT_THROW_WITH_PARTIAL_MESSAGE(
-        pool_->register_data("test data"),
+        (void) pool_->register_data("test data"),
         std::logic_error,
         "This pool is already released."
     );
@@ -1121,7 +1121,7 @@ TEST_F(blob_pool_impl_test, register_data_fails_to_open_file) {
 
     std::string data = "test data";
     EXPECT_THROW_WITH_PARTIAL_MESSAGE(
-        pool_->register_data(data),
+        (void) pool_->register_data(data),
         limestone_blob_exception,
         "Failed to open destination file"
     );
@@ -1142,7 +1142,7 @@ TEST_F(blob_pool_impl_test, register_data_fails_to_write_data) {
 
     std::string data = "test data";
     EXPECT_THROW_WITH_PARTIAL_MESSAGE(
-        pool_->register_data(data),
+        (void) pool_->register_data(data),
         limestone_blob_exception,
         "Failed to write data to destination file"
     );
@@ -1163,7 +1163,7 @@ TEST_F(blob_pool_impl_test, register_data_fails_to_flush_data) {
 
     std::string data = "test data";
     EXPECT_THROW_WITH_PARTIAL_MESSAGE(
-        pool_->register_data(data),
+        (void) pool_->register_data(data),
         limestone_blob_exception,
         "Failed to flush data to destination file"
     );
@@ -1184,7 +1184,7 @@ TEST_F(blob_pool_impl_test, register_data_fails_to_sync_data) {
 
     std::string data = "test data";
     EXPECT_THROW_WITH_PARTIAL_MESSAGE(
-        pool_->register_data(data),
+        (void) pool_->register_data(data),
         limestone_blob_exception,
         "Failed to synchronize destination file"
     );
@@ -1210,7 +1210,7 @@ TEST_F(blob_pool_impl_test, register_data_fsync_fails_remove_fails_file_not_foun
 
     std::string data = "test data";
     EXPECT_THROW_WITH_PARTIAL_MESSAGE(
-        pool_->register_data(data),
+        (void) pool_->register_data(data),
         limestone_blob_exception,
         "Failed to synchronize destination file"
     );
@@ -1236,7 +1236,7 @@ TEST_F(blob_pool_impl_test, register_data_fsync_fails_remove_fails_other_reason)
 
     std::string data = "test data";
     EXPECT_THROW_WITH_PARTIAL_MESSAGE(
-        pool_->register_data(data),
+        (void) pool_->register_data(data),
         limestone_blob_exception,
         "Failed to synchronize destination file"
     );
@@ -1273,7 +1273,7 @@ TEST_F(blob_pool_impl_test, duplicate_data__fails_if_pool_released) {
     pool_->release();
 
     EXPECT_THROW_WITH_PARTIAL_MESSAGE(
-        pool_->duplicate_data(1),
+        (void) pool_->duplicate_data(1),
         std::logic_error,
         "This pool is already released."
     );
@@ -1284,7 +1284,7 @@ TEST_F(blob_pool_impl_test, duplicate_data_source_not_found) {
     blob_id_type invalid_id = 9999;
 
     EXPECT_THROW_WITH_PARTIAL_MESSAGE(
-        pool_->duplicate_data(invalid_id),
+        (void) pool_->duplicate_data(invalid_id),
         limestone_blob_exception,
         "Invalid blob_id"
     );
@@ -1307,7 +1307,7 @@ TEST_F(blob_pool_impl_test, duplicate_data_hard_link_failure) {
     blob_id_type original_id = pool_->register_data(data);
 
     EXPECT_THROW_WITH_PARTIAL_MESSAGE(
-        pool_->duplicate_data(original_id),
+        (void) pool_->duplicate_data(original_id),
         limestone_blob_exception,
         "Failed to create hard link"
     );
