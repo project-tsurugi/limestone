@@ -23,6 +23,9 @@ public:
     blob_socket_io(blob_socket_io&&) = delete;
     blob_socket_io& operator=(blob_socket_io&&) = delete;
 
+    // Default constructor
+    ~blob_socket_io() = default;
+
     // Real‑socket constructor
     blob_socket_io(int fd, datastore& ds);
 
