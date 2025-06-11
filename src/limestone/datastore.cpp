@@ -425,7 +425,7 @@ backup& datastore::begin_backup() {
         auto tmp_files = get_files();
         
         // Use blob_file_scanner to add blob files to the backup target
-        blob_file_scanner scanner(*blob_file_resolver_);
+        blob_file_scanner scanner(blob_file_resolver_.get());
         for (const auto& blob_file : scanner) {
             tmp_files.insert(blob_file);
         }
