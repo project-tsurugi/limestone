@@ -111,18 +111,19 @@ void log_channel::end_session() {
     try {
         TRACE_START << "current_epoch_id_=" << current_epoch_id_.load();
         if (envelope_.impl_->is_async_session_close_enabled()) {
-            auto fut = std::async(std::launch::async, [this]() { this->finalize_session_file(); });
             impl_->send_replica_message(finished_epoch_id_.load(), [&](replication::message_log_entries &msg) {
                 msg.set_session_end_flag(true);
                 msg.set_flush_flag(true);
             });
-            fut.wait();
+            finalize_session_file();
+            impl_->wait_for_replica_ack();
         } else {
             finalize_session_file();
             impl_->send_replica_message(finished_epoch_id_.load(), [&](replication::message_log_entries &msg) {
                 msg.set_session_end_flag(true);
                 msg.set_flush_flag(true);
             });
+            impl_->wait_for_replica_ack();
         }
         TRACE_END;
     } catch (...) {

@@ -122,9 +122,9 @@ bool datastore_impl::open_control_channel() {
     return true;
 }
 
-void datastore_impl::propagate_group_commit(uint64_t epoch_id) {
+bool datastore_impl::propagate_group_commit(uint64_t epoch_id) {
     if (!is_master_) {
-        return;
+        return false;
     }
     if (replica_exists_.load(std::memory_order_acquire)) {
         TRACE_START << "epoch_id=" << epoch_id;
@@ -132,18 +132,25 @@ void datastore_impl::propagate_group_commit(uint64_t epoch_id) {
         if (!control_channel_->send_message(message)) {
             LOG_LP(ERROR) << "Failed to send switch epoch message to replica.";
             TRACE_END << "Failed to send switch epoch message.";
-            return;
-        }
-        // Wait for the acknowledgment
-        if (!control_channel_->receive_message()) {
-            LOG_LP(ERROR) << "Failed to receive acknowledgment for switch epoch message.";
-            control_channel_->close_session();
-            replica_exists_.store(false, std::memory_order_release);
-            TRACE_ABORT << "Failed to receive acknowledgment for switch epoch message.";
-            return;
+            return false;
         }
         TRACE_END;
+        return true;
     }
+    return false;
+}
+
+void datastore_impl::wait_for_propagated_group_commit_ack() {
+    TRACE_START;
+    auto response = control_channel_->receive_message();
+    if (response == nullptr || response->get_message_type_id() != message_type_id::COMMON_ACK) {
+        LOG_LP(ERROR) << "Failed to receive acknowledgment for switch epoch message.";
+        control_channel_->close_session();
+        replica_exists_.store(false, std::memory_order_release);
+        TRACE_END << "Failed to receive acknowledgment for switch epoch message.";
+        return;
+    }
+    TRACE_END;
 }
 
 bool datastore_impl::is_replication_configured() const noexcept {

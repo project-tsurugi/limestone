@@ -62,8 +62,16 @@ public:
     // Getter for control_channel_
     [[nodiscard]] std::shared_ptr<replica_connector> get_control_channel() const noexcept;
 
-    // Propagates the group commit message to the replica
-    void propagate_group_commit(uint64_t epoch_id);
+    /**
+     * @brief Sends a group commit message to the replica.
+     * @param epoch_id The epoch ID to send.
+     * @return Returns true if the message was actually sent; false otherwise.
+     *         (If true, you must call wait_for_propagated_group_commit_ack().)
+     */
+    [[nodiscard]] bool propagate_group_commit(uint64_t epoch_id);
+
+    // Waits for the acknowledgment of the propagated group commit message
+    void wait_for_propagated_group_commit_ack();
 
     /**
      * @brief Checks if the replication endpoint is configured.

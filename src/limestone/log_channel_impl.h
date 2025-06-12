@@ -80,6 +80,13 @@ public:
      */
     void send_replica_message(uint64_t epoch_id, const std::function<void(replication::message_log_entries&)>& modifier);
 
+    /**
+     * @brief Blocks the calling thread until an acknowledgment is received from the replica.
+     *
+     * @note This function may block indefinitely if the replica does not respond.
+     *       Consider using a timeout mechanism if appropriate.
+     */
+    void wait_for_replica_ack();
 private:
     std::unique_ptr<replication::replica_connector> replica_connector_;
     std::mutex mtx_replica_connector_;
