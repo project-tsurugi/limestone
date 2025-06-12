@@ -130,8 +130,8 @@ bool datastore_impl::propagate_group_commit(uint64_t epoch_id) {
         TRACE_START << "epoch_id=" << epoch_id;
         message_group_commit message{epoch_id};
         if (!control_channel_->send_message(message)) {
-            LOG_LP(ERROR) << "Failed to send switch epoch message to replica.";
-            TRACE_END << "Failed to send switch epoch message.";
+            LOG_LP(ERROR) << "Failed to send group commit message to replica.";
+            TRACE_END << "Failed to send group commit message.";
             return false;
         }
         TRACE_END;
