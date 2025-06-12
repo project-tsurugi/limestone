@@ -219,14 +219,17 @@ void datastore::persist_and_propagate_epoch_id(epoch_id_type epoch_id) {
     TRACE_START << "epoch_id=" << epoch_id;
     uint64_t start = limestone::internal::now_nsec();
     if (impl_->is_async_group_commit_enabled()) {
-        auto fut1 = std::async(std::launch::async, [this, epoch_id] {
-            persist_epoch_id(epoch_id);
-        });
-            impl_->propagate_group_commit(epoch_id);
-        fut1.wait();
+        bool sent = impl_->propagate_group_commit(epoch_id);
+        persist_epoch_id(epoch_id);
+        if (sent) {
+            impl_->wait_for_propagated_group_commit_ack();
+        }
     } else {
         persist_epoch_id(epoch_id);
-        impl_->propagate_group_commit(epoch_id);
+        bool sent = impl_->propagate_group_commit(epoch_id);
+        if (sent) {
+            impl_->wait_for_propagated_group_commit_ack();
+        }
     }
     uint64_t end = limestone::internal::now_nsec();
     LOG_LP(INFO) << "datastore::persist_and_propagate_epoch_id() took " << (end - start) / 1000 << "us";

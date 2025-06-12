@@ -26,8 +26,6 @@ void log_channel_impl::send_replica_message(uint64_t epoch_id, const std::functi
         return; 
     }
 
-    uint64_t start = limestone::internal::now_nsec();
-
     // Create and modify the message
     replication::message_log_entries message{epoch_id};
     modifier(message);
@@ -39,18 +37,23 @@ void log_channel_impl::send_replica_message(uint64_t epoch_id, const std::functi
         return;
     }
 
-    // If session_end_flag or flush_flag is set, wait for receive ACK
-    if (message.has_session_end_flag() || message.has_flush_flag()) {
-        auto ack = replica_connector_->receive_message();
-        auto mid = ack->get_message_type_id();
-        if (mid != message_type_id::COMMON_ACK) {
-            LOG_LP(FATAL) << "Protocol error: expected ACK message, but received " << static_cast<int>(mid);
-            replica_connector_.reset();
-        }
-        uint64_t end = limestone::internal::now_nsec();
-        LOG_LP(INFO) << "log_channel_impl::send_replica_message() took " << (end - start) / 1000 << "us";
+}
+
+void log_channel_impl::wait_for_replica_ack() {
+    // If replica_connector_ is invalid, exit the function
+    if (!replica_connector_) {
+        return; 
+    }
+
+    auto ack = replica_connector_->receive_message();
+    auto mid = ack->get_message_type_id();
+    if (mid != message_type_id::COMMON_ACK) {
+        LOG_LP(FATAL) << "Protocol error: expected ACK message, but received " << static_cast<int>(mid);
+        replica_connector_.reset();
     }
 }
+
+
 
 void log_channel_impl::set_replica_connector(std::unique_ptr<replication::replica_connector> connector) {
     std::lock_guard<std::mutex> lock(mtx_replica_connector_);
