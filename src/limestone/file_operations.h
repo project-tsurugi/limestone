@@ -81,6 +81,15 @@ public:
     // Unlinks (deletes) a file
     virtual int unlink(const char* filename) = 0;
 
+    // flock system call for file locking
+    virtual int flock(int fd, int operation) = 0;
+
+    // open system call for file opening
+    virtual int open(const char* filename, int flags) = 0;
+
+    // close system call for file closing
+    virtual int close(int fd) = 0;
+
     // -----------------------------------------
     // C++-style file operations
     // -----------------------------------------
@@ -142,6 +151,9 @@ public:
     int fsync(int fd) override;
     int rename(const char* oldname, const char* newname) override;
     int unlink(const char* filename) override;
+    int flock(int fd, int operation) override;
+    int open(const char* filename, int flags) override;
+    int close(int fd) override;
 
     std::unique_ptr<std::ifstream> open_ifstream(const std::string& path) override;
     bool getline(std::ifstream& file, std::string& line) override;

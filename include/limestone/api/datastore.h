@@ -40,6 +40,7 @@
 #include <limestone/api/write_version_type.h>
 #include <limestone/api/tag_repository.h>
 #include <limestone/api/restore_progress.h>
+#include <limestone/api/rotation_result.h>
 
 namespace limestone::internal {
     class compaction_catalog;
@@ -49,6 +50,8 @@ namespace limestone::internal {
 namespace limestone::api {
 
 class datastore_impl;
+class backup;
+class log_channel;
 
 /**
  * @brief datastore interface to start/stop the services, store log, create snapshot for recover from log files
@@ -316,6 +319,31 @@ public:
      */
     std::vector<blob_id_type> check_and_remove_persistent_blob_ids(const std::vector<blob_id_type>& blob_ids);
 
+    /**
+     * @brief Retrieves a pointer to the underlying datastore implementation.
+     *
+     * This method returns a non-owning pointer to the internal
+     * datastore_impl instance.
+     *
+     *
+     * NOTE: This method is intended for internal use only.
+     * 
+     * @return A pointer to the datastore implementation.
+     */
+    datastore_impl* get_impl() noexcept { return impl_.get(); }
+
+    /**
+     * @brief Writes the specified epoch id to the epoch file and notifies replicas if needed.
+     *
+     * This function writes the specified epoch id into the epoch file.
+     * If there are any replicas that require the epoch id to be updated, they will be notified.
+     *
+     * NOTE: This method is intended for internal use only.
+     *
+     * @param epoch_id The epoch id to be written and, if necessary, propagated to replicas.
+     */
+    virtual void persist_and_propagate_epoch_id(epoch_id_type epoch_id);
+
 protected:  // for tests
     auto& log_channels_for_tests() const noexcept { return log_channels_; }
     auto epoch_id_informed_for_tests() const noexcept { return epoch_id_informed_.load(); }
@@ -332,6 +360,7 @@ protected:  // for tests
     }
     write_version_type get_available_boundary_version_for_tests() const noexcept { return available_boundary_version_; }
     void wait_for_blob_file_garbace_collector_for_tests() const noexcept;
+
 
     // These virtual methods are hooks for testing thread synchronization.
     // They allow derived classes to inject custom behavior or notifications
@@ -382,8 +411,10 @@ protected:  // for tests
     }
 
 private:
+    void persist_epoch_id(epoch_id_type epoch_id);
+
     std::function<void(epoch_id_type)> write_epoch_callback_{
-        [this](epoch_id_type epoch) { this->write_epoch_to_file(epoch); }
+        [this](epoch_id_type epoch) { this->persist_and_propagate_epoch_id(epoch); }
     };
 
     std::vector<std::unique_ptr<log_channel>> log_channels_;
@@ -490,8 +521,7 @@ private:
     // File descriptor for file lock (flock) on the manifest file
     int fd_for_flock_{-1};
 
-    virtual void write_epoch_to_file(epoch_id_type epoch_id);
-
+    
     int epoch_write_counter = 0;
 
     std::unique_ptr<limestone::internal::blob_file_resolver> blob_file_resolver_;

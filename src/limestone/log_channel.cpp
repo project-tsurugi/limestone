@@ -14,21 +14,24 @@
  * limitations under the License.
  */
 
-#include <chrono>
-#include <sstream>
-#include <iomanip>
-
 #include <glog/logging.h>
-#include <limestone/logging.h>
-#include "logging_helper.h"
-#include "limestone_exception_helper.h"
-
-#include <limestone/api/log_channel.h>
 #include <limestone/api/datastore.h>
-#include "internal.h"
-#include "log_entry.h"
-#include "rotation_result.h"
+#include <limestone/api/log_channel.h>
+#include <limestone/logging.h>
 
+#include <chrono>
+#include <future>
+#include <iomanip>
+#include <sstream>
+#include <thread>
+
+#include "internal.h"
+#include "datastore_impl.h"
+#include "limestone_exception_helper.h"
+#include "log_channel_impl.h"
+#include "log_entry.h"
+#include "logging_helper.h"
+#include "replication/message_log_entries.h"
 namespace limestone::api {
 
 log_channel::log_channel(boost::filesystem::path location, std::size_t id, datastore& envelope) noexcept
@@ -37,6 +40,7 @@ log_channel::log_channel(boost::filesystem::path location, std::size_t id, datas
     std::stringstream ss;
     ss << limestone::internal::log_channel_prefix << std::setw(4) << std::setfill('0') << std::dec << id_;
     file_ = ss.str();
+    impl_ = std::make_unique<log_channel_impl>();
 }
 
 void log_channel::begin_session() {
@@ -73,7 +77,11 @@ void log_channel::begin_session() {
             envelope_.add_file(log_file);
             registered_ = true;
         }
-        log_entry::begin_session(strm_, static_cast<epoch_id_type>(current_epoch_id_.load()));
+        uint64_t epoch_id = current_epoch_id_.load();
+        log_entry::begin_session(strm_, static_cast<epoch_id_type>(epoch_id));
+        impl_->send_replica_message(epoch_id, [&](replication::message_log_entries &msg) {
+            msg.set_session_begin_flag(true);
+        });
         TRACE_END;
     } catch (...) {
         TRACE_ABORT;
@@ -81,23 +89,41 @@ void log_channel::begin_session() {
     }
 }
 
+void log_channel::finalize_session_file() {
+    if (fflush(strm_) != 0) {
+        LOG_AND_THROW_IO_EXCEPTION("fflush failed", errno);
+    }
+    if (fsync(fileno(strm_)) != 0) {
+        LOG_AND_THROW_IO_EXCEPTION("fsync failed", errno);
+    }
+    envelope_.on_end_session_finished_epoch_id_store(); // for testing
+    finished_epoch_id_.store(current_epoch_id_.load());
+    envelope_.update_min_epoch_id();
+    envelope_.on_end_session_current_epoch_id_store(); // for testing
+    current_epoch_id_.store(UINT64_MAX);
+
+    if (fclose(strm_) != 0) {  // NOLINT(*-owning-memory)
+        LOG_AND_THROW_IO_EXCEPTION("fclose failed", errno);
+    }
+}
+
 void log_channel::end_session() {
     try {
         TRACE_START << "current_epoch_id_=" << current_epoch_id_.load();
-        if (fflush(strm_) != 0) {
-            LOG_AND_THROW_IO_EXCEPTION("fflush failed", errno);
-        }
-        if (fsync(fileno(strm_)) != 0) {
-            LOG_AND_THROW_IO_EXCEPTION("fsync failed", errno);
-        }
-        envelope_.on_end_session_finished_epoch_id_store(); // for testing
-        finished_epoch_id_.store(current_epoch_id_.load());
-        envelope_.update_min_epoch_id();
-        envelope_.on_end_session_current_epoch_id_store(); // for testing
-        current_epoch_id_.store(UINT64_MAX);
-
-        if (fclose(strm_) != 0) {  // NOLINT(*-owning-memory)
-            LOG_AND_THROW_IO_EXCEPTION("fclose failed", errno);
+        if (envelope_.impl_->is_async_session_close_enabled()) {
+            impl_->send_replica_message(finished_epoch_id_.load(), [&](replication::message_log_entries &msg) {
+                msg.set_session_end_flag(true);
+                msg.set_flush_flag(true);
+            });
+            finalize_session_file();
+            impl_->wait_for_replica_ack();
+        } else {
+            finalize_session_file();
+            impl_->send_replica_message(finished_epoch_id_.load(), [&](replication::message_log_entries &msg) {
+                msg.set_session_end_flag(true);
+                msg.set_flush_flag(true);
+            });
+            impl_->wait_for_replica_ack();
         }
         TRACE_END;
     } catch (...) {
@@ -119,6 +145,9 @@ void log_channel::add_entry(storage_id_type storage_id, std::string_view key, st
     TRACE_START << "storage_id=" << storage_id << ", key=" << key << ",value = " << value << ", epoch =" << write_version.epoch_number_ << ", minor =" << write_version.minor_write_version_;
     try {
         log_entry::write(strm_, storage_id, key, value, write_version);
+        impl_->send_replica_message(current_epoch_id_.load(), [&](replication::message_log_entries &msg) {
+            msg.add_normal_entry(storage_id, key, value, write_version);
+        });
     } catch (...) {
         TRACE_ABORT;
         HANDLE_EXCEPTION_AND_ABORT();
@@ -135,6 +164,9 @@ void log_channel::add_entry([[maybe_unused]] storage_id_type storage_id, [[maybe
     try {
         log_entry::write_with_blob(strm_, storage_id, key, value, write_version, large_objects);
         envelope_.add_persistent_blob_ids(large_objects);
+        impl_->send_replica_message(current_epoch_id_.load(), [&](replication::message_log_entries &msg) {
+            msg.add_normal_with_blob(storage_id, key, value, write_version, large_objects);
+        });
     } catch (...) {
         TRACE_ABORT;
         HANDLE_EXCEPTION_AND_ABORT();
@@ -146,6 +178,9 @@ void log_channel::remove_entry(storage_id_type storage_id, std::string_view key,
     TRACE_START << "storage_id=" << storage_id << ", key=" << key << ", epoch =" << write_version.epoch_number_ << ", minor =" << write_version.minor_write_version_;
     try {
         log_entry::write_remove(strm_, storage_id, key, write_version);
+        impl_->send_replica_message(current_epoch_id_.load(), [&](replication::message_log_entries &msg) {
+            msg.add_remove_entry(storage_id, key, write_version);
+        });
     } catch (...) {
         TRACE_ABORT;
         HANDLE_EXCEPTION_AND_ABORT();
@@ -157,6 +192,9 @@ void log_channel::add_storage(storage_id_type storage_id, write_version_type wri
     TRACE_START << "storage_id=" << storage_id << ", epoch =" << write_version.epoch_number_ << ", minor =" << write_version.minor_write_version_;
     try {
         log_entry::write_add_storage(strm_, storage_id, write_version);
+        impl_->send_replica_message(current_epoch_id_.load(), [&](replication::message_log_entries &msg) {
+            msg.add_add_storage(storage_id, write_version);
+        });
     } catch (...) {
         TRACE_ABORT;
         HANDLE_EXCEPTION_AND_ABORT();
@@ -169,6 +207,9 @@ void log_channel::remove_storage(storage_id_type storage_id, write_version_type 
     TRACE_START << "storage_id=" << storage_id << ", epoch =" << write_version.epoch_number_ << ", minor =" << write_version.minor_write_version_;
     try {
         log_entry::write_remove_storage(strm_, storage_id, write_version);
+        impl_->send_replica_message(current_epoch_id_.load(), [&](replication::message_log_entries &msg) {
+            msg.add_remove_storage(storage_id, write_version);
+        });
     } catch (...) {
         TRACE_ABORT;
         HANDLE_EXCEPTION_AND_ABORT();
@@ -180,6 +221,9 @@ void log_channel::truncate_storage(storage_id_type storage_id, write_version_typ
     TRACE_START << "storage_id=" << storage_id << ", epoch =" << write_version.epoch_number_ << ", minor =" << write_version.minor_write_version_;
     try {
         log_entry::write_clear_storage(strm_, storage_id, write_version);
+        impl_->send_replica_message(current_epoch_id_.load(), [&](replication::message_log_entries &msg) {
+            msg.add_clear_storage(storage_id, write_version);
+        });
     } catch (...) {
         TRACE_ABORT;
         HANDLE_EXCEPTION_AND_ABORT();
@@ -214,4 +258,11 @@ std::string log_channel::do_rotate_file(epoch_id_type epoch) {
     return new_name;
 }
 
+
+
+
+
+log_channel_impl* log_channel::get_impl() const noexcept {
+    return impl_.get();
+}
 } // namespace limestone::api

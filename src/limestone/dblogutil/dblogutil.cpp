@@ -25,6 +25,7 @@
 #include "internal.h"
 #include "log_entry.h"
 #include "limestone_exception_helper.h"
+#include "manifest.h"
 
 // NOLINTBEGIN(performance-avoid-endl)
 
@@ -298,8 +299,8 @@ int main(char *dir, subcommand mode) {  // NOLINT
         log_and_exit(64);
     }
     try {
+        int lock_fd = manifest::acquire_lock(p);
         check_and_migrate_logdir_format(p);
-        int lock_fd = acquire_manifest_lock(p);
         if (lock_fd == -1) {
             LOG(ERROR) << "Log directory " << p
                        << " is already in use by another process. Operation aborted.";

@@ -31,12 +31,13 @@ endfunction (add_test_executable)
 file(GLOB SRCS
         "limestone/api/*.cpp"
         "limestone/blob/*.cpp"
-        "limestone/log/*.cpp"
-        "limestone/epoch/*.cpp"
-        "limestone/utils/*.cpp"
         "limestone/compaction/*.cpp"
-        "limestone/snapshot/*.cpp"
         "limestone/datastore_impl/*.cpp"
+        "limestone/epoch/*.cpp"
+        "limestone/log/*.cpp"
+        "limestone/replication/*.cpp"
+        "limestone/snapshot/*.cpp"
+        "limestone/utils/*.cpp"
         )
 
 foreach(file ${SRCS})
