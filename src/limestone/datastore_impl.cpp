@@ -26,6 +26,7 @@
 #include "replication/message_log_channel_create.h"
 #include "replication/message_session_begin.h"
 #include "replication/replica_connector.h"
+#include "replication/async_replication.h"
 
 namespace limestone::api {
 
@@ -33,13 +34,13 @@ namespace limestone::api {
 datastore_impl::datastore_impl()
     : backup_counter_(0)
     , replica_exists_(false)
-    , async_session_close_enabled_(std::getenv("REPLICATION_ASYNC_SESSION_CLOSE") != nullptr)
-    , async_group_commit_enabled_(std::getenv("REPLICATION_ASYNC_GROUP_COMMIT") != nullptr)
+    , async_session_close_mode_(limestone::replication::async_replication_from_env("REPLICATION_ASYNC_SESSION_CLOSE"))
+    , async_group_commit_mode_(limestone::replication::async_replication_from_env("REPLICATION_ASYNC_GROUP_COMMIT"))
 {
     LOG_LP(INFO) << "REPLICATION_ASYNC_SESSION_CLOSE: "
-                 << (async_session_close_enabled_ ? "enabled" : "disabled");
+                 << limestone::replication::to_string(async_session_close_mode_);
     LOG_LP(INFO) << "REPLICATION_ASYNC_GROUP_COMMIT: "
-                 << (async_group_commit_enabled_ ? "enabled" : "disabled");
+                 << limestone::replication::to_string(async_group_commit_mode_);
 
     bool has_replica = replication_endpoint_.is_valid();
     replica_exists_.store(has_replica, std::memory_order_release);
@@ -208,29 +209,12 @@ bool datastore_impl::is_master() const noexcept {
     return is_master_;
 }
 
-bool datastore_impl::is_async_session_close_enabled() const noexcept {
-    return async_session_close_enabled_;
+async_replication datastore_impl::get_async_session_close_mode() const noexcept {
+    return async_session_close_mode_;
 }
 
-bool datastore_impl::is_async_group_commit_enabled() const noexcept {
-    return async_group_commit_enabled_;
-}
-
-async_replication datastore_impl::async_replication_from_env(const char* env_name) {
-    const char* env = std::getenv(env_name);
-    if (!env || std::string(env).empty() || std::string(env) == "disabled") {
-        return async_replication::disabled;
-    }
-    std::string v(env);
-    if (v == "std_async") {
-        return async_replication::std_async;
-    }
-    if (v == "single_thread_async") {
-        return async_replication::single_thread_async;
-    }
-    LOG_LP(FATAL) << "Invalid value for " << env_name << ": " << v;
-    // Defensive: LOG_LP(FATAL) should terminate the process; std::abort() is for redundancy.
-    std::abort();
+async_replication datastore_impl::get_async_group_commit_mode() const noexcept {
+    return async_group_commit_mode_;
 }
 
 }  // namespace limestone::api

@@ -115,7 +115,7 @@ void log_channel::end_session() {
     try {
         TRACE_START << "current_epoch_id_=" << current_epoch_id_.load();
         uint64_t start = limestone::internal::now_nsec();
-        if (envelope_.impl_->is_async_session_close_enabled()) {
+        if (envelope_.impl_->get_async_session_close_mode() != async_replication::disabled) {
             impl_->send_replica_message(finished_epoch_id_.load(), [&](replication::message_log_entries &msg) {
                 msg.set_session_end_flag(true);
                 msg.set_flush_flag(true);

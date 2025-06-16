@@ -218,7 +218,7 @@ void datastore::persist_epoch_id(epoch_id_type epoch_id) {
 void datastore::persist_and_propagate_epoch_id(epoch_id_type epoch_id) {
     TRACE_START << "epoch_id=" << epoch_id;
     uint64_t start = limestone::internal::now_nsec();
-    if (impl_->is_async_group_commit_enabled()) {
+    if (impl_->get_async_group_commit_mode() != limestone::replication::async_replication::disabled) {
         bool sent = impl_->propagate_group_commit(epoch_id);
         persist_epoch_id(epoch_id);
         if (sent) {
