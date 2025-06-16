@@ -5,6 +5,7 @@
 namespace limestone::api {
 
 using limestone::api::datastore_impl;
+using limestone::replication::async_replication;
 
 class replication_flag_test : public ::testing::Test {
 protected:
@@ -74,4 +75,40 @@ TEST_F(replication_flag_test, async_both_flags_enabled) {
     unsetenv("REPLICATION_ASYNC_GROUP_COMMIT");
 }
 
+// Test that async_replication_from_env returns disabled for unset, empty, or "disabled"
+TEST(async_replication_from_env_test, returns_disabled_for_unset_and_empty_and_disabled) {
+    unsetenv("TEST_ASYNC_ENV");
+    EXPECT_EQ(datastore_impl::async_replication_from_env("TEST_ASYNC_ENV"), async_replication::disabled);
+
+    setenv("TEST_ASYNC_ENV", "", 1);
+    EXPECT_EQ(datastore_impl::async_replication_from_env("TEST_ASYNC_ENV"), async_replication::disabled);
+
+    setenv("TEST_ASYNC_ENV", "disabled", 1);
+    EXPECT_EQ(datastore_impl::async_replication_from_env("TEST_ASYNC_ENV"), async_replication::disabled);
+
+    unsetenv("TEST_ASYNC_ENV");
+}
+
+// Test that async_replication_from_env returns correct enum for valid values
+TEST(async_replication_from_env_test, returns_std_async_and_single_thread_async) {
+    setenv("TEST_ASYNC_ENV", "std_async", 1);
+    EXPECT_EQ(datastore_impl::async_replication_from_env("TEST_ASYNC_ENV"), async_replication::std_async);
+
+    setenv("TEST_ASYNC_ENV", "single_thread_async", 1);
+    EXPECT_EQ(datastore_impl::async_replication_from_env("TEST_ASYNC_ENV"), async_replication::single_thread_async);
+
+    unsetenv("TEST_ASYNC_ENV");
+}
+
+// Test that async_replication_from_env logs fatal and terminates for invalid value
+TEST(async_replication_from_env_test, fatal_on_invalid_value) {
+    setenv("TEST_ASYNC_ENV", "invalid_value", 1);
+    // This should terminate the process with a fatal log
+    EXPECT_DEATH({
+        datastore_impl::async_replication_from_env("TEST_ASYNC_ENV");
+    }, "Invalid value for TEST_ASYNC_ENV");
+    unsetenv("TEST_ASYNC_ENV");
+}
+
 }  // namespace limestone::api
+

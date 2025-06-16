@@ -21,6 +21,19 @@
 #include "replication/replica_connector.h"
 #include "replication/replication_endpoint.h"
 
+namespace limestone::replication {
+
+/**
+ * @brief Enum for async replication mode.
+ */
+enum class async_replication {
+    disabled,           ///< Synchronous mode (default)
+    std_async,          ///< Use std::async for asynchronous operation
+    single_thread_async ///< Asynchronous operation in a single thread
+};
+
+} // namespace limestone::replication
+
 namespace limestone::api {
 
 using namespace limestone::replication;    
@@ -92,6 +105,14 @@ public:
 
     // Getter for REPLICATION_ASYNC_GROUP_COMMIT environment variable presence
     [[nodiscard]] bool is_async_group_commit_enabled() const noexcept;
+
+    /**
+     * @brief Parses the specified environment variable and returns the corresponding async_replication value.
+     * @param env_name The environment variable name to check.
+     * @return The corresponding async_replication enum value.
+     * @note If the value is invalid, this function logs a fatal error and terminates the process.
+     */
+    static async_replication async_replication_from_env(const char* env_name);
 
 private:
     // Atomic counter for tracking active backup operations.

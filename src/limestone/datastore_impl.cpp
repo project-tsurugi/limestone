@@ -93,7 +93,7 @@ bool datastore_impl::open_control_channel() {
     }
 
     std::string host = replication_endpoint_.host();  
-    int port = replication_endpoint_.port();          // Get the port
+    int port = replication_endpoint_.port();          
 
     // Create the control channel connection
     control_channel_ = std::make_shared<replica_connector>();
@@ -159,7 +159,6 @@ bool datastore_impl::is_replication_configured() const noexcept {
     return replication_endpoint_.env_defined();
 }
 
-// Getter for control_channel_
 std::shared_ptr<replica_connector> datastore_impl::get_control_channel() const noexcept {
     return control_channel_;
 }
@@ -215,6 +214,23 @@ bool datastore_impl::is_async_session_close_enabled() const noexcept {
 
 bool datastore_impl::is_async_group_commit_enabled() const noexcept {
     return async_group_commit_enabled_;
+}
+
+async_replication datastore_impl::async_replication_from_env(const char* env_name) {
+    const char* env = std::getenv(env_name);
+    if (!env || std::string(env).empty() || std::string(env) == "disabled") {
+        return async_replication::disabled;
+    }
+    std::string v(env);
+    if (v == "std_async") {
+        return async_replication::std_async;
+    }
+    if (v == "single_thread_async") {
+        return async_replication::single_thread_async;
+    }
+    LOG_LP(FATAL) << "Invalid value for " << env_name << ": " << v;
+    // Defensive: LOG_LP(FATAL) should terminate the process; std::abort() is for redundancy.
+    std::abort();
 }
 
 }  // namespace limestone::api
