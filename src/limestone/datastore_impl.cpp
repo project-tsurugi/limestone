@@ -26,6 +26,7 @@
 #include "replication/message_log_channel_create.h"
 #include "replication/message_session_begin.h"
 #include "replication/replica_connector.h"
+#include "replication/async_replication.h"
 
 namespace limestone::api {
 
@@ -33,13 +34,13 @@ namespace limestone::api {
 datastore_impl::datastore_impl()
     : backup_counter_(0)
     , replica_exists_(false)
-    , async_session_close_enabled_(std::getenv("REPLICATION_ASYNC_SESSION_CLOSE") != nullptr)
-    , async_group_commit_enabled_(std::getenv("REPLICATION_ASYNC_GROUP_COMMIT") != nullptr)
+    , async_session_close_mode_(limestone::replication::async_replication_from_env("REPLICATION_ASYNC_SESSION_CLOSE"))
+    , async_group_commit_mode_(limestone::replication::async_replication_from_env("REPLICATION_ASYNC_GROUP_COMMIT"))
 {
     LOG_LP(INFO) << "REPLICATION_ASYNC_SESSION_CLOSE: "
-                 << (async_session_close_enabled_ ? "enabled" : "disabled");
+                 << limestone::replication::to_string(async_session_close_mode_);
     LOG_LP(INFO) << "REPLICATION_ASYNC_GROUP_COMMIT: "
-                 << (async_group_commit_enabled_ ? "enabled" : "disabled");
+                 << limestone::replication::to_string(async_group_commit_mode_);
 
     bool has_replica = replication_endpoint_.is_valid();
     replica_exists_.store(has_replica, std::memory_order_release);
@@ -93,7 +94,7 @@ bool datastore_impl::open_control_channel() {
     }
 
     std::string host = replication_endpoint_.host();  
-    int port = replication_endpoint_.port();          // Get the port
+    int port = replication_endpoint_.port();          
 
     // Create the control channel connection
     control_channel_ = std::make_shared<replica_connector>();
@@ -159,7 +160,6 @@ bool datastore_impl::is_replication_configured() const noexcept {
     return replication_endpoint_.env_defined();
 }
 
-// Getter for control_channel_
 std::shared_ptr<replica_connector> datastore_impl::get_control_channel() const noexcept {
     return control_channel_;
 }
@@ -209,12 +209,12 @@ bool datastore_impl::is_master() const noexcept {
     return is_master_;
 }
 
-bool datastore_impl::is_async_session_close_enabled() const noexcept {
-    return async_session_close_enabled_;
+async_replication datastore_impl::get_async_session_close_mode() const noexcept {
+    return async_session_close_mode_;
 }
 
-bool datastore_impl::is_async_group_commit_enabled() const noexcept {
-    return async_group_commit_enabled_;
+async_replication datastore_impl::get_async_group_commit_mode() const noexcept {
+    return async_group_commit_mode_;
 }
 
 }  // namespace limestone::api

@@ -1,7 +1,9 @@
 #include <gtest/gtest.h>
 #include "datastore_impl.h"
 
-namespace limestone::api {
+namespace limestone::testing {
+
+using namespace limestone::api;
 
 class backup_counter_test : public ::testing::Test {
 protected:

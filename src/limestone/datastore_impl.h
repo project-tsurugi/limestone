@@ -20,6 +20,7 @@
 #include <limestone/api/datastore.h>
 #include "replication/replica_connector.h"
 #include "replication/replication_endpoint.h"
+#include "replication/async_replication.h"
 
 namespace limestone::api {
 
@@ -87,11 +88,11 @@ public:
     // Set the role to replica (switch from master to replica)
     void set_replica_role() noexcept;
 
-    // Getter for REPLICATION_ASYNC_SESSION_CLOSE environment variable presence
-    [[nodiscard]] bool is_async_session_close_enabled() const noexcept;
+    // Getter for async session close mode
+    [[nodiscard]] async_replication get_async_session_close_mode() const noexcept;
 
-    // Getter for REPLICATION_ASYNC_GROUP_COMMIT environment variable presence
-    [[nodiscard]] bool is_async_group_commit_enabled() const noexcept;
+    // Getter for async group commit mode
+    [[nodiscard]] async_replication get_async_group_commit_mode() const noexcept;
 
 private:
     // Atomic counter for tracking active backup operations.
@@ -107,9 +108,9 @@ private:
     // Replication endpoint to retrieve connection info
     replication::replication_endpoint replication_endpoint_;
 
-    // Environment variable flags
-    bool async_session_close_enabled_;
-    bool async_group_commit_enabled_;
+    // Environment variable flags (now modes)
+    async_replication async_session_close_mode_;
+    async_replication async_group_commit_mode_;
 };
 
 }  // namespace limestone::api

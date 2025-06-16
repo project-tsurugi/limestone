@@ -19,14 +19,15 @@
 #include <limestone/api/log_channel.h>
 #include <limestone/logging.h>
 
+#include <boost/asio/post.hpp>
 #include <chrono>
 #include <future>
 #include <iomanip>
 #include <sstream>
 #include <thread>
 
-#include "internal.h"
 #include "datastore_impl.h"
+#include "internal.h"
 #include "limestone_exception_helper.h"
 #include "log_channel_impl.h"
 #include "log_entry.h"
@@ -115,21 +116,56 @@ void log_channel::end_session() {
     try {
         TRACE_START << "current_epoch_id_=" << current_epoch_id_.load();
         uint64_t start = limestone::internal::now_nsec();
-        if (envelope_.impl_->is_async_session_close_enabled()) {
-            impl_->send_replica_message(finished_epoch_id_.load(), [&](replication::message_log_entries &msg) {
-                msg.set_session_end_flag(true);
-                msg.set_flush_flag(true);
-            });
-            finalize_session_file();
-            impl_->wait_for_replica_ack();
-        } else {
-            finalize_session_file();
-            impl_->send_replica_message(finished_epoch_id_.load(), [&](replication::message_log_entries &msg) {
-                msg.set_session_end_flag(true);
-                msg.set_flush_flag(true);
-            });
-            impl_->wait_for_replica_ack();
+
+        switch (envelope_.impl_->get_async_session_close_mode()) {
+            case async_replication::single_thread_async: {
+                impl_->send_replica_message(finished_epoch_id_.load(), [](replication::message_log_entries &msg) {
+                    msg.set_session_end_flag(true);
+                    msg.set_flush_flag(true);
+                });
+                finalize_session_file();
+                impl_->wait_for_replica_ack();
+                break;
+            }
+            case async_replication::disabled: {
+                finalize_session_file();
+                impl_->send_replica_message(finished_epoch_id_.load(), [](replication::message_log_entries &msg) {
+                    msg.set_session_end_flag(true);
+                    msg.set_flush_flag(true);
+                });
+                impl_->wait_for_replica_ack();
+                break;
+            }
+            case async_replication::std_async: {
+                auto future = std::async(std::launch::async, [this]() {
+                    impl_->send_replica_message(finished_epoch_id_.load(), [](replication::message_log_entries &msg) {
+                        msg.set_session_end_flag(true);
+                        msg.set_flush_flag(true);
+                    });
+                    impl_->wait_for_replica_ack();
+                });
+                finalize_session_file();
+                future.wait();
+                break;
+            }
+            case async_replication::boost_thread_pool_async: {
+                // --- add: boost thread pool async ---
+                std::packaged_task<void()> task([this]() {
+                    impl_->send_replica_message(finished_epoch_id_.load(), [](replication::message_log_entries &msg) {
+                        msg.set_session_end_flag(true);
+                        msg.set_flush_flag(true);
+                    });
+                    impl_->wait_for_replica_ack();
+                });
+                auto future = task.get_future();
+                boost::asio::post(*envelope_.boost_thread_pool_, std::move(task));
+                finalize_session_file();
+                future.wait();
+                break;
+                // --- end add ---
+            }
         }
+
         uint64_t end = limestone::internal::now_nsec();
         LOG_LP(INFO) << "log_channel::end_session() took " << (end - start) / 1000 << "us";
         TRACE_END;

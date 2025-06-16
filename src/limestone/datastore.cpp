@@ -17,6 +17,7 @@
 #include <limestone/api/datastore.h>
 #include <limestone/logging.h>
 
+#include <boost/asio/post.hpp>
 #include <boost/filesystem/fstream.hpp>
 #include <chrono>
 #include <future>
@@ -80,7 +81,9 @@ void write_epoch_to_file_internal(const std::string& file_path, epoch_id_type ep
 namespace limestone::api {
 using namespace limestone::internal;
 
-datastore::datastore() noexcept: impl_(std::make_unique<datastore_impl>()) {}
+datastore::datastore() noexcept: impl_(std::make_unique<datastore_impl>()) {
+    boost_thread_pool_ = std::make_unique<boost::asio::thread_pool>(64);
+}
 
 
 datastore::datastore(configuration const& conf) : location_(conf.data_locations_.at(0)), impl_(std::make_unique<datastore_impl>()) { // NOLINT(readability-function-cognitive-complexity)
@@ -181,6 +184,10 @@ datastore::~datastore() noexcept{
     } catch (...) {
         LOG_LP(ERROR) << "Unknown exception in destructor during shutdown.";
     }
+    if (boost_thread_pool_) {
+        boost_thread_pool_->join();
+        boost_thread_pool_.reset();
+    }
 }
 
 
@@ -218,17 +225,53 @@ void datastore::persist_epoch_id(epoch_id_type epoch_id) {
 void datastore::persist_and_propagate_epoch_id(epoch_id_type epoch_id) {
     TRACE_START << "epoch_id=" << epoch_id;
     uint64_t start = limestone::internal::now_nsec();
-    if (impl_->is_async_group_commit_enabled()) {
-        bool sent = impl_->propagate_group_commit(epoch_id);
-        persist_epoch_id(epoch_id);
-        if (sent) {
-            impl_->wait_for_propagated_group_commit_ack();
+    switch (impl_->get_async_group_commit_mode()) {
+        case limestone::replication::async_replication::single_thread_async: {
+            // Send group commit message to replica first so that it can begin processing early.
+            // Since propagate_group_commit() returns after data is written to the local socket buffer,
+            // local persist_epoch_id() and replica-side processing can proceed in parallel.
+            // Note: if the socket buffer is full, propagate_group_commit() may block until space is available.
+            // Finally, wait for replica acknowledgment to ensure synchronization.
+            bool sent = impl_->propagate_group_commit(epoch_id);
+            persist_epoch_id(epoch_id);
+            if (sent) {
+                impl_->wait_for_propagated_group_commit_ack();
+            }
+            break;
         }
-    } else {
-        persist_epoch_id(epoch_id);
-        bool sent = impl_->propagate_group_commit(epoch_id);
-        if (sent) {
-            impl_->wait_for_propagated_group_commit_ack();
+        case limestone::replication::async_replication::disabled: {
+            persist_epoch_id(epoch_id);
+            bool sent = impl_->propagate_group_commit(epoch_id);
+            if (sent) {
+                impl_->wait_for_propagated_group_commit_ack();
+            }
+            break;
+        }
+        case limestone::replication::async_replication::std_async: {
+            auto future = std::async(std::launch::async, [this, epoch_id]() {
+                bool sent = impl_->propagate_group_commit(epoch_id);
+                if (sent) {
+                    impl_->wait_for_propagated_group_commit_ack();
+                }
+            });
+            persist_epoch_id(epoch_id);
+            future.wait();
+            break;
+        }
+        case limestone::replication::async_replication::boost_thread_pool_async: {
+            // --- add: boost thread pool async ---
+            std::packaged_task<void()> task([this, epoch_id]() {
+                bool sent = impl_->propagate_group_commit(epoch_id);
+                if (sent) {
+                    impl_->wait_for_propagated_group_commit_ack();
+                }
+            });
+            auto future = task.get_future();
+            boost::asio::post(*boost_thread_pool_, std::move(task));
+            persist_epoch_id(epoch_id);
+            future.wait();
+            break;
+            // --- end add ---
         }
     }
     uint64_t end = limestone::internal::now_nsec();
@@ -941,7 +984,4 @@ void datastore::wait_for_blob_file_garbace_collector_for_tests() const noexcept 
     }
 }
 
-
-
-} // namespace limestone::api
-
+}  // namespace limestone::api
