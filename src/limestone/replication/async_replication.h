@@ -8,9 +8,11 @@ namespace limestone::replication {
  * @brief Enum for async replication mode.
  */
 enum class async_replication {
-    disabled,           ///< Synchronous mode (default)
-    std_async,          ///< Use std::async for asynchronous operation
-    single_thread_async ///< Asynchronous operation in a single thread
+    disabled,               ///< Synchronous mode (default)
+    std_async,              ///< Use std::async for asynchronous operation
+    single_thread_async,    ///< Asynchronous operation in a single thread
+    boost_thread_pool_async,///< Use Boost.Asio thread_pool for asynchronous operation
+    tbb_thread_pool_async   ///< Use Intel TBB thread_pool for asynchronous operation
 };
 
 /**
