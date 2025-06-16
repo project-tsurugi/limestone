@@ -26,6 +26,7 @@
 #include <map>
 
 #include <boost/filesystem.hpp>
+#include <boost/asio/thread_pool.hpp>
 
 #include <limestone/status.h>
 #include <limestone/api/blob_pool.h>
@@ -543,6 +544,9 @@ private:
     // Use Pimpl idiom to hide implementation details, improve encapsulation,
     // and minimize compilation dependencies.
     std::unique_ptr<datastore_impl> impl_;
+
+    // Thread pool for asynchronous operations using Boost.Asio
+    std::unique_ptr<boost::asio::thread_pool> boost_thread_pool_;
 };
 
 } // namespace limestone::api

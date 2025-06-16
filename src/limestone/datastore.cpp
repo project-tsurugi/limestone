@@ -17,6 +17,7 @@
 #include <limestone/api/datastore.h>
 #include <limestone/logging.h>
 
+#include <boost/asio/post.hpp>
 #include <boost/filesystem/fstream.hpp>
 #include <chrono>
 #include <future>
@@ -80,7 +81,9 @@ void write_epoch_to_file_internal(const std::string& file_path, epoch_id_type ep
 namespace limestone::api {
 using namespace limestone::internal;
 
-datastore::datastore() noexcept: impl_(std::make_unique<datastore_impl>()) {}
+datastore::datastore() noexcept: impl_(std::make_unique<datastore_impl>()) {
+    boost_thread_pool_ = std::make_unique<boost::asio::thread_pool>(64);
+}
 
 
 datastore::datastore(configuration const& conf) : location_(conf.data_locations_.at(0)), impl_(std::make_unique<datastore_impl>()) { // NOLINT(readability-function-cognitive-complexity)
@@ -181,6 +184,10 @@ datastore::~datastore() noexcept{
     } catch (...) {
         LOG_LP(ERROR) << "Unknown exception in destructor during shutdown.";
     }
+    if (boost_thread_pool_) {
+        boost_thread_pool_->join();
+        boost_thread_pool_.reset();
+    }
 }
 
 
@@ -250,6 +257,21 @@ void datastore::persist_and_propagate_epoch_id(epoch_id_type epoch_id) {
             persist_epoch_id(epoch_id);
             future.wait();
             break;
+        }
+        case limestone::replication::async_replication::boost_thread_pool_async: {
+            // --- add: boost thread pool async ---
+            std::packaged_task<void()> task([this, epoch_id]() {
+                bool sent = impl_->propagate_group_commit(epoch_id);
+                if (sent) {
+                    impl_->wait_for_propagated_group_commit_ack();
+                }
+            });
+            auto future = task.get_future();
+            boost::asio::post(*boost_thread_pool_, std::move(task));
+            persist_epoch_id(epoch_id);
+            future.wait();
+            break;
+            // --- end add ---
         }
     }
     uint64_t end = limestone::internal::now_nsec();

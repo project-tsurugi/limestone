@@ -34,8 +34,8 @@ TEST(async_replication_from_env_test, returns_boost_and_tbb_thread_pool_async) {
     setenv("TEST_ASYNC_ENV", "boost_thread_pool_async", 1);
     EXPECT_EQ(async_replication_from_env("TEST_ASYNC_ENV"), async_replication::boost_thread_pool_async);
 
-    setenv("TEST_ASYNC_ENV", "tbb_thread_pool_async", 1);
-    EXPECT_EQ(async_replication_from_env("TEST_ASYNC_ENV"), async_replication::tbb_thread_pool_async);
+    // setenv("TEST_ASYNC_ENV", "tbb_thread_pool_async", 1);
+    // EXPECT_EQ(async_replication_from_env("TEST_ASYNC_ENV"), async_replication::tbb_thread_pool_async);
 
     unsetenv("TEST_ASYNC_ENV");
 }
@@ -55,7 +55,7 @@ TEST(async_replication_to_string_test, returns_expected_string) {
     EXPECT_EQ(to_string(async_replication::std_async), "std_async");
     EXPECT_EQ(to_string(async_replication::single_thread_async), "single_thread_async");
     EXPECT_EQ(to_string(async_replication::boost_thread_pool_async), "boost_thread_pool_async");
-    EXPECT_EQ(to_string(async_replication::tbb_thread_pool_async), "tbb_thread_pool_async");
+    // EXPECT_EQ(to_string(async_replication::tbb_thread_pool_async), "tbb_thread_pool_async");
 }
 
 TEST(async_replication_to_string_test, returns_unknown_for_invalid_enum_value) {

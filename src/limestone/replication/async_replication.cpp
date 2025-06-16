@@ -16,7 +16,7 @@ std::string to_string(async_replication mode) {
         case async_replication::std_async: return "std_async";
         case async_replication::single_thread_async: return "single_thread_async";
         case async_replication::boost_thread_pool_async: return "boost_thread_pool_async";
-        case async_replication::tbb_thread_pool_async: return "tbb_thread_pool_async";
+        // case async_replication::tbb_thread_pool_async: return "tbb_thread_pool_async";
         default: return "unknown";
     }
 }
@@ -26,7 +26,7 @@ async_replication async_replication_from_string(const std::string& str) {
     if (str == "std_async") return async_replication::std_async;
     if (str == "single_thread_async") return async_replication::single_thread_async;
     if (str == "boost_thread_pool_async") return async_replication::boost_thread_pool_async;
-    if (str == "tbb_thread_pool_async") return async_replication::tbb_thread_pool_async;
+    // if (str == "tbb_thread_pool_async") return async_replication::tbb_thread_pool_async;
     throw std::invalid_argument("Invalid async_replication string: " + str);
 }
 
