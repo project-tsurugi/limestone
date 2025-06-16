@@ -115,21 +115,40 @@ void log_channel::end_session() {
     try {
         TRACE_START << "current_epoch_id_=" << current_epoch_id_.load();
         uint64_t start = limestone::internal::now_nsec();
-        if (envelope_.impl_->get_async_session_close_mode() != async_replication::disabled) {
-            impl_->send_replica_message(finished_epoch_id_.load(), [&](replication::message_log_entries &msg) {
-                msg.set_session_end_flag(true);
-                msg.set_flush_flag(true);
-            });
-            finalize_session_file();
-            impl_->wait_for_replica_ack();
-        } else {
-            finalize_session_file();
-            impl_->send_replica_message(finished_epoch_id_.load(), [&](replication::message_log_entries &msg) {
-                msg.set_session_end_flag(true);
-                msg.set_flush_flag(true);
-            });
-            impl_->wait_for_replica_ack();
+
+        switch (envelope_.impl_->get_async_session_close_mode()) {
+            case async_replication::single_thread_async: {
+                impl_->send_replica_message(finished_epoch_id_.load(), [this](replication::message_log_entries &msg) {
+                    msg.set_session_end_flag(true);
+                    msg.set_flush_flag(true);
+                });
+                finalize_session_file();
+                impl_->wait_for_replica_ack();
+                break;
+            }
+            case async_replication::disabled: {
+                finalize_session_file();
+                impl_->send_replica_message(finished_epoch_id_.load(), [this](replication::message_log_entries &msg) {
+                    msg.set_session_end_flag(true);
+                    msg.set_flush_flag(true);
+                });
+                impl_->wait_for_replica_ack();
+                break;
+            }
+            case async_replication::std_async: {
+                auto future = std::async(std::launch::async, [this]() {
+                    impl_->send_replica_message(finished_epoch_id_.load(), [this](replication::message_log_entries &msg) {
+                        msg.set_session_end_flag(true);
+                        msg.set_flush_flag(true);
+                    });
+                    impl_->wait_for_replica_ack();
+                });
+                finalize_session_file();
+                future.wait();
+                break;
+            }
         }
+
         uint64_t end = limestone::internal::now_nsec();
         LOG_LP(INFO) << "log_channel::end_session() took " << (end - start) / 1000 << "us";
         TRACE_END;
