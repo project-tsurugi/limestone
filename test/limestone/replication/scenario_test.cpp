@@ -65,6 +65,9 @@ protected:
     void TearDown() override {
         // cleanup environment variable
         unsetenv("TSURUGI_REPLICATION_ENDPOINT");
+        unsetenv("REPLICATION_ASYNC_SESSION_CLOSE");
+        unsetenv("REPLICATION_ASYNC_GROUP_COMMIT");
+
         // stop replica server
         stop_replica();
 
@@ -193,107 +196,133 @@ private:
 
 protected:
     // fore replica server
-    std::unique_ptr<boost::process::child> process_; 
-    std::unique_ptr<boost::process::ipstream> out_stream_; 
-    std::unique_ptr<boost::process::ipstream> err_stream_; 
+    std::unique_ptr<boost::process::child> process_;
+    std::unique_ptr<boost::process::ipstream> out_stream_;
+    std::unique_ptr<boost::process::ipstream> err_stream_;
     replica_server server{};
-    std::thread replica_thread_;  
+    std::thread replica_thread_;
 
     // for master
     std::unique_ptr<api::datastore_test> ds;
     log_channel* lc0_{};
     log_channel* lc1_{};
+
+    // run test
+    void run_minimal_test() {
+        // Replica is already initialized in SetUp
+        // Start the master
+        gen_datastore(master_location);
+        ds->switch_epoch(1);
+
+        // Verify that PWAL is transferred to the replica
+        lc0_->begin_session();
+        lc0_->add_entry(1, "k1", "v1", {1, 0});
+        lc0_->end_session();
+
+        {
+            auto master_entries = read_master_pwal00();
+            ASSERT_EQ(master_entries.size(), 1);
+            EXPECT_TRUE(AssertLogEntry(master_entries[0], 1, "k1", "v1", 1, 0, {}, log_entry::entry_type::normal_entry));
+
+            auto replica_entries = read_replica_pwal00();
+            ASSERT_EQ(replica_entries.size(), 1);
+            EXPECT_TRUE(AssertLogEntry(replica_entries[0], 1, "k1", "v1", 1, 0, {}, log_entry::entry_type::normal_entry));
+        }
+
+        // Verify that group commit is transferred
+        ds->switch_epoch(2);
+        EXPECT_EQ(get_master_epoch(), 1);
+        EXPECT_EQ(get_replica_epoch(), 1);
+
+        // Write PWAL in the next epoch
+        lc0_->begin_session();
+        lc0_->add_entry(1, "k2", "v2", {2, 0});
+        lc0_->end_session();
+
+        // Verify that writing PWAL alone does not advance the epoch
+        EXPECT_EQ(get_master_epoch(), 1);
+        EXPECT_EQ(get_replica_epoch(), 1);
+
+        // Verify that the PWAL write is transferred to the replica
+        {
+            auto master_entries = read_master_pwal00();
+            ASSERT_EQ(master_entries.size(), 2);
+            EXPECT_TRUE(AssertLogEntry(master_entries[0], 1, "k1", "v1", 1, 0, {}, log_entry::entry_type::normal_entry));
+            EXPECT_TRUE(AssertLogEntry(master_entries[1], 1, "k2", "v2", 2, 0, {}, log_entry::entry_type::normal_entry));
+
+            auto replica_entries = read_replica_pwal00();
+            ASSERT_EQ(replica_entries.size(), 2);
+            EXPECT_TRUE(AssertLogEntry(replica_entries[0], 1, "k1", "v1", 1, 0, {}, log_entry::entry_type::normal_entry));
+            EXPECT_TRUE(AssertLogEntry(replica_entries[1], 1, "k2", "v2", 2, 0, {}, log_entry::entry_type::normal_entry));
+        }
+
+        // Verify that group commit is transferred
+        ds->switch_epoch(3);
+        EXPECT_EQ(get_master_epoch(), 2);
+        EXPECT_EQ(get_replica_epoch(), 2);
+
+        // Stop the master
+        ds.reset();
+
+        // Stop the replica
+        stop_replica();
+
+        // Start the master without a replica
+        unsetenv("TSURUGI_REPLICATION_ENDPOINT");
+        gen_datastore(master_location);
+
+        // Verify the snapshot
+        {
+            auto snapshot_entries = get_snapshot_entries();
+            ASSERT_EQ(snapshot_entries.size(), 2);
+            EXPECT_EQ(snapshot_entries[0].key, "k1");
+            EXPECT_EQ(snapshot_entries[0].value, "v1");
+            EXPECT_EQ(snapshot_entries[0].storage_id, 1);
+            EXPECT_EQ(snapshot_entries[1].key, "k2");
+            EXPECT_EQ(snapshot_entries[1].value, "v2");
+            EXPECT_EQ(snapshot_entries[1].storage_id, 1);
+        }
+        // Stop the master and restart it with the replica's data
+        ds.reset();
+        gen_datastore(replica_location);
+
+        // Verify the snapshot again
+        {
+            auto snapshot_entries = get_snapshot_entries();
+            ASSERT_EQ(snapshot_entries.size(), 2);
+            EXPECT_EQ(snapshot_entries[0].key, "k1");
+            EXPECT_EQ(snapshot_entries[0].value, "v1");
+            EXPECT_EQ(snapshot_entries[0].storage_id, 1);
+            EXPECT_EQ(snapshot_entries[1].key, "k2");
+            EXPECT_EQ(snapshot_entries[1].value, "v2");
+            EXPECT_EQ(snapshot_entries[1].storage_id, 1);
+        }
+    }
 };
 
-TEST_F(scenario_test, minimal_test) {
-    // Replica is already initialized in SetUp
-    // Start the master
-    gen_datastore(master_location);
-    ds->switch_epoch(1);
-    
-    // Verify that PWAL is transferred to the replica
-    lc0_->begin_session();
-    lc0_->add_entry(1, "k1", "v1", {1, 0});
-    lc0_->end_session();
-
-    {
-        auto master_entries = read_master_pwal00();
-        ASSERT_EQ(master_entries.size(), 1);
-        EXPECT_TRUE(AssertLogEntry(master_entries[0], 1, "k1", "v1", 1, 0, {}, log_entry::entry_type::normal_entry));
-
-        auto replica_entries = read_replica_pwal00();
-        ASSERT_EQ(replica_entries.size(), 1);
-        EXPECT_TRUE(AssertLogEntry(replica_entries[0], 1, "k1", "v1", 1, 0, {}, log_entry::entry_type::normal_entry));
-    }
-
-    // Verify that group commit is transferred
-    ds->switch_epoch(2);
-    EXPECT_EQ(get_master_epoch(), 1);
-    EXPECT_EQ(get_replica_epoch(), 1);
-
-    // Write PWAL in the next epoch
-    lc0_->begin_session();
-    lc0_->add_entry(1, "k2", "v2", {2, 0});
-    lc0_->end_session();
-
-    // Verify that writing PWAL alone does not advance the epoch
-    EXPECT_EQ(get_master_epoch(), 1);
-    EXPECT_EQ(get_replica_epoch(), 1);
-
-    // Verify that the PWAL write is transferred to the replica
-    {
-        auto master_entries = read_master_pwal00();
-        ASSERT_EQ(master_entries.size(), 2);
-        EXPECT_TRUE(AssertLogEntry(master_entries[0], 1, "k1", "v1", 1, 0, {}, log_entry::entry_type::normal_entry));
-        EXPECT_TRUE(AssertLogEntry(master_entries[1], 1, "k2", "v2", 2, 0, {}, log_entry::entry_type::normal_entry));
-
-        auto replica_entries = read_replica_pwal00();
-        ASSERT_EQ(replica_entries.size(), 2);
-        EXPECT_TRUE(AssertLogEntry(replica_entries[0], 1, "k1", "v1", 1, 0, {}, log_entry::entry_type::normal_entry));
-        EXPECT_TRUE(AssertLogEntry(replica_entries[1], 1, "k2", "v2", 2, 0, {}, log_entry::entry_type::normal_entry));
-    }
-
-    // Verify that group commit is transferred
-    ds->switch_epoch(3);
-    EXPECT_EQ(get_master_epoch(), 2);
-    EXPECT_EQ(get_replica_epoch(), 2);
-
-    // Stop the master
-    ds.reset();
-    
-    // Stop the replica
-    stop_replica();
-
-    // Start the master without a replica
-    unsetenv("TSURUGI_REPLICATION_ENDPOINT");
-    gen_datastore(master_location);
-
-    // Verify the snapshot
-    {
-        auto snapshot_entries = get_snapshot_entries();
-        ASSERT_EQ(snapshot_entries.size(), 2);
-        EXPECT_EQ(snapshot_entries[0].key, "k1");
-        EXPECT_EQ(snapshot_entries[0].value, "v1");
-        EXPECT_EQ(snapshot_entries[0].storage_id, 1);
-        EXPECT_EQ(snapshot_entries[1].key, "k2");
-        EXPECT_EQ(snapshot_entries[1].value, "v2");
-        EXPECT_EQ(snapshot_entries[1].storage_id, 1);
-    }
-    // Stop the master and restart it with the replica's data
-    ds.reset();
-    gen_datastore(replica_location);
-
-    // Verify the snapshot again
-    {
-        auto snapshot_entries = get_snapshot_entries();
-        ASSERT_EQ(snapshot_entries.size(), 2);
-        EXPECT_EQ(snapshot_entries[0].key, "k1");
-        EXPECT_EQ(snapshot_entries[0].value, "v1");
-        EXPECT_EQ(snapshot_entries[0].storage_id, 1);
-        EXPECT_EQ(snapshot_entries[1].key, "k2");
-        EXPECT_EQ(snapshot_entries[1].value, "v2");
-        EXPECT_EQ(snapshot_entries[1].storage_id, 1);
-    }
+TEST_F(scenario_test, minimal_test_disabled_async) {
+    setenv("REPLICATION_ASYNC_SESSION_CLOSE", "disabled", 1);
+    setenv("REPLICATION_ASYNC_GROUP_COMMIT", "disabled", 1);
+   run_minimal_test();
 }
+
+TEST_F(scenario_test, minimal_test_std_async) {
+    setenv("REPLICATION_ASYNC_SESSION_CLOSE", "std_async", 1);
+    setenv("REPLICATION_ASYNC_GROUP_COMMIT", "std_async", 1);
+   run_minimal_test();
+}
+
+TEST_F(scenario_test, minimal_test_single_thread_async) {
+    setenv("REPLICATION_ASYNC_SESSION_CLOSE", "single_thread_async", 1);
+    setenv("REPLICATION_ASYNC_GROUP_COMMIT", "single_thread_async", 1);
+   run_minimal_test();
+}
+
+TEST_F(scenario_test, minimal_test_boost_thread_pool_async) {
+    setenv("REPLICATION_ASYNC_SESSION_CLOSE", "boost_thread_pool_async", 1);
+    setenv("REPLICATION_ASYNC_GROUP_COMMIT", "boost_thread_pool_async", 1);
+   run_minimal_test();
+}
+
 
 }  // namespace limestone::testing
