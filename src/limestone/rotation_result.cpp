@@ -15,7 +15,7 @@
  */
 
 #include <limestone/api/datastore.h>
-#include "rotation_result.h"
+#include <limestone/api/rotation_result.h>
 
 namespace limestone::api {
 

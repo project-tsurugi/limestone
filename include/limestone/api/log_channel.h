@@ -21,6 +21,7 @@
 #include <cstdint>
 #include <atomic>
 #include <set>
+#include <memory>
 #include <condition_variable>
 
 #include <boost/filesystem.hpp>
@@ -34,6 +35,7 @@ namespace limestone::api {
 
 class datastore;
 class rotation_result;
+class log_channel_impl;
 
 /**
  * @brief log_channel interface to output logs
@@ -42,7 +44,7 @@ class rotation_result;
 class log_channel {
 
 public:
-    /**
+   /**
      * @brief join a persistence session for the current epoch in this channel
      * @attention this function is not thread-safe.
      * @exception limestone_exception if I/O error occurs
@@ -174,7 +176,11 @@ public:
      */
     [[nodiscard]] auto finished_epoch_id() const noexcept { return finished_epoch_id_.load(); }
 
+
+    [[nodiscard]] log_channel_impl* get_impl() const noexcept;
 private:
+    void finalize_session_file();
+
     datastore& envelope_;
 
     boost::filesystem::path location_;
@@ -192,6 +198,9 @@ private:
     std::atomic_uint64_t finished_epoch_id_{0};
 
     std::string do_rotate_file(epoch_id_type epoch = 0);
+
+    std::unique_ptr<log_channel_impl> impl_;
+
 
 protected: // Protected to allow testing with derived classes
     log_channel(boost::filesystem::path location, std::size_t id, datastore& envelope) noexcept;

@@ -6,7 +6,7 @@
 #include <boost/filesystem.hpp>
 
 #include "dblog_scan.h"
-#include "internal.h"
+#include "manifest.h"
 #include "log_entry.h"
 
 #include "test_root.h"
@@ -83,7 +83,7 @@ static constexpr const char* metadata_location = "/tmp/dblogutil_test/metadata";
     std::pair<int, std::string> inspect(std::string pwal_fname, std::string_view data) {
         boost::filesystem::path dir{location};
         create_file(dir / "epoch", epoch_0x100_str);
-        create_file(dir / std::string(manifest_file_name), data_manifest());
+        create_file(dir / std::string(manifest::file_name), data_manifest());
         auto pwal = dir / pwal_fname;
         create_file(pwal, data);
         std::string command;
@@ -96,7 +96,7 @@ static constexpr const char* metadata_location = "/tmp/dblogutil_test/metadata";
     std::pair<int, std::string> repairm(std::string pwal_fname, std::string_view data) {
         boost::filesystem::path dir{location};
         create_file(dir / "epoch", epoch_0x100_str);
-        create_file(dir / std::string(manifest_file_name), data_manifest());
+        create_file(dir / std::string(manifest::file_name), data_manifest());
         auto pwal = dir / pwal_fname;
         create_file(pwal, data);
         std::string command;
@@ -112,7 +112,7 @@ static constexpr const char* metadata_location = "/tmp/dblogutil_test/metadata";
     std::tuple<int, std::string, int, std::string> repairm_twice(std::string pwal_fname, std::string_view data) {
         boost::filesystem::path dir{location};
         create_file(dir / "epoch", epoch_0x100_str);
-        create_file(dir / std::string(manifest_file_name), data_manifest());
+        create_file(dir / std::string(manifest::file_name), data_manifest());
         auto pwal = dir / pwal_fname;
         create_file(pwal, data);
         std::string command;
@@ -139,7 +139,7 @@ static constexpr const char* metadata_location = "/tmp/dblogutil_test/metadata";
     std::pair<int, std::string> repairc(std::string pwal_fname, std::string_view data) {
         boost::filesystem::path dir{location};
         create_file(dir / "epoch", epoch_0x100_str);
-        create_file(dir / std::string(manifest_file_name), data_manifest());
+        create_file(dir / std::string(manifest::file_name), data_manifest());
         auto pwal = dir / pwal_fname;
         create_file(pwal, data);
         std::string command;
@@ -155,7 +155,7 @@ static constexpr const char* metadata_location = "/tmp/dblogutil_test/metadata";
     std::tuple<int, std::string, int, std::string> repairc_twice(std::string pwal_fname, std::string_view data) {
         boost::filesystem::path dir{location};
         create_file(dir / "epoch", epoch_0x100_str);
-        create_file(dir / std::string(manifest_file_name), data_manifest());
+        create_file(dir / std::string(manifest::file_name), data_manifest());
         auto pwal = dir / pwal_fname;
         create_file(pwal, data);
         std::string command;
@@ -498,7 +498,7 @@ TEST_F(dblogutil_test, repair_cannot_rotate) {
     dir /= "unwriteable";
     boost::filesystem::create_directory(dir);
     create_file(dir / "epoch", epoch_0x100_str);
-    create_file(dir / std::string(manifest_file_name), data_manifest());
+    create_file(dir / std::string(manifest::file_name), data_manifest());
     create_file(dir / "pwal_0000", data_zerofill);
     boost::filesystem::permissions(dir, boost::filesystem::owner_read | boost::filesystem::owner_exe);  // drop dir write permission
     std::string command;
@@ -520,7 +520,7 @@ TEST_F(dblogutil_test, repair_cannot_modify) {
     auto pwal = dir / "pwal_0000.rotated";
     boost::filesystem::create_directory(dir);
     create_file(dir / "epoch", epoch_0x100_str);
-    create_file(dir / std::string(manifest_file_name), data_manifest());
+    create_file(dir / std::string(manifest::file_name), data_manifest());
     create_file(pwal, data_zerofill);
     boost::filesystem::permissions(pwal, boost::filesystem::owner_read);  // drop file write permission
     std::string command;

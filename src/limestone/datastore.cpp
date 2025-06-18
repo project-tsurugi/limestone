@@ -28,7 +28,6 @@
 
 #include <limestone/api/datastore.h>
 #include "internal.h"
-#include "rotation_result.h"
 #include "log_entry.h"
 #include "online_compaction.h"
 #include "compaction_catalog.h"
@@ -39,6 +38,8 @@
 #include "blob_file_gc_snapshot.h"
 #include "blob_file_scanner.h"
 #include "datastore_impl.h"
+#include "manifest.h"
+#include "log_channel_impl.h"
 
 namespace {
 
@@ -87,7 +88,7 @@ datastore::datastore(configuration const& conf) : location_(conf.data_locations_
         LOG(INFO) << "/:limestone:config:datastore setting log location = " << location_.string();
         boost::system::error_code error;
         const bool result_check = boost::filesystem::exists(location_, error);
-        boost::filesystem::path manifest_path = boost::filesystem::path(location_) / std::string(internal::manifest_file_name);
+        boost::filesystem::path manifest_path = boost::filesystem::path(location_) / std::string(internal::manifest::file_name);
         boost::filesystem::path compaction_catalog_path= boost::filesystem::path(location_) / compaction_catalog::get_catalog_filename();
         if (!result_check || error) {
             const bool result_mkdir = boost::filesystem::create_directory(location_, error);
@@ -110,10 +111,9 @@ datastore::datastore(configuration const& conf) : location_(conf.data_locations_
                 add_file(manifest_path);
             }
         }
-        internal::check_and_migrate_logdir_format(location_);
 
         // acquire lock for manifest file
-        fd_for_flock_ = internal::acquire_manifest_lock(location_);
+        fd_for_flock_ = manifest::acquire_lock(location_);
         if (fd_for_flock_ == -1) {
             if (errno == EWOULDBLOCK) {
                 std::string err_msg = "another process is using the log directory: " + location_.string();
@@ -124,6 +124,8 @@ datastore::datastore(configuration const& conf) : location_(conf.data_locations_
             LOG(FATAL) << "/:limestone:config:datastore " << err_msg;
             throw limestone_io_exception(exception_type::initialization_failure, err_msg, errno);
         }
+
+        internal::check_and_migrate_logdir_format(location_);
 
         add_file(compaction_catalog_path);
         compaction_catalog_ = std::make_unique<compaction_catalog>(compaction_catalog::from_catalog_file(location_));
@@ -188,7 +190,7 @@ void datastore::recover() const noexcept {
 
 
 
-void datastore::write_epoch_to_file(epoch_id_type epoch_id) {
+void datastore::persist_epoch_id(epoch_id_type epoch_id) {
     TRACE_START << "epoch_id=" << epoch_id;
     if (++epoch_write_counter >= max_entries_in_epoch_file) {
         write_epoch_to_file_internal(tmp_epoch_file_path_.string(), epoch_id, file_write_mode::overwrite);
@@ -206,6 +208,24 @@ void datastore::write_epoch_to_file(epoch_id_type epoch_id) {
         epoch_write_counter = 0;
     } else {
         write_epoch_to_file_internal(epoch_file_path_.string(), epoch_id, file_write_mode::append);
+    }
+    TRACE_END;
+}
+
+void datastore::persist_and_propagate_epoch_id(epoch_id_type epoch_id) {
+    TRACE_START << "epoch_id=" << epoch_id;
+    if (impl_->is_async_group_commit_enabled()) {
+        bool sent = impl_->propagate_group_commit(epoch_id);
+        persist_epoch_id(epoch_id);
+        if (sent) {
+            impl_->wait_for_propagated_group_commit_ack();
+        }
+    } else {
+        persist_epoch_id(epoch_id);
+        bool sent = impl_->propagate_group_commit(epoch_id);
+        if (sent) {
+            impl_->wait_for_propagated_group_commit_ack();
+        }
     }
     TRACE_END;
 }
@@ -229,6 +249,13 @@ void datastore::ready() {
         }
         cleanup_rotated_epoch_files(location_);
         state_ = state::ready;
+        if (impl_ ->is_replication_configured() && impl_->is_master()) {
+            if (impl_->open_control_channel()) {
+                LOG_LP(INFO) << "Replication control channel opened successfully.";
+            } else {
+                LOG_LP(FATAL) << "Failed to open replication control channel.";
+            }
+        }
         TRACE_END;
     } catch (...) {
         HANDLE_EXCEPTION_AND_ABORT();
@@ -246,12 +273,23 @@ std::shared_ptr<snapshot> datastore::shared_snapshot() const {
 }
 
 log_channel& datastore::create_channel(const boost::filesystem::path& location) {
+    TRACE_START;
     check_before_ready(static_cast<const char*>(__func__));
     
     std::lock_guard<std::mutex> lock(mtx_channel_);
     
     auto id = log_channel_id_.fetch_add(1);
     log_channels_.emplace_back(std::unique_ptr<log_channel>(new log_channel(location, id, *this)));  // constructor of log_channel is private
+    
+    if (impl_->has_replica() && impl_->is_master()) {
+        auto connector = impl_->create_log_channel_connector(*this);
+        if (connector) {
+            log_channels_.back()->get_impl()->set_replica_connector(std::move(connector));
+        } else {
+            LOG_LP(FATAL) << "Failed to create log channel connector.";
+        }
+    }
+    TRACE_END << "id=" << id;
     return *log_channels_.at(id);
 }
 
@@ -503,7 +541,7 @@ std::unique_ptr<backup_detail> datastore::begin_backup(backup_type btype) {  // 
                     break;
                 }
                 case 'l': {
-                    if (filename == internal::manifest_file_name) {
+                    if (filename == internal::manifest::file_name) {
                         entries.emplace_back(ent.string(), dst, true, false);
                     } else {
                         // unknown type
@@ -639,6 +677,7 @@ int64_t datastore::current_unix_epoch_in_millis() {
 }
 
 void datastore::online_compaction_worker() {
+    pthread_setname_np(pthread_self(), "cmpctn_worker");
     LOG_LP(INFO) << "online compaction worker started...";
 
     boost::filesystem::path ctrl_dir = location_ / "ctrl";

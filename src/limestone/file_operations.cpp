@@ -15,12 +15,15 @@
  */
 
 #include "file_operations.h"
-#include <unistd.h>  // for fsync
-#include <cerrno>    // for errno
-#include <cstring>   // for strerror
-#include <sstream>   // for std::stringstream
-#include <array>     // for std::array
+
 #include <limestone/api/limestone_exception.h>
+#include <sys/file.h> // for flock
+#include <unistd.h>  // for fsync
+
+#include <array>    // for std::array
+#include <cerrno>   // for errno
+#include <cstring>  // for strerror
+#include <sstream>  // for std::stringstream
 
 namespace limestone::internal {
 
@@ -69,6 +72,18 @@ int real_file_operations::rename(const char* oldname, const char* newname) {
 
 int real_file_operations::unlink(const char* filename) {
     return ::unlink(filename);
+}
+
+int real_file_operations::flock(int fd, int operation) {
+    return ::flock(fd, operation);
+}
+
+int real_file_operations::open(const char* filename, int flags) {
+    return ::open(filename, flags); // NOLINT(cppcoreguidelines-pro-type-vararg,hicpp-vararg)
+}
+
+int real_file_operations::close(int fd) {
+    return ::close(fd);
 }
 
 // -----------------------------------------

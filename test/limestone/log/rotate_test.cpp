@@ -1,19 +1,18 @@
 
-#include <atomic>
-#include <thread>
-#include <chrono>
-#include <sstream>
 #include <limestone/logging.h>
 
+#include <atomic>
 #include <boost/filesystem.hpp>
 #include <boost/filesystem/fstream.hpp>
+#include <chrono>
+#include <sstream>
+#include <thread>
 
 #include "internal.h"
-
-#include "test_root.h"
 #include "limestone/api/limestone_exception.h"
 #include "limestone_exception_helper.h"
-
+#include "manifest.h"
+#include "test_root.h"
 
 #define LOGFORMAT_VER 2
 
@@ -172,7 +171,7 @@ TEST_F(rotate_test, log_is_rotated) { // NOLINT
 #endif
         ASSERT_EQ(files[i++].string(), std::string(location) + "/epoch");
 #if LOGFORMAT_VER >=1
-        ASSERT_EQ(files[i++].string(), std::string(location) + "/" + std::string(limestone::internal::manifest_file_name));
+        ASSERT_EQ(files[i++].string(), std::string(location) + "/" + std::string(limestone::internal::manifest::file_name));
 #endif
         ASSERT_EQ(files[i++].string(), std::string(location) + "/pwal_0000");
     }
@@ -204,7 +203,7 @@ TEST_F(rotate_test, log_is_rotated) { // NOLINT
         EXPECT_EQ(v[i].is_mutable(), false);
         i++;
 #if LOGFORMAT_VER >=1
-        EXPECT_EQ(v[i].destination_path().string(), limestone::internal::manifest_file_name);  // relative
+        EXPECT_EQ(v[i].destination_path().string(), limestone::internal::manifest::file_name);  // relative
         EXPECT_TRUE(starts_with(v[i].source_path().string(), location));  // absolute
         EXPECT_EQ(v[i].is_detached(), false);
         EXPECT_EQ(v[i].is_mutable(), true);
@@ -232,7 +231,7 @@ TEST_F(rotate_test, log_is_rotated) { // NOLINT
         EXPECT_EQ(files[i++].string(), std::string(location) + "/epoch");  // active epoch
         EXPECT_TRUE(starts_with(files[i++].string(), std::string(location) + "/epoch."));  // rotated epoch
 #if LOGFORMAT_VER >=1
-        ASSERT_EQ(files[i++].string(), std::string(location) + "/" + std::string(limestone::internal::manifest_file_name));
+        ASSERT_EQ(files[i++].string(), std::string(location) + "/" + std::string(limestone::internal::manifest::file_name));
 #endif
         EXPECT_TRUE(starts_with(files[i++].string(), std::string(location) + "/pwal_0000."));  // rotated pwal
     }
@@ -319,7 +318,7 @@ TEST_F(rotate_test, inactive_files_are_also_backed_up) { // NOLINT
         EXPECT_EQ(v[i].is_mutable(), false);
         i++;
 #if LOGFORMAT_VER >=1
-        EXPECT_EQ(v[i].destination_path().string(), limestone::internal::manifest_file_name);  // relative
+        EXPECT_EQ(v[i].destination_path().string(), limestone::internal::manifest::file_name);  // relative
         EXPECT_TRUE(starts_with(v[i].source_path().string(), location));  // absolute
         EXPECT_EQ(v[i].is_detached(), false);
         EXPECT_EQ(v[i].is_mutable(), true);
@@ -363,7 +362,7 @@ TEST_F(rotate_test, restore_prusik_all_abs) { // NOLINT
     data.emplace_back(pwal2d / pwal2fn, pwal2fn, false);
     data.emplace_back(epochd / epochfn, epochfn, false);
 #if LOGFORMAT_VER >=1
-    auto conffn = std::string(limestone::internal::manifest_file_name);
+    auto conffn = std::string(limestone::internal::manifest::file_name);
     auto confd = location_path / "bk0";
     boost::filesystem::create_directories(confd);
     create_file(confd / conffn, data_manifest(1));
@@ -415,7 +414,7 @@ TEST_F(rotate_test, restore_prusik_all_rel) { // NOLINT
     data.emplace_back("bk2/" + pwal2fn, pwal2fn, false);
     data.emplace_back("bk3/" + epochfn, epochfn, false);
 #if LOGFORMAT_VER >=1
-    std::string conffn(limestone::internal::manifest_file_name);
+    std::string conffn(limestone::internal::manifest::file_name);
     auto confd = location_path / "bk0";
     boost::filesystem::create_directories(confd);
     create_file(confd / conffn, data_manifest(1));

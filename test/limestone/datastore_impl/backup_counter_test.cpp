@@ -3,13 +3,13 @@
 
 namespace limestone::api {
 
-class backup_counter : public ::testing::Test {
+class backup_counter_test : public ::testing::Test {
 protected:
-    backup_counter() = default;
-    ~backup_counter() override = default;
+    backup_counter_test() = default;
+    ~backup_counter_test() override = default;
 };
 
-TEST_F(backup_counter, backup_counter_increments) {
+TEST_F(backup_counter_test, backup_counter_increments) {
     datastore_impl datastore;
     
     // Increment the counter
@@ -25,7 +25,7 @@ TEST_F(backup_counter, backup_counter_increments) {
     EXPECT_FALSE(datastore.is_backup_in_progress());
 }
 
-TEST_F(backup_counter, backup_counter_multiple_increments) {
+TEST_F(backup_counter_test, backup_counter_multiple_increments) {
     datastore_impl datastore;
     
     // Increment multiple times
@@ -45,7 +45,7 @@ TEST_F(backup_counter, backup_counter_multiple_increments) {
     EXPECT_FALSE(datastore.is_backup_in_progress());
 }
 
-TEST_F(backup_counter, backup_counter_does_not_go_negative) {
+TEST_F(backup_counter_test, backup_counter_does_not_go_negative) {
     datastore_impl datastore;
     
     // Decrement without incrementing

@@ -14,31 +14,23 @@
  * limitations under the License.
  */
 
-#include <glog/logging.h>
-#include <limestone/api/datastore.h>
-#include <limestone/logging.h>
-
-#include <boost/filesystem.hpp>
 #include <iostream>
+#include <boost/filesystem.hpp>
 #include <string>
-#include <chrono> // 追加
-#include <locale>
-#include <sstream>
-
-#include "logging_helper.h"
+#include "replication/replication_endpoint.h"
+#include "replication/replica_server.h"
 
 // NOLINTBEGIN(performance-avoid-endl)
 
-using namespace limestone;
-
 namespace {
+
 void show_usage(const std::string& program_name) {
     std::cerr << "Usage: " << program_name << " <logdir>" << std::endl;
     std::cerr << "Note: The environment variable TSURUGI_REPLICATION_ENDPOINT must be set with the endpoint URL." << std::endl;
     std::cerr << "      For example: tcp://localhost:1234" << std::endl;
 }
-}
 
+} // namespace
 
 int main(int argc, char* argv[]) {
     // Convert argv to vector<string> to avoid direct pointer arithmetic.
@@ -65,54 +57,34 @@ int main(int argc, char* argv[]) {
         return 1;
     }
 
-    std::vector<boost::filesystem::path> data_locations{};
-    data_locations.emplace_back(log_dir_path);
-    boost::filesystem::path metadata_location{log_dir_path};
-    limestone::api::configuration conf(data_locations, metadata_location);
-
-    auto datastore_ = std::make_unique<limestone::api::datastore>(conf);
-
-    datastore_->ready();
-    
-    auto snapshot = datastore_->get_snapshot();
-    auto cursor = snapshot->get_cursor();
-
-    LOG_LP(INFO) << "start snapshot reading";
-    int i = 0;
-    std::size_t total_bytes = 0;
-    auto start = std::chrono::steady_clock::now(); // 開始時刻取得
-    while (cursor->next()) {
-        i++;
-        auto storage_id = cursor->storage();
-        std::string key;
-        std::string value;
-        cursor->key(key);
-        cursor->value(value);
-
-        total_bytes += sizeof(storage_id) + key.size() + value.size();
-
-        if (i % 1000000 == 0) {
-            std::ostringstream oss;
-            oss.imbue(std::locale(""));
-            oss << "processed entries: " << i
-                << " | total bytes: " << total_bytes;
-            LOG_LP(INFO) << oss.str();
-        }
+    limestone::replication::replication_endpoint endpoint{};
+    if (endpoint.env_defined()) {
+        std::cout << "Endpoint: " << endpoint.host() << ":" << endpoint.port() << std::endl;
+    } else {
+        std::cerr << "Error: TSURUGI_REPLICATION_ENDPOINT environment variable is not set." << std::endl;
+        show_usage(program_name);
+        return 1;
     }
-    auto end = std::chrono::steady_clock::now(); // 終了時刻取得
-    auto duration_ms = std::chrono::duration_cast<std::chrono::milliseconds>(end - start).count();
+    if (!endpoint.is_valid()) {
+        std::cerr << "Error: Invalid endpoint specified in TSURUGI_REPLICATION_ENDPOINT." << std::endl;
+        show_usage(program_name);
+        return 1;
+    }
 
-    std::ostringstream oss;
-    oss.imbue(std::locale(""));
-    oss << "end snapshot reading"
-        << " | entries: " << i
-        << " | elapsed(ms): " << duration_ms
-        << " | total bytes: " << total_bytes;
-    LOG_LP(INFO) << oss.str();
+    limestone::replication::replica_server server{};
 
+    server.initialize(log_dir_path);        
+
+    bool success = server.start_listener(endpoint.get_sockaddr());
+    if (!success) {
+        return 1;
+    }
+
+    std::cout << "[replica] initialized and listening" << std::endl;
+
+    server.accept_loop();
 
     return 0;
 }
 
 // NOLINTEND(performance-avoid-endl)
-
