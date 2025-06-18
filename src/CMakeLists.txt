@@ -100,3 +100,25 @@ set_target_properties(replica
 if (INSTALL_EXPERIMENTAL_TOOLS)
     install_custom(replica replica)
 endif()
+
+# startup_speed_benchmark command
+file(GLOB STARTUP_SPEED_BENCHMARK_SOURCES
+        "limestone/startup_speed_benchmark/*.cpp"
+)
+
+add_executable(startup_speed_benchmark ${STARTUP_SPEED_BENCHMARK_SOURCES})
+target_include_directories(startup_speed_benchmark
+        PRIVATE ./limestone
+)
+target_link_libraries(startup_speed_benchmark
+        PRIVATE limestone-impl
+        PRIVATE glog::glog
+)
+set_target_properties(startup_speed_benchmark
+        PROPERTIES
+                INSTALL_RPATH "\$ORIGIN/../${CMAKE_INSTALL_LIBDIR}"
+                RUNTIME_OUTPUT_NAME "startup_speed_benchmark"
+)
+if (INSTALL_EXPERIMENTAL_TOOLS)
+    install_custom(startup_speed_benchmark startup_speed_benchmark)
+endif()
