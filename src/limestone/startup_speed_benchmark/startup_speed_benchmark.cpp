@@ -9,6 +9,8 @@
 
 static constexpr const char* loc = "log_dir";
 
+// NOLINTBEGIN(performance-avoid-endl)
+
 int main() {
     // Check if the log directory exists
     boost::filesystem::path dir_path(loc);
@@ -49,3 +51,5 @@ int main() {
 
     datastore_->shutdown();
 }
+
+// NOLINTEND(performance-avoid-endl)
