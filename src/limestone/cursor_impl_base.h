@@ -35,7 +35,6 @@ public:
     virtual api::log_entry::entry_type type() const = 0;
     virtual std::vector<api::blob_id_type> blob_ids() const = 0;
     virtual void close() = 0;
-    virtual void set_clear_storage(const std::map<api::storage_id_type, api::write_version_type>& clear_storage) = 0;
 };
 
 } // namespace limestone::internal

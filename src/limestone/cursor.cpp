@@ -25,12 +25,12 @@
 
 namespace limestone::api {
 
-
-cursor::cursor(const boost::filesystem::path& snapshot_file)
-    : pimpl(std::make_unique<limestone::internal::cursor_impl>(snapshot_file)) {}
-
-cursor::cursor(const boost::filesystem::path& snapshot_file, const boost::filesystem::path& compacted_file)
-    : pimpl(std::make_unique<limestone::internal::cursor_impl>(snapshot_file, compacted_file)) {}
+cursor::cursor(std::unique_ptr<internal::cursor_impl_base> impl)
+    : pimpl(std::move(impl)) {
+    if (!pimpl) {
+        LOG_AND_THROW_EXCEPTION("Cursor implementation cannot be null");
+    }
+}
 
 cursor::~cursor() noexcept {
     // TODO: handle close failure

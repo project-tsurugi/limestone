@@ -29,18 +29,20 @@
 
 namespace limestone::internal {
 
-using limestone::api::cursor;    
+using limestone::api::cursor;
+using limestone::api::storage_id_type;
+using limestone::api::write_version_type;    
 class cursor_impl : public cursor_impl_base {
 public:
-    explicit cursor_impl(const boost::filesystem::path& snapshot_file);
-    explicit cursor_impl(const boost::filesystem::path& snapshot_file, const boost::filesystem::path& compacted_file);
+    cursor_impl(const boost::filesystem::path& snapshot_file, std::map<storage_id_type, write_version_type> clear_storage);
+
+    cursor_impl(const boost::filesystem::path& snapshot_file, const boost::filesystem::path& compacted_file,
+                std::map<storage_id_type, write_version_type> clear_storage);
 
     static std::unique_ptr<cursor> create_cursor(const boost::filesystem::path& snapshot_file,
                                                   const std::map<limestone::api::storage_id_type, limestone::api::write_version_type>& clear_storage);
     static std::unique_ptr<cursor> create_cursor(const boost::filesystem::path& snapshot_file, const boost::filesystem::path& compacted_file,
                                                   const std::map<limestone::api::storage_id_type, limestone::api::write_version_type>& clear_storage);
-
-    void set_clear_storage(const std::map<limestone::api::storage_id_type, limestone::api::write_version_type>& clear_storage) override;
 
 private:
     limestone::api::log_entry log_entry_;

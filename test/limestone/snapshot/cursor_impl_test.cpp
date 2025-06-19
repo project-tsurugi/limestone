@@ -28,6 +28,21 @@ using limestone::api::log_channel;
 
 class cursor_impl_testable : public  limestone::internal::cursor_impl {
 public:
+    /**
+     * @brief Provides backward-compatible constructor for existing test cases.
+     * @details The base class cursor_impl now requires clear_storage as a constructor parameter.
+     * However, existing tests do not depend on clear_storage, so we inject an empty map here.
+     */
+    explicit cursor_impl_testable(const boost::filesystem::path& snapshot_file) : cursor_impl(snapshot_file, {}) {}
+
+    /**
+     * @brief Provides backward-compatible constructor for existing test cases (compacted snapshot).
+     * @details Similar to the single-argument version, we supply an empty clear_storage map
+     * to preserve compatibility with existing test logic.
+     */
+    cursor_impl_testable(const boost::filesystem::path& snapshot_file, const boost::filesystem::path& compacted_file)
+        : cursor_impl(snapshot_file, compacted_file, {}) {}
+
     using cursor_impl::cursor_impl;
     using cursor_impl::next;
     using cursor_impl::validate_and_read_stream;
@@ -427,15 +442,14 @@ TEST_F(cursor_impl_test, while_loop_resets_invalid_entry) {
         FAIL() << "pwal_0000 file not found for renaming";
     }
 
-    // Create a cursor using the snapshot file.
-    cursor_impl_testable test_cursor(snapshot_file);
-
     // Set clear_storage to a threshold that makes the entry non-relevant.
     // For example, if the entry's write version is {1, 0}, setting the threshold to {1, 1} 
     // will cause the entry to be considered outdated (non-relevant).
     std::map<limestone::api::storage_id_type, limestone::api::write_version_type> clear_storage;
     clear_storage[1] = limestone::api::write_version_type(1, 1);
-    test_cursor.set_clear_storage(clear_storage);
+
+    // Create a cursor using the snapshot file.
+    cursor_impl_testable test_cursor(snapshot_file, clear_storage);
 
     // Call next(). The while loop in validate_and_read_stream will read the single entry,
     // find it non-relevant, reset log_entry, and eventually return false since no further entries exist.

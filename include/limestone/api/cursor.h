@@ -81,9 +81,7 @@ public:
 
 private:
     std::unique_ptr<internal::cursor_impl_base> pimpl;
-
-    explicit cursor(const boost::filesystem::path& snapshot_file);
-    explicit cursor(const boost::filesystem::path& snapshot_file, const boost::filesystem::path& compacted_file);
+    explicit cursor(std::unique_ptr<internal::cursor_impl_base> impl);
 
     friend class internal::cursor_impl;
 };
