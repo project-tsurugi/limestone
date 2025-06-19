@@ -15,20 +15,22 @@
  */
 
 #pragma once
-#include <map>
-#include <optional>
+#include <limestone/api/blob_id_type.h>
+#include <limestone/api/cursor.h>
+#include <limestone/api/storage_id_type.h>
+
 #include <boost/filesystem.hpp>
 #include <boost/filesystem/fstream.hpp>
-#include <limestone/api/storage_id_type.h>
-#include <limestone/api/cursor.h>
-#include <limestone/api/blob_id_type.h>
-#include "log_entry.h"
+#include <map>
+#include <optional>
 
+#include "cursor_impl_base.h"
+#include "log_entry.h"
 
 namespace limestone::internal {
 
 using limestone::api::cursor;    
-class cursor_impl {
+class cursor_impl : public cursor_impl_base {
 public:
     explicit cursor_impl(const boost::filesystem::path& snapshot_file);
     explicit cursor_impl(const boost::filesystem::path& snapshot_file, const boost::filesystem::path& compacted_file);
@@ -38,7 +40,7 @@ public:
     static std::unique_ptr<cursor> create_cursor(const boost::filesystem::path& snapshot_file, const boost::filesystem::path& compacted_file,
                                                   const std::map<limestone::api::storage_id_type, limestone::api::write_version_type>& clear_storage);
 
-    void set_clear_storage(const std::map<limestone::api::storage_id_type, limestone::api::write_version_type>& clear_storage);
+    void set_clear_storage(const std::map<limestone::api::storage_id_type, limestone::api::write_version_type>& clear_storage) override;
 
 private:
     limestone::api::log_entry log_entry_;
@@ -52,17 +54,17 @@ private:
 
 protected:
     void open(const boost::filesystem::path& file, std::optional<boost::filesystem::ifstream>& stream);
-    void close();
+    void close() override;
 
-    bool next();
+    bool next() override;
     void validate_and_read_stream(std::optional<boost::filesystem::ifstream>& stream, const std::string& stream_name, 
                                   std::optional<limestone::api::log_entry>& log_entry, std::string& previous_key_sid);
 
-    [[nodiscard]] limestone::api::storage_id_type storage() const noexcept;
-    void key(std::string& buf) const noexcept;
-    void value(std::string& buf) const noexcept;
-    std::vector<limestone::api::blob_id_type> blob_ids() const;
-    [[nodiscard]] limestone::api::log_entry::entry_type type() const;
+    [[nodiscard]] limestone::api::storage_id_type storage() const noexcept override;
+    void key(std::string& buf) const noexcept override;
+    void value(std::string& buf) const noexcept override;
+    std::vector<limestone::api::blob_id_type> blob_ids() const override;
+    [[nodiscard]] limestone::api::log_entry::entry_type type() const override;
     bool is_relevant_entry(const limestone::api::log_entry& entry);
     // Making the cursor class a friend so that it can access protected members
     friend class limestone::api::cursor;
