@@ -26,14 +26,20 @@ namespace limestone::internal {
 
 class cursor_impl_base {
 public:
+    cursor_impl_base() = default;
     virtual ~cursor_impl_base() = default;
 
-   virtual bool next() = 0;
-    virtual api::storage_id_type storage() const noexcept = 0;
+    cursor_impl_base(const cursor_impl_base&) = delete;
+    cursor_impl_base& operator=(const cursor_impl_base&) = delete;
+    cursor_impl_base(cursor_impl_base&&) = delete;
+    cursor_impl_base& operator=(cursor_impl_base&&) = delete;
+
+    virtual bool next() = 0;
+    [[nodiscard]] virtual api::storage_id_type storage() const noexcept = 0;
     virtual void key(std::string& buf) const noexcept = 0;
     virtual void value(std::string& buf) const noexcept = 0;
-    virtual api::log_entry::entry_type type() const = 0;
-    virtual std::vector<api::blob_id_type> blob_ids() const = 0;
+    [[nodiscard]] virtual api::log_entry::entry_type type() const = 0;
+    [[nodiscard]] virtual std::vector<api::blob_id_type> blob_ids() const = 0;
     virtual void close() = 0;
 };
 
