@@ -373,11 +373,31 @@ blob_id_type create_compact_pwal_and_get_max_blob_id(compaction_options &options
     epoch_id_type epoch = rewind ? 0 : max_appeared_epoch;
     log_entry::begin_session(ostrm, epoch);
 
-    auto write_snapshot_entry = [&ostrm, rewind](
+    long prev_chunk_marker = 0;  // or tellg
+    long size_count = 0;
+    auto write_snapshot_entry = [&ostrm, rewind, &size_count, &prev_chunk_marker](
         log_entry::entry_type entry_type, 
         std::string_view key_sid, 
         std::string_view value_etc, 
                                                         std::string_view blob_ids) {
+        if (entry_type == log_entry::entry_type::remove_entry) {
+            return;
+        }
+        if (++size_count >= 128 * 1024L) {
+            std::fflush(ostrm);
+            auto pos = std::ftell(ostrm);
+            if (std::fseek(ostrm, prev_chunk_marker, SEEK_SET) != 0) {
+                LOG_AND_THROW_IO_EXCEPTION("cannot fseek to modify chunk marker", errno);
+            }
+            log_entry::chunk(ostrm, pos);
+            std::fflush(ostrm);
+            if (std::fseek(ostrm, pos, SEEK_SET) != 0) {
+                LOG_AND_THROW_IO_EXCEPTION("cannot fseek to tail", errno);
+            }
+            log_entry::chunk(ostrm, -1);
+            prev_chunk_marker = pos;
+            size_count = 0;
+        }
         switch (entry_type) {
             case log_entry::entry_type::normal_entry:
                 if (rewind) {
@@ -399,9 +419,9 @@ blob_id_type create_compact_pwal_and_get_max_blob_id(compaction_options &options
                 log_entry::write_with_blob(ostrm, key_sid, value_etc, blob_ids);
                 }
                 break;
-            case log_entry::entry_type::remove_entry:
-                // No action needed
-                break;
+            // case log_entry::entry_type::remove_entry:
+            //     // No action needed
+            //     break;
             default:
                 LOG(ERROR) << "Unexpected entry type: " << static_cast<int>(entry_type);
                 std::abort();
@@ -535,21 +555,8 @@ blob_id_type datastore::create_snapshot_and_get_max_blob_id() {
         std::string_view key_sid, 
         std::string_view value_etc, 
         std::string_view blob_ids) {
-        switch (entry_type) {
-        case log_entry::entry_type::normal_entry:
-            log_entry::write(ostrm, key_sid, value_etc);
-            break;
-        case log_entry::entry_type::normal_with_blob:
-            log_entry::write_with_blob(ostrm, key_sid, value_etc, blob_ids);
-            break;
-        case log_entry::entry_type::remove_entry:
-            if (should_write_remove_entry) {
-                log_entry::write_remove(ostrm, key_sid, value_etc);
-            }
-            break;
-        default:
-            LOG(ERROR) << "Unexpected entry type: " << static_cast<int>(entry_type);
-            std::abort();
+        if (entry_type == log_entry::entry_type::remove_entry && !should_write_remove_entry) {
+            return;
         }
         if (++size_count >= 128 * 1024L) {
             std::fflush(ostrm);
@@ -565,6 +572,20 @@ blob_id_type datastore::create_snapshot_and_get_max_blob_id() {
             log_entry::chunk(ostrm, -1);
             prev_chunk_marker = pos;
             size_count = 0;
+        }
+        switch (entry_type) {
+        case log_entry::entry_type::normal_entry:
+            log_entry::write(ostrm, key_sid, value_etc);
+            break;
+        case log_entry::entry_type::normal_with_blob:
+            log_entry::write_with_blob(ostrm, key_sid, value_etc, blob_ids);
+            break;
+        case log_entry::entry_type::remove_entry:
+            log_entry::write_remove(ostrm, key_sid, value_etc);
+            break;
+        default:
+            LOG(ERROR) << "Unexpected entry type: " << static_cast<int>(entry_type);
+            std::abort();
         }
     };
 
