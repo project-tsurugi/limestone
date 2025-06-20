@@ -53,6 +53,7 @@ public:
     using cursor_impl::value;  
     using cursor_impl::type;
     using cursor_impl::blob_ids;
+    using cursor_impl::current;
 
     ~cursor_impl_testable() {
         // Ensure that the close() method is called to release resources.
@@ -738,6 +739,30 @@ TEST_F(cursor_impl_test, snapshot_remove_entry_overrides_compacted_normal) {
     EXPECT_FALSE(cursor.next()) << "remove_entry in snapshot should override compacted normal_entry";
 }
 
+TEST_F(cursor_impl_test, current_returns_latest_entry_after_next) {
+    create_log_file("snapshot", entry_maker_.get_default_entries());
+    boost::filesystem::path snapshot_file = boost::filesystem::path(location) / "snapshot";
+
+    cursor_impl_testable cursor(snapshot_file);
+
+    ASSERT_TRUE(cursor.next());
+    const auto& entry1 = cursor.current();
+    std::string key;
+    std::string value;
+    entry1.key(key);
+    entry1.value(value);
+    EXPECT_EQ(key, "key1");
+    EXPECT_EQ(value, "value1");
+
+    ASSERT_TRUE(cursor.next());
+    const auto& entry2 = cursor.current();
+    entry2.key(key);
+    entry2.value(value);
+    EXPECT_EQ(key, "key2");
+    EXPECT_EQ(value, "value2"); 
+
+    EXPECT_FALSE(cursor.next());
+}
 
 
 }  // namespace limestone::testing

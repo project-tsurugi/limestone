@@ -43,7 +43,6 @@ public:
                                                   const std::map<limestone::api::storage_id_type, limestone::api::write_version_type>& clear_storage);
     static std::unique_ptr<cursor> create_cursor(const boost::filesystem::path& snapshot_file, const boost::filesystem::path& compacted_file,
                                                   const std::map<limestone::api::storage_id_type, limestone::api::write_version_type>& clear_storage);
-
 private:
     limestone::api::log_entry log_entry_;
     std::optional<limestone::api::log_entry> snapshot_log_entry_;
@@ -68,6 +67,7 @@ protected:
     std::vector<limestone::api::blob_id_type> blob_ids() const override;
     [[nodiscard]] limestone::api::log_entry::entry_type type() const override;
     bool is_relevant_entry(const limestone::api::log_entry& entry);
+    [[nodiscard]] const log_entry& current() const override;
     // Making the cursor class a friend so that it can access protected members
     friend class limestone::api::cursor;
 };

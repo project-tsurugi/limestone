@@ -24,7 +24,7 @@
 
 namespace limestone::internal {
 
-class cursor_impl_base {
+using limestone::api::log_entry;    class cursor_impl_base {
 public:
     cursor_impl_base() = default;
     virtual ~cursor_impl_base() = default;
@@ -34,13 +34,62 @@ public:
     cursor_impl_base(cursor_impl_base&&) = delete;
     cursor_impl_base& operator=(cursor_impl_base&&) = delete;
 
+    /**
+     * @brief Advances the cursor to the next entry.
+     * @return true if a valid entry was found, false if the end has been reached.
+     */
     virtual bool next() = 0;
+
+    /**
+     * @brief Returns the storage ID of the current entry.
+     * @return the storage ID.
+     * @note Only valid after a successful call to `next()`.
+     */
     [[nodiscard]] virtual api::storage_id_type storage() const noexcept = 0;
+
+    /**
+     * @brief Retrieves the key of the current entry.
+     * @param[out] buf the buffer to store the key.
+     * @note Only valid after a successful call to `next()`.
+     */
     virtual void key(std::string& buf) const noexcept = 0;
+
+    /**
+     * @brief Retrieves the value of the current entry.
+     * @param[out] buf the buffer to store the value.
+     * @note Only valid after a successful call to `next()`.
+     */
     virtual void value(std::string& buf) const noexcept = 0;
+
+    /**
+     * @brief Returns the type of the current entry.
+     * @return the entry type.
+     * @note Only valid after a successful call to `next()`.
+     */
     [[nodiscard]] virtual api::log_entry::entry_type type() const = 0;
+
+    /**
+     * @brief Returns the list of blob IDs associated with the current entry.
+     * @return a vector of blob IDs.
+     * @note Only valid after a successful call to `next()`.
+     */
     [[nodiscard]] virtual std::vector<api::blob_id_type> blob_ids() const = 0;
+
+    /**
+     * @brief Returns the current entry.
+     * @return a reference to the current log_entry.
+     * @details Only valid after a successful call to `next()`.
+     *          If called before the first `next()` or after `next()` has returned false,
+     *          the behavior is undefined.
+     */
+    [[nodiscard]] virtual const log_entry& current() const = 0;
+
+    /**
+     * @brief Closes the cursor and releases any held resources.
+     * @details After calling this method, no further operations on the cursor are valid.
+     */
     virtual void close() = 0;
 };
+
 
 } // namespace limestone::internal

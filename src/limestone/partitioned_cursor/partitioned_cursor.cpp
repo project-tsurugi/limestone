@@ -49,6 +49,9 @@ std::vector<api::blob_id_type> partitioned_cursor::blob_ids() const {
     return std::get<api::log_entry>(current_).get_blob_ids();
 }
 
+const log_entry& partitioned_cursor::current() const {
+    return std::get<api::log_entry>(current_);
+}
 void partitioned_cursor::close() {
     queue_.reset();
 }

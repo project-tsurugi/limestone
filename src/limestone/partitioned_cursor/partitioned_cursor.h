@@ -48,6 +48,7 @@ public:
     void value(std::string& buf) const noexcept override;
     [[nodiscard]] api::log_entry::entry_type type() const override;
     [[nodiscard]] std::vector<api::blob_id_type> blob_ids() const override;
+    [[nodiscard]] const log_entry& current() const override;
     void close() override;
 
 private:

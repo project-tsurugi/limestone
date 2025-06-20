@@ -94,4 +94,35 @@ TEST_F(partitioned_cursor_test, next_returns_false_after_cursor_closed) {
     EXPECT_FALSE(cursor.next());
 }
 
+TEST_F(partitioned_cursor_test, current_returns_last_entry_after_next) {
+    auto queue = std::make_shared<cursor_entry_queue>(8);
+    partitioned_cursor cursor(queue);
+
+    auto entry1 = create_normal_log_entry(123, "k1", "v1", {1, 0});
+    auto entry2 = create_normal_log_entry(456, "k2", "v2", {2, 0});
+    EXPECT_TRUE(queue->push(entry1));
+    EXPECT_TRUE(queue->push(entry2));
+    EXPECT_TRUE(queue->push(end_marker{true, ""}));
+
+    ASSERT_TRUE(cursor.next());
+    const log_entry& current1 = cursor.current();
+    EXPECT_EQ(current1.storage(), 123);
+    std::string key1, value1;
+    current1.key(key1);
+    current1.value(value1);
+    EXPECT_EQ(key1, "k1");
+    EXPECT_EQ(value1, "v1");
+
+    ASSERT_TRUE(cursor.next());
+    const log_entry& current2 = cursor.current();
+    EXPECT_EQ(current2.storage(), 456);
+    std::string key2, value2;
+    current2.key(key2);
+    current2.value(value2);
+    EXPECT_EQ(key2, "k2");
+    EXPECT_EQ(value2, "v2");
+
+    EXPECT_FALSE(cursor.next());
+}
+
 }  // namespace limestone::testing
