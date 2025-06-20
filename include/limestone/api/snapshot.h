@@ -72,7 +72,7 @@ public:
      * @attention this function is thread-safe.
      * @return pair of unique pointer of the cursor and next chunk offset
      */
-    [[nodiscard]] std::pair<std::unique_ptr<cursor>, long> get_chunk_cursor(long offset) const;
+    [[nodiscard]] std::pair<std::unique_ptr<cursor>, chunk_offset_t> get_chunk_cursor(chunk_offset_t offset) const;
 
     /**
      * @brief create a cursor for an entry at a given location on the snapshot and returns it

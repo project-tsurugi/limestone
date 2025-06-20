@@ -22,6 +22,7 @@ namespace limestone::internal {
 
 using limestone::api::log_entry;
 using limestone::api::write_version_type;
+using limestone::api::chunk_offset_t;
 
 std::unique_ptr<cursor> cursor_impl::create_cursor(const boost::filesystem::path& snapshot_file,
                                                     const std::map<limestone::api::storage_id_type, limestone::api::write_version_type>& clear_storage) {
@@ -37,11 +38,13 @@ std::unique_ptr<cursor> cursor_impl::create_cursor(const boost::filesystem::path
     return cursor_instance;
 }
 
-std::pair<std::unique_ptr<cursor>, long> cursor_impl::create_chunk_cursor(
-    const boost::filesystem::path& snapshot_file, const std::map<limestone::api::storage_id_type, limestone::api::write_version_type>& clear_storage, long offset) {
-    auto cursor_instance = std::unique_ptr<cursor>(new cursor(snapshot_file, offset));
+std::pair<std::unique_ptr<cursor>, chunk_offset_t> cursor_impl::create_chunk_cursor(
+    const boost::filesystem::path& snapshot_file, const boost::filesystem::path& compacted_file,
+    const std::map<limestone::api::storage_id_type, limestone::api::write_version_type>& clear_storage, chunk_offset_t offset) {
+    auto cursor_instance = std::unique_ptr<cursor>(new cursor(snapshot_file, compacted_file));
     cursor_instance->pimpl->set_clear_storage(clear_storage);
-    return std::make_pair(std::move(cursor_instance), cursor_instance->pimpl->verify_chunk_mark());
+    auto next_offset = cursor_instance->pimpl->verify_chunk_mark(offset);
+    return std::make_pair(std::move(cursor_instance), next_offset);
 }
 
 cursor_impl::cursor_impl(const boost::filesystem::path& snapshot_file) 
@@ -54,31 +57,97 @@ cursor_impl::cursor_impl(const boost::filesystem::path& snapshot_file, const boo
     open(compacted_file, compacted_istrm_); 
 }
 
-cursor_impl::cursor_impl(const boost::filesystem::path& snapshot_file, long offset)
-    : compacted_istrm_(std::nullopt) {
-    open(snapshot_file, snapshot_istrm_, offset);
+cursor_impl::cursor_impl(const boost::filesystem::path& snapshot_file, const boost::filesystem::path& compacted_file, chunk_offset_t offset)
+    : offset_(offset) {
+    open(snapshot_file, snapshot_istrm_);
+    if (offset.c_off >= 0 && boost::filesystem::exists(compacted_file)) {
+        open(compacted_file, compacted_istrm_);
+    } else {
+        compacted_istrm_ = std::nullopt;
+    }
     chunked_read_ = true;
 }
 
-void cursor_impl::open(const boost::filesystem::path& file, std::optional<boost::filesystem::ifstream>& stream, long chunk) {
+void cursor_impl::open(const boost::filesystem::path& file, std::optional<boost::filesystem::ifstream>& stream) {
     stream.emplace(file, std::ios_base::in | std::ios_base::binary);
     if (!stream->is_open() || !stream->good()) {
         LOG_AND_THROW_EXCEPTION("Failed to open file: " + file.string());
     }
-    if (chunk >= 0) {
-        stream->seekg(chunk, std::ios::beg);
-    }
 }
 
-long cursor_impl::verify_chunk_mark() {
+static std::pair<long, std::string> verify_chunk_mark_1(boost::filesystem::ifstream& istrm, const std::string& filetype, long marker_pos, const std::string& low) {
     log_entry le;
-    if (!le.read(*snapshot_istrm_)) {
-        throw std::runtime_error("read");
+    istrm.seekg(marker_pos, std::ios::beg);
+    if (!le.read(istrm)) {
+        throw std::runtime_error(filetype + " read");
     }
     if (le.type() != log_entry::entry_type::marker_chunk) {
-        throw std::runtime_error("read chunk");
+        throw std::runtime_error(filetype + " read-chunk");
     }
-    return static_cast<long>(le.epoch_id());
+    auto next_marker = static_cast<long>(le.epoch_id());
+    std::pair<long, std::string> ret{ -1, {} };
+    if (next_marker >= 0) {
+        // seek to next chunk
+        istrm.seekg(next_marker, std::ios::beg);
+        // read next key
+        if (!le.read(istrm)) {
+            throw std::runtime_error(filetype + " read-next-chunk");
+        }
+        if (le.type() != log_entry::entry_type::marker_chunk) {
+            throw std::runtime_error(filetype + " read-next-chunk-marker");
+        }
+        if (!le.read(istrm)) {
+            throw std::runtime_error(filetype + " read-next-head-entry");
+        }
+        // rewind
+        istrm.seekg(marker_pos + 9, std::ios::beg);
+        ret = std::make_pair(next_marker, le.key_sid());
+    }
+
+    // skip to low
+    while (istrm) {
+        auto prev_pos = istrm.tellg();
+        if (!le.read(istrm)) {
+
+        }
+        if (le.type() != log_entry::entry_type::normal_entry && le.type() != log_entry::entry_type::normal_with_blob && le.type() != log_entry::entry_type::remove_entry)
+            continue;
+        if (le.key_sid() >= low) {
+            istrm.seekg(prev_pos);
+            break;
+        }
+    }
+    return ret;
+}
+
+chunk_offset_t cursor_impl::verify_chunk_mark(chunk_offset_t offset) {
+    if (offset.c_off < 0) {
+        if (offset.ss_off < 0) { throw std::runtime_error("both eof"); }
+        auto [ ss_next_off, ss_high ] = verify_chunk_mark_1(*snapshot_istrm_, "ss", offset.ss_off, offset.low);
+        high_ = ss_next_off >= 0 ? std::optional{ss_high} : std::nullopt;
+        return { ss_next_off, -1, ss_high };
+    }
+    if (offset.ss_off < 0) {
+        auto [ c_next_off, c_high ] = verify_chunk_mark_1(*compacted_istrm_, "compacted", offset.c_off, offset.low);
+        high_ = c_next_off >= 0 ? std::optional{c_high} : std::nullopt;
+        return { -1, c_next_off, c_high };
+    }
+
+    auto [ ss_next_off, ss_high ] = verify_chunk_mark_1(*snapshot_istrm_, "ss", offset.ss_off, offset.low);
+    auto [ c_next_off, c_high ] = verify_chunk_mark_1(*compacted_istrm_, "compacted", offset.c_off, offset.low);
+
+    if (ss_next_off == -1 && c_next_off == -1) {  // both last chunk
+        return { -1, -1, {} };
+    }
+    if (c_next_off == -1 || ss_high < c_high) {
+        // next: advance ss chunk
+        high_ = ss_high;
+        return { ss_next_off, offset.c_off, ss_high };
+    } else {
+        // next: advance c chunk
+        high_ = c_high;
+        return { offset.ss_off, c_next_off, c_high };
+    }
 }
 
 void cursor_impl::close() {
@@ -101,7 +170,7 @@ void cursor_impl::validate_and_read_stream(std::optional<boost::filesystem::ifst
         if (!log_entry) {
             log_entry.emplace();  // Construct a new log_entry
             do {
-                if (!log_entry->read(*stream) || (log_entry->type() == log_entry::entry_type::marker_chunk && chunked_read_)) {
+                if (!log_entry->read(*stream) || (chunked_read_ && log_entry->key_sid() >= high_)) {
                     // If reading fails, close the stream and reset the log_entry
                     stream->close();
                     stream = std::nullopt;

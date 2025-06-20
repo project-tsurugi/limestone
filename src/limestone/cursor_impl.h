@@ -28,23 +28,24 @@
 namespace limestone::internal {
 
 using limestone::api::cursor;    
+using limestone::api::chunk_offset_t;
 class cursor_impl {
 public:
     explicit cursor_impl(const boost::filesystem::path& snapshot_file);
     explicit cursor_impl(const boost::filesystem::path& snapshot_file, const boost::filesystem::path& compacted_file);
-    explicit cursor_impl(const boost::filesystem::path& snapshot_file, long);
+    explicit cursor_impl(const boost::filesystem::path& snapshot_file, const boost::filesystem::path&, chunk_offset_t);
 
     static std::unique_ptr<cursor> create_cursor(const boost::filesystem::path& snapshot_file,
                                                   const std::map<limestone::api::storage_id_type, limestone::api::write_version_type>& clear_storage);
     static std::unique_ptr<cursor> create_cursor(const boost::filesystem::path& snapshot_file, const boost::filesystem::path& compacted_file,
                                                   const std::map<limestone::api::storage_id_type, limestone::api::write_version_type>& clear_storage);
-    static std::pair<std::unique_ptr<cursor>, long> create_chunk_cursor(
-            const boost::filesystem::path& snapshot_file,
+    static std::pair<std::unique_ptr<cursor>, chunk_offset_t> create_chunk_cursor(
+            const boost::filesystem::path& snapshot_file, const boost::filesystem::path& compacted_file,
             const std::map<limestone::api::storage_id_type, limestone::api::write_version_type>& clear_storage,
-            long offset);
+            chunk_offset_t offset);
 
     void set_clear_storage(const std::map<limestone::api::storage_id_type, limestone::api::write_version_type>& clear_storage);
-    long verify_chunk_mark();
+    chunk_offset_t verify_chunk_mark(chunk_offset_t);
 
 private:
     limestone::api::log_entry log_entry_;
@@ -56,9 +57,11 @@ private:
     std::string previous_compacted_key_sid;
     std::map<limestone::api::storage_id_type, limestone::api::write_version_type> clear_storage_; 
     bool chunked_read_ = false;
+    chunk_offset_t offset_;
+    std::optional<std::string> high_;
 
 protected:
-    void open(const boost::filesystem::path& file, std::optional<boost::filesystem::ifstream>& stream, long offset = -1);
+    void open(const boost::filesystem::path& file, std::optional<boost::filesystem::ifstream>& stream);
     void close();
 
     bool next();
