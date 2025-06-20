@@ -41,7 +41,7 @@ std::unique_ptr<cursor> snapshot::get_cursor() const {
     }
 }
 
-std::pair<std::unique_ptr<cursor>, long> snapshot::get_chunk_cursor(long offset) const {
+std::pair<std::unique_ptr<cursor>, chunk_offset_t> snapshot::get_chunk_cursor(chunk_offset_t offset) const {
     try {
         return pimpl->get_chunk_cursor(offset);
     } catch (...) {

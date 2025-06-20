@@ -131,9 +131,9 @@ void invalidate_epoch_snippet(boost::filesystem::fstream& strm, std::streampos f
         enum class token_type {
             eof,
             normal_entry = 1, marker_begin, marker_end, marker_durable, remove_entry, marker_invalidated_begin,
-            clear_storage, add_storage, remove_storage, normal_with_blob,
+            clear_storage, add_storage, remove_storage, normal_with_blob, marker_chunk,
             SHORT_normal_entry = 101, SHORT_marker_begin, SHORT_marker_end, SHORT_marker_durable, SHORT_remove_entry, SHORT_marker_inv_begin,
-            SHORT_clear_storage, SHORT_add_storage, SHORT_remove_storage, SHORT_normal_with_blob,
+            SHORT_clear_storage, SHORT_add_storage, SHORT_remove_storage, SHORT_normal_with_blob, SHORT_marker_chunk,
             UNKNOWN_TYPE_entry = 1001,
         };
 
@@ -155,6 +155,7 @@ void invalidate_epoch_snippet(boost::filesystem::fstream& strm, std::streampos f
                 case log_entry::entry_type::clear_storage:            value_ = token_type::clear_storage; break;
                 case log_entry::entry_type::add_storage:              value_ = token_type::add_storage; break;
                 case log_entry::entry_type::remove_storage:           value_ = token_type::remove_storage; break;
+                case log_entry::entry_type::marker_chunk:             value_ = token_type::marker_chunk; break;
                 default: assert(false);
                 }
             } else if (ec.value() == log_entry::read_error::short_entry) {
@@ -169,6 +170,7 @@ void invalidate_epoch_snippet(boost::filesystem::fstream& strm, std::streampos f
                 case log_entry::entry_type::clear_storage:            value_ = token_type::SHORT_clear_storage; break;
                 case log_entry::entry_type::add_storage:              value_ = token_type::SHORT_add_storage; break;
                 case log_entry::entry_type::remove_storage:           value_ = token_type::SHORT_remove_storage; break;
+                case log_entry::entry_type::marker_chunk:             value_ = token_type::SHORT_marker_chunk; break;
                 default: assert(false);
                 }
             } else if (ec.value() == log_entry::read_error::unknown_type) {

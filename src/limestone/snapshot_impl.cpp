@@ -39,14 +39,11 @@ std::unique_ptr<cursor> snapshot_impl::get_cursor() const {
     return cursor_impl::create_cursor(snapshot_file, clear_storage);  
 }
 
-std::pair<std::unique_ptr<cursor>, long> snapshot_impl::get_chunk_cursor(long offset) const {
+std::pair<std::unique_ptr<cursor>, chunk_offset_t> snapshot_impl::get_chunk_cursor(chunk_offset_t offset) const {
     boost::filesystem::path compacted_file = location_ / limestone::internal::compaction_catalog::get_compacted_filename();
     boost::filesystem::path snapshot_file = location_ / std::string(snapshot::subdirectory_name_) / std::string(snapshot::file_name_);
 
-    if (boost::filesystem::exists(compacted_file)) {
-        throw std::runtime_error(std::string("unimplemented"));
-    }
-    return cursor_impl::create_chunk_cursor(snapshot_file, clear_storage, offset);
+    return cursor_impl::create_chunk_cursor(snapshot_file, compacted_file, clear_storage, offset);
 }
 
 

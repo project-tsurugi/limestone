@@ -34,6 +34,11 @@ namespace limestone::api {
 class log_entry;
 class snapshot;
 
+struct chunk_offset_t {
+    long ss_off;
+    long c_off;
+    std::string low;
+};
 
 /**
  * @brief a cursor to scan entries on the snapshot
@@ -84,7 +89,7 @@ private:
 
     explicit cursor(const boost::filesystem::path& snapshot_file);
     explicit cursor(const boost::filesystem::path& snapshot_file, const boost::filesystem::path& compacted_file);
-    explicit cursor(const boost::filesystem::path& snapshot_file, long);
+    explicit cursor(const boost::filesystem::path& snapshot_file, const boost::filesystem::path& compacted_file, chunk_offset_t);
 
     friend class internal::cursor_impl;
 };
