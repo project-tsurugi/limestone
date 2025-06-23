@@ -17,6 +17,7 @@
 #pragma once
 
 #include <limestone/api/blob_id_type.h>
+#include <limestone/api/cursor.h>
 #include <limestone/api/storage_id_type.h>
 #include <log_entry.h>
 
@@ -50,6 +51,7 @@ public:
     [[nodiscard]] std::vector<api::blob_id_type> blob_ids() const override;
     [[nodiscard]] const log_entry& current() const override;
     void close() override;
+    static std::unique_ptr<api::cursor> create_cursor(std::shared_ptr<cursor_entry_queue> queue);
 
 private:
     std::shared_ptr<cursor_entry_queue> queue_;

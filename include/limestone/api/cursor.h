@@ -26,7 +26,8 @@
 
 namespace limestone::internal {
     class cursor_impl_base;
-    class cursor_impl;  
+    class cursor_impl;
+    class partitioned_cursor;
 }
 
 namespace limestone::api {
@@ -84,6 +85,8 @@ private:
     explicit cursor(std::unique_ptr<internal::cursor_impl_base> impl);
 
     friend class internal::cursor_impl;
+    friend class internal::partitioned_cursor;  
+
 };
 
 } // namespace limestone::api

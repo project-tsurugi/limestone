@@ -13,14 +13,20 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-#include <map>
 #include "snapshot_impl.h"
+
 #include <glog/logging.h>
-#include <limestone/logging.h>
-#include "compaction_catalog.h"
-#include "logging_helper.h"
-#include "cursor_impl.h" 
+#include "limestone_exception_helper.h"
 #include <limestone/api/snapshot.h>
+#include <limestone/logging.h>
+#include <partitioned_cursor/cursor_distributor.h>
+#include <partitioned_cursor/partitioned_cursor.h>
+
+#include <map>
+
+#include "compaction_catalog.h"
+#include "cursor_impl.h"
+#include "logging_helper.h"
 
 namespace limestone::internal {
 
@@ -37,6 +43,45 @@ std::unique_ptr<cursor> snapshot_impl::get_cursor() const {
         return cursor_impl::create_cursor(snapshot_file, compacted_file, clear_storage);
     }
     return cursor_impl::create_cursor(snapshot_file, clear_storage);  
+}
+
+std::vector<std::unique_ptr<limestone::api::cursor>> snapshot_impl::get_partitioned_cursors(std::size_t n) {
+    if (n == 0) {
+        throw std::invalid_argument("partition count must be greater than 0");
+    }
+    if (partitioned_called_.exchange(true)) {
+        THROW_LIMESTONE_EXCEPTION("get_partitioned_cursors() was already called once");
+    }
+
+    namespace li = limestone::internal;
+    namespace la = limestone::api;
+
+    std::vector<std::shared_ptr<li::cursor_entry_queue>> queues;
+    std::vector<std::unique_ptr<la::cursor>> cursors;
+
+    for (std::size_t i = 0; i < n; ++i) {
+        auto queue = std::make_shared<li::cursor_entry_queue>(1024);
+        queues.push_back(queue);
+        cursors.emplace_back(li::partitioned_cursor::create_cursor(queue));
+    }
+
+    boost::filesystem::path snapshot_file = location_ / std::string(la::snapshot::subdirectory_name_) / std::string(la::snapshot::file_name_);
+    boost::filesystem::path compacted_file = location_ / li::compaction_catalog::get_compacted_filename();
+
+    std::unique_ptr<li::cursor_impl_base> base_cursor;
+    if (boost::filesystem::exists(compacted_file)) {
+        base_cursor = std::make_unique<li::cursor_impl>(snapshot_file, compacted_file, clear_storage);
+    } else {
+        base_cursor = std::make_unique<li::cursor_impl>(snapshot_file, clear_storage);
+    }
+
+    auto distributor = std::make_shared<li::cursor_distributor>(
+        std::move(base_cursor),
+        std::move(queues)
+    );
+    distributor->start();
+
+    return cursors;
 }
 
 

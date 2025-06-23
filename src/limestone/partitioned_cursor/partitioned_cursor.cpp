@@ -15,6 +15,7 @@
  */
 
 #include "partitioned_cursor.h"
+#include <limestone/api/cursor.h>
 
 namespace limestone::internal {
 
@@ -55,5 +56,11 @@ const log_entry& partitioned_cursor::current() const {
 void partitioned_cursor::close() {
     queue_.reset();
 }
+
+std::unique_ptr<api::cursor> partitioned_cursor::create_cursor(std::shared_ptr<cursor_entry_queue> queue) {
+    auto impl = std::make_unique<partitioned_cursor>(std::move(queue));
+    return std::unique_ptr<api::cursor>(new api::cursor(std::move(impl)));
+}
+
 
 }  // namespace limestone::internal
