@@ -59,7 +59,7 @@ public:
      *
      * @note This must be called only from the producer thread.
      */
-    [[nodiscard]] bool push(const cursor_entry_type& entry) noexcept;
+    [[nodiscard]] virtual bool push(const cursor_entry_type& entry) noexcept;
 
     /**
      * @brief Waits for and pops the next available entry.
