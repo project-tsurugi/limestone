@@ -15,6 +15,7 @@
  */
 
 #include "partitioned_cursor/cursor_entry_queue.h"
+#include "partitioned_cursor/partitioned_cursor_consts.h"
 #include <thread>
 
 namespace limestone::internal {
@@ -28,9 +29,8 @@ bool cursor_entry_queue::push(const cursor_entry_type& entry) noexcept {
 
 cursor_entry_type cursor_entry_queue::wait_and_pop() {
     cursor_entry_type entry;
-    // busy-wait を避けるために軽い sleep を入れる
     while (!queue_.pop(entry)) {
-        std::this_thread::sleep_for(std::chrono::microseconds(10));
+        std::this_thread::sleep_for(std::chrono::microseconds(CURSOR_POP_POLL_INTERVAL_US));
     }
     return entry;
 }

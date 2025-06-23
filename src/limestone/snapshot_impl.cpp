@@ -16,17 +16,19 @@
 #include "snapshot_impl.h"
 
 #include <glog/logging.h>
-#include "limestone_exception_helper.h"
 #include <limestone/api/snapshot.h>
 #include <limestone/logging.h>
-#include <partitioned_cursor/cursor_distributor.h>
-#include <partitioned_cursor/partitioned_cursor_impl.h>
 
 #include <map>
 
 #include "compaction_catalog.h"
 #include "cursor_impl.h"
+#include "limestone_exception_helper.h"
 #include "logging_helper.h"
+#include "partitioned_cursor/cursor_distributor.h"
+#include "partitioned_cursor/partitioned_cursor_consts.h"
+#include "partitioned_cursor/partitioned_cursor_impl.h"
+
 
 namespace limestone::internal {
 
@@ -60,7 +62,7 @@ std::vector<std::unique_ptr<limestone::api::cursor>> snapshot_impl::get_partitio
     std::vector<std::unique_ptr<la::cursor>> cursors;
 
     for (std::size_t i = 0; i < n; ++i) {
-        auto queue = std::make_shared<li::cursor_entry_queue>(1024);
+        auto queue = std::make_shared<li::cursor_entry_queue>(CURSOR_QUEUE_CAPACITY);
         queues.push_back(queue);
         cursors.emplace_back(li::partitioned_cursor_impl::create_cursor(queue));
     }
@@ -77,7 +79,9 @@ std::vector<std::unique_ptr<limestone::api::cursor>> snapshot_impl::get_partitio
 
     auto distributor = std::make_shared<li::cursor_distributor>(
         std::move(base_cursor),
-        std::move(queues)
+        std::move(queues),
+        CURSOR_PUSH_RETRY_COUNT,
+        CURSOR_PUSH_RETRY_INTERVAL_US
     );
     distributor->start();
 
