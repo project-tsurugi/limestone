@@ -33,15 +33,15 @@
 
 namespace limestone::internal {
 
-class partitioned_cursor : public cursor_impl_base {
+class partitioned_cursor_impl : public cursor_impl_base {
 public:
-    explicit partitioned_cursor(std::shared_ptr<cursor_entry_queue> queue);
-    ~partitioned_cursor() override = default;
+    explicit partitioned_cursor_impl(std::shared_ptr<cursor_entry_queue> queue);
+    ~partitioned_cursor_impl() override = default;
 
-    partitioned_cursor(const partitioned_cursor&) = delete;
-    partitioned_cursor& operator=(const partitioned_cursor&) = delete;
-    partitioned_cursor(partitioned_cursor&&) = delete;
-    partitioned_cursor& operator=(partitioned_cursor&&) = delete;
+    partitioned_cursor_impl(const partitioned_cursor_impl&) = delete;
+    partitioned_cursor_impl& operator=(const partitioned_cursor_impl&) = delete;
+    partitioned_cursor_impl(partitioned_cursor_impl&&) = delete;
+    partitioned_cursor_impl& operator=(partitioned_cursor_impl&&) = delete;
 
     bool next() override;
     [[nodiscard]] api::storage_id_type storage() const noexcept override;

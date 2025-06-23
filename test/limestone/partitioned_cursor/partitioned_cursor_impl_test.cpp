@@ -1,7 +1,7 @@
 #include <gtest/gtest.h>
 #include <memory>
 #include <vector>
-#include "partitioned_cursor/partitioned_cursor.h"
+#include "partitioned_cursor/partitioned_cursor_impl.h"
 #include "partitioned_cursor/cursor_entry_queue.h"
 #include "partitioned_cursor/end_marker.h"
 #include "log_entry.h"
@@ -10,7 +10,7 @@
 
 namespace limestone::testing {
 
-using limestone::internal::partitioned_cursor;
+using limestone::internal::partitioned_cursor_impl;
 using limestone::internal::cursor_entry_queue;
 using limestone::internal::end_marker;
 using limestone::api::log_entry;
@@ -58,7 +58,7 @@ protected:
 
 TEST_F(partitioned_cursor_test, single_entry_and_end_marker) {
     auto queue = std::make_shared<cursor_entry_queue>(8);
-    partitioned_cursor cursor(queue);
+    partitioned_cursor_impl cursor(queue);
 
     // Push one log_entry
     EXPECT_TRUE(queue->push(create_normal_log_entry(123, "key", "value", {12, 34})));
@@ -84,7 +84,7 @@ TEST_F(partitioned_cursor_test, single_entry_and_end_marker) {
 
 TEST_F(partitioned_cursor_test, next_returns_false_after_cursor_closed) {
     auto queue = std::make_shared<cursor_entry_queue>(8);
-    partitioned_cursor cursor(queue);
+    partitioned_cursor_impl cursor(queue);
 
     // Push multiple log_entries
     EXPECT_TRUE(queue->push(create_normal_log_entry(123, "key1", "value1", {12, 34})));
@@ -96,7 +96,7 @@ TEST_F(partitioned_cursor_test, next_returns_false_after_cursor_closed) {
 
 TEST_F(partitioned_cursor_test, current_returns_last_entry_after_next) {
     auto queue = std::make_shared<cursor_entry_queue>(8);
-    partitioned_cursor cursor(queue);
+    partitioned_cursor_impl cursor(queue);
 
     auto entry1 = create_normal_log_entry(123, "k1", "v1", {1, 0});
     auto entry2 = create_normal_log_entry(456, "k2", "v2", {2, 0});

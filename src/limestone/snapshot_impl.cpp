@@ -20,7 +20,7 @@
 #include <limestone/api/snapshot.h>
 #include <limestone/logging.h>
 #include <partitioned_cursor/cursor_distributor.h>
-#include <partitioned_cursor/partitioned_cursor.h>
+#include <partitioned_cursor/partitioned_cursor_impl.h>
 
 #include <map>
 
@@ -62,7 +62,7 @@ std::vector<std::unique_ptr<limestone::api::cursor>> snapshot_impl::get_partitio
     for (std::size_t i = 0; i < n; ++i) {
         auto queue = std::make_shared<li::cursor_entry_queue>(1024);
         queues.push_back(queue);
-        cursors.emplace_back(li::partitioned_cursor::create_cursor(queue));
+        cursors.emplace_back(li::partitioned_cursor_impl::create_cursor(queue));
     }
 
     boost::filesystem::path snapshot_file = location_ / std::string(la::snapshot::subdirectory_name_) / std::string(la::snapshot::file_name_);
