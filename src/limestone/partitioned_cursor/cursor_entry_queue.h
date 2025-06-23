@@ -52,6 +52,17 @@ public:
     explicit cursor_entry_queue(std::size_t capacity);
 
     /**
+     * @brief Virtual destructor for proper inheritance.
+     */
+    virtual ~cursor_entry_queue() = default;
+
+    // Delete copy and move operations as this class manages exclusive queue resources
+    cursor_entry_queue(const cursor_entry_queue&) = delete;
+    cursor_entry_queue& operator=(const cursor_entry_queue&) = delete;
+    cursor_entry_queue(cursor_entry_queue&&) = delete;
+    cursor_entry_queue& operator=(cursor_entry_queue&&) = delete;
+
+    /**
      * @brief Pushes an entry into the queue.
      *
      * @param entry The entry to push.

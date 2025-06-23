@@ -102,8 +102,8 @@ TEST_F(cursor_entry_queue_test, push_and_wait_and_pop_end_marker) {
     auto result = queue.wait_and_pop();
     ASSERT_TRUE(std::holds_alternative<end_marker>(result));
     const auto& actual = std::get<end_marker>(result);
-    EXPECT_FALSE(actual.success);
-    EXPECT_EQ(actual.message, "error occurred");
+    EXPECT_FALSE(actual.success());
+    EXPECT_EQ(actual.message(), "error occurred");
     producer.join();
 }
 

@@ -21,25 +21,25 @@
 namespace limestone::internal {
 
 /**
- * @brief A marker object indicating the end of cursor data stream.
- * 
- * This is pushed into the queue when no more entries will follow.
- * It can indicate either a successful completion or an error.
+ * @brief A marker object indicating the end of a cursor data stream.
+ *
+ * This class is used to signal that no more entries will follow.
+ * It encapsulates the completion status and an optional message.
+ * Typically used as a value object passed through a queue.
  */
-struct end_marker {
-    bool success{true};
-    std::string message;
-
+class end_marker {
+public:
     end_marker() = default;
-
     explicit end_marker(bool s, std::string m = {})
-        : success(s), message(std::move(m)) {}
+        : success_(s), message_(std::move(m)) {}
 
-    end_marker(const end_marker&) = default;
-    end_marker(end_marker&&) = default;
-    end_marker& operator=(const end_marker&) = default;
-    end_marker& operator=(end_marker&&) = default;
-    ~end_marker() = default;
+    [[nodiscard]] bool success() const { return success_; }
+    [[nodiscard]] const std::string& message() const { return message_; }
+
+private:
+    bool success_{true};
+    std::string message_;
 };
+
 
 } // namespace limestone::internal
