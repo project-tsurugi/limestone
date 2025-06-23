@@ -125,4 +125,28 @@ TEST_F(partitioned_cursor_test, current_returns_last_entry_after_next) {
     EXPECT_FALSE(cursor.next());
 }
 
+TEST_F(partitioned_cursor_test, create_cursor_returns_valid_cursor) {
+    auto queue = std::make_shared<cursor_entry_queue>(8);
+
+    // Use create_cursor to create a wrapped API cursor
+    auto cursor = partitioned_cursor_impl::create_cursor(queue);
+    ASSERT_NE(cursor, nullptr);  // cursor should not be null
+
+    // Push a log entry
+    EXPECT_TRUE(queue->push(create_normal_log_entry(42, "foo", "bar", {1, 2})));
+    EXPECT_TRUE(queue->push(end_marker{true, ""}));
+
+    // The returned cursor behaves like any other cursor
+    EXPECT_TRUE(cursor->next());
+    EXPECT_EQ(cursor->storage(), 42);
+    std::string key, value;
+    cursor->key(key);
+    cursor->value(value);
+    EXPECT_EQ(key, "foo");
+    EXPECT_EQ(value, "bar");
+
+    EXPECT_FALSE(cursor->next());
+}
+
+
 }  // namespace limestone::testing
