@@ -75,28 +75,31 @@ void cursor_distributor::push_end_markers() {
     }
 }
 
-void cursor_distributor::run() {
-    std::size_t queue_index = 0;
-
+std::vector<cursor_entry_type> cursor_distributor::read_batch_from_cursor(cursor_impl_base& cursor) {
     std::vector<cursor_entry_type> buffer;
     buffer.reserve(CURSOR_DISTRIBUTOR_BATCH_SIZE);
 
-    while (cursor_->next()) {
-        buffer.emplace_back(cursor_->current());
-
+    while (cursor.next()) {
+        buffer.emplace_back(cursor.current());
         if (buffer.size() >= CURSOR_DISTRIBUTOR_BATCH_SIZE) {
-            if (!try_push_all_to_queues(buffer, queue_index)) {
-                cursor_->close();
-                LOG_LP(FATAL) << "[cursor_distributor] Fatal: failed to push all entries after retry. Aborting.";
-                std::abort();
-            }
+            break;
         }
     }
+    return buffer;
+}
 
-    if (!buffer.empty()) {
+void cursor_distributor::run() {
+    std::size_t queue_index = 0;
+
+    while (true) {
+        auto buffer = read_batch_from_cursor(*cursor_);
+        if (buffer.empty()) {
+            break;
+        }
+
         if (!try_push_all_to_queues(buffer, queue_index)) {
             cursor_->close();
-            LOG_LP(FATAL) << "[cursor_distributor] Fatal: failed to flush remaining entries. Aborting.";
+            LOG_LP(FATAL) << "[cursor_distributor] Fatal: failed to push all entries after retry. Aborting.";
             std::abort();
         }
     }

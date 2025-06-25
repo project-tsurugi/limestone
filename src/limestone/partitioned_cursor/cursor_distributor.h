@@ -87,6 +87,14 @@ protected:
         on_complete_ = std::move(callback);
     }
 
+    /**
+     * @brief Reads entries from the cursor until the buffer reaches a configured batch size,
+     *        or the cursor reaches end-of-stream.
+     *
+     * @param buffer the buffer to store read entries; cleared at start
+     * @return true if at least one entry was read, false if end-of-stream with no data
+     */
+    std::vector<cursor_entry_type> read_batch_from_cursor(cursor_impl_base& cursor);
 private:
     void run();
 

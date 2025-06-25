@@ -230,7 +230,7 @@ TEST_F(cursor_distributor_test, aborts_when_push_entry_fails) {
         auto distributor = std::make_shared<cursor_distributor>(std::move(cursor), queues);
         distributor->start();
         std::this_thread::sleep_for(std::chrono::milliseconds(50));
-    }, "failed to flush remaining entries");
+    }, "failed to push all entries after retry");
 }
 
 
@@ -258,7 +258,7 @@ TEST_F(cursor_distributor_test, aborts_when_flushing_remaining_entries_fails) {
         auto distributor = std::make_shared<cursor_distributor>(std::move(cursor), queues);
         distributor->start();
         std::this_thread::sleep_for(std::chrono::milliseconds(50));
-    }, "failed to flush remaining entries");
+    }, "failed to push all entries after retry");
 }
 
 TEST_F(cursor_distributor_test, retries_on_partial_push_and_advances_queue_index) {
