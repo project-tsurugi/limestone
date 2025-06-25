@@ -79,7 +79,7 @@ public:
      *
      * @return The next cursor entry in the queue.
      */
-    [[nodiscard]] cursor_entry_type wait_and_pop();
+    [[nodiscard]] virtual cursor_entry_type wait_and_pop();
 
     /**
      * @brief Attempts to push multiple entries into the queue.
@@ -93,7 +93,7 @@ public:
      * @note This function must be called only from the producer thread.
      *       The caller is responsible for handling any unpushed remainder.
      */
-    std::size_t push_all(const std::vector<cursor_entry_type>& entries);
+    virtual std::size_t push_all(const std::vector<cursor_entry_type>& entries);
 
 
 private:

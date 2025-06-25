@@ -54,12 +54,38 @@ public:
 
 protected:
     /**
-     * @brief Pushes an entry into a queue with retry logic.
-     * @return true if successful, false if all retries failed.
+     * @brief Attempts to push all entries in the buffer to available queues.
+     * Retries across different queues using round-robin and up to `max_retries_` times.
+     *
+     * @param buffer the buffer of entries to push; will be truncated as entries are pushed
+     * @param queue_index the current queue index; used for round-robin push strategy
+     * @return true if all entries were successfully pushed, false otherwise
      */
-    [[nodiscard]] bool push_with_retry(const std::shared_ptr<cursor_entry_queue>& queue,
-                         const cursor_entry_type& entry,
-                         std::size_t queue_index) const;
+    [[nodiscard]] bool try_push_all_to_queues(std::vector<cursor_entry_type>& buffer,
+                                              std::size_t& queue_index);
+
+    /**
+     * @brief Pushes end_marker entries to all queues with retry logic.
+     *
+     * If any push fails after all retries, the process is aborted.
+     */
+    void push_end_markers();
+
+    /**
+     * @brief Sets a callback to be invoked when the distribution process completes.
+     * @details
+     * This is primarily intended for testing and diagnostics. The callback is executed
+     * at the very end of the `run()` method, after all entries and end_markers have been pushed.
+     *
+     * Note:
+     * - This method must be called before `start()`.
+     * - If not set, no action is taken on completion.
+     *
+     * @param callback a function to be called when distribution finishes
+     */
+    void set_on_complete(std::function<void()> callback) {
+        on_complete_ = std::move(callback);
+    }
 
 private:
     void run();
@@ -68,6 +94,7 @@ private:
     std::vector<std::shared_ptr<cursor_entry_queue>> queues_;
     std::size_t max_retries_;
     std::size_t retry_delay_us_;
+    std::function<void()> on_complete_;
 };
 
 }  // namespace limestone::internal

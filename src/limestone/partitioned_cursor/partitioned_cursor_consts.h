@@ -42,4 +42,9 @@ constexpr std::size_t CURSOR_PUSH_RETRY_INTERVAL_US = 1000;
  */
 constexpr std::size_t CURSOR_POP_POLL_INTERVAL_US = 10;
 
+/**
+ * @brief The batch size used by cursor_distributor when buffering entries.
+ */
+constexpr std::size_t CURSOR_DISTRIBUTOR_BATCH_SIZE = 64;
+
 }  // namespace limestone::internal
