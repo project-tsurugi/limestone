@@ -130,4 +130,45 @@ TEST_F(cursor_entry_queue_test, multiple_entries) {
     producer.join();
 }
 
+TEST_F(cursor_entry_queue_test, push_all_pushes_up_to_available_space) {
+    cursor_entry_queue queue(4);  // Small queue
+    std::vector<cursor_entry_type> entries;
+    for (std::size_t i = 0; i < 5; ++i) {
+        entries.emplace_back(create_log_entry(100 + i));
+    }
+
+    std::size_t pushed = queue.push_all(entries);
+
+    // Since the queue capacity is 4, at most 4 entries should be pushed
+    EXPECT_LE(pushed, 4);
+    EXPECT_GT(pushed, 0);
+
+    for (std::size_t i = 0; i < pushed; ++i) {
+        auto result = queue.wait_and_pop();
+        ASSERT_TRUE(std::holds_alternative<log_entry>(result));
+        const auto& actual = std::get<log_entry>(result);
+        EXPECT_EQ(actual.storage(), 100 + i);
+    }
+}
+
+TEST_F(cursor_entry_queue_test, push_all_returns_zero_when_queue_full) {
+    cursor_entry_queue queue(2);
+
+    // First, fill up the queue
+    auto le1 = create_log_entry(1);
+    auto le2 = create_log_entry(2);
+
+    EXPECT_TRUE(queue.push(le1));
+    EXPECT_TRUE(queue.push(le2));
+
+    // Prepare entries to push
+    std::vector<cursor_entry_type> entries;
+    entries.emplace_back(create_log_entry(3));
+    entries.emplace_back(create_log_entry(4));
+
+    // push_all should not be able to push anything (queue is full)
+    std::size_t pushed = queue.push_all(entries);
+    EXPECT_EQ(pushed, 0);
+}
+
 }  // namespace limestone::testing

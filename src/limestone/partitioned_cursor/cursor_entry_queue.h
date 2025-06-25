@@ -81,6 +81,21 @@ public:
      */
     [[nodiscard]] cursor_entry_type wait_and_pop();
 
+    /**
+     * @brief Attempts to push multiple entries into the queue.
+     *
+     * This method does not retry or block. It pushes as many entries as possible,
+     * up to the available space in the queue.
+     *
+     * @param entries The list of entries to be pushed.
+     * @return The number of entries actually pushed.
+     *
+     * @note This function must be called only from the producer thread.
+     *       The caller is responsible for handling any unpushed remainder.
+     */
+    std::size_t push_all(const std::vector<cursor_entry_type>& entries);
+
+
 private:
     boost::lockfree::spsc_queue<cursor_entry_type> queue_;
 };

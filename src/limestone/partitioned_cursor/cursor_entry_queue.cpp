@@ -35,4 +35,8 @@ cursor_entry_type cursor_entry_queue::wait_and_pop() {
     return entry;
 }
 
+std::size_t cursor_entry_queue::push_all(const std::vector<cursor_entry_type>& entries) {
+    return queue_.push(entries.data(), entries.size());
+}
+
 } // namespace limestone::internal
