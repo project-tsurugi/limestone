@@ -87,18 +87,15 @@ std::vector<log_entry> cursor_distributor::read_batch_from_cursor(cursor_impl_ba
     return buffer;
 }
 
+void cursor_distributor::set_on_complete(std::function<void()> callback) {
+    on_complete_ = std::move(callback);
+}
+
 void cursor_distributor::run() {
     std::size_t queue_index = 0;
     const std::size_t queue_count = queues_.size();
 
-    boost::asio::thread_pool pool(1);  
-
-    std::promise<void> last_push_done;
-    std::future<void> last_push = last_push_done.get_future();
-    last_push_done.set_value();  // No-op for the first time
-
     while (true) {
-        last_push.wait();  // Wait for the previous push_batch
         auto batch = read_batch_from_cursor(*cursor_);
         if (batch.empty()) {
             break;
@@ -106,22 +103,22 @@ void cursor_distributor::run() {
 
         auto& queue = *queues_[queue_index % queue_count];
 
-        std::promise<void> done;
-        last_push = done.get_future();
-
-        boost::asio::post(pool, [this, b = std::move(batch), &queue, d = std::move(done)]() mutable {
-            this->push_batch(std::move(const_cast<std::vector<log_entry>&>(b)), queue);
-            d.set_value();
-        });
+        // 同期的にpush_batch
+        push_batch(std::move(batch), queue);
 
         ++queue_index;
     }
 
-    last_push.wait();
     push_end_markers();
     cursor_->close();
-    pool.join();  
     LOG_LP(INFO) << "[cursor_distributor] Distribution completed.";
+
+    if (on_complete_) {
+        on_complete_();
+    }
+
 }
+
+
 
 }  // namespace limestone::internal

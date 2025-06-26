@@ -114,6 +114,7 @@ public:
     using cursor_distributor::push_batch;  
     using cursor_distributor::push_end_markers;
     using cursor_distributor::read_batch_from_cursor;
+    using cursor_distributor::set_on_complete;
 };
 
 
@@ -224,11 +225,19 @@ TEST_F(cursor_distributor_test, aborts_when_push_entry_fails) {
     auto queue = std::make_shared<mock_cursor_entry_queue>(999); // always fail
     std::vector<std::shared_ptr<cursor_entry_queue>> queues = { queue };
 
-    EXPECT_DEATH({
-        auto distributor = std::make_shared<cursor_distributor>(std::move(cursor), queues);
+   EXPECT_DEATH({
+        auto distributor = std::make_shared<testable_cursor_distributor>(
+            std::move(cursor),
+            queues,
+            /* max_retries = */ 0, 
+            /* retry_delay_us = */ 0, 
+            /* batch_size = */ 1   
+        ); 
+        std::promise<void> done;
+        distributor->set_on_complete([&] { done.set_value(); });
         distributor->start();
-        std::this_thread::sleep_for(std::chrono::milliseconds(50));
-    }, "failed to push log_entry batch");
+        done.get_future().get(); 
+   }, "failed to push log_entry batch");
 }
 
 TEST_F(cursor_distributor_test, aborts_when_push_end_marker_fails) {
@@ -238,9 +247,17 @@ TEST_F(cursor_distributor_test, aborts_when_push_end_marker_fails) {
     std::vector<std::shared_ptr<cursor_entry_queue>> queues = { queue };
 
     EXPECT_DEATH({
-        auto distributor = std::make_shared<cursor_distributor>(std::move(cursor), queues);
+        auto distributor = std::make_shared<testable_cursor_distributor>(
+            std::move(cursor),
+            queues,
+            /* max_retries = */ 0, 
+            /* retry_delay_us = */ 0, 
+            /* batch_size = */ 1   
+        ); 
+        std::promise<void> done;
+        distributor->set_on_complete([&] { done.set_value(); });
         distributor->start();
-        std::this_thread::sleep_for(std::chrono::milliseconds(50));
+        done.get_future().get(); 
     }, "failed to push end_marker to queue");
 }
 
@@ -253,10 +270,18 @@ TEST_F(cursor_distributor_test, aborts_when_flushing_remaining_entries_fails) {
     std::vector<std::shared_ptr<cursor_entry_queue>> queues = { queue };
 
     EXPECT_DEATH({
-        auto distributor = std::make_shared<cursor_distributor>(std::move(cursor), queues);
+        auto distributor = std::make_shared<testable_cursor_distributor>(
+            std::move(cursor),
+            queues,
+            /* max_retries = */ 0, 
+            /* retry_delay_us = */ 0, 
+            /* batch_size = */ 1   
+        ); 
+        std::promise<void> done;
+        distributor->set_on_complete([&] { done.set_value(); });
         distributor->start();
-        std::this_thread::sleep_for(std::chrono::milliseconds(50));
-    }, "failed to push log_entry batch");
+        done.get_future().get(); 
+    }, "failed to push log_entry batch after retries");
 }
 
 TEST_F(cursor_distributor_test, distributes_all_entries_and_adds_end_marker_regardless_of_batch_size) {
@@ -356,6 +381,41 @@ TEST_F(cursor_distributor_test, read_batch_stops_at_batch_size_limit) {
     auto batch = distributor->read_batch_from_cursor(*raw_cursor);
 
     EXPECT_EQ(batch.size(), 2);  
+}
+
+TEST_F(cursor_distributor_test, calls_on_complete_after_successful_run) {
+    // Prepare a mock cursor that returns a single entry
+    std::vector<api::log_entry> entries = { api::log_entry{} };
+    auto cursor = std::make_unique<mock_cursor>(entries);
+
+    // Mock queue whose push() always succeeds
+    auto queue = std::make_shared<mock_cursor_entry_queue>(0);  // fail_at = 0 → success
+    std::vector<std::shared_ptr<cursor_entry_queue>> queues = { queue };
+
+    // Completion notification flag (atomic for thread safety)
+    std::atomic<bool> on_complete_called{false};
+
+    // Construct the distributor
+    auto distributor = std::make_shared<testable_cursor_distributor>(
+        std::move(cursor),
+        queues,
+        /* max_retries */ 0,
+        /* retry_delay_us */ 0,
+        /* batch_size */ 1
+    );
+
+    // Set the on_complete handler
+    std::promise<void> done;
+    distributor->set_on_complete([&] {
+        on_complete_called = true;
+        done.set_value();  // Notify
+    });
+
+    distributor->start();
+    done.get_future().get();  // Wait until execution completes
+
+    // Verify that the completion notification was actually called
+    EXPECT_TRUE(on_complete_called);
 }
 
 

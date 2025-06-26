@@ -81,6 +81,21 @@ protected:
      * @return true if at least one entry was read, false if end-of-stream with no data
      */
     std::vector<log_entry> read_batch_from_cursor(cursor_impl_base& cursor);
+
+   /**
+     * @brief Sets a callback to be invoked when the distribution process completes.
+     * @details
+     * This is primarily intended for testing and diagnostics. The callback is executed
+     * at the very end of the `run()` method, after all entries and end_markers have been pushed.
+     *
+     * Note:
+     * - This method must be called before `start()`.
+     * - If not set, no action is taken on completion.
+     *
+     * @param callback a function to be called when distribution finishes
+     */
+    void set_on_complete(std::function<void()> callback);
+
 private:
     void run();
 
@@ -88,7 +103,8 @@ private:
     std::vector<std::shared_ptr<cursor_entry_queue>> queues_;
     std::size_t max_retries_;
     std::size_t retry_delay_us_;
-    std::size_t batch_size_; 
+    std::size_t batch_size_;
+    std::function<void()> on_complete_;
 };
 
 }  // namespace limestone::internal
