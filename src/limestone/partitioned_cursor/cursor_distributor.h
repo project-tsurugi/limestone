@@ -40,10 +40,16 @@ public:
                        std::vector<std::shared_ptr<cursor_entry_queue>> queues,
                        std::size_t max_retries = CURSOR_PUSH_RETRY_COUNT,
                        std::size_t retry_delay_us = CURSOR_PUSH_RETRY_INTERVAL_US,
-                       std::size_t batch_size = CURSOR_DISTRIBUTOR_BATCH_SIZE); 
+                       std::size_t batch_size = CURSOR_DISTRIBUTOR_BATCH_SIZE);
 
     /**
      * @brief Starts the distribution thread.
+     * @details
+     * Launches a new background thread that executes the distribution logic asynchronously.
+     * Internally captures a shared_ptr via shared_from_this() to extend the object lifetime.
+     * The thread is detached; ensure any necessary synchronization is handled externally.
+     *
+     * This method must be called only once.
      */
     void start();
 
@@ -78,11 +84,11 @@ protected:
      *        or the cursor reaches end-of-stream.
      *
      * @param buffer the buffer to store read entries; cleared at start
-     * @return true if at least one entry was read, false if end-of-stream with no data
+     * @return a vector of log entries; empty if the cursor has no more data
      */
     std::vector<log_entry> read_batch_from_cursor(cursor_impl_base& cursor);
 
-   /**
+    /**
      * @brief Sets a callback to be invoked when the distribution process completes.
      * @details
      * This is primarily intended for testing and diagnostics. The callback is executed

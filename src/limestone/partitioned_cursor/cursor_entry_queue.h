@@ -49,7 +49,7 @@ public:
     /**
      * @brief Constructs a new cursor_entry_queue.
      *
-     * @param capacity The maximum number of entries the queue can hold.
+     * @param capacity The maximum number of elements (batches or end markers) the queue can hold.
      */
     explicit cursor_entry_queue(std::size_t capacity);
 
