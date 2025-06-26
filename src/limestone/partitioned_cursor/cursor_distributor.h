@@ -70,7 +70,7 @@ protected:
      * @param buffer the batch of log entries to push
      * @param queue the target queue to receive the entries
      */
-    void push_batch(std::vector<log_entry>&& buffer, cursor_entry_queue& queue);
+    void push_batch(std::vector<log_entry>&& buffer, cursor_entry_queue& queue) const;
 
     /**
      * @brief Pushes end_marker entries to all queues with retry logic.
@@ -86,7 +86,7 @@ protected:
      * @param buffer the buffer to store read entries; cleared at start
      * @return a vector of log entries; empty if the cursor has no more data
      */
-    std::vector<log_entry> read_batch_from_cursor(cursor_impl_base& cursor);
+    std::vector<log_entry> read_batch_from_cursor(cursor_impl_base& cursor) const;
 
     /**
      * @brief Sets a callback to be invoked when the distribution process completes.

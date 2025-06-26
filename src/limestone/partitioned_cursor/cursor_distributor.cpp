@@ -38,7 +38,7 @@ void cursor_distributor::start() {
     }
 }
 
-void cursor_distributor::push_batch(std::vector<log_entry>&& buffer, cursor_entry_queue& queue) {
+void cursor_distributor::push_batch(std::vector<log_entry>&& buffer, cursor_entry_queue& queue) const {
     if (buffer.empty()) {
         return;
     }
@@ -74,7 +74,7 @@ void cursor_distributor::push_end_markers() {
     }
 }
 
-std::vector<log_entry> cursor_distributor::read_batch_from_cursor(cursor_impl_base& cursor) {
+std::vector<log_entry> cursor_distributor::read_batch_from_cursor(cursor_impl_base& cursor) const {
     std::vector<log_entry> buffer;
     buffer.reserve(batch_size_);
 
