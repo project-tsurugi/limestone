@@ -25,17 +25,17 @@ namespace limestone::internal {
  *
  * For 32 queues = ~230MB total, suitable for development environments.
  */
-constexpr std::size_t CURSOR_QUEUE_CAPACITY = 65536;
+constexpr std::size_t CURSOR_QUEUE_CAPACITY = 1024;
 
 /**
  * @brief Maximum number of retry attempts when pushing to a queue fails.
  */
-constexpr std::size_t CURSOR_PUSH_RETRY_COUNT = 3;
+constexpr std::size_t CURSOR_PUSH_RETRY_COUNT = 30;
 
 /**
  * @brief Delay between push retry attempts, in microseconds.
  */
-constexpr std::size_t CURSOR_PUSH_RETRY_INTERVAL_US = 1000;
+constexpr std::size_t CURSOR_PUSH_RETRY_INTERVAL_US = 10000;
 
 /**
  * @brief Polling interval when waiting to pop from the queue, in microseconds.
@@ -45,6 +45,7 @@ constexpr std::size_t CURSOR_POP_POLL_INTERVAL_US = 10;
 /**
  * @brief The batch size used by cursor_distributor when buffering entries.
  */
-constexpr std::size_t CURSOR_DISTRIBUTOR_BATCH_SIZE = 65536;
+constexpr std::size_t CURSOR_DISTRIBUTOR_BATCH_SIZE = 4096;
+
 
 }  // namespace limestone::internal

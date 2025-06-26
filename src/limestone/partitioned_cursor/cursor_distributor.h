@@ -64,7 +64,7 @@ protected:
      * @param buffer the batch of log entries to push
      * @param queue the target queue to receive the entries
      */
-    void push_batch(std::vector<log_entry>& buffer, cursor_entry_queue& queue);
+    void push_batch(std::vector<log_entry>&& buffer, cursor_entry_queue& queue);
 
     /**
      * @brief Pushes end_marker entries to all queues with retry logic.

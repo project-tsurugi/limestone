@@ -127,7 +127,7 @@ TEST_F(cursor_distributor_test, does_nothing_when_pushing_empty_batch) {
     );
 
     std::vector<api::log_entry> empty_batch;
-    distributor->push_batch(empty_batch, *queue);
+    distributor->push_batch(std::move(empty_batch), *queue);
 
     EXPECT_TRUE(queue->pushed_entries().empty());
 }
@@ -306,7 +306,7 @@ TEST_F(cursor_distributor_test, push_batch_retries_and_succeeds) {
         2    // batch_size
     );
 
-    distributor->push_batch(batch, *queue);
+    distributor->push_batch(std::move(batch), *queue);
 
     ASSERT_EQ(queue->pushed_entries().size(), 1);
     EXPECT_TRUE(std::holds_alternative<std::vector<api::log_entry>>(queue->pushed_entries()[0]));

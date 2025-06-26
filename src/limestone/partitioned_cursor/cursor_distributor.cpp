@@ -1,5 +1,8 @@
 #include "cursor_distributor.h"
 
+#include <boost/asio/post.hpp>
+#include <boost/asio/thread_pool.hpp>
+#include <future>
 #include <iostream>
 #include <thread>
 
@@ -35,12 +38,12 @@ void cursor_distributor::start() {
     }
 }
 
-void cursor_distributor::push_batch(std::vector<log_entry>& buffer, cursor_entry_queue& queue) {
+void cursor_distributor::push_batch(std::vector<log_entry>&& buffer, cursor_entry_queue& queue) {
     if (buffer.empty()) {
         return;
     }
 
-    cursor_entry_type batch = std::move(buffer);  // vector<log_entry> → cursor_entry_type に変換
+    cursor_entry_type batch = std::move(buffer); 
 
     for (std::size_t retry = 0; retry <= max_retries_; ++retry) {
         if (queue.push(batch)) {
@@ -52,7 +55,6 @@ void cursor_distributor::push_batch(std::vector<log_entry>& buffer, cursor_entry
         }
     }
 
-    // Push failed after all retries
     LOG_LP(FATAL) << "[cursor_distributor] Fatal: failed to push log_entry batch after retries. Aborting.";
     std::abort();
 }
@@ -89,22 +91,37 @@ void cursor_distributor::run() {
     std::size_t queue_index = 0;
     const std::size_t queue_count = queues_.size();
 
+    boost::asio::thread_pool pool(1);  
+
+    std::promise<void> last_push_done;
+    std::future<void> last_push = last_push_done.get_future();
+    last_push_done.set_value();  // No-op for the first time
+
     while (true) {
+        last_push.wait();  // Wait for the previous push_batch
         auto batch = read_batch_from_cursor(*cursor_);
         if (batch.empty()) {
             break;
         }
 
-        auto& queue = queues_[queue_index % queue_count];
-        push_batch(batch, *queue);
+        auto& queue = *queues_[queue_index % queue_count];
+
+        std::promise<void> done;
+        last_push = done.get_future();
+
+        boost::asio::post(pool, [this, b = std::move(batch), &queue, d = std::move(done)]() mutable {
+            this->push_batch(std::move(const_cast<std::vector<log_entry>&>(b)), queue);
+            d.set_value();
+        });
+
         ++queue_index;
     }
 
+    last_push.wait();
     push_end_markers();
     cursor_->close();
+    pool.join();  
     LOG_LP(INFO) << "[cursor_distributor] Distribution completed.";
 }
-
-
 
 }  // namespace limestone::internal
