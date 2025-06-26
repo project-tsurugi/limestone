@@ -558,7 +558,7 @@ TEST_F(manifest_test, from_json_string_throws_if_format_version_missing) {
     std::string json_str = j.dump();
 
     EXPECT_THROW(
-        manifest::from_json_string(json_str),
+        (void) manifest::from_json_string(json_str),
         limestone::api::limestone_exception
     );
 }
@@ -569,7 +569,7 @@ TEST_F(manifest_test, from_json_string_throws_if_persistent_format_version_missi
     std::string json_str = j.dump();
 
     EXPECT_THROW(
-        manifest::from_json_string(json_str),
+        (void)manifest::from_json_string(json_str),
         limestone::api::limestone_exception
     );
 }
@@ -578,7 +578,7 @@ TEST_F(manifest_test, from_json_string_throws_if_persistent_format_version_missi
 TEST_F(manifest_test, from_json_string_throws_on_invalid_json) {
     std::string json_str = "{ not: json }";
     EXPECT_THROW(
-        manifest::from_json_string(json_str),
+        (void)manifest::from_json_string(json_str),
         limestone::api::limestone_exception
     );
 }
@@ -592,7 +592,7 @@ TEST_F(manifest_test, from_json_string_throws_on_invalid_type) {
     std::string json_str = j.dump();
 
     EXPECT_THROW(
-        manifest::from_json_string(json_str),
+        (void)manifest::from_json_string(json_str),
         limestone::api::limestone_exception
     );
 }
@@ -647,7 +647,7 @@ TEST_F(manifest_test, from_json_string_format_1_1_missing_instance_uuid_throws) 
     };
     std::string json_str = j.dump();
     EXPECT_THROW(
-        manifest::from_json_string(json_str),
+        (void)manifest::from_json_string(json_str),
         limestone::api::limestone_exception
     );
 }
@@ -687,7 +687,8 @@ TEST_F(manifest_test, load_manifest_from_path_returns_none_if_invalid_json) {
 TEST_F(manifest_test, load_manifest_from_path_returns_none_if_missing_required_fields) {
     nlohmann::json j = { {"format_version", "1.1"} };
     auto manifest_path = logdir / std::string(manifest::file_name);
-    std::ofstream(manifest_path.string()) << j.dump();
+    std::string json_str = j.dump();
+    std::ofstream(manifest_path.string()) << json_str;
     real_file_operations ops;
     auto loaded = manifest::load_manifest_from_path(manifest_path, ops);
     EXPECT_FALSE(loaded);
