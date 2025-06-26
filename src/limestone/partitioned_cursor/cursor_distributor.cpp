@@ -12,12 +12,14 @@ cursor_distributor::cursor_distributor(
     std::unique_ptr<cursor_impl_base> cursor,
     std::vector<std::shared_ptr<cursor_entry_queue>> queues,
     std::size_t max_retries,
-    std::size_t retry_delay_us
+    std::size_t retry_delay_us,
+    std::size_t batch_size
 )
     : cursor_(std::move(cursor))
     , queues_(std::move(queues))
     , max_retries_(max_retries)
     , retry_delay_us_(retry_delay_us)
+    , batch_size_(batch_size) 
 {}
 
 void cursor_distributor::start() {
@@ -33,31 +35,26 @@ void cursor_distributor::start() {
     }
 }
 
+void cursor_distributor::push_batch(std::vector<log_entry>& buffer, cursor_entry_queue& queue) {
+    if (buffer.empty()) {
+        return;
+    }
 
-bool cursor_distributor::try_push_all_to_queues(std::vector<cursor_entry_type>& buffer,
-                                                std::size_t& queue_index) {
-    const std::size_t queue_count = queues_.size();
+    cursor_entry_type batch = std::move(buffer);  // vector<log_entry> → cursor_entry_type に変換
+
     for (std::size_t retry = 0; retry <= max_retries_; ++retry) {
-        std::size_t attempts = 0;
-        while (attempts < queue_count) {
-            auto& queue = queues_[queue_index % queue_count];
-            std::size_t pushed_count = queue->push_all(buffer);
-            if (pushed_count > 0) {
-                buffer.erase(buffer.begin(), buffer.begin() + pushed_count);
-                if (buffer.empty()) {
-                    return true;
-                }
-            }
-            ++queue_index;
-            ++attempts;
+        if (queue.push(batch)) {
+            return;
         }
+
         if (retry < max_retries_) {
             std::this_thread::sleep_for(std::chrono::microseconds(retry_delay_us_));
         }
     }
-    // All retries exhausted. Normally buffer should not be empty here.
-    // However, return buffer.empty() defensively in case all entries were pushed just before exiting.
-    return buffer.empty();
+
+    // Push failed after all retries
+    LOG_LP(FATAL) << "[cursor_distributor] Fatal: failed to push log_entry batch after retries. Aborting.";
+    std::abort();
 }
 
 void cursor_distributor::push_end_markers() {
@@ -75,13 +72,13 @@ void cursor_distributor::push_end_markers() {
     }
 }
 
-std::vector<cursor_entry_type> cursor_distributor::read_batch_from_cursor(cursor_impl_base& cursor) {
-    std::vector<cursor_entry_type> buffer;
-    buffer.reserve(CURSOR_DISTRIBUTOR_BATCH_SIZE);
+std::vector<log_entry> cursor_distributor::read_batch_from_cursor(cursor_impl_base& cursor) {
+    std::vector<log_entry> buffer;
+    buffer.reserve(batch_size_);
 
     while (cursor.next()) {
-        buffer.emplace_back(cursor.current());
-        if (buffer.size() >= CURSOR_DISTRIBUTOR_BATCH_SIZE) {
+        buffer.emplace_back(std::move(cursor.current()));
+        if (buffer.size() >= batch_size_) {
             break;
         }
     }
@@ -90,28 +87,24 @@ std::vector<cursor_entry_type> cursor_distributor::read_batch_from_cursor(cursor
 
 void cursor_distributor::run() {
     std::size_t queue_index = 0;
+    const std::size_t queue_count = queues_.size();
 
     while (true) {
-        auto buffer = read_batch_from_cursor(*cursor_);
-        if (buffer.empty()) {
+        auto batch = read_batch_from_cursor(*cursor_);
+        if (batch.empty()) {
             break;
         }
 
-        if (!try_push_all_to_queues(buffer, queue_index)) {
-            cursor_->close();
-            LOG_LP(FATAL) << "[cursor_distributor] Fatal: failed to push all entries after retry. Aborting.";
-            std::abort();
-        }
+        auto& queue = queues_[queue_index % queue_count];
+        push_batch(batch, *queue);
+        ++queue_index;
     }
 
     push_end_markers();
     cursor_->close();
     LOG_LP(INFO) << "[cursor_distributor] Distribution completed.";
-
-    if (on_complete_) {
-        on_complete_();
-    }
 }
+
 
 
 }  // namespace limestone::internal

@@ -22,14 +22,7 @@ namespace {
 
 using namespace limestone::internal;
 
-class testable_cursor_distributor : public internal::cursor_distributor {
-public:
-    using internal::cursor_distributor::cursor_distributor;
-    using internal::cursor_distributor::set_on_complete;
-    using internal::cursor_distributor::try_push_all_to_queues;
-};
-
-
+using api::log_entry;
 class mock_cursor : public cursor_impl_base {
 public:
     explicit mock_cursor(std::vector<api::log_entry> entries)
@@ -65,72 +58,49 @@ public:
 
     void close() override {}
 
-    const api::log_entry& current() const override {
+    log_entry& current() override {
         return current_;
     }
 
 private:
-    std::vector<api::log_entry> entries_;
+    std::vector<log_entry> entries_;
     std::size_t index_;
-    api::log_entry current_;
+    log_entry current_;
 };
 
 class mock_cursor_entry_queue : public cursor_entry_queue {
 public:
-    mock_cursor_entry_queue(int fail_push_all = 0, int fail_push = 0)
-        : cursor_entry_queue(8)  // dummy size
-        , fail_push_all_(fail_push_all)
-        , fail_push_(fail_push)
+    // fail_push_until_n: number of initial push attempts to fail
+    explicit mock_cursor_entry_queue(int fail_push_until_n = 0)
+        : cursor_entry_queue(8)
+        , fail_push_until_n_(fail_push_until_n)
+        , total_push_attempts_(0)
     {}
 
-    std::size_t push_all(const std::vector<cursor_entry_type>& entries) override {
-        if (fail_push_all_ > 0) {
-            --fail_push_all_;
-            return 0;
-        }
-        for (const auto& e : entries) {
-            pushed_entries_.emplace_back(e);
-            local_queue_.emplace_back(e);
-        }
-        return entries.size();
-    }
-
     bool push(const cursor_entry_type& entry) noexcept override {
-        if (fail_push_ > 0) {
-            --fail_push_;
+        ++total_push_attempts_;
+
+        if (fail_push_until_n_ > 0) {
+            --fail_push_until_n_;
             return false;
         }
+
         pushed_entries_.emplace_back(entry);
-        local_queue_.emplace_back(entry);  
         return true;
     }
 
-    // テスト用: pushされたエントリの確認
     const std::vector<cursor_entry_type>& pushed_entries() const {
         return pushed_entries_;
     }
 
-    // オプション: wait_and_pop を簡易実装してテスト可能にする
-    cursor_entry_type wait_and_pop() override {
-        while (local_queue_.empty()) {
-            std::this_thread::sleep_for(std::chrono::microseconds(100));
-        }
-        cursor_entry_type front = local_queue_.front();
-        local_queue_.pop_front();
-        return front;
-    }
-
-    void enqueue_for_pop(cursor_entry_type entry) {
-        local_queue_.emplace_back(std::move(entry));
+    std::size_t total_push_attempts() const {
+        return total_push_attempts_;
     }
 
 private:
-    int fail_push_all_;
-    int fail_push_;
+    int fail_push_until_n_;  // fail first N pushes
+    std::size_t total_push_attempts_;
     std::vector<cursor_entry_type> pushed_entries_;
-
-    // wait_and_pop用の疑似queue
-    std::deque<cursor_entry_type> local_queue_;
 };
 
 
@@ -138,16 +108,41 @@ private:
 
 class cursor_distributor_test : public ::testing::Test {};
 
-TEST_F(cursor_distributor_test, distributes_entries_to_queues_and_adds_end_marker) {
-    std::vector<api::log_entry> entries = {
-        api::log_entry{}, api::log_entry{}, api::log_entry{}
-    };
+class testable_cursor_distributor : public cursor_distributor {
+public:
+    using cursor_distributor::cursor_distributor;
+    using cursor_distributor::push_batch;  
+    using cursor_distributor::push_end_markers;
+    using cursor_distributor::read_batch_from_cursor;
+};
 
+
+TEST_F(cursor_distributor_test, does_nothing_when_pushing_empty_batch) {
+    auto queue = std::make_shared<mock_cursor_entry_queue>();
+    std::vector<std::shared_ptr<cursor_entry_queue>> queues = { queue };
+
+    auto cursor = std::make_unique<mock_cursor>(std::vector<api::log_entry>{});
+    auto distributor = std::make_shared<testable_cursor_distributor>(
+        std::move(cursor), queues
+    );
+
+    std::vector<api::log_entry> empty_batch;
+    distributor->push_batch(empty_batch, *queue);
+
+    EXPECT_TRUE(queue->pushed_entries().empty());
+}
+
+
+
+TEST_F(cursor_distributor_test, distributes_entries_to_queues_and_adds_end_marker) {
+    constexpr std::size_t total_entries = 6; 
+
+    std::vector<api::log_entry> entries(total_entries, api::log_entry{});
     auto cursor = std::make_unique<mock_cursor>(entries);
 
     std::vector<std::shared_ptr<cursor_entry_queue>> queues = {
-        std::make_shared<cursor_entry_queue>(8),
-        std::make_shared<cursor_entry_queue>(8)
+        std::make_shared<cursor_entry_queue>(16),
+        std::make_shared<cursor_entry_queue>(16)
     };
 
     auto distributor = std::make_shared<cursor_distributor>(std::move(cursor), queues);
@@ -158,18 +153,20 @@ TEST_F(cursor_distributor_test, distributes_entries_to_queues_and_adds_end_marke
     for (auto& q : queues) {
         while (true) {
             auto e = q->wait_and_pop();
-            if (std::holds_alternative<api::log_entry>(e)) {
-                ++entry_count;
+            if (std::holds_alternative<std::vector<api::log_entry>>(e)) {
+                const auto& batch = std::get<std::vector<api::log_entry>>(e);
+                entry_count += static_cast<int>(batch.size());
             } else if (std::holds_alternative<end_marker>(e)) {
                 ++end_marker_count;
-                break; 
+                break;
             }
         }
     }
 
-    EXPECT_EQ(entry_count, 3);
-    EXPECT_EQ(end_marker_count, 2);
+    EXPECT_EQ(entry_count, total_entries);
+    EXPECT_EQ(end_marker_count, queues.size());
 }
+
 
 TEST_F(cursor_distributor_test, sends_only_end_marker_when_cursor_is_empty) {
     std::vector<api::log_entry> entries = {};
@@ -189,8 +186,9 @@ TEST_F(cursor_distributor_test, sends_only_end_marker_when_cursor_is_empty) {
     for (auto& q : queues) {
         while (true) {
             auto e = q->wait_and_pop();
-            if (std::holds_alternative<api::log_entry>(e)) {
-                ++entry_count;
+            if (std::holds_alternative<std::vector<api::log_entry>>(e)) {
+                const auto& batch = std::get<std::vector<api::log_entry>>(e);
+                entry_count += static_cast<int>(batch.size());
             } else if (std::holds_alternative<end_marker>(e)) {
                 ++end_marker_count;
                 break;
@@ -223,21 +221,20 @@ TEST_F(cursor_distributor_test, aborts_when_push_entry_fails) {
     std::vector<api::log_entry> entries = { api::log_entry{} };
     auto cursor = std::make_unique<mock_cursor>(entries);
 
-    auto queue = std::make_shared<mock_cursor_entry_queue>(999,999);  // Always fail
+    auto queue = std::make_shared<mock_cursor_entry_queue>(999); // always fail
     std::vector<std::shared_ptr<cursor_entry_queue>> queues = { queue };
 
     EXPECT_DEATH({
         auto distributor = std::make_shared<cursor_distributor>(std::move(cursor), queues);
         distributor->start();
         std::this_thread::sleep_for(std::chrono::milliseconds(50));
-    }, "failed to push all entries after retry");
+    }, "failed to push log_entry batch");
 }
 
-
 TEST_F(cursor_distributor_test, aborts_when_push_end_marker_fails) {
-    auto cursor = std::make_unique<mock_cursor>(std::vector<api::log_entry>{});  // Empty cursor
+    auto cursor = std::make_unique<mock_cursor>(std::vector<api::log_entry>{});
 
-    auto queue = std::make_shared<mock_cursor_entry_queue>(999,9999);  // Always fail
+    auto queue = std::make_shared<mock_cursor_entry_queue>(999); // always fail
     std::vector<std::shared_ptr<cursor_entry_queue>> queues = { queue };
 
     EXPECT_DEATH({
@@ -248,68 +245,41 @@ TEST_F(cursor_distributor_test, aborts_when_push_end_marker_fails) {
 }
 
 TEST_F(cursor_distributor_test, aborts_when_flushing_remaining_entries_fails) {
-    std::vector<api::log_entry> entries = { api::log_entry{} };
+    std::vector<api::log_entry> entries;
+    for (int i = 0; i < 10; ++i) entries.emplace_back(api::log_entry{});
     auto cursor = std::make_unique<mock_cursor>(entries);
 
-    auto queue = std::make_shared<mock_cursor_entry_queue>(9999,9999);
+    auto queue = std::make_shared<mock_cursor_entry_queue>(999); // always fail
     std::vector<std::shared_ptr<cursor_entry_queue>> queues = { queue };
 
     EXPECT_DEATH({
         auto distributor = std::make_shared<cursor_distributor>(std::move(cursor), queues);
         distributor->start();
         std::this_thread::sleep_for(std::chrono::milliseconds(50));
-    }, "failed to push all entries after retry");
+    }, "failed to push log_entry batch");
 }
 
-TEST_F(cursor_distributor_test, retries_on_partial_push_and_advances_queue_index) {
-    std::vector<api::log_entry> entries = { api::log_entry{}, api::log_entry{} };
+TEST_F(cursor_distributor_test, distributes_all_entries_and_adds_end_marker_regardless_of_batch_size) {
+    constexpr std::size_t total_entries = 4;
+
+    std::vector<api::log_entry> entries(total_entries, api::log_entry{});
     auto cursor = std::make_unique<mock_cursor>(entries);
 
-    auto queue1 = std::make_shared<mock_cursor_entry_queue>(1, 0);
-    auto queue2 = std::make_shared<mock_cursor_entry_queue>(1, 0);
-
+    auto queue1 = std::make_shared<cursor_entry_queue>(16);
+    auto queue2 = std::make_shared<cursor_entry_queue>(16);
     std::vector<std::shared_ptr<cursor_entry_queue>> queues = { queue1, queue2 };
 
-    auto distributor = std::make_shared<testable_cursor_distributor>(
-        std::move(cursor), queues,
-        2, 10
-    );
-
-    std::promise<void> done;
-    std::future<void> done_future = done.get_future();
-    distributor->set_on_complete([&done]() {
-        done.set_value();
-    });
-
+    auto distributor = std::make_shared<cursor_distributor>(std::move(cursor), queues);
     distributor->start();
-    ASSERT_EQ(done_future.wait_for(std::chrono::seconds(1)), std::future_status::ready)
-        << "cursor_distributor did not complete in time";
 
-    // Validate queue1
-    {
-        auto pushed = queue1->pushed_entries();
-        ASSERT_EQ(pushed.size(), 3);  // 2 entries + 1 end_marker
-
-        EXPECT_TRUE(std::holds_alternative<api::log_entry>(pushed[0]));
-        EXPECT_TRUE(std::holds_alternative<api::log_entry>(pushed[1]));
-        EXPECT_TRUE(std::holds_alternative<end_marker>(pushed[2]));
-    }
-
-    // Validate queue2
-    {
-        auto pushed = queue2->pushed_entries();
-        ASSERT_EQ(pushed.size(), 1);
-        EXPECT_TRUE(std::holds_alternative<end_marker>(pushed[0]));
-    }
-
-    // Validation using wait_and_pop()
-    int entry_count = 0;
+    int log_entry_count = 0;
     int end_marker_count = 0;
-    for (auto& q : queues) {
+
+    for (auto& queue : queues) {
         while (true) {
-            auto e = q->wait_and_pop();  
-            if (std::holds_alternative<api::log_entry>(e)) {
-                ++entry_count;
+            auto e = queue->wait_and_pop();
+            if (std::holds_alternative<std::vector<api::log_entry>>(e)) {
+                log_entry_count += std::get<std::vector<api::log_entry>>(e).size();
             } else if (std::holds_alternative<end_marker>(e)) {
                 ++end_marker_count;
                 break;
@@ -317,56 +287,76 @@ TEST_F(cursor_distributor_test, retries_on_partial_push_and_advances_queue_index
         }
     }
 
-    EXPECT_EQ(entry_count, 2);
-    EXPECT_EQ(end_marker_count, 2);
+    EXPECT_EQ(log_entry_count, total_entries);
+    EXPECT_EQ(end_marker_count, queues.size());
 }
 
-TEST_F(cursor_distributor_test, try_push_all_to_queues_returns_expected_results) {
-    using test_distributor = testable_cursor_distributor;
+TEST_F(cursor_distributor_test, push_batch_retries_and_succeeds) {
+    auto queue = std::make_shared<mock_cursor_entry_queue>(2); // 最初の2回失敗
+    std::vector<api::log_entry> batch = { api::log_entry{}, api::log_entry{} };
 
-    // ✅ Case 1: 成功して buffer.empty() == true
-    {
-        std::vector<api::log_entry> entries = { api::log_entry{} };
-        auto cursor = std::make_unique<mock_cursor>(entries);
+    auto cursor = std::make_unique<mock_cursor>(std::vector<api::log_entry>{});
+    auto distributor = std::make_shared<testable_cursor_distributor>(
+        std::move(cursor),
+        std::vector<std::shared_ptr<cursor_entry_queue>>{
+            std::static_pointer_cast<cursor_entry_queue>(queue)
+        },
+        5,   // max_retries
+        10,  // retry_delay_us
+        2    // batch_size
+    );
 
-        // 成功する queue
-        auto queue = std::make_shared<mock_cursor_entry_queue>(0);  // 失敗なし
-        std::vector<std::shared_ptr<cursor_entry_queue>> queues = { queue };
+    distributor->push_batch(batch, *queue);
 
-        auto distributor = std::make_shared<test_distributor>(
-            std::move(cursor), queues,
-            2, 0  // retries, no delay
-        );
-
-        std::vector<cursor_entry_type> buffer = { api::log_entry{} };
-        std::size_t index = 0;
-
-        bool result = distributor->try_push_all_to_queues(buffer, index);
-        EXPECT_TRUE(result);
-        EXPECT_TRUE(buffer.empty());
-    }
-
-    // ✅ Case 2: 失敗して buffer.empty() == false
-    {
-        std::vector<api::log_entry> entries = { api::log_entry{} };
-        auto cursor = std::make_unique<mock_cursor>(entries);
-
-        // 常に失敗する queue
-        auto queue = std::make_shared<mock_cursor_entry_queue>(999);  // push_all 常に失敗
-        std::vector<std::shared_ptr<cursor_entry_queue>> queues = { queue };
-
-        auto distributor = std::make_shared<test_distributor>(
-            std::move(cursor), queues,
-            2, 0
-        );
-
-        std::vector<cursor_entry_type> buffer = { api::log_entry{} };
-        std::size_t index = 0;
-
-        bool result = distributor->try_push_all_to_queues(buffer, index);
-        EXPECT_FALSE(result);
-        EXPECT_FALSE(buffer.empty());
-    }
+    ASSERT_EQ(queue->pushed_entries().size(), 1);
+    EXPECT_TRUE(std::holds_alternative<std::vector<api::log_entry>>(queue->pushed_entries()[0]));
+    EXPECT_EQ(queue->total_push_attempts(), 3);
 }
+
+
+TEST_F(cursor_distributor_test, push_end_marker_retries_and_succeeds) {
+    auto queue = std::make_shared<mock_cursor_entry_queue>(3);
+    std::vector<std::shared_ptr<cursor_entry_queue>> queues = {
+        std::static_pointer_cast<cursor_entry_queue>(queue)
+    };
+
+    auto cursor = std::make_unique<mock_cursor>(std::vector<api::log_entry>{});
+    auto distributor = std::make_shared<testable_cursor_distributor>(
+        std::move(cursor),
+        queues,
+        5,   // max_retries
+        10,  // retry_delay_us
+        1    // batch_size
+    );
+
+    distributor->push_end_markers();
+
+    ASSERT_EQ(queue->pushed_entries().size(), 1);
+    EXPECT_TRUE(std::holds_alternative<end_marker>(queue->pushed_entries()[0]));
+    EXPECT_EQ(queue->total_push_attempts(), 4);  // 3 failures + 1 success
+}
+
+TEST_F(cursor_distributor_test, read_batch_stops_at_batch_size_limit) {
+    std::vector<api::log_entry> entries = {
+        api::log_entry{}, api::log_entry{}, api::log_entry{}
+    };
+
+    auto raw_cursor = new mock_cursor(entries);
+    std::unique_ptr<mock_cursor> cursor_ptr(raw_cursor);
+
+    auto distributor = std::make_shared<testable_cursor_distributor>(
+        std::move(cursor_ptr),
+        std::vector<std::shared_ptr<cursor_entry_queue>>{},
+        5,   // max_retries
+        10,  // retry_delay_us
+        2    // batch_size
+    );
+
+
+    auto batch = distributor->read_batch_from_cursor(*raw_cursor);
+
+    EXPECT_EQ(batch.size(), 2);  
+}
+
 
 }  // namespace limestone::testing

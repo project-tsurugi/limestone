@@ -17,8 +17,10 @@
 
  #pragma once
 
-#include <variant>
 #include <boost/lockfree/spsc_queue.hpp>
+#include <variant>
+#include <vector>
+
 #include "log_entry.h"
 #include "partitioned_cursor/end_marker.h"
 
@@ -31,7 +33,7 @@ using limestone::api::log_entry;
  *
  * This can either be a log_entry (normal case) or an end_marker (indicating completion or error).
  */
-using cursor_entry_type = std::variant<log_entry, end_marker>;
+using cursor_entry_type = std::variant<std::vector<log_entry>, end_marker>;
 
 /**
  * @brief Lock-free single-producer, single-consumer queue for cursor entries.
@@ -80,20 +82,6 @@ public:
      * @return The next cursor entry in the queue.
      */
     [[nodiscard]] virtual cursor_entry_type wait_and_pop();
-
-    /**
-     * @brief Attempts to push multiple entries into the queue.
-     *
-     * This method does not retry or block. It pushes as many entries as possible,
-     * up to the available space in the queue.
-     *
-     * @param entries The list of entries to be pushed.
-     * @return The number of entries actually pushed.
-     *
-     * @note This function must be called only from the producer thread.
-     *       The caller is responsible for handling any unpushed remainder.
-     */
-    virtual std::size_t push_all(const std::vector<cursor_entry_type>& entries);
 
 
 private:

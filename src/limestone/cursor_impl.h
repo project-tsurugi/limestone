@@ -67,7 +67,7 @@ protected:
     std::vector<limestone::api::blob_id_type> blob_ids() const override;
     [[nodiscard]] limestone::api::log_entry::entry_type type() const override;
     bool is_relevant_entry(const limestone::api::log_entry& entry);
-    [[nodiscard]] const log_entry& current() const override;
+    [[nodiscard]] log_entry& current() override;
     // Making the cursor class a friend so that it can access protected members
     friend class limestone::api::cursor;
 };

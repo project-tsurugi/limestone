@@ -50,28 +50,35 @@ TEST_F(cursor_entry_queue_test, push_and_wait_and_pop_single_entry) {
     log_entry le = create_log_entry(1);
 
     std::thread producer([&]() {
-        EXPECT_TRUE(queue.push(le));
+        EXPECT_TRUE(queue.push(std::vector<log_entry>{le}));
     });
 
     auto result = queue.wait_and_pop();
-    ASSERT_TRUE(std::holds_alternative<log_entry>(result));
-    const auto& actual = std::get<log_entry>(result);
+    ASSERT_TRUE(std::holds_alternative<std::vector<log_entry>>(result));
+    const auto& actual_batch = std::get<std::vector<log_entry>>(result);
+    ASSERT_EQ(actual_batch.size(), 1);
+    const auto& actual = actual_batch[0];
     EXPECT_EQ(actual.storage(), 1);
+
     producer.join();
 }
+
 
 TEST_F(cursor_entry_queue_test, push_before_calling_wait_and_pop) {
     cursor_entry_queue queue(8);
 
     // Push before calling wait_and_pop (no thread involved)
     log_entry le = create_log_entry(10);
-    EXPECT_TRUE(queue.push(le));
+    EXPECT_TRUE(queue.push(std::vector<log_entry>{le}));
 
     auto result = queue.wait_and_pop();
-    ASSERT_TRUE(std::holds_alternative<log_entry>(result));
-    const auto& actual = std::get<log_entry>(result);
+    ASSERT_TRUE(std::holds_alternative<std::vector<log_entry>>(result));
+    const auto& actual_batch = std::get<std::vector<log_entry>>(result);
+    ASSERT_EQ(actual_batch.size(), 1);
+    const auto& actual = actual_batch[0];
     EXPECT_EQ(actual.storage(), 10);
 }
+
 
 TEST_F(cursor_entry_queue_test, wait_and_pop_before_push) {
     cursor_entry_queue queue(8);
@@ -79,17 +86,19 @@ TEST_F(cursor_entry_queue_test, wait_and_pop_before_push) {
     std::thread producer([&]() {
         std::this_thread::sleep_for(std::chrono::milliseconds(10));  // Ensure wait_and_pop starts first
         log_entry le = create_log_entry(20);
-        EXPECT_EQ(le.storage(), 20);
-        EXPECT_TRUE(queue.push(le));
+        EXPECT_TRUE(queue.push(std::vector<log_entry>{le}));
     });
 
     auto result = queue.wait_and_pop();
-    ASSERT_TRUE(std::holds_alternative<log_entry>(result));
-    const auto& actual = std::get<log_entry>(result);
+    ASSERT_TRUE(std::holds_alternative<std::vector<log_entry>>(result));
+    const auto& actual_batch = std::get<std::vector<log_entry>>(result);
+    ASSERT_EQ(actual_batch.size(), 1);
+    const auto& actual = actual_batch[0];
     EXPECT_EQ(actual.storage(), 20);
 
     producer.join();
 }
+
 
 TEST_F(cursor_entry_queue_test, push_and_wait_and_pop_end_marker) {
     cursor_entry_queue queue(8);
@@ -107,6 +116,7 @@ TEST_F(cursor_entry_queue_test, push_and_wait_and_pop_end_marker) {
     producer.join();
 }
 
+
 TEST_F(cursor_entry_queue_test, multiple_entries) {
     cursor_entry_queue queue(16);
     std::vector<log_entry> sent;
@@ -116,59 +126,19 @@ TEST_F(cursor_entry_queue_test, multiple_entries) {
 
     std::thread producer([&]() {
         for (const auto& e : sent) {
-            EXPECT_TRUE(queue.push(e));
+            EXPECT_TRUE(queue.push(std::vector<log_entry>{e}));
         }
     });
 
     for (std::size_t i = 0; i < sent.size(); ++i) {
         auto result = queue.wait_and_pop();
-        ASSERT_TRUE(std::holds_alternative<log_entry>(result));
-        const auto& actual = std::get<log_entry>(result);
-        EXPECT_EQ(actual.storage(), sent[i].storage());
+        ASSERT_TRUE(std::holds_alternative<std::vector<log_entry>>(result));
+        const auto& batch = std::get<std::vector<log_entry>>(result);
+        ASSERT_EQ(batch.size(), 1);
+        EXPECT_EQ(batch[0].storage(), sent[i].storage());
     }
 
     producer.join();
-}
-
-TEST_F(cursor_entry_queue_test, push_all_pushes_up_to_available_space) {
-    cursor_entry_queue queue(4);  // Small queue
-    std::vector<cursor_entry_type> entries;
-    for (std::size_t i = 0; i < 5; ++i) {
-        entries.emplace_back(create_log_entry(100 + i));
-    }
-
-    std::size_t pushed = queue.push_all(entries);
-
-    // Since the queue capacity is 4, at most 4 entries should be pushed
-    EXPECT_LE(pushed, 4);
-    EXPECT_GT(pushed, 0);
-
-    for (std::size_t i = 0; i < pushed; ++i) {
-        auto result = queue.wait_and_pop();
-        ASSERT_TRUE(std::holds_alternative<log_entry>(result));
-        const auto& actual = std::get<log_entry>(result);
-        EXPECT_EQ(actual.storage(), 100 + i);
-    }
-}
-
-TEST_F(cursor_entry_queue_test, push_all_returns_zero_when_queue_full) {
-    cursor_entry_queue queue(2);
-
-    // First, fill up the queue
-    auto le1 = create_log_entry(1);
-    auto le2 = create_log_entry(2);
-
-    EXPECT_TRUE(queue.push(le1));
-    EXPECT_TRUE(queue.push(le2));
-
-    // Prepare entries to push
-    std::vector<cursor_entry_type> entries;
-    entries.emplace_back(create_log_entry(3));
-    entries.emplace_back(create_log_entry(4));
-
-    // push_all should not be able to push anything (queue is full)
-    std::size_t pushed = queue.push_all(entries);
-    EXPECT_EQ(pushed, 0);
 }
 
 }  // namespace limestone::testing

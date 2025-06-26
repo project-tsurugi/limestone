@@ -227,7 +227,7 @@ std::vector<limestone::api::blob_id_type> cursor_impl::blob_ids() const {
     return log_entry_.get_blob_ids();
 }
 
-log_entry const& cursor_impl::current() const {
+log_entry& cursor_impl::current() {
     return log_entry_;
 }
 

@@ -24,7 +24,8 @@
 
 namespace limestone::internal {
 
-using limestone::api::log_entry;    class cursor_impl_base {
+using limestone::api::log_entry;
+class cursor_impl_base {
 public:
     cursor_impl_base() = default;
     virtual ~cursor_impl_base() = default;
@@ -77,12 +78,14 @@ public:
 
     /**
      * @brief Returns the current entry.
-     * @return a reference to the current log_entry.
+     * @return the current log_entry, typically moved.
      * @details Only valid after a successful call to `next()`.
-     *          If called before the first `next()` or after `next()` has returned false,
-     *          the behavior is undefined.
+     *          The returned object is intended to be moved.
+     *          After calling this method, the cursor may enter an unspecified internal state,
+     *          and calling any method other than `next()` may result in undefined behavior.
      */
-    [[nodiscard]] virtual const log_entry& current() const = 0;
+    [[nodiscard]] virtual log_entry& current() = 0;
+
 
     /**
      * @brief Closes the cursor and releases any held resources.

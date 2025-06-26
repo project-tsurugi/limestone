@@ -8,6 +8,7 @@
 
 #include "cursor_entry_queue.h"
 #include "cursor_impl_base.h"
+#include "partitioned_cursor_consts.h"
 
 namespace limestone::internal {
 
@@ -33,11 +34,13 @@ public:
      * @param queues the target queues to distribute entries to
      * @param max_retries number of times to retry if a push fails
      * @param retry_delay_us delay between retries in microseconds
+     * @param batch_size number of entries per batch to send to a queue
      */
     cursor_distributor(std::unique_ptr<cursor_impl_base> cursor,
                        std::vector<std::shared_ptr<cursor_entry_queue>> queues,
-                       std::size_t max_retries = 3,
-                       std::size_t retry_delay_us = 1000);
+                       std::size_t max_retries = CURSOR_PUSH_RETRY_COUNT,
+                       std::size_t retry_delay_us = CURSOR_PUSH_RETRY_INTERVAL_US,
+                       std::size_t batch_size = CURSOR_DISTRIBUTOR_BATCH_SIZE); 
 
     /**
      * @brief Starts the distribution thread.
@@ -54,15 +57,14 @@ public:
 
 protected:
     /**
-     * @brief Attempts to push all entries in the buffer to available queues.
-     * Retries across different queues using round-robin and up to `max_retries_` times.
+     * @brief Pushes a batch of log_entry objects to a specific queue.
+     *        Retries up to `max_retries_` times if the push fails.
+     *        If all retries fail, logs a fatal error and aborts the process.
      *
-     * @param buffer the buffer of entries to push; will be truncated as entries are pushed
-     * @param queue_index the current queue index; used for round-robin push strategy
-     * @return true if all entries were successfully pushed, false otherwise
+     * @param buffer the batch of log entries to push
+     * @param queue the target queue to receive the entries
      */
-    [[nodiscard]] bool try_push_all_to_queues(std::vector<cursor_entry_type>& buffer,
-                                              std::size_t& queue_index);
+    void push_batch(std::vector<log_entry>& buffer, cursor_entry_queue& queue);
 
     /**
      * @brief Pushes end_marker entries to all queues with retry logic.
@@ -72,29 +74,13 @@ protected:
     void push_end_markers();
 
     /**
-     * @brief Sets a callback to be invoked when the distribution process completes.
-     * @details
-     * This is primarily intended for testing and diagnostics. The callback is executed
-     * at the very end of the `run()` method, after all entries and end_markers have been pushed.
-     *
-     * Note:
-     * - This method must be called before `start()`.
-     * - If not set, no action is taken on completion.
-     *
-     * @param callback a function to be called when distribution finishes
-     */
-    void set_on_complete(std::function<void()> callback) {
-        on_complete_ = std::move(callback);
-    }
-
-    /**
      * @brief Reads entries from the cursor until the buffer reaches a configured batch size,
      *        or the cursor reaches end-of-stream.
      *
      * @param buffer the buffer to store read entries; cleared at start
      * @return true if at least one entry was read, false if end-of-stream with no data
      */
-    std::vector<cursor_entry_type> read_batch_from_cursor(cursor_impl_base& cursor);
+    std::vector<log_entry> read_batch_from_cursor(cursor_impl_base& cursor);
 private:
     void run();
 
@@ -102,7 +88,7 @@ private:
     std::vector<std::shared_ptr<cursor_entry_queue>> queues_;
     std::size_t max_retries_;
     std::size_t retry_delay_us_;
-    std::function<void()> on_complete_;
+    std::size_t batch_size_; 
 };
 
 }  // namespace limestone::internal

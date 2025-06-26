@@ -49,13 +49,14 @@ public:
     void value(std::string& buf) const noexcept override;
     [[nodiscard]] api::log_entry::entry_type type() const override;
     [[nodiscard]] std::vector<api::blob_id_type> blob_ids() const override;
-    [[nodiscard]] const log_entry& current() const override;
+    [[nodiscard]] log_entry& current() override;
     void close() override;
     static std::unique_ptr<api::cursor> create_cursor(std::shared_ptr<cursor_entry_queue> queue);
 
 private:
     std::shared_ptr<cursor_entry_queue> queue_;
     cursor_entry_type current_{};
+    std::size_t current_index_{ 0 };
 };
 
 } // namespace limestone::internal

@@ -79,9 +79,7 @@ std::vector<std::unique_ptr<limestone::api::cursor>> snapshot_impl::get_partitio
 
     auto distributor = std::make_shared<li::cursor_distributor>(
         std::move(base_cursor),
-        std::move(queues),
-        CURSOR_PUSH_RETRY_COUNT,
-        CURSOR_PUSH_RETRY_INTERVAL_US
+        std::move(queues)
     );
     distributor->start();
 
