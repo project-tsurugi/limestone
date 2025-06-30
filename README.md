@@ -43,6 +43,7 @@ available options:
 * `-DBUILD_DOCUMENTS=OFF` - don't build documents by doxygen
 * `-DBUILD_STRICT=OFF` - don't treat compile warnings as build errors
 * `-DINSTALL_EXAMPLES=ON` - install example applications
+* `-DINSTALL_EXPERIMENTAL_TOOLS=ON` - install experimental tools (e.g. tgreplica)
 * `-DRECOVERY_SORTER_KVSLIB=<library>` - select the eKVS library using at recovery process. (`LEVELDB` or `ROCKSDB` (default), case-insensitive)
 * `-DRECOVERY_SORTER_PUT_ONLY=OFF` - don't use (faster) put-only method at recovery process
 * for debugging only

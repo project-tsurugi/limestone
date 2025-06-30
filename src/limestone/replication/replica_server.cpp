@@ -211,10 +211,10 @@ void replica_server::handle_client(int client_fd) {
     TRACE_START << "client_fd: " << client_fd;
     int opt = 1;
     if (setsockopt(client_fd, SOL_SOCKET, SO_KEEPALIVE, &opt, sizeof(opt)) < 0) {
-        LOG_LP(FATAL) << "Warning: failed to set SO_KEEPALIVE: " << strerror(errno);
+        LOG_LP(ERROR) << "Warning: failed to set SO_KEEPALIVE: " << strerror(errno);
     }
     if (setsockopt(client_fd, IPPROTO_TCP, TCP_NODELAY, &opt, sizeof(opt)) < 0) {
-        LOG_LP(FATAL) << "Warning: failed to set TCP_NODELAY: " << strerror(errno);
+        LOG_LP(ERROR) << "Warning: failed to set TCP_NODELAY: " << strerror(errno);
     }
 
     blob_socket_io io(client_fd, *datastore_);

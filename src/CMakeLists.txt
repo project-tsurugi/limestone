@@ -97,4 +97,6 @@ set_target_properties(replica
                 INSTALL_RPATH "\$ORIGIN/../${CMAKE_INSTALL_LIBDIR}"
                 RUNTIME_OUTPUT_NAME "tgreplica"
 )
-install_custom(replica replica)
+if (INSTALL_EXPERIMENTAL_TOOLS)
+    install_custom(replica replica)
+endif()

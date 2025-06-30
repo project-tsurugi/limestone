@@ -38,6 +38,7 @@ option(ENABLE_GOOGLE_PERFTOOLS "Enable Google Perftools" OFF)
 option(PERFORMANCE_TOOLS "Enable tooling to measure engine performance" OFF)
 option(TRACY_ENABLE "enable tracy profiler" OFF)
 option(ENABLE_ALTIMETER "enable altimeter logging" OFF)
+option(INSTALL_EXPERIMENTAL_TOOLS "Install experimental tools like tgreplica" OFF)
 
 if (FORCE_INSTALL_RPATH)
     message(DEPRECATION "FORCE_INSTALL_RPATH is obsoleted")
