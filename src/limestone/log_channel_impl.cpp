@@ -17,13 +17,14 @@ log_channel_impl::~log_channel_impl() = default;
 // preventing unnecessary message creation and avoiding redundant code in the caller. This helps keep the code concise
 // and reduces the chances of errors caused by missing the `if` check.
 void log_channel_impl::send_replica_message(uint64_t epoch_id, const std::function<void(replication::message_log_entries&)>& modifier) {
-    std::lock_guard<std::mutex> lock(mtx_replica_connector_);
-    
-    // If replica_connector_ is invalid, exit the function
-    if (!replica_connector_) {
-        return; 
-    }
+    {
+        std::lock_guard<std::mutex> lock(mtx_replica_connector_);
 
+        // If replica_connector_ is invalid, exit the function
+        if (!replica_connector_) {
+            return;
+        }
+    }
     // Create and modify the message
     replication::message_log_entries message{epoch_id};
     modifier(message);
@@ -38,9 +39,13 @@ void log_channel_impl::send_replica_message(uint64_t epoch_id, const std::functi
 }
 
 void log_channel_impl::wait_for_replica_ack() {
-    // If replica_connector_ is invalid, exit the function
-    if (!replica_connector_) {
-        return; 
+    {
+        std::lock_guard<std::mutex> lock(mtx_replica_connector_);
+
+        // If replica_connector_ is invalid, exit the function
+        if (!replica_connector_) {
+            return;
+        }
     }
 
     auto ack = replica_connector_->receive_message();
