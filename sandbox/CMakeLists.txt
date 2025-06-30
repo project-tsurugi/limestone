@@ -1,4 +1,5 @@
 set(TOOLS
+    startup_speed_benchmark
     wal_dump
 )
 
