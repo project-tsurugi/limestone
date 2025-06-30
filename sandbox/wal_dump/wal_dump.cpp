@@ -1,6 +1,7 @@
 #include <iostream>
 #include <filesystem>
 #include <fstream>
+#include <optional>
 #include <iomanip>
 #include <log_entry.h>
 
@@ -101,7 +102,7 @@ std::string format_data_field(const std::string& data, std::size_t limit = 20) {
     }
 }
 
-void print_entry(const limestone::api::log_entry& entry) {
+void print_entry(const limestone::api::log_entry& entry, std::optional<limestone::api::epoch_id_type> current_epoch) {
     using E = limestone::api::log_entry::entry_type;
 
     std::cout << to_string(entry.type());
@@ -132,6 +133,10 @@ void print_entry(const limestone::api::log_entry& entry) {
 
     if (has_epoch_id) {
         std::cout << " epoch_id=" << entry.epoch_id();
+    }
+
+    if (entry.type() != E::marker_begin && current_epoch.has_value()) {
+        std::cout << " epoch=" << *current_epoch;
     }
 
     if (has_storage_id) {
@@ -167,6 +172,7 @@ case E::remove_entry: {
 
 
 void dump_wal(const std::filesystem::path& file_path) {
+
     std::ifstream in(file_path, std::ios::binary);
     if (!in) {
         std::cerr << "Error: Cannot open file '" << file_path << "'" << std::endl;
@@ -174,14 +180,17 @@ void dump_wal(const std::filesystem::path& file_path) {
     }
 
     std::size_t count = 0;
+    std::optional<limestone::api::epoch_id_type> current_epoch;
     while (true) {
         limestone::api::log_entry entry;
         bool success = entry.read(in);
         if (!success) {
             break;
         }
-
-        print_entry(entry);
+        if (entry.type() == limestone::api::log_entry::entry_type::marker_begin) {
+            current_epoch = entry.epoch_id();
+        }
+        print_entry(entry, current_epoch);
         ++count;
     }
 
