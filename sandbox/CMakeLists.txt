@@ -1,10 +1,18 @@
-add_executable(startup_speed_benchmark
-    startup_speed_benchmark/startup_speed_benchmark.cpp
+set(TOOLS
+    startup_speed_benchmark
+    wal_dump
 )
-target_include_directories(startup_speed_benchmark
-    PRIVATE ${CMAKE_SOURCE_DIR}/src/limestone
-)
-target_link_libraries(startup_speed_benchmark
-    PRIVATE limestone-impl
-    PRIVATE glog::glog
-)
+
+foreach(tool IN LISTS TOOLS)
+    add_executable(${tool} ${tool}/${tool}.cpp)
+
+    target_include_directories(${tool}
+        PRIVATE ${CMAKE_SOURCE_DIR}/src/limestone
+        PRIVATE ${CMAKE_SOURCE_DIR}/include
+    )
+
+    target_link_libraries(${tool}
+        PRIVATE limestone-impl
+        PRIVATE glog::glog
+    )
+endforeach()
