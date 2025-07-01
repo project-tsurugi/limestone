@@ -66,7 +66,8 @@ void insert_entry_or_update_to_max(sortdb_wrapper* sortdb, const log_entry& e) {
     std::string value;
     if (sortdb->get(e.key_sid(), &value)) {
         write_version_type stored_write_version;
-        if (e.type() == log_entry::entry_type::normal_with_blob) {
+        auto stored_entry_type = static_cast<log_entry::entry_type>(value[0]);
+        if (stored_entry_type == log_entry::entry_type::normal_with_blob) {
             // For normal_with_blob, the stored format is:
             // [0]: entry_type, [1,8]: value_size, [9, ...]: value_etc (which starts with write_version)
             stored_write_version = write_version_type(value.substr(1 + sizeof(std::size_t)));
