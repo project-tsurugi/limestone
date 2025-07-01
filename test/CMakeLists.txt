@@ -41,6 +41,11 @@ file(GLOB SRCS
         )
 
 foreach(file ${SRCS})
+    if("${file}" MATCHES "limestone/replication/" AND NOT BUILD_REPLICATION_TESTS)
+        message(STATUS "Skipping replication test: ${file}")
+        continue()
+    endif()
+
     add_test_executable(${file})
 endforeach()
   
