@@ -455,6 +455,10 @@ TEST_F(message_log_entries_test, write_all_entry_type_to_pwal_via_replication_ch
     // wwait for the ack response
     EXPECT_EQ(clients.back().receive_message()->get_message_type_id(), message_type_id::COMMON_ACK);
 
+    // 4) Close the control session
+    for (auto& client : clients) {
+        client.close_session();
+    }
     // shutdown the server
     server.shutdown();
     server_thread.join();
