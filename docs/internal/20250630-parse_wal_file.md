@@ -405,3 +405,387 @@ durable epoch 以下のスニペットで途中切れや不明型を検知した
 
 この修正方針により、**durable epoch 以下の不整合を誤って修復可能扱いにしない** ことで、  
 DB の永続性保証を正しく守れる状態にします。
+
+
+
+## scan_one_pwal_file 完全フロー解説
+
+from chatgpt
+
+```
+このセクションでは dblog_scan::scan_one_pwal_file のソースの動きを、
+途中の細かい分岐も含めて、全体の流れとして整理します。
+
+---
+
+1) 事前準備
+
+epoch_id_type current_epoch{UINT64_MAX};
+epoch_id_type max_epoch_of_file{0};
+log_entry::read_error ec{};
+int fixed = 0;
+
+log_entry e;
+
+auto err_unexpected = [&](){
+    log_entry::read_error ectmp{};
+    ectmp.value(log_entry::read_error::unexpected_type);
+    ectmp.entry_type(e.type());
+    report_error(ectmp);
+};
+
+boost::filesystem::fstream strm;
+strm.open(p, std::ios_base::in | std::ios_base::out | std::ios_base::binary);
+
+- current_epoch はスニペットの epoch を記録。初期値は UINT64_MAX (未設定を示す番兵)。
+- max_epoch_of_file はこのファイル内での最大 epoch を追跡する。
+- fixed は修復の件数をカウントする。
+- err_unexpected は想定外順序を報告するための共通ロジック (本来は関数化推奨)。
+- strm は読み書きモードで開く。
+
+---
+
+2) 状態フラグ
+
+bool valid = true;
+[[maybe_unused]]
+bool invalidated_wrote = true;
+bool marked_before_scan{};
+bool first = true;
+
+- valid : スニペットが有効かどうか。
+- invalidated_wrote : 無効化マークを書いたか (repair_by_mark 用)。
+- marked_before_scan : 既に marker_invalidated_begin だった場合に true。
+- first : スニペットの先頭エントリかどうか。
+
+---
+
+3) メインループ
+
+while (true) {
+    auto fpos_before_read_entry = strm.tellg();
+    bool data_remains = e.read_entry_from(strm, ec);
+    lex_token tok{ec, data_remains, e};
+    bool aborted = false;
+
+    switch (tok.value()) {
+      ...
+    }
+
+    if (aborted) break;
+    first = false;
+}
+
+- 1件ずつ読み取り lex_token で種類を分類する。
+- aborted が true になるとループ終了。
+
+---
+
+4) 各トークンの分岐
+
+■ 正常エントリ (normal_entry 系)
+
+case normal_entry:
+case normal_with_blob:
+case remove_entry:
+case clear_storage:
+case add_storage:
+case remove_storage:
+  if (!first) {
+    if (valid) add_entry(e);
+  } else {
+    err_unexpected();
+    pe = unexpected;
+    if (fail_fast_) aborted = true;
+  }
+
+- スニペット先頭で normal_entry が来たらエラー。
+- 2件目以降かつ valid なら add_entry に渡す。
+
+---
+
+■ EOF
+
+case eof:
+  aborted = true;
+  break;
+
+---
+
+■ marker_begin
+
+case marker_begin:
+  fpos_epoch_snippet = fpos_before_read_entry;
+  current_epoch = e.epoch_id();
+  max_epoch_of_file = max(max_epoch_of_file, current_epoch);
+  marked_before_scan = false;
+
+  if (current_epoch <= ld_epoch) {
+    valid = true;
+    invalidated_wrote = false;
+  } else {
+    switch (process_at_nondurable_) {
+      case ignore: break;
+      case repair_by_mark: invalidate_epoch_snippet(...); fixed++; invalidated_wrote = true; pe = repaired; break;
+      case report: report_error(...); pe = nondurable_entries; break;
+    }
+    valid = false;
+  }
+  break;
+
+- スニペット開始。epoch を更新し durable と比較。
+
+---
+
+■ marker_invalidated_begin
+
+case marker_invalidated_begin:
+  fpos_epoch_snippet = fpos_before_read_entry;
+  current_epoch = e.epoch_id();
+  max_epoch_of_file = max(max_epoch_of_file, current_epoch);
+  marked_before_scan = true;
+  invalidated_wrote = true;
+  valid = false;
+  break;
+
+- 無効化済みスニペットなので読み飛ばし。
+
+---
+
+■ SHORT_* (途中切れ)
+
+case SHORT_normal_entry:
+...
+case SHORT_remove_storage:
+  if (first) {
+    err_unexpected();
+    pe = unexpected;
+  } else {
+    switch (process_at_truncated_) {
+      case ignore: break;
+      case repair_by_mark: strm.clear(); if (valid) { invalidate_epoch_snippet(...); fixed++; valid = false; } pe = broken_after_marked; break;
+      case repair_by_cut: pe = broken_after_tobe_cut; break;
+      case report: if (valid) { report_error(...); pe = broken_after; } else if (marked_before_scan) { pe = broken_after_marked; } else { pe = broken_after; } break;
+    }
+  }
+  aborted = true;
+  break;
+
+- 途中切れは必ず終了。
+
+---
+
+■ SHORT_marker_begin, SHORT_marker_inv_begin も同様に process_at_truncated_ に従い分岐し aborted = true。
+
+---
+
+■ UNKNOWN_TYPE_entry
+
+case UNKNOWN_TYPE_entry:
+  if (first) {
+    err_unexpected();
+    pe = unexpected;
+  } else {
+    switch (process_at_damaged_) {
+      case ignore: break;
+      case repair_by_mark: strm.clear(); if (valid) { invalidate_epoch_snippet(...); fixed++; valid = false; } pe = broken_after_marked; break;
+      case repair_by_cut: pe = broken_after_tobe_cut; break;
+      case report: if (valid) { report_error(...); pe = broken_after; } else if (marked_before_scan) { pe = broken_after_marked; } else { pe = broken_after; } break;
+    }
+  }
+  aborted = true;
+  break;
+
+---
+
+5) 修復で CUT
+
+if (pe == broken_after_tobe_cut) {
+  resize_file(p, pe.fpos());
+  pe = repaired;
+  fixed++;
+}
+
+---
+
+6) 戻り値
+
+pe.modified(fixed > 0);
+return max_epoch_of_file;
+
+---
+
+■ ポイント
+
+- スニペット先頭で epoch を必ず把握。
+- valid, invalidated_wrote, marked_before_scan で状態管理。
+- process_at_* に応じて分岐し修復するか終了するかを決める。
+- fail_fast が true なら想定外で即終了。
+
+以上で scan_one_pwal_file の詳細な流れが理解できる。
+```
+
+## 修正メモ
+
+### durable epoch 以下のmarker_invalidated_begin
+
+```cpp
+        case lex_token::token_type::marker_invalidated_begin: {
+// marker_invalidated_begin : { head_pos := ...; max-epoch := max(...); valid := false } -> loop
+            fpos_epoch_snippet = fpos_before_read_entry;
+            max_epoch_of_file = std::max(max_epoch_of_file, e.epoch_id());
+            marked_before_scan = true;
+            invalidated_wrote = true;
+            valid = false;
+            VLOG_LP(45) << "valid: false (already marked)";
+            break;
+        }
+```
+* epochの値がdurable epoch以下であった場合、正しくエラーにする。
+* このバグ修正前のデータを、修正後に読んだときに正しくエラーにするために必要
+
+### SHORTエントリの処理
+
+```cpp
+        case lex_token::token_type::SHORT_normal_entry:
+        case lex_token::token_type::SHORT_normal_with_blob:
+        case lex_token::token_type::SHORT_remove_entry:
+        case lex_token::token_type::SHORT_clear_storage:
+        case lex_token::token_type::SHORT_add_storage:
+        case lex_token::token_type::SHORT_remove_storage: {
+// SHORT_normal_entry | SHORT_normal_with_blob | SHORT_remove_entry | SHORT_clear_storage | SHORT_add_storage | SHORT_remove_storage : (not 1st) { if (valid) error-truncated } -> END
+            if (first) {
+                err_unexpected();
+                pe = parse_error(parse_error::unexpected, fpos_before_read_entry);
+            } else {
+                switch (process_at_truncated_) {
+                case process_at_truncated::ignore:
+                    break;
+                case process_at_truncated::repair_by_mark:
+                    strm.clear();  // reset eof
+                    if (valid) {
+                        invalidate_epoch_snippet(strm, fpos_epoch_snippet);
+                        fixed++;
+                        VLOG_LP(0) << "marked invalid " << p << " at offset " << fpos_epoch_snippet;
+                        // quitting loop just after this, so no need to change 'valid', but...
+                        valid = false;
+                        VLOG_LP(45) << "valid: false";
+                    }
+                    if (pe.value() < parse_error::broken_after_marked) {
+                        pe = parse_error(parse_error::broken_after_marked, fpos_epoch_snippet);
+                    }
+                    break;
+                case process_at_truncated::repair_by_cut:
+                    pe = parse_error(parse_error::broken_after_tobe_cut, fpos_epoch_snippet);
+                    break;
+                case process_at_truncated::report:
+                    if (valid) {
+                        // durable broken data, serious
+                        report_error(ec);
+                        pe = parse_error(parse_error::broken_after, fpos_epoch_snippet);
+                    } else if (marked_before_scan) {
+                        if (pe.value() < parse_error::broken_after_marked) {
+                            pe = parse_error(parse_error::broken_after_marked, fpos_epoch_snippet);
+                        }
+                    } else {
+                        // marked during inspect
+                        pe = parse_error(parse_error::broken_after, fpos_epoch_snippet);
+                    }
+                }
+            }
+            aborted = true;
+            break;
+        }
+```
+
+* いくつかな状態は、深刻なエラー(回復不能な破損だが)、リペア処理が正しくない。リペアなどせず、エラーとして扱うべき。
+* すでにこのWALがdurable epochより大きなmarker_beginを持っている場合はリペア可能、それ以外は回復不能な破損として扱うべきですね。
+
+### SHOT_maker_begin
+
+
+```
+        case lex_token::token_type::SHORT_marker_begin: {
+// SHORT_marker_begin : { head_pos := ...; error-truncated } -> END
+            fpos_epoch_snippet = fpos_before_read_entry;
+            marked_before_scan = false;
+            switch (process_at_truncated_) {
+            case process_at_truncated::ignore:
+                break;
+            case process_at_truncated::repair_by_mark:
+                strm.clear();  // reset eof
+                invalidate_epoch_snippet(strm, fpos_epoch_snippet);
+                fixed++;
+                VLOG_LP(0) << "marked invalid " << p << " at offset " << fpos_epoch_snippet;
+                pe = parse_error(parse_error::broken_after_marked, fpos_epoch_snippet);
+                break;
+            case process_at_truncated::repair_by_cut:
+                pe = parse_error(parse_error::broken_after_tobe_cut, fpos_epoch_snippet);
+                break;
+            case process_at_truncated::report:
+                report_error(ec);
+                pe = parse_error(parse_error::broken_after, fpos_epoch_snippet);
+            }
+            aborted = true;
+            break;
+        }
+```
+
+* durable epoch以下のpeochの場合の処理が抜けている。
+* このmakerで始まったepochがdurable_epochなのかどうか、本質的にわからないので、それを前提とする必要がある。
+  * これ、結構きびしし。破損とみなすかどうか、どうしよう。
+  * すでにこのWALがdurable epochより大きなmarker_beginを持っている場合はリペア可能、それ以外は回復不能な破損として扱うべきで。
+  * SHOTエントリは全て同じ扱いにすべき。
+
+
+### SHORT_marker_inv_begin
+
+```cpp
+        case lex_token::token_type::SHORT_marker_inv_begin: {
+// SHORT_marker_inv_begin : { head_pos := ... } -> END
+            fpos_epoch_snippet = fpos_before_read_entry;
+            marked_before_scan = true;
+            // ignore short in invalidated blocks
+            switch (process_at_truncated_) {
+            case process_at_truncated::ignore:
+                break;
+            case process_at_truncated::repair_by_mark:
+                strm.clear();  // reset eof
+                // invalidate_epoch_snippet(strm, fpos_epoch_snippet);
+                // fixed++;
+                // VLOG_LP(0) << "marked invalid " << p << " at offset " << fpos_epoch_snippet;
+                pe = parse_error(parse_error::broken_after_marked, fpos_epoch_snippet);
+                break;
+            case process_at_truncated::repair_by_cut:
+                pe = parse_error(parse_error::broken_after_tobe_cut, fpos_epoch_snippet);
+                break;
+            case process_at_truncated::report:
+                report_error(ec);
+                pe = parse_error(parse_error::broken_after_marked, fpos_epoch_snippet);
+            }
+            aborted = true;
+            break;
+        }
+```
+
+* これは、SHOT_maker_beginをリペアするとできる。
+* これも他のSHORT_エントリと同じ扱いで良さそう。
+* SHOT_maker_beginをリペア以外でおキルトするとrepair中の電源だんとKILL
+  * そもそも想定指定なさそう。
+  * そういうデータを使わないように対策スべきでは。
+
+
+### UNKNOWN_TYPE_entry
+
+* 今回のバグのケース
+
+### リペア中の障害
+
+リペア中にプロセスが死んだり、電源断が起きた時に、次にリペアできない壊れ方をする可能性がある。
+かなり、いろいろな壊れ方をする可能性があり、今のやり方で良いのか議論が必要。
+
+#### durable epochを超えるスニペット
+
+* durable epoch を超えるスニペットは全部無効化するのが本質的に安全」
+* marker_endを導入し、marker_end後durable epochのmarker_begin以外のエントリがでてきたら、それ以降すべて無効としょりすべき。
+* short_entryとか言う概念が不要なはず。
