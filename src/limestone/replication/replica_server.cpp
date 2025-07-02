@@ -160,11 +160,34 @@ void replica_server::accept_new_client() {
         return;
     }
     TRACE << "Accepted new client connection: " << client_fd;
-    std::thread(&replica_server::handle_client, this, client_fd).detach();
+    
+    // Launch async task and store future
+    auto future = std::async(std::launch::async, &replica_server::handle_client, this, client_fd);
+    
+    {
+        std::lock_guard<std::mutex> lock(futures_mutex_);
+        client_futures_.emplace_back(std::move(future));
+    }
+}
+
+void replica_server::cleanup_completed_futures() {
+    std::lock_guard<std::mutex> lock(futures_mutex_);
+    for (auto it = client_futures_.begin(); it != client_futures_.end();) {
+        if (it->wait_for(std::chrono::seconds(0)) == std::future_status::ready) {
+            // When erasing an element, erase returns an iterator to the next element
+            it = client_futures_.erase(it);
+        } else {
+            // If not erasing, manually advance to the next element
+            ++it;
+        }
+    }
 }
 
 void replica_server::accept_loop() {
     while (true) {
+        // Clean up completed futures without blocking
+        cleanup_completed_futures();
+        
         poll_result result = poll_shutdown_event_or_client();
 
         if (result == poll_result::poll_error) {
@@ -256,6 +279,15 @@ void replica_server::handle_client(int client_fd) {
 }
 
 void replica_server::shutdown() {
+    // Wait for all client threads to complete
+    {
+        std::lock_guard<std::mutex> lock(futures_mutex_);
+        for (auto& future : client_futures_) {
+            future.wait();
+        }
+        client_futures_.clear();
+    }
+    
     std::lock_guard<std::mutex> lock(state_mutex_);
     if (event_fd_ >= 0) {
         uint64_t v = 1;
@@ -297,5 +329,4 @@ bool replica_server::mark_control_channel_created() noexcept {
     return ret;
 }
 
- } // namespace limestone::replication
- 
+} // namespace limestone::replication
