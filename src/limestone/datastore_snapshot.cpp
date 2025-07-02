@@ -77,9 +77,9 @@ void merge_max_wv(const std::string_view a, const std::string_view b, std::strin
 [[maybe_unused]]
 void insert_entry_or_update_to_max(sortdb_wrapper* sortdb, const log_entry& e) {
     bool need_write = true;
+#if !defined SORT_METHOD_MERGE_OP
     // Skip writing if an older entry is already stored.
     std::string value;
-#if !defined SORT_METHOD_MERGE_OP
     if (sortdb->get(e.key_sid(), &value)) {
         write_version_type stored_write_version;
         auto stored_entry_type = static_cast<log_entry::entry_type>(value[0]);
@@ -165,6 +165,9 @@ std::pair<epoch_id_type, sorting_context> create_sorted_from_wals(compaction_opt
 
 #if defined SORT_METHOD_PUT_ONLY
     const auto add_entry_to_point = insert_twisted_entry;
+    bool works_with_multi_thread = true;
+#elif defined SORT_METHOD_MERGE_OP
+    const auto add_entry_to_point = insert_entry_or_update_to_max;
     bool works_with_multi_thread = true;
 #else
     const auto add_entry_to_point = insert_entry_or_update_to_max;
