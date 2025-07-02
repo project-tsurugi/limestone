@@ -1,4 +1,4 @@
-# Copyright 2022-2024 Project Tsurugi.
+# Copyright 2022-2025 Project Tsurugi.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -52,8 +52,9 @@ endif()
 set(RECOVERY_SORTER_KVSLIB ROCKSDB CACHE STRING "using eKVS library at recovery process")
 string(TOUPPER $CACHE{RECOVERY_SORTER_KVSLIB} RECOVERY_SORTER_KVSLIB_UPPERCASE)
 option(RECOVERY_SORTER_PUT_ONLY "using put-only method at recovery process (faster)" ON)
+option(RECOVERY_SORTER_MERGE_OP "using merge operator of RocksDB at recovery process (efficient)" OFF)
 
-# set(ENGINE "engine")
+include(CheckCXXSourceCompiles)
 
 find_package(Doxygen)
 find_package(glog REQUIRED)
@@ -65,6 +66,13 @@ find_package(Boost
         )
 if(${RECOVERY_SORTER_KVSLIB_UPPERCASE} STREQUAL "ROCKSDB")
     find_package(RocksDB REQUIRED)
+    check_cxx_source_compiles("#include <rocksdb/merge_operator.h>
+using namespace rocksdb;
+struct LinkTest : public rocksdb::AssociativeMergeOperator {
+    const char* Name() const override { return \"test\"; }
+    bool Merge(const Slice&, const Slice*, const Slice&, std::string*, Logger*) const override { return true; }
+};
+int main() { LinkTest x; }" HAVE_ROCKSDB_MERGE_OP)
 elseif(${RECOVERY_SORTER_KVSLIB_UPPERCASE} STREQUAL "LEVELDB")
     find_package(leveldb REQUIRED)
 else()

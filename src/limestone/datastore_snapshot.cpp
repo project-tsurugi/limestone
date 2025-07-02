@@ -60,10 +60,26 @@ int comp_twisted_key(const std::string_view& a, const std::string_view& b) {
 }
 
 [[maybe_unused]]
+write_version_type wv_in_dbvalue(const std::string_view dbval) {
+    auto entry_type = static_cast<log_entry::entry_type>(dbval[0]);
+    std::size_t offset = 1;
+    if (entry_type == log_entry::entry_type::normal_with_blob) { offset = 1 + sizeof(std::size_t); }
+    return write_version_type{dbval.substr(offset)};
+}
+
+[[maybe_unused]]
+void merge_max_wv(const std::string_view a, const std::string_view b, std::string* s) {
+    write_version_type a_wv{wv_in_dbvalue(a)};
+    write_version_type b_wv{wv_in_dbvalue(b)};
+    *s = a_wv < b_wv ? b : a;
+}
+
+[[maybe_unused]]
 void insert_entry_or_update_to_max(sortdb_wrapper* sortdb, const log_entry& e) {
     bool need_write = true;
     // Skip writing if an older entry is already stored.
     std::string value;
+#if !defined SORT_METHOD_MERGE_OP
     if (sortdb->get(e.key_sid(), &value)) {
         write_version_type stored_write_version;
         auto stored_entry_type = static_cast<log_entry::entry_type>(value[0]);
@@ -83,6 +99,7 @@ void insert_entry_or_update_to_max(sortdb_wrapper* sortdb, const log_entry& e) {
             need_write = false;
         }
     }
+#endif
     if (need_write) {
         std::string db_value;
         db_value.push_back(static_cast<char>(e.type()));
@@ -98,7 +115,11 @@ void insert_entry_or_update_to_max(sortdb_wrapper* sortdb, const log_entry& e) {
         } else {
             db_value.append(e.value_etc());
         }
+#if defined SORT_METHOD_MERGE_OP
+        sortdb->merge(e.key_sid(), db_value);
+#else
         sortdb->put(e.key_sid(), db_value);
+#endif
     }
 }
 
@@ -131,7 +152,9 @@ std::pair<epoch_id_type, sorting_context> create_sorted_from_wals(compaction_opt
     auto from_dir = options.get_from_dir();
     auto file_names = options.get_file_names();
     auto num_worker = options.get_num_worker();
-#if defined SORT_METHOD_PUT_ONLY
+#if defined SORT_METHOD_MERGE_OP
+    sorting_context sctx{std::make_unique<sortdb_wrapper>(from_dir, nullptr, merge_max_wv)};
+#elif defined SORT_METHOD_PUT_ONLY
     sorting_context sctx{std::make_unique<sortdb_wrapper>(from_dir, comp_twisted_key)};
 #else
     sorting_context sctx{std::make_unique<sortdb_wrapper>(from_dir)};

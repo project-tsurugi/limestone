@@ -19,6 +19,7 @@
 #ifdef SORT_METHOD_USE_ROCKSDB
 #include <rocksdb/db.h>
 #include <rocksdb/comparator.h>
+#include <rocksdb/merge_operator.h>
 #else
 #include <leveldb/db.h>
 #include <leveldb/comparator.h>
@@ -43,12 +44,15 @@ public:
     // type of user-defined key-comparator function
     using keycomp = int(*)(const std::string_view& a, const std::string_view& b);
 
+    // type of user-defined value merge function
+    using mergeop = void(*)(const std::string_view, const std::string_view, std::string*);
+
     /**
      * @brief create new object
      * @param dir the directory where DB library files will be placed
      * @param keycomp (optional) user-defined comparator
      */
-    explicit sortdb_wrapper(const boost::filesystem::path& dir, keycomp keycomp = nullptr)
+    explicit sortdb_wrapper(const boost::filesystem::path& dir, keycomp keycomp = nullptr, mergeop mergeop = nullptr)
         : workdir_path_(dir / boost::filesystem::path(std::string(sortdb_dir))) {
         clear_directory();
         
@@ -57,6 +61,14 @@ public:
         if (keycomp != nullptr) {
             comp_ = std::make_unique<comparator>(keycomp);
             options.comparator = comp_.get();
+        }
+        if (mergeop != nullptr) {
+#if defined SORT_METHOD_MERGE_OP
+            options.merge_operator.reset(new merger(mergeop));
+#else
+            LOG_LP(ERROR) << "Unsupported operation: mergeop";
+            std::abort();
+#endif
         }
         if (Status status = DB::Open(options, workdir_path_.string(), &sortdb_); !status.ok()) {
             LOG_LP(ERROR) << "Unable to open/create database working files, status = " << status.ToString();
@@ -94,6 +106,15 @@ public:
         return false; // Added return statement to ensure function always returns a value
     }
 
+#if defined SORT_METHOD_MERGE_OP
+    void merge(const std::string& key, const std::string& value) {
+        WriteOptions write_options{};
+        auto status = sortdb_->Merge(write_options, key, value);
+        if (status.ok()) { return; }
+        LOG_AND_THROW_EXCEPTION("sortdb merge error, status: " + status.ToString());
+    }
+#endif
+
     void each(const std::function<void(std::string_view, std::string_view)>& fun) {
         std::unique_ptr<Iterator> it{sortdb_->NewIterator(ReadOptions())};
         for (it->SeekToFirst(); it->Valid(); it->Next()) {
@@ -123,6 +144,20 @@ private:
     };
 
     std::unique_ptr<comparator> comp_{};
+
+#if defined SORT_METHOD_MERGE_OP
+    class merger : public AssociativeMergeOperator {
+        mergeop mergeop_;
+    public:
+        explicit merger(mergeop mergeop) : mergeop_(mergeop) {}
+        [[nodiscard]] const char *Name() const override { return "custom merge op"; }
+        [[nodiscard]] bool Merge([[maybe_unused]] const Slice& k, const Slice* existing, const Slice& v, std::string* new_v, Logger*) const override {
+            if (existing == nullptr) { *new_v = v.ToString(); }
+            else { mergeop_(existing->ToStringView(), v.ToStringView(), new_v); }
+            return true;
+        }
+    };
+#endif
 
     boost::filesystem::path workdir_path_;
 
