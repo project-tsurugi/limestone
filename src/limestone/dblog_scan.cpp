@@ -174,6 +174,12 @@ epoch_id_type dblog_scan::scan_pwal_files(  // NOLINT(readability-function-cogni
             case parse_error::nondurable_entries:
                 VLOG(log_debug) << "CONTAINS NONDURABLE ENTRY: " << p;
                 break;
+            case parse_error::corrupted_durable_entries:
+                VLOG(log_debug) << "DURABLE EPOCH ENTRIES ARE CORRUPTED: " << p;
+                if (fail_fast_) {
+                    THROW_LIMESTONE_EXCEPTION(ec.message());
+                }
+                break;
             case parse_error::unexpected:
             case parse_error::failed:
                 VLOG(log_debug) << "ERROR: " << p;

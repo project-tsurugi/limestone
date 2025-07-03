@@ -241,8 +241,8 @@ TEST_F(dblogutil_test, inspect_truncated_normal_entry) {
 
 TEST_F(dblogutil_test, inspect_truncated_epoch_header) {
     auto [rc, out] = inspect("pwal_0000", data_truncated_epoch_header);
-    EXPECT_EQ(rc, 1 << 8);
-    EXPECT_NE(out.find("\n" "status: auto-repairable"), out.npos);
+    EXPECT_EQ(rc, 2 << 8);
+    EXPECT_NE(out.find("\n" "status: unrepairable"), out.npos);
 }
 
 TEST_F(dblogutil_test, inspect_truncated_invalidated_normal_entry) {
@@ -336,19 +336,19 @@ TEST_F(dblogutil_test, repairm_truncated_normal_entry_detached) {
 TEST_F(dblogutil_test, repairm_truncated_epoch_header) {
     auto orig_data = data_truncated_epoch_header;
     auto [rc, out, rc2, out2] = repairm_twice("pwal_0000", orig_data);
-    EXPECT_EQ(rc, 0);
-    EXPECT_NE(out.find("\n" "status: repaired"), out.npos);
-    EXPECT_EQ(rc2, 0);
-    EXPECT_NE(out2.find("\n" "status: OK"), out2.npos);
-    expect_mark_at(50, orig_data);
+    EXPECT_EQ(rc, 16 << 8);
+    EXPECT_NE(out.find("\n" "status: unrepairable"), out.npos);
+    EXPECT_EQ(rc2, 16 << 8);
+    EXPECT_NE(out2.find("\n" "status: unrepairable"), out2.npos);
+    expect_no_change(orig_data);
 }
 
 TEST_F(dblogutil_test, repairm_truncated_epoch_header_detached) {
     auto orig_data = data_truncated_epoch_header;
     auto [rc, out] = repairm("pwal_0000.rotated", orig_data);
-    EXPECT_EQ(rc, 0);
-    EXPECT_NE(out.find("\n" "status: repaired"), out.npos);
-    expect_mark_at(50, orig_data);
+    EXPECT_EQ(rc, 16 << 8);
+    EXPECT_NE(out.find("\n" "status: unrepairable"), out.npos);
+    expect_no_change(orig_data);
 }
 
 TEST_F(dblogutil_test, repairm_truncated_invalidated_normal_entry) {
@@ -414,11 +414,11 @@ TEST_F(dblogutil_test, repairc_truncated_normal_entry) {
 TEST_F(dblogutil_test, repairc_truncated_epoch_header) {
     auto orig_data = data_truncated_epoch_header;
     auto [rc, out, rc2, out2] = repairc_twice("pwal_0000", orig_data);
-    EXPECT_EQ(rc, 0);
-    EXPECT_NE(out.find("\n" "status: repaired"), out.npos);
-    EXPECT_EQ(rc2, 0);
-    EXPECT_NE(out2.find("\n" "status: OK"), out2.npos);
-    expect_cut_at(50, orig_data);
+    EXPECT_EQ(rc,16 << 8);
+    EXPECT_NE(out.find("\n" "status: unrepairable"), out.npos);
+    EXPECT_EQ(rc2, 16 << 8);
+    EXPECT_NE(out2.find("\n" "status: unrepairable"), out2.npos);
+    expect_no_change(orig_data);
 }
 
 TEST_F(dblogutil_test, repairc_truncated_invalidated_normal_entry) {

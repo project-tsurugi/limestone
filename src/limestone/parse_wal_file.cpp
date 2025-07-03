@@ -211,9 +211,9 @@ using namespace limestone::api;
 //    eof                        : {} -> END
 //    marker_begin               : { head_pos := ...; max-epoch := max(...); if (epoch <= ld) { valid := true } else { valid := false, error-nondurable } } -> loop
 //    marker_invalidated_begin   : { head_pos := ...; max-epoch := max(...); valid := false } -> loop
-//    SHORT_marker_begin         : { head_pos := ...; error-truncated } -> END
-//    SHORT_marker_inv_begin     : { head_pos := ... } -> END
-//    UNKNOWN_TYPE_entry         : { error-broken-snippet-header } -> END
+//    SHORT_marker_begin         : { head_pos := ...; if (current_epoch <= ld) error-corrupted-durable else error-truncated } -> END
+//    SHORT_marker_inv_begin     : { head_pos := ...; error-truncated } -> END
+//    UNKNOWN_TYPE_entry         : { if (current_epoch <= ld) error-corrupted-durable else error-broken-snippet-header } -> END
 //    else                       : { err_unexpected } -> END
 //  loop:
 //    normal_entry               : { if (valid) process-entry } -> loop
@@ -225,15 +225,17 @@ using namespace limestone::api;
 //    eof                        : {} -> END
 //    marker_begin               : { head_pos := ...; max-epoch := max(...); if (epoch <= ld) { valid := true } else { valid := false, error-nondurable } } -> loop
 //    marker_invalidated_begin   : { head_pos := ...; max-epoch := max(...); valid := false } -> loop
-//    SHORT_normal_entry         : { if (valid) error-truncated } -> END
-//    SHORT_normal_with_blob     : { if (valid) error-truncated } -> END
-//    SHORT_remove_entry         : { if (valid) error-truncated } -> END
-//    SHORT_clear_storage        : { if (valid) error-truncated } -> END
-//    SHORT_add_storage          : { if (valid) error-truncated } -> END
-//    SHORT_remove_storage       : { if (valid) error-truncated } -> END
-//    SHORT_marker_begin         : { head_pos := ...; error-truncated } -> END
-//    SHORT_marker_inv_begin     : { head_pos := ... } -> END
-//    UNKNOWN_TYPE_entry         : { if (valid) error-damaged-entry } -> END
+//    SHORT_normal_entry         : { if (valid && current_epoch <= ld) error-corrupted-durable else if (valid) error-truncated } -> END
+//    SHORT_normal_with_blob     : { if (valid && current_epoch <= ld) error-corrupted-durable else if (valid) error-truncated } -> END
+//    SHORT_remove_entry         : { if (valid && current_epoch <= ld) error-corrupted-durable else if (valid) error-truncated } -> END
+//    SHORT_clear_storage        : { if (valid && current_epoch <= ld) error-corrupted-durable else if (valid) error-truncated } -> END
+//    SHORT_add_storage          : { if (valid && current_epoch <= ld) error-corrupted-durable else if (valid) error-truncated } -> END
+//    SHORT_remove_storage       : { if (valid && current_epoch <= ld) error-corrupted-durable else if (valid) error-truncated } -> END
+//    SHORT_marker_begin         : { if (current_epoch <= ld) error-corrupted-durable else error-truncated } -> END
+//    SHORT_marker_inv_begin     : { error-truncated } -> END
+//    UNKNOWN_TYPE_entry         : { if (valid && current_epoch <= ld) error-corrupted-durable else if (valid) error-damaged-entry } -> END
+
+
 
 
 // scan the file, and check max epoch number in this file
@@ -351,10 +353,13 @@ epoch_id_type dblog_scan::scan_one_pwal_file(  // NOLINT(readability-function-co
         case lex_token::token_type::SHORT_clear_storage:
         case lex_token::token_type::SHORT_add_storage:
         case lex_token::token_type::SHORT_remove_storage: {
-// SHORT_normal_entry | SHORT_normal_with_blob | SHORT_remove_entry | SHORT_clear_storage | SHORT_add_storage | SHORT_remove_storage : (not 1st) { if (valid) error-truncated } -> END
+// SHORT_* : (not 1st) { if (valid && durable) corrupted else if (valid) truncated } -> END
             if (first) {
                 err_unexpected();
                 pe = parse_error(parse_error::unexpected, fpos_before_read_entry);
+            } else if (valid && current_epoch <= ld_epoch) {
+                report_error(ec);
+                pe = parse_error(parse_error::corrupted_durable_entries, fpos_epoch_snippet);
             } else {
                 switch (process_at_truncated_) {
                 case process_at_truncated::ignore:
@@ -398,22 +403,28 @@ epoch_id_type dblog_scan::scan_one_pwal_file(  // NOLINT(readability-function-co
 // SHORT_marker_begin : { head_pos := ...; error-truncated } -> END
             fpos_epoch_snippet = fpos_before_read_entry;
             marked_before_scan = false;
-            switch (process_at_truncated_) {
-            case process_at_truncated::ignore:
-                break;
-            case process_at_truncated::repair_by_mark:
-                strm.clear();  // reset eof
-                invalidate_epoch_snippet(strm, fpos_epoch_snippet);
-                fixed++;
-                VLOG_LP(0) << "marked invalid " << p << " at offset " << fpos_epoch_snippet;
-                pe = parse_error(parse_error::broken_after_marked, fpos_epoch_snippet);
-                break;
-            case process_at_truncated::repair_by_cut:
-                pe = parse_error(parse_error::broken_after_tobe_cut, fpos_epoch_snippet);
-                break;
-            case process_at_truncated::report:
+
+            if (current_epoch <= ld_epoch) {
                 report_error(ec);
-                pe = parse_error(parse_error::broken_after, fpos_epoch_snippet);
+                pe = parse_error(parse_error::corrupted_durable_entries, fpos_epoch_snippet);
+            } else {
+                switch (process_at_truncated_) {
+                    case process_at_truncated::ignore:
+                        break;
+                    case process_at_truncated::repair_by_mark:
+                        strm.clear();  // reset eof
+                        invalidate_epoch_snippet(strm, fpos_epoch_snippet);
+                        fixed++;
+                        VLOG_LP(0) << "marked invalid " << p << " at offset " << fpos_epoch_snippet;
+                        pe = parse_error(parse_error::broken_after_marked, fpos_epoch_snippet);
+                        break;
+                    case process_at_truncated::repair_by_cut:
+                        pe = parse_error(parse_error::broken_after_tobe_cut, fpos_epoch_snippet);
+                        break;
+                    case process_at_truncated::report:
+                        report_error(ec);
+                        pe = parse_error(parse_error::broken_after, fpos_epoch_snippet);
+                }
             }
             aborted = true;
             break;
@@ -444,11 +455,14 @@ epoch_id_type dblog_scan::scan_one_pwal_file(  // NOLINT(readability-function-co
             break;
         }
         case lex_token::token_type::UNKNOWN_TYPE_entry: {
-// UNKNOWN_TYPE_entry : (not 1st) { if (valid) error-damaged-entry } -> END
-// UNKNOWN_TYPE_entry : (1st) { error-broken-snippet-header } -> END
+            // UNKNOWN_TYPE_entry : (not 1st) { if (valid && current_epoch <= ld) error-corrupted-durable else error-damaged-entry } -> END
+            // UNKNOWN_TYPE_entry : (1st) { error-broken-snippet-header } -> END
             if (first) {
                 err_unexpected();  // FIXME: error type
                 pe = parse_error(parse_error::unexpected, fpos_before_read_entry);
+            } else if (valid && current_epoch <= ld_epoch) {
+                report_error(ec);
+                pe = parse_error(parse_error::corrupted_durable_entries, fpos_epoch_snippet);
             } else {
                 switch (process_at_damaged_) {
                 case process_at_damaged::ignore:

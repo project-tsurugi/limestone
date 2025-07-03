@@ -1,5 +1,13 @@
 # parse_wal_file.cppの分析
 
+## この文書について
+
+この文書は[Issue #1257](https://github.com/project-tsurugi/tsurugi-issues/issues/1257)対応の
+ためにWALのパースとリペア処理を行っているコードの分析をしたときのメモです。
+
+分析結果を情報として残しておくことを目的に保存しますが、
+内容の正確性の保証はありません。また、ソフトウェアの更新に追従することもありません。
+
 ## chatgptによる分析
 
 ### 何をしているかの概要
@@ -787,5 +795,45 @@ return max_epoch_of_file;
 #### durable epochを超えるスニペット
 
 * durable epoch を超えるスニペットは全部無効化するのが本質的に安全」
-* marker_endを導入し、marker_end後durable epochのmarker_begin以外のエントリがでてきたら、それ以降すべて無効としょりすべき。
+* marker_endを導入し、marker_end後durable epochのmarker_begin以外のエントリがでてきたら、それ以降すべて無効として処理すべき。
 * short_entryとか言う概念が不要なはず。
+
+
+## Durable Epoch 以下を破損とする修正
+
+durable epoch より小さいSHORT_entryや、UNKNOWN_TYPE_entryを、WALの破損として扱うように修正する。
+
+### DFAの修正
+
+```cpp
+// DFA
+//  START:
+//    eof                        : {} -> END
+//    marker_begin               : { head_pos := ...; max-epoch := max(...); if (epoch <= ld) { valid := true } else { valid := false, error-nondurable } } -> loop
+//    marker_invalidated_begin   : { head_pos := ...; max-epoch := max(...); valid := false } -> loop
+//    SHORT_marker_begin         : { head_pos := ...; if (current_epoch <= ld) error-corrupted-durable else error-truncated } -> END
+//    SHORT_marker_inv_begin     : { head_pos := ...; error-truncated } -> END
+//    UNKNOWN_TYPE_entry         : { if (current_epoch <= ld) error-corrupted-durable else error-broken-snippet-header } -> END
+//    else                       : { err_unexpected } -> END
+//  loop:
+//    normal_entry               : { if (valid) process-entry } -> loop
+//    normal_with_blob           : { if (valid) process-entry } -> loop
+//    remove_entry               : { if (valid) process-entry } -> loop
+//    clear_storage              : { if (valid) process-entry } -> loop
+//    add_storage                : { if (valid) process-entry } -> loop
+//    remove_storage             : { if (valid) process-entry } -> loop
+//    eof                        : {} -> END
+//    marker_begin               : { head_pos := ...; max-epoch := max(...); if (epoch <= ld) { valid := true } else { valid := false, error-nondurable } } -> loop
+//    marker_invalidated_begin   : { head_pos := ...; max-epoch := max(...); valid := false } -> loop
+//    SHORT_normal_entry         : { if (valid && current_epoch <= ld) error-corrupted-durable else if (valid) error-truncated } -> END
+//    SHORT_normal_with_blob     : { if (valid && current_epoch <= ld) error-corrupted-durable else if (valid) error-truncated } -> END
+//    SHORT_remove_entry         : { if (valid && current_epoch <= ld) error-corrupted-durable else if (valid) error-truncated } -> END
+//    SHORT_clear_storage        : { if (valid && current_epoch <= ld) error-corrupted-durable else if (valid) error-truncated } -> END
+//    SHORT_add_storage          : { if (valid && current_epoch <= ld) error-corrupted-durable else if (valid) error-truncated } -> END
+//    SHORT_remove_storage       : { if (valid && current_epoch <= ld) error-corrupted-durable else if (valid) error-truncated } -> END
+//    SHORT_marker_begin         : { if (current_epoch <= ld) error-corrupted-durable else error-truncated } -> END
+//    SHORT_marker_inv_begin     : { error-truncated } -> END
+//    UNKNOWN_TYPE_entry         : { if (valid && current_epoch <= ld) error-corrupted-durable else if (valid) error-damaged-entry } -> END
+```
+
+
