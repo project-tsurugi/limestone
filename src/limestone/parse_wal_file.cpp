@@ -207,14 +207,27 @@ using namespace limestone::api;
     };
 
 // DFA
+//
+//  NOTE:
+//    - This module currently fully accepts the old WAL format.
+//    - In the old format, epoch snippets do not have explicit `marker_end` entries.
+//      Each snippet ends implicitly when the next `marker_begin` or EOF appears.
+//    - In the new format (future), each snippet *must* end with a `marker_end`.
+//      If `marker_end` is missing in durable range, it will be treated as corruption.
+//    - For now, this DFA does not enforce `marker_end` for durable epochs.
+//      So `marker_begin` always implicitly closes any previous snippet.
+//
 //  START:
 //    eof                        : {} -> END
 //    marker_begin               : { head_pos := ...; max-epoch := max(...); if (epoch <= ld) { valid := true } else { valid := false, error-nondurable } } -> loop
 //    marker_invalidated_begin   : { head_pos := ...; max-epoch := max(...); valid := false } -> loop
 //    SHORT_marker_begin         : { head_pos := ...; if (current_epoch <= ld) error-corrupted-durable else error-truncated } -> END
 //    SHORT_marker_inv_begin     : { head_pos := ...; error-truncated } -> END
+//    marker_end                 : { error-unexpected } -> END
+//    SHORT_marker_end           : { error-unexpected } -> END
 //    UNKNOWN_TYPE_entry         : { if (current_epoch <= ld) error-corrupted-durable else error-broken-snippet-header } -> END
 //    else                       : { err_unexpected } -> END
+//
 //  loop:
 //    normal_entry               : { if (valid) process-entry } -> loop
 //    normal_with_blob           : { if (valid) process-entry } -> loop
@@ -225,6 +238,7 @@ using namespace limestone::api;
 //    eof                        : {} -> END
 //    marker_begin               : { head_pos := ...; max-epoch := max(...); if (epoch <= ld) { valid := true } else { valid := false, error-nondurable } } -> loop
 //    marker_invalidated_begin   : { head_pos := ...; max-epoch := max(...); valid := false } -> loop
+//    marker_end                 : { mark end of snippet; reset state } -> loop
 //    SHORT_normal_entry         : { if (valid && current_epoch <= ld) error-corrupted-durable else if (valid) error-truncated } -> END
 //    SHORT_normal_with_blob     : { if (valid && current_epoch <= ld) error-corrupted-durable else if (valid) error-truncated } -> END
 //    SHORT_remove_entry         : { if (valid && current_epoch <= ld) error-corrupted-durable else if (valid) error-truncated } -> END
@@ -233,7 +247,9 @@ using namespace limestone::api;
 //    SHORT_remove_storage       : { if (valid && current_epoch <= ld) error-corrupted-durable else if (valid) error-truncated } -> END
 //    SHORT_marker_begin         : { if (current_epoch <= ld) error-corrupted-durable else error-truncated } -> END
 //    SHORT_marker_inv_begin     : { error-truncated } -> END
+//    SHORT_marker_end           : { error-truncated } -> END
 //    UNKNOWN_TYPE_entry         : { if (valid && current_epoch <= ld) error-corrupted-durable else if (valid) error-damaged-entry } -> END
+
 
 
 
@@ -352,7 +368,8 @@ epoch_id_type dblog_scan::scan_one_pwal_file(  // NOLINT(readability-function-co
         case lex_token::token_type::SHORT_remove_entry:
         case lex_token::token_type::SHORT_clear_storage:
         case lex_token::token_type::SHORT_add_storage:
-        case lex_token::token_type::SHORT_remove_storage: {
+        case lex_token::token_type::SHORT_remove_storage:
+        case lex_token::token_type::SHORT_marker_end: {
 // SHORT_* : (not 1st) { if (valid && durable) corrupted else if (valid) truncated } -> END
             if (first) {
                 err_unexpected();
@@ -500,6 +517,18 @@ epoch_id_type dblog_scan::scan_one_pwal_file(  // NOLINT(readability-function-co
                 }
             }
             aborted = true;
+            break;
+        }
+        case lex_token::token_type::marker_end: {
+            if (first) {
+                err_unexpected();
+                pe = parse_error(parse_error::unexpected, fpos_before_read_entry);
+                aborted = true;
+            } else {
+                VLOG_LP(45) << "marker_end: closing current snippet";
+                valid = false;
+                first = true;
+            }
             break;
         }
         default:

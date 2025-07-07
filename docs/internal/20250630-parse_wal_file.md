@@ -98,8 +98,6 @@
 
 必要に応じて DFA 図や構造体の定義などもドキュメントに含めると理解がより深まる。
 
-
-
 ## いろいろ分析
 
 ### 異常処理ポリシーの個別設定
@@ -166,10 +164,9 @@ scanner.set_process_at_damaged_epoch_snippet(dblog_scan::process_at_damaged::ign
 - `dblogutil repair` は、`--cut` を付けると途中で切れた部分や破損部分を物理的に切り詰める。
 - `--cut` を付けない場合は切り詰めは行わず、スニペットの先頭を無効化マークに書き換えて対応する。
 
-
 #### fail_fast について
 
-fail_fast は、異常を検知した際に即座にスキャンを中断するかどうか を制御するオプションです。
+fail_fast は、異常を検知した際に即座にスキャンを中断するかどうかを制御するオプションです。
 
 dblogutil inspect と repair では fail_fast は false（無効）であり、異常を記録しつつスキャンを最後まで続けます。
 
@@ -186,22 +183,21 @@ dblogutil inspect と repair では fail_fast は false（無効）であり、�
 #### pWAL の基本構造とスニペットの単位
 
 - pWAL ファイルは「スニペット（epoch snippet）」の連続で構成されています。
-- スニペットはかならず **`marker_begin`** または **`marker_invalidated_begin`** で始まります。
+- スニペットは必ず **`marker_begin`** または **`marker_invalidated_begin`** で始まります。
 - スニペット内には 0 個以上のエントリ（`normal_entry` など）が続きます。
-- スニペットの終わりは明示的なマーカはなく、**EOF** か、次の `marker_begin` または `marker_invalidated_begin` の出現で次のスニペットと見なされます。
+- スニペットの終わりは明示的なマーカはなく、**EOF** か、次の `marker_begin` または `marker_invalidated_begin` の出現で次のスニペットとみなされます。
 - つまり、マーカがない箇所でエントリが現れたり、途中で途切れたりすると構造上の異常として扱われます。
 
 ---
 
 以下に、そのような異常がどう扱われるかを具体的に示します。
+
 #### 1. スニペット開始マーカがない
 
 - ファイルの先頭で `marker_begin` または `marker_invalidated_begin` 以外のエントリが出現した場合。
 - 例: 最初に `normal_entry` が出ると `unexpected` エラーとして扱う。
 - **動作:** `fail_fast` が有効な場合は例外をスローしてスキャンを即中断する。  
   無効な場合でもエラー状態を記録し、スキャンは即終了して後続処理には進まない。
-
-
 
 #### 2. durable epoch を超えたスニペット
 
@@ -212,9 +208,6 @@ dblogutil inspect と repair では fail_fast は false（無効）であり、�
   - `report`: 異常を検知して報告し、結果としてスキャン後に例外をスローまたはエラーコードを返す。
 - 無効化して継続した場合でも、スニペット内で途中切れや不明型など他の異常が発生した場合は、
   それぞれ `process_at_truncated` や `process_at_damaged` の設定に従って追加で修復や切り詰め、報告が行われる。
-
-
-
 
 #### 3. 不完全（途中で切れた）エントリ
 
@@ -227,21 +220,16 @@ dblogutil inspect と repair では fail_fast は false（無効）であり、�
   - `repair_by_cut`: ファイルを物理的に切り詰めて修復し、以降の読み取りを停止する。
   - `report`: 異常を報告し、結果として例外をスローまたはエラーコードを返す。
 
-
 #### 4. スニペット開始マーカ自体が途中で切れている
 
 - `SHORT_marker_begin` が出現した場合。
 - `process_at_truncated` に従って分岐（3と同様）。
-
-
 
 #### 5. 無効化済みスニペットの開始マーカが途中で切れている
 
 - `SHORT_marker_inv_begin` が出現した場合。
 - 既に無効化されているため致命的ではないが、`process_at_truncated` に従って処理。
 - `ignore` 以外は報告してスキャンを終了、場合によっては例外をスロー。
-
-
 
 #### 6. 不明な型のエントリが出現
 
@@ -270,14 +258,10 @@ dblogutil inspect と repair では fail_fast は false（無効）であり、�
 このように、異常を検知した後の挙動は「スキャン継続／修復して終了／例外をスローして中断」が
 ポリシー設定に応じて切り替わる仕組みになっている。
 
-
-
 ### エラー処理内容の種類
 
 `scan_one_pwal_file` のエラー処理は、異常を検知した後に行われる対応として  
 大きく次の 4 種類に分類できます。
-
-
 
 #### 1. スキャンの即時中断
 
@@ -289,8 +273,6 @@ dblogutil inspect と repair では fail_fast は false（無効）であり、�
 - 不明型エントリが先頭に出現  
 - `fail_fast` が有効で途中切れを許さない場合
 
-
-
 #### 2. 修復して継続
 
 - 構造異常が論理的に修復可能な場合、スニペット先頭を `marker_invalidated_begin` に書き換え無効化する。
@@ -299,8 +281,6 @@ dblogutil inspect と repair では fail_fast は false（無効）であり、�
 **代表例**  
 - durable epoch 超えのスニペット → `repair_by_mark`
 - 途中切れエントリ → `repair_by_mark`
-
-
 
 #### 3. ファイルを切り詰める
 
@@ -311,8 +291,6 @@ dblogutil inspect と repair では fail_fast は false（無効）であり、�
 - `SHORT_*` 検出 → `repair_by_cut`
 - 不明型エントリ → `repair_by_cut`
 
-
-
 #### 4. エラーとして報告のみ
 
 - 修復や切り詰めを行わず、異常を `parse_error` に記録して結果として呼び出し元に返す。
@@ -322,8 +300,6 @@ dblogutil inspect と repair では fail_fast は false（無効）であり、�
 - durable epoch 超え → `report`
 - 途中切れエントリ → `report`
 - 不明型エントリ → `report`
-
-
 
 ### 処理まとめ表
 
@@ -394,15 +370,11 @@ durable epoch 以下のスニペットで途中切れや不明型を検知した
 - `repair_by_mark` / `repair_by_cut` は durable epoch 以下では発動しない。
 - durable epoch を超えるスニペットに対しては、従来どおりポリシーに従って修復を許可する。
 
-
-
 #### `parse_error` コードの追加
 
 このケースを区別してログで原因がすぐ分かるように、  
 `parse_error` に新しいコード `corrupted_durable_snippet` を追加し、  
 「永続性保証違反の修復不能エラー」であることを明示する。
-
-
 
 #### `fail_fast` の扱い
 
@@ -410,11 +382,8 @@ durable epoch 以下のスニペットで途中切れや不明型を検知した
 - `fail_fast = true` の場合は、ファイル単位の致命エラーが発生した時点で全体スキャンを即中断する。
 - `fail_fast = false` の場合は、ファイル単位でエラーがあっても他の pWAL のスキャンは続行する（`inspect` 用途）。
 
-
 この修正方針により、**durable epoch 以下の不整合を誤って修復可能扱いにしない** ことで、  
 DB の永続性保証を正しく守れる状態にします。
-
-
 
 ## scan_one_pwal_file 完全フロー解説
 
@@ -706,11 +675,10 @@ return max_epoch_of_file;
         }
 ```
 
-* いくつかな状態は、深刻なエラー(回復不能な破損だが)、リペア処理が正しくない。リペアなどせず、エラーとして扱うべき。
-* すでにこのWALがdurable epochより大きなmarker_beginを持っている場合はリペア可能、それ以外は回復不能な破損として扱うべきですね。
+* いくつかの状態は、深刻なエラー（回復不能な破損だが）、リペア処理が正しくない。リペアなどせず、エラーとして扱うべき。
+* すでにこのWALがdurable epochより大きなmarker_beginを持っている場合はリペア可能、それ以外は回復不能な破損として扱うべきです。
 
-### SHOT_maker_begin
-
+### SHORT_marker_begin
 
 ```
         case lex_token::token_type::SHORT_marker_begin: {
@@ -739,12 +707,11 @@ return max_epoch_of_file;
         }
 ```
 
-* durable epoch以下のpeochの場合の処理が抜けている。
-* このmakerで始まったepochがdurable_epochなのかどうか、本質的にわからないので、それを前提とする必要がある。
-  * これ、結構きびしし。破損とみなすかどうか、どうしよう。
-  * すでにこのWALがdurable epochより大きなmarker_beginを持っている場合はリペア可能、それ以外は回復不能な破損として扱うべきで。
-  * SHOTエントリは全て同じ扱いにすべき。
-
+* durable epoch以下のepochの場合の処理が抜けている。
+* このmarkerで始まったepochがdurable_epochなのかどうか、本質的にわからないので、それを前提とする必要がある。
+  * これ、結構厳しい。破損とみなすかどうか、どうしよう。
+  * すでにこのWALがdurable epochより大きなmarker_beginを持っている場合はリペア可能、それ以外は回復不能な破損として扱うべき。
+  * SHORTエントリは全て同じ扱いにすべき。
 
 ### SHORT_marker_inv_begin
 
@@ -776,12 +743,11 @@ return max_epoch_of_file;
         }
 ```
 
-* これは、SHOT_maker_beginをリペアするとできる。
-* これも他のSHORT_エントリと同じ扱いで良さそう。
-* SHOT_maker_beginをリペア以外でおキルトするとrepair中の電源だんとKILL
-  * そもそも想定指定なさそう。
-  * そういうデータを使わないように対策スべきでは。
-
+* これは、SHORT_marker_beginをリペアするとできる。
+* これも他のSHORTエントリと同じ扱いで良さそう。
+* SHORT_marker_beginをリペア以外で起きるとrepair中の電源断とKILL
+  * そもそも想定していなさそう。
+  * そういうデータを使わないように対策すべきでは。
 
 ### UNKNOWN_TYPE_entry
 
@@ -794,10 +760,8 @@ return max_epoch_of_file;
 
 #### durable epochを超えるスニペット
 
-* durable epoch を超えるスニペットは全部無効化するのが本質的に安全」
+* durable epoch を超えるスニペットは全部無効化するのが本質的に安全
 * marker_endを導入し、marker_end後durable epochのmarker_begin以外のエントリがでてきたら、それ以降すべて無効として処理すべき。
-* short_entryとか言う概念が不要なはず。
-
 
 ## Durable Epoch 以下を破損とする修正
 
@@ -836,4 +800,146 @@ durable epoch より小さいSHORT_entryや、UNKNOWN_TYPE_entryを、WALの破�
 //    UNKNOWN_TYPE_entry         : { if (valid && current_epoch <= ld) error-corrupted-durable else if (valid) error-damaged-entry } -> END
 ```
 
+##  marker_endの追加
+
+### log_channel::end_sessionの修正
+
+log::log_channel::end_session ストリームをflush/syncする処理の前に、marker_endを追加する。
+
+### DFAの修正
+
+修正後のDFA
+
+```cpp
+// DFA
+//
+//  NOTE:
+//    - This module currently fully accepts the old WAL format.
+//    - In the old format, epoch snippets do not have explicit `marker_end` entries.
+//      Each snippet ends implicitly when the next `marker_begin` or EOF appears.
+//    - In the new format (future), each snippet *must* end with a `marker_end`.
+//      If `marker_end` is missing in durable range, it will be treated as corruption.
+//    - For now, this DFA does not enforce `marker_end` for durable epochs.
+//      So `marker_begin` always implicitly closes any previous snippet.
+//
+//  START:
+//    eof                        : {} -> END
+//    marker_begin               : { head_pos := ...; max-epoch := max(...); if (epoch <= ld) { valid := true } else { valid := false, error-nondurable } } -> loop
+//    marker_invalidated_begin   : { head_pos := ...; max-epoch := max(...); valid := false } -> loop
+//    SHORT_marker_begin         : { head_pos := ...; if (current_epoch <= ld) error-corrupted-durable else error-truncated } -> END
+//    SHORT_marker_inv_begin     : { head_pos := ...; error-truncated } -> END
+//    marker_end                 : { error-unexpected } -> END
+//    SHORT_marker_end           : { error-unexpected } -> END
+//    UNKNOWN_TYPE_entry         : { if (current_epoch <= ld) error-corrupted-durable else error-broken-snippet-header } -> END
+//    else                       : { err_unexpected } -> END
+//
+//  loop:
+//    normal_entry               : { if (valid) process-entry } -> loop
+//    normal_with_blob           : { if (valid) process-entry } -> loop
+//    remove_entry               : { if (valid) process-entry } -> loop
+//    clear_storage              : { if (valid) process-entry } -> loop
+//    add_storage                : { if (valid) process-entry } -> loop
+//    remove_storage             : { if (valid) process-entry } -> loop
+//    eof                        : {} -> END
+//    marker_begin               : { head_pos := ...; max-epoch := max(...); if (epoch <= ld) { valid := true } else { valid := false, error-nondurable } } -> loop
+//    marker_invalidated_begin   : { head_pos := ...; max-epoch := max(...); valid := false } -> loop
+//    marker_end                 : { mark end of snippet; reset state } -> loop
+//    SHORT_normal_entry         : { if (valid && current_epoch <= ld) error-corrupted-durable else if (valid) error-truncated } -> END
+//    SHORT_normal_with_blob     : { if (valid && current_epoch <= ld) error-corrupted-durable else if (valid) error-truncated } -> END
+//    SHORT_remove_entry         : { if (valid && current_epoch <= ld) error-corrupted-durable else if (valid) error-truncated } -> END
+//    SHORT_clear_storage        : { if (valid && current_epoch <= ld) error-corrupted-durable else if (valid) error-truncated } -> END
+//    SHORT_add_storage          : { if (valid && current_epoch <= ld) error-corrupted-durable else if (valid) error-truncated } -> END
+//    SHORT_remove_storage       : { if (valid && current_epoch <= ld) error-corrupted-durable else if (valid) error-truncated } -> END
+//    SHORT_marker_begin         : { if (current_epoch <= ld) error-corrupted-durable else error-truncated } -> END
+//    SHORT_marker_inv_begin     : { error-truncated } -> END
+//    SHORT_marker_end           : { error-truncated } -> END
+//    UNKNOWN_TYPE_entry         : { if (valid && current_epoch <= ld) error-corrupted-durable else if (valid) error-damaged-entry } -> END
+```
+
+### DFAの修正に関するコメント
+
+本修正では、WAL のスニペット終端を明示的に示す `marker_end` を新たに導入し、  
+旧フォーマットとの互換性を維持しつつ、将来的な仕様強化に対応可能な構造としている。
+
+現行の DFA は以下の設計方針に基づいている。
+
+- **旧フォーマットの互換性**  
+  旧フォーマットでは `marker_end` が存在せず、スニペットは次の `marker_begin` または EOF により  
+  暗黙的に終了していた。このため、`marker_begin` は常に前のスニペットを自動的に閉じる役割を兼ねている。
+
+- **新フォーマットへの移行**  
+  新フォーマットでは、各スニペットを `marker_begin` から `marker_end` で明示的に区切ることを前提とする。  
+  将来的には、`marker_end` が欠落している durable 範囲のスニペットは破損として扱い、  
+  修復可能とはみなさない設計とする。
+
+- **途中切れ（SHORT_系）および UNKNOWN_TYPE_entry の扱い**  
+  途中切れや型不明の断片は、直前のスニペット（`current_epoch`）に属するとみなし、  
+  durable epoch 内で発生した場合には回復不能な破損として直ちに中断する。  
+  これにより、永続化保証を損なわないことを担保する。
+
+- **`marker_end` 後のエントリ処理の考え方**  
+  `marker_end` を読んだ後は、次に現れるのは必ず `marker_begin`（または `marker_invalidated_begin`）であるべきである。  
+  それ以外のエントリが出現した場合は構造異常であり、適切に検出されなければならない。
+
+- **フラグによる状態管理**  
+  この判定のため、内部状態として `first` フラグを使用している。  
+  `marker_end` を読んだ直後は `first` を `true` にすることで、論理的に「次のスニペット開始を待つ状態」であることを示している。
+
+- **`first` フラグによる分岐の役割**  
+  `first` フラグにより、`marker_begin` 以外のエントリが来た場合でも、
+  「これはスニペット先頭の異常か、途中のエントリか」を区別して処理が変わるようになっている。  
+  これにより、`SHORT_marker_begin` や `UNKNOWN_TYPE_entry` は直前スニペットの閉じ漏れを補足でき、  
+  `normal_entry` などは即 `unexpected` として扱われる。
+
+- **DFA には明示されない実装依存の制御**  
+  この `first` フラグによる挙動は、DFA の状態遷移としては明示されていないが、  
+  実装上は `loop` 状態内で論理的に `START` 相当を再現する重要な仕組みである。
+
+- **将来的な強化計画**  
+  将来的には、外部設定により「旧フォーマットとして扱う最終 epoch」を明示的に指定できるようにする予定である。  
+  この境界値以降のエポックについては新フォーマットとして扱い、各スニペットの終端に `marker_end` が必ず存在することを要求する。  
+  もし新フォーマットと認識される範囲内で `marker_end` が欠落し、`marker_begin` が出現した場合は構造破損として即エラーとする。  
+  これにより、パーサの状態遷移は旧フォーマットと新フォーマットを混在させたままでも正確に判別でき、  
+  永続性保証の厳格化と段階的な仕様強化が両立される設計となる。  
+  
+  さらに `marker_end` には将来的に CRC を付与し、当該スニペット全体に物理的な破損がないことを  
+  検証可能とする拡張も検討している。ただし、この CRC チェック機能については現時点では実装しない。
+- **新フォーマットへの移行**  
+  新フォーマットでは、各スニペットを `marker_begin` から `marker_end` で明示的に区切ることを前提とする。  
+  将来的には、`marker_end` が欠落している durable 範囲のスニペットは破損として扱い、  
+  修復可能とはみなさない設計とする。
+
+- **途中切れ（SHORT_系）および UNKNOWN_TYPE_entry の扱い**  
+  途中切れや型不明の断片は、直前のスニペット（`current_epoch`）に属するとみなし、  
+  durable epoch 内で発生した場合には回復不能な破損として直ちに中断する。  
+  これにより、永続化保証を損なわないことを担保する。
+
+- **`marker_end` 後のエントリ処理の考え方**  
+  `marker_end` を読んだ後は、次に現れるのは必ず `marker_begin`（または `marker_invalidated_begin`）であるべきである。  
+  それ以外のエントリが出現した場合は構造異常であり、適切に検出されなければならない。
+
+- **フラグによる状態管理**  
+  この判定のため、内部状態として `first` フラグを使用している。  
+  `marker_end` を読んだ直後は `first` を `true` にすることで、論理的に「次のスニペット開始を待つ状態」であることを示している。
+
+- **`first` フラグによる分岐の役割**  
+  `first` フラグにより、`marker_begin` 以外のエントリが来た場合でも、
+  「これはスニペット先頭の異常か、途中のエントリか」を区別して処理が変わるようになっている。  
+  これにより、`SHORT_marker_begin` や `UNKNOWN_TYPE_entry` は直前スニペットの閉じ漏れを補足でき、  
+  `normal_entry` などは即 `unexpected` として扱われる。
+
+- **DFA には明示されない実装依存の制御**  
+  この `first` フラグによる挙動は、DFA の状態遷移としては明示されていないが、  
+  実装上は `loop` 状態内で論理的に `START` 相当を再現する重要な仕組みである。
+
+
+- **将来的な強化計画**  
+  将来的には、外部設定により「旧フォーマットとして扱う最終 epoch」を明示的に指定できるようにする予定である。  
+  この境界値以降のエポックについては新フォーマットとして扱い、各スニペットの終端に `marker_end` が必ず存在することを要求する。  
+  もし新フォーマットと認識される範囲内で `marker_end` が欠落し、`marker_begin` が出現した場合は構造破損として即エラーとする。  
+  これにより、パーサの状態遷移は旧フォーマットと新フォーマットを混在させたままでも正確に判別でき、  
+  永続性保証の厳格化と段階的な仕様強化が両立される設計となる。  
+  
+  さらに `marker_end` には将来的に CRC を付与し、当該スニペット全体に物理的な破損がないことを  
+  検証可能とする拡張も検討している。ただし、この CRC チェック機能については現時点では実装しない。
 
