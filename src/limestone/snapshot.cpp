@@ -41,6 +41,15 @@ std::unique_ptr<cursor> snapshot::get_cursor() const {
     }
 }
 
+std::vector<std::unique_ptr<cursor>> snapshot::get_partitioned_cursors(std::size_t n) {
+    try {
+        return pimpl->get_partitioned_cursors(n);
+    } catch (...) {
+        HANDLE_EXCEPTION_AND_ABORT();
+        throw;  // Unreachable, but required to satisfy the compiler
+    }
+}
+
 std::unique_ptr<cursor> snapshot::find([[maybe_unused]] storage_id_type storage_id, [[maybe_unused]] std::string_view entry_key) const noexcept {
     LOG_LP(ERROR) << "not implemented";
     std::abort();  // FIXME should implement

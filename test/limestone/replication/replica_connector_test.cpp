@@ -21,14 +21,14 @@ constexpr const char* base_directory = "/tmp/test_blob_resolver";
 class replica_connector_test : public ::testing::Test {
 protected:
     void SetUp() override {
-        system(("rm -rf " + std::string(base_directory)).c_str());
-        system(("mkdir -p " + std::string(base_directory)).c_str());
+        [[maybe_unused]] int rm_result = system(("rm -rf " + std::string(base_directory)).c_str());
+        [[maybe_unused]] int mkdir_result = system(("mkdir -p " + std::string(base_directory)).c_str());
         resolver_ = std::make_unique<blob_file_resolver>(boost::filesystem::path(base_directory));
     }
 
     void TearDown() override {
         resolver_.reset();
-        system(("rm -rf " + std::string(base_directory)).c_str());
+        [[maybe_unused]] int rm_result2 = system(("rm -rf " + std::string(base_directory)).c_str());
     }
 
     std::unique_ptr<blob_file_resolver> resolver_;

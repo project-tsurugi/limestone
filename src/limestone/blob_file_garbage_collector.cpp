@@ -238,10 +238,11 @@ void blob_file_garbage_collector::wait_for_all_threads() {
 void blob_file_garbage_collector::scan_snapshot(const boost::filesystem::path &snapshot_file, const boost::filesystem::path &compacted_file) {
     state_machine_.start_snapshot_scan(blob_file_gc_state_machine::snapshot_scan_mode::internal);
     std::unique_ptr<my_cursor> cur;
+    std::map<storage_id_type, write_version_type> clear_storage_map{};
     if (boost::filesystem::exists(compacted_file)) {
-        cur = std::make_unique<my_cursor>(snapshot_file, compacted_file);
+        cur = std::make_unique<my_cursor>(snapshot_file, compacted_file, clear_storage_map);
     } else {
-        cur = std::make_unique<my_cursor>(snapshot_file);
+        cur = std::make_unique<my_cursor>(snapshot_file, clear_storage_map);
     }
     // Launch the snapshot scanning thread with the pre-created cursor.
     snapshot_scan_thread_ = std::thread([this, cur = std::move(cur)]() {
