@@ -40,6 +40,7 @@ option(TRACY_ENABLE "enable tracy profiler" OFF)
 option(ENABLE_ALTIMETER "enable altimeter logging" OFF)
 option(INSTALL_EXPERIMENTAL_TOOLS "Install experimental tools like tgreplica" OFF)
 option(BUILD_REPLICATION_TESTS "Build replication tests" OFF)
+option(BUILD_SANDBOX_TOOLS "build sandbox (temporary) tools" OFF)
 
 if (FORCE_INSTALL_RPATH)
     message(DEPRECATION "FORCE_INSTALL_RPATH is obsoleted")
@@ -108,6 +109,9 @@ endif()
 # if (BUILD_DOCUMENTS)
 #     add_subdirectory(doxygen)
 # endif()
+if (BUILD_SANDBOX_TOOLS)
+    add_subdirectory(sandbox)
+endif()
 
 install(
     TARGETS
@@ -170,3 +174,4 @@ install(
     DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/${package_name}
     EXPORT_LINK_INTERFACE_LIBRARIES
 )
+
