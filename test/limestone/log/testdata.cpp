@@ -105,21 +105,21 @@ extern constexpr const std::string_view data_allzero =
 // ---- for marker_end tests ----
 
 
-// === 1 === marker_end のみ
+// === 1 === Only marker_end
 extern constexpr const std::string_view data_marker_end_only =
     "\x02\x00\x01\x00\x00\x00\x00\x00\x00"  // marker_begin epoch 0x100
     "\x01\x04\x00\x00\x00\x04\x00\x00\x00" "storage1" "1234" "vermajor" "verminor" "1234"  // normal_entry
     "\x03\x00\x01\x00\x00\x00\x00\x00\x00" // marker_end epoch 0x100
     ""sv;
 
-// === 2 === marker_end の後に normal_entry
+// === 2 === normal_entry after marker_end
 extern constexpr const std::string_view data_marker_end_followed_by_normal_entry =
     "\x02\x00\x01\x00\x00\x00\x00\x00\x00"  // marker_begin epoch 0x100
     "\x01\x04\x00\x00\x00\x04\x00\x00\x00" "storage1" "1234" "vermajor" "verminor" "1234"  // normal_entry
     "\x03\x00\x01\x00\x00\x00\x00\x00\x00"  // marker_end epoch 0x100
     "\x01\x20\x00\x00\x00" "storage1" "1234" "vermajor" "verminor" "1234"  // normal_entry again
     ""sv;
-// === 3 === marker_end の後に marker_begin
+// === 3 === marker_begin after marker_end
 extern constexpr const std::string_view data_marker_end_followed_by_marker_begin =
     "\x02\x00\x01\x00\x00\x00\x00\x00\x00"  // marker_begin epoch 0x100
     "\x01\x04\x00\x00\x00\x04\x00\x00\x00" "storage1" "1234" "vermajor" "verminor" "1234"  // normal_entry
@@ -129,7 +129,7 @@ extern constexpr const std::string_view data_marker_end_followed_by_marker_begin
     "\x03\x01\x01\x00\x00\x00\x00\x00\x00" // marker_end epoch 0x101
     ""sv;
 
-// === 4 === marker_end の後に marker_inv_begin
+// === 4 === marker_inv_begin after marker_end
 extern constexpr const std::string_view data_marker_end_followed_by_marker_inv_begin =
     "\x02\x00\x01\x00\x00\x00\x00\x00\x00"  // marker_begin epoch 0x100
     "\x01\x04\x00\x00\x00\x04\x00\x00\x00" "storage1" "1234" "vermajor" "verminor" "1234"  // normal_entry
@@ -139,7 +139,7 @@ extern constexpr const std::string_view data_marker_end_followed_by_marker_inv_b
     "\x03\x01\x01\x00\x00\x00\x00\x00\x00" // marker_end epoch 0x101
     ""sv;
 
-// === 5 === marker_end の後に SHORT_entry
+// === 5 === SHORT_entry after marker_end
 extern constexpr const std::string_view data_marker_end_followed_by_short_entry =
     "\x02\x00\x01\x00\x00\x00\x00\x00\x00"  // marker_begin epoch 0x100
     "\x01\x04\x00\x00\x00\x04\x00\x00\x00" "storage1" "1234" "vermajor" "verminor" "1234"  // normal_entry
@@ -147,7 +147,7 @@ extern constexpr const std::string_view data_marker_end_followed_by_short_entry 
     "\x01\x20\x00\x00"                     // SHORT normal_entry (incomplete)
     ""sv;
 
-// === 6 === SHORT_marker_end のみ
+// === 6 === Only SHORT_marker_end
 extern constexpr const std::string_view data_short_marker_end_only =
     "\x02\x00\x01\x00\x00\x00\x00\x00\x00"  // marker_begin epoch 0x100
     "\x01\x04\x00\x00\x00\x04\x00\x00\x00" "storage1" "1234" "vermajor" "verminor" "1234"  // normal_entry
@@ -155,42 +155,42 @@ extern constexpr const std::string_view data_short_marker_end_only =
     ""sv;
 
 
-// 0F-1: ファイル全体が 0fill
+// 0F-1: Entire file is 0fill
 extern constexpr std::string_view data_all_zerofill =
     "\x00\x00\x00\x00\x00\x00\x00\x00\x00"
     ""sv;
 
-// 0F-2: marker_begin の途中から 0fill
+// 0F-2: 0fill from the middle of marker_begin
 extern constexpr std::string_view data_marker_begin_partial_zerofill =
-    "\x02\x00\x01\x00\x00\x00\x00"  // SHORT marker_begin (7バイト)
+    "\x02\x00\x01\x00\x00\x00\x00"  // SHORT marker_begin (7 bytes)
     "\x00"                      // 0fill
     ""sv;
 
-// 0F-3: marker_begin の直後から 0fill
+// 0F-3: 0fill immediately after marker_begin
 extern constexpr std::string_view data_marker_begin_followed_by_zerofill =
-    "\x02\x00\x01\x00\x00\x00\x00\x00\x00"  // 正常 marker_begin
+    "\x02\x00\x01\x00\x00\x00\x00\x00\x00"  // normal marker_begin
     "\x00\x00\x00\x00\x00\x00\x00\x00\x00"  // 0fill
     ""sv;
 
-// 0F-4: marker_begin + normal_entry の途中から 0fill
+// 0F-4: 0fill from the middle of marker_begin + normal_entry
 extern constexpr std::string_view data_marker_begin_normal_entry_partial_zerofill =
-    "\x02\x00\x01\x00\x00\x00\x00\x00\x00"  // 正常 marker_begin
-    "\x01\x04\x00\x00\x00\x04\x00"          // SHORT normal_entry (不完全)
+    "\x02\x00\x01\x00\x00\x00\x00\x00\x00"  // normal marker_begin
+    "\x01\x04\x00\x00\x00\x04\x00"          // SHORT normal_entry (incomplete)
     "\x00\x00"                              // 0fill
     ""sv;
 
-// 0F-5: marker_begin + normal_entry の後から 0fill
+// 0F-5: 0fill after marker_begin + normal_entry
 extern constexpr std::string_view data_marker_begin_normal_entry_followed_by_zerofill =
-    "\x02\x00\x01\x00\x00\x00\x00\x00\x00"  // 正常 marker_begin
+    "\x02\x00\x01\x00\x00\x00\x00\x00\x00"  // normal marker_begin
     "\x01\x04\x00\x00\x00\x04\x00\x00\x00" "storage1" "1234" "vermajor" "verminor" "1234" // normal_entry
     "\x00\x00\x00\x00\x00\x00\x00\x00\x00"  // 0fill
     ""sv;
 
-// 0F-6: marker_end の途中から 0fill
+// 0F-6: 0fill from the middle of marker_end
 extern constexpr std::string_view data_marker_end_partial_zerofill =
-    "\x02\x00\x01\x00\x00\x00\x00\x00\x00"  // 正常 marker_begin
+    "\x02\x00\x01\x00\x00\x00\x00\x00\x00"  // normal marker_begin
     "\x01\x04\x00\x00\x00\x04\x00\x00\x00" "storage1" "1234" "vermajor" "verminor" "1234" // normal_entry
-    "\x03\x01\x01\x00\x00"                  // SHORT marker_end (5バイト)
+    "\x03\x01\x01\x00\x00"                  // SHORT marker_end (5 bytes)
     "\x00"                      // 0fill
     ""sv;
 

@@ -689,22 +689,13 @@ TEST_F(dblog_scan_test, scan_one_pwal_file_repairm_truncated_invalidated_epoch_h
     );
 }
 
-
-
-// unit-test scan_one_pwal_file
-// repair(cut) the normal file; returns ok
-// same as avobe
-
-// unit-test scan_one_pwal_file
-// repair(cut) is not supported
-
 // unit-test scan_one_pwal_file
 // repair(mark) the file filled zero
 TEST_F(dblog_scan_test, scan_one_pwal_file_repairc_zerofill) {
     auto orig_data = data_zerofill;
 
-    // Case 1: durable_epoch == 0x101 -> durable -> corrupted_durable_entries -> cutされない
-    scan_one_pwal_file_repairc(
+        // Case 1: durable_epoch == 0x101 -> durable -> corrupted_durable_entries -> not cut
+ scan_one_pwal_file_repairc(
         orig_data,
         [&orig_data](const boost::filesystem::path& p, epoch_id_type max_epoch,
                      const std::vector<log_entry::read_error>& errors,
@@ -717,7 +708,7 @@ TEST_F(dblog_scan_test, scan_one_pwal_file_repairc_zerofill) {
         0x101
     );
 
-    // Case 2: durable_epoch < 0x101 -> nondurable -> repaired -> cutされる
+    // Case 2: durable_epoch < 0x101 -> nondurable -> repaired -> cut
     scan_one_pwal_file_repairc(
         orig_data,
         [](const boost::filesystem::path& p, epoch_id_type max_epoch,
@@ -730,8 +721,7 @@ TEST_F(dblog_scan_test, scan_one_pwal_file_repairc_zerofill) {
         },
         0x100
     );
-
-    // Case 3: durable_epoch > 0x101 -> durable -> corrupted_durable_entries -> cutされない
+    // Case 3: durable_epoch > 0x101 -> durable -> corrupted_durable_entries -> not cut
     scan_one_pwal_file_repairc(
         orig_data,
         [&orig_data](const boost::filesystem::path& p, epoch_id_type max_epoch,
@@ -751,8 +741,7 @@ TEST_F(dblog_scan_test, scan_one_pwal_file_repairc_zerofill) {
 // repair(cut) the file truncated on log_entries
 TEST_F(dblog_scan_test, scan_one_pwal_file_repairc_truncated_normal_entry) {
     auto orig_data = data_truncated_normal_entry;
-
-    // Case 1: durable_epoch == 0x101 -> durable -> corrupted_durable_entries -> cutされない
+    // Case 1: durable_epoch == 0x101 -> durable -> corrupted_durable_entries -> not cut
     scan_one_pwal_file_repairc(
         orig_data,
         [&orig_data](const boost::filesystem::path& p, epoch_id_type max_epoch,
@@ -760,12 +749,12 @@ TEST_F(dblog_scan_test, scan_one_pwal_file_repairc_truncated_normal_entry) {
             EXPECT_EQ(max_epoch, 0x101);
             EXPECT_EQ(pe.value(), dblog_scan::parse_error::corrupted_durable_entries);
             EXPECT_EQ(pe.fpos(), 9);
-            EXPECT_EQ(boost::filesystem::file_size(p), orig_data.size());  // cutされない
+            EXPECT_EQ(boost::filesystem::file_size(p), orig_data.size());  // not cut
         },
         0x101
     );
 
-    // Case 2: durable_epoch < 0x101 -> nondurable -> repaired -> cutされる
+    // Case 2: durable_epoch < 0x101 -> nondurable -> repaired -> cut
     scan_one_pwal_file_repairc(
         orig_data,
         [](const boost::filesystem::path& p, epoch_id_type max_epoch,
@@ -778,7 +767,7 @@ TEST_F(dblog_scan_test, scan_one_pwal_file_repairc_truncated_normal_entry) {
         0x100
     );
 
-    // Case 3: durable_epoch > 0x101 -> durable -> corrupted_durable_entries -> cutされない
+    // Case 3: durable_epoch > 0x101 -> durable -> corrupted_durable_entries -> not cut
     scan_one_pwal_file_repairc(
         orig_data,
         [&orig_data](const boost::filesystem::path& p, epoch_id_type max_epoch,
@@ -786,7 +775,7 @@ TEST_F(dblog_scan_test, scan_one_pwal_file_repairc_truncated_normal_entry) {
             EXPECT_EQ(max_epoch, 0x101);
             EXPECT_EQ(pe.value(), dblog_scan::parse_error::corrupted_durable_entries);
             EXPECT_EQ(pe.fpos(), 9);
-            EXPECT_EQ(boost::filesystem::file_size(p), orig_data.size());  // cutされない
+            EXPECT_EQ(boost::filesystem::file_size(p), orig_data.size());  // not cut
         },
         0x102
     );
@@ -1190,24 +1179,24 @@ TEST_F(dblog_scan_test, scan_one_pwal_file_inspect_short_marker_end_only) {
 TEST_F(dblog_scan_test, scan_one_pwal_file_repairm_short_marker_end_only) {
     auto orig_data = data_short_marker_end_only;
 
-    // durable_epoch < epoch: → SHORT_marker_end is treated as nondurable and gets repaired by mark
+    // durable_epoch < epoch: -> SHORT_marker_end is treated as nondurable and gets repaired by mark
     scan_one_pwal_file_repairm(
         orig_data,
         [&orig_data](const boost::filesystem::path& p,
-                     epoch_id_type max_epoch,
-                     const std::vector<log_entry::read_error>& errors,
-                     const dblog_scan::parse_error& pe) {
+                 epoch_id_type max_epoch,
+                 const std::vector<log_entry::read_error>& errors,
+                 const dblog_scan::parse_error& pe) {
             EXPECT_EQ(max_epoch, 0x100);
             EXPECT_EQ(pe.value(), dblog_scan::parse_error::broken_after_marked);
             auto data = read_entire_file(p);
-            // 最初の marker_begin が mark されていること
+            // Ensure the first marker_begin is marked
             ASSERT_EQ(orig_data.at(0), '\x02');
-            EXPECT_EQ(data.at(0), '\x06');  // 0x02 → 0x06 に書き換わっている
+            EXPECT_EQ(data.at(0), '\x06');  // 0x02 -> 0x06 has been overwritten
         },
         0x0FF
-    );
+        );
 
-    // durable_epoch == epoch: → SHORT_marker_end is durable → cannot be repaired, ends with corrupted_durable_entries, not marked
+    // durable_epoch == epoch: -> SHORT_marker_end is durable -> cannot be repaired, ends with corrupted_durable_entries, not marked
     scan_one_pwal_file_repairm(
         orig_data,
         [&orig_data](const boost::filesystem::path& p,
@@ -1222,7 +1211,7 @@ TEST_F(dblog_scan_test, scan_one_pwal_file_repairm_short_marker_end_only) {
         0x100
     );
 
-    // durable_epoch > epoch: → SHORT_marker_end is durable → cannot be repaired, ends with corrupted_durable_entries, not marked
+    // durable_epoch > epoch: -> SHORT_marker_end is durable -> cannot be repaired, ends with corrupted_durable_entries, not marked
     scan_one_pwal_file_repairm(
         orig_data,
         [&orig_data](const boost::filesystem::path& p,
@@ -1242,7 +1231,7 @@ TEST_F(dblog_scan_test, scan_one_pwal_file_repairm_short_marker_end_only) {
 TEST_F(dblog_scan_test, scan_one_pwal_file_repairm_marker_end_followed_by_normal_entry) {
     auto orig_data = data_marker_end_followed_by_normal_entry;
 
-    // durable_epoch < epoch → first half is nondurable, second half is unexpected → first half gets marked but unexpected takes priority
+    // durable_epoch < epoch -> first half is nondurable, second half is unexpected -> first half gets marked but unexpected takes priority
     scan_one_pwal_file_repairm(
         orig_data,
         [&orig_data](const boost::filesystem::path& p, epoch_id_type max_epoch,
@@ -1256,7 +1245,7 @@ TEST_F(dblog_scan_test, scan_one_pwal_file_repairm_marker_end_followed_by_normal
         0x0FF
     );
 
-    // durable_epoch == epoch → first half is durable, second half is unexpected → cannot be repaired
+    // durable_epoch == epoch -> first half is durable, second half is unexpected -> cannot be repaired
     scan_one_pwal_file_repairm(
         orig_data,
         [&orig_data](const boost::filesystem::path& p, epoch_id_type max_epoch,
@@ -1268,7 +1257,7 @@ TEST_F(dblog_scan_test, scan_one_pwal_file_repairm_marker_end_followed_by_normal
         0x100
     );
 
-    // durable_epoch > epoch → first half is durable, second half is unexpected → cannot be repaired
+    // durable_epoch > epoch -> first half is durable, second half is unexpected -> cannot be repaired
     scan_one_pwal_file_repairm(
         orig_data,
         [&orig_data](const boost::filesystem::path& p, epoch_id_type max_epoch,
@@ -1286,7 +1275,7 @@ TEST_F(dblog_scan_test, scan_one_pwal_file_repairm_marker_end_followed_by_marker
 
     EXPECT_EQ(orig_data.at(59), '\x02'); 
 
-    // Case 1: durable_epoch < first half epoch → first half nondurable + second half also nondurable → both get marked
+    // Case 1: durable_epoch < first half epoch -> first half nondurable + second half also nondurable -> both get marked
     scan_one_pwal_file_repairm(
         orig_data,
         [&orig_data](const boost::filesystem::path& p, epoch_id_type max_epoch,
@@ -1300,7 +1289,7 @@ TEST_F(dblog_scan_test, scan_one_pwal_file_repairm_marker_end_followed_by_marker
         0x0FF
     );
 
-    // Case 2: durable_epoch == first half epoch → first half is durable, second half is nondurable → only second half gets marked
+    // Case 2: durable_epoch == first half epoch -> first half is durable, second half is nondurable -> only second half gets marked
     scan_one_pwal_file_repairm(
         orig_data,
         [&orig_data](const boost::filesystem::path& p, epoch_id_type max_epoch,
@@ -1314,7 +1303,7 @@ TEST_F(dblog_scan_test, scan_one_pwal_file_repairm_marker_end_followed_by_marker
         0x100
     );
 
-    // Case 3: durable_epoch > second half epoch → both durable → no repair
+    // Case 3: durable_epoch > second half epoch -> both durable -> no repair
     scan_one_pwal_file_repairm(
         orig_data,
         [&orig_data](const boost::filesystem::path& p, epoch_id_type max_epoch,
@@ -1333,7 +1322,7 @@ TEST_F(dblog_scan_test, scan_one_pwal_file_repairm_marker_end_followed_by_marker
 TEST_F(dblog_scan_test, scan_one_pwal_file_repairm_marker_end_followed_by_marker_inv_begin) {
     auto orig_data = data_marker_end_followed_by_marker_inv_begin;
 
-    // durable_epoch < epoch → first half nondurable → first half gets marked
+    // durable_epoch < epoch -> first half nondurable -> first half gets marked
     scan_one_pwal_file_repairm(
         orig_data,
         [&orig_data](const boost::filesystem::path& p, epoch_id_type max_epoch,
@@ -1341,12 +1330,12 @@ TEST_F(dblog_scan_test, scan_one_pwal_file_repairm_marker_end_followed_by_marker
             EXPECT_EQ(max_epoch, 0x101);
             EXPECT_EQ(pe.value(), dblog_scan::parse_error::repaired);
             auto data = read_entire_file(p);
-            EXPECT_EQ(data.at(0), '\x06');  // marker_begin → invalid
+            EXPECT_EQ(data.at(0), '\x06');  // marker_begin -> invalid
         },
         0x0FF
     );
 
-    // durable_epoch == epoch → second half inv is treated as invalid → no mark needed
+    // durable_epoch == epoch -> second half inv is treated as invalid -> no mark needed
     scan_one_pwal_file_repairm(
         orig_data,
         [&orig_data](const boost::filesystem::path& p, epoch_id_type max_epoch,
@@ -1358,7 +1347,7 @@ TEST_F(dblog_scan_test, scan_one_pwal_file_repairm_marker_end_followed_by_marker
         0x100
     );
 
-    // durable_epoch > second half inv epoch → both treated as durable → no mark needed
+    // durable_epoch > second half inv epoch -> both treated as durable -> no mark needed
     scan_one_pwal_file_repairm(
         orig_data,
         [&orig_data](const boost::filesystem::path& p, epoch_id_type max_epoch,
@@ -1376,7 +1365,7 @@ TEST_F(dblog_scan_test, scan_one_pwal_file_repairm_marker_end_followed_by_marker
 TEST_F(dblog_scan_test, scan_one_pwal_file_repairm_marker_end_followed_by_short_entry) {
     auto orig_data = data_marker_end_followed_by_short_entry;
 
-    // Case 1: durable_epoch < epoch → first half nondurable + SHORT → gets marked while result is broken_after_marked
+    // Case 1: durable_epoch < epoch -> first half nondurable + SHORT -> gets marked while result is broken_after_marked
     scan_one_pwal_file_repairm(
         orig_data,
         [&orig_data](const boost::filesystem::path& p, epoch_id_type max_epoch,
@@ -1389,7 +1378,7 @@ TEST_F(dblog_scan_test, scan_one_pwal_file_repairm_marker_end_followed_by_short_
         0x0FF
     );
 
-    // Case 2: durable_epoch == epoch → SHORT is unexpected → cannot be repaired
+    // Case 2: durable_epoch == epoch -> SHORT is unexpected -> cannot be repaired
     scan_one_pwal_file_repairm(
         orig_data,
         [&orig_data](const boost::filesystem::path& p, epoch_id_type max_epoch,
@@ -1401,7 +1390,7 @@ TEST_F(dblog_scan_test, scan_one_pwal_file_repairm_marker_end_followed_by_short_
         0x100
     );
 
-    // Case 3: durable_epoch > epoch → SHORT is unexpected → cannot be repaired
+    // Case 3: durable_epoch > epoch -> SHORT is unexpected -> cannot be repaired
     scan_one_pwal_file_repairm(
         orig_data,
         [&orig_data](const boost::filesystem::path& p, epoch_id_type max_epoch,
@@ -1419,7 +1408,7 @@ TEST_F(dblog_scan_test, scan_one_pwal_file_repairm_marker_end_followed_by_short_
 TEST_F(dblog_scan_test, scan_one_pwal_file_repairm_short_marker_end_case) {
     auto orig_data = data_short_marker_end_only;
 
-    // Case 1: durable_epoch < epoch → nondurable → gets marked
+    // Case 1: durable_epoch < epoch -> nondurable -> gets marked
     scan_one_pwal_file_repairm(
         orig_data,
         [&orig_data](const boost::filesystem::path& p, epoch_id_type max_epoch,
@@ -1432,7 +1421,7 @@ TEST_F(dblog_scan_test, scan_one_pwal_file_repairm_short_marker_end_case) {
         0x0FF
     );
 
-    // Case 2: durable_epoch == epoch → durable → corrupted_durable_entries
+    // Case 2: durable_epoch == epoch -> durable -> corrupted_durable_entries
     scan_one_pwal_file_repairm(
         orig_data,
         [&orig_data](const boost::filesystem::path& p, epoch_id_type max_epoch,
@@ -1444,7 +1433,7 @@ TEST_F(dblog_scan_test, scan_one_pwal_file_repairm_short_marker_end_case) {
         0x100
     );
 
-    // Case 3: durable_epoch > epoch → durable → corrupted_durable_entries
+    // Case 3: durable_epoch > epoch -> durable -> corrupted_durable_entries
     scan_one_pwal_file_repairm(
         orig_data,
         [&orig_data](const boost::filesystem::path& p, epoch_id_type max_epoch,
@@ -1460,7 +1449,7 @@ TEST_F(dblog_scan_test, scan_one_pwal_file_repairm_short_marker_end_case) {
 TEST_F(dblog_scan_test, scan_one_pwal_file_repairc_short_marker_end_only) {
     auto orig_data = data_short_marker_end_only;
 
-    // Case 1: durable_epoch < epoch → cut
+    // Case 1: durable_epoch < epoch -> cut
     scan_one_pwal_file_repairc(
         orig_data,
         [](const boost::filesystem::path& p, epoch_id_type max_epoch,
@@ -1471,7 +1460,7 @@ TEST_F(dblog_scan_test, scan_one_pwal_file_repairc_short_marker_end_only) {
         0x0FF
         );
 
-        // Case 2: durable_epoch == epoch → corrupted_durable_entries → cannot cut
+        // Case 2: durable_epoch == epoch -> corrupted_durable_entries -> cannot cut
         scan_one_pwal_file_repairc(
         orig_data,
         [&orig_data](const auto& p, epoch_id_type, const auto&, const auto& pe) {
@@ -1481,7 +1470,7 @@ TEST_F(dblog_scan_test, scan_one_pwal_file_repairc_short_marker_end_only) {
         0x100
         );
 
-        // Case 3: durable_epoch > epoch → corrupted_durable_entries → cannot cut
+        // Case 3: durable_epoch > epoch -> corrupted_durable_entries -> cannot cut
         scan_one_pwal_file_repairc(
         orig_data,
         [&orig_data](const auto& p, epoch_id_type, const auto&, const auto& pe) {
@@ -1495,7 +1484,7 @@ TEST_F(dblog_scan_test, scan_one_pwal_file_repairc_short_marker_end_only) {
 TEST_F(dblog_scan_test, scan_one_pwal_file_repairc_marker_end_followed_by_normal_entry) {
     auto orig_data = data_marker_end_followed_by_normal_entry;
 
-    // Case 1: durable_epoch < epoch → first half nondurable, second half unexpected → first half mark, unexpected takes priority
+    // Case 1: durable_epoch < epoch -> first half nondurable, second half unexpected -> first half mark, unexpected takes priority
     scan_one_pwal_file_repairc(
         orig_data,
         [&orig_data](const boost::filesystem::path& p,
@@ -1505,13 +1494,13 @@ TEST_F(dblog_scan_test, scan_one_pwal_file_repairc_marker_end_followed_by_normal
             EXPECT_EQ(max_epoch, 0x100);
             EXPECT_EQ(pe.value(), dblog_scan::parse_error::unexpected);
             auto data = read_entire_file(p);
-            EXPECT_EQ(data.at(0), '\x06');  // marker_begin → invalid
+            EXPECT_EQ(data.at(0), '\x06');  // marker_begin -> invalid
             EXPECT_EQ(data.substr(1), orig_data.substr(1));  // second half is unchanged
         },
         0x0FF
     );
 
-    // Case 2: durable_epoch == epoch → first half durable, second half unexpected → cannot be repaired
+    // Case 2: durable_epoch == epoch -> first half durable, second half unexpected -> cannot be repaired
     scan_one_pwal_file_repairc(
         orig_data,
         [&orig_data](const boost::filesystem::path& p,
@@ -1525,7 +1514,7 @@ TEST_F(dblog_scan_test, scan_one_pwal_file_repairc_marker_end_followed_by_normal
         0x100
     );
 
-    // Case 3: durable_epoch > epoch → first half durable, second half unexpected → cannot be repaired
+    // Case 3: durable_epoch > epoch -> first half durable, second half unexpected -> cannot be repaired
     scan_one_pwal_file_repairc(
         orig_data,
         [&orig_data](const boost::filesystem::path& p,
@@ -1546,7 +1535,7 @@ TEST_F(dblog_scan_test, scan_one_pwal_file_repairc_marker_end_followed_by_marker
     // Position verification
     EXPECT_EQ(orig_data.at(59), '\x02');
 
-    // Case 1: durable_epoch < first half epoch → both first and second half are nondurable → both get marked
+    // Case 1: durable_epoch < first half epoch -> both first and second half are nondurable -> both get marked
     scan_one_pwal_file_repairc(
         orig_data,
         [&orig_data](const auto& p, epoch_id_type, const auto&, const auto& pe) {
@@ -1558,7 +1547,7 @@ TEST_F(dblog_scan_test, scan_one_pwal_file_repairc_marker_end_followed_by_marker
         0x0FF
     );
 
-    // Case 2: durable_epoch == first half epoch → first half is durable, second half is nondurable → only second half gets marked
+    // Case 2: durable_epoch == first half epoch -> first half is durable, second half is nondurable -> only second half gets marked
     scan_one_pwal_file_repairc(
         orig_data,
         [&orig_data](const auto& p, epoch_id_type, const auto&, const auto& pe) {
@@ -1570,8 +1559,8 @@ TEST_F(dblog_scan_test, scan_one_pwal_file_repairc_marker_end_followed_by_marker
         0x100
     );
 
-    // Case 3: durable_epoch > 後半の epoch → 両方 durable → 修復なし
-    scan_one_pwal_file_repairc(
+        // Case 3: durable_epoch > latter half epoch -> both are durable -> no repair
+ scan_one_pwal_file_repairc(
         orig_data,
         [&orig_data](const auto& p, epoch_id_type, const auto&, const auto& pe) {
             EXPECT_EQ(pe.value(), dblog_scan::parse_error::ok);
@@ -1585,7 +1574,7 @@ TEST_F(dblog_scan_test, scan_one_pwal_file_repairc_marker_end_followed_by_marker
 TEST_F(dblog_scan_test, scan_one_pwal_file_repairc_marker_end_followed_by_marker_inv_begin) {
     auto orig_data = data_marker_end_followed_by_marker_inv_begin;
 
-    // Case 1: durable_epoch < epoch → first half is nondurable → mark
+    // Case 1: durable_epoch < epoch -> first half is nondurable -> mark
     scan_one_pwal_file_repairc(
         orig_data,
         [&orig_data](const auto& p, epoch_id_type max_epoch, const auto&, const auto& pe) {
@@ -1597,7 +1586,7 @@ TEST_F(dblog_scan_test, scan_one_pwal_file_repairc_marker_end_followed_by_marker
         0x0FF
     );
 
-    // Case 2: durable_epoch == epoch → the latter inv is not treated as valid → no mark
+    // Case 2: durable_epoch == epoch -> the latter inv is not treated as valid -> no mark
     scan_one_pwal_file_repairc(
         orig_data,
         [&orig_data](const auto& p, epoch_id_type max_epoch, const auto&, const auto& pe) {
@@ -1608,7 +1597,7 @@ TEST_F(dblog_scan_test, scan_one_pwal_file_repairc_marker_end_followed_by_marker
         0x100
     );
 
-    // Case 3: durable_epoch > latter epoch → both are durable → no mark
+    // Case 3: durable_epoch > latter epoch -> both are durable -> no mark
     scan_one_pwal_file_repairc(
         orig_data,
         [&orig_data](const auto& p, epoch_id_type max_epoch, const auto&, const auto& pe) {
@@ -1623,7 +1612,7 @@ TEST_F(dblog_scan_test, scan_one_pwal_file_repairc_marker_end_followed_by_marker
 TEST_F(dblog_scan_test, scan_one_pwal_file_repairc_marker_end_followed_by_short_entry) {
     auto orig_data = data_marker_end_followed_by_short_entry;
 
-    // Case 1: durable_epoch < epoch → first half nondurable so gets marked, second half SHORT cannot be cut → remains unexpected
+    // Case 1: durable_epoch < epoch -> first half nondurable so gets marked, second half SHORT cannot be cut -> remains unexpected
     scan_one_pwal_file_repairc(
         orig_data,
         [&orig_data](const auto& p, epoch_id_type max_epoch, const auto&, const auto& pe) {
@@ -1635,7 +1624,7 @@ TEST_F(dblog_scan_test, scan_one_pwal_file_repairc_marker_end_followed_by_short_
         0x0FF
     );
 
-    // Case 2: durable_epoch == epoch → SHORT は unexpected → 修復不可
+    // Case 2: durable_epoch == epoch -> SHORT is unexpected -> cannot be repaired
     scan_one_pwal_file_repairc(
         orig_data,
         [&orig_data](const auto& p, epoch_id_type max_epoch, const auto&, const auto& pe) {
@@ -1643,10 +1632,9 @@ TEST_F(dblog_scan_test, scan_one_pwal_file_repairc_marker_end_followed_by_short_
             EXPECT_EQ(pe.value(), dblog_scan::parse_error::unexpected);
             EXPECT_EQ(read_entire_file(p), orig_data);
         },
-        0x100
-    );
+        0x100);
 
-    // Case 3: durable_epoch > epoch → same unexpected
+    // Case 3: durable_epoch > epoch -> same unexpected
     scan_one_pwal_file_repairc(
         orig_data,
         [&orig_data](const auto& p, epoch_id_type max_epoch, const auto&, const auto& pe) {
@@ -1721,7 +1709,7 @@ TEST_F(dblog_scan_test, scan_one_pwal_file_inspect_marker_begin_partial_zerofill
     );
 }
 
-// === 0F-3: marker_begin の直後から 0fill ===
+// === 0F-3: 0fill immediately after marker_begin ===
 TEST_F(dblog_scan_test, scan_one_pwal_file_inspect_marker_begin_followed_by_zerofill) {
     auto orig_data = data_marker_begin_followed_by_zerofill;
 
@@ -1750,7 +1738,7 @@ TEST_F(dblog_scan_test, scan_one_pwal_file_inspect_marker_begin_followed_by_zero
     );
 }
 
-// === 0F-4: marker_begin + normal_entry の途中から 0fill ===
+// === 0F-4: 0fill starts in the middle of marker_begin + normal_entry ===
 TEST_F(dblog_scan_test, scan_one_pwal_file_inspect_marker_begin_normal_entry_partial_zerofill) {
     auto orig_data = data_marker_begin_normal_entry_partial_zerofill;
 
@@ -1779,7 +1767,7 @@ TEST_F(dblog_scan_test, scan_one_pwal_file_inspect_marker_begin_normal_entry_par
     );
 }
 
-// === 0F-5: marker_begin + normal_entry の後から 0fill ===
+// === 0F-5: 0fill starts after marker_begin + normal_entry ===
 TEST_F(dblog_scan_test, scan_one_pwal_file_inspect_marker_begin_normal_entry_followed_by_zerofill) {
     auto orig_data = data_marker_begin_normal_entry_followed_by_zerofill;
 
@@ -1808,7 +1796,7 @@ TEST_F(dblog_scan_test, scan_one_pwal_file_inspect_marker_begin_normal_entry_fol
     );
 }
 
-// === 0F-6: marker_end の途中から 0fill ===
+// === 0F-6: 0fill starts in the middle of marker_end ===
 TEST_F(dblog_scan_test, scan_one_pwal_file_inspect_marker_end_partial_zerofill) {
     auto orig_data = data_marker_end_partial_zerofill;
 
