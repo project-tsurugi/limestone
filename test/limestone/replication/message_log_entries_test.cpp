@@ -273,7 +273,7 @@ TEST_F(message_log_entries_test, mixed_socket_io_blob_socket_io_round_trip) {
     constexpr epoch_id_type k_epoch = 2025;
     message_log_entries original{k_epoch};
 
-    // Case A: no blobs → both socket_io↔blob_socket_io must work
+    // Case A: no blobs -> both socket_io↔blob_socket_io must work
     original.add_normal_entry(1, "k", "v", {1,1});
 
     {
@@ -301,7 +301,7 @@ TEST_F(message_log_entries_test, mixed_socket_io_blob_socket_io_round_trip) {
         EXPECT_EQ(msg->get_entries().size(), 1u);
     }
 
-    // Case B: with blobs → socket_io send should ASSERT_DEATH
+    // Case B: with blobs -> socket_io send should ASSERT_DEATH
     message_log_entries with_blobs{k_epoch};
     with_blobs.add_normal_with_blob(2, "k2", "v2", {2,2}, {42});
 

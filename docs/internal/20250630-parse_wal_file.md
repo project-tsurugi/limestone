@@ -943,3 +943,155 @@ log::log_channel::end_session ストリームをflush/syncする処理の前に�
   さらに `marker_end` には将来的に CRC を付与し、当該スニペット全体に物理的な破損がないことを  
   検証可能とする拡張も検討している。ただし、この CRC チェック機能については現時点では実装しない。
 
+
+
+### テストのマトリクス
+
+
+| テスト対象                                   | durable_epoch < epoch | durable_epoch == epoch | durable_epoch > epoch | 備考 |
+|----------------------------------------------|-----------------------|------------------------|-----------------------|------|
+| **1. marker_end のみ**                       | nondurable_entries    | ok                     | ok                    | durable_epoch 未満なら未コミットなので破損 |
+| **2. marker_end の後に normal_entry**        | nondurable_entries/unexpected            | unexpected             | unexpected            | 不正追記は破損、durable含むなら修復不能 |
+| **3. marker_end の後に marker_begin**        | nondurable_entries/nondurable_entries    | ok/nondurable_entries                  | ok/ok                 | 後続の marker_begin は新しいスニペット。epoch は連続している想定 |
+| **4. marker_end の後に marker_inv_begin**    | nondurable_entries    | ok                  | ok                 | 修復済みのスニペットとして正常扱い、後続 epoch は連続想定 |
+| **5. marker_end の後に SHORT_entry**         | nondurable_entries/unexpected            | unexpected             | unexpected            | 終了済みの後に SHORT_* は論理破綻 |
+| **6. SHORT_marker_end のみ**                 | broken_after          | corrupted_durable_entries | corrupted_durable_entries | 不完全終了を修復 or 修復不能 |
+
+**補足**
+
+- `ok/broken_after` は「前半スニペット / 後半スニペット」の解析結果を表す
+- 後続スニペットの epoch は連続（例: epoch+1）で想定する
+- テスト対象が2つのスニペットを持つ場合、このテーブルでの **`epoch`** は前半のスニペットの epoch を指す
+- ここでの **`marker_end`** は「`marker_begin` で始まり、`marker_end` で正常に閉じられた *スニペットの終了マーカー*」を意味します。
+- **`SHORT_marker_end`** も同様に、`marker_begin` で始まり `SHORT_marker_end` で終わるはずの *スニペットの終了マーカー* を指します。
+- **3. marker_end の後に marker_begin** と **4. marker_end の後に marker_inv_begin** は、どちらも「`marker_begin` または `marker_inv_begin` で始まり、正常に `marker_end` で閉じられた次のスニペット」であることが前提です。そうでない場合（例えば未終了や壊れた場合）は、このテストの前提外として別エラーが発生します。
+
+
+- **ok**
+  - WAL が完全に正常で、`durable_epoch` までのエントリが正しく揃っている。
+  - 修復は不要。
+
+- **nondurable_entries**
+  - `durable_epoch` より新しい完全なスニペットが存在する。
+  - `repair_by_mark` や `repair_by_cut` で修復する必用がある。
+
+- **broken_after**
+  - WAL の末尾など一部が途中で切れていたり、予期しない構造になっている。
+  - `durable_epoch` より新しい部分なので、`repair_by_mark` や `repair_by_cut` で修復可能。
+  - `durable_epoch` を超える部分なら切り離せばOK、超えない場合は破損扱い。
+
+- **corrupted_durable_entries**
+  - `durable_epoch` 以内のエントリが途中で欠損している。
+  - コミット済みのデータが壊れているので修復不能。
+  - 即エラーで停止。
+
+
+- **unexpected**
+  - 想定外の構造が出現した状態。
+  - コードの前提条件違反、論理バグ、ファイルフォーマット不一致の可能性。
+
+
+## 🔍 モード別動作表
+
+| ステータス                    | inspect の挙動      | repair_by_mark の挙動 | repair_by_cut の挙動 | 備考 |
+|-------------------------------|---------------------|-----------------------|----------------------|------|
+| **ok**                        | ok                  | ok                    | ok                   | 完全に正常なので何もしない |
+| **broken_after**              | broken_after        | repaired (mark)       | repaired (cut)       | durable_epoch を超えた未コミット部分を修復 |
+| **corrupted_durable_entries** | corrupted_durable_entries | corrupted_durable_entries | corrupted_durable_entries | 修復不能。即エラー |
+| **unexpected**                | unexpected (abort)  | unexpected (abort)    | unexpected (abort)   | 修復不能。即エラー |
+
+---
+
+### ✅ 意味
+
+- **inspect**  
+  現状を解析するのみで修復はしない。ステータスそのままを返す。
+
+- **repair_by_mark**  
+  `broken_after` ならマーカーを挿入して無効化（論理切断）。`ok` は何もしない。
+
+- **repair_by_cut**  
+  `broken_after` なら durable_epoch 超の未コミット部分を物理的に切り詰める。`ok` は何もしない。
+
+- **corrupted_durable_entries** / **unexpected**  
+  どのモードでも修復できないので即エラー。
+
+---
+
+### ✏️ 対応付けの位置づけ
+
+- この表は **どのエラーがどのモードでどの結果になるか** を示す設計仕様。
+- 実際には、例えば `broken_after` なら inspect は `broken_after` と返すが、 `repair_by_mark` では `repaired (mark)` となる。
+
+
+## 0fill位置パターンテスト
+
+* scan_one_pwal_file の破損検出ロジックが 途中の 0fill（UNKNOWN_TYPE_entry） を適切に検知し、
+* durable epoch 内は修復不能 / durable epoch 超は repair by mark / cut で除去可能
+となることを検証する。
+* 0fill の位置と前後の構造に応じて、DFA と実装の分岐が仕様通り動作するかを保証する。
+
+
+* テストシナリオ
+
+
+| シナリオ | 内容 | durable_epoch < epoch | durable_epoch == epoch | durable_epoch > epoch |
+|----------|------|-----------------------|------------------------|-----------------------|
+| ファイル全体 0fill | ファイル先頭から全て 0x00 | unexpected | unexpected | unexpected |
+| marker_begin の途中から 0fill | `marker_begin` の途中で切れて残りが 0x00 | corrupted_durable_entries | corrupted_durable_entries | broken_after |
+| marker_begin の直後から 0fill | 完全な `marker_begin` の直後に UNKNOWN | corrupted_durable_entries | corrupted_durable_entries | broken_after |
+| marker_begin + normal_entry の途中から 0fill | `normal_entry` の途中で切れて残りが 0x00 | corrupted_durable_entries | corrupted_durable_entries | broken_after |
+| marker_begin + normal_entry の後から 0fill | 正常な `normal_entry` の後、次のエントリが 0x00 | corrupted_durable_entries | corrupted_durable_entries | broken_after |
+| marker_end の途中から 0fill | `marker_end` が途中で切れて残りが 0x00 | corrupted_durable_entries | corrupted_durable_entries | broken_after |
+
+
+* ファイルの先頭が上の表のシナリオの場合と、正常なスニペットのあとに続く場合のテストをお行う。
+
+* 0fill 発生パターン別 WAL スキャンの期待挙動一覧
+
+| 構造 | durable_epoch < epoch | durable_epoch >= epoch |
+|------|-----------------------|------------------------|
+| ファイル全体が 0x00 で埋まっている | unexpected | unexpected |
+| marker_begin の途中で切れて残りが 0fill | corrupted_durable_entries | broken_after |
+| marker_begin は正常だが次が UNKNOWN | corrupted_durable_entries | broken_after |
+| normal_entry が途中で切れて残りが 0fill | corrupted_durable_entries | broken_after |
+| 正常な normal_entry 後、次のエントリが 0x00 | corrupted_durable_entries | broken_after |
+| marker_end が途中で切れて残りが 0fill | corrupted_durable_entries | broken_after |
+
+## 0fillされたデータのリペア
+
+### 概要
+
+0fillされたデータは、unexpectedとして扱われるが、0fillが開始する位置によっては
+現行ロジックで修復が不可能なケースがある。
+
+具体的には、ファイルの先頭から 0fill が始まる場合と、marker_endの直後から0fillが始まる場合である。
+
+このケース現在のコードでは次のように扱われている。
+
+```cpp
+        case lex_token::token_type::UNKNOWN_TYPE_entry: {
+            // UNKNOWN_TYPE_entry : (not 1st) { if (valid && current_epoch <= ld) error-corrupted-durable else error-damaged-entry } -> END
+            // UNKNOWN_TYPE_entry : (1st) { error-broken-snippet-header } -> END
+            if (first) {
+                err_unexpected();  // FIXME: error type
+                pe = parse_error(parse_error::unexpected, fpos_before_read_entry);
+            } else if (valid && current_epoch <= ld_epoch) {
+```
+
+無条件で、parse_error::unexpected を返していて、リペアされない。
+
+
+実は、次の方法で修復可能である。
+
+repair by mark => 0fillされた最初の位置にmarker_invalidated_beginを書き込む
+repair by cut => 0fillされた最初の位置からカットする。
+
+
+### SHORT_maker_beginの扱い
+
+上の対応で、marker_invalidated_beginを書き込んでも、
+次のWALのREADでSHORT_marker_beginとみなされると破損しているとして
+扱われる。これだと、repair by markでリペアしたことにならない。
+
+現行のSHORT_marker_beginの処理は過剰なので、単に無視するように修正する。

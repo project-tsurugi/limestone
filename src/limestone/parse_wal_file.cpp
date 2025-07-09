@@ -221,11 +221,12 @@ using namespace limestone::api;
 //    eof                        : {} -> END
 //    marker_begin               : { head_pos := ...; max-epoch := max(...); if (epoch <= ld) { valid := true } else { valid := false, error-nondurable } } -> loop
 //    marker_invalidated_begin   : { head_pos := ...; max-epoch := max(...); valid := false } -> loop
-//    SHORT_marker_begin         : { head_pos := ...; if (current_epoch <= ld) error-corrupted-durable else error-truncated } -> END
-//    SHORT_marker_inv_begin     : { head_pos := ...; error-truncated } -> END
+//    SHORT_marker_begin         : { head_pos := ...; if (first) treat as leftover -> repair_by_cut or ignore; else { if (current_epoch <= ld) error-corrupted-durable else error-truncated } } -> END
+//    SHORT_marker_inv_begin     : { already invalidated -> safe to ignore } -> END
 //    marker_end                 : { error-unexpected } -> END
 //    SHORT_marker_end           : { error-unexpected } -> END
-//    UNKNOWN_TYPE_entry         : { if (current_epoch <= ld) error-corrupted-durable else error-broken-snippet-header } -> END
+//    UNKNOWN_TYPE_entry         : (not 1st) { if (valid && current_epoch <= ld) error-corrupted-durable else error-damaged-entry } -> END
+//                               : (1st) { treat as leftover -> repair_by_mark or repair_by_cut } -> END
 //    else                       : { err_unexpected } -> END
 //
 //  loop:
@@ -246,7 +247,7 @@ using namespace limestone::api;
 //    SHORT_add_storage          : { if (valid && current_epoch <= ld) error-corrupted-durable else if (valid) error-truncated } -> END
 //    SHORT_remove_storage       : { if (valid && current_epoch <= ld) error-corrupted-durable else if (valid) error-truncated } -> END
 //    SHORT_marker_begin         : { if (current_epoch <= ld) error-corrupted-durable else error-truncated } -> END
-//    SHORT_marker_inv_begin     : { error-truncated } -> END
+//    SHORT_marker_inv_begin     : { already invalidated -> safe to ignore } -> END
 //    SHORT_marker_end           : { error-truncated } -> END
 //    UNKNOWN_TYPE_entry         : { if (valid && current_epoch <= ld) error-corrupted-durable else if (valid) error-damaged-entry } -> END
 
@@ -351,6 +352,7 @@ epoch_id_type dblog_scan::scan_one_pwal_file(  // NOLINT(readability-function-co
                 valid = false;
                 VLOG_LP(45) << "valid: false";
             }
+            first = false;
             break;
         }
         case lex_token::token_type::marker_invalidated_begin: {
@@ -361,6 +363,7 @@ epoch_id_type dblog_scan::scan_one_pwal_file(  // NOLINT(readability-function-co
             invalidated_wrote = true;
             valid = false;
             VLOG_LP(45) << "valid: false (already marked)";
+            first = false;
             break;
         }
         case lex_token::token_type::SHORT_normal_entry:
@@ -420,8 +423,7 @@ epoch_id_type dblog_scan::scan_one_pwal_file(  // NOLINT(readability-function-co
 // SHORT_marker_begin : { head_pos := ...; error-truncated } -> END
             fpos_epoch_snippet = fpos_before_read_entry;
             marked_before_scan = false;
-
-            if (current_epoch <= ld_epoch) {
+            if (!first && current_epoch <= ld_epoch) {
                 report_error(ec);
                 pe = parse_error(parse_error::corrupted_durable_entries, fpos_epoch_snippet);
             } else {
@@ -447,36 +449,45 @@ epoch_id_type dblog_scan::scan_one_pwal_file(  // NOLINT(readability-function-co
             break;
         }
         case lex_token::token_type::SHORT_marker_inv_begin: {
-// SHORT_marker_inv_begin : { head_pos := ... } -> END
+        // SHORT_marker_inv_begin : partial invalidated marker -> safe to ignore
             fpos_epoch_snippet = fpos_before_read_entry;
             marked_before_scan = true;
-            // ignore short in invalidated blocks
-            switch (process_at_truncated_) {
-            case process_at_truncated::ignore:
-                break;
-            case process_at_truncated::repair_by_mark:
-                strm.clear();  // reset eof
-                // invalidate_epoch_snippet(strm, fpos_epoch_snippet);
-                // fixed++;
-                // VLOG_LP(0) << "marked invalid " << p << " at offset " << fpos_epoch_snippet;
-                pe = parse_error(parse_error::broken_after_marked, fpos_epoch_snippet);
-                break;
-            case process_at_truncated::repair_by_cut:
-                pe = parse_error(parse_error::broken_after_tobe_cut, fpos_epoch_snippet);
-                break;
-            case process_at_truncated::report:
-                report_error(ec);
-                pe = parse_error(parse_error::broken_after_marked, fpos_epoch_snippet);
-            }
-            aborted = true;
+            invalidated_wrote = true;
+            valid = false;
+            VLOG_LP(45) << "valid: false (already marked)";
+            first = false;
             break;
         }
         case lex_token::token_type::UNKNOWN_TYPE_entry: {
-            // UNKNOWN_TYPE_entry : (not 1st) { if (valid && current_epoch <= ld) error-corrupted-durable else error-damaged-entry } -> END
-            // UNKNOWN_TYPE_entry : (1st) { error-broken-snippet-header } -> END
+        // UNKNOWN_TYPE_entry : (not 1st) { if (valid && current_epoch <= ld) error-corrupted-durable else error-damaged-entry } -> END
+        // UNKNOWN_TYPE_entry : (1st) { treat as leftover -> repair_by_mark or repair_by_cut } -> END
             if (first) {
-                err_unexpected();  // FIXME: error type
-                pe = parse_error(parse_error::unexpected, fpos_before_read_entry);
+                fpos_epoch_snippet = fpos_before_read_entry;
+
+                switch (process_at_damaged_) {
+                case process_at_damaged::ignore:
+                    break;
+
+                case process_at_damaged::repair_by_mark:
+                    strm.clear();  // reset eof
+                    invalidate_epoch_snippet(strm, fpos_epoch_snippet);
+                    fixed++;
+                    VLOG_LP(0) << "marked invalid " << p << " at offset " << fpos_epoch_snippet;
+                    if (pe.value() < parse_error::broken_after_marked) {
+                        pe = parse_error(parse_error::broken_after_marked, fpos_epoch_snippet);
+                    }
+                    break;
+
+                case process_at_damaged::repair_by_cut:
+                    pe = parse_error(parse_error::broken_after_tobe_cut, fpos_epoch_snippet);
+                    break;
+
+                case process_at_damaged::report:
+                    err_unexpected();
+                    report_error(ec);
+                    pe = parse_error(parse_error::unexpected, fpos_epoch_snippet);
+                    break;
+                }
             } else if (valid && current_epoch <= ld_epoch) {
                 report_error(ec);
                 pe = parse_error(parse_error::corrupted_durable_entries, fpos_epoch_snippet);
@@ -540,7 +551,6 @@ epoch_id_type dblog_scan::scan_one_pwal_file(  // NOLINT(readability-function-co
             pe = parse_error(parse_error::unexpected, fpos_before_read_entry);  // point to this log_entry
         }
         if (aborted) break;
-        first = false;
     }
     strm.close();
     if (pe.value() == parse_error::broken_after_tobe_cut) {
