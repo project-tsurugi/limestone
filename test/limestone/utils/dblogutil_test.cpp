@@ -192,6 +192,14 @@ static constexpr const char* metadata_location = "/tmp/dblogutil_test/metadata";
         EXPECT_EQ(from.substr(offset + 1), to.substr(offset + 1));
     }
 
+    void expect_mark_at_from_zero(std::size_t offset, std::string_view& from) {
+        auto to = read_entire_file(list_dir()[0]);
+        ASSERT_EQ(from.at(offset), '\x00');
+        EXPECT_EQ(to.at(offset), '\x06');                         // marked
+        EXPECT_EQ(from.substr(0, offset), to.substr(0, offset));  // no change before mark
+        EXPECT_EQ(from.substr(offset + 1), to.substr(offset + 1));
+    }
+
     void expect_cut_at(std::size_t offset, std::string_view& from) {
         auto to = read_entire_file(list_dir()[0]);
         ASSERT_TRUE(from.at(offset) == '\x02' || from.at(offset) == '\x06');
@@ -253,8 +261,8 @@ TEST_F(dblogutil_test, inspect_truncated_invalidated_normal_entry) {
 
 TEST_F(dblogutil_test, inspect_truncated_invalidated_epoch_header) {
     auto [rc, out] = inspect("pwal_0000", data_truncated_invalidated_epoch_header);
-    EXPECT_EQ(rc, 1 << 8);
-    EXPECT_NE(out.find("\n" "status: auto-repairable"), out.npos);
+    EXPECT_EQ(rc, 0);
+    EXPECT_NE(out.find("\n" "status: OK"), out.npos);
 }
 
 TEST_F(dblogutil_test, inspect_allzero) {
@@ -386,9 +394,9 @@ TEST_F(dblogutil_test, repairm_truncated_invalidated_epoch_header_detached) {
 TEST_F(dblogutil_test, repairm_allzero) {
     auto orig_data = data_allzero;
     auto [rc, out] = repairm("pwal_0000", orig_data);
-    EXPECT_EQ(rc, 16 << 8);
-    EXPECT_NE(out.find("\n" "status: unrepairable"), out.npos);
-    expect_no_change(orig_data);
+    EXPECT_EQ(rc, 0);
+    EXPECT_NE(out.find("\n" "status: repaired"), out.npos);
+    expect_mark_at_from_zero(0, orig_data);
 }
 
 TEST_F(dblogutil_test, repairc_zerofill) {
@@ -435,18 +443,19 @@ TEST_F(dblogutil_test, repairc_truncated_invalidated_epoch_header) {
     auto orig_data = data_truncated_invalidated_epoch_header;
     auto [rc, out, rc2, out2] = repairc_twice("pwal_0000", orig_data);
     EXPECT_EQ(rc, 0);
-    EXPECT_NE(out.find("\n" "status: repaired"), out.npos);
+    EXPECT_NE(out.find("\n" "status: OK"), out.npos);
     EXPECT_EQ(rc2, 0);
     EXPECT_NE(out2.find("\n" "status: OK"), out2.npos);
-    expect_cut_at(50, orig_data);
+    expect_no_change(orig_data);
 }
 
 TEST_F(dblogutil_test, repairc_allzero) {
     auto orig_data = data_allzero;
     auto [rc, out] = repairc("pwal_0000", orig_data);
-    EXPECT_EQ(rc, 16 << 8);
-    EXPECT_TRUE(contains_line_starts_with(out, "status: unrepairable"));
-    expect_no_change(orig_data);
+    EXPECT_EQ(rc, 0);
+    EXPECT_TRUE(contains_line_starts_with(out, "status: repaired"));
+    auto to = read_entire_file(list_dir()[0]);
+    EXPECT_TRUE(to.empty()); // allzero file is cut to empty
 }
 
 TEST_F(dblogutil_test, repair_nonexistent) {
