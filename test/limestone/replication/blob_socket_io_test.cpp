@@ -17,14 +17,14 @@ constexpr const char* base_directory = "/tmp/blob_socket_io_test";
 
 class blob_socket_io_test : public ::testing::Test {
 
-// TODO: エラー系のテストが不足していｔ，カバレッジが低い。    
+// TODO: エラー系のテストが不足していて，カバレッジが低い。    
 
 
 
 protected:
     void SetUp() override {
-        system(("rm -rf " + std::string(base_directory)).c_str());
-        system(("mkdir -p " + std::string(base_directory)).c_str());
+        [[maybe_unused]] int rm_result = system(("rm -rf " + std::string(base_directory)).c_str());
+        [[maybe_unused]] int mkdir_result = system(("mkdir -p " + std::string(base_directory)).c_str());
 
         std::vector<boost::filesystem::path> data_locations{};
         data_locations.emplace_back(base_directory);
@@ -36,7 +36,7 @@ protected:
 
     void TearDown() override {
         datastore_.reset();
-        system(("rm -rf " + std::string(base_directory)).c_str());
+        [[maybe_unused]] int rm_result2 = system(("rm -rf " + std::string(base_directory)).c_str());
     }
 
 

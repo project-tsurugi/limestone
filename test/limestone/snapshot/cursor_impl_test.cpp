@@ -28,6 +28,21 @@ using limestone::api::log_channel;
 
 class cursor_impl_testable : public  limestone::internal::cursor_impl {
 public:
+    /**
+     * @brief Provides backward-compatible constructor for existing test cases.
+     * @details The base class cursor_impl now requires clear_storage as a constructor parameter.
+     * However, existing tests do not depend on clear_storage, so we inject an empty map here.
+     */
+    explicit cursor_impl_testable(const boost::filesystem::path& snapshot_file) : cursor_impl(snapshot_file, {}) {}
+
+    /**
+     * @brief Provides backward-compatible constructor for existing test cases (compacted snapshot).
+     * @details Similar to the single-argument version, we supply an empty clear_storage map
+     * to preserve compatibility with existing test logic.
+     */
+    cursor_impl_testable(const boost::filesystem::path& snapshot_file, const boost::filesystem::path& compacted_file)
+        : cursor_impl(snapshot_file, compacted_file, {}) {}
+
     using cursor_impl::cursor_impl;
     using cursor_impl::next;
     using cursor_impl::validate_and_read_stream;
@@ -38,6 +53,7 @@ public:
     using cursor_impl::value;  
     using cursor_impl::type;
     using cursor_impl::blob_ids;
+    using cursor_impl::current;
 
     ~cursor_impl_testable() {
         // Ensure that the close() method is called to release resources.
@@ -427,15 +443,14 @@ TEST_F(cursor_impl_test, while_loop_resets_invalid_entry) {
         FAIL() << "pwal_0000 file not found for renaming";
     }
 
-    // Create a cursor using the snapshot file.
-    cursor_impl_testable test_cursor(snapshot_file);
-
     // Set clear_storage to a threshold that makes the entry non-relevant.
     // For example, if the entry's write version is {1, 0}, setting the threshold to {1, 1} 
     // will cause the entry to be considered outdated (non-relevant).
     std::map<limestone::api::storage_id_type, limestone::api::write_version_type> clear_storage;
     clear_storage[1] = limestone::api::write_version_type(1, 1);
-    test_cursor.set_clear_storage(clear_storage);
+
+    // Create a cursor using the snapshot file.
+    cursor_impl_testable test_cursor(snapshot_file, clear_storage);
 
     // Call next(). The while loop in validate_and_read_stream will read the single entry,
     // find it non-relevant, reset log_entry, and eventually return false since no further entries exist.
@@ -724,6 +739,30 @@ TEST_F(cursor_impl_test, snapshot_remove_entry_overrides_compacted_normal) {
     EXPECT_FALSE(cursor.next()) << "remove_entry in snapshot should override compacted normal_entry";
 }
 
+TEST_F(cursor_impl_test, current_returns_latest_entry_after_next) {
+    create_log_file("snapshot", entry_maker_.get_default_entries());
+    boost::filesystem::path snapshot_file = boost::filesystem::path(location) / "snapshot";
+
+    cursor_impl_testable cursor(snapshot_file);
+
+    ASSERT_TRUE(cursor.next());
+    const auto& entry1 = cursor.current();
+    std::string key;
+    std::string value;
+    entry1.key(key);
+    entry1.value(value);
+    EXPECT_EQ(key, "key1");
+    EXPECT_EQ(value, "value1");
+
+    ASSERT_TRUE(cursor.next());
+    const auto& entry2 = cursor.current();
+    entry2.key(key);
+    entry2.value(value);
+    EXPECT_EQ(key, "key2");
+    EXPECT_EQ(value, "value2"); 
+
+    EXPECT_FALSE(cursor.next());
+}
 
 
 }  // namespace limestone::testing
