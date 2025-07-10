@@ -425,7 +425,7 @@ TEST_F(message_log_entries_test, write_all_entry_type_to_pwal_via_replication_ch
     auto request = message_log_channel_create::create();
     EXPECT_TRUE(clients.back().send_message(*request));
 
-    // wwait for the ack response
+    // Wait for the ack response
     EXPECT_EQ(clients.back().receive_message()->get_message_type_id(), message_type_id::COMMON_ACK);
 
     // 3) Send log entries
@@ -452,7 +452,7 @@ TEST_F(message_log_entries_test, write_all_entry_type_to_pwal_via_replication_ch
 
     ds->ready();
     clients.back().send_message(msg);
-    // wwait for the ack response
+    // Wait for the ack response
     EXPECT_EQ(clients.back().receive_message()->get_message_type_id(), message_type_id::COMMON_ACK);
 
     // 4) Close the control session
