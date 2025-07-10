@@ -139,43 +139,6 @@ static constexpr const char* location = "/tmp/dblog_scan_test";
 
         check(p, max_epoch, errors, pe);
     }
-    void hexdump(std::string_view data, const std::string& name = "") {
-        const size_t bytes_per_line = 16;
-
-        if (!name.empty()) {
-            std::cerr << name << ":\n";
-        }
-
-        for (size_t i = 0; i < data.size(); i += bytes_per_line) {
-            std::cerr << std::setw(4) << std::setfill('0') << std::hex << i << ": ";
-
-            // Output bytes in hexadecimal
-            for (size_t j = 0; j < bytes_per_line; ++j) {
-                if (i + j < data.size()) {
-                    std::cerr << std::setw(2) << static_cast<unsigned>(static_cast<unsigned char>(data[i + j])) << " ";
-                } else {
-                    std::cerr << "   ";
-                }
-            }
-
-            std::cerr << " ";
-
-            // Output bytes as ASCII
-            for (size_t j = 0; j < bytes_per_line; ++j) {
-                if (i + j < data.size()) {
-                    unsigned char c = static_cast<unsigned char>(data[i + j]);
-                    if (std::isprint(c)) {
-                        std::cerr << c;
-                    } else {
-                        std::cerr << ".";
-                    }
-                }
-            }
-
-            std::cerr << "\n";
-        }
-        std::cerr << std::dec;  
-    }
 
     std::string concat_binary(std::string_view a, std::string_view b) {
         std::string result;
@@ -1625,7 +1588,7 @@ TEST_F(dblog_scan_test, scan_one_pwal_file_inspect_all_zerofill) {
     scan_one_pwal_file_inspect(
         orig_data,
         [](const boost::filesystem::path&, epoch_id_type, const auto&, const dblog_scan::parse_error& pe) {
-            EXPECT_EQ(pe.value(), dblog_scan::parse_error::unexpected);
+            EXPECT_EQ(pe.value(), dblog_scan::parse_error::broken_after);
         },
         0x0FF
     );
@@ -1634,7 +1597,7 @@ TEST_F(dblog_scan_test, scan_one_pwal_file_inspect_all_zerofill) {
     scan_one_pwal_file_inspect(
         orig_data,
         [](const boost::filesystem::path&, epoch_id_type, const auto&, const dblog_scan::parse_error& pe) {
-            EXPECT_EQ(pe.value(), dblog_scan::parse_error::unexpected);
+            EXPECT_EQ(pe.value(), dblog_scan::parse_error::broken_after);
         },
         0x100
     );
@@ -1643,7 +1606,7 @@ TEST_F(dblog_scan_test, scan_one_pwal_file_inspect_all_zerofill) {
     scan_one_pwal_file_inspect(
         orig_data,
         [](const boost::filesystem::path&, epoch_id_type, const auto&, const dblog_scan::parse_error& pe) {
-            EXPECT_EQ(pe.value(), dblog_scan::parse_error::unexpected);
+            EXPECT_EQ(pe.value(), dblog_scan::parse_error::broken_after);
         },
         0x101
     );
@@ -1802,7 +1765,7 @@ TEST_F(dblog_scan_test, scan_one_pwal_file_inspect_valid_snippet_followed_by_all
     scan_one_pwal_file_inspect(
         orig_data,
         [](const auto&, epoch_id_type, const auto&, const dblog_scan::parse_error& pe) {
-            EXPECT_EQ(pe.value(), dblog_scan::parse_error::unexpected);
+            EXPECT_EQ(pe.value(), dblog_scan::parse_error::broken_after);
         },
         0x0FF
     );
@@ -1810,7 +1773,7 @@ TEST_F(dblog_scan_test, scan_one_pwal_file_inspect_valid_snippet_followed_by_all
     scan_one_pwal_file_inspect(
         orig_data,
         [](const auto&, epoch_id_type, const auto&, const dblog_scan::parse_error& pe) {
-            EXPECT_EQ(pe.value(), dblog_scan::parse_error::unexpected);
+            EXPECT_EQ(pe.value(), dblog_scan::parse_error::broken_after);
         },
         0x100
     );
@@ -1818,7 +1781,7 @@ TEST_F(dblog_scan_test, scan_one_pwal_file_inspect_valid_snippet_followed_by_all
     scan_one_pwal_file_inspect(
         orig_data,
         [](const auto&, epoch_id_type, const auto&, const dblog_scan::parse_error& pe) {
-            EXPECT_EQ(pe.value(), dblog_scan::parse_error::unexpected);
+            EXPECT_EQ(pe.value(), dblog_scan::parse_error::broken_after);
         },
         0x101
     );

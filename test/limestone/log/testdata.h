@@ -9,6 +9,7 @@ using namespace std::literals;
 // Binary test data definitions (C++17: inline constexpr)
 inline constexpr const std::string_view epoch_0_str = "\x04\x00\x00\x00\x00\x00\x00\x00\x00"sv;
 inline constexpr const std::string_view epoch_0x100_str = "\x04\x00\x01\x00\x00\x00\x00\x00\x00"sv;
+inline constexpr const std::string_view epoch_0xff_str = "\x04\xff\x00\x00\x00\x00\x00\x00\x00"sv;
 inline constexpr const std::string_view data_normal =
     "\x02\xff\x00\x00\x00\x00\x00\x00\x00"  // marker_begin 0xff
     // XXX: epoch footer...
@@ -149,6 +150,9 @@ inline constexpr std::string_view valid_snippet =
     "\x01\x04\x00\x00\x00\x04\x00\x00\x00" "storage1" "1234" "vermajor" "verminor" "1234"
     "\x03\x00\x01\x00\x00\x00\x00\x00\x00"  // marker_end
     ""sv;
+
+// Debug utilities
+void hexdump(std::string_view data, const std::string& name = "");
 
 // File helpers
 void create_file(const boost::filesystem::path& path, std::string_view content);

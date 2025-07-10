@@ -1,5 +1,8 @@
 #include <algorithm>
 #include <sstream>
+#include <iomanip>
+#include <cctype>
+#include <iostream>
 #include <limestone/logging.h>
 
 #include <boost/filesystem.hpp>
@@ -37,6 +40,44 @@ std::string read_entire_file(const boost::filesystem::path& path) {
     ss << strm.rdbuf();
     strm.close();
     return ss.str();
+}
+
+void hexdump(std::string_view data, const std::string& name) {
+    const size_t bytes_per_line = 16;
+
+    if (!name.empty()) {
+        std::cerr << name << ":\n";
+    }
+
+    for (size_t i = 0; i < data.size(); i += bytes_per_line) {
+        std::cerr << std::setw(4) << std::setfill('0') << std::hex << i << ": ";
+
+        // Output bytes in hexadecimal
+        for (size_t j = 0; j < bytes_per_line; ++j) {
+            if (i + j < data.size()) {
+                std::cerr << std::setw(2) << static_cast<unsigned>(static_cast<unsigned char>(data[i + j])) << " ";
+            } else {
+                std::cerr << "   ";
+            }
+        }
+
+        std::cerr << " ";
+
+        // Output bytes as ASCII
+        for (size_t j = 0; j < bytes_per_line; ++j) {
+            if (i + j < data.size()) {
+                unsigned char c = static_cast<unsigned char>(data[i + j]);
+                if (std::isprint(c)) {
+                    std::cerr << c;
+                } else {
+                    std::cerr << ".";
+                }
+            }
+        }
+
+        std::cerr << "\n";
+    }
+    std::cerr << std::dec;
 }
 
 } // namespace limestone::testing

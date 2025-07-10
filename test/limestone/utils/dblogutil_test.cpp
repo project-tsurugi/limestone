@@ -63,27 +63,33 @@ static constexpr const char* metadata_location = "/tmp/dblogutil_test/metadata";
         return ret;
     }
 
-    std::pair<int, std::string> inspect(std::string pwal_fname, std::string_view data) {
+    std::pair<int, std::string> inspect(
+        std::string pwal_fname,
+        std::string_view data,
+        std::string_view epoch = epoch_0x100_str
+    ) {
         boost::filesystem::path dir{location};
-        create_file(dir / "epoch", epoch_0x100_str);
+        create_file(dir / "epoch", epoch);
         create_file(dir / std::string(manifest::file_name), data_manifest());
         auto pwal = dir / pwal_fname;
         create_file(pwal, data);
-        std::string command;
-        command = UTIL_COMMAND " inspect " + dir.string() + " 2>&1";
+        std::string command = UTIL_COMMAND " inspect " + dir.string() + " 2>&1";
         std::string out;
         int rc = invoke(command, out);
         return make_pair(rc, out);
     }
 
-    std::pair<int, std::string> repairm(std::string pwal_fname, std::string_view data) {
+    std::pair<int, std::string> repairm(
+        std::string pwal_fname,
+        std::string_view data,
+        std::string_view epoch = epoch_0x100_str
+    ) {
         boost::filesystem::path dir{location};
-        create_file(dir / "epoch", epoch_0x100_str);
+        create_file(dir / "epoch", epoch);
         create_file(dir / std::string(manifest::file_name), data_manifest());
         auto pwal = dir / pwal_fname;
         create_file(pwal, data);
-        std::string command;
-        command = UTIL_COMMAND " repair --cut=false " + dir.string() + " 2>&1";
+        std::string command = UTIL_COMMAND " repair --cut=false " + dir.string() + " 2>&1";
         std::string out;
         int rc = invoke(command, out);
         auto files = list_dir();
@@ -92,14 +98,17 @@ static constexpr const char* metadata_location = "/tmp/dblogutil_test/metadata";
         return make_pair(rc, out);
     }
 
-    std::tuple<int, std::string, int, std::string> repairm_twice(std::string pwal_fname, std::string_view data) {
+    std::tuple<int, std::string, int, std::string> repairm_twice(
+        std::string pwal_fname,
+        std::string_view data,
+        std::string_view epoch = epoch_0x100_str
+    ) {
         boost::filesystem::path dir{location};
-        create_file(dir / "epoch", epoch_0x100_str);
+        create_file(dir / "epoch", epoch);
         create_file(dir / std::string(manifest::file_name), data_manifest());
         auto pwal = dir / pwal_fname;
         create_file(pwal, data);
-        std::string command;
-        command = UTIL_COMMAND " repair --cut=false " + dir.string() + " 2>&1";
+        std::string command = UTIL_COMMAND " repair --cut=false " + dir.string() + " 2>&1";
         std::string out;
         int rc = invoke(command, out);
         auto files = list_dir();
@@ -119,14 +128,17 @@ static constexpr const char* metadata_location = "/tmp/dblogutil_test/metadata";
         return std::make_tuple(rc, out, rc2, out2);
     }
 
-    std::pair<int, std::string> repairc(std::string pwal_fname, std::string_view data) {
+    std::pair<int, std::string> repairc(
+        std::string pwal_fname,
+        std::string_view data,
+        std::string_view epoch = epoch_0x100_str
+    ) {
         boost::filesystem::path dir{location};
-        create_file(dir / "epoch", epoch_0x100_str);
+        create_file(dir / "epoch", epoch);
         create_file(dir / std::string(manifest::file_name), data_manifest());
         auto pwal = dir / pwal_fname;
         create_file(pwal, data);
-        std::string command;
-        command = UTIL_COMMAND " repair --cut=true " + dir.string() + " 2>&1";
+        std::string command = UTIL_COMMAND " repair --cut=true " + dir.string() + " 2>&1";
         std::string out;
         int rc = invoke(command, out);
         auto files = list_dir();
@@ -135,14 +147,17 @@ static constexpr const char* metadata_location = "/tmp/dblogutil_test/metadata";
         return make_pair(rc, out);
     }
 
-    std::tuple<int, std::string, int, std::string> repairc_twice(std::string pwal_fname, std::string_view data) {
+    std::tuple<int, std::string, int, std::string> repairc_twice(
+        std::string pwal_fname,
+        std::string_view data,
+        std::string_view epoch = epoch_0x100_str
+    ) {
         boost::filesystem::path dir{location};
-        create_file(dir / "epoch", epoch_0x100_str);
+        create_file(dir / "epoch", epoch);
         create_file(dir / std::string(manifest::file_name), data_manifest());
         auto pwal = dir / pwal_fname;
         create_file(pwal, data);
-        std::string command;
-        command = UTIL_COMMAND " repair --cut=true " + dir.string() + " 2>&1";
+        std::string command = UTIL_COMMAND " repair --cut=true " + dir.string() + " 2>&1";
         std::string out;
         int rc = invoke(command, out);
         auto files = list_dir();
@@ -250,8 +265,8 @@ TEST_F(dblogutil_test, inspect_truncated_invalidated_epoch_header) {
 
 TEST_F(dblogutil_test, inspect_allzero) {
     auto [rc, out] = inspect("pwal_0000", data_allzero);
-    EXPECT_EQ(rc, 2 << 8);
-    EXPECT_NE(out.find("\n" "status: unrepairable"), out.npos);
+    EXPECT_EQ(rc, 1 << 8);
+    EXPECT_NE(out.find("\n" "status: auto-repairable"), out.npos);
 }
 
 TEST_F(dblogutil_test, repairm_normal) {
@@ -584,6 +599,413 @@ TEST_F(dblogutil_test, execution_fails_while_active_datastore) {
     auto [rc_inactive, out_inacive] = inspect("pwal_0000", data_normal);
     EXPECT_EQ(rc_inactive, 0);
     EXPECT_NE(out_inacive.find("\n" "status: OK"), out.npos);
+}
+
+
+TEST_F(dblogutil_test, inspect_marker_end_only) {
+    auto [rc, out] = inspect("pwal_0000", data_marker_end_only);
+    EXPECT_EQ(rc, 0);
+    EXPECT_NE(out.find("\n" "status: OK"), out.npos);
+    EXPECT_NE(out.find("\n" "count-durable-wal-entries: 1"), out.npos);
+}
+
+TEST_F(dblogutil_test, repairm_marker_end_only) {
+    auto orig_data = data_marker_end_only;
+    auto [rc, out] = repairm("pwal_0000", orig_data);
+    EXPECT_EQ(rc, 0);
+    EXPECT_NE(out.find("\n" "status: OK"), out.npos);
+    expect_no_change(orig_data);
+}
+
+TEST_F(dblogutil_test, repairc_marker_end_only) {
+    auto orig_data = data_marker_end_only;
+    auto [rc, out] = repairc("pwal_0000", orig_data);
+    EXPECT_EQ(rc, 0);
+    EXPECT_NE(out.find("\n" "status: OK"), out.npos);
+    expect_no_change(orig_data);
+}
+
+TEST_F(dblogutil_test, inspect_marker_end_followed_by_normal_entry) {
+    auto [rc, out] = inspect("pwal_0000", data_marker_end_followed_by_normal_entry);
+    EXPECT_EQ(rc, 2 << 8);
+    EXPECT_NE(out.find("\n" "status: unrepairable"), out.npos);
+}
+
+TEST_F(dblogutil_test, repairm_marker_end_followed_by_normal_entry) {
+    auto orig_data = data_marker_end_followed_by_normal_entry;
+    auto [rc, out] = repairm("pwal_0000", orig_data);
+    EXPECT_EQ(rc, 16 << 8);
+    EXPECT_NE(out.find("\n" "status: unrepairable"), out.npos);
+    expect_no_change(orig_data);
+}
+
+TEST_F(dblogutil_test, repairc_marker_end_followed_by_normal_entry) {
+    auto orig_data = data_marker_end_followed_by_normal_entry;
+    auto [rc, out] = repairc("pwal_0000", orig_data);
+    EXPECT_EQ(rc, 16 << 8);
+    EXPECT_NE(out.find("\n" "status: unrepairable"), out.npos);
+    expect_no_change(orig_data);
+}
+
+TEST_F(dblogutil_test, inspect_marker_end_followed_by_marker_begin) {
+    auto [rc, out] = inspect("pwal_0000", data_marker_end_followed_by_marker_begin);
+    EXPECT_EQ(rc, 1 << 8);
+    EXPECT_NE(out.find("\n" "status: auto-repairable"), out.npos);
+}
+
+TEST_F(dblogutil_test, repairm_marker_end_followed_by_marker_begin) {
+    auto orig_data = data_marker_end_followed_by_marker_begin;
+    auto [rc, out, rc2, out2] = repairm_twice("pwal_0000", orig_data);
+    EXPECT_EQ(rc, 0);
+    EXPECT_NE(out.find("\n" "status: repaired"), out.npos);
+    EXPECT_EQ(rc2, 0);
+    EXPECT_NE(out2.find("\n" "status: OK"), out2.npos);
+    expect_mark_at(59, orig_data);
+}
+
+TEST_F(dblogutil_test, repairc_marker_end_followed_by_marker_begin) {
+    auto orig_data = data_marker_end_followed_by_marker_begin;
+    auto [rc, out, rc2, out2] = repairc_twice("pwal_0000", orig_data);
+    EXPECT_EQ(rc, 0);
+    EXPECT_NE(out.find("\n" "status: repaired"), out.npos);
+    EXPECT_EQ(rc2, 0);
+    EXPECT_NE(out2.find("\n" "status: OK"), out2.npos);
+    expect_mark_at(59, orig_data);
+}
+
+TEST_F(dblogutil_test, inspect_marker_end_followed_by_marker_inv_begin) {
+    auto [rc, out] = inspect("pwal_0000", data_marker_end_followed_by_marker_inv_begin);
+    EXPECT_EQ(rc, 0);
+    EXPECT_NE(out.find("\n" "status: OK"), out.npos);
+}
+
+TEST_F(dblogutil_test, repairm_marker_end_followed_by_marker_inv_begin) {
+    auto orig_data = data_marker_end_followed_by_marker_inv_begin;
+    auto [rc, out] = repairm("pwal_0000", orig_data);
+    EXPECT_EQ(rc, 0);
+    EXPECT_NE(out.find("\n" "status: OK"), out.npos);
+    expect_no_change(orig_data);
+}
+
+TEST_F(dblogutil_test, repairc_marker_end_followed_by_marker_inv_begin) {
+    auto orig_data = data_marker_end_followed_by_marker_inv_begin;
+    auto [rc, out] = repairc("pwal_0000", orig_data);
+    EXPECT_EQ(rc, 0);
+    EXPECT_NE(out.find("\n" "status: OK"), out.npos);
+    expect_no_change(orig_data);
+}
+
+TEST_F(dblogutil_test, inspect_marker_end_followed_by_short_entry) {
+    auto [rc, out] = inspect("pwal_0000", data_marker_end_followed_by_short_entry);
+    EXPECT_EQ(rc, 2 << 8);
+    EXPECT_NE(out.find("\n" "status: unrepairable"), out.npos);
+}
+
+TEST_F(dblogutil_test, repairm_marker_end_followed_by_short_entry) {
+    auto orig_data = data_marker_end_followed_by_short_entry;
+    auto [rc, out] = repairm("pwal_0000", orig_data);
+    EXPECT_EQ(rc, 16 << 8);
+    EXPECT_NE(out.find("\n" "status: unrepairable"), out.npos);
+    expect_no_change(orig_data);
+}
+
+TEST_F(dblogutil_test, repairc_marker_end_followed_by_short_entry) {
+    auto orig_data = data_marker_end_followed_by_short_entry;
+    auto [rc, out] = repairc("pwal_0000", orig_data);
+    EXPECT_EQ(rc, 16 << 8);
+    EXPECT_NE(out.find("\n" "status: unrepairable"), out.npos);
+    expect_no_change(orig_data);
+}
+
+TEST_F(dblogutil_test, inspect_short_marker_end_only) {
+    auto [rc, out] = inspect("pwal_0000", data_short_marker_end_only);
+    EXPECT_EQ(rc, 2 << 8);
+    EXPECT_NE(out.find("\n" "status: unrepairable"), out.npos);
+}
+
+TEST_F(dblogutil_test, repairm_short_marker_end_only) {
+    auto orig_data = data_short_marker_end_only;
+    auto [rc, out] = repairm("pwal_0000", orig_data);
+    EXPECT_EQ(rc, 16 << 8);
+    EXPECT_NE(out.find("\n" "status: unrepairable"), out.npos);
+    expect_no_change(orig_data);
+}
+
+TEST_F(dblogutil_test, repairc_short_marker_end_only) {
+    auto orig_data = data_short_marker_end_only;
+    auto [rc, out] = repairc("pwal_0000", orig_data);
+    EXPECT_EQ(rc, 16 << 8);
+    EXPECT_NE(out.find("\n" "status: unrepairable"), out.npos);
+    expect_no_change(orig_data);
+}
+
+TEST_F(dblogutil_test, inspect_marker_begin_partial_zerofill) {
+    auto [rc, out] = inspect("pwal_0000", data_marker_begin_partial_zerofill);
+    EXPECT_EQ(rc, 1 << 8);
+    EXPECT_NE(out.find("\n" "status: auto-repairable"), out.npos);
+}
+
+TEST_F(dblogutil_test, repairm_marker_begin_partial_zerofill) {
+    auto orig_data = data_marker_begin_partial_zerofill;
+    auto [rc, out, rc2, out2] = repairm_twice("pwal_0000", orig_data);
+    EXPECT_EQ(rc, 0);
+    EXPECT_NE(out.find("\n" "status: repaired"), out.npos);
+    EXPECT_EQ(rc2, 0);
+    EXPECT_NE(out2.find("\n" "status: OK"), out2.npos);
+    expect_mark_at(0, orig_data);
+}
+
+TEST_F(dblogutil_test, repairc_marker_begin_partial_zerofill) {
+    auto orig_data = data_marker_begin_partial_zerofill;
+    auto [rc, out, rc2, out2] = repairc_twice("pwal_0000", orig_data);
+    EXPECT_EQ(rc, 0);
+    EXPECT_NE(out.find("\n" "status: repaired"), out.npos);
+    EXPECT_EQ(rc2, 0);
+    EXPECT_NE(out2.find("\n" "status: OK"), out2.npos);
+    expect_cut_at(0, orig_data);
+}
+
+TEST_F(dblogutil_test, inspect_marker_begin_followed_by_zerofill) {
+    auto [rc, out] = inspect("pwal_0000", data_marker_begin_followed_by_zerofill);
+    EXPECT_EQ(rc, 2 << 8);
+    EXPECT_NE(out.find("\n" "status: unrepairable"), out.npos);
+}
+
+TEST_F(dblogutil_test, repairm_marker_begin_followed_by_zerofill) {
+    auto orig_data = data_marker_begin_followed_by_zerofill;
+    auto [rc, out] = repairm("pwal_0000", orig_data);
+    EXPECT_EQ(rc, 16 << 8);
+    EXPECT_NE(out.find("\n" "status: unrepairable"), out.npos);
+    expect_no_change(orig_data);
+}
+
+TEST_F(dblogutil_test, repairc_marker_begin_followed_by_zerofill) {
+    auto orig_data = data_marker_begin_followed_by_zerofill;
+    auto [rc, out] = repairc("pwal_0000", orig_data);
+    EXPECT_EQ(rc, 16 << 8);
+    EXPECT_NE(out.find("\n" "status: unrepairable"), out.npos);
+    expect_no_change(orig_data);
+}
+
+TEST_F(dblogutil_test, inspect_marker_begin_normal_entry_partial_zerofill) {
+    auto [rc, out] = inspect("pwal_0000", data_marker_begin_normal_entry_partial_zerofill);
+    EXPECT_EQ(rc, 2 << 8);
+    EXPECT_NE(out.find("\n" "status: unrepairable"), out.npos);
+}
+
+TEST_F(dblogutil_test, repairm_marker_begin_normal_entry_partial_zerofill) {
+    auto orig_data = data_marker_begin_normal_entry_partial_zerofill;
+    auto [rc, out] = repairm("pwal_0000", orig_data);
+    EXPECT_EQ(rc, 16 << 8);
+    EXPECT_NE(out.find("\n" "status: unrepairable"), out.npos);
+    expect_no_change(orig_data);
+}
+
+TEST_F(dblogutil_test, repairc_marker_begin_normal_entry_partial_zerofill) {
+    auto orig_data = data_marker_begin_normal_entry_partial_zerofill;
+    auto [rc, out] = repairc("pwal_0000", orig_data);
+    EXPECT_EQ(rc, 16 << 8);
+    EXPECT_NE(out.find("\n" "status: unrepairable"), out.npos);
+    expect_no_change(orig_data);
+}
+
+TEST_F(dblogutil_test, inspect_marker_begin_normal_entry_followed_by_zerofill) {
+    auto [rc, out] = inspect("pwal_0000", data_marker_begin_normal_entry_followed_by_zerofill);
+    EXPECT_EQ(rc, 2 << 8);
+    EXPECT_NE(out.find("\n" "status: unrepairable"), out.npos);
+}
+
+TEST_F(dblogutil_test, repairm_marker_begin_normal_entry_followed_by_zerofill) {
+    auto orig_data = data_marker_begin_normal_entry_followed_by_zerofill;
+    auto [rc, out] = repairm("pwal_0000", orig_data);
+    EXPECT_EQ(rc, 16 << 8);
+    EXPECT_NE(out.find("\n" "status: unrepairable"), out.npos);
+    expect_no_change(orig_data);
+}
+
+TEST_F(dblogutil_test, repairc_marker_begin_normal_entry_followed_by_zerofill) {
+    auto orig_data = data_marker_begin_normal_entry_followed_by_zerofill;
+    auto [rc, out] = repairc("pwal_0000", orig_data);
+    EXPECT_EQ(rc, 16 << 8);
+    EXPECT_NE(out.find("\n" "status: unrepairable"), out.npos);
+    expect_no_change(orig_data);
+}
+
+TEST_F(dblogutil_test, inspect_marker_end_partial_zerofill) {
+    auto [rc, out] = inspect("pwal_0000", data_marker_end_partial_zerofill);
+    EXPECT_EQ(rc, 2 << 8);
+    EXPECT_NE(out.find("\n" "status: unrepairable"), out.npos);
+}
+
+TEST_F(dblogutil_test, repairm_marker_end_partial_zerofill) {
+    auto orig_data = data_marker_end_partial_zerofill;
+    auto [rc, out] = repairm("pwal_0000", orig_data);
+    EXPECT_EQ(rc, 16 << 8);
+    EXPECT_NE(out.find("\n" "status: unrepairable"), out.npos);
+    expect_no_change(orig_data);
+}
+
+TEST_F(dblogutil_test, repairc_marker_end_partial_zerofill) {
+    auto orig_data = data_marker_end_partial_zerofill;
+    auto [rc, out] = repairc("pwal_0000", orig_data);
+    EXPECT_EQ(rc, 16 << 8);
+    EXPECT_NE(out.find("\n" "status: unrepairable"), out.npos);
+    expect_no_change(orig_data);
+}
+
+TEST_F(dblogutil_test, inspect_marker_begin_followed_by_zerofill_epoch_ff) {
+    auto [rc, out] = inspect("pwal_0000", data_marker_begin_followed_by_zerofill, epoch_0xff_str);
+    EXPECT_EQ(rc, 1 << 8);
+    EXPECT_NE(out.find("\n" "status: auto-repairable"), out.npos);
+}
+
+TEST_F(dblogutil_test, repairm_marker_begin_followed_by_zerofill_epoch_ff) {
+    auto orig_data = data_marker_begin_followed_by_zerofill;
+    auto [rc, out, rc2, out2] = repairm_twice("pwal_0000", orig_data, epoch_0xff_str);
+    EXPECT_EQ(rc, 0);
+    EXPECT_NE(out.find("\n" "status: repaired"), out.npos);
+    EXPECT_EQ(rc2, 0);
+    EXPECT_NE(out2.find("\n" "status: OK"), out2.npos);
+    expect_mark_at(0, orig_data);
+}
+
+TEST_F(dblogutil_test, repairc_marker_begin_followed_by_zerofill_epoch_ff) {
+    auto orig_data = data_marker_begin_followed_by_zerofill;
+    auto [rc, out, rc2, out2] = repairc_twice("pwal_0000", orig_data, epoch_0xff_str);
+    EXPECT_EQ(rc, 0);
+    EXPECT_NE(out.find("\n" "status: repaired"), out.npos);
+    EXPECT_EQ(rc2, 0);
+    EXPECT_NE(out2.find("\n" "status: OK"), out2.npos);
+    expect_cut_at(0, orig_data);
+}
+
+TEST_F(dblogutil_test, inspect_all_zerofill_epoch_ff) {
+    auto [rc, out] = inspect("pwal_0000", data_all_zerofill, epoch_0xff_str);
+    EXPECT_EQ(rc, 1 << 8);
+    EXPECT_NE(out.find("\n" "status: auto-repairable"), out.npos);
+}
+
+TEST_F(dblogutil_test, repairm_all_zerofill_epoch_ff) {
+    auto orig_data = data_all_zerofill;
+    auto [rc, out, rc2, out2] = repairm_twice("pwal_0000", orig_data, epoch_0xff_str);
+    EXPECT_EQ(rc, 0);
+    EXPECT_NE(out.find("\n" "status: repaired"), out.npos);
+    EXPECT_EQ(rc2, 0);
+    EXPECT_NE(out2.find("\n" "status: OK"), out2.npos);
+    expect_mark_at_from_zero(0, orig_data);
+}
+
+TEST_F(dblogutil_test, repairc_all_zerofill_epoch_ff) {
+    auto orig_data = data_all_zerofill;
+    auto [rc, out] = repairc("pwal_0000", orig_data, epoch_0xff_str);
+    EXPECT_EQ(rc, 0);
+    EXPECT_TRUE(contains_line_starts_with(out, "status: repaired"));
+    auto to = read_entire_file(list_dir()[0]);
+    EXPECT_TRUE(to.empty()); // all zero file is cut to empty
+}
+
+TEST_F(dblogutil_test, inspect_marker_begin_partial_zerofill_epoch_ff) {
+    auto [rc, out] = inspect("pwal_0000", data_marker_begin_partial_zerofill, epoch_0xff_str);
+    EXPECT_EQ(rc, 1 << 8);
+    EXPECT_NE(out.find("\n" "status: auto-repairable"), out.npos);
+}
+
+TEST_F(dblogutil_test, repairm_marker_begin_partial_zerofill_epoch_ff) {
+    auto orig_data = data_marker_begin_partial_zerofill;
+    auto [rc, out, rc2, out2] = repairm_twice("pwal_0000", orig_data, epoch_0xff_str);
+    EXPECT_EQ(rc, 0);
+    EXPECT_NE(out.find("\n" "status: repaired"), out.npos);
+    EXPECT_EQ(rc2, 0);
+    EXPECT_NE(out2.find("\n" "status: OK"), out2.npos);
+    expect_mark_at(0, orig_data);
+}
+
+TEST_F(dblogutil_test, repairc_marker_begin_partial_zerofill_epoch_ff) {
+    auto orig_data = data_marker_begin_partial_zerofill;
+    auto [rc, out, rc2, out2] = repairc_twice("pwal_0000", orig_data, epoch_0xff_str);
+    EXPECT_EQ(rc, 0);
+    EXPECT_NE(out.find("\n" "status: repaired"), out.npos);
+    EXPECT_EQ(rc2, 0);
+    EXPECT_NE(out2.find("\n" "status: OK"), out2.npos);
+    expect_cut_at(0, orig_data);
+}
+
+TEST_F(dblogutil_test, inspect_marker_begin_normal_entry_partial_zerofill_epoch_ff) {
+    auto [rc, out] = inspect("pwal_0000", data_marker_begin_normal_entry_partial_zerofill, epoch_0xff_str);
+    EXPECT_EQ(rc, 1 << 8);
+    EXPECT_NE(out.find("\n" "status: auto-repairable"), out.npos);
+}
+
+TEST_F(dblogutil_test, repairm_marker_begin_normal_entry_partial_zerofill_epoch_ff) {
+    auto orig_data = data_marker_begin_normal_entry_partial_zerofill;
+    auto [rc, out, rc2, out2] = repairm_twice("pwal_0000", orig_data, epoch_0xff_str);
+    EXPECT_EQ(rc, 0);
+    EXPECT_NE(out.find("\n" "status: repaired"), out.npos);
+    EXPECT_EQ(rc2, 0);
+    EXPECT_NE(out2.find("\n" "status: OK"), out2.npos);
+    expect_mark_at(0, orig_data);
+}
+
+TEST_F(dblogutil_test, repairc_marker_begin_normal_entry_partial_zerofill_epoch_ff) {
+    auto orig_data = data_marker_begin_normal_entry_partial_zerofill;
+    auto [rc, out, rc2, out2] = repairc_twice("pwal_0000", orig_data, epoch_0xff_str);
+    EXPECT_EQ(rc, 0);
+    EXPECT_NE(out.find("\n" "status: repaired"), out.npos);
+    EXPECT_EQ(rc2, 0);
+    EXPECT_NE(out2.find("\n" "status: OK"), out2.npos);
+    expect_cut_at(0, orig_data);
+}
+
+TEST_F(dblogutil_test, inspect_marker_begin_normal_entry_followed_by_zerofill_epoch_ff) {
+    auto [rc, out] = inspect("pwal_0000", data_marker_begin_normal_entry_followed_by_zerofill, epoch_0xff_str);
+    EXPECT_EQ(rc, 1 << 8);
+    EXPECT_NE(out.find("\n" "status: auto-repairable"), out.npos);
+}
+
+TEST_F(dblogutil_test, repairm_marker_begin_normal_entry_followed_by_zerofill_epoch_ff) {
+    auto orig_data = data_marker_begin_normal_entry_followed_by_zerofill;
+    auto [rc, out, rc2, out2] = repairm_twice("pwal_0000", orig_data, epoch_0xff_str);
+    EXPECT_EQ(rc, 0);
+    EXPECT_NE(out.find("\n" "status: repaired"), out.npos);
+    EXPECT_EQ(rc2, 0);
+    EXPECT_NE(out2.find("\n" "status: OK"), out2.npos);
+    expect_mark_at(0, orig_data);
+}
+
+TEST_F(dblogutil_test, repairc_marker_begin_normal_entry_followed_by_zerofill_epoch_ff) {
+    auto orig_data = data_marker_begin_normal_entry_followed_by_zerofill;
+    auto [rc, out, rc2, out2] = repairc_twice("pwal_0000", orig_data, epoch_0xff_str);
+    EXPECT_EQ(rc, 0);
+    EXPECT_NE(out.find("\n" "status: repaired"), out.npos);
+    EXPECT_EQ(rc2, 0);
+    EXPECT_NE(out2.find("\n" "status: OK"), out2.npos);
+    expect_cut_at(0, orig_data);
+}
+
+TEST_F(dblogutil_test, inspect_marker_end_partial_zerofill_epoch_ff) {
+    auto [rc, out] = inspect("pwal_0000", data_marker_end_partial_zerofill, epoch_0xff_str);
+    EXPECT_EQ(rc, 1 << 8);
+    EXPECT_NE(out.find("\n" "status: auto-repairable"), out.npos);
+}
+
+TEST_F(dblogutil_test, repairm_marker_end_partial_zerofill_epoch_ff) {
+    auto orig_data = data_marker_end_partial_zerofill;
+    auto [rc, out, rc2, out2] = repairm_twice("pwal_0000", orig_data, epoch_0xff_str);
+    EXPECT_EQ(rc, 0);
+    EXPECT_NE(out.find("\n" "status: repaired"), out.npos);
+    EXPECT_EQ(rc2, 0);
+    EXPECT_NE(out2.find("\n" "status: OK"), out2.npos);
+    expect_mark_at(0, orig_data);
+}
+
+TEST_F(dblogutil_test, repairc_marker_end_partial_zerofill_epoch_ff) {
+    auto orig_data = data_marker_end_partial_zerofill;
+    auto [rc, out, rc2, out2] = repairc_twice("pwal_0000", orig_data, epoch_0xff_str);
+    EXPECT_EQ(rc, 0);
+    EXPECT_NE(out.find("\n" "status: repaired"), out.npos);
+    EXPECT_EQ(rc2, 0);
+    EXPECT_NE(out2.find("\n" "status: OK"), out2.npos);
+    expect_cut_at(0, orig_data);
 }
 
 } // namespace limestone::testing

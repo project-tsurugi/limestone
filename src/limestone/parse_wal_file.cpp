@@ -485,7 +485,7 @@ epoch_id_type dblog_scan::scan_one_pwal_file(  // NOLINT(readability-function-co
                 case process_at_damaged::report:
                     err_unexpected();
                     report_error(ec);
-                    pe = parse_error(parse_error::unexpected, fpos_epoch_snippet);
+                    pe = parse_error(parse_error::broken_after, fpos_epoch_snippet);
                     break;
                 }
             } else if (valid && current_epoch <= ld_epoch) {
