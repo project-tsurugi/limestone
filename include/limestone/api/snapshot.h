@@ -65,6 +65,40 @@ public:
     [[nodiscard]] std::unique_ptr<cursor> get_cursor() const;
 
     /**
+     * @brief Returns multiple cursors, each responsible for a distinct partition of the snapshot.
+     * @details This method partitions the snapshot data into at most @p n disjoint logical ranges
+     * and returns a cursor for each. The number of returned cursors will be between 1 and @p n,
+     * even if the snapshot contains no data. Each cursor independently iterates over a subset of the data,
+     * and their ranges do not overlap.
+     *
+     * The partitioning strategy is implementation-defined. The order and size of each partition,
+     * as well as the ordering of entries returned by each cursor, are not guaranteed and may vary.
+     * Partitions may span across multiple storage IDs.
+     *
+     * This method is intended for parallel processing. Each cursor must be processed independently
+     * and exclusively by a single thread. The cursor class is not thread-safe.
+     *
+     * This method must be called at most once per snapshot instance. Calling it more than once will
+     * result in a limestone_exception being thrown. The result of the partitioning is not guaranteed
+     * to be stable across calls or implementations.
+     *
+     * @param n The maximum number of partitions (and thus cursors) to return. Must be greater than 0.
+     * @return A vector containing between 1 and @p n unique pointers to cursors. Each cursor is valid and non-null.
+     *
+     * @throws std::invalid_argument if @p n is 0.
+     * @throws limestone_exception if this method is called more than once on the same snapshot instance.
+     * @throws limestone_exception or limestone_io_exception if a fatal error occurs during setup.
+     *         These exceptions are unrecoverable and may indicate serious corruption or I/O failure.
+     *
+     * @note The entries returned by each cursor are disjoint and collectively cover all data in the snapshot.
+     * @note The internal logic may assign more data to some cursors depending on workload characteristics.
+     * @note Using a cursor after the associated snapshot has been destroyed results in undefined behavior.
+     * @note Current implementations may allow cursors to function after snapshot destruction,
+     *       but this is not guaranteed and must not be relied upon.
+     */
+    [[nodiscard]] std::vector<std::unique_ptr<cursor>> get_partitioned_cursors(std::size_t n);
+
+    /**
      * @brief create a cursor for an entry at a given location on the snapshot and returns it
      * @details the returned cursor will point to the target element by calling cursor::next().
      * If such an entry does not exist, cursor::next() will return false.

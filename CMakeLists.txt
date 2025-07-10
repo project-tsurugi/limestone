@@ -39,6 +39,7 @@ option(PERFORMANCE_TOOLS "Enable tooling to measure engine performance" OFF)
 option(TRACY_ENABLE "enable tracy profiler" OFF)
 option(ENABLE_ALTIMETER "enable altimeter logging" OFF)
 option(INSTALL_EXPERIMENTAL_TOOLS "Install experimental tools like tgreplica" OFF)
+option(BUILD_REPLICATION_TESTS "Build replication tests" OFF)
 option(BUILD_SANDBOX_TOOLS "build sandbox (temporary) tools" OFF)
 
 if (FORCE_INSTALL_RPATH)

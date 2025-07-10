@@ -38,9 +38,15 @@ file(GLOB SRCS
         "limestone/replication/*.cpp"
         "limestone/snapshot/*.cpp"
         "limestone/utils/*.cpp"
+        "limestone/partitioned_cursor/*.cpp"
         )
 
 foreach(file ${SRCS})
+    if("${file}" MATCHES "limestone/replication/" AND NOT BUILD_REPLICATION_TESTS)
+        message(STATUS "Skipping replication test: ${file}")
+        continue()
+    endif()
+
     add_test_executable(${file})
 endforeach()
   

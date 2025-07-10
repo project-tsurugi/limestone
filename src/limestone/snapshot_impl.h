@@ -16,12 +16,15 @@
 
 #pragma once
 
+#include <limestone/api/cursor.h>
+#include <limestone/api/write_version_type.h>
+
+#include <atomic>
+#include <boost/filesystem.hpp>
 #include <map>
 #include <memory>
 #include <string_view>
-#include <boost/filesystem.hpp>
-#include <limestone/api/cursor.h>
-#include <limestone/api/write_version_type.h>
+#include <vector>
 
 namespace limestone::internal {
 
@@ -32,11 +35,13 @@ using limestone::api::write_version_type;
 class snapshot_impl {
 public:
     explicit snapshot_impl(boost::filesystem::path location, std::map<storage_id_type, write_version_type> clear_storage) noexcept;
+    std::vector<std::unique_ptr<limestone::api::cursor>> get_partitioned_cursors(std::size_t n);
     [[nodiscard]] std::unique_ptr<cursor> get_cursor() const;
 
 private:
     boost::filesystem::path location_;
-    std::map<storage_id_type, write_version_type> clear_storage;    
+    std::map<storage_id_type, write_version_type> clear_storage;
+    std::atomic<bool> partitioned_called_{false};
 };
 
 } // namespace limestone::internal

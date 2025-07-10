@@ -24,9 +24,10 @@
 
 #include <limestone/api/storage_id_type.h>
 
-
 namespace limestone::internal {
-    class cursor_impl;  
+    class cursor_impl_base;
+    class cursor_impl;
+    class partitioned_cursor_impl;
 }
 
 namespace limestone::api {
@@ -80,12 +81,12 @@ public:
     void value(std::string& buf) const noexcept;
 
 private:
-    std::unique_ptr<internal::cursor_impl> pimpl;
-
-    explicit cursor(const boost::filesystem::path& snapshot_file);
-    explicit cursor(const boost::filesystem::path& snapshot_file, const boost::filesystem::path& compacted_file);
+    std::unique_ptr<internal::cursor_impl_base> pimpl;
+    explicit cursor(std::unique_ptr<internal::cursor_impl_base> impl);
 
     friend class internal::cursor_impl;
+    friend class internal::partitioned_cursor_impl;  
+
 };
 
 } // namespace limestone::api
