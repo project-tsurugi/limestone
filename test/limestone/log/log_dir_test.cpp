@@ -10,6 +10,7 @@
 #include "log_entry.h"
 #include "manifest.h"
 #include "test_root.h"
+#include "limestone/log/testdata.h"
 
 using namespace std::literals;
 using dblog_scan = limestone::internal::dblog_scan;
@@ -17,12 +18,6 @@ using compaction_catalog = limestone::internal::compaction_catalog;
 
 namespace limestone::testing {
 
-extern void create_file(const boost::filesystem::path& path, std::string_view content);
-extern const std::string_view epoch_0_str;
-extern const std::string_view epoch_0x100_str;
-extern std::string data_manifest(int persistent_format_version = 1);
-extern const std::string_view data_normal;
-extern const std::string_view data_nondurable;
 
 class log_dir_test : public ::testing::Test {
 public:

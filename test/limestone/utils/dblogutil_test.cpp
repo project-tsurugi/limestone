@@ -1,4 +1,3 @@
-
 #include <algorithm>
 #include <sstream>
 #include <limestone/logging.h>
@@ -8,7 +7,7 @@
 #include "dblog_scan.h"
 #include "manifest.h"
 #include "log_entry.h"
-
+#include "limestone/log/testdata.h"
 #include "test_root.h"
 
 namespace limestone::testing {
@@ -17,22 +16,6 @@ using namespace std::literals;
 using namespace limestone::api;
 using namespace limestone::internal;
 
-extern void create_file(const boost::filesystem::path& path, std::string_view content);
-extern std::string read_entire_file(const boost::filesystem::path& path);
-extern std::string data_manifest(int persistent_format_version = 1);
-
-extern const std::string_view epoch_0x100_str;
-
-extern const std::string_view data_normal;
-extern const std::string_view data_normal2;
-extern const std::string_view data_nondurable;
-extern const std::string_view data_repaired_nondurable;
-extern const std::string_view data_zerofill;
-extern const std::string_view data_truncated_normal_entry;
-extern const std::string_view data_truncated_epoch_header;
-extern const std::string_view data_truncated_invalidated_normal_entry;
-extern const std::string_view data_truncated_invalidated_epoch_header;
-extern const std::string_view data_allzero;
 
 #define UTIL_COMMAND "../src/tglogutil"
 

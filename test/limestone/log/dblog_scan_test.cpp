@@ -10,6 +10,7 @@
 #include "log_entry.h"
 
 #include "test_root.h"
+#include "limestone/log/testdata.h"
 
 namespace limestone::testing {
 
@@ -17,8 +18,6 @@ using namespace std::literals;
 using namespace limestone::api;
 using namespace limestone::internal;
 
-extern void create_file(const boost::filesystem::path& path, std::string_view content);
-extern std::string read_entire_file(const boost::filesystem::path& path);
 
 class dblog_scan_test : public ::testing::Test {
 public:
@@ -192,37 +191,7 @@ static constexpr const char* location = "/tmp/dblog_scan_test";
 //   x
 // {normal, nondurable, zerofill, truncated_normal_entry, truncated_epoch_header, truncated_invalidated_normal_entry, truncated_invalidated_epoch_header}
 
-// Existing data
-extern const std::string_view data_normal;
-extern const std::string_view data_nondurable;
-extern const std::string_view data_zerofill;
-extern const std::string_view data_truncated_normal_entry;
-extern const std::string_view data_truncated_epoch_header;
-extern const std::string_view data_truncated_invalidated_normal_entry;
-extern const std::string_view data_truncated_invalidated_epoch_header;
 
-extern const std::string_view data_marker_end_only;      
-extern const std::string_view data_marker_end_followed_by_normal_entry; 
-extern const std::string_view data_marker_end_followed_by_marker_begin; 
-extern const std::string_view data_marker_end_followed_by_marker_inv_begin; 
-extern const std::string_view data_marker_end_followed_by_short_entry;   
-
-// SHORT_marker_end patterns
-extern const std::string_view data_short_marker_end_only;  
-extern const std::string_view data_short_marker_end_followed_by_normal_entry;
-extern const std::string_view data_short_marker_end_followed_by_marker_begin;
-extern const std::string_view data_short_marker_end_followed_by_marker_inv_begin;
-extern const std::string_view data_short_marker_end_followed_by_short_entry; 
-
-
-// 0fill variations
-extern const std::string_view data_all_zerofill;
-extern const std::string_view data_marker_begin_partial_zerofill;
-extern const std::string_view data_marker_begin_followed_by_zerofill;
-extern const std::string_view data_marker_begin_normal_entry_partial_zerofill;
-extern const std::string_view data_marker_begin_normal_entry_followed_by_zerofill;
-extern const std::string_view data_marker_end_partial_zerofill;
-extern const std::string_view valid_snippet;
 
 // unit-test scan_one_pwal_file
 // inspect the normal file; returns ok
