@@ -97,7 +97,6 @@ protected:
         datastore_ = std::make_unique<limestone::api::datastore_test>(conf);
 
         log_channel_ = &datastore_->create_channel(master);
-
     }
 
     void start_replica_server(uint16_t port) {
@@ -124,11 +123,16 @@ protected:
     
 
     void stop_replica_server() {
+        auto connector = log_channel_->get_impl()->get_replica_connector();
+        if (connector) {
+            connector->close_session();
+        }   
+        datastore_->shutdown();
+        datastore_ = nullptr;
         if (server_thread_ && server_thread_->joinable()) {
             server_.shutdown();
             server_thread_->join();
         }
-        datastore_ = nullptr;
     }
 
     replication::replica_connector* begin_session_and_get_connector() {
