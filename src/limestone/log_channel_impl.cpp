@@ -16,31 +16,30 @@ log_channel_impl::~log_channel_impl() = default;
 // Using a lambda allows us to encapsulate the validity check of `replica_connector_` within the function,
 // preventing unnecessary message creation and avoiding redundant code in the caller. This helps keep the code concise
 // and reduces the chances of errors caused by missing the `if` check.
-void log_channel_impl::send_replica_message(uint64_t epoch_id, const std::function<void(replication::message_log_entries&)>& modifier) {
+bool log_channel_impl::send_replica_message(uint64_t epoch_id, const std::function<void(replication::message_log_entries&)>& modifier) {
     std::lock_guard<std::mutex> lock(mtx_replica_connector_);
-    
+
     // If replica_connector_ is invalid, exit the function
     if (!replica_connector_) {
-        return; 
+        return false;
     }
-
     // Create and modify the message
     replication::message_log_entries message{epoch_id};
     modifier(message);
-    
+
     // Send the message
     if (!replica_connector_->send_message(message)) {
         LOG_LP(FATAL) << "Failed to send message to replica";
         replica_connector_.reset();
-        return;
+        return false;
     }
-
+    return true;
 }
 
 void log_channel_impl::wait_for_replica_ack() {
     // If replica_connector_ is invalid, exit the function
     if (!replica_connector_) {
-        return; 
+        return;
     }
 
     auto ack = replica_connector_->receive_message();

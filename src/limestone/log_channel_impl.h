@@ -77,8 +77,9 @@ public:
      * @param epoch_id The epoch identifier to be associated with the message.
      * @param modifier A lambda function that modifies the `message_log_entries`. The lambda should take a reference
      *                 to the `message_log_entries` object and apply any required changes (e.g., setting flags, adding entries).
+     * @return true if the message was actually sent to the replica, false otherwise.
      */
-    void send_replica_message(uint64_t epoch_id, const std::function<void(replication::message_log_entries&)>& modifier);
+    bool send_replica_message(uint64_t epoch_id, const std::function<void(replication::message_log_entries&)>& modifier);
 
     /**
      * @brief Blocks the calling thread until an acknowledgment is received from the replica.

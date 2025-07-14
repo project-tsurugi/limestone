@@ -431,6 +431,22 @@ std::future<void> datastore::shutdown() noexcept {
     VLOG_LP(log_info) << "start";
     state_ = state::shutdown;
 
+    // shutdown replication control channel
+    if (impl_->is_replication_configured() && impl_->is_master()) {
+        auto control_channel = impl_->get_control_channel();
+        if (control_channel) {
+            control_channel->close_session();
+        }
+    }
+
+    // shutdown log channels
+    for (auto& lc : log_channels_) {
+        auto replica_connector = lc->get_impl()->get_replica_connector();
+        if (replica_connector) {
+            replica_connector->close_session();
+        }
+    }
+
     if (blob_file_garbage_collector_) {
         blob_file_garbage_collector_->shutdown();
     }

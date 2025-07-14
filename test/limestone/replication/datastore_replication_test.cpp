@@ -143,6 +143,7 @@ TEST_F(datastore_replication_test, open_control_channel_via_datastore_ready) {
 
     EXPECT_NE(lc0_->get_impl()->get_replica_connector(), nullptr);
     EXPECT_NE(lc1_->get_impl()->get_replica_connector(), nullptr);
+    datastore_->shutdown();
 }
 
 
