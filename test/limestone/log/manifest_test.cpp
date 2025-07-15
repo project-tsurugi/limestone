@@ -707,5 +707,40 @@ TEST_F(manifest_test, load_manifest_from_path_returns_none_if_open_ifstream_fail
     EXPECT_FALSE(loaded);
 }
 
+// Test that check_and_migrate reports migration performed
+TEST_F(manifest_test, check_and_migrate_reports_migration_performed) {
+    // Write old manifest (version 2) to simulate migration
+    auto manifest_path = logdir / std::string(manifest::file_name);
+    nlohmann::json j = {
+        {"format_version", "1.0"},
+        {"persistent_format_version", 2}
+    };
+    std::ofstream(manifest_path.string()) << j.dump();
+
+    // Act
+    was_migrated migrated = manifest::check_and_migrate(logdir);
+
+    // Assert
+    EXPECT_TRUE(migrated);
+}
+
+// Test that check_and_migrate reports no migration performed
+TEST_F(manifest_test, check_and_migrate_reports_no_migration_needed) {
+    // Write up-to-date manifest (version == default)
+    auto manifest_path = logdir / std::string(manifest::file_name);
+    nlohmann::json j = {
+        {"format_version", "1.0"},
+        {"persistent_format_version", manifest::default_persistent_format_version}
+    };
+    std::ofstream(manifest_path.string()) << j.dump();
+
+    // Act
+    was_migrated migrated = manifest::check_and_migrate(logdir);
+
+
+    // Assert
+    EXPECT_FALSE(migrated);
+}
+
 
 }  // namespace limestone::testing

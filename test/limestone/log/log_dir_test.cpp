@@ -147,8 +147,13 @@ TEST_F(log_dir_test, accept_manifest_version_v5) {
     gen_datastore();   // success
 }
 
-TEST_F(log_dir_test, reject_manifest_version_v6) {
+TEST_F(log_dir_test, accept_manifest_version_v6) {
     create_manifest_file(6);
+    gen_datastore();   // success
+}
+
+TEST_F(log_dir_test, reject_manifest_version_v7) {
+    create_manifest_file(7);
     EXPECT_THROW({ gen_datastore(); }, std::exception);
 }
 
@@ -174,7 +179,7 @@ TEST_F(log_dir_test, rotate_old_rejects_unsupported_data) {
         LOG(FATAL) << "cannot make directory";
     }
     create_file(bk_path / "epoch", epoch_0_str);
-    create_file(bk_path / std::string(limestone::internal::manifest::file_name), data_manifest(6));
+    create_file(bk_path / std::string(limestone::internal::manifest::file_name), data_manifest(7));
 
     gen_datastore();
 
@@ -234,7 +239,7 @@ TEST_F(log_dir_test, rotate_prusik_rejects_unsupported_data) {
         LOG(FATAL) << "cannot make directory";
     }
     create_file(bk_path / "epoch", epoch_0_str);
-    create_file(bk_path / std::string(limestone::internal::manifest::file_name), data_manifest(6));
+    create_file(bk_path / std::string(limestone::internal::manifest::file_name), data_manifest(7));
     // setup entries
     std::vector<limestone::api::file_set_entry> entries;
     entries.emplace_back("epoch", "epoch", false);
@@ -366,7 +371,7 @@ TEST_F(log_dir_test, setup_initial_logdir_creates_manifest_file) {
     manifest_file >> manifest;
 
     EXPECT_EQ(manifest["format_version"], "1.1");
-    EXPECT_EQ(manifest["persistent_format_version"], 5);
+    EXPECT_EQ(manifest["persistent_format_version"], 6);
 }
 
 TEST_F(log_dir_test, setup_initial_logdir_creates_compaction_catalog_if_not_exists) {

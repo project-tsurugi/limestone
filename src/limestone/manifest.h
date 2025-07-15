@@ -25,6 +25,14 @@
 
 namespace limestone::internal {
 
+/**
+ * @brief Indicates whether migration was performed (true) or not (false).
+ *
+ * This is a simple type alias for bool to improve readability at call sites.
+ */
+using was_migrated = bool;
+
+
 class manifest {
 public:
     // Manifest file names as static constants
@@ -44,7 +52,7 @@ public:
      * @brief Default persistent format version for new manifest files.
      * @note Update this value when upgrading the manifest persistent format version.
      */
-    static constexpr int default_persistent_format_version = 5;
+    static constexpr int default_persistent_format_version = 6;
 
     /**
      * @brief Constructs a manifest object with the default version information.
@@ -125,8 +133,9 @@ public:
      * @brief Validates the manifest file in the specified log directory and performs repair or migration if necessary.
      *
      * @param logdir Path to the log directory containing the manifest file.
+     * @return was_migrated indicating whether migration was performed.
      */
-    static void check_and_migrate(const boost::filesystem::path& logdir);
+    static was_migrated check_and_migrate(const boost::filesystem::path& logdir);
 
     /**
      * @brief Validates and migrates the manifest file, with injectable I/O backend.
@@ -136,8 +145,9 @@ public:
      *
      * @param logdir Path to the log directory containing the manifest file.
      * @param ops    Custom file_operations implementation (e.g. a test stub).
+     * @return was_migrated indicating whether migration was performed.
      */ 
-    static void check_and_migrate(const boost::filesystem::path& logdir, file_operations& ops);
+    static was_migrated check_and_migrate(const boost::filesystem::path& logdir, file_operations& ops);
 
     /**
      * @brief Converts the current object state to a JSON formatted string.
