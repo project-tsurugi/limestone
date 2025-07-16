@@ -1,4 +1,3 @@
-
 #include <limestone/logging.h>
 
 #include <boost/filesystem.hpp>
@@ -423,5 +422,39 @@ TEST_F(log_dir_test, exists_path_returns_false_for_non_existing_file) {
 /* check purge_dir returns err_permission_error: unimplemented.
    because creating the file that cannnot be deleted by test user requires super-user privileges or similar */
 //TEST_F(log_dir_test, ut_purge_dir_err_file1) {}
+
+TEST_F(log_dir_test, ready_rotates_pwal_files_if_migration_info_requires_rotation) {
+    // 1. Create valid manifest, epoch, and pwal files
+    create_manifest_file(5); // Rotation required from 5 to 6
+    create_file(boost::filesystem::path(location) / "epoch", epoch_0_str);
+    create_file(boost::filesystem::path(location) / "pwal_0000", data_normal);
+
+    gen_datastore();
+
+    // 3. Call ready()
+    datastore_->ready();
+
+    // 4. Verify the file name after rotation
+    bool rotated = false;
+    for (auto& entry : boost::filesystem::directory_iterator(location)) {
+        if (entry.path().filename().string().find("pwal_0000.") == 0) {
+            rotated = true;
+        }
+    }
+    EXPECT_TRUE(rotated);
+}
+
+TEST_F(log_dir_test, ready_does_not_rotate_pwal_files_if_migration_info_does_not_require_rotation) {
+    create_manifest_file(6); // No rotation required from 6 to 7
+    create_file(boost::filesystem::path(location) / "epoch", epoch_0_str);
+    create_file(boost::filesystem::path(location) / "pwal_0000", data_normal);
+
+    gen_datastore();
+
+    datastore_->ready();
+
+    // Verify that pwal_0000 remains unchanged
+    EXPECT_TRUE(boost::filesystem::exists(boost::filesystem::path(location) / "pwal_0000"));
+}
 
 }  // namespace limestone::testing
