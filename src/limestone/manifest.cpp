@@ -139,12 +139,12 @@ int manifest::is_supported_version(const boost::filesystem::path& manifest_path,
     }
 }
 
-was_migrated manifest::check_and_migrate(const boost::filesystem::path& logdir) {
+manifest::migration_info manifest::check_and_migrate(const boost::filesystem::path& logdir) {
     real_file_operations default_ops;
     return check_and_migrate(logdir, default_ops);
 }
 
-was_migrated manifest::check_and_migrate(const boost::filesystem::path& logdir, file_operations& ops) {
+manifest::migration_info manifest::check_and_migrate(const boost::filesystem::path& logdir, file_operations& ops) {
     boost::filesystem::path manifest_path = logdir / std::string(file_name);
     boost::filesystem::path manifest_backup_path = logdir / std::string(backup_file_name);
     boost::system::error_code ec;
@@ -189,9 +189,8 @@ was_migrated manifest::check_and_migrate(const boost::filesystem::path& logdir, 
         VLOG_LP(log_info) << "Migrating manifest file (safe double-write: backup then main)"
                           << " from version " << persistent_version << " to " << default_persistent_format_version;
         migrate_manifest(manifest_path, manifest_backup_path, *manifest, ops);
-        return true;
     }
-    return false;
+    return {persistent_version, default_persistent_format_version};
 }
 
 // NOTE:
@@ -325,6 +324,24 @@ boost::optional<manifest> manifest::load_manifest_from_path(const boost::filesys
 
 std::string manifest::generate_instance_uuid() {
     return boost::uuids::to_string(boost::uuids::random_generator()());
+}
+
+
+manifest::migration_info::migration_info(int old_version, int new_version)
+    : old_version_(old_version)
+    , new_version_(new_version)
+{}
+
+int manifest::migration_info::get_old_version() const {
+    return old_version_;
+}
+
+int manifest::migration_info::get_new_version() const {
+    return new_version_;
+}
+
+bool manifest::migration_info::requires_rotation() const {
+    return old_version_ <= 5 && new_version_ >= 6;
 }
 
 

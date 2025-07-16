@@ -35,6 +35,52 @@ using was_migrated = bool;
 
 class manifest {
 public:
+    /**
+     * @brief Migration information for version transitions.
+     * 
+     * This inner class holds information about version migration,
+     * including old and new versions, and provides functionality
+     * to determine if rotation is required during the migration.
+     */
+    class migration_info {
+    public:
+        /**
+         * @brief Constructs migration_info with old and new versions.
+         * 
+         * @param old_version The version before migration.
+         * @param new_version The version after migration.
+         */
+        migration_info(int old_version, int new_version);
+
+        /**
+         * @brief Returns the old version.
+         * 
+         * @return The version before migration.
+         */
+        [[nodiscard]] int get_old_version() const;
+
+        /**
+         * @brief Returns the new version.
+         * 
+         * @return The version after migration.
+         */
+        [[nodiscard]] int get_new_version() const;
+
+        /**
+         * @brief Determines if rotation is required for this migration.
+         * 
+         * Rotation is required when migrating from version 5 or below
+         * to version 6 or above.
+         * 
+         * @return true if rotation is required, false otherwise.
+         */
+        [[nodiscard]] bool requires_rotation() const;
+
+    private:
+        int old_version_;
+        int new_version_;
+    };
+
     // Manifest file names as static constants
     static constexpr std::string_view file_name        = "limestone-manifest.json";
     static constexpr std::string_view backup_file_name = "limestone-manifest.json.back";
@@ -133,9 +179,9 @@ public:
      * @brief Validates the manifest file in the specified log directory and performs repair or migration if necessary.
      *
      * @param logdir Path to the log directory containing the manifest file.
-     * @return was_migrated indicating whether migration was performed.
+     * @return migration_info containing information about the migration performed.
      */
-    static was_migrated check_and_migrate(const boost::filesystem::path& logdir);
+    static migration_info check_and_migrate(const boost::filesystem::path& logdir);
 
     /**
      * @brief Validates and migrates the manifest file, with injectable I/O backend.
@@ -145,9 +191,9 @@ public:
      *
      * @param logdir Path to the log directory containing the manifest file.
      * @param ops    Custom file_operations implementation (e.g. a test stub).
-     * @return was_migrated indicating whether migration was performed.
+     * @return migration_info containing information about the migration performed.
      */ 
-    static was_migrated check_and_migrate(const boost::filesystem::path& logdir, file_operations& ops);
+    static migration_info check_and_migrate(const boost::filesystem::path& logdir, file_operations& ops);
 
     /**
      * @brief Converts the current object state to a JSON formatted string.
