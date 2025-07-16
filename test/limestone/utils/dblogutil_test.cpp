@@ -660,7 +660,7 @@ TEST_F(dblogutil_test, repairm_marker_end_followed_by_marker_begin) {
     EXPECT_NE(out.find("\n" "status: repaired"), out.npos);
     EXPECT_EQ(rc2, 0);
     EXPECT_NE(out2.find("\n" "status: OK"), out2.npos);
-    expect_mark_at(59, orig_data);
+    expect_mark_at(60, orig_data);
 }
 
 TEST_F(dblogutil_test, repairc_marker_end_followed_by_marker_begin) {
@@ -670,7 +670,7 @@ TEST_F(dblogutil_test, repairc_marker_end_followed_by_marker_begin) {
     EXPECT_NE(out.find("\n" "status: repaired"), out.npos);
     EXPECT_EQ(rc2, 0);
     EXPECT_NE(out2.find("\n" "status: OK"), out2.npos);
-    expect_mark_at(59, orig_data);
+    expect_mark_at(60, orig_data);
 }
 
 TEST_F(dblogutil_test, inspect_marker_end_followed_by_marker_inv_begin) {

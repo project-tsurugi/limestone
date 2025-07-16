@@ -1205,7 +1205,7 @@ TEST_F(dblog_scan_test, scan_one_pwal_file_repairm_marker_end_followed_by_normal
 TEST_F(dblog_scan_test, scan_one_pwal_file_repairm_marker_end_followed_by_marker_begin) {
     auto orig_data = data_marker_end_followed_by_marker_begin;
 
-    EXPECT_EQ(orig_data.at(59), '\x02'); 
+    EXPECT_EQ(orig_data.at(60), '\x02'); 
 
     // Case 1: durable_epoch < first half epoch -> first half nondurable + second half also nondurable -> both get marked
     scan_one_pwal_file_repairm(
@@ -1216,7 +1216,7 @@ TEST_F(dblog_scan_test, scan_one_pwal_file_repairm_marker_end_followed_by_marker
             EXPECT_EQ(pe.value(), dblog_scan::parse_error::repaired);
             auto data = read_entire_file(p);
             EXPECT_EQ(data.at(0), '\x06');   // first half
-            EXPECT_EQ(data.at(59), '\x06');   // second half
+            EXPECT_EQ(data.at(60), '\x06');   // second half
         },
         0x0FF
     );
@@ -1230,7 +1230,7 @@ TEST_F(dblog_scan_test, scan_one_pwal_file_repairm_marker_end_followed_by_marker
             EXPECT_EQ(pe.value(), dblog_scan::parse_error::repaired);
             auto data = read_entire_file(p);
             EXPECT_EQ(data.at(0), '\x02');   // first half remains unchanged
-            EXPECT_EQ(data.at(59), '\x06');   // only second half gets marked
+            EXPECT_EQ(data.at(60), '\x06');   // only second half gets marked
         },
         0x100
     );
@@ -1465,7 +1465,7 @@ TEST_F(dblog_scan_test, scan_one_pwal_file_repairc_marker_end_followed_by_marker
     auto orig_data = data_marker_end_followed_by_marker_begin;
 
     // Position verification
-    EXPECT_EQ(orig_data.at(59), '\x02');
+    EXPECT_EQ(orig_data.at(60), '\x02');
 
     // Case 1: durable_epoch < first half epoch -> both first and second half are nondurable -> both get marked
     scan_one_pwal_file_repairc(
@@ -1474,7 +1474,7 @@ TEST_F(dblog_scan_test, scan_one_pwal_file_repairc_marker_end_followed_by_marker
             EXPECT_EQ(pe.value(), dblog_scan::parse_error::repaired);
             auto data = read_entire_file(p);
             EXPECT_EQ(data.at(0), '\x06');   // first half mark
-            EXPECT_EQ(data.at(59), '\x06');  // second half mark
+            EXPECT_EQ(data.at(60), '\x06');  // second half mark
         },
         0x0FF
     );
@@ -1486,7 +1486,7 @@ TEST_F(dblog_scan_test, scan_one_pwal_file_repairc_marker_end_followed_by_marker
             EXPECT_EQ(pe.value(), dblog_scan::parse_error::repaired);
             auto data = read_entire_file(p);
             EXPECT_EQ(data.at(0), '\x02');   // first half remains unchanged
-            EXPECT_EQ(data.at(59), '\x06');  // only second half gets marked
+            EXPECT_EQ(data.at(60), '\x06');  // only second half gets marked "\x01"
         },
         0x100
     );

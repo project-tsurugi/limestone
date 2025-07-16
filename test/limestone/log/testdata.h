@@ -83,34 +83,34 @@ inline constexpr const std::string_view data_allzero =
 inline constexpr const std::string_view data_marker_end_only =
     "\x02\x00\x01\x00\x00\x00\x00\x00\x00"  // marker_begin epoch 0x100
     "\x01\x04\x00\x00\x00\x04\x00\x00\x00" "storage1" "1234" "vermajor" "verminor" "1234"  // normal_entry
-    "\x03\x00\x01\x00\x00\x00\x00\x00\x00" // marker_end epoch 0x100
+    "\x03\x00\x01\x00\x00\x00\x00\x00\x00" "\x01"// marker_end epoch 0x100
     ""sv;
 inline constexpr const std::string_view data_marker_end_followed_by_normal_entry =
     "\x02\x00\x01\x00\x00\x00\x00\x00\x00"  // marker_begin epoch 0x100
     "\x01\x04\x00\x00\x00\x04\x00\x00\x00" "storage1" "1234" "vermajor" "verminor" "1234"  // normal_entry
-    "\x03\x00\x01\x00\x00\x00\x00\x00\x00"  // marker_end epoch 0x100
+    "\x03\x00\x01\x00\x00\x00\x00\x00\x00" "\x01"  // marker_end epoch 0x100
     "\x01\x20\x00\x00\x00" "storage1" "1234" "vermajor" "verminor" "1234"  // normal_entry again
     ""sv;
 inline constexpr const std::string_view data_marker_end_followed_by_marker_begin =
     "\x02\x00\x01\x00\x00\x00\x00\x00\x00"  // marker_begin epoch 0x100
     "\x01\x04\x00\x00\x00\x04\x00\x00\x00" "storage1" "1234" "vermajor" "verminor" "1234"  // normal_entry
-    "\x03\x00\x01\x00\x00\x00\x00\x00\x00"  // marker_end epoch 0x100
+    "\x03\x00\x01\x00\x00\x00\x00\x00\x00" "\x01" // marker_end epoch 0x100
     "\x02\x01\x01\x00\x00\x00\x00\x00\x00"  // marker_begin epoch 0x101
     "\x01\x04\x00\x00\x00\x04\x00\x00\x00" "storage1" "1234" "vermajor" "verminor" "1234"  // normal_entry
-    "\x03\x01\x01\x00\x00\x00\x00\x00\x00" // marker_end epoch 0x101
+    "\x03\x01\x01\x00\x00\x00\x00\x00\x00" "\x01"// marker_end epoch 0x101
     ""sv;
 inline constexpr const std::string_view data_marker_end_followed_by_marker_inv_begin =
     "\x02\x00\x01\x00\x00\x00\x00\x00\x00"  // marker_begin epoch 0x100
     "\x01\x04\x00\x00\x00\x04\x00\x00\x00" "storage1" "1234" "vermajor" "verminor" "1234"  // normal_entry
-    "\x03\x00\x01\x00\x00\x00\x00\x00\x00"  // marker_end epoch 0x100
+    "\x03\x00\x01\x00\x00\x00\x00\x00\x00" "\x01"  // marker_end epoch 0x100
     "\x06\x01\x01\x00\x00\x00\x00\x00\x00"  // marker_inv_begin epoch 0x101
     "\x01\x04\x00\x00\x00\x04\x00\x00\x00" "storage1" "1234" "vermajor" "verminor" "1234"  // normal_entry in invalidated snippet
-    "\x03\x01\x01\x00\x00\x00\x00\x00\x00" // marker_end epoch 0x101
+    "\x03\x01\x01\x00\x00\x00\x00\x00\x00" "\x01" // marker_end epoch 0x101
     ""sv;
 inline constexpr const std::string_view data_marker_end_followed_by_short_entry =
     "\x02\x00\x01\x00\x00\x00\x00\x00\x00"  // marker_begin epoch 0x100
     "\x01\x04\x00\x00\x00\x04\x00\x00\x00" "storage1" "1234" "vermajor" "verminor" "1234"  // normal_entry
-    "\x03\x00\x01\x00\x00\x00\x00\x00\x00"  // marker_end epoch 0x100
+    "\x03\x00\x01\x00\x00\x00\x00\x00\x00" "\x01"  // marker_end epoch 0x100
     "\x01\x20\x00\x00"                     // SHORT normal_entry (incomplete)
     ""sv;
 inline constexpr const std::string_view data_short_marker_end_only =
@@ -148,7 +148,7 @@ inline constexpr std::string_view data_marker_end_partial_zerofill =
 inline constexpr std::string_view valid_snippet =
     "\x02\xff\x00\x00\x00\x00\x00\x00\x00"   // marker_begin (epoch = 0x100)
     "\x01\x04\x00\x00\x00\x04\x00\x00\x00" "storage1" "1234" "vermajor" "verminor" "1234"
-    "\x03\x00\x01\x00\x00\x00\x00\x00\x00"  // marker_end
+    "\x03\x00\x01\x00\x00\x00\x00\x00\x00" "\x01"  // marker_end
     ""sv;
 
 // Debug utilities

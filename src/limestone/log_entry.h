@@ -57,6 +57,11 @@ public:
         add_storage = 8,
         remove_storage = 9,
     };
+    enum class crc_type : std::uint8_t {
+        // use non-zero values to avoid misinterpretation of zero-filled junk
+        no_crc = 1,
+        // future values should be added here when implementation is ready
+    };
     class read_error {
     public:
         enum code {
@@ -108,6 +113,7 @@ public:
         entry_type type = entry_type::marker_end;
         write_uint8(strm, static_cast<std::uint8_t>(type));
         write_uint64le(strm, static_cast<std::uint64_t>(epoch));
+        write_uint8(strm, static_cast<std::uint8_t>(crc_type::no_crc)); 
     }
     static void durable_epoch(FILE* strm, epoch_id_type epoch) {
         entry_type type = entry_type::marker_durable;
@@ -409,13 +415,19 @@ public:
             break;
         }
         case entry_type::marker_begin:
-        case entry_type::marker_end:
         case entry_type::marker_durable:
         case entry_type::marker_invalidated_begin:
             epoch_id_ = static_cast<epoch_id_type>(read_uint64le(strm, ec));
             if (ec) return false;
             break;
-
+        case entry_type::marker_end: {
+            epoch_id_ = static_cast<epoch_id_type>(read_uint64le(strm, ec));
+            if (ec) return false;
+            char crc_type_char{};
+            read_bytes(strm, &crc_type_char, sizeof(crc_type_char), ec);
+            if (ec) return false;
+            break;
+        }
         default:
             ec.value(read_error::unknown_type);
             ec.entry_type(entry_type_);
