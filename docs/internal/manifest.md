@@ -149,6 +149,6 @@
   * 戻り値をvoidから `migration_info` に変更
   * `migration_info` クラスを作成
   * `migration_info` クラスは、マイグレーションの情報を保持
-  * versin5以前からversion6(以降)へマイグレーションした場合、
+  * version5以前からversion6(以降)へマイグレーションした場合、
     * `migration_info::requires_rotation()` がtrueを返すようにする。
     * これをみて、起動時にローテーションを行うことを想定している。
