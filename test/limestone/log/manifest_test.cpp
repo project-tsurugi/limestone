@@ -812,4 +812,4 @@ TEST_F(manifest_test, migration_info_version_downgrade) {
     EXPECT_FALSE(info.requires_rotation()); // 8 > 5, so no rotation
 }
 
-} // namespace limestone::internal
+} // namespace limestone::testing
