@@ -118,7 +118,7 @@ inline constexpr const std::string_view data_short_marker_end_only =
     "\x01\x04\x00\x00\x00\x04\x00\x00\x00" "storage1" "1234" "vermajor" "verminor" "1234"  // normal_entry
     "\x03\x00\x01\x00\x00\x00\x00"         // SHORT_marker_end (incomplete)
     ""sv;
-inline constexpr std::string_view data_all_zerofill =
+inline constexpr const std::string_view data_all_zerofill =
     "\x00\x00\x00\x00\x00\x00\x00\x00\x00"
     ""sv;
 inline constexpr std::string_view data_marker_begin_partial_zerofill =
