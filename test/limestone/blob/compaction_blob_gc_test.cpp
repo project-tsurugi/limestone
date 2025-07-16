@@ -215,9 +215,9 @@ TEST_F(compaction_test, basic_blob_gc_reboot_test) {
 
     // Verify snapshot content.
     // Expected effective state:
-    // - "blob_key1": updated in epoch 2 → "blob_value1_epoch2"
+    // - "blob_key1": updated in epoch 2 -> "blob_value1_epoch2"
     // - "blob_key2": remains from epoch 1.
-    // - "noblob_key1": updated in epoch 2 → "noblob_value1_epoch2"
+    // - "noblob_key1": updated in epoch 2 -> "noblob_value1_epoch2"
     // - "noblob_key2": remains from epoch 1.
     ASSERT_EQ(kv_list.size(), 4);
     EXPECT_EQ(kv_list[0].first, "blob_key1");

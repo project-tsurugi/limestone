@@ -110,6 +110,7 @@ void inspect(dblog_scan &ds, std::optional<epoch_id_type> epoch) {
     case dblog_scan::parse_error::nondurable_entries:
         std::cout << "status: auto-repairable" << std::endl;
         log_and_exit(1);  // FIXME: conflicts with gflags error code
+    case dblog_scan::parse_error::corrupted_durable_entries:
     case dblog_scan::parse_error::unexpected:
         std::cout << "status: unrepairable" << std::endl;
         log_and_exit(2);
@@ -160,6 +161,7 @@ void repair(dblog_scan &ds, std::optional<epoch_id_type> epoch) {
         LOG(FATAL) << "status: unreachable " << max_ec;
     case dblog_scan::parse_error::broken_after:
     case dblog_scan::parse_error::nondurable_entries:
+    case dblog_scan::parse_error::corrupted_durable_entries:
     case dblog_scan::parse_error::unexpected:
         std::cout << "status: unrepairable" << std::endl;
         log_and_exit(16);

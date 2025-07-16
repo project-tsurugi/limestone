@@ -24,6 +24,7 @@
 #include "file_operations.h"
 #include "limestone/api/blob_id_type.h"
 #include "compaction_options.h"
+#include "manifest.h"
 
 
 namespace limestone::internal {
@@ -62,9 +63,17 @@ std::optional<epoch_id_type> last_durable_epoch(const boost::filesystem::path& f
 void setup_initial_logdir(const boost::filesystem::path& logdir);
 
 // Validates the manifest file in the specified log directory and performs repair or migration if necessary.
-void check_and_migrate_logdir_format(const boost::filesystem::path& logdir);
+manifest::migration_info check_and_migrate_logdir_format(const boost::filesystem::path& logdir);
 
-// Ensures that the compaction catalog exists in the specified log directory.
+/**
+ * @brief Ensures that the compaction catalog exists in the specified log directory.
+ *
+ * This function checks the presence of the compaction catalog in the given log directory.
+ * If the catalog is missing or corrupted, it creates a new one to ensure proper log compaction
+ * and recovery operations can be performed.
+ *
+ * @param logdir The path to the log directory where the compaction catalog should exist.
+ */
 void ensure_compaction_catalog(const boost::filesystem::path& logdir);
 
 
