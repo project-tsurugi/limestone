@@ -65,14 +65,14 @@ void datastore_impl::decrement_backup_counter() noexcept {
 // Returns true if a backup operation is in progress.
 bool datastore_impl::is_backup_in_progress() const noexcept {
     int count = backup_counter_.load(std::memory_order_acquire);
-    VLOG_LP(log_info) << "Checking if backup is in progress; active backup count: " << count;
+    VLOG_LP(log_debug) << "Checking if backup is in progress; active backup count: " << count;
     return count > 0;
 }
 
 // Returns true if a replica exists.
 bool datastore_impl::has_replica() const noexcept {
     bool exists = replica_exists_.load(std::memory_order_acquire);
-    VLOG_LP(log_info) << "Checking replica existence; replica exists: " << exists;
+    VLOG_LP(log_debug) << "Checking replica existence; replica exists: " << exists;
     return exists;
 }
 
