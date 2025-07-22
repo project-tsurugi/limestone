@@ -15,14 +15,19 @@
  */
 #pragma once
 
+#include <limestone/api/datastore.h>
+
 #include <atomic>
 #include <memory>
-#include <limestone/api/datastore.h>
+#include <optional>
+
+#include "manifest.h"
 #include "replication/replica_connector.h"
 #include "replication/replication_endpoint.h"
 
 namespace limestone::api {
 
+using limestone::internal::manifest;
 using namespace limestone::replication;    
 
 // Internal implementation class for datastore (Pimpl idiom).
@@ -93,6 +98,12 @@ public:
     // Getter for REPLICATION_ASYNC_GROUP_COMMIT environment variable presence
     [[nodiscard]] bool is_async_group_commit_enabled() const noexcept;
 
+    // Getter for migration_info_
+    [[nodiscard]] const std::optional<manifest::migration_info>& get_migration_info() const noexcept;
+
+    // Setter for migration_info_
+    void set_migration_info(const manifest::migration_info& info) noexcept;
+
 private:
     // Atomic counter for tracking active backup operations.
     std::atomic<int> backup_counter_;
@@ -110,6 +121,9 @@ private:
     // Environment variable flags
     bool async_session_close_enabled_;
     bool async_group_commit_enabled_;
+  
+    // Migration info for the manifest
+    std::optional<manifest::migration_info> migration_info_; 
 };
 
 }  // namespace limestone::api

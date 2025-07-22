@@ -168,11 +168,7 @@ case E::remove_entry: {
     std::cout << std::endl;
 }
 
-
-
-
 void dump_wal(const std::filesystem::path& file_path) {
-
     std::ifstream in(file_path, std::ios::binary);
     if (!in) {
         std::cerr << "Error: Cannot open file '" << file_path << "'" << std::endl;
@@ -181,19 +177,24 @@ void dump_wal(const std::filesystem::path& file_path) {
 
     std::size_t count = 0;
     std::optional<limestone::api::epoch_id_type> current_epoch;
-    while (true) {
-        limestone::api::log_entry entry;
-        bool success = entry.read(in);
-        if (!success) {
-            break;
+    try {
+        while (true) {
+            limestone::api::log_entry entry;
+            bool success = entry.read(in);
+            if (!success) {
+                break;
+            }
+            if (entry.type() == limestone::api::log_entry::entry_type::marker_begin ||
+                entry.type() == limestone::api::log_entry::entry_type::marker_invalidated_begin) {
+                current_epoch = entry.epoch_id();
+            }
+            print_entry(entry, current_epoch);
+            ++count;
         }
-        if (entry.type() == limestone::api::log_entry::entry_type::marker_begin) {
-            current_epoch = entry.epoch_id();
-        }
-        print_entry(entry, current_epoch);
-        ++count;
+    } catch (limestone::api::limestone_exception) {
+        // Handle limestone exceptions, such as read errors
+        std::cerr << "Error reading log entry: " << limestone::api::log_entry::read_error().message() << std::endl;
     }
-
     std::cerr << "Total entries: " << count << std::endl;
 }
 

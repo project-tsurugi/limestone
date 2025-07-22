@@ -48,9 +48,10 @@ void setup_initial_logdir(const boost::filesystem::path& logdir) {
 }
 
 
-void check_and_migrate_logdir_format(const boost::filesystem::path& logdir) {
-    manifest::check_and_migrate(logdir);
+manifest::migration_info check_and_migrate_logdir_format(const boost::filesystem::path& logdir) {
+    auto result = manifest::check_and_migrate(logdir);
     ensure_compaction_catalog(logdir);
+    return result;
 }
 
 void ensure_compaction_catalog(const boost::filesystem::path& logdir) {

@@ -37,6 +37,7 @@ public:
             broken_after_marked = 0x11,     // warning; repaired, but tail is still broken, so do not append to this file
             nondurable_entries = 0x40,      // error; nondurable (formal (not short) and alive (not invalidated)) snippets exist, so need to mark invalidated
             broken_after = 0x41,            // error; tail is broken, not repaired yet (but can repair)
+            corrupted_durable_entries = 0x42, // fatal; durable entries physically corrupted and unrecoverable
             unexpected = 0x81,              // error; unexpected (formal) entry, maybe logic error
             failed = 0xff,
         };
@@ -61,6 +62,7 @@ public:
             case broken_after_marked: return "file is broken after offset " + std::to_string(fpos_) + ", and marked invalid snippet";
             case nondurable_entries: return "nondurable entries remain";
             case broken_after: return "file is broken after offset " + std::to_string(fpos_) + ", need to be repair";
+            case corrupted_durable_entries: return "durable epoch snippet is physically corrupted and unrecoverable";
             case unexpected: return "unexpected log entry order";
             case failed: return "parse failed";
             }

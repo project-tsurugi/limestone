@@ -40,6 +40,7 @@
 #include "datastore_impl.h"
 #include "manifest.h"
 #include "log_channel_impl.h"
+#include "dblog_scan.h"
 
 namespace {
 
@@ -125,7 +126,8 @@ datastore::datastore(configuration const& conf) : location_(conf.data_locations_
             throw limestone_io_exception(exception_type::initialization_failure, err_msg, errno);
         }
 
-        internal::check_and_migrate_logdir_format(location_);
+        auto migration_info = internal::check_and_migrate_logdir_format(location_);
+        impl_->set_migration_info(migration_info);
 
         add_file(compaction_catalog_path);
         compaction_catalog_ = std::make_unique<compaction_catalog>(compaction_catalog::from_catalog_file(location_));
@@ -248,6 +250,14 @@ void datastore::ready() {
             write_epoch_callback_(epoch_id_informed_.load());
         }
         cleanup_rotated_epoch_files(location_);
+        auto migration_info = impl_->get_migration_info();
+        if (migration_info.has_value() && migration_info->requires_rotation()) {
+            LOG(INFO) << "Manifest migration requires WAL rotation.";
+            dblog_scan ds(location_);
+            ds.detach_wal_files();
+            LOG(INFO) << "WAL rotation completed.";
+        }
+
         state_ = state::ready;
         if (impl_ ->is_replication_configured() && impl_->is_master()) {
             if (impl_->open_control_channel()) {

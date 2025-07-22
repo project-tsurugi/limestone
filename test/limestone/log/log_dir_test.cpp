@@ -1,4 +1,3 @@
-
 #include <limestone/logging.h>
 
 #include <boost/filesystem.hpp>
@@ -10,6 +9,7 @@
 #include "log_entry.h"
 #include "manifest.h"
 #include "test_root.h"
+#include "limestone/log/testdata.h"
 
 using namespace std::literals;
 using dblog_scan = limestone::internal::dblog_scan;
@@ -17,12 +17,6 @@ using compaction_catalog = limestone::internal::compaction_catalog;
 
 namespace limestone::testing {
 
-extern void create_file(const boost::filesystem::path& path, std::string_view content);
-extern const std::string_view epoch_0_str;
-extern const std::string_view epoch_0x100_str;
-extern std::string data_manifest(int persistent_format_version = 1);
-extern const std::string_view data_normal;
-extern const std::string_view data_nondurable;
 
 class log_dir_test : public ::testing::Test {
 public:
@@ -152,8 +146,13 @@ TEST_F(log_dir_test, accept_manifest_version_v5) {
     gen_datastore();   // success
 }
 
-TEST_F(log_dir_test, reject_manifest_version_v6) {
+TEST_F(log_dir_test, accept_manifest_version_v6) {
     create_manifest_file(6);
+    gen_datastore();   // success
+}
+
+TEST_F(log_dir_test, reject_manifest_version_v7) {
+    create_manifest_file(7);
     EXPECT_THROW({ gen_datastore(); }, std::exception);
 }
 
@@ -179,7 +178,7 @@ TEST_F(log_dir_test, rotate_old_rejects_unsupported_data) {
         LOG(FATAL) << "cannot make directory";
     }
     create_file(bk_path / "epoch", epoch_0_str);
-    create_file(bk_path / std::string(limestone::internal::manifest::file_name), data_manifest(6));
+    create_file(bk_path / std::string(limestone::internal::manifest::file_name), data_manifest(7));
 
     gen_datastore();
 
@@ -239,7 +238,7 @@ TEST_F(log_dir_test, rotate_prusik_rejects_unsupported_data) {
         LOG(FATAL) << "cannot make directory";
     }
     create_file(bk_path / "epoch", epoch_0_str);
-    create_file(bk_path / std::string(limestone::internal::manifest::file_name), data_manifest(6));
+    create_file(bk_path / std::string(limestone::internal::manifest::file_name), data_manifest(7));
     // setup entries
     std::vector<limestone::api::file_set_entry> entries;
     entries.emplace_back("epoch", "epoch", false);
@@ -371,7 +370,7 @@ TEST_F(log_dir_test, setup_initial_logdir_creates_manifest_file) {
     manifest_file >> manifest;
 
     EXPECT_EQ(manifest["format_version"], "1.1");
-    EXPECT_EQ(manifest["persistent_format_version"], 5);
+    EXPECT_EQ(manifest["persistent_format_version"], 6);
 }
 
 TEST_F(log_dir_test, setup_initial_logdir_creates_compaction_catalog_if_not_exists) {
@@ -423,5 +422,39 @@ TEST_F(log_dir_test, exists_path_returns_false_for_non_existing_file) {
 /* check purge_dir returns err_permission_error: unimplemented.
    because creating the file that cannnot be deleted by test user requires super-user privileges or similar */
 //TEST_F(log_dir_test, ut_purge_dir_err_file1) {}
+
+TEST_F(log_dir_test, ready_rotates_pwal_files_if_migration_info_requires_rotation) {
+    // 1. Create valid manifest, epoch, and pwal files
+    create_manifest_file(5); // Rotation required from 5 to 6
+    create_file(boost::filesystem::path(location) / "epoch", epoch_0_str);
+    create_file(boost::filesystem::path(location) / "pwal_0000", data_normal);
+
+    gen_datastore();
+
+    // 3. Call ready()
+    datastore_->ready();
+
+    // 4. Verify the file name after rotation
+    bool rotated = false;
+    for (auto& entry : boost::filesystem::directory_iterator(location)) {
+        if (entry.path().filename().string().find("pwal_0000.") == 0) {
+            rotated = true;
+        }
+    }
+    EXPECT_TRUE(rotated);
+}
+
+TEST_F(log_dir_test, ready_does_not_rotate_pwal_files_if_migration_info_does_not_require_rotation) {
+    create_manifest_file(6); // No rotation required from 6 to 7
+    create_file(boost::filesystem::path(location) / "epoch", epoch_0_str);
+    create_file(boost::filesystem::path(location) / "pwal_0000", data_normal);
+
+    gen_datastore();
+
+    datastore_->ready();
+
+    // Verify that pwal_0000 remains unchanged
+    EXPECT_TRUE(boost::filesystem::exists(boost::filesystem::path(location) / "pwal_0000"));
+}
 
 }  // namespace limestone::testing

@@ -90,6 +90,8 @@ void log_channel::begin_session() {
 }
 
 void log_channel::finalize_session_file() {
+    uint64_t epoch_id = current_epoch_id_.load();
+    log_entry::end_session(strm_, static_cast<epoch_id_type>(epoch_id));
     if (fflush(strm_) != 0) {
         LOG_AND_THROW_IO_EXCEPTION("fflush failed", errno);
     }

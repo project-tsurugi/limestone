@@ -34,6 +34,15 @@
   * Limestoneのデータフォーマットは変更なし
   * jogasakiが管理するテーブル・インデックスのメタデータが拡張され、
     それにともなって永続化データが前方互換でなくなくなったため。Limestoneで管理しているバージョンを更新。
+* Version 5
+  * Manifestファイルの形式が変更された。
+    * `format_version` が `"1.0"` から `"1.1"`
+    * `persistent_format_version` が `4` から `5`に変更された。
+    * `instance_uuid` が追加された。
+      * ログディレクトリ作成時、またはフォーマットバージョン 4->5 のアップグレード時に生成したUUIDが設定される。
+      * 主にレプリケーション時にマスタとレプリカが同一のデータベースであることの確認のために使用する。
+* Version 6
+  * WALファイルにmarker_endを書き込むように変更
 
 ### バージョン間の互換性
 
@@ -65,11 +74,21 @@
     * 手動でもダウングレード不可
 * Version 3 対応のTsurugi
   * 起動時に、Version 1,2のデータをVersion 3に自動アップグレードする。
-  * Version 4のデータを読むことはできない
+  * Version 4以降のデータを読むことはできない
     * 起動時にエラーとなる。
     * 手動でもダウングレード不可
 * Version 4 対応のTsurugi
   * 起動時に、Version 1〜3のデータをVersion 4に自動アップグレードする。
+  * Version 5以降のデータを読むことはできない
+    * 起動時にエラーとなる。
+    * 手動でもダウングレード不可
+* Version 5 対応のTsurugi
+  * 起動時に、Version 1〜4のデータをVersion 5に自動アップグレードする。
+  * Version 6以降のデータを読むことはできない
+    * 起動時にエラーとなる。
+    * 手動でもダウングレード不可
+* Version 6 対応のTsurugi
+  * 起動時に、Version 1〜5のデータをVersion 6に自動アップグレードする。
 
 
 ## 永続化データ形式バージョンの変更
@@ -116,3 +135,20 @@
     * Version 4もサポートバージョンに加える
 * その他
   * テストコード内でのバージョンチェックを行っている箇所の修正
+
+### Version 4 から Version 5 への更新
+
+* manifestに関する処理をmanifestクラスに集約
+  * `manifest.cpp` と `manifest.h` を作成
+
+
+### Version 5から Version 6 への更新
+
+* default versionを6に変更
+* `manifest.cpp` の `check_and_migrate_logdir_format` 関数を修正
+  * 戻り値をvoidから `migration_info` に変更
+  * `migration_info` クラスを作成
+  * `migration_info` クラスは、マイグレーションの情報を保持
+  * version5以前からversion6(以降)へマイグレーションした場合、
+    * `migration_info::requires_rotation()` がtrueを返すようにする。
+    * これをみて、起動時にローテーションを行うことを想定している。

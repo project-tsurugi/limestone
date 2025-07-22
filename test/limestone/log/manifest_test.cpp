@@ -707,5 +707,109 @@ TEST_F(manifest_test, load_manifest_from_path_returns_none_if_open_ifstream_fail
     EXPECT_FALSE(loaded);
 }
 
+// Test that check_and_migrate reports migration performed
+TEST_F(manifest_test, check_and_migrate_reports_migration_performed) {
+    // Write old manifest (version 2) to simulate migration
+    auto manifest_path = logdir / std::string(manifest::file_name);
+    nlohmann::json j = {
+        {"format_version", "1.0"},
+        {"persistent_format_version", 2}
+    };
+    std::ofstream(manifest_path.string()) << j.dump();
 
-}  // namespace limestone::testing
+    // Act
+    auto migration_result = manifest::check_and_migrate(logdir);
+
+    // Assert
+    EXPECT_EQ(migration_result.get_old_version(), 2);
+    EXPECT_EQ(migration_result.get_new_version(), manifest::default_persistent_format_version);
+}
+
+// Test that check_and_migrate reports no migration performed
+TEST_F(manifest_test, check_and_migrate_reports_no_migration_needed) {
+    // Write up-to-date manifest (version == default)
+    auto manifest_path = logdir / std::string(manifest::file_name);
+    nlohmann::json j = {
+        {"format_version", "1.0"},
+        {"persistent_format_version", manifest::default_persistent_format_version}
+    };
+    std::ofstream(manifest_path.string()) << j.dump();
+
+    // Act
+    auto migration_result = manifest::check_and_migrate(logdir);
+
+    // Assert
+    EXPECT_EQ(migration_result.get_old_version(), manifest::default_persistent_format_version);
+    EXPECT_EQ(migration_result.get_new_version(), manifest::default_persistent_format_version);
+}
+
+// Test migration_info class
+TEST_F(manifest_test, migration_info_constructor_and_getters) {
+    manifest::migration_info info(3, 6);
+    
+    EXPECT_EQ(info.get_old_version(), 3);
+    EXPECT_EQ(info.get_new_version(), 6);
+}
+
+// Test requires_rotation method with boundary values
+TEST_F(manifest_test, migration_info_requires_rotation_boundary_values) {
+    // Test all boundary value combinations for requires_rotation
+    // Rule: rotation required when old_version <= 5 AND new_version >= 6
+    
+    struct test_case {
+        int old_version;
+        int new_version;
+        bool expected_rotation;
+        const char* description;
+    };
+    
+    std::vector<test_case> test_cases = {
+        // Boundary cases where rotation is required (old <= 5 AND new >= 6)
+        {5, 6, true, "old=5, new=6 (both boundaries)"},
+        {4, 6, true, "old=4, new=6 (old < boundary, new = boundary)"},
+        {5, 7, true, "old=5, new=7 (old = boundary, new > boundary)"},
+        {1, 6, true, "old=1, new=6 (old << boundary, new = boundary)"},
+        {5, 10, true, "old=5, new=10 (old = boundary, new >> boundary)"},
+        
+        // Boundary cases where rotation is NOT required
+        {6, 6, false, "old=6, new=6 (old > boundary, new = boundary)"},
+        {6, 7, false, "old=6, new=7 (old > boundary, new > boundary)"},
+        {5, 5, false, "old=5, new=5 (old = boundary, new < boundary)"},
+        {4, 5, false, "old=4, new=5 (old < boundary, new < boundary)"},
+        {5, 4, false, "old=5, new=4 (old = boundary, new << boundary)"},
+        {7, 5, false, "old=7, new=5 (old > boundary, new < boundary)"},
+        {7, 6, false, "old=7, new=6 (old > boundary, new = boundary)"},
+        
+        // Edge cases
+        {0, 6, true, "old=0, new=6 (minimum old, boundary new)"},
+        {5, 1000, true, "old=5, new=1000 (boundary old, very large new)"},
+        {1000, 6, false, "old=1000, new=6 (very large old, boundary new)"},
+        {1000, 1000, false, "old=1000, new=1000 (both very large)"}
+    };
+    
+    for (const auto& test_case : test_cases) {
+        manifest::migration_info info(test_case.old_version, test_case.new_version);
+        EXPECT_EQ(info.requires_rotation(), test_case.expected_rotation) 
+            << "Failed for " << test_case.description;
+    }
+}
+
+// Test migration_info with same versions (no migration case)
+TEST_F(manifest_test, migration_info_no_migration_case) {
+    manifest::migration_info info(6, 6);
+    
+    EXPECT_EQ(info.get_old_version(), 6);
+    EXPECT_EQ(info.get_new_version(), 6);
+    EXPECT_FALSE(info.requires_rotation());
+}
+
+// Test migration_info with version downgrade (unusual but possible)
+TEST_F(manifest_test, migration_info_version_downgrade) {
+    manifest::migration_info info(8, 4);
+    
+    EXPECT_EQ(info.get_old_version(), 8);
+    EXPECT_EQ(info.get_new_version(), 4);
+    EXPECT_FALSE(info.requires_rotation()); // 8 > 5, so no rotation
+}
+
+} // namespace limestone::testing

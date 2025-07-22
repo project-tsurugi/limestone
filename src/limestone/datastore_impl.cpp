@@ -24,6 +24,7 @@
 #include "replication/message_session_begin.h"
 #include "replication/message_log_channel_create.h"
 #include "replication/message_group_commit.h"
+#include "manifest.h"
 
 namespace limestone::api {
 
@@ -33,6 +34,7 @@ datastore_impl::datastore_impl()
     , replica_exists_(false)
     , async_session_close_enabled_(std::getenv("REPLICATION_ASYNC_SESSION_CLOSE") != nullptr)
     , async_group_commit_enabled_(std::getenv("REPLICATION_ASYNC_GROUP_COMMIT") != nullptr)
+    , migration_info_(std::nullopt)
 {
     LOG_LP(INFO) << "REPLICATION_ASYNC_SESSION_CLOSE: "
                  << (async_session_close_enabled_ ? "enabled" : "disabled");
@@ -213,6 +215,14 @@ bool datastore_impl::is_async_session_close_enabled() const noexcept {
 
 bool datastore_impl::is_async_group_commit_enabled() const noexcept {
     return async_group_commit_enabled_;
+}
+
+const std::optional<manifest::migration_info>& datastore_impl::get_migration_info() const noexcept {
+    return migration_info_;
+}
+
+void datastore_impl::set_migration_info(const manifest::migration_info& info) noexcept {
+    migration_info_ = info;
 }
 
 }  // namespace limestone::api
