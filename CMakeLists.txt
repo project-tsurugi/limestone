@@ -77,6 +77,13 @@ if (ENABLE_ALTIMETER)
     find_package(fmt REQUIRED)
 endif()
 
+
+# gRPC/protobuf
+find_package(Protobuf REQUIRED)
+find_package(PkgConfig REQUIRED)
+pkg_check_modules(GRPC REQUIRED grpc++)
+
+
 add_subdirectory(third_party) # should be before enable_testing()
 
 include(GNUInstallDirs)

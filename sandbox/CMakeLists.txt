@@ -16,3 +16,8 @@ foreach(tool IN LISTS TOOLS)
         PRIVATE glog::glog
     )
 endforeach()
+
+# Special handling for grpc_server
+if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/grpc_server")
+    add_subdirectory(grpc_server)
+endif()
