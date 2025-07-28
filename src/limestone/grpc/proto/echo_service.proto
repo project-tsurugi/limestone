@@ -1,0 +1,25 @@
+syntax = "proto3";
+
+package limestone.grpc;
+
+option java_package = "com.tsurugi.limestone.grpc";
+option java_outer_classname = "EchoServiceProto";
+option csharp_namespace = "Limestone.Grpc";
+
+// Echo service for testing and demonstration purposes
+service EchoService {
+  // Simple echo operation that returns the input message
+  rpc Echo(EchoRequest) returns (EchoResponse);
+}
+
+// Request message for Echo operation
+message EchoRequest {
+  // Message to be echoed back
+  string message = 1;
+}
+
+// Response message for Echo operation
+message EchoResponse {
+  // Echoed message
+  string message = 1;
+}

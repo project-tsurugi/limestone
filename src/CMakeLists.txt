@@ -2,7 +2,43 @@ file(GLOB SOURCES
         "limestone/*.cpp"
         "limestone/replication/*.cpp"
         "limestone/partitioned_cursor/*.cpp"
+        "limestone/grpc/service/*.cpp"
+        "limestone/grpc/client/*.cpp"
 )
+
+# Generate protobuf and gRPC files
+find_program(PROTOC protoc REQUIRED)
+find_program(GRPC_CPP_PLUGIN grpc_cpp_plugin REQUIRED)
+
+# Automatically find all .proto files in limestone/grpc/proto/
+file(GLOB PROTO_FILES "limestone/grpc/proto/*.proto")
+set(PROTO_SRCS)
+set(GRPC_SRCS)
+
+foreach(PROTO_FILE ${PROTO_FILES})
+    get_filename_component(PROTO_NAME ${PROTO_FILE} NAME_WE)
+    get_filename_component(PROTO_PATH ${PROTO_FILE} PATH)
+    set(PROTO_SRC "${CMAKE_CURRENT_BINARY_DIR}/${PROTO_NAME}.pb.cc")
+    set(GRPC_SRC "${CMAKE_CURRENT_BINARY_DIR}/${PROTO_NAME}.grpc.pb.cc")
+    list(APPEND PROTO_SRCS ${PROTO_SRC})
+    list(APPEND GRPC_SRCS ${GRPC_SRC})
+    
+    add_custom_command(
+        OUTPUT ${PROTO_SRC} ${CMAKE_CURRENT_BINARY_DIR}/${PROTO_NAME}.pb.h 
+               ${GRPC_SRC} ${CMAKE_CURRENT_BINARY_DIR}/${PROTO_NAME}.grpc.pb.h
+        COMMAND ${PROTOC}
+            --cpp_out=${CMAKE_CURRENT_BINARY_DIR}
+            --grpc_out=${CMAKE_CURRENT_BINARY_DIR}
+            --plugin=protoc-gen-grpc=${GRPC_CPP_PLUGIN}
+            --proto_path=${CMAKE_CURRENT_SOURCE_DIR}/limestone/grpc/proto
+            ${PROTO_FILE}
+        DEPENDS ${PROTO_FILE}
+        COMMENT "Generating protobuf and gRPC files for ${PROTO_FILE}"
+    )
+endforeach()
+
+# Add generated files to sources
+list(APPEND SOURCES ${PROTO_SRCS} ${GRPC_SRCS})
 
 add_library(${package_name}
         ${SOURCES}
@@ -15,6 +51,7 @@ set_target_properties(${package_name}
 )
 target_include_directories(${package_name}
         PRIVATE ./limestone
+        PRIVATE ${CMAKE_CURRENT_BINARY_DIR}
 )
 
 if(${RECOVERY_SORTER_KVSLIB_UPPERCASE} STREQUAL "ROCKSDB")
@@ -36,6 +73,9 @@ target_link_libraries(${package_name}
         PRIVATE glog::glog
         PRIVATE ${sort_lib}
         PRIVATE nlohmann_json::nlohmann_json
+        PRIVATE grpc++
+        PRIVATE grpc
+        PRIVATE protobuf
 )
 
 if (ENABLE_ALTIMETER)
