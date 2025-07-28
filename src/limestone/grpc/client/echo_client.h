@@ -29,13 +29,6 @@ public:
     explicit echo_client(std::shared_ptr<::grpc::Channel> channel);
     
     /**
-     * @brief Send echo request and receive response
-     * 
-     * @param message Message to be echoed
-     * @param response Output parameter to store the echoed message
-     * @return grpc::Status indicating success or failure
-     */
-    /**
      * @brief Send an echo request to the server
      * @param message Message to echo
      * @param response Reference to store the response
@@ -44,23 +37,15 @@ public:
     ::grpc::Status echo(const std::string& message, std::string& response);
     
     /**
-     * @brief Send echo request with timeout
-     * 
-     * @param message Message to be echoed
-     * @param response Output parameter to store the echoed message
-     * @param timeout_ms Timeout in milliseconds
-     * @return grpc::Status indicating success or failure
-     */
-    /**
      * @brief Send an echo request with timeout
      * @param message Message to echo
      * @param response Reference to store the response
-     * @param timeout_ms Timeout in milliseconds (default: 1000ms)
+     * @param timeout_ms Timeout in milliseconds
      * @return gRPC status of the operation
      */
     ::grpc::Status echo(const std::string& message,
                         std::string& response,
-                        int timeout_ms = 1000);
+                        int timeout_ms);
 
 private:
     std::unique_ptr<limestone::grpc::EchoService::Stub> stub_;

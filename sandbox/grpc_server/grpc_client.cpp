@@ -3,48 +3,52 @@
 #include <string>
 
 #include <grpcpp/grpcpp.h>
-#include "echo.grpc.pb.h"
-
-using grpc::Channel;
-using grpc::ClientContext;
-using grpc::Status;
-using echo::EchoRequest;
-using echo::EchoReply;
-using echo::EchoService;
+#include <glog/logging.h>
+#include "limestone/grpc/client/echo_client.h"
 
 int main(int argc, char** argv) {
-  std::string target_str = "localhost:50051";
-  std::string message = "Hello, gRPC!";
-  
-  if (argc > 1) {
-    message = argv[1];
-  }
+    // Initialize glog
+    google::InitGoogleLogging(argv[0]);
+    FLAGS_logtostderr = 1;  // Log to stderr instead of file
+    
+    std::string target_str = "localhost:50051";
+    std::string message = "Hello, gRPC!";
+    
+    if (argc > 1) {
+        message = argv[1];
+    }
 
-// Message size check
-if (message.size() > 100) {
-    std::cerr << "Error: Message too long (max 100 chars)" << std::endl;
-    return 1;
-}
+    // Message size check
+    if (message.size() > 100) {
+        std::cerr << "Error: Message too long (max 100 chars)" << std::endl;
+        return 1;
+    }
 
-// Create a simple channel
-auto channel = grpc::CreateChannel(target_str, grpc::InsecureChannelCredentials());
-auto stub = EchoService::NewStub(channel);
+    LOG(INFO) << "Starting limestone gRPC echo client";
+    LOG(INFO) << "Connecting to: " << target_str;
+    
+    try {
+        // Create echo client
+        limestone::grpc::client::echo_client client(target_str);
+        
+        // Send echo request
+        std::string response;
+        ::grpc::Status status = client.echo(message, response);
+        
+        if (status.ok()) {
+            std::cout << "Server replied: " << response << std::endl;
+            LOG(INFO) << "Echo successful: " << response;
+        } else {
+            std::cout << "RPC failed: " << status.error_message() << std::endl;
+            LOG(ERROR) << "RPC failed: " << status.error_code() 
+                       << ": " << status.error_message();
+            return 1;
+        }
+    } catch (const std::exception& e) {
+        std::cerr << "Exception: " << e.what() << std::endl;
+        LOG(ERROR) << "Exception occurred: " << e.what();
+        return 1;
+    }
 
-// Request/Response
-EchoRequest request;
-EchoReply reply;
-ClientContext context;
-
-request.set_message(message);
-
-// gRPC call
-  Status status = stub->Echo(&context, request, &reply);
-
-  if (status.ok()) {
-    std::cout << "Server replied: " << reply.message() << std::endl;
-  } else {
-    std::cout << "RPC failed: " << status.error_message() << std::endl;
-  }
-
-  return 0;
+    return 0;
 }
