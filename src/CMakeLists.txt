@@ -7,8 +7,9 @@ file(GLOB SOURCES
 )
 
 # Generate protobuf and gRPC files
-find_program(PROTOC protoc REQUIRED)
-find_program(GRPC_CPP_PLUGIN grpc_cpp_plugin REQUIRED)
+# Use the protoc and grpc_cpp_plugin from the built gRPC
+set(_PROTOBUF_PROTOC $<TARGET_FILE:protoc>)
+set(_GRPC_CPP_PLUGIN_EXECUTABLE $<TARGET_FILE:grpc_cpp_plugin>)
 
 # Automatically find all .proto files in limestone/grpc/proto/
 file(GLOB PROTO_FILES "limestone/grpc/proto/*.proto")
@@ -26,13 +27,13 @@ foreach(PROTO_FILE ${PROTO_FILES})
     add_custom_command(
         OUTPUT ${PROTO_SRC} ${CMAKE_CURRENT_BINARY_DIR}/${PROTO_NAME}.pb.h 
                ${GRPC_SRC} ${CMAKE_CURRENT_BINARY_DIR}/${PROTO_NAME}.grpc.pb.h
-        COMMAND ${PROTOC}
+        COMMAND ${_PROTOBUF_PROTOC}
             --cpp_out=${CMAKE_CURRENT_BINARY_DIR}
             --grpc_out=${CMAKE_CURRENT_BINARY_DIR}
-            --plugin=protoc-gen-grpc=${GRPC_CPP_PLUGIN}
+            --plugin=protoc-gen-grpc=${_GRPC_CPP_PLUGIN_EXECUTABLE}
             --proto_path=${CMAKE_CURRENT_SOURCE_DIR}/limestone/grpc/proto
             ${PROTO_FILE}
-        DEPENDS ${PROTO_FILE}
+        DEPENDS ${PROTO_FILE} protoc grpc_cpp_plugin
         COMMENT "Generating protobuf and gRPC files for ${PROTO_FILE}"
     )
 endforeach()
@@ -75,7 +76,7 @@ target_link_libraries(${package_name}
         PRIVATE nlohmann_json::nlohmann_json
         PRIVATE grpc++
         PRIVATE grpc
-        PRIVATE protobuf
+        PRIVATE libprotobuf
 )
 
 if (ENABLE_ALTIMETER)

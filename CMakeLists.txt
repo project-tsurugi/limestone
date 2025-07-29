@@ -19,6 +19,23 @@ project(limestone
     DESCRIPTION "limestone datastore engine"
     LANGUAGES CXX)
 
+# ccache setup for faster builds
+find_program(CCACHE_PROGRAM ccache)
+if(CCACHE_PROGRAM)
+    message(STATUS "Found ccache: ${CCACHE_PROGRAM}")
+    set(CMAKE_CXX_COMPILER_LAUNCHER ${CCACHE_PROGRAM})
+    set(CMAKE_C_COMPILER_LAUNCHER ${CCACHE_PROGRAM})
+    
+    # ccache options for better performance
+    set(ENV{CCACHE_SLOPPINESS} "file_macro,locale,time_macros")
+    set(ENV{CCACHE_COMPRESS} "true")
+    set(ENV{CCACHE_COMPRESSLEVEL} "6")
+    set(ENV{CCACHE_MAXSIZE} "10G")
+    message(STATUS "ccache enabled with 10GB cache size")
+else()
+    message(STATUS "ccache not found")
+endif()
+
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_EXTENSIONS OFF)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -76,12 +93,6 @@ if (ENABLE_ALTIMETER)
     find_package(altimeter REQUIRED)
     find_package(fmt REQUIRED)
 endif()
-
-
-# gRPC/protobuf
-find_package(Protobuf REQUIRED)
-find_package(PkgConfig REQUIRED)
-pkg_check_modules(GRPC REQUIRED grpc++)
 
 
 add_subdirectory(third_party) # should be before enable_testing()

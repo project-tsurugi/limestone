@@ -6,12 +6,13 @@ target_include_directories(grpc_server PRIVATE
     ${PROJECT_SOURCE_DIR}/src  # For limestone headers
     ${CMAKE_CURRENT_BINARY_DIR}/../../src  # For generated protobuf headers
 )
+
 target_link_libraries(grpc_server PRIVATE
     limestone-impl  # This includes limestone library with gRPC
     glog::glog
     grpc++
     grpc
-    protobuf
+    libprotobuf
 )
 
 # Add grpc_client
@@ -20,29 +21,11 @@ target_include_directories(grpc_client PRIVATE
     ${PROJECT_SOURCE_DIR}/src  # For limestone headers
     ${CMAKE_CURRENT_BINARY_DIR}/../../src  # For generated protobuf headers
 )
+
 target_link_libraries(grpc_client PRIVATE
     limestone-impl  # This includes limestone library with gRPC
     glog::glog
     grpc++
     grpc
-    protobuf
-)
-
-# Client with AddressSanitizer disabled - more aggressive approach
-target_compile_options(grpc_client PRIVATE -fno-sanitize=address -fno-sanitize-address-use-after-scope)
-target_link_options(grpc_client PRIVATE -fno-sanitize=address -fno-sanitize-address-use-after-scope)
-
-# Safe client with AddressSanitizer disabled
-add_executable(grpc_client_safe grpc_client.cpp)
-target_include_directories(grpc_client_safe PRIVATE 
-    ${PROJECT_SOURCE_DIR}/src  # For limestone headers
-    ${CMAKE_CURRENT_BINARY_DIR}/../../src  # For generated protobuf headers
-)
-target_compile_options(grpc_client_safe PRIVATE -O2 -DNDEBUG)
-target_link_libraries(grpc_client_safe PRIVATE
-    limestone-impl  # This includes limestone library with gRPC
-    glog::glog
-    grpc++
-    grpc
-    protobuf
+    libprotobuf
 )
