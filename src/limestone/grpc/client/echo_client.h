@@ -26,7 +26,7 @@ public:
      * @brief Constructor with custom gRPC channel
      * @param channel Shared pointer to gRPC channel
      */
-    explicit echo_client(std::shared_ptr<::grpc::Channel> channel);
+    explicit echo_client(const std::shared_ptr<::grpc::Channel>& channel);
     
     /**
      * @brief Send an echo request to the server

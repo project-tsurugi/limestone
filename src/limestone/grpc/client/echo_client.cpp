@@ -10,7 +10,7 @@ echo_client::echo_client(const std::string& server_address)
     LOG(INFO) << "echo_client created for server: " << server_address;
 }
 
-echo_client::echo_client(std::shared_ptr<::grpc::Channel> channel)
+echo_client::echo_client(const std::shared_ptr<::grpc::Channel>& channel)
     : stub_(limestone::grpc::EchoService::NewStub(channel)) {
     LOG(INFO) << "echo_client created with custom channel";
 }
