@@ -83,11 +83,11 @@ jobs:
         with:
           submodules: true
 
-      - name: Install gRPC (AlmaLinux)
+      - name: Install gRPC
         run: |
           dnf install -y epel-release
           dnf config-manager --set-enabled crb
-          dnf install -y grpc-devel grpc-plugins protobuf-devel 
+          dnf install -y grpc-devel grpc-plugins grpc-cli protobuf-devel
 
       - name: CMake_Build
         run: |
