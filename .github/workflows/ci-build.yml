@@ -86,7 +86,7 @@ jobs:
       - name: Install gRPC
         run: |
           dnf install -y epel-release
-          dnf config-manager --set-enabled powertools
+          dnf config-manager --set-enabled crb
           dnf install -y grpc-devel grpc-plugins grpc-compiler grpc++-devel protobuf-compiler-grpc protobuf-devel || true
 
       - name: CMake_Build
