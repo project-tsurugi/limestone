@@ -83,6 +83,10 @@ jobs:
         with:
           submodules: true
 
+      - name: Install gRPC
+        run: |
+          dnf install -y grpc-devel grpc-plugins protobuf-compiler-grpc || true
+
       - name: CMake_Build
         run: |
           mkdir build
