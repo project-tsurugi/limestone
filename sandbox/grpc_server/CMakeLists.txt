@@ -28,10 +28,6 @@ target_link_libraries(grpc_client PRIVATE
     protobuf
 )
 
-# Client with AddressSanitizer disabled - more aggressive approach
-target_compile_options(grpc_client PRIVATE -fno-sanitize=address -fno-sanitize-address-use-after-scope)
-target_link_options(grpc_client PRIVATE -fno-sanitize=address -fno-sanitize-address-use-after-scope)
-
 # Safe client with AddressSanitizer disabled
 add_executable(grpc_client_safe grpc_client.cpp)
 target_include_directories(grpc_client_safe PRIVATE 
