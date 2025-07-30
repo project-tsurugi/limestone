@@ -85,7 +85,7 @@ jobs:
 
       - name: Install gRPC
         run: |
-          dnf install -y grpc-devel grpc-plugins protobuf-compiler-grpc || true
+          dnf install -y grpc-devel grpc-plugins grpc-compiler grpc++-devel protobuf-compiler-grpc || true
 
       - name: CMake_Build
         run: |
