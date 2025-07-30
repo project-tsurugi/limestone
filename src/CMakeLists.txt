@@ -13,19 +13,23 @@ find_program(GRPC_CPP_PLUGIN grpc_cpp_plugin REQUIRED)
 # Automatically find all .proto files in limestone/grpc/proto/
 file(GLOB PROTO_FILES "limestone/grpc/proto/*.proto")
 set(PROTO_SRCS)
+set(PROTO_HDRS)
 set(GRPC_SRCS)
+set(GRPC_HDRS)
 
 foreach(PROTO_FILE ${PROTO_FILES})
     get_filename_component(PROTO_NAME ${PROTO_FILE} NAME_WE)
-    get_filename_component(PROTO_PATH ${PROTO_FILE} PATH)
     set(PROTO_SRC "${CMAKE_CURRENT_BINARY_DIR}/${PROTO_NAME}.pb.cc")
+    set(PROTO_HDR "${CMAKE_CURRENT_BINARY_DIR}/${PROTO_NAME}.pb.h")
     set(GRPC_SRC "${CMAKE_CURRENT_BINARY_DIR}/${PROTO_NAME}.grpc.pb.cc")
+    set(GRPC_HDR "${CMAKE_CURRENT_BINARY_DIR}/${PROTO_NAME}.grpc.pb.h")
     list(APPEND PROTO_SRCS ${PROTO_SRC})
+    list(APPEND PROTO_HDRS ${PROTO_HDR})
     list(APPEND GRPC_SRCS ${GRPC_SRC})
-    
+    list(APPEND GRPC_HDRS ${GRPC_HDR})
+
     add_custom_command(
-        OUTPUT ${PROTO_SRC} ${CMAKE_CURRENT_BINARY_DIR}/${PROTO_NAME}.pb.h 
-               ${GRPC_SRC} ${CMAKE_CURRENT_BINARY_DIR}/${PROTO_NAME}.grpc.pb.h
+        OUTPUT ${PROTO_SRC} ${PROTO_HDR} ${GRPC_SRC} ${GRPC_HDR}
         COMMAND ${PROTOC}
             --cpp_out=${CMAKE_CURRENT_BINARY_DIR}
             --grpc_out=${CMAKE_CURRENT_BINARY_DIR}
@@ -50,8 +54,8 @@ set_target_properties(${package_name}
                 OUTPUT_NAME ${export_name}
 )
 target_include_directories(${package_name}
-        PRIVATE ./limestone
-        PRIVATE ${CMAKE_CURRENT_BINARY_DIR}
+        PRIVATE ./limestone                   # internal sources
+        PRIVATE ${CMAKE_CURRENT_BINARY_DIR}   # for generated pb.h, not installed
 )
 
 if(${RECOVERY_SORTER_KVSLIB_UPPERCASE} STREQUAL "ROCKSDB")
@@ -104,6 +108,9 @@ target_link_libraries(limestone-impl
         INTERFACE glog::glog
         INTERFACE ${sort_lib}
         INTERFACE nlohmann_json::nlohmann_json
+        INTERFACE grpc++
+        INTERFACE grpc
+        INTERFACE protobuf
 )
 
 # utils

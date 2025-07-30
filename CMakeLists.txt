@@ -83,9 +83,9 @@ find_package(Protobuf REQUIRED)
 find_package(PkgConfig REQUIRED)
 pkg_check_modules(GRPC QUIET grpc++)
 if(NOT GRPC_FOUND)
-    message(WARNING "gRPC not found. gRPC-related targets will be skipped.")
+    message(FATAL_ERROR "gRPC not found. Please install grpc++ development package.")
 endif()
-
+find_program(GRPC_CPP_PLUGIN grpc_cpp_plugin REQUIRED)
 
 add_subdirectory(third_party) # should be before enable_testing()
 
