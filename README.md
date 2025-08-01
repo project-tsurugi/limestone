@@ -49,8 +49,6 @@ available options:
 * `-DBUILD_REPLICATION_TESTS=ON` - (temporary) enable experimental replication tests (excluded by default)
 * `-DUSE_GRPC_CONFIG=ON` - use CMake Config mode for gRPC instead of pkg-config (recommended on Ubuntu 24.04 or later for faster configuration)
 
-ChatGPT に質問する
-
 * for debugging only
   * `-DENABLE_SANITIZER=OFF` - disable sanitizers (requires `-DCMAKE_BUILD_TYPE=Debug`)
   * `-DENABLE_UB_SANITIZER=ON` - enable undefined behavior sanitizer (requires `-DENABLE_SANITIZER=ON`)
