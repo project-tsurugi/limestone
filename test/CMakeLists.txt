@@ -7,6 +7,7 @@ add_executable(${test_target}
 target_include_directories(${test_target}
         PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}
         PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../src/limestone
+        PRIVATE ${CMAKE_BINARY_DIR}/src # for generated pb.h, grpc.pb.h
         )
 
 target_link_libraries(${test_target}
@@ -39,6 +40,7 @@ file(GLOB SRCS
         "limestone/snapshot/*.cpp"
         "limestone/utils/*.cpp"
         "limestone/partitioned_cursor/*.cpp"
+        "limestone/grpc/*.cpp"
         )
 
 foreach(file ${SRCS})
