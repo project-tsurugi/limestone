@@ -35,11 +35,6 @@ jobs:
         with:
           submodules: true
 
-      - name: Install gRPC
-        run: |
-          apt-get update
-          apt-get install -y libgrpc-dev libgrpc++-dev protobuf-compiler-grpc
-
       - name: CMake_Build
         run: |
           mkdir build
@@ -82,12 +77,6 @@ jobs:
         uses: actions/checkout@v4
         with:
           submodules: true
-
-      - name: Install gRPC
-        run: |
-          dnf install -y epel-release
-          dnf config-manager --set-enabled crb
-          dnf install -y grpc-devel grpc-plugins grpc-cli protobuf-devel
 
       - name: CMake_Build
         run: |
