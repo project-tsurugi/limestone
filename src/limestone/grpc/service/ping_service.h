@@ -7,9 +7,7 @@ namespace limestone::grpc::testing {
 
 class ping_service final : public PingService::Service {
 public:
-    ::grpc::Status Ping(::grpc::ServerContext*, const PingRequest*, PingResponse*) override {
-        return ::grpc::Status::OK;
-    }
+    ::grpc::Status Ping(::grpc::ServerContext*, const PingRequest*, PingResponse*) override;
 };
 
 } // namespace limestone::grpc::testing
