@@ -39,18 +39,18 @@ namespace limestone::grpc::service {
     auto t0 = steady_clock::now();
 
     int64_t size = request->size();
-    const int64_t chunk_size = 32 * 1024 * 1024; // 32MB
+    const int64_t chunk_size = 32LL * 1024 * 1024; // 32MB
 
-    uint32_t state = 0x12345678 ^ static_cast<uint32_t>(size);
+    auto state =  static_cast<uint32_t>(0x12345678) ^ static_cast<uint32_t>(size);
 
     // First, create the entire buffer and fill it with random numbers
 
-    std::vector<uint8_t> all_data(size);
+    std::string all_data(size, '\0');
     for (int64_t i = 0; i < size; ++i) {
-        state ^= state << 13;
-        state ^= state >> 17;
-        state ^= state << 5;
-        all_data[i] = static_cast<uint8_t>(state & 0xFF);
+        state ^= state << static_cast<uint32_t>(13);
+        state ^= state >> static_cast<uint32_t>(17);
+        state ^= state << static_cast<uint32_t>(5);
+        all_data[i] = static_cast<char>(state & static_cast<uint32_t>(0xFF));
     }
 
     auto t1 = steady_clock::now();
@@ -61,9 +61,7 @@ namespace limestone::grpc::service {
     while (sent < size) {
         int64_t current_chunk_size = std::min(chunk_size, size - sent);
         limestone::grpc::RandomBytesChunk chunk;
-        chunk.set_data(std::string(
-            reinterpret_cast<const char*>(&all_data[sent]),
-            static_cast<size_t>(current_chunk_size)));
+        chunk.set_data(all_data.substr(sent, current_chunk_size));
         writer->Write(chunk);
         sent += current_chunk_size;
     }
