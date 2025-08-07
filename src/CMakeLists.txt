@@ -111,6 +111,8 @@ target_link_libraries(limestone-impl
         INTERFACE grpc++
         INTERFACE grpc
         INTERFACE protobuf
+        INTERFACE gpr
+        INTERFACE absl_synchronization
 )
 
 # utils

@@ -3,6 +3,8 @@ set(TOOLS
     wal_dump/wal_dump.cpp
     grpc/grpc_server.cpp
     grpc/grpc_client.cpp
+    grpc/server_streaming_sample_client.cpp
+    grpc/server_streaming_sample_server.cpp
 )
 
 foreach(tool_src IN LISTS TOOLS)
