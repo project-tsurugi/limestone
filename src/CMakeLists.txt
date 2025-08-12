@@ -2,6 +2,7 @@ file(GLOB SOURCES
         "limestone/*.cpp"
         "limestone/replication/*.cpp"
         "limestone/partitioned_cursor/*.cpp"
+        "limestone/wal_sync/*.cpp"
 )
 
 add_library(${package_name}

@@ -97,6 +97,9 @@ public:
     // Opens an input file stream
     virtual std::unique_ptr<std::ifstream> open_ifstream(const std::string& path) = 0;
 
+    // Opens an output file stream
+    virtual std::unique_ptr<std::ofstream> open_ofstream(const std::string& path) = 0;
+
     // Reads a line from an input file stream
     virtual bool getline(std::ifstream& file, std::string& line) = 0;
 
@@ -109,6 +112,8 @@ public:
     // Checks if there's an error in the file stream
     virtual bool has_error(std::ifstream& file) = 0;
 
+    // Writes data to an ofstream (for testability)
+    virtual void ofs_write(std::ofstream& ofs, const char* buf, std::streamsize size) = 0;
 
     // -----------------------------------------
     // Boost filesystem operations
@@ -156,10 +161,12 @@ public:
     int close(int fd) override;
 
     std::unique_ptr<std::ifstream> open_ifstream(const std::string& path) override;
+    std::unique_ptr<std::ofstream> open_ofstream(const std::string& path) override;
     bool getline(std::ifstream& file, std::string& line) override;
     bool is_eof(std::ifstream& file) override;
     bool is_open(std::ifstream& file) override;
     bool has_error(std::ifstream& file) override;
+    void ofs_write(std::ofstream& ofs, const char* buf, std::streamsize size) override;
 
     bool exists(const boost::filesystem::path& p, boost::system::error_code& ec) override;
     void directory_iterator_next(boost::filesystem::directory_iterator& it, boost::system::error_code& ec) override;

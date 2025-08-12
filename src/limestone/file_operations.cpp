@@ -94,6 +94,10 @@ std::unique_ptr<std::ifstream> real_file_operations::open_ifstream(const std::st
     return std::make_unique<std::ifstream>(path);
 }
 
+std::unique_ptr<std::ofstream> real_file_operations::open_ofstream(const std::string& path) {
+    return std::make_unique<std::ofstream>(path, std::ios::binary | std::ios::trunc);
+}
+
 bool real_file_operations::getline(std::ifstream& file, std::string& line) {
     return static_cast<bool>(std::getline(file, line));
 }
@@ -108,6 +112,10 @@ bool real_file_operations::is_eof(std::ifstream& file) {
 
 bool real_file_operations::is_open(std::ifstream& file) {
     return file.is_open();
+}
+
+void real_file_operations::ofs_write(std::ofstream& ofs, const char* buf, std::streamsize size) {
+    ofs.write(buf, size);
 }
 
 
