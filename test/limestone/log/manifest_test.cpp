@@ -16,6 +16,34 @@ using namespace limestone::internal;
 constexpr const char* k_manifest_test_dir = "/tmp/manifest_test";
 
 class manifest_test : public ::testing::Test {
+public:
+    // Tests for failure scenarios using a custom file_operations stub
+    class failing_file_ops : public real_file_operations {
+    public:
+        enum class fail_step_type { none, fopen, fwrite, fflush, fsync, fclose };
+        fail_step_type fail_step = fail_step_type::none;
+
+        FILE* fopen(const char* path, const char* mode) override {
+            if (fail_step == fail_step_type::fopen) return nullptr;
+            return real_file_operations::fopen(path, mode);
+        }
+        size_t fwrite(const void* ptr, size_t size, size_t nmemb, FILE* stream) override {
+            if (fail_step == fail_step_type::fwrite) return 0;
+            return real_file_operations::fwrite(ptr, size, nmemb, stream);
+        }
+        int fflush(FILE* stream) override {
+            if (fail_step == fail_step_type::fflush) return EOF;
+            return real_file_operations::fflush(stream);
+        }
+        int fsync(int fd) override {
+            if (fail_step == fail_step_type::fsync) return -1;
+            return real_file_operations::fsync(fd);
+        }
+        int fclose(FILE* stream) override {
+            if (fail_step == fail_step_type::fclose) return EOF;
+            return real_file_operations::fclose(stream);
+        }
+    };
 protected:
     boost::filesystem::path logdir;
 
@@ -61,34 +89,6 @@ TEST_F(manifest_test, create_initial_throws_when_logdir_is_file) {
         limestone::api::limestone_io_exception
     );
 }
-
-// Tests for failure scenarios using a custom file_operations stub
-class failing_file_ops : public real_file_operations {
-public:
-    enum class fail_step_type { none, fopen, fwrite, fflush, fsync, fclose };
-    fail_step_type fail_step = fail_step_type::none;
-
-    FILE* fopen(const char* path, const char* mode) override {
-        if (fail_step == fail_step_type::fopen) return nullptr;
-        return real_file_operations::fopen(path, mode);
-    }
-    size_t fwrite(const void* ptr, size_t size, size_t nmemb, FILE* stream) override {
-        if (fail_step == fail_step_type::fwrite) return 0;
-        return real_file_operations::fwrite(ptr, size, nmemb, stream);
-    }
-    int fflush(FILE* stream) override {
-        if (fail_step == fail_step_type::fflush) return EOF;
-        return real_file_operations::fflush(stream);
-    }
-    int fsync(int fd) override {
-        if (fail_step == fail_step_type::fsync) return -1;
-        return real_file_operations::fsync(fd);
-    }
-    int fclose(FILE* stream) override {
-        if (fail_step == fail_step_type::fclose) return EOF;
-        return real_file_operations::fclose(stream);
-    }
-};
 
 TEST_F(manifest_test, create_initial_fails_on_fwrite_error) {
     failing_file_ops ops;
