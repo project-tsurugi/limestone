@@ -18,8 +18,8 @@ public:
     using wal_history::set_file_operations;
     using wal_history::record_size;
     using wal_history::write_record; 
+    using wal_history::parse_record;
 };
-
 
 class wal_history_test : public ::testing::Test {
 public:
@@ -76,18 +76,19 @@ TEST_F(wal_history_test, write_record_and_list_consistency) {
     wal_history_testable wh(test_dir);
     boost::filesystem::path file_path = test_dir / "wal_history";
 
-    auto ofs = std::ofstream(file_path.string(), std::ios::binary);
+    FILE* fp = fopen(file_path.string().c_str(), "wb");
+    ASSERT_TRUE(fp != nullptr);
     std::vector<epoch_id_type> epochs = {42, 43, 44};
     std::vector<boost::uuids::uuid> uuids;
     std::vector<std::int64_t> timestamps;
     for (size_t i = 0; i < epochs.size(); ++i) {
         boost::uuids::uuid uuid = {};
         std::int64_t timestamp = 1234567890 + i;
-        wh.write_record(ofs, epochs[i], uuid, timestamp);
+        wh.write_record(fp, epochs[i], uuid, timestamp);
         uuids.push_back(uuid);
         timestamps.push_back(timestamp);
     }
-    ofs.close();
+    fclose(fp);
 
     auto records = wh.list();
     ASSERT_EQ(records.size(), epochs.size());
@@ -279,23 +280,211 @@ TEST_F(wal_history_test, write_record_throws_on_write_failure) {
     wal_history_testable wh(test_dir);
     class failing_write_file_ops : public limestone::internal::real_file_operations {
     public:
-        void ofs_write(std::ofstream& ofs, const char* buf, std::streamsize size) override {
-            ofs.setstate(std::ios::failbit); // Simulate write failure
+        size_t fwrite(const void* /*ptr*/, size_t /*size*/, size_t /*count*/, FILE* /*stream*/) override {
+            errno = EIO;
+            return 0; // Simulate write failure
         }
     };
     auto failing_ops = std::make_unique<failing_write_file_ops>();
     wh.set_file_operations(std::move(failing_ops));
     boost::filesystem::path file_path = test_dir / "wal_history";
-    auto ofs = std::ofstream(file_path.string(), std::ios::binary);
-    // uuid and timestamp are dummy
+    FILE* fp = fopen(file_path.string().c_str(), "wb");
+    ASSERT_TRUE(fp != nullptr);
     boost::uuids::uuid uuid{};
     try {
-        wh.write_record(ofs, 1, uuid, 123);
+        wh.write_record(fp, 1, uuid, 123);
+        FAIL() << "Exception was not thrown";
+    } catch (const limestone_exception& ex) {
+        EXPECT_TRUE(std::string(ex.what()).find("Failed to write wal_history record") != std::string::npos);
+    }
+    fclose(fp);
+}
+
+TEST_F(wal_history_test, write_record_partial_fwrite_success) {
+    wal_history_testable wh(test_dir);
+    class partial_write_ops_t : public limestone::internal::real_file_operations {
+    public:
+        size_t call_count = 0;
+        size_t fwrite(const void* ptr, size_t size, size_t count, FILE* stream) override {
+            ++call_count;
+            if (call_count == 1) {
+                // 1回目は半分だけ書く
+                size_t half = count / 2 > 0 ? count / 2 : 1;
+                return ::fwrite(ptr, size, half, stream);
+            } else {
+                // 2回目は残りすべて書く
+                return ::fwrite(ptr, size, count, stream);
+            }
+        }
+    };
+    auto partial_ops = std::make_unique<partial_write_ops_t>();
+    wh.set_file_operations(std::move(partial_ops));
+    boost::filesystem::path file_path = test_dir / "wal_history";
+    FILE* fp = fopen(file_path.string().c_str(), "wb");
+    ASSERT_TRUE(fp != nullptr);
+    boost::uuids::uuid uuid{};
+    wh.write_record(fp, 1, uuid, 123);
+    fclose(fp);
+    // ファイル内容が正しいか検証
+    fp = fopen(file_path.string().c_str(), "rb");
+    ASSERT_TRUE(fp != nullptr);
+    std::array<std::byte, wal_history_testable::record_size> buf{};
+    size_t n = fread(buf.data(), 1, buf.size(), fp);
+    fclose(fp);
+    ASSERT_EQ(n, buf.size());
+    // パースして値を検証
+    auto rec = wh.parse_record(buf);
+    EXPECT_EQ(rec.epoch, 1u);
+    EXPECT_EQ(rec.uuid, uuid);
+    EXPECT_EQ(rec.timestamp, 123);
+}
+
+
+TEST_F(wal_history_test, exists_and_get_file_path) {
+    wal_history wh(test_dir);
+    // The file should not exist initially
+    EXPECT_FALSE(wh.exists());
+    // Create the file with append
+    wh.append(1);
+    EXPECT_TRUE(wh.exists());
+    // Check if get_file_path returns the correct path
+    boost::filesystem::path expected = test_dir / "wal_history";
+    EXPECT_EQ(wh.get_file_path(), expected);
+    // Remove the file and check again
+    boost::filesystem::remove(expected);
+    EXPECT_FALSE(wh.exists());
+}
+
+TEST_F(wal_history_test, append_throws_on_fopen_failure) {
+    wal_history_testable wh(test_dir);
+    class failing_ops_t : public limestone::internal::real_file_operations {
+    public:
+        FILE* fopen(const char*, const char*) override {
+            errno = EACCES;
+            return nullptr;
+        }
+    };
+    auto failing_ops = std::make_unique<failing_ops_t>();
+    wh.set_file_operations(std::move(failing_ops));
+    try {
+        wh.append(1);
+        FAIL() << "Exception was not thrown";
+    } catch (const limestone_exception& ex) {
+        EXPECT_TRUE(std::string(ex.what()).find("Failed to open wal_history.tmp for write:") != std::string::npos);
+    }
+}
+
+TEST_F(wal_history_test, append_throws_on_fwrite_failure) {
+    wal_history_testable wh(test_dir);
+    class failing_ops_t : public limestone::internal::real_file_operations {
+    public:
+        size_t fwrite(const void*, size_t, size_t, FILE*) override {
+            errno = EIO;
+            return 0;
+        }
+    };
+    auto failing_ops = std::make_unique<failing_ops_t>();
+    wh.set_file_operations(std::move(failing_ops));
+    try {
+        wh.append(1);
         FAIL() << "Exception was not thrown";
     } catch (const limestone_exception& ex) {
         EXPECT_TRUE(std::string(ex.what()).find("Failed to write wal_history record") != std::string::npos);
     }
 }
 
+TEST_F(wal_history_test, append_throws_on_fflush_failure) {
+    wal_history_testable wh(test_dir);
+    class failing_ops_t : public limestone::internal::real_file_operations {
+    public:
+        int fflush(FILE*) override {
+            errno = EIO;
+            return -1;
+        }
+    };
+    auto failing_ops = std::make_unique<failing_ops_t>();
+    wh.set_file_operations(std::move(failing_ops));
+    try {
+        wh.append(1);
+        FAIL() << "Exception was not thrown";
+    } catch (const limestone_exception& ex) {
+        EXPECT_TRUE(std::string(ex.what()).find("Failed to flush wal_history.tmp:") != std::string::npos);
+    }
+}
+
+TEST_F(wal_history_test, append_throws_on_fileno_failure) {
+    wal_history_testable wh(test_dir);
+    class failing_ops_t : public limestone::internal::real_file_operations {
+    public:
+        int fileno(FILE*) override {
+            errno = EBADF;
+            return -1;
+        }
+    };
+    auto failing_ops = std::make_unique<failing_ops_t>();
+    wh.set_file_operations(std::move(failing_ops));
+    try {
+        wh.append(1);
+        FAIL() << "Exception was not thrown";
+    } catch (const limestone_exception& ex) {
+        EXPECT_TRUE(std::string(ex.what()).find("Failed to get file descriptor for wal_history.tmp:") != std::string::npos);
+    }
+}
+
+TEST_F(wal_history_test, append_throws_on_fsync_failure) {
+    wal_history_testable wh(test_dir);
+    class failing_ops_t : public limestone::internal::real_file_operations {
+    public:
+        int fsync(int) override {
+            errno = EIO;
+            return -1;
+        }
+    };
+    auto failing_ops = std::make_unique<failing_ops_t>();
+    wh.set_file_operations(std::move(failing_ops));
+    try {
+        wh.append(1);
+        FAIL() << "Exception was not thrown";
+    } catch (const limestone_exception& ex) {
+        EXPECT_TRUE(std::string(ex.what()).find("Failed to fsync wal_history.tmp:") != std::string::npos);
+    }
+}
+
+TEST_F(wal_history_test, append_throws_on_fclose_failure) {
+    wal_history_testable wh(test_dir);
+    class failing_ops_t : public limestone::internal::real_file_operations {
+    public:
+        int fclose(FILE*) override {
+            errno = EIO;
+            return -1;
+        }
+    };
+    auto failing_ops = std::make_unique<failing_ops_t>();
+    wh.set_file_operations(std::move(failing_ops));
+    try {
+        wh.append(1);
+        FAIL() << "Exception was not thrown";
+    } catch (const limestone_exception& ex) {
+        EXPECT_TRUE(std::string(ex.what()).find("Failed to close wal_history.tmp:") != std::string::npos);
+    }
+}
+
+TEST_F(wal_history_test, append_throws_on_rename_failure) {
+    wal_history_testable wh(test_dir);
+    class failing_ops_t : public limestone::internal::real_file_operations {
+    public:
+        void rename(const boost::filesystem::path&, const boost::filesystem::path&, boost::system::error_code& ec) override {
+            ec = boost::system::errc::make_error_code(boost::system::errc::io_error);
+        }
+    };
+    auto failing_ops = std::make_unique<failing_ops_t>();
+    wh.set_file_operations(std::move(failing_ops));
+    try {
+        wh.append(1);
+        FAIL() << "Exception was not thrown";
+    } catch (const limestone_exception& ex) {
+        EXPECT_TRUE(std::string(ex.what()).find("Failed to rename wal_history.tmp to wal_history:") != std::string::npos);
+    }
+}
 
 } // namespace limestone::testing

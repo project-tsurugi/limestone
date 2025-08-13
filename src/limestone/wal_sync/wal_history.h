@@ -41,8 +41,8 @@ public:
     void append(epoch_id_type epoch);
     [[nodiscard]] std::vector<record> list() const;
     void check_and_recover();
-    
-
+    [[nodiscard]] bool exists() const;
+    [[nodiscard]] boost::filesystem::path get_file_path() const;
 
 protected:
     // Note: These members are protected (not private) to allow access from test subclasses.
@@ -52,8 +52,8 @@ protected:
 
     void set_file_operations(std::unique_ptr<file_operations> file_ops) { file_ops_ = std::move(file_ops); }
     void reset_file_operations() { file_ops_ = std::make_unique<real_file_operations>(); }
-    void write_record(std::ofstream& ofs, epoch_id_type epoch, const boost::uuids::uuid& uuid, std::int64_t timestamp);
-    [[nodiscard]] static record parse_record(const std::array<std::byte, record_size>& buf); 
+    void write_record(FILE* fp, epoch_id_type epoch, const boost::uuids::uuid& uuid, std::int64_t timestamp);
+    [[nodiscard]] static record parse_record(const std::array<std::byte, record_size>& buf);
     [[nodiscard]] std::vector<record> read_all_records(const boost::filesystem::path& file_path) const;
 
 private:

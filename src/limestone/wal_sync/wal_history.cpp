@@ -47,26 +47,26 @@ namespace {
     constexpr std::size_t timestamp_size    = sizeof(std::uint64_t);
 }
 
-void wal_history::write_record(std::ofstream& ofs,
+void wal_history::write_record(FILE* fp,
                                epoch_id_type epoch,
                                const boost::uuids::uuid& uuid,
                                std::int64_t timestamp) {
-    std::array<std::byte, record_size> buf{}; // binary buffer
-
+    std::array<std::byte, record_size> buf{};
     const auto be_epoch = htobe64(static_cast<std::uint64_t>(epoch));
-    std::memcpy(&buf[epoch_offset], &be_epoch, epoch_size); // no pointer arithmetic
-
+    std::memcpy(&buf[epoch_offset], &be_epoch, epoch_size);
     static_assert(uuid_size == 16, "uuid must be 16 bytes");
-    std::memcpy(&buf[uuid_offset], &uuid.data[0], uuid_size); // avoid array-to-pointer decay
-
+    std::memcpy(&buf[uuid_offset], &uuid.data[0], uuid_size);
     const auto be_timestamp = htobe64(static_cast<std::uint64_t>(timestamp));
-    std::memcpy(&buf[timestamp_offset], &be_timestamp, timestamp_size); // no pointer arithmetic
-
-    file_ops_->ofs_write(ofs, buf.data(), static_cast<std::streamsize>(buf.size()));
-
-    if (!ofs) {
-        int err = errno;
-        LOG_AND_THROW_IO_EXCEPTION("Failed to write wal_history record", err);
+    std::memcpy(&buf[timestamp_offset], &be_timestamp, timestamp_size);
+    size_t total = 0;
+    const char* p = reinterpret_cast<const char*>(buf.data());
+    while (total < buf.size()) {
+        size_t n = file_ops_->fwrite(p + total, 1, buf.size() - total, fp);
+        if (n == 0) {
+            int err = errno;
+            LOG_AND_THROW_IO_EXCEPTION("Failed to write wal_history record", err);
+        }
+        total += n;
     }
 }
 
@@ -130,6 +130,11 @@ std::vector<wal_history::record> wal_history::read_all_records(const boost::file
 wal_history::wal_history(boost::filesystem::path dir_path)
     : dir_path_(std::move(dir_path)) {}
 
+
+boost::filesystem::path wal_history::get_file_path() const {
+    return dir_path_ / file_name_;
+}
+    
 void wal_history::append(epoch_id_type epoch) {
     boost::filesystem::path file_path = dir_path_ / file_name_;
     boost::filesystem::path tmp_path = dir_path_ / tmp_file_name_;
@@ -141,30 +146,37 @@ void wal_history::append(epoch_id_type epoch) {
     records.push_back(record{epoch, uuid, timestamp});
     // Write to temporary file
     {
-        auto ofs = file_ops_->open_ofstream(tmp_path.string());
+        FILE* fp = file_ops_->fopen(tmp_path.string().c_str(), "wb");
         int err = errno;
-        if (!ofs->is_open()) {
+        if (!fp) {
             LOG_AND_THROW_IO_EXCEPTION("Failed to open wal_history.tmp for write: " + tmp_path.string(), err);
         }
         for (const auto& rec : records) {
-            write_record(*ofs, rec.epoch, rec.uuid, rec.timestamp);
+            write_record(fp, rec.epoch, rec.uuid, rec.timestamp);
         }
-        ofs->flush();
-        int fd = file_ops_->open(tmp_path.string().c_str(), O_WRONLY);
+        if (file_ops_->fflush(fp) != 0) {
+            int err = errno;
+            file_ops_->fclose(fp);
+            LOG_AND_THROW_IO_EXCEPTION("Failed to flush wal_history.tmp: " + tmp_path.string(), err);
+        }
+        int fd = file_ops_->fileno(fp);
         if (fd < 0) {
             int err = errno;
-            LOG_AND_THROW_IO_EXCEPTION("Failed to open wal_history.tmp for fsync: " + tmp_path.string(), err);
+            file_ops_->fclose(fp);
+            LOG_AND_THROW_IO_EXCEPTION("Failed to get file descriptor for wal_history.tmp: " + tmp_path.string(), err);
         }
         if (file_ops_->fsync(fd) != 0) {
             int err = errno;
-            file_ops_->close(fd);
+            file_ops_->fclose(fp);
             LOG_AND_THROW_IO_EXCEPTION("Failed to fsync wal_history.tmp: " + tmp_path.string(), err);
         }
-        file_ops_->close(fd);
+        if (file_ops_->fclose(fp) != 0) {
+            int err = errno;
+            LOG_AND_THROW_IO_EXCEPTION("Failed to close wal_history.tmp: " + tmp_path.string(), err);
+        }
     }
-    // Atomic rename
     boost::system::error_code ec;
-    boost::filesystem::rename(tmp_path, file_path, ec);
+    file_ops_->rename(tmp_path, file_path, ec);
     if (ec) {
         LOG_AND_THROW_IO_EXCEPTION("Failed to rename wal_history.tmp to wal_history: " + tmp_path.string() + " -> " + file_path.string(), ec.value());
     }
@@ -197,5 +209,12 @@ void wal_history::check_and_recover() {
     }
     // Pattern 2 (only main) and 3 (neither) are normal, do nothing
 }
+
+bool wal_history::exists() const {
+    boost::filesystem::path file_path = dir_path_ / file_name_;
+    boost::system::error_code ec;
+    return file_ops_->exists(file_path, ec) && !ec;
+}
+
 
 } // namespace limestone::internal
