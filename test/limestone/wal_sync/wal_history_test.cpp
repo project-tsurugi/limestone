@@ -72,6 +72,32 @@ TEST_F(wal_history_test, append_and_list) {
     EXPECT_EQ(records[1].epoch, 200u);
 }
 
+TEST_F(wal_history_test, write_record_and_list_consistency) {
+    wal_history_testable wh(test_dir);
+    boost::filesystem::path file_path = test_dir / "wal_history";
+
+    auto ofs = std::ofstream(file_path.string(), std::ios::binary);
+    std::vector<epoch_id_type> epochs = {42, 43, 44};
+    std::vector<boost::uuids::uuid> uuids;
+    std::vector<std::int64_t> timestamps;
+    for (size_t i = 0; i < epochs.size(); ++i) {
+        boost::uuids::uuid uuid = {};
+        std::int64_t timestamp = 1234567890 + i;
+        wh.write_record(ofs, epochs[i], uuid, timestamp);
+        uuids.push_back(uuid);
+        timestamps.push_back(timestamp);
+    }
+    ofs.close();
+
+    auto records = wh.list();
+    ASSERT_EQ(records.size(), epochs.size());
+    for (size_t i = 0; i < epochs.size(); ++i) {
+        EXPECT_EQ(records[i].epoch, epochs[i]);
+        EXPECT_EQ(records[i].uuid, uuids[i]);
+        EXPECT_EQ(records[i].timestamp, timestamps[i]);
+    }
+}
+
 TEST_F(wal_history_test, check_and_recover_tmp_only) {
     wal_history wh(test_dir);
     wh.append(1);
