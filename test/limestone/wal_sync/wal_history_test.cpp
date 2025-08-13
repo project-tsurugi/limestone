@@ -487,4 +487,9 @@ TEST_F(wal_history_test, append_throws_on_rename_failure) {
     }
 }
 
+TEST_F(wal_history_test, file_name_returns_expected_value) {
+    EXPECT_STREQ(wal_history::file_name(), "wal_history");
+}
+
 } // namespace limestone::testing
+

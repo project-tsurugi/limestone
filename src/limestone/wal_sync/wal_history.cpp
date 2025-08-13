@@ -58,15 +58,16 @@ void wal_history::write_record(FILE* fp,
     std::memcpy(&buf[uuid_offset], &uuid.data[0], uuid_size);
     const auto be_timestamp = htobe64(static_cast<std::uint64_t>(timestamp));
     std::memcpy(&buf[timestamp_offset], &be_timestamp, timestamp_size);
-    size_t total = 0;
-    const char* p = reinterpret_cast<const char*>(buf.data());
-    while (total < buf.size()) {
-        size_t n = file_ops_->fwrite(p + total, 1, buf.size() - total, fp);
+    auto cur = buf.cbegin();
+    const auto end = buf.cend();
+    while (cur != end) {
+        const auto remaining = static_cast<size_t>(std::distance(cur, end));
+        size_t n = file_ops_->fwrite(static_cast<const void*>(std::addressof(*cur)), 1, remaining, fp);
         if (n == 0) {
             int err = errno;
             LOG_AND_THROW_IO_EXCEPTION("Failed to write wal_history record", err);
         }
-        total += n;
+        std::advance(cur, static_cast<std::ptrdiff_t>(n));
     }
 }
 
