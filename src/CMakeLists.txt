@@ -4,6 +4,7 @@ file(GLOB SOURCES
         "limestone/partitioned_cursor/*.cpp"
         "limestone/grpc/service/*.cpp"
         "limestone/grpc/client/*.cpp"
+        "limestone/wal_sync/*.cpp"
 )
 
 # Generate protobuf and gRPC files

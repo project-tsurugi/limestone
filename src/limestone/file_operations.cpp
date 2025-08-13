@@ -94,6 +94,10 @@ std::unique_ptr<std::ifstream> real_file_operations::open_ifstream(const std::st
     return std::make_unique<std::ifstream>(path);
 }
 
+std::unique_ptr<std::ofstream> real_file_operations::open_ofstream(const std::string& path) {
+    return std::make_unique<std::ofstream>(path, std::ios::binary | std::ios::trunc);
+}
+
 bool real_file_operations::getline(std::ifstream& file, std::string& line) {
     return static_cast<bool>(std::getline(file, line));
 }
@@ -110,6 +114,25 @@ bool real_file_operations::is_open(std::ifstream& file) {
     return file.is_open();
 }
 
+void real_file_operations::ofs_write(std::ofstream& ofs, const char* buf, std::streamsize size) {
+    ofs.write(buf, size);
+}
+
+void real_file_operations::ofs_write(std::ofstream& ofs, const std::byte* buf, std::size_t size) {
+    ofs_write(ofs,
+              reinterpret_cast<const char*>(buf),  // NOLINT(cppcoreguidelines-pro-type-reinterpret-cast) ostream::write requires const char*
+              static_cast<std::streamsize>(size));
+}
+
+void real_file_operations::ifs_read(std::ifstream& ifs, char* buf, std::streamsize size) {
+    ifs.read(buf, size);
+}
+
+void real_file_operations::ifs_read(std::ifstream& ifs, std::byte* buf, std::size_t size) {
+    ifs_read(ifs,
+             reinterpret_cast<char*>(buf),  // NOLINT(cppcoreguidelines-pro-type-reinterpret-cast) required by ifstream::read
+             static_cast<std::streamsize>(size));
+}
 
 // -----------------------------------------
 // Boost filesystem operations

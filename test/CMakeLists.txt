@@ -41,6 +41,7 @@ file(GLOB SRCS
         "limestone/utils/*.cpp"
         "limestone/partitioned_cursor/*.cpp"
         "limestone/grpc/*.cpp"
+        "limestone/wal_sync/*.cpp"
         )
 
 foreach(file ${SRCS})
