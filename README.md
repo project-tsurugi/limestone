@@ -1,5 +1,6 @@
 # Limestone - a datastore engine
 
+
 ## Requirements
 
 * CMake `>= 3.16`
@@ -16,7 +17,7 @@ git submodule update --init --recursive
 ```dockerfile
 FROM ubuntu:22.04
 
-RUN apt update -y && apt install -y git build-essential cmake ninja-build libboost-filesystem-dev libboost-system-dev libboost-container-dev libboost-thread-dev libgoogle-glog-dev libgflags-dev doxygen libleveldb-dev librocksdb-dev pkg-config nlohmann-json3-dev
+RUN apt update -y && apt install -y git build-essential cmake ninja-build libboost-filesystem-dev libboost-system-dev libboost-container-dev libboost-thread-dev libgoogle-glog-dev libgflags-dev doxygen libleveldb-dev librocksdb-dev pkg-config nlohmann-json3-dev libgrpc-dev libgrpc++-dev protobuf-compiler-grpc libabsl-dev
 # libleveldb-dev is not required if -DRECOVERY_SORTER_KVSLIB=ROCKSDB
 # librocksdb-dev is not required if -DRECOVERY_SORTER_KVSLIB=LEVELDB
 ```
@@ -47,6 +48,7 @@ available options:
 * `-DRECOVERY_SORTER_KVSLIB=<library>` - select the eKVS library using at recovery process. (`LEVELDB` or `ROCKSDB` (default), case-insensitive)
 * `-DRECOVERY_SORTER_PUT_ONLY=OFF` - don't use (faster) put-only method at recovery process
 * `-DBUILD_REPLICATION_TESTS=ON` - (temporary) enable experimental replication tests (excluded by default)
+* `-DUSE_GRPC_CONFIG=ON` - use CMake Config mode for gRPC instead of pkg-config (recommended on Ubuntu 24.04 or later for faster configuration)
 
 * for debugging only
   * `-DENABLE_SANITIZER=OFF` - disable sanitizers (requires `-DCMAKE_BUILD_TYPE=Debug`)

@@ -41,6 +41,7 @@ option(ENABLE_ALTIMETER "enable altimeter logging" OFF)
 option(INSTALL_EXPERIMENTAL_TOOLS "Install experimental tools like tgreplica" OFF)
 option(BUILD_REPLICATION_TESTS "Build replication tests" OFF)
 option(BUILD_SANDBOX_TOOLS "build sandbox (temporary) tools" OFF)
+option(USE_GRPC_CONFIG "Use CMake Config mode for gRPC instead of pkg-config" OFF)
 
 if (FORCE_INSTALL_RPATH)
     message(DEPRECATION "FORCE_INSTALL_RPATH is obsoleted")
@@ -76,6 +77,23 @@ if (ENABLE_ALTIMETER)
     find_package(altimeter REQUIRED)
     find_package(fmt REQUIRED)
 endif()
+
+
+# gRPC/protobuf
+find_package(Protobuf REQUIRED)
+
+
+
+if(USE_GRPC_CONFIG)
+    message(STATUS "Using gRPC CMake Config mode")
+    find_package(gRPC CONFIG REQUIRED)
+else()
+    message(STATUS "Using gRPC pkg-config mode")
+    find_package(PkgConfig REQUIRED)
+    pkg_check_modules(GRPC REQUIRED grpc++)
+endif()
+
+find_program(GRPC_CPP_PLUGIN grpc_cpp_plugin REQUIRED)
 
 add_subdirectory(third_party) # should be before enable_testing()
 

@@ -54,5 +54,5 @@ CheckOptions:
     value: 1
   - key: readability-function-cognitive-complexity.IgnoreMacros
     value: true
-HeaderFilterRegex: '.*/(include|src|examples)/.*\.h$'
+HeaderFilterRegex: '^(?!.*/build/).*/(include|src|examples)/.*\.h$'
 ...

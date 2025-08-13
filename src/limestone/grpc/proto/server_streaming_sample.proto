@@ -1,0 +1,35 @@
+syntax = "proto3";
+
+package limestone.grpc;
+
+// Service for calculating file size from streamed file chunks
+service FileSizeService {
+    // Client streams file chunks, server returns the total file size
+    rpc GetFileSize(stream FileChunk) returns (FileSizeResponse);
+}
+
+// Service for generating random bytes and streaming them to the client
+service RandomBytesService {
+    // Client requests a size, server streams random byte chunks
+    rpc GenerateRandomBytes(RandomBytesRequest) returns (stream RandomBytesChunk);
+}
+
+// Message representing a chunk of file data
+message FileChunk {
+    bytes data = 1;
+}
+
+// Response message containing the total file size
+message FileSizeResponse {
+    int64 size = 1;
+}
+
+// Request message specifying the size of random bytes to generate
+message RandomBytesRequest {
+    int64 size = 1;
+}
+
+// Message representing a chunk of random bytes
+message RandomBytesChunk {
+    bytes data = 1;
+}
