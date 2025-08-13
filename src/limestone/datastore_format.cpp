@@ -31,7 +31,7 @@
 #include "internal.h"
 #include "log_entry.h"
 #include "manifest.h"
-
+#include "wal_sync/wal_history.h"
 
 
 namespace limestone::internal {
@@ -44,7 +44,6 @@ using namespace limestone::api;
 void setup_initial_logdir(const boost::filesystem::path& logdir) {
     manifest::create_initial(logdir);
     ensure_compaction_catalog(logdir);
-
 }
 
 

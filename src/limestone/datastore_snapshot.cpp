@@ -34,7 +34,7 @@
 #include "sortdb_wrapper.h"
 #include "snapshot_impl.h"
 #include "sorting_context.h"
-
+#include "wal_sync/wal_history.h"
 namespace  {
 using namespace limestone;
 using namespace limestone::internal;
@@ -511,6 +511,9 @@ blob_id_type datastore::create_snapshot_and_get_max_blob_id() {
     auto [max_appeared_epoch, sctx] = create_sorted_from_wals(options);
     epoch_id_switched_.store(max_appeared_epoch);
     epoch_id_informed_.store(max_appeared_epoch);
+    wal_history wal_history_(location_);
+    wal_history_.append(max_appeared_epoch);
+    add_file(wal_history_.get_file_path());
 
     boost::filesystem::path sub_dir = location_ / boost::filesystem::path(std::string(snapshot::subdirectory_name_));
     boost::system::error_code error;

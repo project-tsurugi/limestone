@@ -98,7 +98,7 @@ public:
      * @brief Default persistent format version for new manifest files.
      * @note Update this value when upgrading the manifest persistent format version.
      */
-    static constexpr int default_persistent_format_version = 6;
+    static constexpr int default_persistent_format_version = 7;
 
     /**
      * @brief Constructs a manifest object with the default version information.

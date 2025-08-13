@@ -44,6 +44,9 @@
 * Version 6
   * WALファイルにmarker_endを書き込むように変更
 
+* Version 7
+  * wal_historyファイルを追加
+
 ### バージョン間の互換性
 
 * Version 0 対応のTsurugi
@@ -89,6 +92,19 @@
     * 手動でもダウングレード不可
 * Version 6 対応のTsurugi
   * 起動時に、Version 1〜5のデータをVersion 6に自動アップグレードする。
+  * Version 7以降のデータを読むことはできない
+    * 起動時にエラーとなる。
+    * 手動でもダウングレードは可能
+      * wal_historyを削除
+      * manifest.jsonを修正
+
+* Version7 対応のTsurgi
+  * 起動時に、Version 1〜6のデータをVersion 7に自動アップグレードする。
+  * wal_historyの処理
+    * 起動時にlogdirが存在しない場合に、wal_historyファイルが生成され、epoch=0のエントリが書き込まれる。wal_historyは1エントリのみ保持する。
+    * 起動時にlogdirが存在し、Version 1〜6の場合、マイグレーションごepoch=durable_epochのエントリが書き込まれる。wal_historyは1エントリのみ保持する。
+    * 起動時にlogdirが存在し、Version 7の場合、epoch=durable_epochのエントリを追記する。
+    * tglogutil でコンパクションしたときは、wal_historyの内容は変更されない。
 
 
 ## 永続化データ形式バージョンの変更
@@ -144,7 +160,7 @@
 
 ### Version 5から Version 6 への更新
 
-* default versionを6に変更
+* default_persistent_format_versionを6に変更
 * `manifest.cpp` の `check_and_migrate_logdir_format` 関数を修正
   * 戻り値をvoidから `migration_info` に変更
   * `migration_info` クラスを作成
@@ -152,3 +168,8 @@
   * version5以前からversion6(以降)へマイグレーションした場合、
     * `migration_info::requires_rotation()` がtrueを返すようにする。
     * これをみて、起動時にローテーションを行うことを想定している。
+
+### Version 6から Version 7 への更新
+
+* default_persistent_format_versionを7に変更
+

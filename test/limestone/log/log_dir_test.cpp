@@ -10,11 +10,12 @@
 #include "manifest.h"
 #include "test_root.h"
 #include "limestone/log/testdata.h"
+#include "wal_sync/wal_history.h"
 
 using namespace std::literals;
 using dblog_scan = limestone::internal::dblog_scan;
 using compaction_catalog = limestone::internal::compaction_catalog;
-
+using wal_history = limestone::internal::wal_history;
 namespace limestone::testing {
 
 
@@ -23,6 +24,7 @@ public:
 static constexpr const char* location = "/tmp/log_dir_test";
 const boost::filesystem::path manifest_path = boost::filesystem::path(location) / std::string(limestone::internal::manifest::file_name);
 const boost::filesystem::path compaction_catalog_path = boost::filesystem::path(location) / "compaction_catalog";
+const boost::filesystem::path wal_history_path = boost::filesystem::path(location) / "wal_history";
 
     void SetUp() {
         limestone::testing::enable_exception_throwing = true;
@@ -59,16 +61,33 @@ const boost::filesystem::path compaction_catalog_path = boost::filesystem::path(
         }
     }
 
+    void check_newly_created_wal_history(std::int64_t start) {
+        wal_history wal_history_{boost::filesystem::path(location)};
+        auto list = wal_history_.list();
+        EXPECT_EQ(list.size(), 1);
+        auto& record = list.front();
+        EXPECT_EQ(record.epoch, 0);
+        using namespace std::chrono;
+        auto now = static_cast<std::int64_t>(std::time(nullptr));
+        EXPECT_LE(record.timestamp, now);
+        EXPECT_GE(record.timestamp, start);
+        EXPECT_FALSE(record.uuid.is_nil());
+    }
+
 protected:
     std::unique_ptr<limestone::api::datastore_test> datastore_{};
 };
 
 
-TEST_F(log_dir_test, newly_created_directory_contains_manifest_file) {
+TEST_F(log_dir_test, newly_created_directory) {
+    auto start = static_cast<std::int64_t>(std::time(nullptr));
     gen_datastore();
 
     EXPECT_TRUE(boost::filesystem::exists(manifest_path));
     EXPECT_TRUE(boost::filesystem::exists(compaction_catalog_path));
+
+    datastore_->ready();
+    check_newly_created_wal_history(start);
 }
 
 TEST_F(log_dir_test, reject_directory_without_manifest_file) {
@@ -112,7 +131,11 @@ TEST_F(log_dir_test, accept_directory_with_correct_manifest_file) {
 TEST_F(log_dir_test, accept_directory_only_correct_manifest_file) {
     create_manifest_file();
 
-    gen_datastore();  // success
+    auto start = static_cast<std::int64_t>(std::time(nullptr));
+    gen_datastore(); 
+    datastore_->ready();
+    check_newly_created_wal_history(start);
+
 }
 
 TEST_F(log_dir_test, reject_directory_of_different_version) {
@@ -151,8 +174,13 @@ TEST_F(log_dir_test, accept_manifest_version_v6) {
     gen_datastore();   // success
 }
 
-TEST_F(log_dir_test, reject_manifest_version_v7) {
+TEST_F(log_dir_test, log_dir_test_accept_manifest_version_v7) {
     create_manifest_file(7);
+    gen_datastore();   // success
+}
+
+TEST_F(log_dir_test, reject_manifest_version_v8) {
+    create_manifest_file(8);
     EXPECT_THROW({ gen_datastore(); }, std::exception);
 }
 
@@ -178,7 +206,7 @@ TEST_F(log_dir_test, rotate_old_rejects_unsupported_data) {
         LOG(FATAL) << "cannot make directory";
     }
     create_file(bk_path / "epoch", epoch_0_str);
-    create_file(bk_path / std::string(limestone::internal::manifest::file_name), data_manifest(7));
+    create_file(bk_path / std::string(limestone::internal::manifest::file_name), data_manifest(8));
 
     gen_datastore();
 
@@ -238,7 +266,7 @@ TEST_F(log_dir_test, rotate_prusik_rejects_unsupported_data) {
         LOG(FATAL) << "cannot make directory";
     }
     create_file(bk_path / "epoch", epoch_0_str);
-    create_file(bk_path / std::string(limestone::internal::manifest::file_name), data_manifest(7));
+    create_file(bk_path / std::string(limestone::internal::manifest::file_name), data_manifest(8));
     // setup entries
     std::vector<limestone::api::file_set_entry> entries;
     entries.emplace_back("epoch", "epoch", false);
@@ -370,7 +398,7 @@ TEST_F(log_dir_test, setup_initial_logdir_creates_manifest_file) {
     manifest_file >> manifest;
 
     EXPECT_EQ(manifest["format_version"], "1.1");
-    EXPECT_EQ(manifest["persistent_format_version"], 6);
+    EXPECT_EQ(manifest["persistent_format_version"], 7);
 }
 
 TEST_F(log_dir_test, setup_initial_logdir_creates_compaction_catalog_if_not_exists) {
