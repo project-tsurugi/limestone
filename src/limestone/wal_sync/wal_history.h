@@ -50,7 +50,7 @@ protected:
     void reset_file_operations() { file_ops_ = std::make_unique<real_file_operations>(); }
     static constexpr std::size_t record_size = sizeof(epoch_id_type) + 16 + sizeof(std::int64_t);
     void write_record(std::ofstream& ofs, epoch_id_type epoch, const boost::uuids::uuid& uuid, std::int64_t timestamp);
-    static record parse_record(const char* buf);
+    static record parse_record(const std::byte* buf);
     std::vector<record> read_all_records(const boost::filesystem::path& file_path) const;
     static constexpr const char* file_name_ = "wal_history";
     static constexpr const char* tmp_file_name_ = "wal_history.tmp";

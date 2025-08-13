@@ -38,33 +38,55 @@
 
 namespace limestone::internal {
 
-constexpr std::size_t wal_history::record_size;
+namespace {
+    constexpr std::size_t epoch_offset      = 0;
+    constexpr std::size_t epoch_size        = sizeof(std::uint64_t);
+    constexpr std::size_t uuid_offset       = epoch_offset + epoch_size;
+    constexpr std::size_t uuid_size         = boost::uuids::uuid::static_size();
+    constexpr std::size_t timestamp_offset  = uuid_offset + uuid_size;
+    constexpr std::size_t timestamp_size    = sizeof(std::uint64_t);
+}
 
-void wal_history::write_record(std::ofstream& ofs, epoch_id_type epoch, const boost::uuids::uuid& uuid, std::int64_t timestamp) {
-    char buf[record_size] = {};
-    uint64_t be_epoch = htobe64(epoch);
-    std::memcpy(buf, &be_epoch, 8);
-    std::memcpy(buf + 8, uuid.data, 16);
-    int64_t be_timestamp = htobe64(timestamp);
-    std::memcpy(buf + 24, &be_timestamp, 8);
-    file_ops_->ofs_write(ofs, buf, record_size);
+void wal_history::write_record(std::ofstream& ofs,
+                               epoch_id_type epoch,
+                               const boost::uuids::uuid& uuid,
+                               std::int64_t timestamp) {
+    std::array<std::byte, record_size> buf{};
+
+    const auto be_epoch = htobe64(static_cast<std::uint64_t>(epoch));
+    std::memcpy(buf.data() + epoch_offset, &be_epoch, epoch_size);
+
+    static_assert(uuid_size == 16, "uuid must be 16 bytes");
+    std::memcpy(buf.data() + uuid_offset, &uuid.data[0], uuid_size);
+
+    const auto be_timestamp = htobe64(static_cast<std::uint64_t>(timestamp));
+    std::memcpy(buf.data() + timestamp_offset, &be_timestamp, timestamp_size);
+
+    file_ops_->ofs_write(ofs, buf.data(), buf.size());  
+
     if (!ofs) {
         int err = errno;
         LOG_AND_THROW_IO_EXCEPTION("Failed to write wal_history record", err);
     }
 }
 
-wal_history::record wal_history::parse_record(const char* buf) {
+wal_history::record wal_history::parse_record(const std::byte* buf) {
     record rec{};
-    uint64_t be_epoch = 0;
-    std::memcpy(&be_epoch, buf, 8);
+
+    std::uint64_t be_epoch = 0;
+    std::memcpy(&be_epoch, buf + epoch_offset, epoch_size);
     rec.epoch = be64toh(be_epoch);
-    std::memcpy(rec.uuid.data, buf + 8, 16);
-    int64_t be_timestamp = 0;
-    std::memcpy(&be_timestamp, buf + 24, 8);
+
+    static_assert(uuid_size == 16, "uuid must be 16 bytes");
+    std::memcpy(&rec.uuid.data[0], buf + uuid_offset, uuid_size);
+
+    std::int64_t be_timestamp = 0;
+    std::memcpy(&be_timestamp, buf + timestamp_offset, timestamp_size);
     rec.timestamp = be64toh(be_timestamp);
+
     return rec;
 }
+
 
 std::vector<wal_history::record> wal_history::read_all_records(const boost::filesystem::path& file_path) const {
     std::vector<record> records;
@@ -73,9 +95,8 @@ std::vector<wal_history::record> wal_history::read_all_records(const boost::file
     if (ec) {
         if (ec == boost::system::errc::no_such_file_or_directory || ec == boost::system::errc::not_a_directory) {
             return records;
-        } else {
-            LOG_AND_THROW_IO_EXCEPTION("Failed to check existence of wal_history: " + file_path.string(), ec.value());
         }
+        LOG_AND_THROW_IO_EXCEPTION("Failed to check existence of wal_history: " + file_path.string(), ec.value());
     }
     if (!exists) {
         return records;
@@ -85,9 +106,9 @@ std::vector<wal_history::record> wal_history::read_all_records(const boost::file
         int err = errno;
         LOG_AND_THROW_IO_EXCEPTION("Failed to open wal_history for read: " + file_path.string(), err);
     }
-    char buf[record_size];
+    std::array<std::byte, record_size> buf{};
     while (true) {
-        ifs->read(buf, record_size);
+        file_ops_->ifs_read(*ifs, buf.data(), buf.size());
         std::streamsize bytes_read = ifs->gcount();
         if (bytes_read == 0) {
             break; // EOF
@@ -95,7 +116,7 @@ std::vector<wal_history::record> wal_history::read_all_records(const boost::file
         if (bytes_read < static_cast<std::streamsize>(record_size)) {
             LOG_AND_THROW_IO_EXCEPTION("Failed to read wal_history file: partial record read: " + file_path.string(), 0);
         }
-        records.push_back(parse_record(buf));
+        records.push_back(parse_record(buf.data()));
     }
     if (!file_ops_->is_eof(*ifs) && file_ops_->has_error(*ifs)) {
         int err = errno;
@@ -103,6 +124,7 @@ std::vector<wal_history::record> wal_history::read_all_records(const boost::file
     }
     return records;
 }
+
 
 
 wal_history::wal_history(const boost::filesystem::path& dir_path)
@@ -115,7 +137,7 @@ void wal_history::append(epoch_id_type epoch) {
     // Add a new record
     boost::uuids::random_generator uuid_gen;
     boost::uuids::uuid uuid = uuid_gen();
-    std::int64_t timestamp = static_cast<std::int64_t>(std::time(nullptr));
+    auto timestamp = static_cast<std::int64_t>(std::time(nullptr));
     records.push_back(record{epoch, uuid, timestamp});
     // Write to temporary file
     {
