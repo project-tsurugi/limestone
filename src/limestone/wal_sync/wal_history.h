@@ -39,21 +39,22 @@ public:
     explicit wal_history(boost::filesystem::path dir_path);
 
     void append(epoch_id_type epoch);
-    std::vector<record> list() const;
+    [[nodiscard]] std::vector<record> list() const;
     void check_and_recover();
     
 
 
 protected:
-    // for Unit Testing
-    void set_file_operations(std::unique_ptr<file_operations> file_ops) { file_ops_ = std::move(file_ops); }
-    void reset_file_operations() { file_ops_ = std::make_unique<real_file_operations>(); }
+    // Note: These members are protected (not private) to allow access from test subclasses.
     static constexpr std::size_t record_size = sizeof(epoch_id_type) + 16 + sizeof(std::int64_t);
-    void write_record(std::ofstream& ofs, epoch_id_type epoch, const boost::uuids::uuid& uuid, std::int64_t timestamp);
-    static record parse_record(const std::array<std::byte, record_size>& buf); 
-    std::vector<record> read_all_records(const boost::filesystem::path& file_path) const;
     static constexpr const char* file_name_ = "wal_history";
     static constexpr const char* tmp_file_name_ = "wal_history.tmp";
+
+    void set_file_operations(std::unique_ptr<file_operations> file_ops) { file_ops_ = std::move(file_ops); }
+    void reset_file_operations() { file_ops_ = std::make_unique<real_file_operations>(); }
+    void write_record(std::ofstream& ofs, epoch_id_type epoch, const boost::uuids::uuid& uuid, std::int64_t timestamp);
+    [[nodiscard]] static record parse_record(const std::array<std::byte, record_size>& buf); 
+    [[nodiscard]] std::vector<record> read_all_records(const boost::filesystem::path& file_path) const;
 
 private:
     boost::filesystem::path dir_path_;

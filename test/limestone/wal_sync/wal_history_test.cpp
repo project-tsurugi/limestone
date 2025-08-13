@@ -182,7 +182,7 @@ TEST_F(wal_history_test, read_all_records_throws_on_open_failure) {
     ofs << "dummy";
     ofs.close();
     try {
-        wh.list();
+        auto _ = wh.list();
         FAIL() << "Exception was not thrown";
     } catch (const limestone_exception& ex) {
         EXPECT_TRUE(std::string(ex.what()).find("Failed to open wal_history for read:") != std::string::npos);
@@ -201,7 +201,7 @@ TEST_F(wal_history_test, read_all_records_throws_on_exists_error) {
     auto failing_ops = std::make_unique<FailingExistsFileOps>();
     wh.set_file_operations(std::move(failing_ops));
     try {
-        wh.list();
+        auto _ = wh.list();
         FAIL() << "Exception was not thrown";
     } catch (const limestone_exception& ex) {
         EXPECT_TRUE(std::string(ex.what()).find("Failed to check existence of wal_history:") != std::string::npos);
@@ -216,7 +216,7 @@ TEST_F(wal_history_test, read_all_records_throws_on_partial_record_read) {
     ofs.put('x');
     ofs.close();
     try {
-        wh.list();
+        auto _ = wh.list();
         FAIL() << "Exception was not thrown";
     } catch (const limestone_exception& ex) {
         EXPECT_TRUE(std::string(ex.what()).find("Failed to read wal_history file: partial record read:") != std::string::npos);
@@ -234,7 +234,7 @@ TEST_F(wal_history_test, read_all_records_throws_on_stream_error) {
     auto failing_ops = std::make_unique<FailingFileOps>();
     wh.set_file_operations(std::move(failing_ops));
     try {
-        wh.list();
+        auto _ = wh.list();
         FAIL() << "Exception was not thrown";
     } catch (const limestone_exception& ex) {
         EXPECT_TRUE(std::string(ex.what()).find("Failed to read wal_history file: stream error:") != std::string::npos);
