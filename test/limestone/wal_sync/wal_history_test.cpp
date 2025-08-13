@@ -17,7 +17,7 @@ public:
     using wal_history::wal_history;
     using wal_history::set_file_operations;
     using wal_history::record_size;
-    using wal_history::write_record; // テスト用にpublic化
+    using wal_history::write_record; 
 };
 
 
@@ -275,20 +275,19 @@ TEST_F(wal_history_test, read_all_records_returns_empty_when_exists_false_and_ec
     EXPECT_TRUE(records.empty());
 }
 
-// write_recordの書き込み失敗時に例外が発生するテスト
 TEST_F(wal_history_test, write_record_throws_on_write_failure) {
     wal_history_testable wh(test_dir);
     class failing_write_file_ops : public limestone::internal::real_file_operations {
     public:
         void ofs_write(std::ofstream& ofs, const char* buf, std::streamsize size) override {
-            ofs.setstate(std::ios::failbit); // 書き込み失敗をシミュレート
+            ofs.setstate(std::ios::failbit); // Simulate write failure
         }
     };
     auto failing_ops = std::make_unique<failing_write_file_ops>();
     wh.set_file_operations(std::move(failing_ops));
     boost::filesystem::path file_path = test_dir / "wal_history";
     auto ofs = std::ofstream(file_path.string(), std::ios::binary);
-    // uuid, timestampはダミー
+    // uuid and timestamp are dummy
     boost::uuids::uuid uuid{};
     try {
         wh.write_record(ofs, 1, uuid, 123);
