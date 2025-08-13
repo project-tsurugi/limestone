@@ -14,7 +14,7 @@
 #include "manifest.h"
 #include "test_root.h"
 
-#define LOGFORMAT_VER 2
+#define LOGFORMAT_VER 7
 
 namespace limestone::testing {
 
@@ -153,10 +153,12 @@ TEST_F(rotate_test, log_is_rotated) { // NOLINT
     channel.end_session();
     datastore_->switch_epoch(43);
 
-#if LOGFORMAT_VER ==1
-    int manifest_file_num = 1;
+#if LOGFORMAT_VER >= 7
+    int manifest_file_num = 3;
 #elif LOGFORMAT_VER >= 2
     int manifest_file_num = 2;
+#elif LOGFORMAT_VER ==1
+    int manifest_file_num = 1;
 #else
     int manifest_file_num = 0;
 #endif
@@ -296,13 +298,16 @@ TEST_F(rotate_test, inactive_files_are_also_backed_up) { // NOLINT
         for (auto & e : v) {
             //std::cout << e.source_path() << std::endl;  // print debug
         }
-#if LOGFORMAT_VER == 1
-        int manifest_file_num = 1;
+#if LOGFORMAT_VER >= 7
+    int manifest_file_num = 3;
 #elif LOGFORMAT_VER >= 2
-        int manifest_file_num = 2;
+    int manifest_file_num = 2;
+#elif LOGFORMAT_VER ==1
+    int manifest_file_num = 1;
 #else
-        int manifest_file_num = 0;
+    int manifest_file_num = 0;
 #endif
+
        EXPECT_EQ(v.size(), 3 + manifest_file_num);
         int i = 0;
 #if LOGFORMAT_VER >=2

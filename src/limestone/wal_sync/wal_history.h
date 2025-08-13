@@ -43,6 +43,7 @@ public:
     void check_and_recover();
     [[nodiscard]] bool exists() const;
     [[nodiscard]] boost::filesystem::path get_file_path() const;
+    [[nodiscard]] static constexpr const char* file_name() { return file_name_; }
 
 protected:
     // Note: These members are protected (not private) to allow access from test subclasses.

@@ -41,6 +41,7 @@
 #include "manifest.h"
 #include "log_channel_impl.h"
 #include "dblog_scan.h"
+#include "wal_sync/wal_history.h"
 
 namespace {
 
@@ -576,6 +577,12 @@ std::unique_ptr<backup_detail> datastore::begin_backup(backup_type btype) {  // 
                 }
                 case 'c': {
                     if (filename == compaction_catalog::get_catalog_filename()) {
+                        entries.emplace_back(ent.string(), dst, false, false);
+                    }
+                    break;
+                }
+                case 'w': {
+                    if (filename == internal::wal_history::file_name()) {
                         entries.emplace_back(ent.string(), dst, false, false);
                     }
                     break;
