@@ -51,18 +51,18 @@ void wal_history::write_record(std::ofstream& ofs,
                                epoch_id_type epoch,
                                const boost::uuids::uuid& uuid,
                                std::int64_t timestamp) {
-    std::array<std::byte, record_size> buf{};
+    std::array<std::byte, record_size> buf{}; // binary buffer
 
     const auto be_epoch = htobe64(static_cast<std::uint64_t>(epoch));
-    std::memcpy(buf.data() + epoch_offset, &be_epoch, epoch_size);
+    std::memcpy(&buf[epoch_offset], &be_epoch, epoch_size); // no pointer arithmetic
 
     static_assert(uuid_size == 16, "uuid must be 16 bytes");
-    std::memcpy(buf.data() + uuid_offset, &uuid.data[0], uuid_size);
+    std::memcpy(&buf[uuid_offset], &uuid.data[0], uuid_size); // avoid array-to-pointer decay
 
     const auto be_timestamp = htobe64(static_cast<std::uint64_t>(timestamp));
-    std::memcpy(buf.data() + timestamp_offset, &be_timestamp, timestamp_size);
+    std::memcpy(&buf[timestamp_offset], &be_timestamp, timestamp_size); // no pointer arithmetic
 
-    file_ops_->ofs_write(ofs, buf.data(), buf.size());  
+    file_ops_->ofs_write(ofs, buf.data(), static_cast<std::streamsize>(buf.size()));
 
     if (!ofs) {
         int err = errno;
@@ -70,23 +70,23 @@ void wal_history::write_record(std::ofstream& ofs,
     }
 }
 
-wal_history::record wal_history::parse_record(const std::byte* buf) {
+
+wal_history::record wal_history::parse_record(const std::array<std::byte, record_size>& buf) {
     record rec{};
 
     std::uint64_t be_epoch = 0;
-    std::memcpy(&be_epoch, buf + epoch_offset, epoch_size);
+    std::memcpy(&be_epoch, &buf[epoch_offset], epoch_size);
     rec.epoch = be64toh(be_epoch);
 
     static_assert(uuid_size == 16, "uuid must be 16 bytes");
-    std::memcpy(&rec.uuid.data[0], buf + uuid_offset, uuid_size);
+    std::memcpy(&rec.uuid.data[0], &buf[uuid_offset], uuid_size);
 
     std::int64_t be_timestamp = 0;
-    std::memcpy(&be_timestamp, buf + timestamp_offset, timestamp_size);
+    std::memcpy(&be_timestamp, &buf[timestamp_offset], timestamp_size);
     rec.timestamp = be64toh(be_timestamp);
 
     return rec;
 }
-
 
 std::vector<wal_history::record> wal_history::read_all_records(const boost::filesystem::path& file_path) const {
     std::vector<record> records;
@@ -116,7 +116,7 @@ std::vector<wal_history::record> wal_history::read_all_records(const boost::file
         if (bytes_read < static_cast<std::streamsize>(record_size)) {
             LOG_AND_THROW_IO_EXCEPTION("Failed to read wal_history file: partial record read: " + file_path.string(), 0);
         }
-        records.push_back(parse_record(buf.data()));
+        records.push_back(parse_record(buf));
     }
     if (!file_ops_->is_eof(*ifs) && file_ops_->has_error(*ifs)) {
         int err = errno;
@@ -127,8 +127,8 @@ std::vector<wal_history::record> wal_history::read_all_records(const boost::file
 
 
 
-wal_history::wal_history(const boost::filesystem::path& dir_path)
-    : dir_path_(dir_path) {}
+wal_history::wal_history(boost::filesystem::path dir_path)
+    : dir_path_(std::move(dir_path)) {}
 
 void wal_history::append(epoch_id_type epoch) {
     boost::filesystem::path file_path = dir_path_ / file_name_;
