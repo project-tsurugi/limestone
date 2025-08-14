@@ -127,11 +127,11 @@ std::vector<wal_history::record> wal_history::read_all_records(const boost::file
 
 
 
-wal_history::wal_history(boost::filesystem::path dir_path)
+wal_history::wal_history(boost::filesystem::path dir_path) noexcept
     : dir_path_(std::move(dir_path)) {}
 
 
-boost::filesystem::path wal_history::get_file_path() const {
+boost::filesystem::path wal_history::get_file_path() const noexcept {
     return dir_path_ / file_name_;
 }
     
@@ -142,8 +142,8 @@ void wal_history::append(epoch_id_type epoch) {
     // Add a new record
     boost::uuids::random_generator uuid_gen;
     boost::uuids::uuid uuid = uuid_gen();
-    std::array<std::uint8_t, 16> unique_id;
-    std::memcpy(unique_id.data(), uuid.data, 16);
+    std::array<std::uint8_t, 16> unique_id{};
+    std::memcpy(unique_id.data(), static_cast<const void*>(uuid.data), 16);
     auto timestamp = static_cast<std::int64_t>(std::time(nullptr));
     records.push_back(record{epoch, unique_id, timestamp});
     // Write to temporary file

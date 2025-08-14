@@ -19,7 +19,9 @@
 #include "limestone/grpc/service/echo_service_impl.h"
 #include "echo_service.grpc.pb.h"
 
-namespace limestone::grpc::service {
+namespace limestone::testing {
+
+using limestone::grpc::service::echo_service_impl;
 
 class echo_service_impl_test : public ::testing::Test {
 protected:
@@ -40,4 +42,4 @@ TEST_F(echo_service_impl_test, echo_returns_input_message) {
     EXPECT_EQ(response.message(), test_message);
 }
 
-} // namespace limestone::grpc::service::testing
+} // namespace limestone::testing

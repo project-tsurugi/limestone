@@ -17,37 +17,52 @@
 namespace limestone::grpc::testing {
 
 
+
 class grpc_server_test_base : public ::testing::Test {
 protected:
     std::unique_ptr<::grpc::Server> server_;
     std::string server_address_;
     std::unique_ptr<limestone::grpc::service::ping_service> ping_service_;
+    std::unique_ptr<limestone::grpc::backend::grpc_service_backend> backend_;
+    std::unique_ptr<::grpc::Service> service_;
+    std::function<std::unique_ptr<limestone::grpc::backend::grpc_service_backend>()> backend_factory_;
+    std::function<std::unique_ptr<::grpc::Service>(limestone::grpc::backend::grpc_service_backend&)> service_factory_;
 
-    void SetUp() override {
-        server_address_ = find_available_address();
-        server_ = build_and_start_server();
+    void set_backend_factory(std::function<std::unique_ptr<limestone::grpc::backend::grpc_service_backend>()> f) {
+        backend_factory_ = std::move(f);
+    }
+    void set_service_factory(std::function<std::unique_ptr<::grpc::Service>(limestone::grpc::backend::grpc_service_backend&)> f) {
+        service_factory_ = std::move(f);
+    }
+
+    void start_server() {
+        ASSERT_TRUE(backend_factory_) << "backend_factory_ is not set. Call set_backend_factory() before start_server().";
+        ASSERT_TRUE(service_factory_) << "service_factory_ is not set. Call set_service_factory() before start_server().";
+        backend_ = backend_factory_();
+        service_ = service_factory_(*backend_);
+        ::grpc::ServerBuilder builder;
+        builder.AddListeningPort(server_address_, ::grpc::InsecureServerCredentials());
+        ping_service_ = std::make_unique<limestone::grpc::service::ping_service>();
+        builder.RegisterService(ping_service_.get());
+        builder.RegisterService(service_.get());
+        server_ = builder.BuildAndStart();
         ASSERT_TRUE(server_ != nullptr);
         wait_for_server_ready();
     }
 
+    void SetUp() override {
+        server_address_ = find_available_address();
+    }
+
     void TearDown() override {
-        if (server_) server_->Shutdown();
+        if (server_) {
+            server_->Shutdown();
+            server_.reset();
+        }
+        service_.reset();
+        backend_.reset();
     }
 
-    // Derived class can override to register additional services
-    virtual void register_additional_services(::grpc::ServerBuilder& builder) {}
-
-    // Build and start the server
-    std::unique_ptr<::grpc::Server> build_and_start_server() {
-        ::grpc::ServerBuilder builder;
-        builder.AddListeningPort(server_address_, ::grpc::InsecureServerCredentials());
-        // Always register ping_service
-        ping_service_ = std::make_unique<limestone::grpc::service::ping_service>();
-        builder.RegisterService(ping_service_.get());
-        // Register additional services from derived class
-        register_additional_services(builder);
-        return builder.BuildAndStart();
-    }
 
     // Wait until the server is ready (using ping_service)
     void wait_for_server_ready() {

@@ -4,19 +4,22 @@ This directory contains the gRPC implementation for limestone datastore.
 
 ## Directory Structure
 
+
 ```
 src/limestone/grpc/
 ├── README.md           # This file (directory overview and conventions)
 ├── proto/              # Protocol Buffer definitions
 ├── service/            # gRPC service implementations
+├── backend/            # gRPC service backend implementations (service logic backend, abstraction for datastore access, etc.)
 └── client/             # gRPC client implementations
 ```
 
 ## Naming Conventions
 
-### C++ Namespaces & Protocol Buffer Package
+### C++ Namespaces
 
 - `limestone::grpc::service` - gRPC service implementations
+- `limestone::grpc::backend` - gRPC backend implementations
 - `limestone::grpc::client` - gRPC client implementations
 - `limestone::grpc::proto` - Protocol Buffer generated code
 
@@ -58,6 +61,22 @@ namespace limestone::grpc::client {
 4. **Naming**: Follow snake_case for file names and variables, PascalCase for types
 5. **Documentation**: Include English comments for all public interfaces
 6. **Testing**: Create corresponding test files for each implementation
+
+
+## Message Versioning
+
+Some gRPC request/response messages include a `version` field for future compatibility.
+The version value to use for each message is defined as a constant in `grpc/message_versions.h`.
+Both client and service must check and set the version accordingly.
+
+Example:
+
+```cpp
+#include "grpc/message_versions.h"
+request.set_version(list_wal_history_message_version);
+```
+
+The initial version number for each message is 1.
 
 ## Build Integration
 

@@ -3,6 +3,7 @@ file(GLOB SOURCES
         "limestone/replication/*.cpp"
         "limestone/partitioned_cursor/*.cpp"
         "limestone/grpc/service/*.cpp"
+        "limestone/grpc/backend/*.cpp"
         "limestone/grpc/client/*.cpp"
         "limestone/wal_sync/*.cpp"
 )

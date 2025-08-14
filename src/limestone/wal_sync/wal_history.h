@@ -28,23 +28,69 @@ namespace limestone::internal {
 
 using epoch_id_type = uint64_t;
 
+
 class wal_history {
 public:
+    /**
+     * @brief Size of the unique_id field in bytes.
+     */
     static constexpr std::size_t unique_id_size = 16;
+
+    /**
+     * @brief Structure representing a single WAL history record.
+     */
     struct record {
-        epoch_id_type epoch;
-        std::array<std::uint8_t, unique_id_size> unique_id;
-        std::time_t timestamp;
+        epoch_id_type epoch;  ///< Epoch value.
+        std::array<std::uint8_t, unique_id_size> unique_id; ///< 16-byte unique identifier.
+        std::time_t timestamp; ///< UNIX timestamp (seconds since epoch).
     };
 
-    explicit wal_history(boost::filesystem::path dir_path);
 
+    /**
+     * @brief Constructs a wal_history object for the specified directory.
+     * @param dir_path Directory path where the wal_history file is stored.
+     * @note This constructor does not throw exceptions.
+     */
+    explicit wal_history(boost::filesystem::path dir_path) noexcept;
+
+    /**
+     * @brief Appends a new WAL history record for the given epoch.
+     * @param epoch The epoch value to append.
+     * @throws limestone::api::limestone_io_exception I/O error
+     */
     void append(epoch_id_type epoch);
+
+    /**
+     * @brief Returns a list of all WAL history records.
+     * @return Vector of WAL history records.
+     * @throws limestone::api::limestone_io_exception I/O error
+     */
     [[nodiscard]] std::vector<record> list() const;
+
+    /**
+     * @brief Checks the WAL history file and recovers if necessary.
+     * @throws limestone::api::limestone_io_exception I/O error
+     */
     void check_and_recover();
+
+    /**
+     * @brief Checks if the WAL history file exists.
+     * @return true if the file exists, false otherwise.
+     * @throws limestone::api::limestone_io_exception I/O error
+     */
     [[nodiscard]] bool exists() const;
-    [[nodiscard]] boost::filesystem::path get_file_path() const;
-    [[nodiscard]] static constexpr const char* file_name() { return file_name_; }
+
+    /**
+     * @brief Returns the file path of the WAL history file.
+     * @return Path to the WAL history file.
+     */
+    [[nodiscard]] boost::filesystem::path get_file_path() const noexcept;
+
+    /**
+     * @brief Returns the file name of the WAL history file.
+     * @return File name as a string literal.
+     */
+    [[nodiscard]] static constexpr const char* file_name() noexcept{ return file_name_; }
 
 protected:
     // Note: These members are protected (not private) to allow access from test subclasses.
