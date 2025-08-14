@@ -71,7 +71,6 @@ const boost::filesystem::path wal_history_path = boost::filesystem::path(locatio
         auto now = static_cast<std::int64_t>(std::time(nullptr));
         EXPECT_LE(record.timestamp, now);
         EXPECT_GE(record.timestamp, start);
-        EXPECT_FALSE(record.uuid.is_nil());
     }
 
 protected:

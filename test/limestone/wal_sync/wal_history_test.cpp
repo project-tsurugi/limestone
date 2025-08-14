@@ -79,13 +79,15 @@ TEST_F(wal_history_test, write_record_and_list_consistency) {
     FILE* fp = fopen(file_path.string().c_str(), "wb");
     ASSERT_TRUE(fp != nullptr);
     std::vector<epoch_id_type> epochs = {42, 43, 44};
-    std::vector<boost::uuids::uuid> uuids;
+    std::vector<std::array<std::uint8_t, 16>> unique_ids;
     std::vector<std::int64_t> timestamps;
     for (size_t i = 0; i < epochs.size(); ++i) {
         boost::uuids::uuid uuid = {};
+        std::array<std::uint8_t, 16> unique_id;
+        std::memcpy(unique_id.data(), uuid.data, 16);
         std::int64_t timestamp = 1234567890 + i;
-        wh.write_record(fp, epochs[i], uuid, timestamp);
-        uuids.push_back(uuid);
+        wh.write_record(fp, epochs[i], unique_id, timestamp);
+        unique_ids.push_back(unique_id);
         timestamps.push_back(timestamp);
     }
     fclose(fp);
@@ -94,7 +96,7 @@ TEST_F(wal_history_test, write_record_and_list_consistency) {
     ASSERT_EQ(records.size(), epochs.size());
     for (size_t i = 0; i < epochs.size(); ++i) {
         EXPECT_EQ(records[i].epoch, epochs[i]);
-        EXPECT_EQ(records[i].uuid, uuids[i]);
+        EXPECT_EQ(records[i].unique_id, unique_ids[i]);
         EXPECT_EQ(records[i].timestamp, timestamps[i]);
     }
 }
@@ -291,8 +293,10 @@ TEST_F(wal_history_test, write_record_throws_on_write_failure) {
     FILE* fp = fopen(file_path.string().c_str(), "wb");
     ASSERT_TRUE(fp != nullptr);
     boost::uuids::uuid uuid{};
+    std::array<std::uint8_t, 16> unique_id;
+    std::memcpy(unique_id.data(), uuid.data, 16);
     try {
-        wh.write_record(fp, 1, uuid, 123);
+        wh.write_record(fp, 1, unique_id, 123);
         FAIL() << "Exception was not thrown";
     } catch (const limestone_exception& ex) {
         EXPECT_TRUE(std::string(ex.what()).find("Failed to write wal_history record") != std::string::npos);
@@ -323,7 +327,9 @@ TEST_F(wal_history_test, write_record_partial_fwrite_success) {
     FILE* fp = fopen(file_path.string().c_str(), "wb");
     ASSERT_TRUE(fp != nullptr);
     boost::uuids::uuid uuid{};
-    wh.write_record(fp, 1, uuid, 123);
+    std::array<std::uint8_t, 16> unique_id;
+    std::memcpy(unique_id.data(), uuid.data, 16);
+    wh.write_record(fp, 1, unique_id, 123);
     fclose(fp);
     // ファイル内容が正しいか検証
     fp = fopen(file_path.string().c_str(), "rb");
@@ -335,7 +341,7 @@ TEST_F(wal_history_test, write_record_partial_fwrite_success) {
     // パースして値を検証
     auto rec = wh.parse_record(buf);
     EXPECT_EQ(rec.epoch, 1u);
-    EXPECT_EQ(rec.uuid, uuid);
+    EXPECT_EQ(rec.unique_id, unique_id);
     EXPECT_EQ(rec.timestamp, 123);
 }
 

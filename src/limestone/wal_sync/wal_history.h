@@ -30,9 +30,10 @@ using epoch_id_type = uint64_t;
 
 class wal_history {
 public:
+    static constexpr std::size_t unique_id_size = 16;
     struct record {
         epoch_id_type epoch;
-        boost::uuids::uuid uuid;
+        std::array<std::uint8_t, unique_id_size> unique_id;
         std::time_t timestamp;
     };
 
@@ -47,13 +48,13 @@ public:
 
 protected:
     // Note: These members are protected (not private) to allow access from test subclasses.
-    static constexpr std::size_t record_size = sizeof(epoch_id_type) + 16 + sizeof(std::int64_t);
+    static constexpr std::size_t record_size = sizeof(epoch_id_type) + unique_id_size + sizeof(std::int64_t);
     static constexpr const char* file_name_ = "wal_history";
     static constexpr const char* tmp_file_name_ = "wal_history.tmp";
 
     void set_file_operations(std::unique_ptr<file_operations> file_ops) { file_ops_ = std::move(file_ops); }
     void reset_file_operations() { file_ops_ = std::make_unique<real_file_operations>(); }
-    void write_record(FILE* fp, epoch_id_type epoch, const boost::uuids::uuid& uuid, std::int64_t timestamp);
+    void write_record(FILE* fp, epoch_id_type epoch, const std::array<std::uint8_t, unique_id_size>& unique_id, std::int64_t timestamp);
     [[nodiscard]] static record parse_record(const std::array<std::byte, record_size>& buf);
     [[nodiscard]] std::vector<record> read_all_records(const boost::filesystem::path& file_path) const;
 
