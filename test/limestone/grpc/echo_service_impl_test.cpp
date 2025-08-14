@@ -19,7 +19,7 @@
 #include "limestone/grpc/service/echo_service_impl.h"
 #include "echo_service.grpc.pb.h"
 
-namespace limestone::grpc::service::testing {
+namespace limestone::grpc::service {
 
 class echo_service_impl_test : public ::testing::Test {
 protected:
@@ -27,8 +27,8 @@ protected:
 };
 
 TEST_F(echo_service_impl_test, echo_returns_input_message) {
-    EchoRequest request;
-    EchoResponse response;
+    limestone::grpc::proto::EchoRequest request;
+    limestone::grpc::proto::EchoResponse response;
     ::grpc::ServerContext context;
 
     std::string test_message = "Hello, gRPC!";

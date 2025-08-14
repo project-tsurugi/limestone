@@ -4,8 +4,8 @@
 namespace limestone::grpc::service {
 
 ::grpc::Status echo_service_impl::Echo(::grpc::ServerContext* /* context */,
-                                       const limestone::grpc::EchoRequest* request,
-                                       limestone::grpc::EchoResponse* response) {
+                                       const limestone::grpc::proto::EchoRequest* request,
+                                       limestone::grpc::proto::EchoResponse* response) {
     // Log the incoming request
     LOG(INFO) << "Echo request received: " << request->message();
     

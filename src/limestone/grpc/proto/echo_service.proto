@@ -1,6 +1,6 @@
 syntax = "proto3";
 
-package limestone.grpc;
+package limestone.grpc.proto;
 
 option java_package = "com.tsurugi.limestone.grpc";
 option java_outer_classname = "EchoServiceProto";

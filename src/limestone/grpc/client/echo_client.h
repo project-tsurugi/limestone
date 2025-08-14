@@ -48,7 +48,7 @@ public:
                         int timeout_ms);
 
 private:
-    std::unique_ptr<limestone::grpc::EchoService::Stub> stub_;
+    std::unique_ptr<limestone::grpc::proto::EchoService::Stub> stub_;
 };
 
 } // namespace limestone::grpc::client

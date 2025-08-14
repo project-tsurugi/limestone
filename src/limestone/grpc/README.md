@@ -14,41 +14,16 @@ src/limestone/grpc/
 
 ## Naming Conventions
 
-### C++ Namespaces
+### C++ Namespaces & Protocol Buffer Package
 
 - `limestone::grpc::service` - gRPC service implementations
-- `limestone::grpc::client` - gRPC client implementations  
-- `limestone::grpc::proto` - Protocol Buffer generated code (if needed)
+- `limestone::grpc::client` - gRPC client implementations
+- `limestone::grpc::proto` - Protocol Buffer generated code
 
-### Protocol Buffer Package
-
-- `limestone.grpc` - Package name for all protobuf definitions
 
 ### Example Usage
 
 **Note**: The `echo_service` and `echo_client` implementations are for testing and development purposes only. They are not intended for production use.
-
-**Protocol Buffer Definition (echo_service.proto):**
-```protobuf
-syntax = "proto3";
-
-package limestone.grpc;
-
-option java_package = "com.tsurugi.limestone.grpc";
-option csharp_namespace = "Limestone.Grpc";
-
-service EchoService {
-  rpc Echo(EchoRequest) returns (EchoResponse);
-}
-
-message EchoRequest {
-  string message = 1;
-}
-
-message EchoResponse {
-  string message = 1;
-}
-```
 
 **C++ Service Implementation (echo_service_impl):**
 ```cpp

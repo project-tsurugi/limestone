@@ -5,19 +5,19 @@
 namespace limestone::grpc::client {
 
 echo_client::echo_client(const std::string& server_address) 
-    : stub_(limestone::grpc::EchoService::NewStub(
+    : stub_(limestone::grpc::proto::EchoService::NewStub(
         ::grpc::CreateChannel(server_address, ::grpc::InsecureChannelCredentials()))) {
     LOG(INFO) << "echo_client created for server: " << server_address;
 }
 
 echo_client::echo_client(const std::shared_ptr<::grpc::Channel>& channel)
-    : stub_(limestone::grpc::EchoService::NewStub(channel)) {
+    : stub_(limestone::grpc::proto::EchoService::NewStub(channel)) {
     LOG(INFO) << "echo_client created with custom channel";
 }
 
 ::grpc::Status echo_client::echo(const std::string& message, std::string& response) {
-    limestone::grpc::EchoRequest request;
-    limestone::grpc::EchoResponse echo_response;
+    limestone::grpc::proto::EchoRequest request;
+    limestone::grpc::proto::EchoResponse echo_response;
     ::grpc::ClientContext context;
     
     request.set_message(message);
@@ -40,8 +40,8 @@ echo_client::echo_client(const std::shared_ptr<::grpc::Channel>& channel)
 ::grpc::Status echo_client::echo(const std::string& message, 
                              std::string& response,
                              int timeout_ms) {
-    limestone::grpc::EchoRequest request;
-    limestone::grpc::EchoResponse echo_response;
+    limestone::grpc::proto::EchoRequest request;
+    limestone::grpc::proto::EchoResponse echo_response;
     ::grpc::ClientContext context;
     
     // Set timeout

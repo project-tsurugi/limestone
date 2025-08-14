@@ -9,15 +9,15 @@ namespace limestone::grpc::service {
 
 ::grpc::Status FileSizeServiceImpl::GetFileSize(
     ::grpc::ServerContext* /*context*/,
-    ::grpc::ServerReader<limestone::grpc::FileChunk>* reader,
-    limestone::grpc::FileSizeResponse* response)
+    ::grpc::ServerReader<limestone::grpc::proto::FileChunk>* reader,
+    limestone::grpc::proto::FileSizeResponse* response)
 {
     using namespace std::chrono;
     LOG(INFO) << "[GetFileSize] start";
     auto t0 = steady_clock::now();
 
     int64_t total_size = 0;
-    limestone::grpc::FileChunk chunk;
+    limestone::grpc::proto::FileChunk chunk;
     while (reader->Read(&chunk)) {
         total_size += static_cast<int64_t>(chunk.data().size());
     }
@@ -31,8 +31,8 @@ namespace limestone::grpc::service {
 
 ::grpc::Status RandomBytesServiceImpl::GenerateRandomBytes(
     ::grpc::ServerContext* /*context*/,
-    const limestone::grpc::RandomBytesRequest* request,
-    ::grpc::ServerWriter<limestone::grpc::RandomBytesChunk>* writer)
+    const limestone::grpc::proto::RandomBytesRequest* request,
+    ::grpc::ServerWriter<limestone::grpc::proto::RandomBytesChunk>* writer)
 {
     using namespace std::chrono;
     LOG(INFO) << "[GenerateRandomBytes] start";
@@ -60,7 +60,7 @@ namespace limestone::grpc::service {
     int64_t sent = 0;
     while (sent < size) {
         int64_t current_chunk_size = std::min(chunk_size, size - sent);
-        limestone::grpc::RandomBytesChunk chunk;
+        limestone::grpc::proto::RandomBytesChunk chunk;
         chunk.set_data(all_data.substr(sent, current_chunk_size));
         writer->Write(chunk);
         sent += current_chunk_size;

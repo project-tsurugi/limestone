@@ -42,15 +42,15 @@ int main(int argc, char* argv[]) {
             std::cerr << "Failed to open file: " << file_path << "\n";
             return 1;
         }
-        limestone::grpc::FileSizeService::Stub stub(channel);
+        limestone::grpc::proto::FileSizeService::Stub stub(channel);
         grpc::ClientContext context;
-        limestone::grpc::FileSizeResponse response;
-        std::unique_ptr<grpc::ClientWriter<limestone::grpc::FileChunk>> writer(
+        limestone::grpc::proto::FileSizeResponse response;
+        std::unique_ptr<grpc::ClientWriter<limestone::grpc::proto::FileChunk>> writer(
             stub.GetFileSize(&context, &response));
         constexpr size_t buffer_size = 32 * 1024 * 1024; // 32MB
         std::vector<char> buffer(buffer_size);
         while (file.read(buffer.data(), buffer.size()) || file.gcount() > 0) {
-            limestone::grpc::FileChunk chunk;
+            limestone::grpc::proto::FileChunk chunk;
             chunk.set_data(std::string(buffer.data(), file.gcount()));
             if (!writer->Write(chunk)) {
                 std::cerr << "Failed to write chunk to server\n";
@@ -76,14 +76,14 @@ int main(int argc, char* argv[]) {
             return 1;
         }
         int64_t size = std::stoll(argv[3]);
-        limestone::grpc::RandomBytesService::Stub stub(channel);
+        limestone::grpc::proto::RandomBytesService::Stub stub(channel);
         grpc::ClientContext context;
-        limestone::grpc::RandomBytesRequest request;
+        limestone::grpc::proto::RandomBytesRequest request;
         request.set_size(size);
-        std::unique_ptr<grpc::ClientReader<limestone::grpc::RandomBytesChunk>> reader(
+        std::unique_ptr<grpc::ClientReader<limestone::grpc::proto::RandomBytesChunk>> reader(
             stub.GenerateRandomBytes(&context, request));
         int64_t received = 0;
-        limestone::grpc::RandomBytesChunk chunk;
+        limestone::grpc::proto::RandomBytesChunk chunk;
         while (reader->Read(&chunk)) {
             received += chunk.data().size();
             // For demonstration, do not print the data

@@ -11,7 +11,7 @@ namespace limestone::grpc::service {
  * This service provides a simple echo functionality that returns
  * the input message back to the client.
  */
-class echo_service_impl final : public limestone::grpc::EchoService::Service {
+class echo_service_impl final : public limestone::grpc::proto::EchoService::Service {
 public:
     /**
      * @brief Echo RPC implementation
@@ -21,8 +21,8 @@ public:
      * @return Status of the RPC operation
      */
     ::grpc::Status Echo(::grpc::ServerContext* context,
-                        const limestone::grpc::EchoRequest* request,
-                        limestone::grpc::EchoResponse* response) override;
+                        const limestone::grpc::proto::EchoRequest* request,
+                        limestone::grpc::proto::EchoResponse* response) override;
 };
 
 } // namespace limestone::grpc::service

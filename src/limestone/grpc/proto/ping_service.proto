@@ -1,6 +1,6 @@
 syntax = "proto3";
 
-package limestone.grpc.testing;
+package limestone.grpc.proto;
 
 service PingService {
   rpc Ping (PingRequest) returns (PingResponse);

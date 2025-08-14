@@ -21,7 +21,7 @@ class grpc_server_test_base : public ::testing::Test {
 protected:
     std::unique_ptr<::grpc::Server> server_;
     std::string server_address_;
-    std::unique_ptr<limestone::grpc::testing::ping_service> ping_service_;
+    std::unique_ptr<limestone::grpc::service::ping_service> ping_service_;
 
     void SetUp() override {
         server_address_ = find_available_address();
@@ -42,7 +42,7 @@ protected:
         ::grpc::ServerBuilder builder;
         builder.AddListeningPort(server_address_, ::grpc::InsecureServerCredentials());
         // Always register ping_service
-        ping_service_ = std::make_unique<limestone::grpc::testing::ping_service>();
+        ping_service_ = std::make_unique<limestone::grpc::service::ping_service>();
         builder.RegisterService(ping_service_.get());
         // Register additional services from derived class
         register_additional_services(builder);
@@ -65,10 +65,10 @@ protected:
     // Use ping_service to check if server is ready
     virtual bool is_server_ready() {
         auto channel = ::grpc::CreateChannel(server_address_, ::grpc::InsecureChannelCredentials());
-        limestone::grpc::testing::PingService::Stub stub(channel);
+        limestone::grpc::proto::PingService::Stub stub(channel);
         ::grpc::ClientContext context;
-        limestone::grpc::testing::PingRequest req;
-        limestone::grpc::testing::PingResponse resp;
+        limestone::grpc::proto::PingRequest req;
+        limestone::grpc::proto::PingResponse resp;
         auto status = stub.Ping(&context, req, &resp);
         return status.ok();
     }

@@ -3,13 +3,13 @@
 
 #include "ping_service.grpc.pb.h"
 
-namespace limestone::grpc::testing {
+namespace limestone::grpc::service {
 
-class ping_service final : public PingService::Service {
+class ping_service final : public limestone::grpc::proto::PingService::Service {
 public:
-    ::grpc::Status Ping(::grpc::ServerContext*, const PingRequest*, PingResponse*) override;
+    ::grpc::Status Ping(::grpc::ServerContext*, const limestone::grpc::proto::PingRequest*, limestone::grpc::proto::PingResponse*) override;
 };
 
-} // namespace limestone::grpc::testing
+} // namespace limestone::grpc::service
 
 #endif // LIMESTONE_GRPC_TESTING_PING_SERVICE_H_

@@ -1,6 +1,6 @@
 syntax = "proto3";
 
-package limestone.grpc;
+package limestone.grpc.proto;
 
 // Service for calculating file size from streamed file chunks
 service FileSizeService {
