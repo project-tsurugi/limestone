@@ -56,9 +56,9 @@ TEST_F(backend_shared_impl_test, list_wal_history_matches_wal_history_class) {
 
     ASSERT_EQ(expected.size(), actual.size());
     for (size_t i = 0; i < expected.size(); ++i) {
-        EXPECT_EQ(expected[i].epoch, actual[i].epoch);
-        EXPECT_EQ(expected[i].unique_id, actual[i].unique_id);
-        EXPECT_EQ(expected[i].timestamp, actual[i].timestamp);
+        EXPECT_EQ(expected[i].epoch, actual[i].epoch());
+        EXPECT_EQ(expected[i].identity, actual[i].identity());
+        EXPECT_EQ(expected[i].timestamp, actual[i].timestamp());
     }
 }
 

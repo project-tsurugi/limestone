@@ -1,8 +1,9 @@
 #pragma once
 
 #include <vector>
+#include <google/protobuf/repeated_field.h>
 #include "wal_sync/wal_history.h"
-
+#include "wal_history.grpc.pb.h"
 namespace limestone::grpc::backend {
 
 class backend_shared_impl {
@@ -14,8 +15,8 @@ public:
     backend_shared_impl(backend_shared_impl&&) = delete;
     backend_shared_impl& operator=(backend_shared_impl&&) = delete;
 
-    // Shared logic for listing WAL history
-    std::vector<limestone::internal::wal_history::record> list_wal_history();
+    // Shared logic for listing WAL history (returns proto repeated field)
+    google::protobuf::RepeatedPtrField<limestone::grpc::proto::BranchEpoch> list_wal_history();
 
 private:
     boost::filesystem::path log_dir_;

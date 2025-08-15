@@ -10,23 +10,16 @@ wal_history_service_impl::wal_history_service_impl(grpc_service_backend& backend
     : backend_(backend) {}
 
 
-::grpc::Status wal_history_service_impl::ListWalHistory(
+::grpc::Status wal_history_service_impl::GetWalHistory(
     ::grpc::ServerContext* /* context */,
-    const limestone::grpc::proto::ListWalHistoryRequest* /* request */,
-    limestone::grpc::proto::ListWalHistoryResponse* response) {
-    VLOG_LP(log_info) << "ListWalHistory called";
+    const limestone::grpc::proto::WalHistoryRequest* /* request */,
+    limestone::grpc::proto::WalHistoryResponse* response) {
+    VLOG_LP(log_info) << "GetWalHistory called";
     try {
-        auto records = backend_.list_wal_history();
-        for (const auto& rec : records) {
-            auto* out = response->add_records();
-            out->set_epoch(rec.epoch);
-            // NOLINTNEXTLINE(cppcoreguidelines-pro-type-reinterpret-cast)
-            out->set_unique_id(std::string(reinterpret_cast<const char*>(rec.unique_id.data()), rec.unique_id.size()));
-            out->set_timestamp(static_cast<int64_t>(rec.timestamp));
-        }
-        return {::grpc::Status::OK}; 
+        *response = backend_.get_wal_history_response();
+        return {::grpc::Status::OK};
     } catch (const std::exception& e) {
-        VLOG_LP(log_info) << "ListWalHistory failed: " << e.what();
+        VLOG_LP(log_info) << "GetWalHistory failed: " << e.what();
         std::string msg = e.what();
         return {::grpc::StatusCode::INTERNAL, msg};
     }

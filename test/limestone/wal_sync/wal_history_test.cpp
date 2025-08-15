@@ -79,25 +79,23 @@ TEST_F(wal_history_test, write_record_and_list_consistency) {
     FILE* fp = fopen(file_path.string().c_str(), "wb");
     ASSERT_TRUE(fp != nullptr);
     std::vector<epoch_id_type> epochs = {42, 43, 44};
-    std::vector<std::array<std::uint8_t, 16>> unique_ids;
+    std::vector<uint64_t> identities;
     std::vector<std::int64_t> timestamps;
     for (size_t i = 0; i < epochs.size(); ++i) {
-        boost::uuids::uuid uuid = {};
-        std::array<std::uint8_t, 16> unique_id;
-        std::memcpy(unique_id.data(), uuid.data, 16);
-        std::int64_t timestamp = 1234567890 + i;
-        wh.write_record(fp, epochs[i], unique_id, timestamp);
-        unique_ids.push_back(unique_id);
-        timestamps.push_back(timestamp);
+    uint64_t identity = static_cast<uint64_t>(std::rand()) ^ (static_cast<uint64_t>(std::rand()) << 32);
+    std::int64_t timestamp = 1234567890 + i;
+    wh.write_record(fp, epochs[i], identity, timestamp);
+    identities.push_back(identity);
+    timestamps.push_back(timestamp);
     }
     fclose(fp);
 
     auto records = wh.list();
     ASSERT_EQ(records.size(), epochs.size());
     for (size_t i = 0; i < epochs.size(); ++i) {
-        EXPECT_EQ(records[i].epoch, epochs[i]);
-        EXPECT_EQ(records[i].unique_id, unique_ids[i]);
-        EXPECT_EQ(records[i].timestamp, timestamps[i]);
+    EXPECT_EQ(records[i].epoch, epochs[i]);
+    EXPECT_EQ(records[i].identity, identities[i]);
+    EXPECT_EQ(records[i].timestamp, timestamps[i]);
     }
 }
 
@@ -292,11 +290,9 @@ TEST_F(wal_history_test, write_record_throws_on_write_failure) {
     boost::filesystem::path file_path = test_dir / "wal_history";
     FILE* fp = fopen(file_path.string().c_str(), "wb");
     ASSERT_TRUE(fp != nullptr);
-    boost::uuids::uuid uuid{};
-    std::array<std::uint8_t, 16> unique_id;
-    std::memcpy(unique_id.data(), uuid.data, 16);
+    uint64_t identity = static_cast<uint64_t>(std::rand()) ^ (static_cast<uint64_t>(std::rand()) << 32);
     try {
-        wh.write_record(fp, 1, unique_id, 123);
+        wh.write_record(fp, 1, identity, 123);
         FAIL() << "Exception was not thrown";
     } catch (const limestone_exception& ex) {
         EXPECT_TRUE(std::string(ex.what()).find("Failed to write wal_history record") != std::string::npos);
@@ -326,10 +322,8 @@ TEST_F(wal_history_test, write_record_partial_fwrite_success) {
     boost::filesystem::path file_path = test_dir / "wal_history";
     FILE* fp = fopen(file_path.string().c_str(), "wb");
     ASSERT_TRUE(fp != nullptr);
-    boost::uuids::uuid uuid{};
-    std::array<std::uint8_t, 16> unique_id;
-    std::memcpy(unique_id.data(), uuid.data, 16);
-    wh.write_record(fp, 1, unique_id, 123);
+    uint64_t identity = static_cast<uint64_t>(std::rand()) ^ (static_cast<uint64_t>(std::rand()) << 32);
+    wh.write_record(fp, 1, identity, 123);
     fclose(fp);
     // ファイル内容が正しいか検証
     fp = fopen(file_path.string().c_str(), "rb");
@@ -341,7 +335,7 @@ TEST_F(wal_history_test, write_record_partial_fwrite_success) {
     // パースして値を検証
     auto rec = wh.parse_record(buf);
     EXPECT_EQ(rec.epoch, 1u);
-    EXPECT_EQ(rec.unique_id, unique_id);
+    EXPECT_EQ(rec.identity, identity);
     EXPECT_EQ(rec.timestamp, 123);
 }
 

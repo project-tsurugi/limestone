@@ -14,16 +14,33 @@
  * limitations under the License.
  */ 
 #include "standalone_backend.h"
-
+#include "dblog_scan.h"
+#include "limestone_exception_helper.h"
 namespace limestone::grpc::backend {
+
+
 
 standalone_backend::standalone_backend(const boost::filesystem::path& log_dir)
 	: log_dir_(log_dir), backend_shared_impl_(log_dir)
 {
 }
 
-std::vector<wal_history::record> standalone_backend::list_wal_history() {
-	return backend_shared_impl_.list_wal_history();
+limestone::grpc::proto::WalHistoryResponse standalone_backend::get_wal_history_response() {
+    limestone::grpc::proto::WalHistoryResponse resp;
+
+    limestone::internal::dblog_scan scan(log_dir_);
+    auto last_epoch = scan.last_durable_epoch_in_dir();
+    resp.set_last_epoch(last_epoch);
+
+    auto records = backend_shared_impl_.list_wal_history();
+    for (const auto& rec : records) {
+        if (rec.epoch() > last_epoch) {
+            LOG_AND_THROW_EXCEPTION("wal history contains a record whose epoch is greater than last_epoch: epoch=" + std::to_string(rec.epoch()) +
+                                    ", last_epoch=" + std::to_string(last_epoch));
+        }
+    }
+    *resp.mutable_records() = std::move(records);
+    return resp;
 }
 
 boost::filesystem::path standalone_backend::get_log_dir() const noexcept {

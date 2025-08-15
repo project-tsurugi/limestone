@@ -33,6 +33,7 @@
 #include <fstream>
 #include <stdexcept>
 #include <vector>
+#include <random>
 
 #include "limestone_exception_helper.h"
 
@@ -41,21 +42,21 @@ namespace limestone::internal {
 namespace {
     constexpr std::size_t epoch_offset      = 0;
     constexpr std::size_t epoch_size        = sizeof(std::uint64_t);
-    constexpr std::size_t unique_id_offset  = epoch_offset + epoch_size;
-    constexpr std::size_t unique_id_size    = boost::uuids::uuid::static_size();
-    static_assert(unique_id_size == 16, "unique_id must be 16 bytes");
-    constexpr std::size_t timestamp_offset  = unique_id_offset + unique_id_size;
+    constexpr std::size_t identity_offset   = epoch_offset + epoch_size;
+    constexpr std::size_t identity_size     = sizeof(uint64_t);
+    constexpr std::size_t timestamp_offset  = identity_offset + identity_size;
     constexpr std::size_t timestamp_size    = sizeof(std::uint64_t);
 }
 
 void wal_history::write_record(FILE* fp,
                                 epoch_id_type epoch,
-                                const std::array<std::uint8_t, 16>& unique_id,
+                                uint64_t identity,
                                 std::int64_t timestamp) {
     std::array<std::byte, record_size> buf{};
     const auto be_epoch = htobe64(static_cast<std::uint64_t>(epoch));
     std::memcpy(&buf[epoch_offset], &be_epoch, epoch_size);
-    std::memcpy(&buf[unique_id_offset], unique_id.data(), unique_id_size);
+    const auto be_identity = htobe64(identity);
+    std::memcpy(&buf[identity_offset], &be_identity, identity_size);
     const auto be_timestamp = htobe64(static_cast<std::uint64_t>(timestamp));
     std::memcpy(&buf[timestamp_offset], &be_timestamp, timestamp_size);
     auto cur = buf.cbegin();
@@ -79,7 +80,9 @@ wal_history::record wal_history::parse_record(const std::array<std::byte, record
     std::memcpy(&be_epoch, &buf[epoch_offset], epoch_size);
     rec.epoch = be64toh(be_epoch);
 
-    std::memcpy(rec.unique_id.data(), &buf[unique_id_offset], unique_id_size);
+    std::uint64_t be_identity = 0;
+    std::memcpy(&be_identity, &buf[identity_offset], identity_size);
+    rec.identity = be64toh(be_identity);
 
     std::int64_t be_timestamp = 0;
     std::memcpy(&be_timestamp, &buf[timestamp_offset], timestamp_size);
@@ -140,12 +143,16 @@ void wal_history::append(epoch_id_type epoch) {
     boost::filesystem::path tmp_path = dir_path_ / tmp_file_name_;
     std::vector<record> records = read_all_records(file_path);
     // Add a new record
+    std::random_device rd;
     boost::uuids::random_generator uuid_gen;
     boost::uuids::uuid uuid = uuid_gen();
-    std::array<std::uint8_t, 16> unique_id{};
-    std::memcpy(unique_id.data(), static_cast<const void*>(uuid.data), 16);
+    // Use the first 8 bytes of the UUID as the identity
+    uint64_t identity = 0;
+    for (int i = 0; i < 8; ++i) {
+        identity = (identity << 8) | uuid.data[i];
+    }
     auto timestamp = static_cast<std::int64_t>(std::time(nullptr));
-    records.push_back(record{epoch, unique_id, timestamp});
+    records.push_back(record{epoch, identity, timestamp});
     // Write to temporary file
     {
         FILE* fp = file_ops_->fopen(tmp_path.string().c_str(), "wb");
@@ -154,7 +161,7 @@ void wal_history::append(epoch_id_type epoch) {
             LOG_AND_THROW_IO_EXCEPTION("Failed to open wal_history.tmp for write: " + tmp_path.string(), err);
         }
         for (const auto& rec : records) {
-            write_record(fp, rec.epoch, rec.unique_id, rec.timestamp);
+            write_record(fp, rec.epoch, rec.identity, rec.timestamp);
         }
         if (file_ops_->fflush(fp) != 0) {
             int err = errno;
@@ -216,6 +223,10 @@ bool wal_history::exists() const {
     boost::filesystem::path file_path = dir_path_ / file_name_;
     boost::system::error_code ec;
     return file_ops_->exists(file_path, ec) && !ec;
+}
+
+const char* wal_history::file_name() noexcept {
+    return file_name_;
 }
 
 

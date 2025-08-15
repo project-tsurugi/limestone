@@ -18,6 +18,8 @@
 #include <vector>
 #include "grpc_service_backend.h"
 #include "backend_shared_impl.h"
+#include "limestone/api/datastore.h"
+
 namespace limestone::grpc::backend {
 
 class inproc_backend : public grpc_service_backend {
@@ -29,9 +31,10 @@ public:
     inproc_backend(inproc_backend&&) = delete;
     inproc_backend& operator=(inproc_backend&&) = delete;
 
-    [[nodiscard]] std::vector<wal_history::record> list_wal_history() override;
     [[nodiscard]] boost::filesystem::path get_log_dir() const noexcept override;
+    [[nodiscard]] limestone::grpc::proto::WalHistoryResponse get_wal_history_response() override;
 private:
+    limestone::api::datastore& datastore_;
     boost::filesystem::path log_dir_;
     backend_shared_impl backend_shared_impl_;
 };

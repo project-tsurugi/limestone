@@ -17,10 +17,10 @@ public:
     wal_history_service_impl(wal_history_service_impl&&) = delete;
     wal_history_service_impl& operator=(wal_history_service_impl&&) = delete;
 
-    ::grpc::Status ListWalHistory(
+    ::grpc::Status GetWalHistory(
         ::grpc::ServerContext* context,
-        const limestone::grpc::proto::ListWalHistoryRequest* request,
-        limestone::grpc::proto::ListWalHistoryResponse* response) override;
+        const limestone::grpc::proto::WalHistoryRequest* request,
+        limestone::grpc::proto::WalHistoryResponse* response) override;
 
 private:
     grpc_service_backend& backend_;
