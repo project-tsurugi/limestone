@@ -14,6 +14,8 @@
  * limitations under the License.
  */ 
 #include "inproc_backend.h"
+#include "limestone/logging.h"
+#include "logging_helper.h"
 
 namespace limestone::grpc::backend {
 
@@ -24,11 +26,16 @@ inproc_backend::inproc_backend([[maybe_unused]] limestone::api::datastore& ds, c
 {
 }
 
-limestone::grpc::proto::WalHistoryResponse inproc_backend::get_wal_history_response() {
-	limestone::grpc::proto::WalHistoryResponse resp;
-	resp.set_last_epoch(datastore_.last_epoch());
-	*resp.mutable_records() = backend_shared_impl_.list_wal_history();
-	return resp;
+::grpc::Status inproc_backend::get_wal_history_response(limestone::grpc::proto::WalHistoryResponse* response) noexcept {
+	try {
+		response->set_last_epoch(datastore_.last_epoch());
+		*response->mutable_records() = backend_shared_impl_.list_wal_history();
+		return {::grpc::Status::OK};
+	} catch (const std::exception& e) {
+		VLOG_LP(log_info) << "GetWalHistory failed: " << e.what();
+		std::string msg = e.what();
+		return {::grpc::StatusCode::INTERNAL, msg};
+	}
 }
 
 boost::filesystem::path inproc_backend::get_log_dir() const noexcept {

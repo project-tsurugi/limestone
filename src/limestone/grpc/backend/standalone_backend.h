@@ -31,7 +31,7 @@ public:
     standalone_backend& operator=(standalone_backend&&) = delete;
 
     [[nodiscard]] boost::filesystem::path get_log_dir() const noexcept override;
-    [[nodiscard]] limestone::grpc::proto::WalHistoryResponse get_wal_history_response() override;
+    ::grpc::Status get_wal_history_response(limestone::grpc::proto::WalHistoryResponse* response) noexcept override;
 private:
     boost::filesystem::path log_dir_;
     backend_shared_impl backend_shared_impl_;

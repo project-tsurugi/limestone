@@ -32,7 +32,7 @@ public:
     inproc_backend& operator=(inproc_backend&&) = delete;
 
     [[nodiscard]] boost::filesystem::path get_log_dir() const noexcept override;
-    [[nodiscard]] limestone::grpc::proto::WalHistoryResponse get_wal_history_response() override;
+    ::grpc::Status get_wal_history_response(limestone::grpc::proto::WalHistoryResponse* response) noexcept override;
 private:
     limestone::api::datastore& datastore_;
     boost::filesystem::path log_dir_;
