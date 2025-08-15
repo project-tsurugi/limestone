@@ -144,7 +144,13 @@ void wal_history::append(epoch_id_type epoch) {
     std::vector<record> records = read_all_records(file_path);
     // Add a new record
     std::random_device rd;
-    uint64_t identity = (static_cast<uint64_t>(rd()) << 32U) | static_cast<uint64_t>(rd());
+    boost::uuids::random_generator uuid_gen;
+    boost::uuids::uuid uuid = uuid_gen();
+    // Use the first 8 bytes of the UUID as the identity
+    uint64_t identity = 0;
+    for (int i = 0; i < 8; ++i) {
+        identity = (identity << 8) | uuid.data[i];
+    }
     auto timestamp = static_cast<std::int64_t>(std::time(nullptr));
     records.push_back(record{epoch, identity, timestamp});
     // Write to temporary file
