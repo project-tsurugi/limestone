@@ -30,8 +30,8 @@ public:
     standalone_backend(standalone_backend&&) = delete;
     standalone_backend& operator=(standalone_backend&&) = delete;
 
-    [[nodiscard]] std::vector<wal_history::record> list_wal_history() override;
     [[nodiscard]] boost::filesystem::path get_log_dir() const noexcept override;
+    [[nodiscard]] limestone::grpc::proto::WalHistoryResponse get_wal_history_response() override;
 private:
     boost::filesystem::path log_dir_;
     backend_shared_impl backend_shared_impl_;

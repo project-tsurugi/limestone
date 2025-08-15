@@ -52,27 +52,34 @@ protected:
     }
 };
 
-TEST_F(inproc_backend_test, list_wal_history_empty) {
+
+TEST_F(inproc_backend_test, get_wal_history_response_empty) {
     gen_datastore();
     inproc_backend backend(*datastore_, log_dir);
-    auto result = backend.list_wal_history();
-    EXPECT_TRUE(result.empty());
+    auto response = backend.get_wal_history_response();
+    EXPECT_EQ(response.records_size(), 0);
 }
 
-TEST_F(inproc_backend_test, list_wal_history_with_records) {
+
+TEST_F(inproc_backend_test, get_wal_history_response_with_records) {
     gen_datastore();
     wal_history wh(log_dir);
     wh.append(300);
     wh.append(400);
+    datastore_->ready();
+    datastore_->switch_epoch(401);
     auto expected = wh.list();
     inproc_backend backend(*datastore_, log_dir);
-    auto actual = backend.list_wal_history();
-    ASSERT_EQ(expected.size(), actual.size());
-    for (size_t i = 0; i < expected.size(); ++i) {
-        EXPECT_EQ(expected[i].epoch, actual[i].epoch);
-        EXPECT_EQ(expected[i].unique_id, actual[i].unique_id);
-        EXPECT_EQ(expected[i].timestamp, actual[i].timestamp);
+    auto response = backend.get_wal_history_response();
+    ASSERT_EQ(expected.size(), response.records_size());
+    for (int i = 0; i < response.records_size(); ++i) {
+        const auto& rec = response.records(i);
+        const auto& exp = expected[i];
+        EXPECT_EQ(rec.epoch(), exp.epoch);
+        EXPECT_EQ(rec.identity(), exp.identity);
+        EXPECT_EQ(rec.timestamp(), static_cast<int64_t>(exp.timestamp));
     }
+    EXPECT_EQ(response.last_epoch(), 400);
 }
 
 TEST_F(inproc_backend_test, get_log_dir_returns_constructor_value) {

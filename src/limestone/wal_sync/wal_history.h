@@ -34,14 +34,14 @@ public:
     /**
      * @brief Size of the unique_id field in bytes.
      */
-    static constexpr std::size_t unique_id_size = 16;
+    static constexpr std::size_t identity_size = sizeof(uint64_t);
 
     /**
      * @brief Structure representing a single WAL history record.
      */
     struct record {
         epoch_id_type epoch;  ///< Epoch value.
-        std::array<std::uint8_t, unique_id_size> unique_id; ///< 16-byte unique identifier.
+        uint64_t identity;    ///< identity of the epoch.
         std::time_t timestamp; ///< UNIX timestamp (seconds since epoch).
     };
 
@@ -90,17 +90,17 @@ public:
      * @brief Returns the file name of the WAL history file.
      * @return File name as a string literal.
      */
-    [[nodiscard]] static constexpr const char* file_name() noexcept{ return file_name_; }
+    [[nodiscard]] static const char* file_name() noexcept;
 
 protected:
     // Note: These members are protected (not private) to allow access from test subclasses.
-    static constexpr std::size_t record_size = sizeof(epoch_id_type) + unique_id_size + sizeof(std::int64_t);
+    static constexpr std::size_t record_size = sizeof(epoch_id_type) + identity_size + sizeof(std::int64_t);
     static constexpr const char* file_name_ = "wal_history";
     static constexpr const char* tmp_file_name_ = "wal_history.tmp";
 
     void set_file_operations(std::unique_ptr<file_operations> file_ops) { file_ops_ = std::move(file_ops); }
     void reset_file_operations() { file_ops_ = std::make_unique<real_file_operations>(); }
-    void write_record(FILE* fp, epoch_id_type epoch, const std::array<std::uint8_t, unique_id_size>& unique_id, std::int64_t timestamp);
+    void write_record(FILE* fp, epoch_id_type epoch, uint64_t identity, std::int64_t timestamp);
     [[nodiscard]] static record parse_record(const std::array<std::byte, record_size>& buf);
     [[nodiscard]] std::vector<record> read_all_records(const boost::filesystem::path& file_path) const;
 

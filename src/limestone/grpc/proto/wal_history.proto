@@ -3,24 +3,27 @@ syntax = "proto3";
 package limestone.grpc.proto;
 
 // Represents a single WAL history record.
-message WalHistoryRecord {
+message BranchEpoch {
   uint64 epoch = 1;        // Epoch value
-  bytes unique_id = 2;     // 16-byte unique identifier (binary)
+  uint64 identity = 2;     // identity of the epoch
   int64 timestamp = 3;     // UNIX timestamp (seconds since epoch)
 }
 
 // Request message for listing WAL history records.
-message ListWalHistoryRequest {
+
+message WalHistoryRequest {
   uint32 version = 1;      // Message version for future compatibility. Use value 1 for current implementation.
 }
 
 // Response message containing a list of WAL history records.
-message ListWalHistoryResponse {
-  repeated WalHistoryRecord records = 1;
+
+message WalHistoryResponse {
+  uint64 last_epoch = 1;   // the last epoch number
+  repeated BranchEpoch records = 2;
 }
 
 // Service for retrieving WAL history records.
 service WalHistoryService {
-  // Returns the list of WAL history records.
-  rpc ListWalHistory(ListWalHistoryRequest) returns (ListWalHistoryResponse);
+  // Returns the WAL history records.
+  rpc GetWalHistory(WalHistoryRequest) returns (WalHistoryResponse);
 }

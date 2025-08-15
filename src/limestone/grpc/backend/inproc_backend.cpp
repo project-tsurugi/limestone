@@ -18,13 +18,17 @@
 namespace limestone::grpc::backend {
 
 
+
 inproc_backend::inproc_backend([[maybe_unused]] limestone::api::datastore& ds, const boost::filesystem::path& log_dir)
-	: log_dir_(log_dir), backend_shared_impl_(log_dir)
+	: datastore_(ds), log_dir_(log_dir), backend_shared_impl_(log_dir)
 {
 }
 
-std::vector<wal_history::record> inproc_backend::list_wal_history() {
-	return backend_shared_impl_.list_wal_history();
+limestone::grpc::proto::WalHistoryResponse inproc_backend::get_wal_history_response() {
+	limestone::grpc::proto::WalHistoryResponse resp;
+	resp.set_last_epoch(datastore_.last_epoch());
+	*resp.mutable_records() = backend_shared_impl_.list_wal_history();
+	return resp;
 }
 
 boost::filesystem::path inproc_backend::get_log_dir() const noexcept {

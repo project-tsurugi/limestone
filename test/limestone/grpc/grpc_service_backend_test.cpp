@@ -17,6 +17,7 @@
 #include <gtest/gtest.h>
 #include <boost/filesystem.hpp>
 #include "limestone/grpc/backend/grpc_service_backend.h"
+#include "limestone/grpc/backend/backend_shared_impl.h"
 #include "limestone/api/datastore.h"
 #include "test_root.h"
 #include "limestone/api/configuration.h"

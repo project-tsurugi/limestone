@@ -19,6 +19,7 @@
 #include <boost/filesystem.hpp>
 #include "limestone/api/datastore.h"
 #include "wal_sync/wal_history.h"
+#include "wal_history.grpc.pb.h"
 
 namespace limestone::grpc::backend {
 
@@ -38,8 +39,8 @@ public:
     [[nodiscard]] static std::unique_ptr<grpc_service_backend> create_inproc(limestone::api::datastore& store, const boost::filesystem::path& log_dir);
     [[nodiscard]] static std::unique_ptr<grpc_service_backend> create_standalone(const boost::filesystem::path& log_dir);
     
-    // Returns the list of WAL history records.
-    [[nodiscard]] virtual std::vector<wal_history::record> list_wal_history() = 0;
+    // Returns the WAL history response (records and last_epoch) as defined in .proto
+    [[nodiscard]] virtual limestone::grpc::proto::WalHistoryResponse get_wal_history_response() = 0;
 
     // Returns the log directory path (for debugging purposes)
     [[nodiscard]] virtual boost::filesystem::path get_log_dir() const noexcept = 0;
