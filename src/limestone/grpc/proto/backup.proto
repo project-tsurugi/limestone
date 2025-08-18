@@ -90,8 +90,8 @@ message GetObjectRequest {
 
 // Response for getting object data (chunked, server streaming)
 message GetObjectResponse {
-    // Object ID.
-    string object_id = 1;
+    // Backup object information (logical/physical mapping).
+    BackupObject object = 1;
 
     // Total size of the object (set in the first chunk).
     int64 total_size = 2;
@@ -132,6 +132,9 @@ enum BackupObjectType {
     // Piece of snapshot files.
     SNAPSHOT = 2;
 
+    // BLOB files.
+    BLOB = 3;
+
     // Metadata files.
-    METADATA = 3;
+    METADATA = 4;
 }
