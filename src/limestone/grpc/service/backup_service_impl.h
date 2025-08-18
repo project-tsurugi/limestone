@@ -10,6 +10,11 @@ public:
     BackupServiceImpl();
     ~BackupServiceImpl() override;
 
+    BackupServiceImpl(const BackupServiceImpl&) = delete;
+    BackupServiceImpl& operator=(const BackupServiceImpl&) = delete;
+    BackupServiceImpl(BackupServiceImpl&&) = delete;
+    BackupServiceImpl& operator=(BackupServiceImpl&&) = delete;
+        
     ::grpc::Status BeginBackup(::grpc::ServerContext* context,
                              const limestone::grpc::backup::BeginBackupRequest* request,
                              limestone::grpc::backup::BeginBackupResponse* response) override;
