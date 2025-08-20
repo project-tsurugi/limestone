@@ -20,7 +20,11 @@
 #include "backend_shared_impl.h"
 #include "limestone/api/datastore.h"
 
+
 namespace limestone::grpc::backend {
+
+using BeginBackupRequest = limestone::grpc::proto::BeginBackupRequest;
+using BeginBackupResponse = limestone::grpc::proto::BeginBackupResponse;
 
 class inproc_backend : public grpc_service_backend {
 public:
@@ -33,6 +37,7 @@ public:
 
     [[nodiscard]] boost::filesystem::path get_log_dir() const noexcept override;
     ::grpc::Status get_wal_history_response(limestone::grpc::proto::WalHistoryResponse* response) noexcept override;
+    ::grpc::Status begin_backup(BeginBackupRequest* request, BeginBackupResponse* response) noexcept override;
 private:
     limestone::api::datastore& datastore_;
     boost::filesystem::path log_dir_;

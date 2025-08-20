@@ -20,6 +20,10 @@
 #include "logging_helper.h"
 namespace limestone::grpc::backend {
 
+::grpc::Status standalone_backend::begin_backup(BeginBackupRequest* /*request*/, BeginBackupResponse* /*response*/) noexcept {
+    return {::grpc::StatusCode::UNIMPLEMENTED, "begin_backup not implemented"};
+}
+
 
 
 standalone_backend::standalone_backend(const boost::filesystem::path& log_dir)

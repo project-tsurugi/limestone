@@ -19,6 +19,10 @@
 
 namespace limestone::grpc::backend {
 
+::grpc::Status inproc_backend::begin_backup(BeginBackupRequest* /*request*/, BeginBackupResponse* /*response*/) noexcept {
+	return {::grpc::StatusCode::UNIMPLEMENTED, "begin_backup not implemented"};
+}
+
 
 
 inproc_backend::inproc_backend([[maybe_unused]] limestone::api::datastore& ds, const boost::filesystem::path& log_dir)

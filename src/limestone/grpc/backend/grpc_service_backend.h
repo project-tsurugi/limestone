@@ -20,10 +20,15 @@
 #include "limestone/api/datastore.h"
 #include "wal_sync/wal_history.h"
 #include "wal_history.grpc.pb.h"
+#include "backup.grpc.pb.h"
 
 namespace limestone::grpc::backend {
 
 using limestone::internal::wal_history;
+
+using WalHistoryResponse = limestone::grpc::proto::WalHistoryResponse;
+using BeginBackupRequest = limestone::grpc::proto::BeginBackupRequest;
+using BeginBackupResponse = limestone::grpc::proto::BeginBackupResponse;
 
 // Pure interface for gRPC backends.
 // Implementations: inproc_backend, standalone_backend.
@@ -40,7 +45,9 @@ public:
     [[nodiscard]] static std::unique_ptr<grpc_service_backend> create_standalone(const boost::filesystem::path& log_dir);
     
     // Returns the WAL history response (records and last_epoch) as defined in .proto
-    virtual ::grpc::Status get_wal_history_response(limestone::grpc::proto::WalHistoryResponse* response) noexcept = 0;
+    virtual ::grpc::Status get_wal_history_response(WalHistoryResponse* response) noexcept = 0;
+
+   virtual ::grpc::Status begin_backup(BeginBackupRequest* request, BeginBackupResponse* response) noexcept = 0;
 
     // Returns the log directory path (for debugging purposes)
     [[nodiscard]] virtual boost::filesystem::path get_log_dir() const noexcept = 0;
