@@ -1,6 +1,6 @@
 syntax = "proto3";
 
-package limestone.grpc.backup;
+package limestone.grpc.proto;
 
 // Backup service
 service BackupService {

@@ -26,7 +26,7 @@ inproc_backend::inproc_backend([[maybe_unused]] limestone::api::datastore& ds, c
 {
 }
 
-::grpc::Status inproc_backend::get_wal_history_response(limestone::grpc::proto::WalHistoryResponse* response) noexcept {
+::grpc::Status inproc_backend::get_wal_history_response(WalHistoryResponse* response) noexcept {
 	try {
 		response->set_last_epoch(datastore_.last_epoch());
 		*response->mutable_records() = backend_shared_impl_.list_wal_history();

@@ -4,7 +4,11 @@
 #include <google/protobuf/repeated_field.h>
 #include "wal_sync/wal_history.h"
 #include "wal_history.grpc.pb.h"
+
 namespace limestone::grpc::backend {
+
+using BranchEpoch = limestone::grpc::proto::BranchEpoch;
+
 
 class backend_shared_impl {
 public:
@@ -16,7 +20,7 @@ public:
     backend_shared_impl& operator=(backend_shared_impl&&) = delete;
 
     // Shared logic for listing WAL history (returns proto repeated field)
-    google::protobuf::RepeatedPtrField<limestone::grpc::proto::BranchEpoch> list_wal_history();
+    google::protobuf::RepeatedPtrField<BranchEpoch> list_wal_history();
 
 private:
     boost::filesystem::path log_dir_;

@@ -27,7 +27,10 @@
 using namespace limestone::grpc::backend;
 using namespace limestone::internal;
 
+
 namespace limestone::testing {
+
+using WalHistoryResponse = limestone::grpc::proto::WalHistoryResponse;
 
 class inproc_backend_test : public ::testing::Test {
 protected:
@@ -56,7 +59,7 @@ protected:
 TEST_F(inproc_backend_test, get_wal_history_response_empty) {
     gen_datastore();
     inproc_backend backend(*datastore_, log_dir);
-    limestone::grpc::proto::WalHistoryResponse response;
+    WalHistoryResponse response;
     auto status = backend.get_wal_history_response(&response);
     ASSERT_TRUE(status.ok());
     EXPECT_EQ(response.records_size(), 0);
@@ -72,7 +75,7 @@ TEST_F(inproc_backend_test, get_wal_history_response_with_records) {
     datastore_->switch_epoch(401);
     auto expected = wh.list();
     inproc_backend backend(*datastore_, log_dir);
-    limestone::grpc::proto::WalHistoryResponse response;
+    WalHistoryResponse response;
     auto status = backend.get_wal_history_response(&response);
     ASSERT_TRUE(status.ok());
     ASSERT_EQ(expected.size(), response.records_size());

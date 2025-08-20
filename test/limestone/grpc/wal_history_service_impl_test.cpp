@@ -7,7 +7,12 @@
 #include "limestone/grpc/backend/standalone_backend.h"
 #include "limestone/log_entry.h"
 
+
 namespace limestone::grpc::service::testing {
+
+using WalHistoryRequest = limestone::grpc::proto::WalHistoryRequest;
+using WalHistoryResponse = limestone::grpc::proto::WalHistoryResponse;
+using WalHistoryService = limestone::grpc::proto::WalHistoryService;
 
 
 class wal_history_service_impl_test : public limestone::grpc::testing::grpc_server_test_base {
@@ -44,10 +49,10 @@ protected:
 TEST_F(wal_history_service_impl_test, list_wal_history_empty) {
     start_server();
 
-    limestone::grpc::proto::WalHistoryRequest request;
-    limestone::grpc::proto::WalHistoryResponse response;
+    WalHistoryRequest request;
+    WalHistoryResponse response;
     ::grpc::ClientContext context;
-    auto stub = limestone::grpc::proto::WalHistoryService::NewStub(
+    auto stub = WalHistoryService::NewStub(
         ::grpc::CreateChannel(server_address_, ::grpc::InsecureChannelCredentials()));
     auto status = stub->GetWalHistory(&context, request, &response);
     EXPECT_TRUE(status.ok());
@@ -62,10 +67,10 @@ TEST_F(wal_history_service_impl_test, list_wal_history_single) {
     auto expected = wh.list();
     write_epoch_file(200);
 
-    limestone::grpc::proto::WalHistoryRequest request;
-    limestone::grpc::proto::WalHistoryResponse response;
+    WalHistoryRequest request;
+    WalHistoryResponse response;
     ::grpc::ClientContext context;
-    auto stub = limestone::grpc::proto::WalHistoryService::NewStub(
+    auto stub = WalHistoryService::NewStub(
         ::grpc::CreateChannel(server_address_, ::grpc::InsecureChannelCredentials()));
     auto status = stub->GetWalHistory(&context, request, &response);
     EXPECT_TRUE(status.ok());
@@ -90,10 +95,10 @@ TEST_F(wal_history_service_impl_test, list_wal_history_multiple) {
     auto expected = wh.list();
     write_epoch_file(400);
 
-    limestone::grpc::proto::WalHistoryRequest request;
-    limestone::grpc::proto::WalHistoryResponse response;
+    WalHistoryRequest request;
+    WalHistoryResponse response;
     ::grpc::ClientContext context;
-    auto stub = limestone::grpc::proto::WalHistoryService::NewStub(
+    auto stub = WalHistoryService::NewStub(
         ::grpc::CreateChannel(server_address_, ::grpc::InsecureChannelCredentials()));
     auto status = stub->GetWalHistory(&context, request, &response);
     EXPECT_TRUE(status.ok());
@@ -116,10 +121,10 @@ TEST_F(wal_history_service_impl_test, list_wal_history_with_max_last_epoch) {
     auto expected = wh.list();
     write_epoch_file(std::numeric_limits<uint64_t>::max());
 
-    limestone::grpc::proto::WalHistoryRequest request;
-    limestone::grpc::proto::WalHistoryResponse response;
+    WalHistoryRequest request;
+    WalHistoryResponse response;
     ::grpc::ClientContext context;
-    auto stub = limestone::grpc::proto::WalHistoryService::NewStub(
+    auto stub = WalHistoryService::NewStub(
         ::grpc::CreateChannel(server_address_, ::grpc::InsecureChannelCredentials()));
     auto status = stub->GetWalHistory(&context, request, &response);
     EXPECT_TRUE(status.ok());

@@ -5,7 +5,17 @@
 
 namespace limestone::grpc::service {
 
-class BackupServiceImpl final : public limestone::grpc::backup::BackupService::Service {
+using BackupService = limestone::grpc::proto::BackupService;
+using BeginBackupRequest = limestone::grpc::proto::BeginBackupRequest;
+using BeginBackupResponse = limestone::grpc::proto::BeginBackupResponse;
+using KeepAliveRequest = limestone::grpc::proto::KeepAliveRequest;
+using KeepAliveResponse = limestone::grpc::proto::KeepAliveResponse;
+using EndBackupRequest = limestone::grpc::proto::EndBackupRequest;
+using EndBackupResponse = limestone::grpc::proto::EndBackupResponse;
+using GetObjectRequest = limestone::grpc::proto::GetObjectRequest;
+using GetObjectResponse = limestone::grpc::proto::GetObjectResponse;
+
+class BackupServiceImpl final : public BackupService::Service {
 public:
     BackupServiceImpl();
     ~BackupServiceImpl() override;
@@ -16,20 +26,20 @@ public:
     BackupServiceImpl& operator=(BackupServiceImpl&&) = delete;
         
     ::grpc::Status BeginBackup(::grpc::ServerContext* context,
-                             const limestone::grpc::backup::BeginBackupRequest* request,
-                             limestone::grpc::backup::BeginBackupResponse* response) override;
+                             const BeginBackupRequest* request,
+                             BeginBackupResponse* response) override;
 
     ::grpc::Status KeepAlive(::grpc::ServerContext* context,
-                          const limestone::grpc::backup::KeepAliveRequest* request,
-                          limestone::grpc::backup::KeepAliveResponse* response) override;
+                          const KeepAliveRequest* request,
+                          KeepAliveResponse* response) override;
 
     ::grpc::Status EndBackup(::grpc::ServerContext* context,
-                          const limestone::grpc::backup::EndBackupRequest* request,
-                          limestone::grpc::backup::EndBackupResponse* response) override;
+                          const EndBackupRequest* request,
+                          EndBackupResponse* response) override;
 
     ::grpc::Status GetObject(::grpc::ServerContext* context,
-                          const limestone::grpc::backup::GetObjectRequest* request,
-                          ::grpc::ServerWriter<limestone::grpc::backup::GetObjectResponse>* writer) override;
+                          const GetObjectRequest* request,
+                          ::grpc::ServerWriter<GetObjectResponse>* writer) override;
 };
 
 } // namespace limestone::grpc::service

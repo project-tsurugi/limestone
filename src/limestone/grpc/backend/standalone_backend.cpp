@@ -27,7 +27,7 @@ standalone_backend::standalone_backend(const boost::filesystem::path& log_dir)
 {
 }
 
-::grpc::Status standalone_backend::get_wal_history_response(limestone::grpc::proto::WalHistoryResponse* response) noexcept {
+::grpc::Status standalone_backend::get_wal_history_response(WalHistoryResponse* response) noexcept {
     try {
         limestone::internal::dblog_scan scan(log_dir_);
         auto last_epoch = scan.last_durable_epoch_in_dir();

@@ -4,13 +4,24 @@
 
 namespace limestone::grpc::service {
 
+// Type aliases for proto types used in this translation unit.
+using BeginBackupRequest = limestone::grpc::proto::BeginBackupRequest;
+using BeginBackupResponse = limestone::grpc::proto::BeginBackupResponse;
+using KeepAliveRequest = limestone::grpc::proto::KeepAliveRequest;
+using KeepAliveResponse = limestone::grpc::proto::KeepAliveResponse;
+using EndBackupRequest = limestone::grpc::proto::EndBackupRequest;
+using EndBackupResponse = limestone::grpc::proto::EndBackupResponse;
+using GetObjectRequest = limestone::grpc::proto::GetObjectRequest;
+using GetObjectResponse = limestone::grpc::proto::GetObjectResponse;
+
+
 BackupServiceImpl::BackupServiceImpl() = default;
 BackupServiceImpl::~BackupServiceImpl() = default;
 
 ::grpc::Status BackupServiceImpl::BeginBackup(
     ::grpc::ServerContext* /*context*/,
-    const limestone::grpc::backup::BeginBackupRequest* /*request*/,
-    limestone::grpc::backup::BeginBackupResponse* /*response*/)
+    const BeginBackupRequest* /*request*/,
+    BeginBackupResponse* /*response*/)
 {
     // TODO: 実装
     return {::grpc::StatusCode::UNIMPLEMENTED, "BeginBackup not implemented"};
@@ -18,8 +29,8 @@ BackupServiceImpl::~BackupServiceImpl() = default;
 
 ::grpc::Status BackupServiceImpl::KeepAlive(
     ::grpc::ServerContext* /*context*/,
-    const limestone::grpc::backup::KeepAliveRequest* /*request*/,
-    limestone::grpc::backup::KeepAliveResponse* /*response*/)
+    const KeepAliveRequest* /*request*/,
+    KeepAliveResponse* /*response*/)
 {
     // TODO: 実装
     return {::grpc::StatusCode::UNIMPLEMENTED, "KeepAlive not implemented"};
@@ -27,8 +38,8 @@ BackupServiceImpl::~BackupServiceImpl() = default;
 
 ::grpc::Status BackupServiceImpl::EndBackup(
     ::grpc::ServerContext* /*context*/,
-    const limestone::grpc::backup::EndBackupRequest* /*request*/,
-    limestone::grpc::backup::EndBackupResponse* /*response*/)
+    const EndBackupRequest* /*request*/,
+    EndBackupResponse* /*response*/)
 {
     // TODO: 実装
     return {::grpc::StatusCode::UNIMPLEMENTED, "EndBackup not implemented"};
@@ -36,8 +47,8 @@ BackupServiceImpl::~BackupServiceImpl() = default;
 
 ::grpc::Status BackupServiceImpl::GetObject(
     ::grpc::ServerContext* /*context*/,
-    const limestone::grpc::backup::GetObjectRequest* /*request*/,
-    ::grpc::ServerWriter<limestone::grpc::backup::GetObjectResponse>* /*writer*/)
+    const GetObjectRequest* /*request*/,
+    ::grpc::ServerWriter<GetObjectResponse>* /*writer*/)
 {
     // TODO: 実装
     return {::grpc::StatusCode::UNIMPLEMENTED, "GetObject not implemented"};

@@ -7,6 +7,8 @@
 
 namespace limestone::grpc::client {
 
+using EchoService = limestone::grpc::proto::EchoService;
+
 /**
  * @brief Echo service client for testing and demonstration
  * 
@@ -48,7 +50,7 @@ public:
                         int timeout_ms);
 
 private:
-    std::unique_ptr<limestone::grpc::proto::EchoService::Stub> stub_;
+    std::unique_ptr<EchoService::Stub> stub_;
 };
 
 } // namespace limestone::grpc::client
