@@ -30,7 +30,7 @@ using namespace limestone::internal;
 
 namespace limestone::testing {
 
-using WalHistoryResponse = limestone::grpc::proto::WalHistoryResponse;
+using limestone::grpc::proto::WalHistoryResponse;
 
 class inproc_backend_test : public ::testing::Test {
 protected:

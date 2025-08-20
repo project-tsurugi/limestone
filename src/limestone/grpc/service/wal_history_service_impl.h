@@ -7,9 +7,9 @@
 namespace limestone::grpc::service {
 
 using grpc_service_backend = limestone::grpc::backend::grpc_service_backend;
-using WalHistoryService = limestone::grpc::proto::WalHistoryService;
-using WalHistoryRequest = limestone::grpc::proto::WalHistoryRequest;
-using WalHistoryResponse = limestone::grpc::proto::WalHistoryResponse;
+using limestone::grpc::proto::WalHistoryService;
+using limestone::grpc::proto::WalHistoryRequest;
+using limestone::grpc::proto::WalHistoryResponse;
 
 class wal_history_service_impl final : public WalHistoryService::Service {
 public:

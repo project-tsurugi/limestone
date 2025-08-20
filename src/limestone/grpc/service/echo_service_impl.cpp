@@ -3,8 +3,8 @@
 
 namespace limestone::grpc::service {
 
-using EchoRequest = limestone::grpc::proto::EchoRequest;
-using EchoResponse = limestone::grpc::proto::EchoResponse;
+using limestone::grpc::proto::EchoRequest;
+using limestone::grpc::proto::EchoResponse;
 
 ::grpc::Status echo_service_impl::Echo(::grpc::ServerContext* /* context */,
                                        const EchoRequest* request,

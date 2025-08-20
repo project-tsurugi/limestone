@@ -4,9 +4,9 @@
 
 namespace limestone::grpc::client {
 
-using EchoService = limestone::grpc::proto::EchoService;
-using EchoRequest = limestone::grpc::proto::EchoRequest;
-using EchoResponse = limestone::grpc::proto::EchoResponse;
+using limestone::grpc::proto::EchoService;
+using limestone::grpc::proto::EchoRequest;
+using limestone::grpc::proto::EchoResponse;
 
 echo_client::echo_client(const std::string& server_address) 
     : stub_(EchoService::NewStub(

@@ -7,7 +7,7 @@
 
 namespace limestone::grpc::backend {
 
-using BranchEpoch = limestone::grpc::proto::BranchEpoch;
+using limestone::grpc::proto::BranchEpoch;
 
 
 class backend_shared_impl {

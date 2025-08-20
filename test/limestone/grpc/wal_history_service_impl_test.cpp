@@ -10,9 +10,9 @@
 
 namespace limestone::grpc::service::testing {
 
-using WalHistoryRequest = limestone::grpc::proto::WalHistoryRequest;
-using WalHistoryResponse = limestone::grpc::proto::WalHistoryResponse;
-using WalHistoryService = limestone::grpc::proto::WalHistoryService;
+using limestone::grpc::proto::WalHistoryRequest;
+using limestone::grpc::proto::WalHistoryResponse;
+using limestone::grpc::proto::WalHistoryService;
 
 
 class wal_history_service_impl_test : public limestone::grpc::testing::grpc_server_test_base {

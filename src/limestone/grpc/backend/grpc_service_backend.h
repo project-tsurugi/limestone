@@ -26,9 +26,9 @@ namespace limestone::grpc::backend {
 
 using limestone::internal::wal_history;
 
-using WalHistoryResponse = limestone::grpc::proto::WalHistoryResponse;
-using BeginBackupRequest = limestone::grpc::proto::BeginBackupRequest;
-using BeginBackupResponse = limestone::grpc::proto::BeginBackupResponse;
+using limestone::grpc::proto::WalHistoryResponse;
+using limestone::grpc::proto::BeginBackupRequest;
+using limestone::grpc::proto::BeginBackupResponse;
 
 // Pure interface for gRPC backends.
 // Implementations: inproc_backend, standalone_backend.

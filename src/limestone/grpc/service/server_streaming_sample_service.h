@@ -9,12 +9,12 @@
 
 namespace limestone::grpc::service {
 
-using FileSizeService = limestone::grpc::proto::FileSizeService;
-using FileChunk = limestone::grpc::proto::FileChunk;
-using FileSizeResponse = limestone::grpc::proto::FileSizeResponse;
-using RandomBytesService = limestone::grpc::proto::RandomBytesService;
-using RandomBytesRequest = limestone::grpc::proto::RandomBytesRequest;
-using RandomBytesChunk = limestone::grpc::proto::RandomBytesChunk;
+using limestone::grpc::proto::FileSizeService;
+using limestone::grpc::proto::FileChunk;
+using limestone::grpc::proto::FileSizeResponse;
+using limestone::grpc::proto::RandomBytesService;
+using limestone::grpc::proto::RandomBytesRequest;
+using limestone::grpc::proto::RandomBytesChunk;
 
 class FileSizeServiceImpl final : public FileSizeService::Service {
 public:

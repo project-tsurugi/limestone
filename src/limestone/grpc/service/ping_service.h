@@ -6,9 +6,9 @@
 namespace limestone::grpc::service {
 
 
-using PingService = limestone::grpc::proto::PingService;
-using PingRequest = limestone::grpc::proto::PingRequest;
-using PingResponse = limestone::grpc::proto::PingResponse;
+using limestone::grpc::proto::PingService;
+using limestone::grpc::proto::PingRequest;
+using limestone::grpc::proto::PingResponse;
 
 class ping_service final : public PingService::Service {
 public:

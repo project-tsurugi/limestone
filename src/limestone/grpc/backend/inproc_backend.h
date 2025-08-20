@@ -23,8 +23,8 @@
 
 namespace limestone::grpc::backend {
 
-using BeginBackupRequest = limestone::grpc::proto::BeginBackupRequest;
-using BeginBackupResponse = limestone::grpc::proto::BeginBackupResponse;
+using limestone::grpc::proto::BeginBackupRequest;
+using limestone::grpc::proto::BeginBackupResponse;
 
 class inproc_backend : public grpc_service_backend {
 public:

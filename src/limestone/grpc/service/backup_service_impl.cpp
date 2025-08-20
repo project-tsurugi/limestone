@@ -5,14 +5,14 @@
 namespace limestone::grpc::service {
 
 // Type aliases for proto types used in this translation unit.
-using BeginBackupRequest = limestone::grpc::proto::BeginBackupRequest;
-using BeginBackupResponse = limestone::grpc::proto::BeginBackupResponse;
-using KeepAliveRequest = limestone::grpc::proto::KeepAliveRequest;
-using KeepAliveResponse = limestone::grpc::proto::KeepAliveResponse;
-using EndBackupRequest = limestone::grpc::proto::EndBackupRequest;
-using EndBackupResponse = limestone::grpc::proto::EndBackupResponse;
-using GetObjectRequest = limestone::grpc::proto::GetObjectRequest;
-using GetObjectResponse = limestone::grpc::proto::GetObjectResponse;
+using limestone::grpc::proto::BeginBackupRequest;
+using limestone::grpc::proto::BeginBackupResponse;
+using limestone::grpc::proto::KeepAliveRequest;
+using limestone::grpc::proto::KeepAliveResponse;
+using limestone::grpc::proto::EndBackupRequest;
+using limestone::grpc::proto::EndBackupResponse;
+using limestone::grpc::proto::GetObjectRequest;
+using limestone::grpc::proto::GetObjectResponse;
 
 
 BackupServiceImpl::BackupServiceImpl() = default;

@@ -5,9 +5,9 @@
 
 namespace limestone::grpc::service {
 
-using EchoService = limestone::grpc::proto::EchoService;
-using EchoRequest = limestone::grpc::proto::EchoRequest;
-using EchoResponse = limestone::grpc::proto::EchoResponse;
+using limestone::grpc::proto::EchoService;
+using limestone::grpc::proto::EchoRequest;
+using limestone::grpc::proto::EchoResponse;
 
 /**
  * @brief Echo service implementation for testing and demonstration

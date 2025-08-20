@@ -7,12 +7,12 @@
 
 namespace limestone::grpc::service {
 
-using steady_clock = std::chrono::steady_clock;
-using milliseconds = std::chrono::milliseconds;
-using FileChunk = limestone::grpc::proto::FileChunk;
-using FileSizeResponse = limestone::grpc::proto::FileSizeResponse;
-using RandomBytesRequest = limestone::grpc::proto::RandomBytesRequest;
-using RandomBytesChunk = limestone::grpc::proto::RandomBytesChunk;
+using std::chrono::steady_clock;
+using std::chrono::milliseconds;
+using limestone::grpc::proto::FileChunk;
+using limestone::grpc::proto::FileSizeResponse;
+using limestone::grpc::proto::RandomBytesRequest;
+using limestone::grpc::proto::RandomBytesChunk;
 
 ::grpc::Status FileSizeServiceImpl::GetFileSize(
     ::grpc::ServerContext* /*context*/,

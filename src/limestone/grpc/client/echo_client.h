@@ -7,7 +7,7 @@
 
 namespace limestone::grpc::client {
 
-using EchoService = limestone::grpc::proto::EchoService;
+using limestone::grpc::proto::EchoService;
 
 /**
  * @brief Echo service client for testing and demonstration
