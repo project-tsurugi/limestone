@@ -20,11 +20,7 @@
 namespace limestone::grpc::backend {
 
 using limestone::grpc::service::list_wal_history_message_version;
-
-::grpc::Status inproc_backend::begin_backup(BeginBackupRequest* /*request*/, BeginBackupResponse* /*response*/) noexcept {
-	return {::grpc::StatusCode::UNIMPLEMENTED, "begin_backup not implemented"};
-}
-
+using limestone::grpc::service::begin_backup_message_version;
 
 
 inproc_backend::inproc_backend([[maybe_unused]] limestone::api::datastore& ds, const boost::filesystem::path& log_dir)
@@ -47,6 +43,24 @@ inproc_backend::inproc_backend([[maybe_unused]] limestone::api::datastore& ds, c
 		return {::grpc::StatusCode::INTERNAL, msg};
 	}
 }
+
+::grpc::Status inproc_backend::begin_backup(BeginBackupRequest* request, BeginBackupResponse* /*response*/) noexcept {
+	if (request->version() != begin_backup_message_version) {
+		return {::grpc::StatusCode::INVALID_ARGUMENT, std::string("unsupported begin_backup request version: ") + std::to_string(request->version())};
+	}
+	uint32_t begin_epoch = request->begin_epoch();
+	uint32_t end_epoch = request->end_epoch();
+	if (begin_epoch != 0 || end_epoch != 0) {
+		return {::grpc::StatusCode::INVALID_ARGUMENT, "begin_backup supports only full backup mode, where both begin_epoch and end_epoch must be 0"};
+	}
+
+
+	return {::grpc::StatusCode::UNIMPLEMENTED, "begin_backup not implemented"};
+	
+}
+
+
+
 
 boost::filesystem::path inproc_backend::get_log_dir() const noexcept {
 	return log_dir_;

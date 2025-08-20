@@ -30,10 +30,12 @@ using namespace limestone::internal;
 
 namespace limestone::testing {
 
+using limestone::grpc::proto::BeginBackupRequest;
+using limestone::grpc::proto::BeginBackupResponse;
 using limestone::grpc::proto::WalHistoryRequest;
 using limestone::grpc::proto::WalHistoryResponse;
+using limestone::grpc::service::begin_backup_message_version;
 using limestone::grpc::service::list_wal_history_message_version;
-
 class standalone_backend_test : public ::testing::Test {
 protected:
     const boost::filesystem::path temp_dir = "/tmp/standalone_backend_test_dir";
@@ -115,5 +117,30 @@ TEST_F(standalone_backend_test, get_wal_history_response_version_boundary) {
     EXPECT_FALSE(status.ok());
     EXPECT_EQ(status.error_code(), ::grpc::StatusCode::INVALID_ARGUMENT);
 }
+
+TEST_F(standalone_backend_test, begin_backup_version_boundary) {
+    standalone_backend backend(temp_dir);
+    BeginBackupRequest request;
+    BeginBackupResponse response;
+
+    // version=0 (unsupported)
+    request.set_version(0);
+    auto status = backend.begin_backup(&request, &response);
+    EXPECT_FALSE(status.ok());
+    EXPECT_EQ(status.error_code(), ::grpc::StatusCode::INVALID_ARGUMENT);
+
+    // version=1 (supported, but not implemented)
+    request.set_version(begin_backup_message_version);
+    status = backend.begin_backup(&request, &response);
+    EXPECT_FALSE(status.ok());
+    EXPECT_EQ(status.error_code(), ::grpc::StatusCode::UNIMPLEMENTED);
+
+    // version=2 (unsupported)
+    request.set_version(2);
+    status = backend.begin_backup(&request, &response);
+    EXPECT_FALSE(status.ok());
+    EXPECT_EQ(status.error_code(), ::grpc::StatusCode::INVALID_ARGUMENT);
+}
+
 
 } // namespace limestone::testing

@@ -1,3 +1,4 @@
+
 /*
  * Copyright 2022-2025 Project Tsurugi.
  *
@@ -29,11 +30,15 @@
 
 
 namespace limestone::testing {
+
 using limestone::grpc::backend::inproc_backend;
-using limestone::grpc::proto::WalHistoryResponse;
+using limestone::grpc::proto::BeginBackupRequest;
+using limestone::grpc::proto::BeginBackupResponse;
 using limestone::grpc::proto::WalHistoryRequest;
-using limestone::internal::wal_history;
+using limestone::grpc::proto::WalHistoryResponse;
+using limestone::grpc::service::begin_backup_message_version;
 using limestone::grpc::service::list_wal_history_message_version;
+using limestone::internal::wal_history;
 
 class inproc_backend_test : public ::testing::Test {
 protected:
@@ -57,7 +62,6 @@ protected:
         boost::filesystem::remove_all(log_dir);
     }
 };
-
 
 TEST_F(inproc_backend_test, get_wal_history_response_empty) {
     gen_datastore();
@@ -123,5 +127,29 @@ TEST_F(inproc_backend_test, get_wal_history_response_version_boundary) {
     EXPECT_EQ(status.error_code(), ::grpc::StatusCode::INVALID_ARGUMENT);
 }
 
+TEST_F(inproc_backend_test, begin_backup_version_boundary) {
+    gen_datastore();
+    inproc_backend backend(*datastore_, log_dir);
+    BeginBackupRequest request;
+    BeginBackupResponse response;
+
+    // version=0 (unsupported)
+    request.set_version(0);
+    auto status = backend.begin_backup(&request, &response);
+    EXPECT_FALSE(status.ok());
+    EXPECT_EQ(status.error_code(), ::grpc::StatusCode::INVALID_ARGUMENT);
+
+    // version=1 (supported, but not implemented)
+    request.set_version(begin_backup_message_version);
+    status = backend.begin_backup(&request, &response);
+    EXPECT_FALSE(status.ok());
+    EXPECT_EQ(status.error_code(), ::grpc::StatusCode::UNIMPLEMENTED);
+
+    // version=2 (unsupported)
+    request.set_version(2);
+    status = backend.begin_backup(&request, &response);
+    EXPECT_FALSE(status.ok());
+    EXPECT_EQ(status.error_code(), ::grpc::StatusCode::INVALID_ARGUMENT);
+}
 
 } // namespace limestone::testing

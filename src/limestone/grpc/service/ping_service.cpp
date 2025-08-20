@@ -5,7 +5,7 @@ namespace limestone::grpc::service {
 using limestone::grpc::proto::PingRequest;
 using limestone::grpc::proto::PingResponse;
 
-::grpc::Status ping_service::Ping(::grpc::ServerContext* /* context */, const limestone::grpc::proto::PingRequest* request,
+::grpc::Status ping_service::Ping(::grpc::ServerContext* /* context */, const PingRequest* request,
                                   PingResponse* response) {
     (void)request;
     (void)response;

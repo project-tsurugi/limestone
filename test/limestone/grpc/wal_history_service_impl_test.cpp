@@ -1,18 +1,21 @@
-#include <gtest/gtest.h>
-#include <grpcpp/grpcpp.h>
 #include "limestone/grpc/service/wal_history_service_impl.h"
-#include "wal_history.grpc.pb.h"
+
+#include <grpcpp/grpcpp.h>
+#include <gtest/gtest.h>
+
 #include "grpc_server_test_base.h"
 #include "limestone/grpc/backend/grpc_service_backend.h"
 #include "limestone/grpc/backend/standalone_backend.h"
+#include "limestone/grpc/service/message_versions.h"
 #include "limestone/log_entry.h"
-
+#include "wal_history.grpc.pb.h"
 
 namespace limestone::grpc::service::testing {
 
 using limestone::grpc::proto::WalHistoryRequest;
 using limestone::grpc::proto::WalHistoryResponse;
 using limestone::grpc::proto::WalHistoryService;
+using limestone::grpc::service::wal_history_service_impl;
 
 
 class wal_history_service_impl_test : public limestone::grpc::testing::grpc_server_test_base {
@@ -50,6 +53,7 @@ TEST_F(wal_history_service_impl_test, list_wal_history_empty) {
     start_server();
 
     WalHistoryRequest request;
+    request.set_version(list_wal_history_message_version);
     WalHistoryResponse response;
     ::grpc::ClientContext context;
     auto stub = WalHistoryService::NewStub(
@@ -68,6 +72,7 @@ TEST_F(wal_history_service_impl_test, list_wal_history_single) {
     write_epoch_file(200);
 
     WalHistoryRequest request;
+    request.set_version(list_wal_history_message_version);
     WalHistoryResponse response;
     ::grpc::ClientContext context;
     auto stub = WalHistoryService::NewStub(
@@ -96,6 +101,7 @@ TEST_F(wal_history_service_impl_test, list_wal_history_multiple) {
     write_epoch_file(400);
 
     WalHistoryRequest request;
+    request.set_version(list_wal_history_message_version);
     WalHistoryResponse response;
     ::grpc::ClientContext context;
     auto stub = WalHistoryService::NewStub(
@@ -122,6 +128,7 @@ TEST_F(wal_history_service_impl_test, list_wal_history_with_max_last_epoch) {
     write_epoch_file(std::numeric_limits<uint64_t>::max());
 
     WalHistoryRequest request;
+    request.set_version(list_wal_history_message_version);
     WalHistoryResponse response;
     ::grpc::ClientContext context;
     auto stub = WalHistoryService::NewStub(
