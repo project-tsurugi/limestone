@@ -16,8 +16,10 @@
 #include "inproc_backend.h"
 #include "limestone/logging.h"
 #include "logging_helper.h"
-
+#include "grpc/service/message_versions.h"
 namespace limestone::grpc::backend {
+
+using limestone::grpc::service::list_wal_history_message_version;
 
 ::grpc::Status inproc_backend::begin_backup(BeginBackupRequest* /*request*/, BeginBackupResponse* /*response*/) noexcept {
 	return {::grpc::StatusCode::UNIMPLEMENTED, "begin_backup not implemented"};
@@ -30,8 +32,12 @@ inproc_backend::inproc_backend([[maybe_unused]] limestone::api::datastore& ds, c
 {
 }
 
-::grpc::Status inproc_backend::get_wal_history_response(WalHistoryResponse* response) noexcept {
+::grpc::Status inproc_backend::get_wal_history_response(const WalHistoryRequest* request, WalHistoryResponse* response) noexcept {
 	try {
+        if (request->version() != list_wal_history_message_version) {
+            return {::grpc::StatusCode::INVALID_ARGUMENT, std::string("unsupported wal history request version: ") + std::to_string(request->version())};
+        }
+
 		response->set_last_epoch(datastore_.last_epoch());
 		*response->mutable_records() = backend_shared_impl_.list_wal_history();
 		return {::grpc::Status::OK};

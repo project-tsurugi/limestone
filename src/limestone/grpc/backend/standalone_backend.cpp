@@ -18,7 +18,11 @@
 #include "limestone_exception_helper.h"
 #include "limestone/logging.h"
 #include "logging_helper.h"
+#include "grpc/service/message_versions.h"
 namespace limestone::grpc::backend {
+
+using limestone::grpc::service::list_wal_history_message_version;
+
 
 ::grpc::Status standalone_backend::begin_backup(BeginBackupRequest* /*request*/, BeginBackupResponse* /*response*/) noexcept {
     return {::grpc::StatusCode::UNIMPLEMENTED, "begin_backup not implemented"};
@@ -31,8 +35,12 @@ standalone_backend::standalone_backend(const boost::filesystem::path& log_dir)
 {
 }
 
-::grpc::Status standalone_backend::get_wal_history_response(WalHistoryResponse* response) noexcept {
+::grpc::Status standalone_backend::get_wal_history_response(const WalHistoryRequest* request, WalHistoryResponse* response) noexcept {
     try {
+        if (request->version() != list_wal_history_message_version) {
+            return {::grpc::StatusCode::INVALID_ARGUMENT, std::string("unsupported wal history request version: ") + std::to_string(request->version())};
+        }
+
         limestone::internal::dblog_scan scan(log_dir_);
         auto last_epoch = scan.last_durable_epoch_in_dir();
         response->set_last_epoch(last_epoch);

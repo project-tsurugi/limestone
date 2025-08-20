@@ -14,23 +14,26 @@
  * limitations under the License.
  */
 
-
 #include "limestone/grpc/backend/inproc_backend.h"
-#include "wal_sync/wal_history.h"
-#include "limestone/api/datastore.h"
-#include "limestone/api/configuration.h"
-#include "test_root.h"
+
 #include <gtest/gtest.h>
+
 #include <boost/filesystem.hpp>
 #include <vector>
 
-using namespace limestone::grpc::backend;
-using namespace limestone::internal;
+#include "limestone/api/configuration.h"
+#include "limestone/api/datastore.h"
+#include "limestone/grpc/service/message_versions.h"
+#include "test_root.h"
+#include "wal_sync/wal_history.h"
 
 
 namespace limestone::testing {
-
+using limestone::grpc::backend::inproc_backend;
 using limestone::grpc::proto::WalHistoryResponse;
+using limestone::grpc::proto::WalHistoryRequest;
+using limestone::internal::wal_history;
+using limestone::grpc::service::list_wal_history_message_version;
 
 class inproc_backend_test : public ::testing::Test {
 protected:
@@ -59,8 +62,10 @@ protected:
 TEST_F(inproc_backend_test, get_wal_history_response_empty) {
     gen_datastore();
     inproc_backend backend(*datastore_, log_dir);
+    WalHistoryRequest request;
+    request.set_version(list_wal_history_message_version);
     WalHistoryResponse response;
-    auto status = backend.get_wal_history_response(&response);
+    auto status = backend.get_wal_history_response(&request, &response);
     ASSERT_TRUE(status.ok());
     EXPECT_EQ(response.records_size(), 0);
 }
@@ -75,8 +80,10 @@ TEST_F(inproc_backend_test, get_wal_history_response_with_records) {
     datastore_->switch_epoch(401);
     auto expected = wh.list();
     inproc_backend backend(*datastore_, log_dir);
+    WalHistoryRequest request;  
+    request.set_version(list_wal_history_message_version);
     WalHistoryResponse response;
-    auto status = backend.get_wal_history_response(&response);
+    auto status = backend.get_wal_history_response(&request, &response);
     ASSERT_TRUE(status.ok());
     ASSERT_EQ(expected.size(), response.records_size());
     for (int i = 0; i < response.records_size(); ++i) {
@@ -94,5 +101,27 @@ TEST_F(inproc_backend_test, get_log_dir_returns_constructor_value) {
     inproc_backend backend(*datastore_, log_dir);
     EXPECT_EQ(backend.get_log_dir(), log_dir);
 }
+
+TEST_F(inproc_backend_test, get_wal_history_response_version_boundary) {
+    gen_datastore();
+    inproc_backend backend(*datastore_, log_dir);
+    WalHistoryRequest request;
+    WalHistoryResponse response;
+
+    request.set_version(0);
+    auto status = backend.get_wal_history_response(&request, &response);
+    EXPECT_FALSE(status.ok());
+    EXPECT_EQ(status.error_code(), ::grpc::StatusCode::INVALID_ARGUMENT);
+
+    request.set_version(list_wal_history_message_version);
+    status = backend.get_wal_history_response(&request, &response);
+    EXPECT_TRUE(status.ok());
+
+    request.set_version(2);
+    status = backend.get_wal_history_response(&request, &response);
+    EXPECT_FALSE(status.ok());
+    EXPECT_EQ(status.error_code(), ::grpc::StatusCode::INVALID_ARGUMENT);
+}
+
 
 } // namespace limestone::testing

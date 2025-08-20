@@ -36,7 +36,7 @@ public:
     inproc_backend& operator=(inproc_backend&&) = delete;
 
     [[nodiscard]] boost::filesystem::path get_log_dir() const noexcept override;
-    ::grpc::Status get_wal_history_response(limestone::grpc::proto::WalHistoryResponse* response) noexcept override;
+    ::grpc::Status get_wal_history_response(const limestone::grpc::proto::WalHistoryRequest* request, limestone::grpc::proto::WalHistoryResponse* response) noexcept override;
     ::grpc::Status begin_backup(BeginBackupRequest* request, BeginBackupResponse* response) noexcept override;
 private:
     limestone::api::datastore& datastore_;

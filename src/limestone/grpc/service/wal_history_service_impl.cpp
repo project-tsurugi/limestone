@@ -12,10 +12,10 @@ wal_history_service_impl::wal_history_service_impl(grpc_service_backend& backend
 
 ::grpc::Status wal_history_service_impl::GetWalHistory(
     ::grpc::ServerContext* /* context */,
-    const WalHistoryRequest* /* request */,
+    const WalHistoryRequest* request,
     WalHistoryResponse* response) {
     VLOG_LP(log_info) << "GetWalHistory called";
-    return backend_.get_wal_history_response(response);
+    return backend_.get_wal_history_response(request, response);
 }
 
 } // namespace limestone::grpc::service

@@ -23,6 +23,8 @@ namespace limestone::grpc::backend {
 
 using limestone::grpc::proto::BeginBackupRequest;
 using limestone::grpc::proto::BeginBackupResponse;
+using limestone::grpc::proto::WalHistoryRequest;
+using limestone::grpc::proto::WalHistoryResponse;
 
 class standalone_backend : public grpc_service_backend {
 public:
@@ -35,7 +37,7 @@ public:
     standalone_backend& operator=(standalone_backend&&) = delete;
 
     [[nodiscard]] boost::filesystem::path get_log_dir() const noexcept override;
-    ::grpc::Status get_wal_history_response(limestone::grpc::proto::WalHistoryResponse* response) noexcept override;
+    ::grpc::Status get_wal_history_response(const WalHistoryRequest* request, WalHistoryResponse* response) noexcept override;
     ::grpc::Status begin_backup(BeginBackupRequest* request, BeginBackupResponse* response) noexcept override;
 private:
     boost::filesystem::path log_dir_;

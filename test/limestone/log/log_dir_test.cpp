@@ -15,7 +15,7 @@
 using namespace std::literals;
 using dblog_scan = limestone::internal::dblog_scan;
 using compaction_catalog = limestone::internal::compaction_catalog;
-using wal_history = limestone::internal::wal_history;
+using limestone::internal::wal_history;
 namespace limestone::testing {
 
 

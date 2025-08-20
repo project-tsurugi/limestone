@@ -26,6 +26,7 @@ namespace limestone::grpc::backend {
 
 using limestone::internal::wal_history;
 
+using limestone::grpc::proto::WalHistoryRequest;
 using limestone::grpc::proto::WalHistoryResponse;
 using limestone::grpc::proto::BeginBackupRequest;
 using limestone::grpc::proto::BeginBackupResponse;
@@ -45,7 +46,7 @@ public:
     [[nodiscard]] static std::unique_ptr<grpc_service_backend> create_standalone(const boost::filesystem::path& log_dir);
     
     // Returns the WAL history response (records and last_epoch) as defined in .proto
-    virtual ::grpc::Status get_wal_history_response(WalHistoryResponse* response) noexcept = 0;
+    virtual ::grpc::Status get_wal_history_response(const WalHistoryRequest* request, WalHistoryResponse* response) noexcept = 0;
 
    virtual ::grpc::Status begin_backup(BeginBackupRequest* request, BeginBackupResponse* response) noexcept = 0;
 
