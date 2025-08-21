@@ -47,13 +47,15 @@ extern const std::string_view data_normal;
 extern const std::string_view data_nondurable;
 
 class compaction_test : public ::testing::Test {
+
 public:
-    static constexpr const char* location = "/tmp/compaction_test";
-    const boost::filesystem::path manifest_path = boost::filesystem::path(location) / std::string(limestone::internal::manifest::file_name);
-    const boost::filesystem::path compaction_catalog_path = boost::filesystem::path(location) / "compaction_catalog";
+    virtual const char* get_location() const { return "/tmp/compaction_test"; }
+    boost::filesystem::path manifest_path() const { return boost::filesystem::path(get_location()) / std::string(limestone::internal::manifest::file_name); }
+    boost::filesystem::path compaction_catalog_path() const { return boost::filesystem::path(get_location()) / "compaction_catalog"; }
     const std::string compacted_filename = compaction_catalog::get_compacted_filename();
 
     void SetUp() {
+        const char* location = get_location();
         if (boost::filesystem::exists(location)) {
             boost::filesystem::permissions(location, boost::filesystem::owner_all);
         }
@@ -64,6 +66,7 @@ public:
     }
 
     void gen_datastore() {
+        const char* location = get_location();
         std::vector<boost::filesystem::path> data_locations{};
         data_locations.emplace_back(location);
         boost::filesystem::path metadata_location{location};
@@ -79,6 +82,7 @@ public:
     }
 
     void TearDown() {
+        const char* location = get_location();
         datastore_ = nullptr;
         if (boost::filesystem::exists(location)) {
             boost::filesystem::permissions(location, boost::filesystem::owner_all);
@@ -350,9 +354,9 @@ protected:
     }
 
     void create_manifest_file(int persistent_format_version = 1) {
-        create_file(manifest_path, data_manifest(persistent_format_version));
+        create_file(manifest_path(), data_manifest(persistent_format_version));
         if (persistent_format_version > 1) {
-            compaction_catalog catalog{location};
+            compaction_catalog catalog{get_location()};
             catalog.update_catalog_file(0, 0, {}, {});
         }
     }

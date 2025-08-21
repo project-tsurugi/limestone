@@ -9,7 +9,7 @@
 #include "blob_file_garbage_collector.h"
 #include "limestone/logging.h"
 #include "blob_file_resolver.h"
-
+#include "blob_test_helpers.h"
 namespace limestone::testing {
 
 using namespace limestone::internal;
@@ -123,16 +123,8 @@ protected:
     std::unique_ptr<testable_blob_file_garbage_collector> gc_;
 };
 
-// Helper function: Create a file for the specified blob_id in the appropriate subdirectory.
-// The file content can be empty.
-void create_blob_file(const blob_file_resolver &resolver, blob_id_type id) {
-    // The file path should be obtained with resolver.resolve_path(id).
-    boost::filesystem::path file_path = resolver.resolve_path(id);
-    // Assume the subdirectory exists for file creation (created in SetUp)
-    std::ofstream ofs(file_path.string());
-    ofs << "dummy data";
-    ofs.close();
-}
+
+
 
 // Test case: Files with blob_id less than or equal to the target are scanned
 TEST_F(blob_file_garbage_collector_test, scan_collects_only_files_with_blob_id_leq_max) {
