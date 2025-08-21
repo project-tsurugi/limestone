@@ -46,7 +46,7 @@ inproc_backend::inproc_backend([[maybe_unused]] limestone::api::datastore& ds, c
 	}
 }
 
-::grpc::Status inproc_backend::begin_backup(BeginBackupRequest* request, BeginBackupResponse* response) noexcept {
+::grpc::Status inproc_backend::begin_backup(const BeginBackupRequest* request, BeginBackupResponse* response) noexcept {
 	if (request->version() != begin_backup_message_version) {
 		return {::grpc::StatusCode::INVALID_ARGUMENT, std::string("unsupported begin_backup request version: ") + std::to_string(request->version())};
 	}

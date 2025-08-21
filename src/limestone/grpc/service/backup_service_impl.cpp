@@ -1,6 +1,7 @@
-// backup_service_impl.cpp
-// gRPC BackupService スケルトン実装（本体）
 #include "backup_service_impl.h"
+#include <glog/logging.h>
+#include "limestone/logging.h"
+#include "logging_helper.h"
 
 namespace limestone::grpc::service {
 
@@ -15,16 +16,16 @@ using limestone::grpc::proto::GetObjectRequest;
 using limestone::grpc::proto::GetObjectResponse;
 
 
-BackupServiceImpl::BackupServiceImpl() = default;
+BackupServiceImpl::BackupServiceImpl(grpc_service_backend& backend) : backend_(backend) {}
 BackupServiceImpl::~BackupServiceImpl() = default;
 
 ::grpc::Status BackupServiceImpl::BeginBackup(
     ::grpc::ServerContext* /*context*/,
-    const BeginBackupRequest* /*request*/,
-    BeginBackupResponse* /*response*/)
+    const BeginBackupRequest* request,
+    BeginBackupResponse* response)
 {
-    // TODO: 実装
-    return {::grpc::StatusCode::UNIMPLEMENTED, "BeginBackup not implemented"};
+    VLOG_LP(log_info) << "BeginBackup called";
+    return backend_.begin_backup(request, response);
 }
 
 ::grpc::Status BackupServiceImpl::KeepAlive(

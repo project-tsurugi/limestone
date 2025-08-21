@@ -56,7 +56,7 @@ standalone_backend::standalone_backend(const boost::filesystem::path& log_dir)
 }
 
 
-::grpc::Status standalone_backend::begin_backup(BeginBackupRequest* request, BeginBackupResponse* /*response*/) noexcept {
+::grpc::Status standalone_backend::begin_backup(const BeginBackupRequest* request, BeginBackupResponse* /*response*/) noexcept {
     if (request->version() != limestone::grpc::service::begin_backup_message_version) {
         return {::grpc::StatusCode::INVALID_ARGUMENT, "unsupported begin backup request version"};
     }

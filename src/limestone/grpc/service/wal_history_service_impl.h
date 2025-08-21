@@ -6,7 +6,7 @@
 
 namespace limestone::grpc::service {
 
-using grpc_service_backend = limestone::grpc::backend::grpc_service_backend;
+using limestone::grpc::backend::grpc_service_backend;
 using limestone::grpc::proto::WalHistoryService;
 using limestone::grpc::proto::WalHistoryRequest;
 using limestone::grpc::proto::WalHistoryResponse;

@@ -48,7 +48,7 @@ public:
     // Returns the WAL history response (records and last_epoch) as defined in .proto
     virtual ::grpc::Status get_wal_history_response(const WalHistoryRequest* request, WalHistoryResponse* response) noexcept = 0;
 
-   virtual ::grpc::Status begin_backup(BeginBackupRequest* request, BeginBackupResponse* response) noexcept = 0;
+   virtual ::grpc::Status begin_backup(const BeginBackupRequest* request, BeginBackupResponse* response) noexcept = 0;
 
     // Returns the log directory path (for debugging purposes)
     [[nodiscard]] virtual boost::filesystem::path get_log_dir() const noexcept = 0;

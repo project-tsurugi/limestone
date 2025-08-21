@@ -38,7 +38,7 @@ public:
 
     [[nodiscard]] boost::filesystem::path get_log_dir() const noexcept override;
     ::grpc::Status get_wal_history_response(const WalHistoryRequest* request, WalHistoryResponse* response) noexcept override;
-    ::grpc::Status begin_backup(BeginBackupRequest* request, BeginBackupResponse* response) noexcept override;
+    ::grpc::Status begin_backup(const BeginBackupRequest* request, BeginBackupResponse* response) noexcept override;
 private:
     boost::filesystem::path log_dir_;
     backend_shared_impl backend_shared_impl_;

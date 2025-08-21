@@ -39,7 +39,7 @@ public:
 
     // gRPC handlers
     ::grpc::Status get_wal_history_response(const limestone::grpc::proto::WalHistoryRequest* request, limestone::grpc::proto::WalHistoryResponse* response) noexcept override;
-    ::grpc::Status begin_backup(BeginBackupRequest* request, BeginBackupResponse* response) noexcept override;
+    ::grpc::Status begin_backup(const BeginBackupRequest* request, BeginBackupResponse* response) noexcept override;
 
 private:
     limestone::api::datastore& datastore_;

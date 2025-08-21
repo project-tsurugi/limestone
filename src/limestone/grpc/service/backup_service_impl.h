@@ -1,23 +1,27 @@
 #pragma once
-#include <memory>
 #include <grpcpp/grpcpp.h>
+
+#include <memory>
+
 #include "backup.grpc.pb.h"
+#include "grpc/backend/grpc_service_backend.h"
 
 namespace limestone::grpc::service {
 
+using limestone::grpc::backend::grpc_service_backend;
 using limestone::grpc::proto::BackupService;
 using limestone::grpc::proto::BeginBackupRequest;
 using limestone::grpc::proto::BeginBackupResponse;
-using limestone::grpc::proto::KeepAliveRequest;
-using limestone::grpc::proto::KeepAliveResponse;
 using limestone::grpc::proto::EndBackupRequest;
 using limestone::grpc::proto::EndBackupResponse;
 using limestone::grpc::proto::GetObjectRequest;
 using limestone::grpc::proto::GetObjectResponse;
+using limestone::grpc::proto::KeepAliveRequest;
+using limestone::grpc::proto::KeepAliveResponse;
 
 class BackupServiceImpl final : public BackupService::Service {
 public:
-    BackupServiceImpl();
+    BackupServiceImpl(grpc_service_backend& backend);
     ~BackupServiceImpl() override;
 
     BackupServiceImpl(const BackupServiceImpl&) = delete;
@@ -40,6 +44,9 @@ public:
     ::grpc::Status GetObject(::grpc::ServerContext* context,
                           const GetObjectRequest* request,
                           ::grpc::ServerWriter<GetObjectResponse>* writer) override;
+
+private:
+    grpc_service_backend& backend_;
 };
 
 } // namespace limestone::grpc::service
