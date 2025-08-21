@@ -21,7 +21,6 @@
 namespace limestone::grpc::backend {
 using limestone::api::backup_detail;
 using limestone::api::backup_type;
-using limestone::grpc::proto::BackupObject;
 using limestone::grpc::service::begin_backup_message_version;
 using limestone::grpc::service::list_wal_history_message_version;
 

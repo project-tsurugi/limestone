@@ -22,7 +22,7 @@ std::optional<limestone::grpc::proto::BackupObject> backend_shared_impl::make_ba
         obj.set_type(limestone::grpc::proto::BackupObjectType::LOG);
         return obj;
     }
-    if (metadata_files.count(filename) || filename.rfind("epoch.", 0) == 0) {
+    if ((metadata_files.count(filename) > 0) || filename.rfind("epoch.", 0) == 0) {
         limestone::grpc::proto::BackupObject obj;
         obj.set_object_id(filename);
         obj.set_path(filename);
