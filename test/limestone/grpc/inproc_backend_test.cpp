@@ -20,52 +20,166 @@
 #include <gtest/gtest.h>
 
 #include <boost/filesystem.hpp>
+#include <regex>
 #include <vector>
 
+#include "blob_file_resolver.h"
 #include "limestone/api/configuration.h"
 #include "limestone/api/datastore.h"
+#include "limestone/blob/blob_test_helpers.h"
+#include "limestone/compaction/compaction_test_fixture.h"
 #include "limestone/grpc/service/message_versions.h"
 #include "test_root.h"
 #include "wal_sync/wal_history.h"
 
-
 namespace limestone::testing {
 
 using limestone::grpc::backend::inproc_backend;
+using limestone::grpc::proto::BackupObjectType;
 using limestone::grpc::proto::BeginBackupRequest;
 using limestone::grpc::proto::BeginBackupResponse;
 using limestone::grpc::proto::WalHistoryRequest;
 using limestone::grpc::proto::WalHistoryResponse;
 using limestone::grpc::service::begin_backup_message_version;
 using limestone::grpc::service::list_wal_history_message_version;
+using limestone::internal::blob_file_resolver;
 using limestone::internal::wal_history;
 
-class inproc_backend_test : public ::testing::Test {
-protected:
-    std::unique_ptr<limestone::api::datastore_test> datastore_{};
-    boost::filesystem::path log_dir = "/tmp/inproc_backend_test";
+namespace {
+// Structure representing backup file conditions for backup test
+struct backup_condition {
+    std::string path_pre_begin_backup;
+    std::string path_post_begin_backup;
+    std::string object_id;
+    std::string object_path;
+    BackupObjectType object_type;
+};
 
-    void gen_datastore() {
-        std::vector<boost::filesystem::path> data_locations{};
-        data_locations.emplace_back(log_dir);
-        boost::filesystem::path metadata_location{log_dir};
-        limestone::api::configuration conf(data_locations, metadata_location);
-        datastore_ = std::make_unique<limestone::api::datastore_test>(conf);
+static const std::vector<backup_condition> backup_conditions = {
+    {"blob/dir_00/00000000000000c8.blob", "blob/dir_00/00000000000000c8.blob", "", "", BackupObjectType::UNSPECIFIED},
+    {"compaction_catalog", "compaction_catalog", "compaction_catalog", "compaction_catalog", BackupObjectType::METADATA},
+    {"compaction_catalog.back", "compaction_catalog.back", "", "", BackupObjectType::UNSPECIFIED},
+    {"data/snapshot", "data/snapshot", "", "", BackupObjectType::UNSPECIFIED},
+    {"epoch", "epoch", "", "", BackupObjectType::UNSPECIFIED}, 
+    {"", "epoch.*.3", "epoch.*.3", "epoch.*.3", BackupObjectType::METADATA},
+    {"limestone-manifest.json", "limestone-manifest.json", "limestone-manifest.json", "limestone-manifest.json", BackupObjectType::METADATA},
+    {"pwal_0000.*.0", "pwal_0000.*.0", "pwal_0000.*.0", "pwal_0000.*.0", BackupObjectType::LOG},
+    {"pwal_0000.compacted", "pwal_0000.compacted", "pwal_0000.compacted", "pwal_0000.compacted", BackupObjectType::SNAPSHOT},
+    {"pwal_0001", "pwal_0001.*.0", "pwal_0001.*.0", "pwal_0001.*.0", BackupObjectType::LOG},
+    {"wal_history", "wal_history", "wal_history", "wal_history", BackupObjectType::METADATA}
+};
+} // anonymous namespace
+
+
+
+
+class inproc_backend_test : public limestone::testing::compaction_test {
+
+protected:
+    const char* get_location() const override { return "/tmp/inproc_backend_test"; }
+    std::unique_ptr<blob_file_resolver> resolver_;
+
+    void prepare_backup_test_files() {
+        datastore_->switch_epoch(1);
+        lc0_->begin_session();
+        create_blob_file(*resolver_, 200);
+        lc0_->add_entry(1, "key1", "value1", {1,1}, {200});
+        lc0_->end_session();
+        run_compact_with_epoch_switch(2);
+        lc1_->begin_session();
+        lc1_->add_entry(1, "key1", "value1", {2,2});
+        lc1_->end_session();
+        datastore_->switch_epoch(3);
+
+    }
+
+    static std::string wildcard_to_regex(const std::string& pattern) {
+        std::string regex;
+        regex.reserve(pattern.size() * 2);
+        for (char c : pattern) {
+            switch (c) {
+                case '*': regex += ".*"; break;
+                case '.': regex += "\\."; break;
+                default: regex += c; break;
+            }
+        }
+        return regex;
+    }
+
+    template <typename Selector>
+    void assert_backup_file_conditions(Selector selector) {
+        namespace fs = boost::filesystem;
+        fs::path dir(get_location());
+
+        std::set<std::string> actual;
+        for (auto& entry : fs::recursive_directory_iterator(dir)) {
+            if (fs::is_regular_file(entry.status())) {
+                fs::path rel = fs::relative(entry.path(), dir);
+                std::string relstr = rel.generic_string();
+                actual.insert(relstr);
+            }
+        }
+
+
+        // Check for expected files
+        for (const auto& cond : backup_conditions) {
+            const std::string& pattern = selector(cond);
+            if (pattern.empty()) {
+                // If empty, the file must NOT exist
+                bool found = false;
+                for (const auto& act : actual) {
+                    if (act.empty()) {
+                        found = true;
+                        break;
+                    }
+                }
+                ASSERT_FALSE(found) << "Unexpected file found (should not exist): <empty pattern>";
+                continue;
+            }
+            bool found = false;
+            std::string regex_pat = wildcard_to_regex(pattern);
+            std::regex re(regex_pat);
+            for (const auto& act : actual) {
+                if (std::regex_match(act, re)) {
+                    found = true;
+                    break;
+                }
+            }
+            ASSERT_TRUE(found) << "Expected file pattern not found: " << pattern;
+        }
+
+        // Check for unexpected files
+        for (const auto& act : actual) {
+            bool matched = false;
+            for (const auto& cond : backup_conditions) {
+                const std::string& pattern = selector(cond);
+                if (pattern.empty()) {
+                    continue;
+                }
+                std::string regex_pat = wildcard_to_regex(pattern);
+                std::regex re(regex_pat);
+                if (std::regex_match(act, re)) {
+                    matched = true;
+                    break;
+                }
+            }
+            ASSERT_TRUE(matched) << "Unexpected file found: " << act;
+        }
     }
 
     void SetUp() override {
-        boost::filesystem::remove_all(log_dir);
-        boost::filesystem::create_directories(log_dir);
+        compaction_test::SetUp();
+        resolver_ = std::make_unique<blob_file_resolver>(boost::filesystem::path(get_location()));
     }
     void TearDown() override {
-        datastore_ = nullptr;
-        boost::filesystem::remove_all(log_dir);
+        resolver_.reset();
+        compaction_test::TearDown();
     }
 };
 
 TEST_F(inproc_backend_test, get_wal_history_response_empty) {
-    gen_datastore();
-    inproc_backend backend(*datastore_, log_dir);
+    gen_datastore(call_ready_mode::call_ready_manual);
+    inproc_backend backend(*datastore_, get_location());
     WalHistoryRequest request;
     request.set_version(list_wal_history_message_version);
     WalHistoryResponse response;
@@ -77,13 +191,12 @@ TEST_F(inproc_backend_test, get_wal_history_response_empty) {
 
 TEST_F(inproc_backend_test, get_wal_history_response_with_records) {
     gen_datastore();
-    wal_history wh(log_dir);
+    wal_history wh(get_location());
     wh.append(300);
     wh.append(400);
-    datastore_->ready();
     datastore_->switch_epoch(401);
     auto expected = wh.list();
-    inproc_backend backend(*datastore_, log_dir);
+    inproc_backend backend(*datastore_, get_location());
     WalHistoryRequest request;  
     request.set_version(list_wal_history_message_version);
     WalHistoryResponse response;
@@ -102,13 +215,13 @@ TEST_F(inproc_backend_test, get_wal_history_response_with_records) {
 
 TEST_F(inproc_backend_test, get_log_dir_returns_constructor_value) {
     gen_datastore();
-    inproc_backend backend(*datastore_, log_dir);
-    EXPECT_EQ(backend.get_log_dir(), log_dir);
+    inproc_backend backend(*datastore_, get_location());
+    EXPECT_EQ(backend.get_log_dir(), get_location());
 }
 
 TEST_F(inproc_backend_test, get_wal_history_response_version_boundary) {
     gen_datastore();
-    inproc_backend backend(*datastore_, log_dir);
+    inproc_backend backend(*datastore_, get_location());
     WalHistoryRequest request;
     WalHistoryResponse response;
 
@@ -129,27 +242,99 @@ TEST_F(inproc_backend_test, get_wal_history_response_version_boundary) {
 
 TEST_F(inproc_backend_test, begin_backup_version_boundary) {
     gen_datastore();
-    inproc_backend backend(*datastore_, log_dir);
+    prepare_backup_test_files();
+
+    inproc_backend backend(*datastore_, get_location());
     BeginBackupRequest request;
     BeginBackupResponse response;
 
     // version=0 (unsupported)
     request.set_version(0);
+    request.set_begin_epoch(0);
+    request.set_end_epoch(0);
     auto status = backend.begin_backup(&request, &response);
     EXPECT_FALSE(status.ok());
     EXPECT_EQ(status.error_code(), ::grpc::StatusCode::INVALID_ARGUMENT);
 
     // version=1 (supported, but not implemented)
     request.set_version(begin_backup_message_version);
-    status = backend.begin_backup(&request, &response);
-    EXPECT_FALSE(status.ok());
-    EXPECT_EQ(status.error_code(), ::grpc::StatusCode::UNIMPLEMENTED);
-
+    status = run_with_epoch_switch([&]() { return backend.begin_backup(&request, &response); }, 5);
+    EXPECT_TRUE(status.ok());
+    
     // version=2 (unsupported)
     request.set_version(2);
     status = backend.begin_backup(&request, &response);
     EXPECT_FALSE(status.ok());
     EXPECT_EQ(status.error_code(), ::grpc::StatusCode::INVALID_ARGUMENT);
 }
+
+TEST_F(inproc_backend_test, begin_backup_fullbackup) {
+    gen_datastore();
+    prepare_backup_test_files();
+    assert_backup_file_conditions([](const backup_condition& c) { return c.path_pre_begin_backup; });
+
+    // FLAGS_v = 50; // set VLOG level to 50
+
+    inproc_backend backend(*datastore_, get_location());
+    BeginBackupRequest request;
+    request.set_version(1);
+    request.set_begin_epoch(0);
+    request.set_end_epoch(0);
+    BeginBackupResponse response;
+    
+    // Call begin_backup via run_with_epoch_switch to synchronize with epoch switch and log rotation if needed
+    auto status = run_with_epoch_switch([&]() { return backend.begin_backup(&request, &response); }, 5);
+    
+    // Check log_dir after begin_backup
+    assert_backup_file_conditions([](const backup_condition& c) { return c.path_post_begin_backup; });
+
+    EXPECT_EQ(response.session_id(),"dummy_session_id");
+    EXPECT_EQ(response.expire_at(), 123456);
+    EXPECT_EQ(response.start_epoch(), 0);
+    EXPECT_EQ(response.finish_epoch(), 0);
+
+
+    for (const auto& cond : backup_conditions) {
+        if (cond.object_id.empty() || cond.object_path.empty() || cond.object_type == BackupObjectType::UNSPECIFIED) {
+            continue; // Skip conditions that do not specify object details
+        }
+        bool found = false;
+        std::regex id_re(wildcard_to_regex(cond.object_id));
+        std::regex path_re(wildcard_to_regex(cond.object_path));
+        for (const auto& obj : response.objects()) {
+            if (std::regex_match(obj.object_id(), id_re) &&
+                std::regex_match(obj.path(), path_re) &&
+                obj.type() == cond.object_type) {
+                found = true;
+                break;
+            }
+        }
+        EXPECT_TRUE(found) << "BackupObject not found: id=" << cond.object_id << ", path=" << cond.object_path << ", type=" << cond.object_type;
+    }
+    // If there is an object in response.objects() that does not exist in backup_conditions, report an error
+    for (const auto& obj : response.objects()) {
+        bool found = false;
+        for (const auto& cond : backup_conditions) {
+            if (cond.object_id.empty() || cond.object_path.empty() || cond.object_type == BackupObjectType::UNSPECIFIED) {
+                continue;
+            }
+            std::regex id_re(wildcard_to_regex(cond.object_id));
+            std::regex path_re(wildcard_to_regex(cond.object_path));
+            if (std::regex_match(obj.object_id(), id_re) &&
+                std::regex_match(obj.path(), path_re) &&
+                obj.type() == cond.object_type) {
+                found = true;
+                break;
+            }
+        }
+        EXPECT_TRUE(found) << "Unexpected BackupObject found: id=" << obj.object_id() << ", path=" << obj.path() << ", type=" << obj.type();
+    }
+
+    EXPECT_TRUE(status.ok());
+
+
+
+}
+
 
 } // namespace limestone::testing

@@ -22,6 +22,9 @@
 
 namespace limestone::testing {
 
+using limestone::grpc::proto::BackupObject;
+using limestone::grpc::proto::BackupObjectType;
+
 using namespace limestone::grpc::backend;
 using namespace limestone::internal;
 
@@ -60,6 +63,46 @@ TEST_F(backend_shared_impl_test, list_wal_history_matches_wal_history_class) {
         EXPECT_EQ(expected[i].identity, actual[i].identity());
         EXPECT_EQ(expected[i].timestamp, actual[i].timestamp());
     }
+}
+
+TEST_F(backend_shared_impl_test, make_backup_object_from_path_metadata_files) {
+    std::vector<std::string> files = {
+        "compaction_catalog",
+        "limestone-manifest.json",
+        "wal_history",
+        "epoch.1234567890.1"
+    };
+    for (const auto& fname : files) {
+        auto obj = backend_shared_impl::make_backup_object_from_path(fname);
+        ASSERT_TRUE(obj.has_value());
+        EXPECT_EQ(obj->object_id(), fname);
+        EXPECT_EQ(obj->path(), fname);
+        EXPECT_EQ(obj->type(), BackupObjectType::METADATA);
+    }
+}
+
+TEST_F(backend_shared_impl_test, make_backup_object_from_path_snapshot) {
+    std::string fname = "pwal_0000.compacted";
+    auto obj = backend_shared_impl::make_backup_object_from_path(fname);
+    ASSERT_TRUE(obj.has_value());
+    EXPECT_EQ(obj->object_id(), fname);
+    EXPECT_EQ(obj->path(), fname);
+    EXPECT_EQ(obj->type(), BackupObjectType::SNAPSHOT);
+}
+
+TEST_F(backend_shared_impl_test, make_backup_object_from_path_log) {
+    std::string fname = "pwal_0001.1234567890.0";
+    auto obj = backend_shared_impl::make_backup_object_from_path(fname);
+    ASSERT_TRUE(obj.has_value());
+    EXPECT_EQ(obj->object_id(), fname);
+    EXPECT_EQ(obj->path(), fname);
+    EXPECT_EQ(obj->type(), BackupObjectType::LOG);
+}
+
+TEST_F(backend_shared_impl_test, make_backup_object_from_path_not_matched) {
+    std::string fname = "random_file.txt";
+    auto obj = backend_shared_impl::make_backup_object_from_path(fname);
+    EXPECT_FALSE(obj.has_value());
 }
 
 } // namespace limestone::testing

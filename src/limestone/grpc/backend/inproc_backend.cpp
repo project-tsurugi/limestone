@@ -17,11 +17,13 @@
 #include "limestone/logging.h"
 #include "logging_helper.h"
 #include "grpc/service/message_versions.h"
+#include "limestone/api/backup_detail.h"
 namespace limestone::grpc::backend {
-
-using limestone::grpc::service::list_wal_history_message_version;
+using limestone::api::backup_detail;
+using limestone::api::backup_type;
+using limestone::grpc::proto::BackupObject;
 using limestone::grpc::service::begin_backup_message_version;
-
+using limestone::grpc::service::list_wal_history_message_version;
 
 inproc_backend::inproc_backend([[maybe_unused]] limestone::api::datastore& ds, const boost::filesystem::path& log_dir)
 	: datastore_(ds), log_dir_(log_dir), backend_shared_impl_(log_dir)
@@ -44,7 +46,7 @@ inproc_backend::inproc_backend([[maybe_unused]] limestone::api::datastore& ds, c
 	}
 }
 
-::grpc::Status inproc_backend::begin_backup(BeginBackupRequest* request, BeginBackupResponse* /*response*/) noexcept {
+::grpc::Status inproc_backend::begin_backup(BeginBackupRequest* request, BeginBackupResponse* response) noexcept {
 	if (request->version() != begin_backup_message_version) {
 		return {::grpc::StatusCode::INVALID_ARGUMENT, std::string("unsupported begin_backup request version: ") + std::to_string(request->version())};
 	}
@@ -54,11 +56,21 @@ inproc_backend::inproc_backend([[maybe_unused]] limestone::api::datastore& ds, c
 		return {::grpc::StatusCode::INVALID_ARGUMENT, "begin_backup supports only full backup mode, where both begin_epoch and end_epoch must be 0"};
 	}
 
-
-	return {::grpc::StatusCode::UNIMPLEMENTED, "begin_backup not implemented"};
-	
+	response->set_session_id("dummy_session_id");  // FIX-ME implement
+	response->set_expire_at(123456);  // FIX-ME implement
+	response->set_start_epoch(0);
+	response->set_finish_epoch(0);
+	std::unique_ptr<backup_detail> backup_detail = datastore_.begin_backup(backup_type::transaction);
+	if (backup_detail) {
+		for (const auto& entry : backup_detail->entries()) {
+			auto obj = backend_shared_impl::make_backup_object_from_path(entry.source_path());
+			if (obj) {
+				*response->add_objects() = *obj;
+			}
+		}
+	}
+	return ::grpc::Status::OK;
 }
-
 
 
 
@@ -67,3 +79,4 @@ boost::filesystem::path inproc_backend::get_log_dir() const noexcept {
 }
 
 } // namespace limestone::grpc::backend
+

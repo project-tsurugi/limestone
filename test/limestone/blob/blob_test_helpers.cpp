@@ -21,6 +21,10 @@ namespace limestone::testing {
 
 void create_blob_file(const blob_file_resolver& resolver, std::uint64_t id) {
     boost::filesystem::path file_path = resolver.resolve_path(id);
+    boost::filesystem::path dir = file_path.parent_path();
+    if (!dir.empty() && !boost::filesystem::exists(dir)) {
+        boost::filesystem::create_directories(dir);
+    }
     std::ofstream ofs(file_path.string());
     ofs << "dummy data";
     ofs.close();

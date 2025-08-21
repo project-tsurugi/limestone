@@ -1,6 +1,36 @@
 #include "backend_shared_impl.h"
 #include <google/protobuf/repeated_field.h>
+#include <optional>
 namespace limestone::grpc::backend {
+
+std::optional<limestone::grpc::proto::BackupObject> backend_shared_impl::make_backup_object_from_path(const boost::filesystem::path& path) {
+    std::string filename = path.filename().string();
+
+    static const std::set<std::string> metadata_files = {"compaction_catalog", "limestone-manifest.json", "wal_history"};
+
+    if (filename == "pwal_0000.compacted") {
+        limestone::grpc::proto::BackupObject obj;
+        obj.set_object_id(filename);
+        obj.set_path(filename);
+        obj.set_type(limestone::grpc::proto::BackupObjectType::SNAPSHOT);
+        return obj;
+    }
+    if (filename.rfind("pwal_", 0) == 0) {
+        limestone::grpc::proto::BackupObject obj;
+        obj.set_object_id(filename);
+        obj.set_path(filename);
+        obj.set_type(limestone::grpc::proto::BackupObjectType::LOG);
+        return obj;
+    }
+    if (metadata_files.count(filename) || filename.rfind("epoch.", 0) == 0) {
+        limestone::grpc::proto::BackupObject obj;
+        obj.set_object_id(filename);
+        obj.set_path(filename);
+        obj.set_type(limestone::grpc::proto::BackupObjectType::METADATA);
+        return obj;
+    }
+    return std::nullopt;
+}
 
 using limestone::internal::wal_history;    
 
