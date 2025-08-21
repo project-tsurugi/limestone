@@ -238,7 +238,7 @@ TEST_F(compaction_test, basic_blob_gc_reboot_test) {
     EXPECT_TRUE(AssertLogEntry(log_entries[3], 1, "noblob_key2", "noblob_value2", 1, 3, {}, log_entry::entry_type::normal_entry));
 
     // Verify that the blob files are still present.
-    datastore_->wait_for_blob_file_garbace_collector();
+    datastore_->wait_for_blob_file_garbage_collector();
     EXPECT_FALSE(boost::filesystem::exists(path1001));
     EXPECT_FALSE(boost::filesystem::exists(path1002));
     EXPECT_TRUE(boost::filesystem::exists(path1003));

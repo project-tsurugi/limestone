@@ -962,7 +962,7 @@ std::vector<blob_id_type> datastore::check_and_remove_persistent_blob_ids(const 
     return not_found_blob_ids;
 }
 
-void datastore::wait_for_blob_file_garbace_collector_for_tests() const noexcept {
+void datastore::wait_for_blob_file_garbage_collector_for_tests() const noexcept {
     if (blob_file_garbage_collector_) {
         blob_file_garbage_collector_->wait_for_all_threads();
     }

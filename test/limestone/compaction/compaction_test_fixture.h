@@ -46,6 +46,12 @@ extern std::string data_manifest(int persistent_format_version = 1);
 extern const std::string_view data_normal;
 extern const std::string_view data_nondurable;
 
+
+enum class ready_call_mode {
+    call_ready_auto,
+    call_ready_manual
+};
+
 class compaction_test : public ::testing::Test {
 
 public:
@@ -65,7 +71,7 @@ public:
         }
     }
 
-    void gen_datastore() {
+    void gen_datastore(ready_call_mode mode = ready_call_mode::call_ready_auto) {
         const char* location = get_location();
         std::vector<boost::filesystem::path> data_locations{};
         data_locations.emplace_back(location);
@@ -77,8 +83,10 @@ public:
         lc1_ = &datastore_->create_channel(location);
         lc2_ = &datastore_->create_channel(location);
 
-        datastore_->ready();
-        datastore_->wait_for_blob_file_garbace_collector();
+        if (mode == ready_call_mode::call_ready_auto) {
+            datastore_->ready();
+        }
+        datastore_->wait_for_blob_file_garbage_collector();
     }
 
     void TearDown() {
@@ -179,7 +187,7 @@ protected:
 
             // Wait for the compact operation to finish
             future.get();  // Will rethrow any exception from compact_with_online
-            datastore_->wait_for_blob_file_garbace_collector();
+            datastore_->wait_for_blob_file_garbage_collector();
         } catch (const std::exception& e) {
             std::cerr << "Error: " << e.what() << std::endl;
             throw;  // Re-throw the exception for further handling
