@@ -47,7 +47,7 @@ extern const std::string_view data_normal;
 extern const std::string_view data_nondurable;
 
 
-enum class ready_call_mode {
+enum class call_ready_mode {
     call_ready_auto,
     call_ready_manual
 };
@@ -71,7 +71,7 @@ public:
         }
     }
 
-    void gen_datastore(ready_call_mode mode = ready_call_mode::call_ready_auto) {
+    void gen_datastore(call_ready_mode mode = call_ready_mode::call_ready_auto) {
         const char* location = get_location();
         std::vector<boost::filesystem::path> data_locations{};
         data_locations.emplace_back(location);
@@ -83,7 +83,7 @@ public:
         lc1_ = &datastore_->create_channel(location);
         lc2_ = &datastore_->create_channel(location);
 
-        if (mode == ready_call_mode::call_ready_auto) {
+        if (mode == call_ready_mode::call_ready_auto) {
             datastore_->ready();
         }
         datastore_->wait_for_blob_file_garbage_collector();
@@ -112,87 +112,6 @@ protected:
     boost::filesystem::path path1003_;
     boost::filesystem::path path2001_;
     boost::filesystem::path path2002_;
-
-    void run_compact_with_epoch_switch_org(epoch_id_type epoch) {
-        std::atomic<bool> compaction_completed(false);
-
-        // Launch a separate thread to repeatedly call switch_epoch until the compaction is completed
-        std::thread switch_epoch_thread([&]() {
-            while (!compaction_completed.load()) {
-                datastore_->switch_epoch(epoch);
-                std::this_thread::sleep_for(std::chrono::milliseconds(1));
-            }
-        });
-
-        try {
-            // Call compact_with_online in the main thread
-            datastore_->compact_with_online();
-        } catch (const std::exception& e) {
-            std::cerr << "Exception caught: " << e.what() << std::endl;
-            // std::cerr << "Stacktrace: " << std::endl << boost::stacktrace::stacktrace() << std::endl;
-
-            compaction_completed.store(true);
-            if (switch_epoch_thread.joinable()) {
-                switch_epoch_thread.join();
-            }
-            throw;  // Rethrow the exception to be handled by the caller
-        } catch (...) {
-            std::cerr << "Unknown exception caught" << std::endl;
-            // std::cerr << "Stacktrace: " << std::endl << boost::stacktrace::stacktrace() << std::endl;
-
-            compaction_completed.store(true);
-            if (switch_epoch_thread.joinable()) {
-                switch_epoch_thread.join();
-            }
-            throw;  // Rethrow the exception to be handled by the caller
-        }
-
-        // Notify that the compaction is completed
-        compaction_completed.store(true);
-        if (switch_epoch_thread.joinable()) {
-            switch_epoch_thread.join();
-        }
-    };
-
-    void run_compact_with_epoch_switch(epoch_id_type epoch) {
-        std::mutex wait_mutex;
-        std::condition_variable wait_cv;
-        bool wait_triggered = false;
-
-        // Get the raw pointer from the unique_ptr
-        auto* test_datastore = dynamic_cast<datastore_test*>(datastore_.get());
-        if (test_datastore == nullptr) {
-            throw std::runtime_error("datastore_ must be of type datastore_test");
-        }
-
-        // Set up the on_rotate_log_files callback to signal when rotate_log_files() reaches the wait point
-        test_datastore->on_rotate_log_files_callback = [&]() {
-            std::unique_lock<std::mutex> lock(wait_mutex);
-            wait_triggered = true;
-            wait_cv.notify_one();  // Notify that on_rotate_log_files has been triggered
-        };
-
-        try {
-            // Run compact_with_online in a separate thread
-            auto future = std::async(std::launch::async, [&]() { datastore_->compact_with_online(); });
-
-            // Wait for on_rotate_log_files to be triggered (simulating the waiting in rotate_log_files)
-            {
-                std::unique_lock<std::mutex> lock(wait_mutex);
-                wait_cv.wait(lock, [&]() { return wait_triggered; });
-            }
-
-            // Now switch the epoch after on_rotate_log_files has been triggered
-            datastore_->switch_epoch(epoch);
-
-            // Wait for the compact operation to finish
-            future.get();  // Will rethrow any exception from compact_with_online
-            datastore_->wait_for_blob_file_garbage_collector();
-        } catch (const std::exception& e) {
-            std::cerr << "Error: " << e.what() << std::endl;
-            throw;  // Re-throw the exception for further handling
-        }
-    };
 
     std::vector<std::pair<std::string, std::string>> restart_datastore_and_read_snapshot() {
         datastore_->shutdown();
@@ -512,36 +431,66 @@ protected:
     }
 
 
-    std::unique_ptr<backup_detail> begin_backup_with_epoch_switch(backup_type btype, epoch_id_type epoch) {
+    /**
+     * @brief Runs the given function asynchronously, synchronizing with log file rotation and epoch switching.
+     *
+     * This function is a test utility that:
+     *   - Temporarily replaces the datastore's on_rotate_log_files_callback with a lambda that notifies a condition variable.
+     *   - Launches the given function (func) asynchronously.
+     *   - Waits until the log rotation callback is triggered (i.e., until the function under test causes a log rotation).
+     *   - After the callback is triggered, switches the epoch of the datastore to the specified value.
+     *   - Waits for the asynchronous function to complete and returns its result.
+     *   - Restores the original log rotation callback, even if an exception occurs.
+     *
+     * This is mainly used to test operations that must be synchronized with log file rotation and epoch switching, such as compaction or backup.
+     *
+     * @tparam func_type Callable type (lambda, functor, etc.)
+     * @param func The function to run asynchronously. It should trigger log rotation.
+     * @param epoch The epoch to switch to after log rotation is detected.
+     * @return The result of func (deduced by std::invoke_result_t)
+     */
+    template<typename func_type>
+    std::invoke_result_t<func_type&> run_with_epoch_switch(func_type&& func, epoch_id_type epoch) {
         std::mutex wait_mutex;
         std::condition_variable wait_cv;
         bool wait_triggered = false;
-    
+
         auto* test_datastore = dynamic_cast<datastore_test*>(datastore_.get());
         if (test_datastore == nullptr) {
             throw std::runtime_error("datastore_ must be of type datastore_test");
         }
-    
+
+        auto original_callback = test_datastore->on_rotate_log_files_callback;
         test_datastore->on_rotate_log_files_callback = [&]() {
             std::unique_lock<std::mutex> lock(wait_mutex);
             wait_triggered = true;
             wait_cv.notify_one();
         };
-    
-        try {
-            auto future = std::async(std::launch::async, [&]() { return datastore_->begin_backup(btype); });
-    
-            {
-                std::unique_lock<std::mutex> lock(wait_mutex);
-                wait_cv.wait(lock, [&]() { return wait_triggered; });
-            }
-    
-            datastore_->switch_epoch(epoch);
-            return future.get();
-        } catch (const std::exception& e) {
-            std::cerr << "Error: " << e.what() << std::endl;
-            throw;
+
+        auto future = std::async(std::launch::async, std::forward<func_type>(func));
+        {
+            std::unique_lock<std::mutex> lock(wait_mutex);
+            wait_cv.wait(lock, [&]() { return wait_triggered; });
         }
+        datastore_->switch_epoch(epoch);
+        auto result = future.get();
+        test_datastore->on_rotate_log_files_callback = original_callback;
+        return result;
+    }
+
+    std::unique_ptr<backup_detail> begin_backup_with_epoch_switch(backup_type btype, epoch_id_type epoch) {
+        return run_with_epoch_switch([&]() { return datastore_->begin_backup(btype); }, epoch);
+    }
+
+    // This function is essentially void, but returns bool due to template type deduction requirements of run_with_epoch_switch.
+    bool run_compact_with_epoch_switch(epoch_id_type epoch) {
+        return run_with_epoch_switch(
+            [&]() {
+                datastore_->compact_with_online();
+                datastore_->wait_for_blob_file_garbage_collector();
+                return true; // dummy value for template type deduction
+            },
+            epoch);
     }
 };
 
