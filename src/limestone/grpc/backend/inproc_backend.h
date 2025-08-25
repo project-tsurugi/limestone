@@ -41,7 +41,10 @@ public:
     ::grpc::Status get_wal_history_response(const limestone::grpc::proto::WalHistoryRequest* request, limestone::grpc::proto::WalHistoryResponse* response) noexcept override;
     ::grpc::Status begin_backup(const BeginBackupRequest* request, BeginBackupResponse* response) noexcept override;
 
+    // For testing: set exception injection hook
+    void set_exception_hook(std::function<void()> hook) { exception_hook_ = std::move(hook); }
 private:
+    std::function<void()> exception_hook_;
     limestone::api::datastore& datastore_;
     boost::filesystem::path log_dir_;
     backend_shared_impl backend_shared_impl_;

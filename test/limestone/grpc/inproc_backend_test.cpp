@@ -478,5 +478,31 @@ TEST_F(inproc_backend_test, begin_backup_end_epoch_gt_current_ng) {
     EXPECT_EQ(status.error_message(), "end_epoch must be less than or equal to the current epoch id: end_epoch=6, current_epoch_id=5");
 }
 
+TEST_F(inproc_backend_test, get_wal_history_response_exception_handling) {
+    gen_datastore(call_ready_mode::call_ready_manual);
+    inproc_backend backend(*datastore_, get_location());
+    backend.set_exception_hook([]() { throw std::runtime_error("test exception"); });
+    WalHistoryRequest request;
+    request.set_version(list_wal_history_message_version);
+    WalHistoryResponse response;
+    auto status = backend.get_wal_history_response(&request, &response);
+    EXPECT_EQ(status.error_code(), ::grpc::StatusCode::INTERNAL);
+    EXPECT_STREQ(status.error_message().c_str(), "test exception");
+}
+
+TEST_F(inproc_backend_test, begin_backup_exception_handling) {
+    gen_datastore(call_ready_mode::call_ready_manual);
+    inproc_backend backend(*datastore_, get_location());
+    backend.set_exception_hook([]() { throw std::runtime_error("test exception"); });
+    BeginBackupRequest request;
+    request.set_version(begin_backup_message_version);
+    request.set_begin_epoch(1);
+    request.set_end_epoch(2);
+    BeginBackupResponse response;
+    auto status = backend.begin_backup(&request, &response);
+    EXPECT_EQ(status.error_code(), ::grpc::StatusCode::INTERNAL);
+    EXPECT_STREQ(status.error_message().c_str(), "test exception");
+}
+
 
 } // namespace limestone::testing

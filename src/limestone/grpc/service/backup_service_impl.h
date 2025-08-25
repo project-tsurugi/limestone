@@ -21,7 +21,7 @@ using limestone::grpc::proto::KeepAliveResponse;
 
 class BackupServiceImpl final : public BackupService::Service {
 public:
-    BackupServiceImpl(grpc_service_backend& backend);
+    explicit BackupServiceImpl(grpc_service_backend& backend);
     ~BackupServiceImpl() override;
 
     BackupServiceImpl(const BackupServiceImpl&) = delete;
