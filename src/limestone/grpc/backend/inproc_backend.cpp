@@ -12,17 +12,22 @@
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
  * See the License for the specific language governing permissions and
  * limitations under the License.
- */ 
+ */
 #include "inproc_backend.h"
-#include "limestone/logging.h"
-#include "logging_helper.h"
+
+#include "compaction_catalog.h"
+#include "datastore_impl.h"
 #include "grpc/service/message_versions.h"
 #include "limestone/api/backup_detail.h"
+#include "limestone/logging.h"
+#include "logging_helper.h"
 namespace limestone::grpc::backend {
 using limestone::api::backup_detail;
 using limestone::api::backup_type;
 using limestone::grpc::service::begin_backup_message_version;
 using limestone::grpc::service::list_wal_history_message_version;
+using limestone::api::backup_detail_and_rotation_result;
+using limestone::internal::compaction_catalog;
 
 inproc_backend::inproc_backend([[maybe_unused]] limestone::api::datastore& ds, const boost::filesystem::path& log_dir)
 	: datastore_(ds), log_dir_(log_dir), backend_shared_impl_(log_dir)
@@ -46,32 +51,48 @@ inproc_backend::inproc_backend([[maybe_unused]] limestone::api::datastore& ds, c
 }
 
 ::grpc::Status inproc_backend::begin_backup(const BeginBackupRequest* request, BeginBackupResponse* response) noexcept {
-	if (request->version() != begin_backup_message_version) {
-		return {::grpc::StatusCode::INVALID_ARGUMENT, std::string("unsupported begin_backup request version: ") + std::to_string(request->version())};
-	}
-	uint32_t begin_epoch = request->begin_epoch();
-	uint32_t end_epoch = request->end_epoch();
-	if (begin_epoch != 0 || end_epoch != 0) {
-		return {::grpc::StatusCode::INVALID_ARGUMENT, "begin_backup supports only full backup mode, where both begin_epoch and end_epoch must be 0"};
-	}
+    if (request->version() != begin_backup_message_version) {
+        return {::grpc::StatusCode::INVALID_ARGUMENT, std::string("unsupported begin_backup request version: ") + std::to_string(request->version())};
+    }
+    uint32_t begin_epoch = request->begin_epoch();
+    uint32_t end_epoch = request->end_epoch();
 
-	response->set_session_id("dummy_session_id");  // FIX-ME implement
-	response->set_expire_at(123456);  // FIX-ME implement
-	response->set_start_epoch(0);
-	response->set_finish_epoch(0);
-	std::unique_ptr<backup_detail> backup_detail = datastore_.begin_backup(backup_type::transaction);
-	if (backup_detail) {
-		for (const auto& entry : backup_detail->entries()) {
-			auto obj = backend_shared_impl::make_backup_object_from_path(entry.source_path());
-			if (obj) {
-				*response->add_objects() = *obj;
-			}
-		}
-	}
-	return ::grpc::Status::OK;
+    response->set_session_id("dummy_session_id");  // FIX-ME implement
+    response->set_expire_at(123456);               // FIX-ME implement
+
+    bool is_full_backup = (begin_epoch == 0 && end_epoch == 0);
+    compaction_catalog& catalog = datastore_.get_impl()->get_compaction_catalog();
+    if (!is_full_backup) {
+        // differential backup
+        if (begin_epoch >= end_epoch) {
+            return {::grpc::StatusCode::INVALID_ARGUMENT,
+                    "begin_epoch must be less than end_epoch: begin_epoch=" + std::to_string(begin_epoch) + ", end_epoch=" + std::to_string(end_epoch)};
+        }
+        auto snapshot_epoch_id = catalog.get_max_epoch_id();
+        if (begin_epoch <= snapshot_epoch_id) {
+            return {::grpc::StatusCode::INVALID_ARGUMENT, "begin_epoch must be strictly greater than the epoch id of the last snapshot: begin_epoch=" +
+                                                              std::to_string(begin_epoch) + ", snapshot_epoch_id=" + std::to_string(snapshot_epoch_id)};
+        }
+        auto current_epoch_id = datastore_.last_epoch();
+        if (end_epoch > current_epoch_id) {
+            return {::grpc::StatusCode::INVALID_ARGUMENT, "end_epoch must be less than or equal to the current epoch id: end_epoch=" +
+                                                              std::to_string(end_epoch) + ", current_epoch_id=" + std::to_string(current_epoch_id)};
+        }
+    }
+    response->set_start_epoch(begin_epoch);
+    response->set_finish_epoch(end_epoch);
+
+    backup_detail_and_rotation_result result = datastore_.get_impl()->begin_backup_with_rotation_result(backup_type::transaction);
+    if (result.detail) {
+        for (const auto& entry : result.detail->entries()) {
+            auto obj = backend_shared_impl::make_backup_object_from_path(entry.source_path());
+            if (obj) {
+                *response->add_objects() = *obj;
+            }
+        }
+    }
+    return ::grpc::Status::OK;
 }
-
-
 
 boost::filesystem::path inproc_backend::get_log_dir() const noexcept {
 	return log_dir_;

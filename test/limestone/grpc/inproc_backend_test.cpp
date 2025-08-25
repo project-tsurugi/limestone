@@ -1,4 +1,3 @@
-
 /*
  * Copyright 2022-2025 Project Tsurugi.
  *
@@ -24,6 +23,7 @@
 #include <vector>
 
 #include "blob_file_resolver.h"
+#include "datastore_impl.h"
 #include "limestone/api/configuration.h"
 #include "limestone/api/datastore.h"
 #include "limestone/blob/blob_test_helpers.h"
@@ -61,7 +61,7 @@ static const std::vector<backup_condition> backup_conditions = {
     {"compaction_catalog.back", "compaction_catalog.back", "", "", BackupObjectType::UNSPECIFIED},
     {"data/snapshot", "data/snapshot", "", "", BackupObjectType::UNSPECIFIED},
     {"epoch", "epoch", "", "", BackupObjectType::UNSPECIFIED}, 
-    {"", "epoch.*.3", "epoch.*.3", "epoch.*.3", BackupObjectType::METADATA},
+    {"", "epoch.*.6", "epoch.*.6", "epoch.*.6", BackupObjectType::METADATA},
     {"limestone-manifest.json", "limestone-manifest.json", "limestone-manifest.json", "limestone-manifest.json", BackupObjectType::METADATA},
     {"pwal_0000.*.0", "pwal_0000.*.0", "pwal_0000.*.0", "pwal_0000.*.0", BackupObjectType::LOG},
     {"pwal_0000.compacted", "pwal_0000.compacted", "pwal_0000.compacted", "pwal_0000.compacted", BackupObjectType::SNAPSHOT},
@@ -78,6 +78,7 @@ class inproc_backend_test : public limestone::testing::compaction_test {
 protected:
     const char* get_location() const override { return "/tmp/inproc_backend_test"; }
     std::unique_ptr<blob_file_resolver> resolver_;
+    epoch_id_type snapshot_epoch_id_;
 
     void prepare_backup_test_files() {
         datastore_->switch_epoch(1);
@@ -85,12 +86,25 @@ protected:
         create_blob_file(*resolver_, 200);
         lc0_->add_entry(1, "key1", "value1", {1,1}, {200});
         lc0_->end_session();
-        run_compact_with_epoch_switch(2);
-        lc1_->begin_session();
-        lc1_->add_entry(1, "key1", "value1", {2,2});
-        lc1_->end_session();
+        datastore_->switch_epoch(2);
+        lc0_->begin_session();
+        lc0_->add_entry(1, "key1", "value1", {2,2});
+        lc0_->end_session();
+        run_compact_with_epoch_switch(3);
         datastore_->switch_epoch(3);
-
+        snapshot_epoch_id_ = datastore_->get_impl()->get_compaction_catalog().get_max_epoch_id();
+        lc1_->begin_session();
+        lc1_->add_entry(1, "key1", "value1", {3,3});
+        lc1_->end_session();
+        datastore_->switch_epoch(4);
+        lc1_->begin_session();
+        lc1_->add_entry(1, "key1", "value1", {4,4});
+        lc1_->end_session();
+        datastore_->switch_epoch(5);
+        lc1_->begin_session();
+        lc1_->add_entry(1, "key1", "value1", {5,5});
+        lc1_->end_session();
+        datastore_->switch_epoch(6);
     }
 
     static std::string wildcard_to_regex(const std::string& pattern) {
@@ -258,7 +272,7 @@ TEST_F(inproc_backend_test, begin_backup_version_boundary) {
 
     // version=1 (supported, but not implemented)
     request.set_version(begin_backup_message_version);
-    status = run_with_epoch_switch([&]() { return backend.begin_backup(&request, &response); }, 5);
+    status = run_with_epoch_switch([&]() { return backend.begin_backup(&request, &response); }, 7);
     EXPECT_TRUE(status.ok());
     
     // version=2 (unsupported)
@@ -268,7 +282,7 @@ TEST_F(inproc_backend_test, begin_backup_version_boundary) {
     EXPECT_EQ(status.error_code(), ::grpc::StatusCode::INVALID_ARGUMENT);
 }
 
-TEST_F(inproc_backend_test, begin_backup_fullbackup) {
+TEST_F(inproc_backend_test, begin_backup_overall) {
     gen_datastore();
     prepare_backup_test_files();
     assert_backup_file_conditions([](const backup_condition& c) { return c.path_pre_begin_backup; });
@@ -283,7 +297,7 @@ TEST_F(inproc_backend_test, begin_backup_fullbackup) {
     BeginBackupResponse response;
     
     // Call begin_backup via run_with_epoch_switch to synchronize with epoch switch and log rotation if needed
-    auto status = run_with_epoch_switch([&]() { return backend.begin_backup(&request, &response); }, 5);
+    auto status = run_with_epoch_switch([&]() { return backend.begin_backup(&request, &response); }, 7);
     
     // Check log_dir after begin_backup
     assert_backup_file_conditions([](const backup_condition& c) { return c.path_post_begin_backup; });
@@ -331,9 +345,137 @@ TEST_F(inproc_backend_test, begin_backup_fullbackup) {
     }
 
     EXPECT_TRUE(status.ok());
+}
 
+// begin_epoch > end_epoch
+TEST_F(inproc_backend_test, begin_backup_epoch_order_ok) {
+    gen_datastore();
+    prepare_backup_test_files();
+    inproc_backend backend(*datastore_, get_location());
+    BeginBackupRequest request;
+    BeginBackupResponse response;
+    request.set_version(begin_backup_message_version);
+    request.set_begin_epoch(3);
+    request.set_end_epoch(4);
+    auto status = run_with_epoch_switch([&]() { return backend.begin_backup(&request, &response); }, 7);
+    EXPECT_TRUE(status.ok());
+}
 
+TEST_F(inproc_backend_test, begin_backup_epoch_order_equal_ng) {
+    gen_datastore();
+    prepare_backup_test_files();
+    inproc_backend backend(*datastore_, get_location());
+    BeginBackupRequest request;
+    BeginBackupResponse response;
+    request.set_version(begin_backup_message_version);
+    request.set_begin_epoch(3);
+    request.set_end_epoch(3);
+    auto status = backend.begin_backup(&request, &response);
+    EXPECT_FALSE(status.ok());
+    EXPECT_EQ(status.error_code(), ::grpc::StatusCode::INVALID_ARGUMENT);
+    EXPECT_EQ(status.error_message(), "begin_epoch must be less than end_epoch: begin_epoch=3, end_epoch=3");
+}
 
+TEST_F(inproc_backend_test, begin_backup_epoch_order_gt_ng) {
+    gen_datastore();
+    prepare_backup_test_files();
+    inproc_backend backend(*datastore_, get_location());
+    BeginBackupRequest request;
+    BeginBackupResponse response;
+    request.set_version(begin_backup_message_version);
+    request.set_begin_epoch(4);
+    request.set_end_epoch(3);
+    auto status = backend.begin_backup(&request, &response);
+    EXPECT_FALSE(status.ok());
+    EXPECT_EQ(status.error_code(), ::grpc::StatusCode::INVALID_ARGUMENT);
+    EXPECT_EQ(status.error_message(), "begin_epoch must be less than end_epoch: begin_epoch=4, end_epoch=3");
+}
+
+TEST_F(inproc_backend_test, begin_backup_begin_epoch_gt_snapshot_ok) {
+    gen_datastore();
+    prepare_backup_test_files();
+    inproc_backend backend(*datastore_, get_location());
+    BeginBackupRequest request;
+    BeginBackupResponse response;
+    request.set_version(begin_backup_message_version);
+    EXPECT_EQ(snapshot_epoch_id_, 2);
+    request.set_begin_epoch(3);
+    request.set_end_epoch(4);
+    auto status = run_with_epoch_switch([&]() { return backend.begin_backup(&request, &response); }, 7);
+    EXPECT_TRUE(status.ok());
+}
+
+TEST_F(inproc_backend_test, begin_backup_begin_epoch_eq_snapshot_ng) {
+    gen_datastore();
+    prepare_backup_test_files();
+    inproc_backend backend(*datastore_, get_location());
+    BeginBackupRequest request;
+    BeginBackupResponse response;
+    request.set_version(begin_backup_message_version);
+    EXPECT_EQ(snapshot_epoch_id_, 2);
+    request.set_begin_epoch(2);
+    request.set_end_epoch(4);
+    auto status = backend.begin_backup(&request, &response);
+    EXPECT_FALSE(status.ok());
+    EXPECT_EQ(status.error_code(), ::grpc::StatusCode::INVALID_ARGUMENT);
+    EXPECT_EQ(status.error_message(), "begin_epoch must be strictly greater than the epoch id of the last snapshot: begin_epoch=2, snapshot_epoch_id=2");
+}
+
+TEST_F(inproc_backend_test, begin_backup_begin_epoch_lt_snapshot_ng) {
+    gen_datastore();
+    prepare_backup_test_files();
+    inproc_backend backend(*datastore_, get_location());
+    BeginBackupRequest request;
+    BeginBackupResponse response;
+    request.set_version(begin_backup_message_version);
+    EXPECT_EQ(snapshot_epoch_id_, 2);
+    request.set_begin_epoch(1);
+    request.set_end_epoch(4);
+    auto status = backend.begin_backup(&request, &response);
+    EXPECT_FALSE(status.ok());
+    EXPECT_EQ(status.error_code(), ::grpc::StatusCode::INVALID_ARGUMENT);
+    EXPECT_EQ(status.error_message(), "begin_epoch must be strictly greater than the epoch id of the last snapshot: begin_epoch=1, snapshot_epoch_id=2");
+}
+
+TEST_F(inproc_backend_test, begin_backup_end_epoch_lt_current_ok) {
+    gen_datastore();
+    prepare_backup_test_files();
+    inproc_backend backend(*datastore_, get_location());
+    BeginBackupRequest request;
+    BeginBackupResponse response;
+    request.set_version(begin_backup_message_version);
+    request.set_begin_epoch(3);
+    request.set_end_epoch(4); 
+    auto status = run_with_epoch_switch([&]() { return backend.begin_backup(&request, &response); }, 7);
+    EXPECT_TRUE(status.ok());
+}
+
+TEST_F(inproc_backend_test, begin_backup_end_epoch_eq_current_ok) {
+    gen_datastore();
+    prepare_backup_test_files();
+    inproc_backend backend(*datastore_, get_location());
+    BeginBackupRequest request;
+    BeginBackupResponse response;
+    request.set_version(begin_backup_message_version);
+    request.set_begin_epoch(3);
+    request.set_end_epoch(5);
+    auto status = run_with_epoch_switch([&]() { return backend.begin_backup(&request, &response); }, 7);
+    EXPECT_TRUE(status.ok());
+}
+
+TEST_F(inproc_backend_test, begin_backup_end_epoch_gt_current_ng) {
+    gen_datastore();
+    prepare_backup_test_files();
+    inproc_backend backend(*datastore_, get_location());
+    BeginBackupRequest request;
+    BeginBackupResponse response;
+    request.set_version(begin_backup_message_version);
+    request.set_begin_epoch(3);
+    request.set_end_epoch(6); 
+    auto status = backend.begin_backup(&request, &response);
+    EXPECT_FALSE(status.ok());
+    EXPECT_EQ(status.error_code(), ::grpc::StatusCode::INVALID_ARGUMENT);
+    EXPECT_EQ(status.error_message(), "end_epoch must be less than or equal to the current epoch id: end_epoch=6, current_epoch_id=5");
 }
 
 

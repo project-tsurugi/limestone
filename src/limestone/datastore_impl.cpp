@@ -233,6 +233,10 @@ void datastore_impl::set_migration_info(const manifest::migration_info& info) no
     migration_info_ = info;
 }
 
+compaction_catalog& datastore_impl::get_compaction_catalog() noexcept{
+    return *datastore_.compaction_catalog_;
+}
+
 backup_detail_and_rotation_result datastore_impl::begin_backup_with_rotation_result(backup_type btype) {  // NOLINT(readability-function-cognitive-complexity)
     datastore_.rotate_epoch_file();
     rotation_result result = datastore_.rotate_log_files();

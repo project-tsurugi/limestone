@@ -470,7 +470,9 @@ protected:
         auto future = std::async(std::launch::async, std::forward<func_type>(func));
         {
             std::unique_lock<std::mutex> lock(wait_mutex);
-            wait_cv.wait(lock, [&]() { return wait_triggered; });
+            if (!wait_cv.wait_for(lock, std::chrono::seconds(5), [&]() { return wait_triggered; })) {
+                throw std::runtime_error("Timeout: on_rotate_log_files_callback was not called. func may have failed or did not trigger log rotation.");
+            }
         }
         datastore_->switch_epoch(epoch);
         auto result = future.get();

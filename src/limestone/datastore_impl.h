@@ -28,7 +28,8 @@
 namespace limestone::api {
 
 using limestone::internal::manifest;
-using namespace limestone::replication;    
+using limestone::internal::compaction_catalog;
+using namespace limestone::replication;
 
 // Internal implementation class for datastore (Pimpl idiom).
 // This header is for internal use only.
@@ -45,9 +46,6 @@ public:
 
     // Default destructor.
     ~datastore_impl();
-
-    // Create backup and return both backup_detail and rotation_result (internal use only)
-    backup_detail_and_rotation_result begin_backup_with_rotation_result(backup_type btype);
 
     // Deleted copy and move constructors and assignment operators.
     datastore_impl(const datastore_impl &) = delete;
@@ -113,6 +111,11 @@ public:
     // Setter for migration_info_
     void set_migration_info(const manifest::migration_info& info) noexcept;
 
+    // Create backup and return both backup_detail and rotation_result (internal use only)
+    backup_detail_and_rotation_result begin_backup_with_rotation_result(backup_type btype);
+
+    // Getter for compaction_catalog_
+    compaction_catalog& get_compaction_catalog() noexcept;
 private:
     datastore& datastore_;
     // Atomic counter for tracking active backup operations.
