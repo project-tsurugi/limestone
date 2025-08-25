@@ -32,6 +32,13 @@
 #include "wal_sync/wal_history.h"
 
 namespace limestone::api {
+epoch_id_type datastore_impl::get_boot_durable_epoch_id() const noexcept {
+    return boot_durable_epoch_id_.load(std::memory_order_seq_cst);
+}
+
+void datastore_impl::set_boot_durable_epoch_id(epoch_id_type epoch_id) noexcept {
+    boot_durable_epoch_id_.store(epoch_id, std::memory_order_seq_cst);
+}
 
 using limestone::internal::compaction_catalog;
 using limestone::internal::blob_file_scanner;

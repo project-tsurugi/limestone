@@ -15,24 +15,25 @@
  */
 
 #include <byteswap.h>
+#include <glog/logging.h>
+#include <limestone/api/datastore.h>
+#include <limestone/logging.h>
+
 #include <boost/filesystem/fstream.hpp>
 #include <cstdlib>
 #include <cstring>
 #include <map>
 #include <mutex>
 
-#include <glog/logging.h>
-#include <limestone/logging.h>
-#include "logging_helper.h"
-
-#include <limestone/api/datastore.h>
-#include "limestone_exception_helper.h"
 #include "compaction_catalog.h"
+#include "datastore_impl.h"
 #include "dblog_scan.h"
 #include "internal.h"
+#include "limestone_exception_helper.h"
 #include "log_entry.h"
-#include "sortdb_wrapper.h"
+#include "logging_helper.h"
 #include "snapshot_impl.h"
+#include "sortdb_wrapper.h"
 #include "sorting_context.h"
 #include "wal_sync/wal_history.h"
 namespace  {
@@ -511,6 +512,7 @@ blob_id_type datastore::create_snapshot_and_get_max_blob_id() {
     auto [max_appeared_epoch, sctx] = create_sorted_from_wals(options);
     epoch_id_switched_.store(max_appeared_epoch);
     epoch_id_informed_.store(max_appeared_epoch);
+    impl_->set_boot_durable_epoch_id(max_appeared_epoch);
     wal_history wal_history_(location_);
     wal_history_.append(max_appeared_epoch);
     add_file(wal_history_.get_file_path());

@@ -86,7 +86,12 @@ inproc_backend::inproc_backend([[maybe_unused]] limestone::api::datastore& ds, c
                 return {::grpc::StatusCode::INVALID_ARGUMENT, "end_epoch must be less than or equal to the current epoch id: end_epoch=" +
                                                                   std::to_string(end_epoch) + ", current_epoch_id=" + std::to_string(current_epoch_id)};
             }
-        }
+			auto boot_durable_epoch_id = datastore_.get_impl()->get_boot_durable_epoch_id();
+			if (end_epoch < boot_durable_epoch_id) {
+				return {::grpc::StatusCode::INVALID_ARGUMENT, "end_epoch must be strictly greater than the durable epoch id at boot time: end_epoch=" +
+																  std::to_string(end_epoch) + ", boot_durable_epoch_id=" + std::to_string(boot_durable_epoch_id)};
+			}
+		} 
         response->set_start_epoch(begin_epoch);
         response->set_finish_epoch(end_epoch);
 

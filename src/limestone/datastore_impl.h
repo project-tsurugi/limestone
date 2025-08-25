@@ -116,6 +116,12 @@ public:
 
     // Getter for compaction_catalog_
     compaction_catalog& get_compaction_catalog() noexcept;
+
+    // Getter for boot_durable_epoch_id_
+    [[nodiscard]] epoch_id_type get_boot_durable_epoch_id() const noexcept;
+
+    // Setter for boot_durable_epoch_id_
+    void set_boot_durable_epoch_id(epoch_id_type epoch_id) noexcept;
 private:
     datastore& datastore_;
     // Atomic counter for tracking active backup operations.
@@ -137,6 +143,9 @@ private:
   
     // Migration info for the manifest
     std::optional<manifest::migration_info> migration_info_; 
+
+    // Durable epoch ID at boot time
+    std::atomic<epoch_id_type> boot_durable_epoch_id_{0};
 };
 
 }  // namespace limestone::api

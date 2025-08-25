@@ -107,6 +107,35 @@ protected:
         datastore_->switch_epoch(6);
     }
 
+    void prepare_backup_test_files_witout_compaction() {
+        datastore_->switch_epoch(1);
+        lc0_->begin_session();
+        create_blob_file(*resolver_, 200);
+        lc0_->add_entry(1, "key1", "value1", {1,1}, {200});
+        lc0_->end_session();
+        datastore_->switch_epoch(2);
+        lc0_->begin_session();
+        lc0_->add_entry(1, "key1", "value1", {2,2});
+        lc0_->end_session();
+        datastore_->switch_epoch(3);
+        lc1_->begin_session();
+        lc1_->add_entry(1, "key1", "value1", {3,3});
+        lc1_->end_session();
+        datastore_->switch_epoch(4);
+        datastore_->shutdown();
+        datastore_ = nullptr;
+        gen_datastore();
+        lc1_->begin_session();
+        lc1_->add_entry(1, "key1", "value1", {4,4});
+        lc1_->end_session();
+        datastore_->switch_epoch(5);
+        lc1_->begin_session();
+        lc1_->add_entry(1, "key1", "value1", {5,5});
+        lc1_->end_session();
+        datastore_->switch_epoch(6);
+
+    }
+
     static std::string wildcard_to_regex(const std::string& pattern) {
         std::string regex;
         regex.reserve(pattern.size() * 2);
@@ -477,6 +506,48 @@ TEST_F(inproc_backend_test, begin_backup_end_epoch_gt_current_ng) {
     EXPECT_EQ(status.error_code(), ::grpc::StatusCode::INVALID_ARGUMENT);
     EXPECT_EQ(status.error_message(), "end_epoch must be less than or equal to the current epoch id: end_epoch=6, current_epoch_id=5");
 }
+
+TEST_F(inproc_backend_test, begin_backup_end_epoch_lt_boot_durable_epoch_ng) {
+    gen_datastore();
+    prepare_backup_test_files_witout_compaction();
+    inproc_backend backend(*datastore_, get_location());
+    BeginBackupRequest request;
+    BeginBackupResponse response;
+    request.set_version(begin_backup_message_version);
+    request.set_begin_epoch(1);
+    request.set_end_epoch(2); 
+    auto status = backend.begin_backup(&request, &response);
+    EXPECT_FALSE(status.ok());
+    EXPECT_EQ(status.error_code(), ::grpc::StatusCode::INVALID_ARGUMENT);
+    EXPECT_EQ(status.error_message(), "end_epoch must be strictly greater than the durable epoch id at boot time: end_epoch=2, boot_durable_epoch_id=3");
+}
+
+TEST_F(inproc_backend_test, begin_backup_end_epoch_eq_boot_durable_epoch_ok) {
+    gen_datastore();
+    prepare_backup_test_files_witout_compaction();
+    inproc_backend backend(*datastore_, get_location());
+    BeginBackupRequest request;
+    BeginBackupResponse response;
+    request.set_version(begin_backup_message_version);
+    request.set_begin_epoch(1);
+    request.set_end_epoch(3); 
+    auto status = run_with_epoch_switch([&]() { return backend.begin_backup(&request, &response); }, 7);
+    EXPECT_TRUE(status.ok());
+}
+
+TEST_F(inproc_backend_test, begin_backup_end_epoch_gt_boot_durable_epoch_ok) {
+    gen_datastore();
+    prepare_backup_test_files_witout_compaction();
+    inproc_backend backend(*datastore_, get_location());
+    BeginBackupRequest request;
+    BeginBackupResponse response;
+    request.set_version(begin_backup_message_version);
+    request.set_begin_epoch(1);
+    request.set_end_epoch(4); 
+    auto status = run_with_epoch_switch([&]() { return backend.begin_backup(&request, &response); }, 7);
+    EXPECT_TRUE(status.ok());
+}
+
 
 TEST_F(inproc_backend_test, get_wal_history_response_exception_handling) {
     gen_datastore(call_ready_mode::call_ready_manual);
