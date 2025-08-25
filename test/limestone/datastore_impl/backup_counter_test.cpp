@@ -7,10 +7,11 @@ class backup_counter_test : public ::testing::Test {
 protected:
     backup_counter_test() = default;
     ~backup_counter_test() override = default;
+    datastore dummy_ds;
 };
 
 TEST_F(backup_counter_test, backup_counter_increments) {
-    datastore_impl datastore;
+    datastore_impl datastore(dummy_ds);
     
     // Increment the counter
     datastore.increment_backup_counter();
@@ -26,8 +27,8 @@ TEST_F(backup_counter_test, backup_counter_increments) {
 }
 
 TEST_F(backup_counter_test, backup_counter_multiple_increments) {
-    datastore_impl datastore;
-    
+    datastore_impl datastore(dummy_ds);
+
     // Increment multiple times
     for (int i = 0; i < 5; ++i) {
         datastore.increment_backup_counter();
@@ -46,8 +47,8 @@ TEST_F(backup_counter_test, backup_counter_multiple_increments) {
 }
 
 TEST_F(backup_counter_test, backup_counter_does_not_go_negative) {
-    datastore_impl datastore;
-    
+    datastore_impl datastore(dummy_ds);
+
     // Decrement without incrementing
     datastore.decrement_backup_counter();
     

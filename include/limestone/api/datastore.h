@@ -59,6 +59,7 @@ class log_channel;
  */
 class datastore {
     friend class log_channel;
+    friend class datastore_impl; 
 
     enum class state : std::int64_t {
         not_ready = 0,

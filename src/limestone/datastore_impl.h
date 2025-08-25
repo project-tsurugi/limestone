@@ -32,13 +32,22 @@ using namespace limestone::replication;
 
 // Internal implementation class for datastore (Pimpl idiom).
 // This header is for internal use only.
+
+struct backup_detail_and_rotation_result {
+    std::unique_ptr<backup_detail> detail;
+    rotation_result rotation;
+};
+
 class datastore_impl {
 public:
-    // Default constructor initializes the backup counter to zero.
-    datastore_impl();
+    // Constructor initializes the backup counter to zero and sets datastore reference.
+    explicit datastore_impl(datastore& ds);
 
     // Default destructor.
     ~datastore_impl();
+
+    // Create backup and return both backup_detail and rotation_result (internal use only)
+    backup_detail_and_rotation_result begin_backup_with_rotation_result(backup_type btype);
 
     // Deleted copy and move constructors and assignment operators.
     datastore_impl(const datastore_impl &) = delete;
@@ -105,6 +114,7 @@ public:
     void set_migration_info(const manifest::migration_info& info) noexcept;
 
 private:
+    datastore& datastore_;
     // Atomic counter for tracking active backup operations.
     std::atomic<int> backup_counter_;
     std::atomic<bool> replica_exists_;

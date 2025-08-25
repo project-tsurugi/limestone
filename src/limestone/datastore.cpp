@@ -82,10 +82,10 @@ void write_epoch_to_file_internal(const std::string& file_path, epoch_id_type ep
 namespace limestone::api {
 using namespace limestone::internal;
 
-datastore::datastore() noexcept: impl_(std::make_unique<datastore_impl>()) {}
+datastore::datastore() noexcept: impl_(std::make_unique<datastore_impl>(*this)) {}
 
 
-datastore::datastore(configuration const& conf) : location_(conf.data_locations_.at(0)), impl_(std::make_unique<datastore_impl>()) { // NOLINT(readability-function-cognitive-complexity)
+datastore::datastore(configuration const& conf) : location_(conf.data_locations_.at(0)), impl_(std::make_unique<datastore_impl>(*this)) { // NOLINT(readability-function-cognitive-complexity)
     try {
         LOG(INFO) << "/:limestone:config:datastore setting log location = " << location_.string();
         boost::system::error_code error;
@@ -503,108 +503,14 @@ backup& datastore::begin_backup() {
     return *backup_; // Required to satisfy the compiler
 }
 
-
-std::unique_ptr<backup_detail> datastore::begin_backup(backup_type btype) {  // NOLINT(readability-function-cognitive-complexity)
+std::unique_ptr<backup_detail> datastore::begin_backup(backup_type btype) {
     try {
-        rotate_epoch_file();
-        rotation_result result = rotate_log_files();
-
-        // LOG-0: all files are log file, so all files are selected in both standard/transaction mode.
-        (void) btype;
-
-        // calculate files_ minus active-files
-        std::set<boost::filesystem::path> inactive_files(result.get_rotation_end_files());
-        inactive_files.erase(epoch_file_path_);
-        for (const auto& lc : log_channels_) {
-            if (lc->registered_) {
-                inactive_files.erase(lc->file_path());
-            }
-        }
-
-        // build entries
-        std::vector<backup_detail::entry> entries;
-        for (auto & ent : inactive_files) {
-            // LOG-0: assume files are located flat in logdir.
-            std::string filename = ent.filename().string();
-            auto dst = filename;
-            switch (filename[0]) {
-                case 'p': {
-                    if (filename.find("wal", 1) == 1) {
-                        // "pwal"
-                        // pwal files are type:logfile, detached
-
-                        // skip an "inactive" file with the name of active file,
-                        // it will cause some trouble if a file (that has the name of mutable files) is saved as immutable file.
-                        // but, by skip, backup files may be imcomplete.
-                        if (filename.length() == 9) {  // FIXME: too adohoc check
-                            boost::system::error_code error;
-                            bool result = boost::filesystem::is_empty(ent, error);
-                            if (!error && !result) {
-                                LOG_LP(ERROR) << "skip the file with the name like active files: " << filename;
-                            }
-                            continue;
-                        }
-                        entries.emplace_back(ent.string(), dst, false, false);
-                    } else {
-                        // unknown type
-                    }
-                    break;
-                }
-                case 'e': {
-                    if (filename.find("poch", 1) == 1) {
-                        // "epoch"
-                        // epoch file(s) are type:logfile, the last rotated file is non-detached
-
-                        // skip active file
-                        if (filename.length() == 5) {  // FIXME: too adohoc check
-                            continue;
-                        }
-
-                        // TODO: only last epoch file is not-detached
-                        entries.emplace_back(ent.string(), dst, false, false);
-                    } else {
-                        // unknown type
-                    }
-                    break;
-                }
-                case 'l': {
-                    if (filename == internal::manifest::file_name) {
-                        entries.emplace_back(ent.string(), dst, true, false);
-                    } else {
-                        // unknown type
-                    }
-                    break;
-                }
-                case 'c': {
-                    if (filename == compaction_catalog::get_catalog_filename()) {
-                        entries.emplace_back(ent.string(), dst, false, false);
-                    }
-                    break;
-                }
-                case 'w': {
-                    if (filename == internal::wal_history::file_name()) {
-                        entries.emplace_back(ent.string(), dst, false, false);
-                    }
-                    break;
-                }
-                default: {
-                    // unknown type
-                }
-            }
-        }
-        // Add blob files to the backup target
-        blob_file_scanner scanner(blob_file_resolver_.get());
-        // Use the parent of the blob root as the base for computing the relative path.
-        boost::filesystem::path backup_root = blob_file_resolver_->get_blob_root().parent_path();
-        for (const auto& src : scanner) {
-            entries.emplace_back(src, src.filename(), false, false);
-        }
-        
-
-        return std::unique_ptr<backup_detail>(new backup_detail(entries, epoch_id_switched_.load(), *impl_));
+        // Wrapper: use datastore_impl's begin_backup_with_rotation_result, return only backup_detail
+        auto result = impl_->begin_backup_with_rotation_result(btype);
+        return std::move(result.detail);
     } catch (...) {
         HANDLE_EXCEPTION_AND_ABORT();
-        throw; // Unreachable, but required to satisfy the compiler
+        throw;  // Unreachable, but required to satisfy the compiler
     }
 }
 

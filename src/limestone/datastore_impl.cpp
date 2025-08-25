@@ -14,23 +14,31 @@
  * limitations under the License.
  */
 #include "datastore_impl.h"
-#include "limestone/logging.h"
-#include "logging_helper.h"
+
 #include <cstdlib>
 #include <iostream>
 
-#include "replication/replica_connector.h"
+#include "blob_file_resolver.h"
+#include "blob_file_scanner.h"
+#include "compaction_catalog.h"
+#include "limestone/logging.h"
 #include "limestone_exception_helper.h"
-#include "replication/message_session_begin.h"
-#include "replication/message_log_channel_create.h"
-#include "replication/message_group_commit.h"
+#include "logging_helper.h"
 #include "manifest.h"
+#include "replication/message_group_commit.h"
+#include "replication/message_log_channel_create.h"
+#include "replication/message_session_begin.h"
+#include "replication/replica_connector.h"
+#include "wal_sync/wal_history.h"
 
 namespace limestone::api {
 
-// Default constructor initializes the backup counter to zero.
-datastore_impl::datastore_impl()
-    : backup_counter_(0)
+using limestone::internal::compaction_catalog;
+using limestone::internal::blob_file_scanner;
+
+datastore_impl::datastore_impl(datastore& ds)
+    : datastore_(ds)
+    , backup_counter_(0)
     , replica_exists_(false)
     , async_session_close_enabled_(std::getenv("REPLICATION_ASYNC_SESSION_CLOSE") != nullptr)
     , async_group_commit_enabled_(std::getenv("REPLICATION_ASYNC_GROUP_COMMIT") != nullptr)
@@ -223,6 +231,105 @@ const std::optional<manifest::migration_info>& datastore_impl::get_migration_inf
 
 void datastore_impl::set_migration_info(const manifest::migration_info& info) noexcept {
     migration_info_ = info;
+}
+
+backup_detail_and_rotation_result datastore_impl::begin_backup_with_rotation_result(backup_type btype) {  // NOLINT(readability-function-cognitive-complexity)
+    datastore_.rotate_epoch_file();
+    rotation_result result = datastore_.rotate_log_files();
+
+    // LOG-0: all files are log file, so all files are selected in both standard/transaction mode.
+    (void)btype;
+
+    // calculate files_ minus active-files
+    std::set<boost::filesystem::path> inactive_files(result.get_rotation_end_files());
+    inactive_files.erase(datastore_.epoch_file_path_);
+    for (const auto& lc : datastore_.log_channels_) {
+        if (lc->registered_) {
+            inactive_files.erase(lc->file_path());
+        }
+    }
+
+    // build entries
+    std::vector<backup_detail::entry> entries;
+    for (auto& ent : inactive_files) {
+        // LOG-0: assume files are located flat in logdir.
+        std::string filename = ent.filename().string();
+        auto dst = filename;
+        switch (filename[0]) {
+            case 'p': {
+                if (filename.find("wal", 1) == 1) {
+                    // "pwal"
+                    // pwal files are type:logfile, detached
+
+                    // skip an "inactive" file with the name of active file,
+                    // it will cause some trouble if a file (that has the name of mutable files) is saved as immutable file.
+                    // but, by skip, backup files may be imcomplete.
+                    if (filename.length() == 9) {  // FIXME: too adohoc check
+                        boost::system::error_code error;
+                        bool result = boost::filesystem::is_empty(ent, error);
+                        if (!error && !result) {
+                            LOG_LP(ERROR) << "skip the file with the name like active files: " << filename;
+                        }
+                        continue;
+                    }
+                    entries.emplace_back(ent.string(), dst, false, false);
+                } else {
+                    // unknown type
+                }
+                break;
+            }
+            case 'e': {
+                if (filename.find("poch", 1) == 1) {
+                    // "epoch"
+                    // epoch file(s) are type:logfile, the last rotated file is non-detached
+
+                    // skip active file
+                    if (filename.length() == 5) {  // FIXME: too adohoc check
+                        continue;
+                    }
+
+                    // TODO: only last epoch file is not-detached
+                    entries.emplace_back(ent.string(), dst, false, false);
+                } else {
+                    // unknown type
+                }
+                break;
+            }
+            case 'l': {
+                if (filename == internal::manifest::file_name) {
+                    entries.emplace_back(ent.string(), dst, true, false);
+                } else {
+                    // unknown type
+                }
+                break;
+            }
+            case 'c': {
+                if (filename == compaction_catalog::get_catalog_filename()) {
+                    entries.emplace_back(ent.string(), dst, false, false);
+                }
+                break;
+            }
+            case 'w': {
+                if (filename == internal::wal_history::file_name()) {
+                    entries.emplace_back(ent.string(), dst, false, false);
+                }
+                break;
+            }
+            default: {
+                // unknown type
+            }
+        }
+    }
+    // Add blob files to the backup target
+    blob_file_scanner scanner(datastore_.blob_file_resolver_.get());
+    // Use the parent of the blob root as the base for computing the relative path.
+    boost::filesystem::path backup_root = datastore_.blob_file_resolver_->get_blob_root().parent_path();
+    for (const auto& src : scanner) {
+        entries.emplace_back(src, src.filename(), false, false);
+    }
+    auto epoch_id = static_cast<uint64_t>(datastore_.epoch_id_switched_.load());
+    auto backup_detail_ptr = std::unique_ptr<backup_detail>(new backup_detail(entries, epoch_id, *this));
+    return {std::move(backup_detail_ptr), result};
 }
 
 }  // namespace limestone::api

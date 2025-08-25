@@ -97,7 +97,7 @@ private:
 };
 
 TEST_F(datastore_replication_test, open_control_channel_success) {
-    datastore_impl datastore;
+    datastore_impl datastore(*datastore_);
 
     // Test open control channel
     EXPECT_TRUE(datastore.open_control_channel());
@@ -111,8 +111,8 @@ TEST_F(datastore_replication_test, open_control_channel_success) {
 TEST_F(datastore_replication_test, open_control_channel_failure_invalid_endpoint) {
     // Set an invalid endpoint
     setenv("TSURUGI_REPLICATION_ENDPOINT", "invalid://endpoint", 1);
-    
-    datastore_impl datastore;
+
+    datastore_impl datastore(*datastore_);
     EXPECT_FALSE(datastore.open_control_channel());
     EXPECT_FALSE(datastore.has_replica()); 
 
@@ -125,7 +125,7 @@ TEST_F(datastore_replication_test, open_control_channel_with_no_endpoint) {
     // Ensure no endpoint is set
     unsetenv("TSURUGI_REPLICATION_ENDPOINT");
 
-    datastore_impl datastore;
+    datastore_impl datastore(*datastore_);
     EXPECT_FALSE(datastore.open_control_channel());
     EXPECT_FALSE(datastore.has_replica()); 
 

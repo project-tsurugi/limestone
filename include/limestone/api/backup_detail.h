@@ -128,7 +128,7 @@ private:
     datastore_impl* ds_impl_{};            // Pointer to the datastore's internal implementation.
     std::atomic<bool> backup_finished_{false};  // Flag to ensure notify_end_backup is executed only once.
 
-    friend class datastore;
+    friend class datastore_impl;
 };
 
 enum class backup_type { standard, transaction };

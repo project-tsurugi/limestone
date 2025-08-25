@@ -206,6 +206,7 @@ protected: // Protected to allow testing with derived classes
     log_channel(boost::filesystem::path location, std::size_t id, datastore& envelope) noexcept;
  
     friend class datastore;
+    friend class datastore_impl;
     friend class rotation_task;
 };
 
