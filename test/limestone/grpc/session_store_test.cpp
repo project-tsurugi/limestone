@@ -108,17 +108,17 @@ TEST_F(session_store_test, expiry_thread_waits_for_next_expire) {
         }
         cv.notify_all();
     };
-    // 2つの異なるexpire_atを持つセッションを登録
+    // Register two sessions with different expire_at values
     auto s1 = store.create_and_register(1, on_remove);
     auto s2 = store.create_and_register(3, on_remove);
     ASSERT_TRUE(s1.has_value());
     ASSERT_TRUE(s2.has_value());
-    // 1つ目のexpire直後に状態を確認
+    // Check the state immediately after the first expire
     {
         std::unique_lock<std::mutex> lock(mtx);
         cv.wait_for(lock, std::chrono::seconds(2), [&removed_count]{ return removed_count.load() >= 1; });
     }
-    // 2つ目のexpire直後に状態を確認
+    // Check the state immediately after the second expire
     {
         std::unique_lock<std::mutex> lock(mtx);
         cv.wait_for(lock, std::chrono::seconds(3), [&removed_count]{ return removed_count.load() >= 2; });
