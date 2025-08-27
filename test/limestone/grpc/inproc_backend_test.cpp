@@ -32,6 +32,7 @@
 #include "limestone/grpc/service/grpc_constants.h"
 #include "test_root.h"
 #include "wal_sync/wal_history.h"
+#include "datastore_impl.h"
 
 namespace limestone::testing {
 
@@ -586,5 +587,32 @@ TEST_F(inproc_backend_test, begin_backup_exception_handling) {
     EXPECT_STREQ(status.error_message().c_str(), "test exception");
 }
 
+TEST_F(inproc_backend_test, begin_and_end_backup_increments_and_decrements_counter) {
+    gen_datastore();
+    prepare_backup_test_files();
+    inproc_backend backend(*datastore_, get_location());
+
+    // Before backup, counter should be 0
+    EXPECT_EQ(datastore_->get_impl()->get_backup_counter(), 0);
+
+    // begin_backup
+    BeginBackupRequest req;
+    req.set_version(begin_backup_message_version);
+    req.set_begin_epoch(0);
+    req.set_end_epoch(0);
+    BeginBackupResponse resp;
+    auto status = run_with_epoch_switch([&]() { return backend.begin_backup(&req, &resp); }, 7);
+    ASSERT_TRUE(status.ok());
+    EXPECT_EQ(datastore_->get_impl()->get_backup_counter(), 1);
+
+    // end_backup
+    limestone::grpc::proto::EndBackupRequest end_req;
+    end_req.set_version(limestone::grpc::service::end_backup_message_version);
+    end_req.set_session_id(resp.session_id());
+    limestone::grpc::proto::EndBackupResponse end_resp;
+    status = backend.end_backup(&end_req, &end_resp);
+    ASSERT_TRUE(status.ok());
+    EXPECT_EQ(datastore_->get_impl()->get_backup_counter(), 0);
+}
 
 } // namespace limestone::testing

@@ -30,20 +30,20 @@ BackupServiceImpl::~BackupServiceImpl() = default;
 
 ::grpc::Status BackupServiceImpl::KeepAlive(
     ::grpc::ServerContext* /*context*/,
-    const KeepAliveRequest* /*request*/,
-    KeepAliveResponse* /*response*/)
+    const KeepAliveRequest* request,
+    KeepAliveResponse* response)
 {
-    // TODO: 実装
-    return {::grpc::StatusCode::UNIMPLEMENTED, "KeepAlive not implemented"};
+    VLOG_LP(log_info) << "KeepAlive called";
+    return backend_.keep_alive(request, response);
 }
 
 ::grpc::Status BackupServiceImpl::EndBackup(
     ::grpc::ServerContext* /*context*/,
-    const EndBackupRequest* /*request*/,
-    EndBackupResponse* /*response*/)
+    const EndBackupRequest* request,
+    EndBackupResponse* response)
 {
-    // TODO: 実装
-    return {::grpc::StatusCode::UNIMPLEMENTED, "EndBackup not implemented"};
+    VLOG_LP(log_info) << "EndBackup called";
+    return backend_.end_backup(request, response);
 }
 
 ::grpc::Status BackupServiceImpl::GetObject(

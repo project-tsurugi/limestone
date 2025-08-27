@@ -19,6 +19,7 @@
 #include <boost/filesystem.hpp>
 #include <fstream>
 #include <vector>
+#include "limestone/grpc/service/message_versions.h"
 
 namespace limestone::testing {
 
@@ -105,4 +106,62 @@ TEST_F(backend_shared_impl_test, make_backup_object_from_path_not_matched) {
     EXPECT_FALSE(obj.has_value());
 }
 
+TEST_F(backend_shared_impl_test, keep_alive_success_and_not_found) {
+    backend_shared_impl backend(temp_dir);
+    // Create a session
+    auto session_opt = backend.create_and_register_session(60, nullptr);
+    ASSERT_TRUE(session_opt.has_value());
+    std::string session_id = session_opt->session_id();
+
+    // Normal case: version matches and session is valid
+    limestone::grpc::proto::KeepAliveRequest req;
+    req.set_version(limestone::grpc::service::keep_alive_message_version);
+    req.set_session_id(session_id);
+    limestone::grpc::proto::KeepAliveResponse resp;
+    auto status = backend.keep_alive(&req, &resp);
+    EXPECT_TRUE(status.ok());
+
+    // Version mismatch
+    req.set_version(9999);
+    status = backend.keep_alive(&req, &resp);
+    EXPECT_EQ(status.error_code(), ::grpc::StatusCode::INVALID_ARGUMENT);
+    EXPECT_STREQ(status.error_message().c_str(), "unsupported keep_alive request version");
+
+    // Unregistered session ID
+    req.set_version(limestone::grpc::service::keep_alive_message_version);
+    req.set_session_id("not_found_id");
+    status = backend.keep_alive(&req, &resp);
+    EXPECT_EQ(status.error_code(), ::grpc::StatusCode::NOT_FOUND);
+    EXPECT_STREQ(status.error_message().c_str(), "session not found or expired");
+}
+
+TEST_F(backend_shared_impl_test, end_backup_success_and_not_found) {
+    backend_shared_impl backend(temp_dir);
+    // Create a session
+    auto session_opt = backend.create_and_register_session(60, nullptr);
+    ASSERT_TRUE(session_opt.has_value());
+    std::string session_id = session_opt->session_id();
+
+    // Normal case: version matches and session is valid
+    limestone::grpc::proto::EndBackupRequest req;
+    req.set_version(limestone::grpc::service::end_backup_message_version);
+    req.set_session_id(session_id);
+    limestone::grpc::proto::EndBackupResponse resp;
+    auto status = backend.end_backup(&req, &resp);
+    EXPECT_TRUE(status.ok());
+
+    // Version mismatch
+    req.set_version(9999);
+    status = backend.end_backup(&req, &resp);
+    EXPECT_EQ(status.error_code(), ::grpc::StatusCode::INVALID_ARGUMENT);
+    EXPECT_STREQ(status.error_message().c_str(), "unsupported end_backup request version");
+
+    // Unregistered session ID
+    req.set_version(limestone::grpc::service::end_backup_message_version);
+    req.set_session_id("not_found_id");
+    status = backend.end_backup(&req, &resp);
+    EXPECT_TRUE(status.ok());  // remove_session returns OK even if not found
+}
+
 } // namespace limestone::testing
+

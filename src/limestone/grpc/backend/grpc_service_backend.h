@@ -64,6 +64,7 @@ public:
     // Returns the log directory path (for debugging purposes)
     [[nodiscard]] virtual boost::filesystem::path get_log_dir() const noexcept = 0;
 protected:
+    // Prevent direct instantiation; only derived classes can construct.
     grpc_service_backend() = default;
 };
 
