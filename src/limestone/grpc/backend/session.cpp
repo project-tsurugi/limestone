@@ -21,6 +21,8 @@
 #include <boost/uuid/uuid_io.hpp>
 #include <chrono>
 #include <ctime>
+#include <optional>
+#include <stdexcept>
 
 namespace limestone::grpc::backend {
 
@@ -69,6 +71,31 @@ epoch_id_type session::begin_epoch() const {
 
 epoch_id_type session::end_epoch() const {
 	return end_epoch_;
+}
+
+void session::add_backup_object(const limestone::backup_object& obj) {
+	std::lock_guard<std::mutex> lock(backup_objects_mutex_);
+	auto [it, inserted] = backup_objects_.emplace(obj.object_id(), obj);
+	if (!inserted) {
+		throw std::runtime_error("backup_object with the same object_id already exists");
+	}
+}
+
+std::optional<std::reference_wrapper<const limestone::backup_object>> session::find_backup_object(const std::string& object_id) const {
+	std::lock_guard<std::mutex> lock(backup_objects_mutex_);
+	auto it = backup_objects_.find(object_id);
+	if (it != backup_objects_.end()) {
+		return std::cref(it->second);
+	}
+	return std::nullopt;
+}
+
+auto session::begin() const noexcept -> std::map<std::string, limestone::backup_object>::const_iterator {
+	return backup_objects_.cbegin();
+}
+
+auto session::end() const noexcept -> std::map<std::string, limestone::backup_object>::const_iterator {
+	return backup_objects_.cend();
 }
 
 } // namespace limestone::grpc::backend

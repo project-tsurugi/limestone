@@ -61,13 +61,13 @@ public:
      * @param src Source proto message.
      * @return backup_object instance.
      */
-    static backup_object from_proto(const limestone::grpc::proto::BackupObject& src);
+    [[nodiscard]] static backup_object from_proto(const limestone::grpc::proto::BackupObject& src);
 
     /**
      * @brief Convert this object to a proto message.
      * @return Proto message.
      */
-    limestone::grpc::proto::BackupObject to_proto() const;
+    [[nodiscard]] limestone::grpc::proto::BackupObject to_proto() const;
 
 private:
     std::string object_id_;

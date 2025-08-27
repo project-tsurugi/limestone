@@ -21,7 +21,7 @@ backup_object::backup_object(
 }
 
 backup_object backup_object::from_proto(const limestone::grpc::proto::BackupObject& src) {
-    backup_object_type type = static_cast<backup_object_type>(src.type());
+    auto type = static_cast<backup_object_type>(src.type());
     return backup_object(src.object_id(), type, boost::filesystem::path(src.path()));
 }
 

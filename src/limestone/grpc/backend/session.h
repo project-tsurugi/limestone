@@ -17,8 +17,12 @@
 
 #include <atomic>
 #include <functional>
+#include <map>
+#include <mutex>
+#include <optional>
 #include <string>
 
+#include "backup_object.h"
 #include "limestone/api/epoch_id_type.h"
 
 namespace limestone::grpc::backend {
@@ -97,13 +101,40 @@ public:
      */
     [[nodiscard]] epoch_id_type end_epoch() const;
 
+    /**
+     * @brief Add a backup_object to the session. Throws if object_id already exists.
+     * @param obj backup_object to add
+     */
+    void add_backup_object(const limestone::backup_object& obj);
+
+    /**
+     * @brief Find a backup_object by object_id.
+     * @param object_id object id string
+     * @return optional reference to backup_object (const), or nullopt if not found
+     */
+    std::optional<std::reference_wrapper<const limestone::backup_object>> find_backup_object(const std::string& object_id) const;
+
+    /**
+     * @brief Get const begin iterator for backup_objects.
+     */
+    auto begin() const noexcept -> std::map<std::string, limestone::backup_object>::const_iterator;
+
+    /**
+     * @brief Get const end iterator for backup_objects.
+     */
+    auto end() const noexcept -> std::map<std::string, limestone::backup_object>::const_iterator;
+
 private:
+    mutable std::mutex backup_objects_mutex_;
     std::string generate_uuid();
     std::string session_id_;
     epoch_id_type begin_epoch_;
     epoch_id_type end_epoch_;
     std::atomic<int64_t> expire_at_;
     on_remove_callback_type on_remove_;
+
+    // Map from object_id to backup_object
+    std::map<std::string, limestone::backup_object> backup_objects_;
 };
 
 } // namespace limestone::grpc::backend
