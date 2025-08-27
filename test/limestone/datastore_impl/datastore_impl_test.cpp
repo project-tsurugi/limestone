@@ -66,4 +66,16 @@ TEST_F(datastore_impl_test, migration_info_multiple_sets) {
     EXPECT_EQ(datastore.get_migration_info().value().get_new_version(), 8);
 }
 
+TEST_F(datastore_impl_test, backup_counter_getter) {
+    datastore_impl datastore(dummy_ds);
+    // Initial value should be 0
+    EXPECT_EQ(datastore.get_backup_counter(), 0);
+    // Increment
+    datastore.increment_backup_counter();
+    EXPECT_EQ(datastore.get_backup_counter(), 1);
+    // Decrement
+    datastore.decrement_backup_counter();
+    EXPECT_EQ(datastore.get_backup_counter(), 0);
+}
+
 } // namespace limestone::api

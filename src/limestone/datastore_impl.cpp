@@ -343,4 +343,8 @@ backup_detail_and_rotation_result datastore_impl::begin_backup_with_rotation_res
     return {std::move(backup_detail_ptr), result};
 }
 
+int datastore_impl::get_backup_counter() const noexcept {
+    return backup_counter_.load();
+}
+
 }  // namespace limestone::api

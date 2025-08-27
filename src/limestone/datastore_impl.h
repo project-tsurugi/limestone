@@ -122,10 +122,16 @@ public:
 
     // Setter for boot_durable_epoch_id_
     void set_boot_durable_epoch_id(epoch_id_type epoch_id) noexcept;
+
+    // Getter for backup_counter_ (for testing and monitoring)
+    int get_backup_counter() const noexcept;
+
 private:
     datastore& datastore_;
     // Atomic counter for tracking active backup operations.
     std::atomic<int> backup_counter_;
+
+    // Atomic flag to indicate if a replica exists
     std::atomic<bool> replica_exists_;
 
     // Role flag (true = master, false = replica)
