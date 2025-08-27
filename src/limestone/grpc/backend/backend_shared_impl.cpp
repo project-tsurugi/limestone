@@ -6,6 +6,7 @@
 #include "grpc/service/grpc_constants.h"
 namespace limestone::grpc::backend {
 
+
 using limestone::grpc::service::keep_alive_message_version;
 using limestone::grpc::service::end_backup_message_version;
 using limestone::grpc::service::session_timeout_seconds;
@@ -86,6 +87,9 @@ std::optional<session> backend_shared_impl::create_and_register_session(int64_t 
     return {::grpc::StatusCode::OK, "end_backup successful"};
 }
 
+const session_store& backend_shared_impl::get_session_store() const noexcept {
+    return session_store_;
+}
 
 
 } // namespace limestone::grpc::backend

@@ -28,11 +28,6 @@ using limestone::grpc::proto::BackupObjectType;
 
 using namespace limestone::grpc::backend;
 
-class testable_backend_shared_impl : public backend_shared_impl {
-public:
-    using backend_shared_impl::backend_shared_impl;
-    using backend_shared_impl::session_store_;
-};
 using namespace limestone::internal;
 
 class backend_shared_impl_test : public ::testing::Test {
@@ -50,7 +45,7 @@ protected:
 
 
 TEST_F(backend_shared_impl_test, list_wal_history_returns_empty_when_dir_is_empty) {
-    testable_backend_shared_impl backend(temp_dir);
+    backend_shared_impl backend(temp_dir);
     auto result = backend.list_wal_history();
     EXPECT_TRUE(result.empty());
 }
@@ -61,7 +56,7 @@ TEST_F(backend_shared_impl_test, list_wal_history_matches_wal_history_class) {
     wh.append(456);
     auto expected = wh.list();
 
-    testable_backend_shared_impl backend(temp_dir);
+    backend_shared_impl backend(temp_dir);
     auto actual = backend.list_wal_history();
 
     ASSERT_EQ(expected.size(), actual.size());
@@ -113,7 +108,7 @@ TEST_F(backend_shared_impl_test, make_backup_object_from_path_not_matched) {
 }
 
 TEST_F(backend_shared_impl_test, keep_alive_success_and_not_found) {
-    testable_backend_shared_impl backend(temp_dir);
+    backend_shared_impl backend(temp_dir);
     // Create a session
     auto session_opt = backend.create_and_register_session(60, nullptr);
     ASSERT_TRUE(session_opt.has_value());
@@ -126,7 +121,7 @@ TEST_F(backend_shared_impl_test, keep_alive_success_and_not_found) {
     limestone::grpc::proto::KeepAliveResponse resp;
     auto status = backend.keep_alive(&req, &resp);
     EXPECT_TRUE(status.ok());
-    auto session_for_check = backend.session_store_.get_session(session_id);
+    auto session_for_check = backend.get_session_store().get_session(session_id);
     ASSERT_TRUE(session_for_check.has_value());
     EXPECT_EQ(resp.expire_at(), session_for_check->expire_at());
 
@@ -145,7 +140,7 @@ TEST_F(backend_shared_impl_test, keep_alive_success_and_not_found) {
 }
 
 TEST_F(backend_shared_impl_test, end_backup_success_and_not_found) {
-    testable_backend_shared_impl backend(temp_dir);
+    backend_shared_impl backend(temp_dir);
     // Create a session
     auto session_opt = backend.create_and_register_session(60, nullptr);
     ASSERT_TRUE(session_opt.has_value());

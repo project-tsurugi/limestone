@@ -40,12 +40,12 @@ public:
     // Shared logic for end_backup
     ::grpc::Status end_backup(const limestone::grpc::proto::EndBackupRequest* request, limestone::grpc::proto::EndBackupResponse* response) noexcept;
 
-protected:
-    // for testing    
-    session_store session_store_;
-   
+    // Getter for session_store_ (for testing)
+    const session_store& get_session_store() const noexcept;
+
 private:
     boost::filesystem::path log_dir_;
+    session_store session_store_;
 };
 
 } // namespace limestone::grpc::backend
