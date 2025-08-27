@@ -124,7 +124,7 @@ public:
     void set_boot_durable_epoch_id(epoch_id_type epoch_id) noexcept;
 
     // Getter for backup_counter_ (for testing and monitoring)
-    int get_backup_counter() const noexcept;
+    [[nodiscard]] int get_backup_counter() const noexcept;
 
 private:
     datastore& datastore_;

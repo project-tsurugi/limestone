@@ -1,3 +1,4 @@
+
 /*
  * Copyright 2022-2025 Project Tsurugi.
  *
@@ -124,6 +125,24 @@ TEST_F(session_store_test, expiry_thread_waits_for_next_expire) {
         cv.wait_for(lock, std::chrono::seconds(3), [&removed_count]{ return removed_count.load() >= 2; });
     }
     ASSERT_EQ(removed_count.load(), 2);
+}
+
+TEST_F(session_store_test, get_session) {
+    grpc::backend::session_store store;
+    auto s_opt = store.create_and_register(10, nullptr);
+    ASSERT_TRUE(s_opt.has_value());
+    std::string session_id = s_opt->session_id();
+
+    // Can be retrieved with get_session
+    auto s2 = store.get_session(session_id);
+    ASSERT_TRUE(s2.has_value());
+    EXPECT_EQ(s2->session_id(), session_id);
+    EXPECT_EQ(s2->expire_at(), s_opt->expire_at());
+
+    // Cannot be retrieved after deletion
+    store.remove_session(session_id);
+    auto s3 = store.get_session(session_id);
+    ASSERT_FALSE(s3.has_value());
 }
 
 } // namespace limestone::testing

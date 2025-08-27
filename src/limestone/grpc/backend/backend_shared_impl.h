@@ -34,15 +34,18 @@ public:
     // Create and register a session via session_store, return the created session
     std::optional<session> create_and_register_session(int64_t timeout_seconds, session::on_remove_callback_type on_remove = nullptr);
 
-    // Shared logic for keep_alive (skeleton)
+    // Shared logic for keep_alive
     ::grpc::Status keep_alive(const limestone::grpc::proto::KeepAliveRequest* request, limestone::grpc::proto::KeepAliveResponse* response) noexcept;
 
-    // Shared logic for end_backup (skeleton)
+    // Shared logic for end_backup
     ::grpc::Status end_backup(const limestone::grpc::proto::EndBackupRequest* request, limestone::grpc::proto::EndBackupResponse* response) noexcept;
 
+protected:
+    // for testing    
+    session_store session_store_;
+   
 private:
     boost::filesystem::path log_dir_;
-    session_store session_store_;
 };
 
 } // namespace limestone::grpc::backend

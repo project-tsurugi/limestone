@@ -84,6 +84,13 @@ public:
      */
     void session_expiry_thread();
 
+    /**
+     * @brief Retrieves a session by its ID without refreshing expiration.
+     * @param session_id The unique identifier of the session to retrieve.
+     * @return std::optional<session> The session object if found; std::nullopt otherwise.
+     */
+    std::optional<session> get_session(const std::string& session_id) const;
+
 private:
     std::unordered_map<std::string, session> sessions_;
     mutable std::mutex mutex_;

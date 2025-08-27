@@ -58,19 +58,20 @@ google::protobuf::RepeatedPtrField<BranchEpoch> backend_shared_impl::list_wal_hi
 }
 
 std::optional<session> backend_shared_impl::create_and_register_session(int64_t timeout_seconds, session::on_remove_callback_type on_remove) {
-    return session_store_.create_and_register(timeout_seconds, on_remove);
+    return session_store_.create_and_register(timeout_seconds, std::move(on_remove));
 }
 
-::grpc::Status backend_shared_impl::keep_alive(const limestone::grpc::proto::KeepAliveRequest* request, limestone::grpc::proto::KeepAliveResponse* /*response*/) noexcept {
+::grpc::Status backend_shared_impl::keep_alive(const limestone::grpc::proto::KeepAliveRequest* request, limestone::grpc::proto::KeepAliveResponse* response) noexcept {
     uint64_t version = request->version();
     if (version != keep_alive_message_version) {
         return {::grpc::StatusCode::INVALID_ARGUMENT, "unsupported keep_alive request version"};
     }
-    std::string session_id = request->session_id();
+    const auto& session_id = request->session_id();
     auto session = session_store_.get_and_refresh(session_id, session_timeout_seconds);
     if (!session) {
         return {::grpc::StatusCode::NOT_FOUND, "session not found or expired"};
     }
+    response->set_expire_at(session->expire_at());
     return {::grpc::StatusCode::OK, "keep_alive successful"};
 }
 
@@ -79,7 +80,7 @@ std::optional<session> backend_shared_impl::create_and_register_session(int64_t 
     if (version != end_backup_message_version) {
         return {::grpc::StatusCode::INVALID_ARGUMENT, "unsupported end_backup request version"};
     }
-    std::string session_id = request->session_id();
+    const auto& session_id = request->session_id();
     session_store_.remove_session(session_id);
 
     return {::grpc::StatusCode::OK, "end_backup successful"};

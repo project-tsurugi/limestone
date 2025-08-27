@@ -106,4 +106,12 @@ void session_store::session_expiry_thread() {
     }
 }
 
+std::optional<session> session_store::get_session(const std::string& session_id) const {
+    std::lock_guard<std::mutex> lock(mutex_);
+    auto it = sessions_.find(session_id);
+    if (it != sessions_.end()) {
+        return it->second;
+    }
+    return std::nullopt;
+}
 } // namespace limestone::grpc::backend
