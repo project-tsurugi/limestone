@@ -66,10 +66,14 @@ inproc_backend::inproc_backend([[maybe_unused]] limestone::api::datastore& ds, c
         if (request->version() != begin_backup_message_version) {
             return {::grpc::StatusCode::INVALID_ARGUMENT, std::string("unsupported begin_backup request version: ") + std::to_string(request->version())};
         }
+        uint32_t begin_epoch = request->begin_epoch();
+        uint32_t end_epoch = request->end_epoch();
         // Create a session for this backup. The second argument is a callback
         // that will be invoked when the session is removed (expired or deleted).
         // In this callback, decrement_backup_counter() is called to update the backup counter.
         auto session = backend_shared_impl_.create_and_register_session(
+            begin_epoch,
+            end_epoch,
             session_timeout_seconds,
             [this]() {
                 datastore_.get_impl()->decrement_backup_counter();
@@ -81,8 +85,6 @@ inproc_backend::inproc_backend([[maybe_unused]] limestone::api::datastore& ds, c
 
         response->set_session_id(session->session_id());
         response->set_expire_at(session->expire_at());
-        uint32_t begin_epoch = request->begin_epoch();
-        uint32_t end_epoch = request->end_epoch();
         bool is_full_backup = (begin_epoch == 0 && end_epoch == 0);
         compaction_catalog& catalog = datastore_.get_impl()->get_compaction_catalog();
         if (!is_full_backup) {

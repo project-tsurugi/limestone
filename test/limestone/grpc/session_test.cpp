@@ -31,8 +31,10 @@ TEST_F(session_test, construct_and_getters) {
     std::string id = "test_id";
     int64_t now = static_cast<int64_t>(std::time(nullptr));
     int64_t expire = now + 10;
-    grpc::backend::session s(id, expire);
+    grpc::backend::session s(id, 1, 2,expire);
     ASSERT_EQ(s.session_id(), id);
+    ASSERT_EQ(s.begin_epoch(), 1);
+    ASSERT_EQ(s.end_epoch(), 2);
     ASSERT_EQ(s.expire_at(), expire);
 }
 
@@ -40,7 +42,7 @@ TEST_F(session_test, refresh_expire_at) {
     std::string id = "test_id2";
     int64_t now = static_cast<int64_t>(std::time(nullptr));
     int64_t expire = now + 1;
-    grpc::backend::session s(id, expire);
+    grpc::backend::session s(id, 1, 2, expire);
     std::this_thread::sleep_for(std::chrono::seconds(1));
     s.refresh(5);
     int64_t refreshed = s.expire_at();
@@ -50,7 +52,7 @@ TEST_F(session_test, refresh_expire_at) {
 TEST_F(session_test, call_on_remove) {
     std::atomic<bool> called{false};
     auto on_remove = [&called]() { called = true; };
-    grpc::backend::session s("id3", std::time(nullptr) + 1, on_remove);
+    grpc::backend::session s("id3", 1, 2, std::time(nullptr) + 1, on_remove);
     s.call_on_remove();
     ASSERT_TRUE(called.load());
 }

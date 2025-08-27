@@ -34,7 +34,9 @@ TEST_F(session_store_test, create_and_register_and_get_and_remove) {
     std::atomic<bool> removed{false};
     auto on_remove = [&removed]() { removed = true; };
     int64_t before_create = static_cast<int64_t>(std::time(nullptr));
-    auto s_opt = store.create_and_register(2, on_remove);
+    auto s_opt = store.create_and_register(0, 1, 2, on_remove);
+    ASSERT_EQ(s_opt->begin_epoch(), 0);
+    ASSERT_EQ(s_opt->end_epoch(), 1);
     ASSERT_TRUE(s_opt.has_value());
     ASSERT_GE(s_opt->expire_at(), before_create + 2);
     std::string session_id = s_opt->session_id();
@@ -69,7 +71,7 @@ TEST_F(session_store_test, session_expiry) {
         }
         cv.notify_one();
     };
-    auto s_opt = store.create_and_register(0, on_remove);
+    auto s_opt = store.create_and_register(0, 0, 0, on_remove);
     ASSERT_TRUE(s_opt.has_value());
     std::string session_id = s_opt->session_id();
     // wait for expiry (on_remove called)
@@ -86,7 +88,7 @@ TEST_F(session_store_test, get_and_refresh_expired_session) {
     grpc::backend::session_store store;
     std::atomic<bool> removed{false};
     auto on_remove = [&removed]() { removed = true; };
-    auto s_opt = store.create_and_register(0, on_remove);
+    auto s_opt = store.create_and_register(3, 5, 0, on_remove);
     ASSERT_TRUE(s_opt.has_value());
     std::string session_id = s_opt->session_id();
 
@@ -110,8 +112,8 @@ TEST_F(session_store_test, expiry_thread_waits_for_next_expire) {
         cv.notify_all();
     };
     // Register two sessions with different expire_at values
-    auto s1 = store.create_and_register(1, on_remove);
-    auto s2 = store.create_and_register(3, on_remove);
+    auto s1 = store.create_and_register(0, 0, 1, on_remove);
+    auto s2 = store.create_and_register(0, 0, 3, on_remove);
     ASSERT_TRUE(s1.has_value());
     ASSERT_TRUE(s2.has_value());
     // Check the state immediately after the first expire
@@ -129,13 +131,15 @@ TEST_F(session_store_test, expiry_thread_waits_for_next_expire) {
 
 TEST_F(session_store_test, get_session) {
     grpc::backend::session_store store;
-    auto s_opt = store.create_and_register(10, nullptr);
+    auto s_opt = store.create_and_register(1, 2, 10, nullptr);
     ASSERT_TRUE(s_opt.has_value());
     std::string session_id = s_opt->session_id();
 
     // Can be retrieved with get_session
     auto s2 = store.get_session(session_id);
     ASSERT_TRUE(s2.has_value());
+    EXPECT_EQ(s2->begin_epoch(), 1);
+    EXPECT_EQ(s2->end_epoch(), 2);
     EXPECT_EQ(s2->session_id(), session_id);
     EXPECT_EQ(s2->expire_at(), s_opt->expire_at());
 

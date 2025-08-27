@@ -58,8 +58,8 @@ google::protobuf::RepeatedPtrField<BranchEpoch> backend_shared_impl::list_wal_hi
     return result;
 }
 
-std::optional<session> backend_shared_impl::create_and_register_session(int64_t timeout_seconds, session::on_remove_callback_type on_remove) {
-    return session_store_.create_and_register(timeout_seconds, std::move(on_remove));
+std::optional<session> backend_shared_impl::create_and_register_session(epoch_id_type begin_epoch, epoch_id_type end_epoch, int64_t timeout_seconds, session::on_remove_callback_type on_remove) {
+    return session_store_.create_and_register(begin_epoch, end_epoch, timeout_seconds, std::move(on_remove));
 }
 
 ::grpc::Status backend_shared_impl::keep_alive(const limestone::grpc::proto::KeepAliveRequest* request, limestone::grpc::proto::KeepAliveResponse* response) noexcept {

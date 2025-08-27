@@ -24,11 +24,11 @@
 
 namespace limestone::grpc::backend {
 
-session::session(std::string session_id, int64_t expire_at, on_remove_callback_type on_remove)
-	: session_id_(std::move(session_id)), expire_at_(expire_at), on_remove_(std::move(on_remove)) {}
+session::session(std::string session_id, epoch_id_type begin_epoch, epoch_id_type end_epoch, int64_t expire_at, on_remove_callback_type on_remove)
+	: session_id_(std::move(session_id)), begin_epoch_(begin_epoch), end_epoch_(end_epoch), expire_at_(expire_at), on_remove_(std::move(on_remove)) {}
 
-session::session(int64_t timeout_seconds, on_remove_callback_type on_remove)
-	: session_id_(generate_uuid()), expire_at_(0), on_remove_(std::move(on_remove)) {
+session::session(epoch_id_type begin_epoch, epoch_id_type end_epoch, int64_t timeout_seconds, on_remove_callback_type on_remove)
+	: session_id_(generate_uuid()), begin_epoch_(begin_epoch), end_epoch_(end_epoch), expire_at_(0), on_remove_(std::move(on_remove)) {
 	refresh(timeout_seconds);
 }
 
@@ -54,30 +54,22 @@ void session::call_on_remove() {
 	if (on_remove_) on_remove_();
 }
 
-// session::session(session&& other) noexcept
-// 	 : session_id_(std::move(other.session_id_)),
-// 		 expire_at_(other.expire_at_.load(std::memory_order_acquire)),
-// 		 on_remove_(std::move(other.on_remove_))
-// {
-// }
-
-// session& session::operator=(session&& other) noexcept {
-//     if (this != &other) {
-//         session_id_ = std::move(other.session_id_);
-//         expire_at_.store(other.expire_at_.load(std::memory_order_acquire), std::memory_order_release);
-//         on_remove_ = std::move(other.on_remove_);
-//     }
-//     return *this;
-// }
-
-
 session::session(const session& other)
 	: session_id_(other.session_id_),
+	  begin_epoch_(other.begin_epoch_),
+	  end_epoch_(other.end_epoch_),
 	  expire_at_(other.expire_at_.load(std::memory_order_acquire)),
 	  on_remove_(other.on_remove_)
 {
 }
 
+epoch_id_type session::begin_epoch() const {
+	return begin_epoch_;
+}
+
+epoch_id_type session::end_epoch() const {
+	return end_epoch_;
+}
 
 } // namespace limestone::grpc::backend
 

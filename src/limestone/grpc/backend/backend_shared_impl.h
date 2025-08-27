@@ -32,7 +32,7 @@ public:
     static std::optional<BackupObject> make_backup_object_from_path(const boost::filesystem::path& path);
 
     // Create and register a session via session_store, return the created session
-    std::optional<session> create_and_register_session(int64_t timeout_seconds, session::on_remove_callback_type on_remove = nullptr);
+    std::optional<session> create_and_register_session(epoch_id_type begin_epoch, epoch_id_type end_epoch, int64_t timeout_seconds, session::on_remove_callback_type on_remove = nullptr);
 
     // Shared logic for keep_alive
     ::grpc::Status keep_alive(const limestone::grpc::proto::KeepAliveRequest* request, limestone::grpc::proto::KeepAliveResponse* response) noexcept;

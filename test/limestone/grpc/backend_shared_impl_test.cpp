@@ -110,7 +110,7 @@ TEST_F(backend_shared_impl_test, make_backup_object_from_path_not_matched) {
 TEST_F(backend_shared_impl_test, keep_alive_success_and_not_found) {
     backend_shared_impl backend(temp_dir);
     // Create a session
-    auto session_opt = backend.create_and_register_session(60, nullptr);
+    auto session_opt = backend.create_and_register_session(0, 0, 60, nullptr);
     ASSERT_TRUE(session_opt.has_value());
     std::string session_id = session_opt->session_id();
 
@@ -142,7 +142,7 @@ TEST_F(backend_shared_impl_test, keep_alive_success_and_not_found) {
 TEST_F(backend_shared_impl_test, end_backup_success_and_not_found) {
     backend_shared_impl backend(temp_dir);
     // Create a session
-    auto session_opt = backend.create_and_register_session(60, nullptr);
+    auto session_opt = backend.create_and_register_session(0, 0, 60, nullptr);
     ASSERT_TRUE(session_opt.has_value());
     std::string session_id = session_opt->session_id();
 

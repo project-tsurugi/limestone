@@ -16,7 +16,7 @@
 #include "session_store.h"
 #include <algorithm>
 #include <chrono>
-
+#include "limestone/api/epoch_id_type.h"
 namespace limestone::grpc::backend {
 
 session_store::session_store() {
@@ -34,9 +34,10 @@ session_store::~session_store() {
     }
 }
 
-std::optional<session> session_store::create_and_register(int64_t timeout_seconds, session::on_remove_callback_type on_remove) {
+std::optional<session> session_store::create_and_register(epoch_id_type begin_epoch, epoch_id_type end_epoch, int64_t timeout_seconds,
+                                                          session::on_remove_callback_type on_remove) {
     std::lock_guard<std::mutex> lock(mutex_);
-    session s(timeout_seconds, std::move(on_remove));
+    session s(begin_epoch, end_epoch, timeout_seconds, std::move(on_remove));
     auto [it, inserted] = sessions_.emplace(s.session_id(), s);
     cv_.notify_all();
     if (!inserted) {

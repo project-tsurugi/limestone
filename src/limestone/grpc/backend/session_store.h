@@ -68,11 +68,13 @@ public:
      * This function creates a new session with the specified timeout and registers it.
      * An optional callback can be provided, which will be invoked when the session is removed.
      *
+     * @param begin_epoch Epoch number to start backup (inclusive). 0 means full backup.
+     * @param end_epoch Epoch number to end backup (exclusive). 0 means there is no data to back up.
      * @param timeout_seconds The timeout duration for the session, in seconds.
      * @param on_remove Optional callback function to be called when the session is removed. Defaults to nullptr.
      * @return std::optional<session> The created session if successful, or std::nullopt on failure.
      */
-    std::optional<session> create_and_register(int64_t timeout_seconds, session::on_remove_callback_type on_remove = nullptr);
+    std::optional<session> create_and_register(epoch_id_type begin_epoch, epoch_id_type end_epoch, int64_t timeout_seconds, session::on_remove_callback_type on_remove = nullptr);
 
     /**
      * @brief Remove all expired sessions from the store (caller must hold lock).

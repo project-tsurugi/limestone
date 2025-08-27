@@ -15,12 +15,15 @@
  */
 #pragma once
 
-#include <string>
-#include <functional>
 #include <atomic>
+#include <functional>
+#include <string>
+
+#include "limestone/api/epoch_id_type.h"
 
 namespace limestone::grpc::backend {
 
+using limestone::api::epoch_id_type;
 class session {
 public:
     /**
@@ -28,20 +31,27 @@ public:
      */
     using on_remove_callback_type = std::function<void()>;
 
-    /**
-     * @brief Constructor for testing only. Do not use in production code.
-     * @param session_id Session ID string.
-     * @param expire_at Expiration time (UNIX timestamp).
-     * @param on_remove Callback to be called on session remove.
-     */
-    explicit session(std::string session_id, int64_t expire_at, on_remove_callback_type on_remove = nullptr);
 
     /**
-     * @brief Construct a session with timeout (seconds from now).
-     * @param timeout_seconds Timeout in seconds from now.
-     * @param on_remove Callback to be called on session remove.
+     * @brief Constructs a new session object.
+     *
+     * @param session_id        The unique identifier for the session.
+     * @param begin_epoch       Epoch number to start backup (inclusive). 0 means full backup.
+     * @param end_epoch         Epoch number to end backup (exclusive). 0 means there is no data to back up.
+     * @param expire_at         The expiration timestamp (in seconds since epoch) for the session.
+     * @param on_remove         Optional callback to be invoked when the session is removed. Defaults to nullptr.
      */
-    explicit session(int64_t timeout_seconds, on_remove_callback_type on_remove = nullptr);
+    explicit session(std::string session_id, epoch_id_type begin_epoch, epoch_id_type end_epoch, int64_t expire_at, on_remove_callback_type on_remove = nullptr);
+
+    /**
+     * @brief Constructs a new session object with the specified parameters.
+     *
+     * @param begin_epoch        Epoch number to start backup (inclusive). 0 means full backup.
+     * @param end_epoch          Epoch number to end backup (exclusive). 0 means there is no data to back up.
+     * @param timeout_seconds    Timeout duration for the session, in seconds.
+     * @param on_remove          Optional callback function to be invoked when the session is removed.
+     */
+    explicit session(epoch_id_type begin_epoch, epoch_id_type end_epoch, int64_t timeout_seconds, on_remove_callback_type on_remove = nullptr);
 
     session(const session& other);
     session& operator=(const session& other) = delete;
@@ -73,10 +83,25 @@ public:
      */
     [[nodiscard]] const std::string& session_id() const;
 
-private:
-    static std::string generate_uuid();
+    /**
+     * @brief Returns the epoch number to start backup (inclusive).
+     * 
+     * @return The epoch number to start backup (inclusive). 0 means full backup
+     */
+    [[nodiscard]] epoch_id_type begin_epoch() const;
 
+    /**
+     * @brief Returns the epoch number to end backup (exclusive).
+     * 
+     * @return The epoch number to end backup (exclusive). 0 means there is no data to back up.
+     */
+    [[nodiscard]] epoch_id_type end_epoch() const;
+
+private:
+    std::string generate_uuid();
     std::string session_id_;
+    epoch_id_type begin_epoch_;
+    epoch_id_type end_epoch_;
     std::atomic<int64_t> expire_at_;
     on_remove_callback_type on_remove_;
 };
