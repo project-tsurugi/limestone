@@ -50,4 +50,13 @@ TEST_F(backup_object_test, proto_conversion) {
     ASSERT_EQ(obj2.path(), path);
 }
 
+TEST_F(backup_object_test, backup_object_type_enum_matches_proto) {
+    using proto_type = limestone::grpc::proto::BackupObjectType;
+    ASSERT_EQ(static_cast<int>(limestone::backup_object_type::unspecified), static_cast<int>(proto_type::UNSPECIFIED));
+    ASSERT_EQ(static_cast<int>(limestone::backup_object_type::log), static_cast<int>(proto_type::LOG));
+    ASSERT_EQ(static_cast<int>(limestone::backup_object_type::snapshot), static_cast<int>(proto_type::SNAPSHOT));
+    ASSERT_EQ(static_cast<int>(limestone::backup_object_type::blob), static_cast<int>(proto_type::BLOB));
+    ASSERT_EQ(static_cast<int>(limestone::backup_object_type::metadata), static_cast<int>(proto_type::METADATA));
+}
+
 } // namespace limestone::testing
