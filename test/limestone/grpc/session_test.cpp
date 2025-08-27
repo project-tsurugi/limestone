@@ -14,10 +14,13 @@
  * limitations under the License.
  */
 #include "limestone/grpc/backend/session.h"
+
 #include <gtest/gtest.h>
+
 #include <atomic>
-#include <thread>
 #include <chrono>
+#include <regex>
+#include <thread>
 
 namespace limestone::testing {
 
@@ -98,6 +101,57 @@ TEST_F(session_test, backup_object_iteration) {
     }
     std::sort(found_ids.begin(), found_ids.end());
     ASSERT_EQ(found_ids, ids);
+}
+
+TEST_F(session_test, copy_constructor_copies_backup_objects) {
+    grpc::backend::session s1("sid", 1, 2, 100, nullptr);
+    backup_object obj1("id1", backup_object_type::log, "foo/bar");
+    backup_object obj2("id2", backup_object_type::snapshot, "snap/path");
+    s1.add_backup_object(obj1);
+    s1.add_backup_object(obj2);
+
+    grpc::backend::session s2 = s1; // copy
+
+    // Check if s2 also contains the same backup_objects
+    auto found1 = s2.find_backup_object("id1");
+    ASSERT_TRUE(found1.has_value());
+    EXPECT_EQ(found1->get().object_id(), "id1");
+    EXPECT_EQ(found1->get().type(), backup_object_type::log);
+    EXPECT_EQ(found1->get().path(), boost::filesystem::path("foo/bar"));
+    auto found2 = s2.find_backup_object("id2");
+    ASSERT_TRUE(found2.has_value());
+    EXPECT_EQ(found2->get().object_id(), "id2");
+    EXPECT_EQ(found2->get().type(), backup_object_type::snapshot);
+    EXPECT_EQ(found2->get().path(), boost::filesystem::path("snap/path"));
+    // Ensure s1 and s2 are independent (deep copy)
+    backup_object obj3("id3", backup_object_type::metadata, "meta");
+    s1.add_backup_object(obj3);
+    auto found3_s1 = s1.find_backup_object("id3");
+    ASSERT_TRUE(found3_s1.has_value());
+    auto found3_s2 = s2.find_backup_object("id3");
+    ASSERT_FALSE(found3_s2.has_value());
+}
+
+TEST_F(session_test, construct_with_timeout_and_on_remove) {
+    int64_t now = static_cast<int64_t>(std::time(nullptr));
+    bool called = false;
+    auto on_remove = [&called]() { called = true; };
+    grpc::backend::session s(42, 99, 5, on_remove);
+    // session_id should be in UUID format
+    std::string id = s.session_id();
+    std::regex uuid_regex(R"([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})");
+    EXPECT_TRUE(std::regex_match(id, uuid_regex));
+    EXPECT_EQ(s.begin_epoch(), 42);
+    EXPECT_EQ(s.end_epoch(), 99);
+    // expire_at should be at least now+5
+    EXPECT_GE(s.expire_at(), now + 5);
+    // on_remove should be called
+    s.call_on_remove();
+    EXPECT_TRUE(called);
+    // expire_at should be extended by refresh
+    int64_t before = s.expire_at();
+    s.refresh(10);
+    EXPECT_GE(s.expire_at(), before + 5);
 }
 
 } // namespace limestone::testing

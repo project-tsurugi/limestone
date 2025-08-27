@@ -11,31 +11,19 @@ using limestone::grpc::service::keep_alive_message_version;
 using limestone::grpc::service::end_backup_message_version;
 using limestone::grpc::service::session_timeout_seconds;
 
-std::optional<limestone::grpc::proto::BackupObject> backend_shared_impl::make_backup_object_from_path(const boost::filesystem::path& path) {
+std::optional<backup_object> backend_shared_impl::make_backup_object_from_path(const boost::filesystem::path& path) {
     std::string filename = path.filename().string();
 
     static const std::set<std::string> metadata_files = {"compaction_catalog", "limestone-manifest.json", "wal_history"};
 
     if (filename == "pwal_0000.compacted") {
-        limestone::grpc::proto::BackupObject obj;
-        obj.set_object_id(filename);
-        obj.set_path(filename);
-        obj.set_type(limestone::grpc::proto::BackupObjectType::SNAPSHOT);
-        return obj;
+        return backup_object(filename, backup_object_type::snapshot, filename);
     }
     if (filename.rfind("pwal_", 0) == 0) {
-        limestone::grpc::proto::BackupObject obj;
-        obj.set_object_id(filename);
-        obj.set_path(filename);
-        obj.set_type(limestone::grpc::proto::BackupObjectType::LOG);
-        return obj;
+        return backup_object(filename, backup_object_type::log, filename);
     }
     if ((metadata_files.count(filename) > 0) || filename.rfind("epoch.", 0) == 0) {
-        limestone::grpc::proto::BackupObject obj;
-        obj.set_object_id(filename);
-        obj.set_path(filename);
-        obj.set_type(limestone::grpc::proto::BackupObjectType::METADATA);
-        return obj;
+        return backup_object(filename, backup_object_type::metadata, filename);
     }
     return std::nullopt;
 }
@@ -87,7 +75,7 @@ std::optional<session> backend_shared_impl::create_and_register_session(epoch_id
     return {::grpc::StatusCode::OK, "end_backup successful"};
 }
 
-const session_store& backend_shared_impl::get_session_store() const noexcept {
+session_store& backend_shared_impl::get_session_store() noexcept {
     return session_store_;
 }
 

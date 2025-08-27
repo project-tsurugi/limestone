@@ -29,7 +29,7 @@ public:
     google::protobuf::RepeatedPtrField<BranchEpoch> list_wal_history();
 
     // Shared logic for creating backup objects from file paths
-    static std::optional<BackupObject> make_backup_object_from_path(const boost::filesystem::path& path);
+    static std::optional<backup_object> make_backup_object_from_path(const boost::filesystem::path& path);
 
     // Create and register a session via session_store, return the created session
     std::optional<session> create_and_register_session(epoch_id_type begin_epoch, epoch_id_type end_epoch, int64_t timeout_seconds, session::on_remove_callback_type on_remove = nullptr);
@@ -40,8 +40,8 @@ public:
     // Shared logic for end_backup
     ::grpc::Status end_backup(const limestone::grpc::proto::EndBackupRequest* request, limestone::grpc::proto::EndBackupResponse* response) noexcept;
 
-    // Getter for session_store_ (for testing)
-    const session_store& get_session_store() const noexcept;
+    // Getter for session_store
+    session_store& get_session_store() noexcept;
 
 private:
     boost::filesystem::path log_dir_;

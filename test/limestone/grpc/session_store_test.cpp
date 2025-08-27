@@ -149,5 +149,44 @@ TEST_F(session_store_test, get_session) {
     ASSERT_FALSE(s3.has_value());
 }
 
-} // namespace limestone::testing
+TEST_F(session_store_test, add_backup_object_to_session)
+{
+    using grpc::backend::session_store;
+    using limestone::backup_object;
+    using limestone::backup_object_type;
+    session_store store;
+    auto s_opt = store.create_and_register(10, 20, 100, nullptr);
+    ASSERT_TRUE(s_opt.has_value());
+    std::string session_id = s_opt->session_id();
 
+    // Generate backup_object
+    backup_object obj1{"obj1", backup_object_type::log, "log1"};
+    backup_object obj2{"obj2", backup_object_type::metadata, "meta1"};
+
+    // Addition succeeds
+    EXPECT_TRUE(store.add_backup_object_to_session(session_id, obj1));
+    EXPECT_TRUE(store.add_backup_object_to_session(session_id, obj2));
+
+    // Retrieve from session and check contents
+    auto s2 = store.get_session(session_id);
+    ASSERT_TRUE(s2.has_value());
+    auto it1 = s2->find_backup_object("obj1");
+    ASSERT_TRUE(it1.has_value());
+    EXPECT_EQ(it1->get().object_id(), "obj1");
+    EXPECT_EQ(it1->get().type(), backup_object_type::log);
+    EXPECT_EQ(it1->get().path(), "log1");
+    auto it2 = s2->find_backup_object("obj2");
+    ASSERT_TRUE(it2.has_value());
+    EXPECT_EQ(it2->get().object_id(), "obj2");
+    EXPECT_EQ(it2->get().type(), backup_object_type::metadata);
+    EXPECT_EQ(it2->get().path(), "meta1");
+
+    // Adding the same object_id fails
+    backup_object obj1_dup{"obj1", backup_object_type::log, "log2"};
+    EXPECT_FALSE(store.add_backup_object_to_session(session_id, obj1_dup));
+
+    // Fails for non-existent session ID
+    EXPECT_FALSE(store.add_backup_object_to_session("no_such_session", obj1));
+}
+
+} // namespace limestone::testing

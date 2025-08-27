@@ -46,8 +46,9 @@ public:
 
     // For testing: set exception injection hook
     void set_exception_hook(std::function<void()> hook) { exception_hook_ = std::move(hook); }
-protected:
-    // exposed for testing
+
+    // For testing: get backend_shared_impl_
+    [[nodiscard]] backend_shared_impl& get_backend_shared_impl() noexcept;
 private:
     std::function<void()> exception_hook_;
     limestone::api::datastore& datastore_;

@@ -117,7 +117,8 @@ inproc_backend::inproc_backend([[maybe_unused]] limestone::api::datastore& ds, c
             for (const auto& entry : result.detail->entries()) {
                 auto obj = backend_shared_impl::make_backup_object_from_path(entry.source_path());
                 if (obj) {
-                    *response->add_objects() = *obj;
+                    backend_shared_impl_.get_session_store().add_backup_object_to_session(session->session_id(), *obj);
+                    *response->add_objects() = obj->to_proto();
                 }
             }
         }
@@ -145,6 +146,10 @@ boost::filesystem::path inproc_backend::get_log_dir() const noexcept {
 ::grpc::Status inproc_backend::get_object(const limestone::grpc::proto::GetObjectRequest* /*request*/, ::grpc::ServerWriter<limestone::grpc::proto::GetObjectResponse>* /*writer*/) noexcept {
     // TODO: implement actual logic
     return {::grpc::StatusCode::UNIMPLEMENTED, "get_object not implemented"};
+}
+
+backend_shared_impl& inproc_backend::get_backend_shared_impl() noexcept {
+    return backend_shared_impl_;
 }
 
 } // namespace limestone::grpc::backend

@@ -79,7 +79,7 @@ TEST_F(backend_shared_impl_test, make_backup_object_from_path_metadata_files) {
         ASSERT_TRUE(obj.has_value());
         EXPECT_EQ(obj->object_id(), fname);
         EXPECT_EQ(obj->path(), fname);
-        EXPECT_EQ(obj->type(), BackupObjectType::METADATA);
+        EXPECT_EQ(obj->type(), backup_object_type::metadata);
     }
 }
 
@@ -89,7 +89,7 @@ TEST_F(backend_shared_impl_test, make_backup_object_from_path_snapshot) {
     ASSERT_TRUE(obj.has_value());
     EXPECT_EQ(obj->object_id(), fname);
     EXPECT_EQ(obj->path(), fname);
-    EXPECT_EQ(obj->type(), BackupObjectType::SNAPSHOT);
+    EXPECT_EQ(obj->type(), backup_object_type::snapshot);
 }
 
 TEST_F(backend_shared_impl_test, make_backup_object_from_path_log) {
@@ -98,7 +98,7 @@ TEST_F(backend_shared_impl_test, make_backup_object_from_path_log) {
     ASSERT_TRUE(obj.has_value());
     EXPECT_EQ(obj->object_id(), fname);
     EXPECT_EQ(obj->path(), fname);
-    EXPECT_EQ(obj->type(), BackupObjectType::LOG);
+    EXPECT_EQ(obj->type(), backup_object_type::log);
 }
 
 TEST_F(backend_shared_impl_test, make_backup_object_from_path_not_matched) {
@@ -165,6 +165,22 @@ TEST_F(backend_shared_impl_test, end_backup_success_and_not_found) {
     req.set_session_id("not_found_id");
     status = backend.end_backup(&req, &resp);
     EXPECT_TRUE(status.ok());  // remove_session returns OK even if not found
+}
+
+TEST_F(backend_shared_impl_test, get_session_store_returns_registered_sessions) {
+    backend_shared_impl backend(temp_dir);
+    // Register a session
+    auto session_opt = backend.create_and_register_session(123, 456, 30, nullptr);
+    ASSERT_TRUE(session_opt.has_value());
+    std::string session_id = session_opt->session_id();
+
+    // Access the session_store via get_session_store and verify the session can be retrieved
+    const auto& store = backend.get_session_store();
+    auto found = store.get_session(session_id);
+    ASSERT_TRUE(found.has_value());
+    EXPECT_EQ(found->session_id(), session_id);
+    EXPECT_EQ(found->begin_epoch(), 123);
+    EXPECT_EQ(found->end_epoch(), 456);
 }
 
 } // namespace limestone::testing

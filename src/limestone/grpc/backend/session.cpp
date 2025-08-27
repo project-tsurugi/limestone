@@ -57,11 +57,15 @@ void session::call_on_remove() {
 }
 
 session::session(const session& other)
-	: session_id_(other.session_id_),
-	  begin_epoch_(other.begin_epoch_),
-	  end_epoch_(other.end_epoch_),
-	  expire_at_(other.expire_at_.load(std::memory_order_acquire)),
-	  on_remove_(other.on_remove_)
+    : session_id_(other.session_id_),
+      begin_epoch_(other.begin_epoch_),
+      end_epoch_(other.end_epoch_),
+      expire_at_(other.expire_at_.load(std::memory_order_acquire)),
+      on_remove_(other.on_remove_),
+      backup_objects_([&other]{
+          std::lock_guard<std::mutex> lock(other.backup_objects_mutex_);
+          return other.backup_objects_;
+      }())
 {
 }
 

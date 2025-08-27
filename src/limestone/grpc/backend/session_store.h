@@ -32,7 +32,7 @@ public:
      * @brief Construct a session_store and start the expiry thread.
      */
     session_store();
-
+    
     /**
      * @brief Destructor. Stops the expiry thread and cleans up resources.
      */
@@ -92,6 +92,19 @@ public:
      * @return std::optional<session> The session object if found; std::nullopt otherwise.
      */
     std::optional<session> get_session(const std::string& session_id) const;
+
+    /**
+     * @brief Adds a backup object to the specified session.
+     *
+     * Associates the given backup object with the session identified by the provided session ID.
+     * If the session does not exist, the operation may fail.
+     *
+     * @param session_id The unique identifier of the session to which the backup object will be added.
+     * @param obj The backup object to add to the session.
+     * @return true if the backup object was successfully added to the session; false otherwise.
+     */
+    bool add_backup_object_to_session(const std::string& session_id, const limestone::backup_object& obj);
+
 
 private:
     std::unordered_map<std::string, session> sessions_;

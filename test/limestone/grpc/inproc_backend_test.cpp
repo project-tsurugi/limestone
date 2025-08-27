@@ -348,7 +348,7 @@ TEST_F(inproc_backend_test, begin_backup_overall) {
     EXPECT_EQ(response.start_epoch(), 0);
     EXPECT_EQ(response.finish_epoch(), 0);
 
-
+    // --- 既存: response.objects() の内容検証 ---
     for (const auto& cond : backup_conditions) {
         if (cond.object_id.empty() || cond.object_path.empty() || cond.object_type == BackupObjectType::UNSPECIFIED) {
             continue; // Skip conditions that do not specify object details
@@ -383,6 +383,45 @@ TEST_F(inproc_backend_test, begin_backup_overall) {
             }
         }
         EXPECT_TRUE(found) << "Unexpected BackupObject found: id=" << obj.object_id() << ", path=" << obj.path() << ", type=" << obj.type();
+    }
+
+    const auto& session_store = backend.get_backend_shared_impl().get_session_store();
+    auto session_opt = session_store.get_session(session_id);
+    ASSERT_TRUE(session_opt.has_value()) << "Session not found for session_id: " << session_id;
+    const auto& session = session_opt.value();
+
+    // セッションの backup_object map から proto型に変換して比較
+    std::vector<limestone::grpc::proto::BackupObject> session_objects;
+    for (auto it = session.begin(); it != session.end(); ++it) {
+        session_objects.push_back(it->second.to_proto());
+    }
+    // 数が一致すること
+    EXPECT_EQ(session_objects.size(), static_cast<size_t>(response.objects_size()));
+    // 各要素が一致すること（順序は問わない）
+    for (const auto& obj : session_objects) {
+        bool found = false;
+        for (const auto& resp_obj : response.objects()) {
+            if (obj.object_id() == resp_obj.object_id() &&
+                obj.path() == resp_obj.path() &&
+                obj.type() == resp_obj.type()) {
+                found = true;
+                break;
+            }
+        }
+        EXPECT_TRUE(found) << "Session backup_object not found in response: id=" << obj.object_id() << ", path=" << obj.path() << ", type=" << obj.type();
+    }
+    // 逆も同様に
+    for (const auto& resp_obj : response.objects()) {
+        bool found = false;
+        for (const auto& obj : session_objects) {
+            if (obj.object_id() == resp_obj.object_id() &&
+                obj.path() == resp_obj.path() &&
+                obj.type() == resp_obj.type()) {
+                found = true;
+                break;
+            }
+        }
+        EXPECT_TRUE(found) << "Response backup_object not found in session: id=" << resp_obj.object_id() << ", path=" << resp_obj.path() << ", type=" << resp_obj.type();
     }
 
     EXPECT_TRUE(status.ok());
