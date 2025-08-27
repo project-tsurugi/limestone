@@ -29,6 +29,7 @@
 #include "limestone/blob/blob_test_helpers.h"
 #include "limestone/compaction/compaction_test_fixture.h"
 #include "limestone/grpc/service/message_versions.h"
+#include "limestone/grpc/service/grpc_constants.h"
 #include "test_root.h"
 #include "wal_sync/wal_history.h"
 
@@ -44,6 +45,7 @@ using limestone::grpc::service::begin_backup_message_version;
 using limestone::grpc::service::list_wal_history_message_version;
 using limestone::internal::blob_file_resolver;
 using limestone::internal::wal_history;
+using limestone::grpc::service::session_timeout_seconds;
 
 namespace {
 // Structure representing backup file conditions for backup test
@@ -326,13 +328,22 @@ TEST_F(inproc_backend_test, begin_backup_overall) {
     BeginBackupResponse response;
     
     // Call begin_backup via run_with_epoch_switch to synchronize with epoch switch and log rotation if needed
+    auto before = static_cast<int64_t>(std::time(nullptr));
     auto status = run_with_epoch_switch([&]() { return backend.begin_backup(&request, &response); }, 7);
-    
+    auto after = static_cast<int64_t>(std::time(nullptr));
+
     // Check log_dir after begin_backup
     assert_backup_file_conditions([](const backup_condition& c) { return c.path_post_begin_backup; });
 
-    EXPECT_EQ(response.session_id(),"dummy_session_id");
-    EXPECT_EQ(response.expire_at(), 123456);
+    // Check that session_id is a valid UUID (xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx)
+    const std::string& session_id = response.session_id();
+    std::regex uuid_regex(R"([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})");
+    EXPECT_TRUE(std::regex_match(session_id, uuid_regex)) << "session_id is not a valid UUID: " << session_id;
+
+    // expire_at should be in [before + session_timeout_seconds, after + session_timeout_seconds]
+    int64_t expire_at = response.expire_at();
+    EXPECT_GE(expire_at, before + session_timeout_seconds);
+    EXPECT_LE(expire_at, after + session_timeout_seconds);
     EXPECT_EQ(response.start_epoch(), 0);
     EXPECT_EQ(response.finish_epoch(), 0);
 

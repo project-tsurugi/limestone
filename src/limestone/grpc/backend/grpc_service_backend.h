@@ -30,6 +30,13 @@ using limestone::grpc::proto::WalHistoryRequest;
 using limestone::grpc::proto::WalHistoryResponse;
 using limestone::grpc::proto::BeginBackupRequest;
 using limestone::grpc::proto::BeginBackupResponse;
+using limestone::grpc::proto::KeepAliveRequest;
+using limestone::grpc::proto::KeepAliveResponse;
+using limestone::grpc::proto::EndBackupRequest;
+using limestone::grpc::proto::EndBackupResponse;
+using limestone::grpc::proto::GetObjectRequest;
+using limestone::grpc::proto::GetObjectResponse;
+
 
 // Pure interface for gRPC backends.
 // Implementations: inproc_backend, standalone_backend.
@@ -45,10 +52,14 @@ public:
     [[nodiscard]] static std::unique_ptr<grpc_service_backend> create_inproc(limestone::api::datastore& store, const boost::filesystem::path& log_dir);
     [[nodiscard]] static std::unique_ptr<grpc_service_backend> create_standalone(const boost::filesystem::path& log_dir);
     
-    // Returns the WAL history response (records and last_epoch) as defined in .proto
+    // gRPC service handlers for requests defined in the proto service.
+    // Each handler receives a request and populates the response according to
+    // the service definition. Implementations must provide the actual logic.
     virtual ::grpc::Status get_wal_history_response(const WalHistoryRequest* request, WalHistoryResponse* response) noexcept = 0;
-
-   virtual ::grpc::Status begin_backup(const BeginBackupRequest* request, BeginBackupResponse* response) noexcept = 0;
+    virtual ::grpc::Status begin_backup(const BeginBackupRequest* request, BeginBackupResponse* response) noexcept = 0;
+    virtual ::grpc::Status keep_alive(const KeepAliveRequest* request, KeepAliveResponse* response) noexcept = 0;
+    virtual ::grpc::Status end_backup(const EndBackupRequest* request, EndBackupResponse* response) noexcept = 0;
+    virtual ::grpc::Status get_object(const GetObjectRequest* request, ::grpc::ServerWriter<GetObjectResponse>* writer) noexcept = 0;
 
     // Returns the log directory path (for debugging purposes)
     [[nodiscard]] virtual boost::filesystem::path get_log_dir() const noexcept = 0;

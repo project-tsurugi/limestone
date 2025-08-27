@@ -40,9 +40,14 @@ public:
     // gRPC handlers
     ::grpc::Status get_wal_history_response(const limestone::grpc::proto::WalHistoryRequest* request, limestone::grpc::proto::WalHistoryResponse* response) noexcept override;
     ::grpc::Status begin_backup(const BeginBackupRequest* request, BeginBackupResponse* response) noexcept override;
+    ::grpc::Status keep_alive(const limestone::grpc::proto::KeepAliveRequest* request, limestone::grpc::proto::KeepAliveResponse* response) noexcept override;
+    ::grpc::Status end_backup(const limestone::grpc::proto::EndBackupRequest* request, limestone::grpc::proto::EndBackupResponse* response) noexcept override;
+    ::grpc::Status get_object(const limestone::grpc::proto::GetObjectRequest* request, ::grpc::ServerWriter<limestone::grpc::proto::GetObjectResponse>* writer) noexcept override;
 
     // For testing: set exception injection hook
     void set_exception_hook(std::function<void()> hook) { exception_hook_ = std::move(hook); }
+protected:
+    // exposed for testing
 private:
     std::function<void()> exception_hook_;
     limestone::api::datastore& datastore_;

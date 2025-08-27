@@ -1,7 +1,14 @@
 #include "backend_shared_impl.h"
 #include <google/protobuf/repeated_field.h>
 #include <optional>
+
+#include "grpc/service/message_versions.h"
+#include "grpc/service/grpc_constants.h"
 namespace limestone::grpc::backend {
+
+using limestone::grpc::service::keep_alive_message_version;
+using limestone::grpc::service::end_backup_message_version;
+using limestone::grpc::service::session_timeout_seconds;
 
 std::optional<limestone::grpc::proto::BackupObject> backend_shared_impl::make_backup_object_from_path(const boost::filesystem::path& path) {
     std::string filename = path.filename().string();
@@ -49,5 +56,35 @@ google::protobuf::RepeatedPtrField<BranchEpoch> backend_shared_impl::list_wal_hi
     }
     return result;
 }
+
+std::optional<session> backend_shared_impl::create_and_register_session(int64_t timeout_seconds, session::on_remove_callback_type on_remove) {
+    return session_store_.create_and_register(timeout_seconds, on_remove);
+}
+
+::grpc::Status backend_shared_impl::keep_alive(const limestone::grpc::proto::KeepAliveRequest* request, limestone::grpc::proto::KeepAliveResponse* /*response*/) noexcept {
+    uint64_t version = request->version();
+    if (version != keep_alive_message_version) {
+        return {::grpc::StatusCode::INVALID_ARGUMENT, "unsupported keep_alive request version"};
+    }
+    std::string session_id = request->session_id();
+    auto session = session_store_.get_and_refresh(session_id, session_timeout_seconds);
+    if (!session) {
+        return {::grpc::StatusCode::NOT_FOUND, "session not found or expired"};
+    }
+    return {::grpc::StatusCode::OK, "keep_alive successful"};
+}
+
+::grpc::Status backend_shared_impl::end_backup(const limestone::grpc::proto::EndBackupRequest* request, limestone::grpc::proto::EndBackupResponse* /*response*/) noexcept {
+    uint64_t version = request->version();
+    if (version != end_backup_message_version) {
+        return {::grpc::StatusCode::INVALID_ARGUMENT, "unsupported end_backup request version"};
+    }
+    std::string session_id = request->session_id();
+    session_store_.remove_session(session_id);
+
+    return {::grpc::StatusCode::OK, "end_backup successful"};
+}
+
+
 
 } // namespace limestone::grpc::backend

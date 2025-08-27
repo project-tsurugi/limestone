@@ -17,15 +17,19 @@
 
 #include "compaction_catalog.h"
 #include "datastore_impl.h"
+#include "grpc/service/grpc_constants.h"
 #include "grpc/service/message_versions.h"
 #include "limestone/api/backup_detail.h"
 #include "limestone/logging.h"
 #include "logging_helper.h"
+#include "session.h"
 namespace limestone::grpc::backend {
+
+using limestone::api::backup_detail_and_rotation_result;
 using limestone::api::backup_type;
 using limestone::grpc::service::begin_backup_message_version;
 using limestone::grpc::service::list_wal_history_message_version;
-using limestone::api::backup_detail_and_rotation_result;
+using limestone::grpc::service::session_timeout_seconds;
 using limestone::internal::compaction_catalog;
 
 inproc_backend::inproc_backend([[maybe_unused]] limestone::api::datastore& ds, const boost::filesystem::path& log_dir)
@@ -62,12 +66,23 @@ inproc_backend::inproc_backend([[maybe_unused]] limestone::api::datastore& ds, c
         if (request->version() != begin_backup_message_version) {
             return {::grpc::StatusCode::INVALID_ARGUMENT, std::string("unsupported begin_backup request version: ") + std::to_string(request->version())};
         }
+        // Create a session for this backup. The second argument is a callback
+        // that will be invoked when the session is removed (expired or deleted).
+        // In this callback, decrement_backup_counter() is called to update the backup counter.
+        auto session = backend_shared_impl_.create_and_register_session(
+            session_timeout_seconds,
+            [this]() {
+                datastore_.get_impl()->decrement_backup_counter();
+            }
+        );
+        if (!session) {
+            return {::grpc::StatusCode::INTERNAL, "failed to create session"};
+        }
+
+        response->set_session_id(session->session_id());
+        response->set_expire_at(session->expire_at());
         uint32_t begin_epoch = request->begin_epoch();
         uint32_t end_epoch = request->end_epoch();
-
-        response->set_session_id("dummy_session_id");  // FIX-ME implement
-        response->set_expire_at(123456);               // FIX-ME implement
-
         bool is_full_backup = (begin_epoch == 0 && end_epoch == 0);
         compaction_catalog& catalog = datastore_.get_impl()->get_compaction_catalog();
         if (!is_full_backup) {
@@ -114,6 +129,20 @@ inproc_backend::inproc_backend([[maybe_unused]] limestone::api::datastore& ds, c
 
 boost::filesystem::path inproc_backend::get_log_dir() const noexcept {
 	return log_dir_;
+}
+
+
+::grpc::Status inproc_backend::keep_alive(const limestone::grpc::proto::KeepAliveRequest* request, limestone::grpc::proto::KeepAliveResponse* response) noexcept {
+    return backend_shared_impl_.keep_alive(request, response);
+}
+
+::grpc::Status inproc_backend::end_backup(const limestone::grpc::proto::EndBackupRequest* request, limestone::grpc::proto::EndBackupResponse* response) noexcept {
+    return backend_shared_impl_.end_backup(request, response);
+}
+
+::grpc::Status inproc_backend::get_object(const limestone::grpc::proto::GetObjectRequest* /*request*/, ::grpc::ServerWriter<limestone::grpc::proto::GetObjectResponse>* /*writer*/) noexcept {
+    // TODO: implement actual logic
+    return {::grpc::StatusCode::UNIMPLEMENTED, "get_object not implemented"};
 }
 
 } // namespace limestone::grpc::backend

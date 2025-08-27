@@ -37,8 +37,11 @@ public:
     standalone_backend& operator=(standalone_backend&&) = delete;
 
     [[nodiscard]] boost::filesystem::path get_log_dir() const noexcept override;
-    ::grpc::Status get_wal_history_response(const WalHistoryRequest* request, WalHistoryResponse* response) noexcept override;
-    ::grpc::Status begin_backup(const BeginBackupRequest* request, BeginBackupResponse* response) noexcept override;
+    ::grpc::Status get_wal_history_response(const limestone::grpc::proto::WalHistoryRequest* request, limestone::grpc::proto::WalHistoryResponse* response) noexcept override;
+    ::grpc::Status begin_backup(const limestone::grpc::proto::BeginBackupRequest* request, limestone::grpc::proto::BeginBackupResponse* response) noexcept override;
+    ::grpc::Status keep_alive(const limestone::grpc::proto::KeepAliveRequest* request, limestone::grpc::proto::KeepAliveResponse* response) noexcept override;
+    ::grpc::Status end_backup(const limestone::grpc::proto::EndBackupRequest* request, limestone::grpc::proto::EndBackupResponse* response) noexcept override;
+    ::grpc::Status get_object(const limestone::grpc::proto::GetObjectRequest* request, ::grpc::ServerWriter<limestone::grpc::proto::GetObjectResponse>* writer) noexcept override;
 private:
     boost::filesystem::path log_dir_;
     backend_shared_impl backend_shared_impl_;

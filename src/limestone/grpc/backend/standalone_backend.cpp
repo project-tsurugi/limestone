@@ -21,6 +21,7 @@
 #include "grpc/service/message_versions.h"
 namespace limestone::grpc::backend {
 
+
 using limestone::grpc::service::list_wal_history_message_version;
 
 
@@ -68,6 +69,20 @@ standalone_backend::standalone_backend(const boost::filesystem::path& log_dir)
 
 boost::filesystem::path standalone_backend::get_log_dir() const noexcept {
 	return log_dir_;
+}
+
+
+::grpc::Status standalone_backend::keep_alive(const limestone::grpc::proto::KeepAliveRequest* request, limestone::grpc::proto::KeepAliveResponse* response) noexcept {
+    return backend_shared_impl_.keep_alive(request, response);
+}
+
+::grpc::Status standalone_backend::end_backup(const limestone::grpc::proto::EndBackupRequest* request, limestone::grpc::proto::EndBackupResponse* response) noexcept {
+    return backend_shared_impl_.end_backup(request, response);
+}
+
+::grpc::Status standalone_backend::get_object(const limestone::grpc::proto::GetObjectRequest* /*request*/, ::grpc::ServerWriter<limestone::grpc::proto::GetObjectResponse>* /*writer*/) noexcept {
+    // TODO: implement actual logic
+    return {::grpc::StatusCode::UNIMPLEMENTED, "get_object not implemented"};
 }
 
 } // namespace limestone::grpc::backend
