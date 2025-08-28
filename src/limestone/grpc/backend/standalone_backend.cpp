@@ -80,9 +80,8 @@ boost::filesystem::path standalone_backend::get_log_dir() const noexcept {
     return backend_shared_impl_.end_backup(request, response);
 }
 
-::grpc::Status standalone_backend::get_object(const limestone::grpc::proto::GetObjectRequest* /*request*/, ::grpc::ServerWriter<limestone::grpc::proto::GetObjectResponse>* /*writer*/) noexcept {
-    // TODO: implement actual logic
-    return {::grpc::StatusCode::UNIMPLEMENTED, "get_object not implemented"};
+::grpc::Status standalone_backend::get_object(const limestone::grpc::proto::GetObjectRequest* request, ::grpc::ServerWriter<limestone::grpc::proto::GetObjectResponse>* writer) noexcept {
+    return backend_shared_impl_.get_object(request, writer);
 }
 
 } // namespace limestone::grpc::backend

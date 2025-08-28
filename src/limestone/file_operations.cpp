@@ -94,6 +94,10 @@ std::unique_ptr<std::ifstream> real_file_operations::open_ifstream(const std::st
     return std::make_unique<std::ifstream>(path);
 }
 
+std::unique_ptr<std::ifstream> real_file_operations::open_ifstream(const std::string& path, std::ios_base::openmode mode) {
+    return std::make_unique<std::ifstream>(path, mode);
+}
+
 std::unique_ptr<std::ofstream> real_file_operations::open_ofstream(const std::string& path) {
     return std::make_unique<std::ofstream>(path, std::ios::binary | std::ios::trunc);
 }
@@ -132,6 +136,30 @@ void real_file_operations::ifs_read(std::ifstream& ifs, std::byte* buf, std::siz
     ifs_read(ifs,
              reinterpret_cast<char*>(buf),  // NOLINT(cppcoreguidelines-pro-type-reinterpret-cast) required by ifstream::read
              static_cast<std::streamsize>(size));
+}
+
+void real_file_operations::ifs_seekg(std::ifstream& ifs, std::streamoff offset, std::ios_base::seekdir way) {
+    ifs.seekg(offset, way);
+}
+
+std::streampos real_file_operations::ifs_tellg(std::ifstream& ifs) {
+    return ifs.tellg();
+}
+
+bool real_file_operations::ifs_fail(std::ifstream& ifs) {
+    return ifs.fail();
+}
+
+bool real_file_operations::ifs_bad(std::ifstream& ifs) {
+    return ifs.bad();
+}
+
+std::streamsize real_file_operations::ifs_gcount(std::ifstream& ifs) {
+    return ifs.gcount();
+}
+
+bool real_file_operations::ifs_eof(std::ifstream& ifs) {
+    return ifs.eof();
 }
 
 // -----------------------------------------

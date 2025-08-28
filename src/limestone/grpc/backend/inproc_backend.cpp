@@ -143,9 +143,8 @@ boost::filesystem::path inproc_backend::get_log_dir() const noexcept {
     return backend_shared_impl_.end_backup(request, response);
 }
 
-::grpc::Status inproc_backend::get_object(const limestone::grpc::proto::GetObjectRequest* /*request*/, ::grpc::ServerWriter<limestone::grpc::proto::GetObjectResponse>* /*writer*/) noexcept {
-    // TODO: implement actual logic
-    return {::grpc::StatusCode::UNIMPLEMENTED, "get_object not implemented"};
+::grpc::Status inproc_backend::get_object(const limestone::grpc::proto::GetObjectRequest* request, ::grpc::ServerWriter<limestone::grpc::proto::GetObjectResponse>* writer) noexcept {
+    return backend_shared_impl_.get_object(request, writer);
 }
 
 backend_shared_impl& inproc_backend::get_backend_shared_impl() noexcept {
