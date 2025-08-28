@@ -110,9 +110,9 @@ public:
     /**
      * @brief Find a backup_object by object_id.
      * @param object_id object id string
-     * @return optional reference to backup_object (const), or nullopt if not found
+     * @return optional backup_object (copy), or nullopt if not found
      */
-    std::optional<std::reference_wrapper<const limestone::backup_object>> find_backup_object(const std::string& object_id) const;
+    std::optional<limestone::backup_object> find_backup_object(const std::string& object_id) const;
 
     /**
      * @brief Get const begin iterator for backup_objects.

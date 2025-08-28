@@ -172,14 +172,14 @@ TEST_F(session_store_test, add_backup_object_to_session)
     ASSERT_TRUE(s2.has_value());
     auto it1 = s2->find_backup_object("obj1");
     ASSERT_TRUE(it1.has_value());
-    EXPECT_EQ(it1->get().object_id(), "obj1");
-    EXPECT_EQ(it1->get().type(), backup_object_type::log);
-    EXPECT_EQ(it1->get().path(), "log1");
+    EXPECT_EQ(it1->object_id(), "obj1");
+    EXPECT_EQ(it1->type(), backup_object_type::log);
+    EXPECT_EQ(it1->path(), "log1");
     auto it2 = s2->find_backup_object("obj2");
     ASSERT_TRUE(it2.has_value());
-    EXPECT_EQ(it2->get().object_id(), "obj2");
-    EXPECT_EQ(it2->get().type(), backup_object_type::metadata);
-    EXPECT_EQ(it2->get().path(), "meta1");
+    EXPECT_EQ(it2->object_id(), "obj2");
+    EXPECT_EQ(it2->type(), backup_object_type::metadata);
+    EXPECT_EQ(it2->path(), "meta1");
 
     // Adding the same object_id fails
     backup_object obj1_dup{"obj1", backup_object_type::log, "log2"};

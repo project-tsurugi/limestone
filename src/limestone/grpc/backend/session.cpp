@@ -85,11 +85,11 @@ void session::add_backup_object(const limestone::backup_object& obj) {
 	}
 }
 
-std::optional<std::reference_wrapper<const limestone::backup_object>> session::find_backup_object(const std::string& object_id) const {
+std::optional<limestone::backup_object> session::find_backup_object(const std::string& object_id) const {
 	std::lock_guard<std::mutex> lock(backup_objects_mutex_);
 	auto it = backup_objects_.find(object_id);
 	if (it != backup_objects_.end()) {
-		return std::cref(it->second);
+		return it->second; // コピーを返す
 	}
 	return std::nullopt;
 }

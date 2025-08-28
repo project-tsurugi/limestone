@@ -69,14 +69,14 @@ TEST_F(session_test, add_and_find_backup_object) {
     s.add_backup_object(obj2);
     auto found1 = s.find_backup_object("id1");
     ASSERT_TRUE(found1.has_value());
-    ASSERT_EQ(found1->get().object_id(), "id1");
-    ASSERT_EQ(found1->get().type(), backup_object_type::log);
-    ASSERT_EQ(found1->get().path(), boost::filesystem::path("foo/bar"));
+    ASSERT_EQ(found1->object_id(), "id1");
+    ASSERT_EQ(found1->type(), backup_object_type::log);
+    ASSERT_EQ(found1->path(), boost::filesystem::path("foo/bar"));
     auto found2 = s.find_backup_object("id2");
     ASSERT_TRUE(found2.has_value());
-    ASSERT_EQ(found2->get().object_id(), "id2");
-    ASSERT_EQ(found2->get().type(), backup_object_type::snapshot);
-    ASSERT_EQ(found2->get().path(), boost::filesystem::path("snap/path"));
+    ASSERT_EQ(found2->object_id(), "id2");
+    ASSERT_EQ(found2->type(), backup_object_type::snapshot);
+    ASSERT_EQ(found2->path(), boost::filesystem::path("snap/path"));
     auto not_found = s.find_backup_object("not_exist");
     ASSERT_FALSE(not_found.has_value());
 }
@@ -115,14 +115,14 @@ TEST_F(session_test, copy_constructor_copies_backup_objects) {
     // Check if s2 also contains the same backup_objects
     auto found1 = s2.find_backup_object("id1");
     ASSERT_TRUE(found1.has_value());
-    EXPECT_EQ(found1->get().object_id(), "id1");
-    EXPECT_EQ(found1->get().type(), backup_object_type::log);
-    EXPECT_EQ(found1->get().path(), boost::filesystem::path("foo/bar"));
+    EXPECT_EQ(found1->object_id(), "id1");
+    EXPECT_EQ(found1->type(), backup_object_type::log);
+    EXPECT_EQ(found1->path(), boost::filesystem::path("foo/bar"));
     auto found2 = s2.find_backup_object("id2");
     ASSERT_TRUE(found2.has_value());
-    EXPECT_EQ(found2->get().object_id(), "id2");
-    EXPECT_EQ(found2->get().type(), backup_object_type::snapshot);
-    EXPECT_EQ(found2->get().path(), boost::filesystem::path("snap/path"));
+    EXPECT_EQ(found2->object_id(), "id2");
+    EXPECT_EQ(found2->type(), backup_object_type::snapshot);
+    EXPECT_EQ(found2->path(), boost::filesystem::path("snap/path"));
     // Ensure s1 and s2 are independent (deep copy)
     backup_object obj3("id3", backup_object_type::metadata, "meta");
     s1.add_backup_object(obj3);
