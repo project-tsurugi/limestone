@@ -1,6 +1,6 @@
 #include "backup_object.h"
 
-namespace limestone {
+namespace limestone::grpc::backend {
 
 backup_object::backup_object(
     std::string object_id,
@@ -33,4 +33,4 @@ limestone::grpc::proto::BackupObject backup_object::to_proto() const {
     return dst;
 }
 
-} // namespace limestone
+} // namespace limestone::grpc::backend

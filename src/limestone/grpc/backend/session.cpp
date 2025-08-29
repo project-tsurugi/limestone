@@ -77,7 +77,7 @@ epoch_id_type session::end_epoch() const {
 	return end_epoch_;
 }
 
-void session::add_backup_object(const limestone::backup_object& obj) {
+void session::add_backup_object(const backup_object& obj) {
 	std::lock_guard<std::mutex> lock(backup_objects_mutex_);
 	auto [it, inserted] = backup_objects_.emplace(obj.object_id(), obj);
 	if (!inserted) {
@@ -85,7 +85,7 @@ void session::add_backup_object(const limestone::backup_object& obj) {
 	}
 }
 
-std::optional<limestone::backup_object> session::find_backup_object(const std::string& object_id) const {
+std::optional<backup_object> session::find_backup_object(const std::string& object_id) const {
 	std::lock_guard<std::mutex> lock(backup_objects_mutex_);
 	auto it = backup_objects_.find(object_id);
 	if (it != backup_objects_.end()) {
@@ -94,11 +94,11 @@ std::optional<limestone::backup_object> session::find_backup_object(const std::s
 	return std::nullopt;
 }
 
-auto session::begin() const noexcept -> std::map<std::string, limestone::backup_object>::const_iterator {
+auto session::begin() const noexcept -> std::map<std::string, backup_object>::const_iterator {
 	return backup_objects_.cbegin();
 }
 
-auto session::end() const noexcept -> std::map<std::string, limestone::backup_object>::const_iterator {
+auto session::end() const noexcept -> std::map<std::string, backup_object>::const_iterator {
 	return backup_objects_.cend();
 }
 

@@ -103,7 +103,7 @@ public:
      * @param obj The backup object to add to the session.
      * @return true if the backup object was successfully added to the session; false otherwise.
      */
-    bool add_backup_object_to_session(const std::string& session_id, const limestone::backup_object& obj);
+    bool add_backup_object_to_session(const std::string& session_id, const backup_object& obj);
 
 
 private:

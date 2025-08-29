@@ -116,7 +116,7 @@ std::optional<session> session_store::get_session(const std::string& session_id)
     return std::nullopt;
 }
 
-bool session_store::add_backup_object_to_session(const std::string& session_id, const limestone::backup_object& obj) {
+bool session_store::add_backup_object_to_session(const std::string& session_id, const backup_object& obj) {
     std::lock_guard<std::mutex> lock(mutex_);
     auto it = sessions_.find(session_id);
     if (it == sessions_.end()) {

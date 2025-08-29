@@ -19,7 +19,12 @@ using limestone::grpc::proto::BackupObject;
 
 class i_writer {
 public:
+    i_writer() = default; 
     virtual ~i_writer() = default;
+    i_writer(const i_writer&) = delete;
+    i_writer& operator=(const i_writer&) = delete;
+    i_writer(i_writer&&) = delete;
+    i_writer& operator=(i_writer&&) = delete;
     virtual bool Write(const limestone::grpc::proto::GetObjectResponse& resp) = 0;
 };
 
@@ -33,10 +38,14 @@ private:
     ::grpc::ServerWriter<limestone::grpc::proto::GetObjectResponse>* writer_;
 };
 
+struct byte_range {
+    std::streamoff start_offset = 0;
+    std::optional<std::streamoff> end_offset = std::nullopt;
+};
 
 class backend_shared_impl {
 public:
-    explicit backend_shared_impl(const boost::filesystem::path& log_dir, std::size_t chunk_size = limestone::grpc::service::backup_object_chunk_size);
+    explicit backend_shared_impl(boost::filesystem::path log_dir, std::size_t chunk_size = limestone::grpc::service::backup_object_chunk_size);
     virtual ~backend_shared_impl() = default;
     backend_shared_impl(const backend_shared_impl&) = delete;
     backend_shared_impl& operator=(const backend_shared_impl&) = delete;
@@ -65,25 +74,38 @@ public:
      * @brief Send backup object data as a chunked gRPC stream.
      *
      * This function streams the contents of the specified backup object file in chunks.
-     * The byte range to send can be specified by start_offset and end_offset.
+     * The byte range to send is specified by the byte_range struct.
      * If end_offset is not specified, the file is sent until the end.
      *
-     * The range is [start_offset, end_offset):
+     * The range is [range.start_offset, range.end_offset):
      *   - start_offset: inclusive (the first byte to send)
      *   - end_offset: exclusive (the first byte NOT to send)
      *
-     * @param object        The backup object to send.
-     * @param writer        The gRPC ServerWriter to stream the data.
-     * @param start_offset  The starting byte offset (inclusive) from which to begin sending data. Default is 0.
-     * @param end_offset    The ending byte offset (exclusive) at which to stop sending data. If not specified, sends to the end of the file.
+     * @param object     The backup object to send.
+     * @param writer     The gRPC ServerWriter to stream the data.
+     * @param range      The byte range to send. If end_offset is not specified, sends to the end of the file.
      * @return ::grpc::Status  gRPC status indicating success or error reason.
      */
     ::grpc::Status send_backup_object_data(
         const backup_object& object,
         i_writer* writer,
-        std::streamoff start_offset,
-        std::optional<std::streamoff> end_offset
+        const byte_range& range
     );
+
+
+    /**
+     * @brief Prepares a copy of a log object for backup within a specified epoch range.
+     *
+     * This function creates a byte range representing the portion of the log object
+     * that falls between the given begin and end epochs. It is typically used to
+     * facilitate efficient backup operations by extracting only the relevant data.
+     *
+     * @param object The backup_object to be copied.
+     * @param begin_epoch The starting epoch (inclusive) for the copy operation.
+     * @param end_epoch The ending epoch (exclusive) for the copy operation.
+     * @return byte_range The range of bytes representing the copied log object data.
+     */
+    byte_range prepare_log_object_copy(const backup_object& object, epoch_id_type begin_epoch, epoch_id_type end_epoch);
 
     // Getter for session_store
     session_store& get_session_store() noexcept;

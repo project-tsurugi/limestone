@@ -36,8 +36,8 @@ std::optional<backup_object> backend_shared_impl::make_backup_object_from_path(c
 
 using limestone::internal::wal_history;    
 
-backend_shared_impl::backend_shared_impl(const boost::filesystem::path& log_dir, std::size_t chunk_size)
-    : log_dir_(log_dir), chunk_size_(chunk_size), 
+backend_shared_impl::backend_shared_impl(boost::filesystem::path log_dir, std::size_t chunk_size)
+    : log_dir_(std::move(log_dir)), chunk_size_(chunk_size), 
       default_file_ops_(std::make_unique<limestone::internal::real_file_operations>()),
       file_ops_(default_file_ops_.get()) {}
 
@@ -107,12 +107,20 @@ void backend_shared_impl::set_file_operations(limestone::internal::file_operatio
     return {::grpc::StatusCode::NOT_FOUND, "session not found: " + session_id};
     }
     grpc_writer_adapter adapter(writer);
+    auto begin_epoch = session->begin_epoch();
+    auto end_epoch = session->end_epoch();
+    bool is_fullbackup = (begin_epoch == 0 && end_epoch == 0);
     for (const auto& obj_id : request->object_id()) {
         auto backup_object = session->find_backup_object(obj_id);
         if (!backup_object) {
             return {::grpc::StatusCode::NOT_FOUND, "backup object not found: " + obj_id};
         }
-        auto send_status = send_backup_object_data(*backup_object, &adapter, 0, std::nullopt);
+        byte_range range{0, std::nullopt};
+        auto type = backup_object.value().type();
+        if (type == backend::backup_object_type::log && !is_fullbackup) {
+            range = prepare_log_object_copy(*backup_object, begin_epoch, end_epoch);
+        }
+        auto send_status = send_backup_object_data(*backup_object, &adapter, range);
         if (!send_status.ok()) {
             return send_status;
         }
@@ -120,11 +128,19 @@ void backend_shared_impl::set_file_operations(limestone::internal::file_operatio
     return {::grpc::StatusCode::OK, "get_object successful"};
 }
 
+byte_range backend_shared_impl::prepare_log_object_copy(
+    const backup_object& /*object*/,
+    epoch_id_type /*begin_epoch*/,
+    epoch_id_type /*end_epoch*/
+) {
+    // ここに実装を追加
+    return byte_range{0, std::nullopt};
+}
+
 ::grpc::Status backend_shared_impl::send_backup_object_data(
     const backup_object& object,
     i_writer* writer,
-    std::streamoff start_offset,
-    std::optional<std::streamoff> end_offset
+    const byte_range& range
 ) {
     auto abs_path = log_dir_ / object.path();
     std::unique_ptr<std::ifstream> ifs = file_ops_->open_ifstream(abs_path.string(), std::ios::binary);
@@ -143,22 +159,22 @@ void backend_shared_impl::set_file_operations(limestone::internal::file_operatio
         int saved_errno = errno;
         return backend_shared_impl::make_stream_error_status("failed to get file size", abs_path, std::nullopt, saved_errno);
     }
-    if (start_offset < 0 || start_offset > total_size) {
-        return ::grpc::Status(::grpc::StatusCode::OUT_OF_RANGE, "start_offset out of range");
+    if (range.start_offset < 0 || range.start_offset > total_size) {
+        return {::grpc::StatusCode::OUT_OF_RANGE, "start_offset out of range"};
     }
-    std::streamoff effective_end = end_offset ? std::min(*end_offset, total_size) : total_size;
-    if (effective_end < start_offset) {
-        return ::grpc::Status(::grpc::StatusCode::OUT_OF_RANGE, "end_offset before start_offset");
+    std::streamoff effective_end = range.end_offset ? std::min(*range.end_offset, total_size) : total_size;
+    if (effective_end < range.start_offset) {
+        return {::grpc::StatusCode::OUT_OF_RANGE, "end_offset before start_offset"};
     }
-    std::streamsize send_size = effective_end - start_offset;
-    file_ops_->ifs_seekg(*ifs, start_offset, std::ios::beg);
+    std::streamsize send_size = effective_end - range.start_offset;
+    file_ops_->ifs_seekg(*ifs, range.start_offset, std::ios::beg);
     if (file_ops_->ifs_fail(*ifs)) {
         int saved_errno = errno;
-        return backend_shared_impl::make_stream_error_status("failed to seek to start_offset", abs_path, start_offset, saved_errno);
+        return backend_shared_impl::make_stream_error_status("failed to seek to start_offset", abs_path, range.start_offset, saved_errno);
     }
 
     std::vector<char> buffer(chunk_size_);
-    std::streamsize offset = start_offset;
+    std::streamsize offset = range.start_offset;
     bool is_first = true;
     std::streamsize remaining = send_size;
     while (remaining > 0) {
@@ -192,14 +208,14 @@ void backend_shared_impl::set_file_operations(limestone::internal::file_operatio
         resp.set_is_last(offset + bytes_read >= effective_end);
 
         if (!writer->Write(resp)) {
-            return ::grpc::Status(::grpc::StatusCode::UNKNOWN, "stream write failed");
+            return {::grpc::StatusCode::UNKNOWN, "stream write failed"};
         }
         offset += bytes_read;
         remaining -= bytes_read;
         is_first = false;
     }
-    if (offset < start_offset + send_size) {
-        return ::grpc::Status(::grpc::StatusCode::DATA_LOSS, "file truncated during read: " + abs_path.string());
+    if (offset < range.start_offset + send_size) {
+        return {::grpc::StatusCode::DATA_LOSS, "file truncated during read: " + abs_path.string()};
     }
     return ::grpc::Status::OK;
 }
@@ -210,7 +226,7 @@ void backend_shared_impl::set_file_operations(limestone::internal::file_operatio
         err_msg += ", offset=" + std::to_string(*offset);
     }
     err_msg += ", errno=" + std::to_string(err) + ", " + std::strerror(err);
-    ::grpc::StatusCode code;
+    ::grpc::StatusCode code = ::grpc::StatusCode::INTERNAL;
     switch (err) {
         case ENOENT:
             code = ::grpc::StatusCode::NOT_FOUND;
@@ -223,7 +239,7 @@ void backend_shared_impl::set_file_operations(limestone::internal::file_operatio
             code = ::grpc::StatusCode::INTERNAL;
             break;
     }
-    return ::grpc::Status(code, err_msg);
+    return {code, err_msg};
 }
 
 void backend_shared_impl::reset_file_operations_to_default() noexcept {

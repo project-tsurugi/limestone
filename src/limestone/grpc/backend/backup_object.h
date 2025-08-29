@@ -4,7 +4,7 @@
 #include <boost/filesystem.hpp>
 #include "backup.pb.h"
 
-namespace limestone {
+namespace limestone::grpc::backend {
 
 /**
  * @brief Type of backup object.
@@ -75,4 +75,4 @@ private:
     boost::filesystem::path path_;
 };
 
-} // namespace limestone
+} // namespace limestone::grpc::backend

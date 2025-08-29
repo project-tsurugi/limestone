@@ -24,6 +24,8 @@
 
 namespace limestone::testing {
 
+using limestone::grpc::backend::backup_object;
+using limestone::grpc::backend::backup_object_type;
 class session_test : public ::testing::Test {
 protected:
     void SetUp() override {}

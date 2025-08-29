@@ -23,6 +23,10 @@
 
 namespace limestone::testing {
 
+using limestone::grpc::backend::backup_object;
+using limestone::grpc::backend::backup_object_type;
+using limestone::grpc::backend::session_store;
+
 class session_store_test : public ::testing::Test {
 protected:
     void SetUp() override {}
@@ -151,9 +155,6 @@ TEST_F(session_store_test, get_session) {
 
 TEST_F(session_store_test, add_backup_object_to_session)
 {
-    using grpc::backend::session_store;
-    using limestone::backup_object;
-    using limestone::backup_object_type;
     session_store store;
     auto s_opt = store.create_and_register(10, 20, 100, nullptr);
     ASSERT_TRUE(s_opt.has_value());

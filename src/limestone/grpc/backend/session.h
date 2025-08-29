@@ -105,24 +105,24 @@ public:
      * @brief Add a backup_object to the session. Throws if object_id already exists.
      * @param obj backup_object to add
      */
-    void add_backup_object(const limestone::backup_object& obj);
+    void add_backup_object(const backup_object& obj);
 
     /**
      * @brief Find a backup_object by object_id.
      * @param object_id object id string
      * @return optional backup_object (copy), or nullopt if not found
      */
-    std::optional<limestone::backup_object> find_backup_object(const std::string& object_id) const;
+    std::optional<backup_object> find_backup_object(const std::string& object_id) const;
 
     /**
      * @brief Get const begin iterator for backup_objects.
      */
-    auto begin() const noexcept -> std::map<std::string, limestone::backup_object>::const_iterator;
+    auto begin() const noexcept -> std::map<std::string, backup_object>::const_iterator;
 
     /**
      * @brief Get const end iterator for backup_objects.
      */
-    auto end() const noexcept -> std::map<std::string, limestone::backup_object>::const_iterator;
+    auto end() const noexcept -> std::map<std::string, backup_object>::const_iterator;
 
 private:
     mutable std::mutex backup_objects_mutex_;
@@ -134,7 +134,7 @@ private:
     on_remove_callback_type on_remove_;
 
     // Map from object_id to backup_object
-    std::map<std::string, limestone::backup_object> backup_objects_;
+    std::map<std::string, backup_object> backup_objects_;
 };
 
 } // namespace limestone::grpc::backend
