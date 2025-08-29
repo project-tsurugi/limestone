@@ -7,6 +7,7 @@
 #include <memory>
 #include <optional>
 #include "file_operations.h"
+#include "log_entry.h"
 
 #include "grpc/service/message_versions.h"
 
@@ -16,6 +17,7 @@ using limestone::grpc::service::keep_alive_message_version;
 using limestone::grpc::service::end_backup_message_version;
 using limestone::grpc::service::session_timeout_seconds;
 using limestone::grpc::service::get_object_message_version;
+using limestone::api::log_entry;
 
 std::optional<backup_object> backend_shared_impl::make_backup_object_from_path(const boost::filesystem::path& path) {
     std::string filename = path.filename().string();
@@ -110,6 +112,7 @@ void backend_shared_impl::set_file_operations(limestone::internal::file_operatio
     auto begin_epoch = session->begin_epoch();
     auto end_epoch = session->end_epoch();
     bool is_fullbackup = (begin_epoch == 0 && end_epoch == 0);
+    std::set<blob_id_type> required_blobs;
     for (const auto& obj_id : request->object_id()) {
         auto backup_object = session->find_backup_object(obj_id);
         if (!backup_object) {
@@ -118,7 +121,12 @@ void backend_shared_impl::set_file_operations(limestone::internal::file_operatio
         byte_range range{0, std::nullopt};
         auto type = backup_object.value().type();
         if (type == backend::backup_object_type::log && !is_fullbackup) {
-            range = prepare_log_object_copy(*backup_object, begin_epoch, end_epoch);
+            ::grpc::Status error_status;
+            auto opt_range = prepare_log_object_copy(*backup_object, begin_epoch, end_epoch, required_blobs, error_status);
+            if (!opt_range) {
+                return error_status;
+            }
+            range = opt_range.value();
         }
         auto send_status = send_backup_object_data(*backup_object, &adapter, range);
         if (!send_status.ok()) {
@@ -128,13 +136,50 @@ void backend_shared_impl::set_file_operations(limestone::internal::file_operatio
     return {::grpc::StatusCode::OK, "get_object successful"};
 }
 
-byte_range backend_shared_impl::prepare_log_object_copy(
-    const backup_object& /*object*/,
-    epoch_id_type /*begin_epoch*/,
-    epoch_id_type /*end_epoch*/
+
+std::optional<byte_range> backend_shared_impl::prepare_log_object_copy(
+    const backup_object& object,
+    epoch_id_type begin_epoch,
+    epoch_id_type end_epoch,
+    std::set<blob_id_type>& required_blobs,
+    ::grpc::Status& error_status
 ) {
-    // ここに実装を追加
-    return byte_range{0, std::nullopt};
+    std::streamoff start_offset = 0;
+    std::optional<std::streamoff> end_offset = std::nullopt;
+    const auto& path = object.path();
+    auto stream = file_ops_->open_ifstream((log_dir_ / path).string(), std::ios::binary);
+    if (!stream) {
+        int saved_errno = errno;
+        error_status = backend_shared_impl::make_stream_error_status("failed to open file", path.filename(), std::nullopt, saved_errno);
+        return std::nullopt;
+    }
+    log_entry entry;
+    log_entry::read_error read_error_{};
+    while (true) {
+        auto fpos_before_read_entry = file_ops_->ifs_tellg(*stream);
+        bool data_remains = entry.read_entry_from(*stream, read_error_);
+        if (!data_remains) {
+            break;
+        }
+        if (read_error_.value() != log_entry::read_error::ok) {
+            std::string context = "file is corrupted: failed to read entry at fpos=" + std::to_string(static_cast<std::streamoff>(fpos_before_read_entry));
+            error_status = backend_shared_impl::make_stream_error_status(context, path.filename(), fpos_before_read_entry, errno);
+            return std::nullopt;
+        }
+        if (entry.type() == log_entry::entry_type::marker_begin) {
+            if (start_offset == 0 && entry.epoch_id() >= begin_epoch) {
+                start_offset = fpos_before_read_entry;
+            }
+            if (!end_offset.has_value() && entry.epoch_id() >= end_epoch) {
+                end_offset = fpos_before_read_entry;
+            }
+        }
+        if (entry.type() == log_entry::entry_type::normal_with_blob) {
+            auto blob_ids = entry.get_blob_ids();
+            required_blobs.insert(blob_ids.begin(), blob_ids.end());
+        }
+    }
+    return {byte_range{start_offset, end_offset}};
 }
 
 ::grpc::Status backend_shared_impl::send_backup_object_data(

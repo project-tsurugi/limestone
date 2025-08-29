@@ -2,20 +2,23 @@
 
 #include <google/protobuf/repeated_field.h>
 
+#include <memory>
 #include <optional>
 #include <vector>
-#include <memory>
 
 #include "backup.grpc.pb.h"
 #include "grpc/service/grpc_constants.h"
+#include "limestone/api/blob_id_type.h"
 #include "session.h"
 #include "session_store.h"
 #include "wal_history.grpc.pb.h"
 #include "wal_sync/wal_history.h"
+
 namespace limestone::grpc::backend {
 
 using limestone::grpc::proto::BranchEpoch;
 using limestone::grpc::proto::BackupObject;
+using limestone::api::blob_id_type;
 
 class i_writer {
 public:
@@ -97,15 +100,24 @@ public:
      * @brief Prepares a copy of a log object for backup within a specified epoch range.
      *
      * This function creates a byte range representing the portion of the log object
-     * that falls between the given begin and end epochs. It is typically used to
-     * facilitate efficient backup operations by extracting only the relevant data.
+     * that falls between the given begin and end epochs. It also inserts into the
+     * provided set the blob_id of any blob file that may need to be copied.
+     * If an error occurs, returns std::nullopt and sets error_status.
      *
      * @param object The backup_object to be copied.
      * @param begin_epoch The starting epoch (inclusive) for the copy operation.
      * @param end_epoch The ending epoch (exclusive) for the copy operation.
-     * @return byte_range The range of bytes representing the copied log object data.
+     * @param required_blobs Reference to a set to which blob_ids that may need to be copied will be inserted.
+     * @param error_status Set to error detail if an error occurs.
+     * @return std::optional<byte_range> The range of bytes representing the copied log object data, or std::nullopt on error.
      */
-    byte_range prepare_log_object_copy(const backup_object& object, epoch_id_type begin_epoch, epoch_id_type end_epoch);
+    std::optional<byte_range> prepare_log_object_copy(
+        const backup_object& object,
+        epoch_id_type begin_epoch,
+        epoch_id_type end_epoch,
+        std::set<blob_id_type>& required_blobs,
+        ::grpc::Status& error_status
+    );
 
     // Getter for session_store
     session_store& get_session_store() noexcept;
