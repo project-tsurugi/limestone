@@ -258,7 +258,7 @@ TEST_F(backend_shared_impl_test, send_backup_object_data_success_whole_file) {
     backup_object obj(fname, backup_object_type::snapshot, fname);
 
     dummy_writer writer;
-    auto status = backend.send_backup_object_data(obj, &writer);
+    auto status = backend.send_backup_object_data(obj, &writer, 0, std::nullopt);
     EXPECT_TRUE(status.ok());
     // Should be split into 3 chunks: 4, 4, 2 bytes
     ASSERT_EQ(writer.responses.size(), 3);
@@ -312,7 +312,7 @@ TEST_F(backend_shared_impl_test, send_backup_object_data_start_offset_out_of_ran
 
     dummy_writer writer;
     // start_offset > file size
-    auto status = backend.send_backup_object_data(obj, &writer, 10);
+    auto status = backend.send_backup_object_data(obj, &writer, 10, std::nullopt);
     EXPECT_EQ(status.error_code(), ::grpc::StatusCode::OUT_OF_RANGE);
     EXPECT_NE(std::string(status.error_message()).find("start_offset out of range"), std::string::npos);
 }
@@ -341,7 +341,7 @@ TEST_F(backend_shared_impl_test, send_backup_object_data_file_not_found) {
     backup_object obj(fname, backup_object_type::snapshot, fname);
 
     dummy_writer writer;
-    auto status = backend.send_backup_object_data(obj, &writer);
+    auto status = backend.send_backup_object_data(obj, &writer, 0, std::nullopt);
     EXPECT_EQ(status.error_code(), ::grpc::StatusCode::NOT_FOUND);
     EXPECT_NE(std::string(status.error_message()).find("failed to open file"), std::string::npos);
 }
@@ -359,7 +359,7 @@ TEST_F(backend_shared_impl_test, send_backup_object_data_writer_write_fails) {
 
     dummy_writer writer;
     writer.fail_write = true;
-    auto status = backend.send_backup_object_data(obj, &writer);
+    auto status = backend.send_backup_object_data(obj, &writer, 0, std::nullopt);
     EXPECT_EQ(status.error_code(), ::grpc::StatusCode::UNKNOWN);
     EXPECT_NE(std::string(status.error_message()).find("stream write failed"), std::string::npos);
 }
@@ -400,9 +400,9 @@ TEST_F(backend_shared_impl_test, send_backup_object_data_file_truncated_during_r
             return true;
         }
     } writer;
-    
-    auto status = backend.send_backup_object_data(obj, &writer);
-    
+
+    auto status = backend.send_backup_object_data(obj, &writer, 0, std::nullopt);
+
     // Should detect file truncation and return DATA_LOSS
     EXPECT_FALSE(status.ok());
     EXPECT_EQ(status.error_code(), ::grpc::StatusCode::DATA_LOSS);
@@ -424,7 +424,7 @@ TEST_F(backend_shared_impl_test, send_backup_object_data_seekg_first_fail) {
     struct test_writer : public i_writer {
         bool Write(const limestone::grpc::proto::GetObjectResponse&) override { return true; }
     } writer;
-    auto status = backend.send_backup_object_data(obj, &writer);
+    auto status = backend.send_backup_object_data(obj, &writer, 0, std::nullopt);
     EXPECT_EQ(status.error_code(), ::grpc::StatusCode::INTERNAL);
     EXPECT_NE(std::string(status.error_message()).find("failed to seek to end of file"), std::string::npos);
 }
@@ -444,7 +444,7 @@ TEST_F(backend_shared_impl_test, send_backup_object_data_seekg_second_fail) {
     struct test_writer : public i_writer {
         bool Write(const limestone::grpc::proto::GetObjectResponse&) override { return true; }
     } writer;
-    auto status = backend.send_backup_object_data(obj, &writer);
+    auto status = backend.send_backup_object_data(obj, &writer, 0, std::nullopt);
     EXPECT_EQ(status.error_code(), ::grpc::StatusCode::INTERNAL);
     EXPECT_NE(std::string(status.error_message()).find("failed to seek to start_offset"), std::string::npos);
 }
@@ -479,7 +479,7 @@ TEST_F(backend_shared_impl_test, send_backup_object_data_tellg_fail) {
     struct test_writer : public i_writer {
         bool Write(const limestone::grpc::proto::GetObjectResponse&) override { return true; }
     } writer;
-    auto status = backend.send_backup_object_data(obj, &writer);
+    auto status = backend.send_backup_object_data(obj, &writer, 0, std::nullopt);
     EXPECT_EQ(status.error_code(), ::grpc::StatusCode::INTERNAL);
     EXPECT_NE(std::string(status.error_message()).find("failed to get file size"), std::string::npos);
     EXPECT_NE(std::string(status.error_message()).find("errno=9"), std::string::npos); // EBADF=9
@@ -505,7 +505,7 @@ TEST_F(backend_shared_impl_test, send_backup_object_data_read_badbit) {
     struct test_writer : public i_writer {
         bool Write(const limestone::grpc::proto::GetObjectResponse&) override { return true; }
     } writer;
-    auto status = backend.send_backup_object_data(obj, &writer);
+    auto status = backend.send_backup_object_data(obj, &writer, 0, std::nullopt);
     EXPECT_EQ(status.error_code(), ::grpc::StatusCode::INTERNAL);
     EXPECT_NE(std::string(status.error_message()).find("failed to read file chunk"), std::string::npos);
 }
@@ -542,7 +542,7 @@ TEST_F(backend_shared_impl_test, send_backup_object_data_read_fail_and_bytes_rea
     struct test_writer : public i_writer {
         bool Write(const limestone::grpc::proto::GetObjectResponse&) override { return true; }
     } writer;
-    auto status = backend.send_backup_object_data(obj, &writer);
+    auto status = backend.send_backup_object_data(obj, &writer, 0, std::nullopt);
     EXPECT_EQ(status.error_code(), ::grpc::StatusCode::INTERNAL);
     EXPECT_NE(std::string(status.error_message()).find("failed to read file chunk"), std::string::npos);
     EXPECT_NE(std::string(status.error_message()).find("errno=5"), std::string::npos); // EIO=5
@@ -567,13 +567,13 @@ TEST_F(backend_shared_impl_test, reset_file_operations_to_default_restores_defau
     struct test_writer : public i_writer {
         bool Write(const limestone::grpc::proto::GetObjectResponse&) override { return true; }
     } writer;
-    backend.send_backup_object_data(obj, &writer);
+    backend.send_backup_object_data(obj, &writer, 0, std::nullopt);
     EXPECT_TRUE(dummy_ops.used);
 
     // Reset to default and verify dummy_ops is not used anymore
     dummy_ops.used = false;
     backend.reset_file_operations_to_default();
-    backend.send_backup_object_data(obj, &writer);
+    backend.send_backup_object_data(obj, &writer, 0, std::nullopt);
     EXPECT_FALSE(dummy_ops.used); // Should use default ops, not dummy_ops
 }
 

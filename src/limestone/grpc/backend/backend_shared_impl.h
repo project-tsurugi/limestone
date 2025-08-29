@@ -81,8 +81,8 @@ public:
     ::grpc::Status send_backup_object_data(
         const backup_object& object,
         i_writer* writer,
-        std::streamoff start_offset = 0,
-        std::optional<std::streamoff> end_offset = std::nullopt
+        std::streamoff start_offset,
+        std::optional<std::streamoff> end_offset
     );
 
     // Getter for session_store

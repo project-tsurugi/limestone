@@ -112,7 +112,7 @@ void backend_shared_impl::set_file_operations(limestone::internal::file_operatio
         if (!backup_object) {
             return {::grpc::StatusCode::NOT_FOUND, "backup object not found: " + obj_id};
         }
-        auto send_status = send_backup_object_data(*backup_object, &adapter);
+        auto send_status = send_backup_object_data(*backup_object, &adapter, 0, std::nullopt);
         if (!send_status.ok()) {
             return send_status;
         }
