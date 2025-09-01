@@ -22,17 +22,16 @@
 #include <regex>
 #include <vector>
 
+#include "backend_test_fixture.h"
 #include "blob_file_resolver.h"
 #include "datastore_impl.h"
 #include "limestone/api/configuration.h"
 #include "limestone/api/datastore.h"
 #include "limestone/blob/blob_test_helpers.h"
-#include "limestone/compaction/compaction_test_fixture.h"
-#include "limestone/grpc/service/message_versions.h"
 #include "limestone/grpc/service/grpc_constants.h"
+#include "limestone/grpc/service/message_versions.h"
 #include "test_root.h"
 #include "wal_sync/wal_history.h"
-#include "datastore_impl.h"
 
 namespace limestone::testing {
 
@@ -76,82 +75,9 @@ static const std::vector<backup_condition> backup_conditions = {
 
 
 
-class inproc_backend_test : public limestone::testing::compaction_test_fixture {
 
+class inproc_backend_test : public backend_test_fixture {
 protected:
-    const char* get_location() const override { return "/tmp/inproc_backend_test"; }
-    std::unique_ptr<blob_file_resolver> resolver_;
-    epoch_id_type snapshot_epoch_id_;
-
-    void prepare_backup_test_files() {
-        datastore_->switch_epoch(1);
-        lc0_->begin_session();
-        create_blob_file(*resolver_, 200);
-        lc0_->add_entry(1, "key1", "value1", {1,1}, {200});
-        lc0_->end_session();
-        datastore_->switch_epoch(2);
-        lc0_->begin_session();
-        lc0_->add_entry(1, "key1", "value1", {2,2});
-        lc0_->end_session();
-        run_compact_with_epoch_switch(3);
-        datastore_->switch_epoch(3);
-        snapshot_epoch_id_ = datastore_->get_impl()->get_compaction_catalog().get_max_epoch_id();
-        lc1_->begin_session();
-        lc1_->add_entry(1, "key1", "value1", {3,3});
-        lc1_->end_session();
-        datastore_->switch_epoch(4);
-        lc1_->begin_session();
-        lc1_->add_entry(1, "key1", "value1", {4,4});
-        lc1_->end_session();
-        datastore_->switch_epoch(5);
-        lc1_->begin_session();
-        lc1_->add_entry(1, "key1", "value1", {5,5});
-        lc1_->end_session();
-        datastore_->switch_epoch(6);
-    }
-
-    void prepare_backup_test_files_witout_compaction() {
-        datastore_->switch_epoch(1);
-        lc0_->begin_session();
-        create_blob_file(*resolver_, 200);
-        lc0_->add_entry(1, "key1", "value1", {1,1}, {200});
-        lc0_->end_session();
-        datastore_->switch_epoch(2);
-        lc0_->begin_session();
-        lc0_->add_entry(1, "key1", "value1", {2,2});
-        lc0_->end_session();
-        datastore_->switch_epoch(3);
-        lc1_->begin_session();
-        lc1_->add_entry(1, "key1", "value1", {3,3});
-        lc1_->end_session();
-        datastore_->switch_epoch(4);
-        datastore_->shutdown();
-        datastore_ = nullptr;
-        gen_datastore();
-        lc1_->begin_session();
-        lc1_->add_entry(1, "key1", "value1", {4,4});
-        lc1_->end_session();
-        datastore_->switch_epoch(5);
-        lc1_->begin_session();
-        lc1_->add_entry(1, "key1", "value1", {5,5});
-        lc1_->end_session();
-        datastore_->switch_epoch(6);
-
-    }
-
-    static std::string wildcard_to_regex(const std::string& pattern) {
-        std::string regex;
-        regex.reserve(pattern.size() * 2);
-        for (char c : pattern) {
-            switch (c) {
-                case '*': regex += ".*"; break;
-                case '.': regex += "\\."; break;
-                default: regex += c; break;
-            }
-        }
-        return regex;
-    }
-
     template <typename Selector>
     void assert_backup_file_conditions(Selector selector) {
         namespace fs = boost::filesystem;
@@ -212,15 +138,8 @@ protected:
             ASSERT_TRUE(matched) << "Unexpected file found: " << act;
         }
     }
-
-    void SetUp() override {
-        compaction_test_fixture::SetUp();
-        resolver_ = std::make_unique<blob_file_resolver>(boost::filesystem::path(get_location()));
-    }
-    void TearDown() override {
-        resolver_.reset();
-        compaction_test_fixture::TearDown();
-    }
+    
+    const char* get_location() const override { return "/tmp/inproc_backend_test"; }
 };
 
 TEST_F(inproc_backend_test, get_wal_history_response_empty) {
@@ -560,7 +479,7 @@ TEST_F(inproc_backend_test, begin_backup_end_epoch_gt_current_ng) {
 
 TEST_F(inproc_backend_test, begin_backup_end_epoch_lt_boot_durable_epoch_ng) {
     gen_datastore();
-    prepare_backup_test_files_witout_compaction();
+    prepare_backup_test_files_without_compaction();
     inproc_backend backend(*datastore_, get_location());
     BeginBackupRequest request;
     BeginBackupResponse response;
@@ -575,7 +494,7 @@ TEST_F(inproc_backend_test, begin_backup_end_epoch_lt_boot_durable_epoch_ng) {
 
 TEST_F(inproc_backend_test, begin_backup_end_epoch_eq_boot_durable_epoch_ok) {
     gen_datastore();
-    prepare_backup_test_files_witout_compaction();
+    prepare_backup_test_files_without_compaction();
     inproc_backend backend(*datastore_, get_location());
     BeginBackupRequest request;
     BeginBackupResponse response;
@@ -588,7 +507,7 @@ TEST_F(inproc_backend_test, begin_backup_end_epoch_eq_boot_durable_epoch_ok) {
 
 TEST_F(inproc_backend_test, begin_backup_end_epoch_gt_boot_durable_epoch_ok) {
     gen_datastore();
-    prepare_backup_test_files_witout_compaction();
+    prepare_backup_test_files_without_compaction();
     inproc_backend backend(*datastore_, get_location());
     BeginBackupRequest request;
     BeginBackupResponse response;
