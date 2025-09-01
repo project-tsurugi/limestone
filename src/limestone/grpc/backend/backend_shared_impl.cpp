@@ -96,7 +96,7 @@ void backend_shared_impl::set_file_operations(limestone::internal::file_operatio
 
 ::grpc::Status backend_shared_impl::get_object(
     const limestone::grpc::proto::GetObjectRequest* request,
-    ::grpc::ServerWriter<limestone::grpc::proto::GetObjectResponse>* writer) noexcept {
+    i_writer* writer) noexcept {
     // Extract fields from request
     uint64_t version = request->version();
     if (version != get_object_message_version) {
@@ -106,9 +106,8 @@ void backend_shared_impl::set_file_operations(limestone::internal::file_operatio
     const std::string& session_id = request->session_id();
     auto session = session_store_.get_session(session_id);
     if (!session) {
-    return {::grpc::StatusCode::NOT_FOUND, "session not found: " + session_id};
+        return {::grpc::StatusCode::NOT_FOUND, "session not found: " + session_id};
     }
-    grpc_writer_adapter adapter(writer);
     auto begin_epoch = session->begin_epoch();
     auto end_epoch = session->end_epoch();
     bool is_fullbackup = (begin_epoch == 0 && end_epoch == 0);
@@ -126,9 +125,11 @@ void backend_shared_impl::set_file_operations(limestone::internal::file_operatio
             if (!opt_range) {
                 return error_status;
             }
-            range = opt_range.value();
+            if (!range.end_offset.has_value()) {
+                continue; // File does not have a copy target
+            }
         }
-        auto send_status = send_backup_object_data(*backup_object, &adapter, range);
+        auto send_status = send_backup_object_data(*backup_object, writer, range);
         if (!send_status.ok()) {
             return send_status;
         }
@@ -144,42 +145,47 @@ std::optional<byte_range> backend_shared_impl::prepare_log_object_copy(
     std::set<blob_id_type>& required_blobs,
     ::grpc::Status& error_status
 ) {
-    std::streamoff start_offset = 0;
+    std::optional<std::streamoff> start_offset = std::nullopt;
     std::optional<std::streamoff> end_offset = std::nullopt;
     const auto& path = object.path();
     auto stream = file_ops_->open_ifstream((log_dir_ / path).string(), std::ios::binary);
-    if (!stream) {
+    if (!stream || !file_ops_->is_open(*stream)) {
         int saved_errno = errno;
         error_status = backend_shared_impl::make_stream_error_status("failed to open file", path.filename(), std::nullopt, saved_errno);
         return std::nullopt;
     }
     log_entry entry;
     log_entry::read_error read_error_{};
+    epoch_id_type current_epoch_id = 0;
     while (true) {
         auto fpos_before_read_entry = file_ops_->ifs_tellg(*stream);
         bool data_remains = entry.read_entry_from(*stream, read_error_);
-        if (!data_remains) {
-            break;
-        }
         if (read_error_.value() != log_entry::read_error::ok) {
             std::string context = "file is corrupted: failed to read entry at fpos=" + std::to_string(static_cast<std::streamoff>(fpos_before_read_entry));
             error_status = backend_shared_impl::make_stream_error_status(context, path.filename(), fpos_before_read_entry, errno);
             return std::nullopt;
         }
+        if (!data_remains) {
+            break;
+        }
         if (entry.type() == log_entry::entry_type::marker_begin) {
-            if (start_offset == 0 && entry.epoch_id() >= begin_epoch) {
+            current_epoch_id = entry.epoch_id();
+            if (!start_offset.has_value() && entry.epoch_id() >= begin_epoch) {
                 start_offset = fpos_before_read_entry;
             }
             if (!end_offset.has_value() && entry.epoch_id() >= end_epoch) {
                 end_offset = fpos_before_read_entry;
             }
         }
-        if (entry.type() == log_entry::entry_type::normal_with_blob) {
+        if (entry.type() == log_entry::entry_type::normal_with_blob && current_epoch_id >= begin_epoch && current_epoch_id < end_epoch) {
             auto blob_ids = entry.get_blob_ids();
             required_blobs.insert(blob_ids.begin(), blob_ids.end());
         }
     }
-    return {byte_range{start_offset, end_offset}};
+    if (start_offset.has_value()) {
+        return {byte_range{start_offset.value(), end_offset}};
+    }
+    return {byte_range{0, std::nullopt}};
 }
 
 ::grpc::Status backend_shared_impl::send_backup_object_data(
@@ -290,5 +296,7 @@ std::optional<byte_range> backend_shared_impl::prepare_log_object_copy(
 void backend_shared_impl::reset_file_operations_to_default() noexcept {
     file_ops_ = default_file_ops_.get();
 }
+
+
 
 }  // namespace limestone::grpc::backend

@@ -15,31 +15,33 @@
  */
 
 #include "limestone/grpc/backend/backend_shared_impl.h"
+
 #include <gtest/gtest.h>
+#include <unistd.h>
+
 #include <boost/filesystem.hpp>
+#include <cstdio>
 #include <fstream>
 #include <vector>
+
+#include "backend_test_fixture.h"
 #include "limestone/grpc/service/message_versions.h"
+#include "log_entry.h"
 
 namespace limestone::testing {
 
-using limestone::grpc::proto::BackupObject;
-using limestone::grpc::proto::BackupObjectType;
 
 using namespace limestone::grpc::backend;
 
-using namespace limestone::internal;
+using limestone::api::log_entry;
+using limestone::grpc::backend::i_writer;
+using limestone::grpc::proto::BackupObject;
+using limestone::grpc::proto::BackupObjectType;
+using limestone::internal::wal_history;
 
-class backend_shared_impl_test : public ::testing::Test {
+class backend_shared_impl_test : public backend_test_fixture {
 protected:
-    boost::filesystem::path temp_dir = "/tmp/backend_shared_impl_test";
-
-    void SetUp() override {
-        boost::filesystem::create_directories(temp_dir);
-    }
-    void TearDown() override {
-        boost::filesystem::remove_all(temp_dir);
-    }
+    const char* get_location() const override { return "/tmp/backend_shared_impl_test"; }
 
     class seekg_fail_file_operations : public limestone::internal::real_file_operations {
     public:
@@ -63,6 +65,28 @@ protected:
         int seekg_count_ = 0;
         bool fail_ = false;
     };
+
+protected:
+    void create_test_pwal_with_blogs() {
+        gen_datastore();
+        create_blob_file(*resolver_, 100);
+        create_blob_file(*resolver_, 200);
+        create_blob_file(*resolver_, 300);
+        datastore_->switch_epoch(100);
+        lc0_->begin_session();
+        create_blob_file(*resolver_, 100);
+        lc0_->add_entry(1, "key1", "value1", {100, 100}, {100});
+        lc0_->end_session();
+        datastore_->switch_epoch(101);
+        lc0_->begin_session();
+        lc0_->add_entry(1, "key1", "value1", {200, 200}, {200, 300});
+        lc0_->end_session();
+        datastore_->switch_epoch(102);
+        lc0_->begin_session();
+        lc0_->add_entry(1, "key1", "value1", {300, 300});
+        lc0_->end_session();
+        datastore_->switch_epoch(103);
+    }
 };
 
 class dummy_writer : public i_writer {
@@ -77,18 +101,18 @@ public:
 };
 
 TEST_F(backend_shared_impl_test, list_wal_history_returns_empty_when_dir_is_empty) {
-    backend_shared_impl backend(temp_dir);
+    backend_shared_impl backend(get_location());
     auto result = backend.list_wal_history();
     EXPECT_TRUE(result.empty());
 }
 
 TEST_F(backend_shared_impl_test, list_wal_history_matches_wal_history_class) {
-    wal_history wh(temp_dir);
+    wal_history wh(get_location());
     wh.append(123);
     wh.append(456);
     auto expected = wh.list();
 
-    backend_shared_impl backend(temp_dir);
+    backend_shared_impl backend(get_location());
     auto actual = backend.list_wal_history();
 
     ASSERT_EQ(expected.size(), actual.size());
@@ -140,7 +164,7 @@ TEST_F(backend_shared_impl_test, make_backup_object_from_path_not_matched) {
 }
 
 TEST_F(backend_shared_impl_test, keep_alive_success_and_not_found) {
-    backend_shared_impl backend(temp_dir);
+    backend_shared_impl backend(get_location());
     // Create a session
     auto session_opt = backend.create_and_register_session(0, 0, 60, nullptr);
     ASSERT_TRUE(session_opt.has_value());
@@ -172,7 +196,7 @@ TEST_F(backend_shared_impl_test, keep_alive_success_and_not_found) {
 }
 
 TEST_F(backend_shared_impl_test, end_backup_success_and_not_found) {
-    backend_shared_impl backend(temp_dir);
+    backend_shared_impl backend(get_location());
     // Create a session
     auto session_opt = backend.create_and_register_session(0, 0, 60, nullptr);
     ASSERT_TRUE(session_opt.has_value());
@@ -200,7 +224,7 @@ TEST_F(backend_shared_impl_test, end_backup_success_and_not_found) {
 }
 
 TEST_F(backend_shared_impl_test, get_session_store_returns_registered_sessions) {
-    backend_shared_impl backend(temp_dir);
+    backend_shared_impl backend(get_location());
     // Register a session
     auto session_opt = backend.create_and_register_session(123, 456, 30, nullptr);
     ASSERT_TRUE(session_opt.has_value());
@@ -216,7 +240,7 @@ TEST_F(backend_shared_impl_test, get_session_store_returns_registered_sessions) 
 }
 
 TEST_F(backend_shared_impl_test, make_stream_error_status_errno_mapping) {
-    boost::filesystem::path dummy_path = temp_dir / "file.txt";
+    boost::filesystem::path dummy_path = boost::filesystem::path(get_location()) / "file.txt";
     std::string context = "test error";
     std::optional<std::streamoff> offset = 42;
 
@@ -249,12 +273,12 @@ TEST_F(backend_shared_impl_test, send_backup_object_data_success_whole_file) {
     // Prepare a file
     std::string fname = "pwal_0000.compacted";
     std::string content = "abcdefghij";
-    auto file_path = temp_dir / fname;
+    auto file_path = boost::filesystem::path(get_location()) / fname;
     {
         std::ofstream ofs(file_path.string(), std::ios::binary);
         ofs << content;
     }
-    backend_shared_impl backend(temp_dir, 4); // chunk_size = 4
+    backend_shared_impl backend(get_location(), 4); // chunk_size = 4
     backup_object obj(fname, backup_object_type::snapshot, fname);
 
     dummy_writer writer;
@@ -280,12 +304,12 @@ TEST_F(backend_shared_impl_test, send_backup_object_data_success_whole_file) {
 TEST_F(backend_shared_impl_test, send_backup_object_data_with_offset_and_end_offset) {
     std::string fname = "pwal_0000.compacted";
     std::string content = "abcdefghij";
-    auto file_path = temp_dir / fname;
+    auto file_path = boost::filesystem::path(get_location()) / fname;
     {
         std::ofstream ofs(file_path.string(), std::ios::binary);
         ofs << content;
     }
-    backend_shared_impl backend(temp_dir, 3); // chunk_size = 3
+    backend_shared_impl backend(get_location(), 3); // chunk_size = 3
     backup_object obj(fname, backup_object_type::snapshot, fname);
 
     dummy_writer writer;
@@ -302,12 +326,12 @@ TEST_F(backend_shared_impl_test, send_backup_object_data_with_offset_and_end_off
 TEST_F(backend_shared_impl_test, send_backup_object_data_start_offset_out_of_range) {
     std::string fname = "pwal_0000.compacted";
     std::string content = "abc";
-    auto file_path = temp_dir / fname;
+    auto file_path = boost::filesystem::path(get_location()) / fname;
     {
         std::ofstream ofs(file_path.string(), std::ios::binary);
         ofs << content;
     }
-    backend_shared_impl backend(temp_dir, 2);
+    backend_shared_impl backend(get_location(), 2);
     backup_object obj(fname, backup_object_type::snapshot, fname);
 
     dummy_writer writer;
@@ -320,12 +344,12 @@ TEST_F(backend_shared_impl_test, send_backup_object_data_start_offset_out_of_ran
 TEST_F(backend_shared_impl_test, send_backup_object_data_end_offset_before_start_offset) {
     std::string fname = "pwal_0000.compacted";
     std::string content = "abc";
-    auto file_path = temp_dir / fname;
+    auto file_path = boost::filesystem::path(get_location()) / fname;
     {
         std::ofstream ofs(file_path.string(), std::ios::binary);
         ofs << content;
     }
-    backend_shared_impl backend(temp_dir, 2);
+    backend_shared_impl backend(get_location(), 2);
     backup_object obj(fname, backup_object_type::snapshot, fname);
 
     dummy_writer writer;
@@ -337,7 +361,7 @@ TEST_F(backend_shared_impl_test, send_backup_object_data_end_offset_before_start
 
 TEST_F(backend_shared_impl_test, send_backup_object_data_file_not_found) {
     std::string fname = "not_exist_file";
-    backend_shared_impl backend(temp_dir, 2);
+    backend_shared_impl backend(get_location(), 2);
     backup_object obj(fname, backup_object_type::snapshot, fname);
 
     dummy_writer writer;
@@ -349,12 +373,12 @@ TEST_F(backend_shared_impl_test, send_backup_object_data_file_not_found) {
 TEST_F(backend_shared_impl_test, send_backup_object_data_writer_write_fails) {
     std::string fname = "pwal_0000.compacted";
     std::string content = "abcdefgh";
-    auto file_path = temp_dir / fname;
+    auto file_path = boost::filesystem::path(get_location()) / fname;
     {
         std::ofstream ofs(file_path.string(), std::ios::binary);
         ofs << content;
     }
-    backend_shared_impl backend(temp_dir, 4);
+    backend_shared_impl backend(get_location(), 4);
     backup_object obj(fname, backup_object_type::snapshot, fname);
 
     dummy_writer writer;
@@ -382,12 +406,12 @@ TEST_F(backend_shared_impl_test, send_backup_object_data_file_truncated_during_r
     
     std::string fname = "pwal_0000.compacted";
     std::string content = "abcdefgh"; // 8 bytes, but truncated to 5 bytes
-    auto file_path = temp_dir / fname;
+    auto file_path = boost::filesystem::path(get_location()) / fname;
     {
         std::ofstream ofs(file_path.string(), std::ios::binary);
         ofs << content;
     }
-    backend_shared_impl backend(temp_dir, 10); // chunk_size = 10
+    backend_shared_impl backend(get_location(), 10); // chunk_size = 10
 
     // Inject mock file operations that simulates truncation to 5 bytes
     auto mock_ops = std::make_unique<mock_file_operations>(content);
@@ -412,12 +436,12 @@ TEST_F(backend_shared_impl_test, send_backup_object_data_file_truncated_during_r
 TEST_F(backend_shared_impl_test, send_backup_object_data_seekg_first_fail) {
     std::string fname = "pwal_0000.compacted";
     std::string content = "abcdefgh";
-    auto file_path = temp_dir / fname;
+    auto file_path = boost::filesystem::path(get_location()) / fname;
     {
         std::ofstream ofs(file_path.string(), std::ios::binary);
         ofs << content;
     }
-    backend_shared_impl backend(temp_dir, 4);
+    backend_shared_impl backend(get_location(), 4);
     auto mock_ops = std::make_unique<seekg_fail_file_operations>( seekg_fail_file_operations::FIRST);
     backend.set_file_operations(mock_ops.get());
     backup_object obj(fname, backup_object_type::snapshot, fname);
@@ -432,12 +456,12 @@ TEST_F(backend_shared_impl_test, send_backup_object_data_seekg_first_fail) {
 TEST_F(backend_shared_impl_test, send_backup_object_data_seekg_second_fail) {
     std::string fname = "pwal_0000.compacted";
     std::string content = "abcdefgh";
-    auto file_path = temp_dir / fname;
+    auto file_path = boost::filesystem::path(get_location()) / fname;
     {
         std::ofstream ofs(file_path.string(), std::ios::binary);
         ofs << content;
     }
-    backend_shared_impl backend(temp_dir, 4);
+    backend_shared_impl backend(get_location(), 4);
     auto mock_ops = std::make_unique<seekg_fail_file_operations>( seekg_fail_file_operations::SECOND);
     backend.set_file_operations(mock_ops.get());
     backup_object obj(fname, backup_object_type::snapshot, fname);
@@ -452,12 +476,12 @@ TEST_F(backend_shared_impl_test, send_backup_object_data_seekg_second_fail) {
 TEST_F(backend_shared_impl_test, send_backup_object_data_tellg_fail) {
     std::string fname = "pwal_0000.compacted";
     std::string content = "abcdefgh";
-    auto file_path = temp_dir / fname;
+    auto file_path = boost::filesystem::path(get_location()) / fname;
     {
         std::ofstream ofs(file_path.string(), std::ios::binary);
         ofs << content;
     }
-    backend_shared_impl backend(temp_dir, 4);
+    backend_shared_impl backend(get_location(), 4);
 
     class : public limestone::internal::real_file_operations {
         std::streampos ifs_tellg(std::ifstream&) override {
@@ -488,12 +512,12 @@ TEST_F(backend_shared_impl_test, send_backup_object_data_tellg_fail) {
 TEST_F(backend_shared_impl_test, send_backup_object_data_read_badbit) {
     std::string fname = "pwal_0000.compacted";
     std::string content = "abcdefgh";
-    auto file_path = temp_dir / fname;
+    auto file_path = boost::filesystem::path(get_location()) / fname;
     {
         std::ofstream ofs(file_path.string(), std::ios::binary);
         ofs << content;
     }
-    backend_shared_impl backend(temp_dir, 4);
+    backend_shared_impl backend(get_location(), 4);
     class : public limestone::internal::real_file_operations {
         bool ifs_bad(std::ifstream&) override { 
             errno = EIO;
@@ -513,12 +537,12 @@ TEST_F(backend_shared_impl_test, send_backup_object_data_read_badbit) {
 TEST_F(backend_shared_impl_test, send_backup_object_data_read_fail_and_bytes_read_zero) {
     std::string fname = "pwal_0000.compacted";
     std::string content = "abcdefgh";
-    auto file_path = temp_dir / fname;
+    auto file_path = boost::filesystem::path(get_location()) / fname;
     {
         std::ofstream ofs(file_path.string(), std::ios::binary);
         ofs << content;
     }
-    backend_shared_impl backend(temp_dir, 4);
+    backend_shared_impl backend(get_location(), 4);
 
     class : public limestone::internal::real_file_operations {
         void ifs_read(std::ifstream& ifs, char* buf, std::streamsize size) override {
@@ -549,7 +573,7 @@ TEST_F(backend_shared_impl_test, send_backup_object_data_read_fail_and_bytes_rea
 }
 
 TEST_F(backend_shared_impl_test, reset_file_operations_to_default_restores_default_ops) {
-    backend_shared_impl backend(temp_dir, 4);
+    backend_shared_impl backend(get_location(), 4);
 
     // Create a dummy file_operations to inject
     class dummy_file_operations : public limestone::internal::real_file_operations {
@@ -578,5 +602,436 @@ TEST_F(backend_shared_impl_test, reset_file_operations_to_default_restores_defau
 }
 
 
+
+TEST_F(backend_shared_impl_test, prepare_log_object_copy_basic_range_and_blob_extraction) {
+    // Create test WAL file with BLOBs
+    create_test_pwal_with_blogs();
+
+    // Create backup object
+    backup_object obj(
+        "test_object_id",
+        backup_object_type::log,
+        "pwal_0000"
+    );
+
+    backend_shared_impl backend(get_location(), 4096);
+
+    std::set<blob_id_type> required_blobs;
+    ::grpc::Status error_status;
+    std::optional<byte_range> result = backend.prepare_log_object_copy(
+        obj,
+        0,
+        999,
+        required_blobs,
+        error_status
+    );
+
+    // Assert the expected range and required_blobs contents
+    EXPECT_EQ(required_blobs.size(), 3);
+    EXPECT_TRUE(required_blobs.count(blob_id_type{100}) > 0);
+    EXPECT_TRUE(required_blobs.count(blob_id_type{200}) > 0);
+    EXPECT_TRUE(required_blobs.count(blob_id_type{300}) > 0);
+    EXPECT_TRUE(result.has_value());
+    EXPECT_EQ(result->start_offset, 0);
+    EXPECT_EQ(result->end_offset, std::nullopt);
+}
+
+TEST_F(backend_shared_impl_test, prepare_log_object_copy_file_open_fail) {
+    backup_object obj(
+        "test_object_id",
+        backup_object_type::log,
+        "not_exist_file"
+    );
+   
+    backend_shared_impl backend(get_location(), 4096);
+    
+
+    std::set<blob_id_type> required_blobs;
+    ::grpc::Status error_status;
+    auto result = backend.prepare_log_object_copy(
+        obj,
+        0,
+        999,
+        required_blobs,
+        error_status
+    );
+
+    EXPECT_FALSE(result.has_value());
+    EXPECT_EQ(error_status.error_code(), ::grpc::StatusCode::NOT_FOUND);
+    EXPECT_NE(std::string(error_status.error_message()).find("failed to open file"), std::string::npos);
+}
+
+// openには成功するがreadに失敗するファイル（/proc/self/memのシンボリックリンク）を使ったテスト
+TEST_F(backend_shared_impl_test, prepare_log_object_copy_read_fail) {
+    // テスト用シンボリックリンク作成
+
+    auto link_path = boost::filesystem::path(get_location()) / "proc_self_mem_link";
+    std::string link_name = link_path.string();
+    const char* target = "/proc/self/mem";
+    int symlink_result = ::symlink(target, link_name.c_str());
+    ASSERT_EQ(symlink_result, 0) << "failed to create symlink to /proc/self/mem";
+
+    backup_object obj(
+        "test_object_id",
+        backup_object_type::log,
+        "proc_self_mem_link"
+    );
+
+    backend_shared_impl backend(get_location(), 4096);
+
+    std::set<blob_id_type> required_blobs;
+    ::grpc::Status error_status;
+    auto result = backend.prepare_log_object_copy(
+        obj,
+        0,
+        999,
+        required_blobs,
+        error_status
+    );
+
+    // openには成功するが、read_entry_fromで失敗し、INTERNALエラーになることを確認
+    EXPECT_FALSE(result.has_value());
+    EXPECT_EQ(error_status.error_code(), ::grpc::StatusCode::INTERNAL);
+    EXPECT_NE(std::string(error_status.error_message()).find("file is corrupted: failed to read entry"), std::string::npos);
+}
+
+TEST_F(backend_shared_impl_test, prepare_log_object_copy_no_blob_ids) {
+    std::string fname = "pwal_empty";
+    auto file_path = boost::filesystem::path(get_location()) / fname;
+    {
+        std::ofstream ofs(file_path.string(), std::ios::binary);
+    }
+    backup_object obj("test_object_id", backup_object_type::log, fname);
+    backend_shared_impl backend(get_location(), 4096);
+    std::set<blob_id_type> required_blobs;
+    ::grpc::Status error_status;
+    auto result = backend.prepare_log_object_copy(
+        obj,
+        0,
+        999,
+        required_blobs,
+        error_status
+    );
+    EXPECT_TRUE(result.has_value());
+    EXPECT_EQ(result->start_offset, 0);
+    EXPECT_EQ(result->end_offset, std::nullopt);
+    EXPECT_TRUE(required_blobs.empty());
+}
+
+
+TEST_F(backend_shared_impl_test, prepare_log_object_copy_duplicate_blob_ids) {
+    // Create test WAL file with BLOBs
+    create_test_pwal_with_blogs();
+
+
+    // Create backup object
+    backup_object obj(
+        "test_object_id",
+        backup_object_type::log,
+        "pwal_0000"
+    );
+
+    backend_shared_impl backend(get_location(), 4096);
+    std::set<blob_id_type> required_blobs = {blob_id_type{100}, blob_id_type{400}};
+    ::grpc::Status error_status;
+    auto result = backend.prepare_log_object_copy(
+        obj,
+        0,
+        999,
+        required_blobs,
+        error_status
+    );
+
+    EXPECT_TRUE(result.has_value());
+    EXPECT_EQ(result->start_offset, 0);
+    EXPECT_EQ(result->end_offset, std::nullopt);
+    EXPECT_EQ(required_blobs.size(), 4);
+    EXPECT_TRUE(required_blobs.count(blob_id_type{100}) > 0);
+    EXPECT_TRUE(required_blobs.count(blob_id_type{200}) > 0);
+    EXPECT_TRUE(required_blobs.count(blob_id_type{300}) > 0);
+    EXPECT_TRUE(required_blobs.count(blob_id_type{400}) > 0);
+}
+
+
+TEST_F(backend_shared_impl_test, prepare_log_object_copy_begin0_end0) {
+    create_test_pwal_with_blogs();
+    backup_object obj("test_object_id", backup_object_type::log, "pwal_0000");
+    backend_shared_impl backend(get_location(), 4096);
+    std::set<blob_id_type> required_blobs;
+    ::grpc::Status error_status;
+    auto result = backend.prepare_log_object_copy(
+        obj,
+        0,
+        0,
+        required_blobs,
+        error_status
+    );
+    // epoch_id=0のエントリは存在しないので、範囲に含まれるエントリは0件、offsetはファイル先頭
+    EXPECT_TRUE(result.has_value());
+    EXPECT_EQ(result->start_offset, 0);
+    EXPECT_EQ(result->end_offset, 0);
+    EXPECT_TRUE(required_blobs.empty());
+}
+
+TEST_F(backend_shared_impl_test, prepare_log_object_copy_begin0_end1) {
+    create_test_pwal_with_blogs();
+    backup_object obj("test_object_id", backup_object_type::log, "pwal_0000");
+    backend_shared_impl backend(get_location(), 4096);
+    std::set<blob_id_type> required_blobs;
+    ::grpc::Status error_status;
+    auto result = backend.prepare_log_object_copy(
+        obj,
+        0,
+        1,
+        required_blobs,
+        error_status
+    );
+    EXPECT_TRUE(result.has_value());
+    EXPECT_EQ(result->start_offset, 0);
+    EXPECT_EQ(result->end_offset, 0);
+    EXPECT_TRUE(required_blobs.empty());
+}
+
+TEST_F(backend_shared_impl_test, prepare_log_object_copy_begin0_end99) {
+    create_test_pwal_with_blogs();
+    backup_object obj("test_object_id", backup_object_type::log, "pwal_0000");
+    backend_shared_impl backend(get_location(), 4096);
+    std::set<blob_id_type> required_blobs;
+    ::grpc::Status error_status;
+    auto result = backend.prepare_log_object_copy(
+        obj,
+        0,
+        99,
+        required_blobs,
+        error_status
+    );
+    EXPECT_TRUE(result.has_value());
+    EXPECT_EQ(result->start_offset, 0);
+    EXPECT_EQ(result->end_offset, 0);
+    EXPECT_EQ(result->end_offset, 0);
+    EXPECT_TRUE(required_blobs.empty());
+}
+
+TEST_F(backend_shared_impl_test, prepare_log_object_copy_begin0_end100) {
+    create_test_pwal_with_blogs();
+    backup_object obj("test_object_id", backup_object_type::log, "pwal_0000");
+    backend_shared_impl backend(get_location(), 4096);
+    std::set<blob_id_type> required_blobs;
+    ::grpc::Status error_status;
+    auto result = backend.prepare_log_object_copy(
+        obj,
+        0,
+        100,
+        required_blobs,
+        error_status
+    );
+    EXPECT_TRUE(result.has_value());
+    EXPECT_EQ(result->start_offset, 0);
+    EXPECT_EQ(result->end_offset, 0);
+    EXPECT_EQ(result->end_offset, 0);
+    EXPECT_TRUE(required_blobs.empty());
+}
+
+TEST_F(backend_shared_impl_test, prepare_log_object_copy_begin0_end101) {
+    create_test_pwal_with_blogs();
+    backup_object obj("test_object_id", backup_object_type::log, "pwal_0000");
+    backend_shared_impl backend(get_location(), 4096);
+    std::set<blob_id_type> required_blobs;
+    ::grpc::Status error_status;
+    auto result = backend.prepare_log_object_copy(
+        obj,
+        0,
+        101,
+        required_blobs,
+        error_status
+    );
+    EXPECT_TRUE(result.has_value());
+    EXPECT_EQ(result->start_offset, 0);
+    EXPECT_EQ(result->end_offset, 74);
+    EXPECT_EQ(required_blobs.size(), 1);
+    EXPECT_TRUE(required_blobs.count(blob_id_type{100}) > 0);
+}
+
+TEST_F(backend_shared_impl_test, prepare_log_object_copy_begin0_end102) {
+    create_test_pwal_with_blogs();
+    backup_object obj("test_object_id", backup_object_type::log, "pwal_0000");
+    backend_shared_impl backend(get_location(), 4096);
+    std::set<blob_id_type> required_blobs;
+    ::grpc::Status error_status;
+    auto result = backend.prepare_log_object_copy(
+        obj,
+        0,
+        102,
+        required_blobs,
+        error_status
+    );
+    EXPECT_TRUE(result.has_value());
+    EXPECT_EQ(result->start_offset, 0);
+    EXPECT_EQ(result->end_offset, 156);
+    EXPECT_EQ(required_blobs.size(), 3);
+    EXPECT_TRUE(required_blobs.count(blob_id_type{100}) > 0);
+    EXPECT_TRUE(required_blobs.count(blob_id_type{200}) > 0);
+    EXPECT_TRUE(required_blobs.count(blob_id_type{300}) > 0);
+}
+
+TEST_F(backend_shared_impl_test, prepare_log_object_copy_begin0_end103) {
+    create_test_pwal_with_blogs();
+    backup_object obj("test_object_id", backup_object_type::log, "pwal_0000");
+    backend_shared_impl backend(get_location(), 4096);
+    std::set<blob_id_type> required_blobs;
+    ::grpc::Status error_status;
+    auto result = backend.prepare_log_object_copy(
+        obj,
+        0,
+        103,
+        required_blobs,
+        error_status
+    );
+    EXPECT_TRUE(result.has_value());
+    EXPECT_EQ(result->start_offset, 0);
+    EXPECT_EQ(result->end_offset, std::nullopt);
+    EXPECT_EQ(required_blobs.size(), 3);
+    EXPECT_TRUE(required_blobs.count(blob_id_type{100}) > 0);
+    EXPECT_TRUE(required_blobs.count(blob_id_type{200}) > 0);
+    EXPECT_TRUE(required_blobs.count(blob_id_type{300}) > 0);
+}
+
+TEST_F(backend_shared_impl_test, prepare_log_object_copy_begin98_end99) {
+    create_test_pwal_with_blogs();
+    backup_object obj("test_object_id", backup_object_type::log, "pwal_0000");
+    backend_shared_impl backend(get_location(), 4096);
+    std::set<blob_id_type> required_blobs;
+    ::grpc::Status error_status;
+    auto result = backend.prepare_log_object_copy(
+        obj,
+        98,
+        99,
+        required_blobs,
+        error_status
+    );
+    EXPECT_TRUE(result.has_value());
+    EXPECT_EQ(result->start_offset, 0);
+    EXPECT_EQ(result->end_offset, 0);
+    EXPECT_TRUE(required_blobs.empty());
+}
+
+TEST_F(backend_shared_impl_test, prepare_log_object_copy_begin99_end100) {
+    create_test_pwal_with_blogs();
+    backup_object obj("test_object_id", backup_object_type::log, "pwal_0000");
+    backend_shared_impl backend(get_location(), 4096);
+    std::set<blob_id_type> required_blobs;
+    ::grpc::Status error_status;
+    auto result = backend.prepare_log_object_copy(
+        obj,
+        99,
+        100,
+        required_blobs,
+        error_status
+    );
+    EXPECT_TRUE(result.has_value());
+    EXPECT_EQ(result->start_offset, 0);
+    EXPECT_EQ(result->end_offset, 0);
+    EXPECT_TRUE(required_blobs.empty());
+}
+
+TEST_F(backend_shared_impl_test, prepare_log_object_copy_begin100_end101) {
+    create_test_pwal_with_blogs();
+    backup_object obj("test_object_id", backup_object_type::log, "pwal_0000");
+    backend_shared_impl backend(get_location(), 4096);
+    std::set<blob_id_type> required_blobs;
+    ::grpc::Status error_status;
+    auto result = backend.prepare_log_object_copy(
+        obj,
+        100,
+        101,
+        required_blobs,
+        error_status
+    );
+    EXPECT_TRUE(result.has_value());
+    EXPECT_EQ(result->start_offset, 0);
+    EXPECT_EQ(result->end_offset, 74);
+    EXPECT_EQ(required_blobs.size(), 1);
+    EXPECT_TRUE(required_blobs.count(blob_id_type{100}) > 0);
+}
+
+TEST_F(backend_shared_impl_test, prepare_log_object_copy_begin101_end102) {
+    create_test_pwal_with_blogs();
+    backup_object obj("test_object_id", backup_object_type::log, "pwal_0000");
+    backend_shared_impl backend(get_location(), 4096);
+    std::set<blob_id_type> required_blobs;
+    ::grpc::Status error_status;
+    auto result = backend.prepare_log_object_copy(
+        obj,
+        101,
+        102,
+        required_blobs,
+        error_status
+    );
+    EXPECT_TRUE(result.has_value());
+    EXPECT_EQ(result->start_offset, 74);
+    EXPECT_EQ(result->end_offset, 156);
+    EXPECT_EQ(required_blobs.size(), 2);
+    EXPECT_TRUE(required_blobs.count(blob_id_type{200}) > 0);
+    EXPECT_TRUE(required_blobs.count(blob_id_type{300}) > 0);
+}
+
+TEST_F(backend_shared_impl_test, prepare_log_object_copy_begin102_end103) {
+    create_test_pwal_with_blogs();
+    backup_object obj("test_object_id", backup_object_type::log, "pwal_0000");
+    backend_shared_impl backend(get_location(), 4096);
+    std::set<blob_id_type> required_blobs;
+    ::grpc::Status error_status;
+    auto result = backend.prepare_log_object_copy(
+        obj,
+        102,
+        103,
+        required_blobs,
+        error_status
+    );
+    EXPECT_TRUE(result.has_value());
+    EXPECT_EQ(result->start_offset, 156);
+    EXPECT_EQ(result->end_offset, std::nullopt);
+    EXPECT_TRUE(required_blobs.empty());
+}
+
+TEST_F(backend_shared_impl_test, get_object_snapshot_success) {
+    // 準備: テスト用ファイル群を生成
+    gen_datastore();
+    prepare_backup_test_files();
+    backend_shared_impl backend(get_location(), 4); // chunk_size=4
+    // セッション作成
+    backend.begin_backup(backup_type::standard);
+
+    auto session_opt = backend.create_and_register_session(0, 0, 60, nullptr);
+    ASSERT_TRUE(session_opt.has_value());
+    std::string session_id = session_opt->session_id();
+
+    // object_idリストにpwal_0000.compactedを指定
+    limestone::grpc::proto::GetObjectRequest req;
+    req.set_version(limestone::grpc::service::get_object_message_version);
+    req.set_session_id(session_id);
+    req.add_object_id("pwal_0000.compacted");
+
+    // dummy_writerはi_writerを継承している
+    dummy_writer writer;
+    // 実行
+    auto status = backend.get_object(&req, &writer);
+    EXPECT_TRUE(status.ok());
+    // レスポンスが1件以上返ること（ファイルサイズによって複数chunkになる可能性あり）
+    EXPECT_FALSE(writer.responses.empty());
+    // 最初のレスポンスのobject_id/type/pathが正しいこと
+    const auto& first = writer.responses[0];
+    EXPECT_EQ(first.object().object_id(), "pwal_0000.compacted");
+    EXPECT_EQ(first.object().type(), limestone::grpc::proto::BackupObjectType::SNAPSHOT);
+    EXPECT_EQ(first.object().path(), "pwal_0000.compacted");
+    // is_first, is_last, offset, total_size なども最低限チェック
+    EXPECT_TRUE(first.is_first());
+    EXPECT_EQ(first.offset(), 0);
+    EXPECT_EQ(first.total_size() > 0, true);
+    // 最後のレスポンスはis_last=true
+    EXPECT_TRUE(writer.responses.back().is_last());
+}
+
 } // namespace limestone::testing
+
 

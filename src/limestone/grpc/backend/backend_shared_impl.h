@@ -41,9 +41,18 @@ private:
     ::grpc::ServerWriter<limestone::grpc::proto::GetObjectResponse>* writer_;
 };
 
+
+/**
+ * @brief Represents a byte range within a file to be copied.
+ *
+ * This structure specifies the range of bytes in a file that should be copied.
+ * - start_offset: The starting byte offset (inclusive).
+ * - end_offset: The ending byte offset (exclusive). If end_offset is 0, no bytes are copied.
+ *   If end_offset is std::nullopt, the range extends to the end of the file.
+ */
 struct byte_range {
-    std::streamoff start_offset = 0;
-    std::optional<std::streamoff> end_offset = std::nullopt;
+    std::streamoff start_offset = 0; ///< Start position (inclusive)
+    std::optional<std::streamoff> end_offset = std::nullopt; ///< End position (exclusive). If nullopt, means EOF.
 };
 
 class backend_shared_impl {
@@ -71,7 +80,7 @@ public:
     ::grpc::Status end_backup(const limestone::grpc::proto::EndBackupRequest* request, limestone::grpc::proto::EndBackupResponse* response) noexcept;
 
     // Get backup objects
-    ::grpc::Status get_object(const limestone::grpc::proto::GetObjectRequest* request, ::grpc::ServerWriter<limestone::grpc::proto::GetObjectResponse>* writer) noexcept;
+    ::grpc::Status get_object(const limestone::grpc::proto::GetObjectRequest* request, i_writer* writer) noexcept;
 
     /**
      * @brief Send backup object data as a chunked gRPC stream.
