@@ -52,10 +52,11 @@ enum class call_ready_mode {
     call_ready_manual
 };
 
-class compaction_test : public ::testing::Test {
+class compaction_test_fixture : public ::testing::Test {
 
 public:
-    virtual const char* get_location() const { return "/tmp/compaction_test"; }
+    // virtual const char* get_location() const { return "/tmp/compaction_test"; }
+    virtual const char* get_location() const = 0;
     boost::filesystem::path manifest_path() const { return boost::filesystem::path(get_location()) / std::string(limestone::internal::manifest::file_name); }
     boost::filesystem::path compaction_catalog_path() const { return boost::filesystem::path(get_location()) / "compaction_catalog"; }
     const std::string compacted_filename = compaction_catalog::get_compacted_filename();

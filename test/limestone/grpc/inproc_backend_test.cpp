@@ -76,7 +76,7 @@ static const std::vector<backup_condition> backup_conditions = {
 
 
 
-class inproc_backend_test : public limestone::testing::compaction_test {
+class inproc_backend_test : public limestone::testing::compaction_test_fixture {
 
 protected:
     const char* get_location() const override { return "/tmp/inproc_backend_test"; }
@@ -214,12 +214,12 @@ protected:
     }
 
     void SetUp() override {
-        compaction_test::SetUp();
+        compaction_test_fixture::SetUp();
         resolver_ = std::make_unique<blob_file_resolver>(boost::filesystem::path(get_location()));
     }
     void TearDown() override {
         resolver_.reset();
-        compaction_test::TearDown();
+        compaction_test_fixture::TearDown();
     }
 };
 

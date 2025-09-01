@@ -22,6 +22,11 @@ using namespace std::literals;
 using namespace limestone::api;
 using namespace limestone::internal;
     
+class compaction_test : public compaction_test_fixture {
+public:
+    const char* get_location() const override { return "/tmp/compaction_test"; }
+};
+
 
 TEST_F(compaction_test, no_pwals) {
     gen_datastore();
