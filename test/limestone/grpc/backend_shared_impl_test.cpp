@@ -31,6 +31,8 @@
 namespace limestone::testing {
 
 
+
+
 using namespace limestone::grpc::backend;
 
 using limestone::api::log_entry;
@@ -661,10 +663,9 @@ TEST_F(backend_shared_impl_test, prepare_log_object_copy_file_open_fail) {
     EXPECT_NE(std::string(error_status.error_message()).find("failed to open file"), std::string::npos);
 }
 
-// openには成功するがreadに失敗するファイル（/proc/self/memのシンボリックリンク）を使ったテスト
 TEST_F(backend_shared_impl_test, prepare_log_object_copy_read_fail) {
-    // テスト用シンボリックリンク作成
-
+    // Test using a file (symbolic link to /proc/self/mem) that can be opened but fails to read
+    // Create a symbolic link for testing
     auto link_path = boost::filesystem::path(get_location()) / "proc_self_mem_link";
     std::string link_name = link_path.string();
     const char* target = "/proc/self/mem";
@@ -689,7 +690,7 @@ TEST_F(backend_shared_impl_test, prepare_log_object_copy_read_fail) {
         error_status
     );
 
-    // openには成功するが、read_entry_fromで失敗し、INTERNALエラーになることを確認
+    // Confirm that open succeeds but read_entry_from fails, resulting in an INTERNAL error
     EXPECT_FALSE(result.has_value());
     EXPECT_EQ(error_status.error_code(), ::grpc::StatusCode::INTERNAL);
     EXPECT_NE(std::string(error_status.error_message()).find("file is corrupted: failed to read entry"), std::string::npos);
@@ -714,7 +715,8 @@ TEST_F(backend_shared_impl_test, prepare_log_object_copy_no_blob_ids) {
     );
     EXPECT_TRUE(result.has_value());
     EXPECT_EQ(result->start_offset, 0);
-    EXPECT_EQ(result->end_offset, std::nullopt);
+    EXPECT_TRUE(result->end_offset.has_value());
+    EXPECT_EQ(result->end_offset, 0);
     EXPECT_TRUE(required_blobs.empty());
 }
 
@@ -766,9 +768,11 @@ TEST_F(backend_shared_impl_test, prepare_log_object_copy_begin0_end0) {
         required_blobs,
         error_status
     );
-    // epoch_id=0のエントリは存在しないので、範囲に含まれるエントリは0件、offsetはファイル先頭
+    // There is no entry with epoch_id=0, so there are 0 entries in the range and the offset is at the beginning of the file
+
     EXPECT_TRUE(result.has_value());
     EXPECT_EQ(result->start_offset, 0);
+    EXPECT_TRUE(result->end_offset.has_value());
     EXPECT_EQ(result->end_offset, 0);
     EXPECT_TRUE(required_blobs.empty());
 }
@@ -788,6 +792,7 @@ TEST_F(backend_shared_impl_test, prepare_log_object_copy_begin0_end1) {
     );
     EXPECT_TRUE(result.has_value());
     EXPECT_EQ(result->start_offset, 0);
+    EXPECT_TRUE(result->end_offset.has_value());
     EXPECT_EQ(result->end_offset, 0);
     EXPECT_TRUE(required_blobs.empty());
 }
@@ -807,7 +812,7 @@ TEST_F(backend_shared_impl_test, prepare_log_object_copy_begin0_end99) {
     );
     EXPECT_TRUE(result.has_value());
     EXPECT_EQ(result->start_offset, 0);
-    EXPECT_EQ(result->end_offset, 0);
+    EXPECT_TRUE(result->end_offset.has_value());
     EXPECT_EQ(result->end_offset, 0);
     EXPECT_TRUE(required_blobs.empty());
 }
@@ -827,7 +832,7 @@ TEST_F(backend_shared_impl_test, prepare_log_object_copy_begin0_end100) {
     );
     EXPECT_TRUE(result.has_value());
     EXPECT_EQ(result->start_offset, 0);
-    EXPECT_EQ(result->end_offset, 0);
+    EXPECT_TRUE(result->end_offset.has_value());
     EXPECT_EQ(result->end_offset, 0);
     EXPECT_TRUE(required_blobs.empty());
 }
@@ -911,6 +916,7 @@ TEST_F(backend_shared_impl_test, prepare_log_object_copy_begin98_end99) {
     );
     EXPECT_TRUE(result.has_value());
     EXPECT_EQ(result->start_offset, 0);
+    EXPECT_TRUE(result->end_offset.has_value());
     EXPECT_EQ(result->end_offset, 0);
     EXPECT_TRUE(required_blobs.empty());
 }
@@ -930,6 +936,7 @@ TEST_F(backend_shared_impl_test, prepare_log_object_copy_begin99_end100) {
     );
     EXPECT_TRUE(result.has_value());
     EXPECT_EQ(result->start_offset, 0);
+    EXPECT_TRUE(result->end_offset.has_value());
     EXPECT_EQ(result->end_offset, 0);
     EXPECT_TRUE(required_blobs.empty());
 }
@@ -994,44 +1001,200 @@ TEST_F(backend_shared_impl_test, prepare_log_object_copy_begin102_end103) {
     EXPECT_TRUE(required_blobs.empty());
 }
 
+TEST_F(backend_shared_impl_test, prepare_log_object_copy_begin103_end104) {
+    create_test_pwal_with_blogs();
+    backup_object obj("test_object_id", backup_object_type::log, "pwal_0000");
+    backend_shared_impl backend(get_location(), 4096);
+    std::set<blob_id_type> required_blobs;
+    ::grpc::Status error_status;
+    auto result = backend.prepare_log_object_copy(
+        obj,
+        103,
+        104,
+        required_blobs,
+        error_status
+    );
+    EXPECT_TRUE(result.has_value());
+    EXPECT_EQ(result->start_offset, 0);
+    EXPECT_TRUE(result->end_offset.has_value());
+    EXPECT_EQ(result->end_offset, 0);
+    EXPECT_TRUE(required_blobs.empty());
+}
+
 TEST_F(backend_shared_impl_test, get_object_snapshot_success) {
-    // 準備: テスト用ファイル群を生成
+    // Prepare test files
     gen_datastore();
     prepare_backup_test_files();
     backend_shared_impl backend(get_location(), 4); // chunk_size=4
-    // セッション作成
-    backend.begin_backup(backup_type::standard);
-
+    // Create session
     auto session_opt = backend.create_and_register_session(0, 0, 60, nullptr);
     ASSERT_TRUE(session_opt.has_value());
     std::string session_id = session_opt->session_id();
 
-    // object_idリストにpwal_0000.compactedを指定
+    // Create backup object
+    backup_object obj("pwal_0000.compacted", backup_object_type::snapshot, "pwal_0000.compacted");
+    backend.get_session_store().add_backup_object_to_session(session_id, obj);
+
+    // Specify object_id list with pwal_0000.compacted
     limestone::grpc::proto::GetObjectRequest req;
     req.set_version(limestone::grpc::service::get_object_message_version);
     req.set_session_id(session_id);
     req.add_object_id("pwal_0000.compacted");
 
-    // dummy_writerはi_writerを継承している
+    // dummy_writer inherits i_writer
     dummy_writer writer;
-    // 実行
+    // Execute
     auto status = backend.get_object(&req, &writer);
     EXPECT_TRUE(status.ok());
-    // レスポンスが1件以上返ること（ファイルサイズによって複数chunkになる可能性あり）
+    // At least one response should be returned (may be multiple chunks depending on file size)
     EXPECT_FALSE(writer.responses.empty());
-    // 最初のレスポンスのobject_id/type/pathが正しいこと
+    // The first response's object_id/type/path should be correct
     const auto& first = writer.responses[0];
     EXPECT_EQ(first.object().object_id(), "pwal_0000.compacted");
     EXPECT_EQ(first.object().type(), limestone::grpc::proto::BackupObjectType::SNAPSHOT);
     EXPECT_EQ(first.object().path(), "pwal_0000.compacted");
-    // is_first, is_last, offset, total_size なども最低限チェック
+    // Check is_first, is_last, offset, total_size, etc.
     EXPECT_TRUE(first.is_first());
     EXPECT_EQ(first.offset(), 0);
     EXPECT_EQ(first.total_size() > 0, true);
-    // 最後のレスポンスはis_last=true
+    // The last response should have is_last=true
     EXPECT_TRUE(writer.responses.back().is_last());
 }
 
-} // namespace limestone::testing
+TEST_F(backend_shared_impl_test, get_object_error_cases) {
+    gen_datastore();
+    backend_shared_impl backend(get_location(), 4);
+    dummy_writer writer;
 
+    // 1. バージョン不正
+    {
+        limestone::grpc::proto::GetObjectRequest req;
+        req.set_version(9999); // 不正なバージョン
+        req.set_session_id("dummy");
+        req.add_object_id("pwal_0000.compacted");
+        auto status = backend.get_object(&req, &writer);
+        EXPECT_EQ(status.error_code(), ::grpc::StatusCode::INVALID_ARGUMENT);
+        EXPECT_NE(std::string(status.error_message()).find("unsupported get_object request version"), std::string::npos);
+    }
+
+    // 2. 存在しないsession_id
+    {
+        limestone::grpc::proto::GetObjectRequest req;
+        req.set_version(limestone::grpc::service::get_object_message_version);
+        req.set_session_id("not_found_session");
+        req.add_object_id("pwal_0000.compacted");
+        auto status = backend.get_object(&req, &writer);
+        EXPECT_EQ(status.error_code(), ::grpc::StatusCode::NOT_FOUND);
+        EXPECT_NE(std::string(status.error_message()).find("session not found"), std::string::npos);
+    }
+
+    // 3. 存在しないobject_id
+    {
+        // 正常なsessionを作成
+        prepare_backup_test_files();
+        auto session_opt = backend.create_and_register_session(0, 0, 60, nullptr);
+        ASSERT_TRUE(session_opt.has_value());
+        std::string session_id = session_opt->session_id();
+        limestone::grpc::proto::GetObjectRequest req;
+        req.set_version(limestone::grpc::service::get_object_message_version);
+        req.set_session_id(session_id);
+        req.add_object_id("not_exist_object");
+        auto status = backend.get_object(&req, &writer);
+        EXPECT_EQ(status.error_code(), ::grpc::StatusCode::NOT_FOUND);
+        EXPECT_NE(std::string(status.error_message()).find("backup object not found"), std::string::npos);
+    }
+}
+
+TEST_F(backend_shared_impl_test, get_object_writer_write_fails)
+{
+    // This test simulates a write failure in i_writer (dummy_writer), just like send_backup_object_data_writer_write_fails.
+    // It covers the error return path in get_object when writer->Write() fails.
+    gen_datastore();
+    prepare_backup_test_files();
+    backend_shared_impl backend(get_location(), 4); // chunk_size=4
+    auto session_opt = backend.create_and_register_session(0, 0, 60, nullptr);
+    ASSERT_TRUE(session_opt.has_value());
+    std::string session_id = session_opt->session_id();
+    backup_object obj("pwal_0000.compacted", backup_object_type::snapshot, "pwal_0000.compacted");
+    backend.get_session_store().add_backup_object_to_session(session_id, obj);
+
+    // Prepare request
+    limestone::grpc::proto::GetObjectRequest req;
+    req.set_version(limestone::grpc::service::get_object_message_version);
+    req.set_session_id(session_id);
+    req.add_object_id("pwal_0000.compacted");
+
+    dummy_writer writer;
+    writer.fail_write = true;
+    auto status = backend.get_object(&req, &writer);
+
+    // Check that the error is UNKNOWN and the message contains 'stream write failed'
+    EXPECT_EQ(status.error_code(), ::grpc::StatusCode::UNKNOWN);
+    EXPECT_NE(std::string(status.error_message()).find("stream write failed"), std::string::npos);
+}
+
+
+TEST_F(backend_shared_impl_test, get_object_log_continue_if_no_end_offset) {
+    // Create actual file pwal_0001 and use it as a log object
+    gen_datastore();
+    prepare_backup_test_files();
+    backend_shared_impl backend(get_location(), 4);
+    // Create session (begin_epoch=999, end_epoch=999)
+    auto session_opt = backend.create_and_register_session(999, 9999, 60, nullptr);
+    ASSERT_TRUE(session_opt.has_value());
+    std::string session_id = session_opt->session_id();
+
+    // Add log object (pwal_0001) to the session
+    backup_object obj("pwal_0001", backup_object_type::log, "pwal_0001");
+    backend.get_session_store().add_backup_object_to_session(session_id, obj);
+
+    // Create request
+    limestone::grpc::proto::GetObjectRequest req;
+    req.set_version(limestone::grpc::service::get_object_message_version);
+    req.set_session_id(session_id);
+    req.add_object_id("pwal_0001");
+
+    dummy_writer writer;
+    // Execute: goes through the continue branch, but send_backup_object_data is not called so the response is empty
+    auto status = backend.get_object(&req, &writer);
+    EXPECT_TRUE(status.ok());
+    EXPECT_TRUE(writer.responses.empty());
+}
+
+TEST_F(backend_shared_impl_test, get_object_log_corrupted_file_returns_error_status) {
+
+    // Directly generate a 00-filled file (write multiple 0x00 bytes)
+    std::string fname = "pwal_00fill";
+    auto file_path = boost::filesystem::path(get_location()) / fname;
+    {
+        std::ofstream ofs(file_path.string(), std::ios::binary);
+        std::vector<char> zeros(256, 0x00); // 256 bytes of 0x00
+        ofs.write(zeros.data(), zeros.size());
+    }
+
+    backend_shared_impl backend(get_location(), 4096);
+    // Create a session
+    auto session_opt = backend.create_and_register_session(100, 200, 60, nullptr);
+    ASSERT_TRUE(session_opt.has_value());
+    std::string session_id = session_opt->session_id();
+
+    // Add log object (pwal_00fill) to the session
+    backup_object obj(fname, backup_object_type::log, fname);
+    backend.get_session_store().add_backup_object_to_session(session_id, obj);
+
+    // Create request
+    limestone::grpc::proto::GetObjectRequest req;
+    req.set_version(limestone::grpc::service::get_object_message_version);
+    req.set_session_id(session_id);
+    req.add_object_id(fname);
+
+    dummy_writer writer;
+    // Execute: since the file is corrupted, the error_status branch in prepare_log_object_copy is reached
+    auto status = backend.get_object(&req, &writer);
+    EXPECT_EQ(status.error_code(), ::grpc::StatusCode::INTERNAL);
+    EXPECT_NE(std::string(status.error_message()).find("file is corrupted"), std::string::npos);
+    EXPECT_TRUE(writer.responses.empty());
+}
+
+} // namespace limestone::testing
 

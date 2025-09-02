@@ -117,19 +117,19 @@ void backend_shared_impl::set_file_operations(limestone::internal::file_operatio
         if (!backup_object) {
             return {::grpc::StatusCode::NOT_FOUND, "backup object not found: " + obj_id};
         }
-        byte_range range{0, std::nullopt};
+        std::optional<byte_range> range = byte_range{0, std::nullopt};
         auto type = backup_object.value().type();
         if (type == backend::backup_object_type::log && !is_fullbackup) {
             ::grpc::Status error_status;
-            auto opt_range = prepare_log_object_copy(*backup_object, begin_epoch, end_epoch, required_blobs, error_status);
-            if (!opt_range) {
+            range = prepare_log_object_copy(*backup_object, begin_epoch, end_epoch, required_blobs, error_status);
+            if (!range) {
                 return error_status;
             }
-            if (!range.end_offset.has_value()) {
+            if (range->end_offset.has_value() && range->end_offset == 0) {
                 continue; // File does not have a copy target
             }
         }
-        auto send_status = send_backup_object_data(*backup_object, writer, range);
+        auto send_status = send_backup_object_data(*backup_object, writer, range.value());
         if (!send_status.ok()) {
             return send_status;
         }
@@ -159,6 +159,9 @@ std::optional<byte_range> backend_shared_impl::prepare_log_object_copy(
     epoch_id_type current_epoch_id = 0;
     while (true) {
         auto fpos_before_read_entry = file_ops_->ifs_tellg(*stream);
+        // Since read_entry_from does not distinguish between system call errors and format errors,
+        // explicitly reset errno here to prevent inappropriate errno values from being included in error messages.
+        errno = 0; 
         bool data_remains = entry.read_entry_from(*stream, read_error_);
         if (read_error_.value() != log_entry::read_error::ok) {
             std::string context = "file is corrupted: failed to read entry at fpos=" + std::to_string(static_cast<std::streamoff>(fpos_before_read_entry));
@@ -185,7 +188,7 @@ std::optional<byte_range> backend_shared_impl::prepare_log_object_copy(
     if (start_offset.has_value()) {
         return {byte_range{start_offset.value(), end_offset}};
     }
-    return {byte_range{0, std::nullopt}};
+    return {byte_range{0, 0}};
 }
 
 ::grpc::Status backend_shared_impl::send_backup_object_data(
