@@ -119,7 +119,7 @@ target_link_libraries(limestone-impl
 
 # utils
 file(GLOB DBLOGUTIL_SOURCES
-        "limestone/dblogutil/*.cpp"
+        "limestone/cli/dblogutil.cpp"
 )
 
 add_executable(dblogutil ${DBLOGUTIL_SOURCES})
@@ -136,7 +136,7 @@ install_custom(dblogutil dblogutil)
 
 # replica command
 file(GLOB REPLICA_SOURCES
-        "limestone/replica/*.cpp"
+        "limestone/cli/replica.cpp"
 )
 
 add_executable(replica ${REPLICA_SOURCES})
@@ -151,4 +151,22 @@ set_target_properties(replica
 )
 if (INSTALL_EXPERIMENTAL_TOOLS)
     install_custom(replica replica)
+endif()
+
+# tg-grpc-backupd: gRPC remote backup service
+file(GLOB TG_GRPC_BACKUPD_SOURCES
+        "limestone/cli/grpc_server_main.cpp"
+)
+add_executable(tg-grpc-backupd ${TG_GRPC_BACKUPD_SOURCES})
+target_include_directories(tg-grpc-backupd
+        PRIVATE ./limestone
+)
+target_link_libraries(tg-grpc-backupd PRIVATE limestone-impl PRIVATE glog::glog)
+set_target_properties(tg-grpc-backupd
+        PROPERTIES
+                INSTALL_RPATH "\$ORIGIN/../${CMAKE_INSTALL_LIBDIR}"
+                RUNTIME_OUTPUT_NAME "tg-grpc-backupd"
+)
+if (INSTALL_EXPERIMENTAL_TOOLS)
+    install_custom(tg-grpc-backupd tg-grpc-backupd)
 endif()
