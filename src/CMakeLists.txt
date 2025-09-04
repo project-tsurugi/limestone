@@ -158,15 +158,19 @@ file(GLOB TG_GRPC_BACKUPD_SOURCES
         "limestone/cli/grpc_server_main.cpp"
 )
 add_executable(tg-grpc-backupd ${TG_GRPC_BACKUPD_SOURCES})
-target_include_directories(tg-grpc-backupd
-        PRIVATE ./limestone
+target_include_directories(tg-grpc-backupd PRIVATE
+        ./limestone
+        ${CMAKE_BINARY_DIR}/src
 )
-target_link_libraries(tg-grpc-backupd PRIVATE limestone-impl PRIVATE glog::glog)
-set_target_properties(tg-grpc-backupd
-        PROPERTIES
-                INSTALL_RPATH "\$ORIGIN/../${CMAKE_INSTALL_LIBDIR}"
-                RUNTIME_OUTPUT_NAME "tg-grpc-backupd"
+target_link_libraries(tg-grpc-backupd PRIVATE
+        limestone-impl
+        glog::glog
+        gflags::gflags
+)
+set_target_properties(tg-grpc-backupd PROPERTIES
+        INSTALL_RPATH "\$ORIGIN/../${CMAKE_INSTALL_LIBDIR}"
+        RUNTIME_OUTPUT_NAME "tg-grpc-backupd"
 )
 if (INSTALL_EXPERIMENTAL_TOOLS)
-    install_custom(tg-grpc-backupd tg-grpc-backupd)
+        install_custom(tg-grpc-backupd tg-grpc-backupd)
 endif()
