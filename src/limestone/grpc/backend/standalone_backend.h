@@ -45,6 +45,7 @@ public:
 private:
     boost::filesystem::path log_dir_;
     backend_shared_impl backend_shared_impl_;
+    limestone::api::datastore datastore_;
 };
 
 } // namespace limestone::grpc::backend

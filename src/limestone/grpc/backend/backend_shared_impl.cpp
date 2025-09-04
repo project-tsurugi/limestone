@@ -1,23 +1,30 @@
 #include "backend_shared_impl.h"
 
-
 #include <google/protobuf/repeated_field.h>
+
 #include <cerrno>
 #include <cstring>
 #include <memory>
 #include <optional>
-#include "file_operations.h"
-#include "log_entry.h"
 
+#include "compaction_catalog.h"
+#include "datastore_impl.h"
+#include "file_operations.h"
 #include "grpc/service/message_versions.h"
+#include "limestone/api/backup_detail.h"
+#include "log_entry.h"
 
 namespace limestone::grpc::backend {
 
-using limestone::grpc::service::keep_alive_message_version;
-using limestone::grpc::service::end_backup_message_version;
-using limestone::grpc::service::session_timeout_seconds;
-using limestone::grpc::service::get_object_message_version;
+using limestone::api::backup_type;
 using limestone::api::log_entry;
+using limestone::grpc::service::begin_backup_message_version;
+using limestone::grpc::service::end_backup_message_version;
+using limestone::grpc::service::get_object_message_version;
+using limestone::grpc::service::keep_alive_message_version;
+using limestone::grpc::service::session_timeout_seconds;
+using limestone::internal::compaction_catalog;
+using limestone::api::backup_detail_and_rotation_result;
 
 std::optional<backup_object> backend_shared_impl::make_backup_object_from_path(const boost::filesystem::path& path) {
     std::string filename = path.filename().string();
@@ -300,6 +307,78 @@ void backend_shared_impl::reset_file_operations_to_default() noexcept {
     file_ops_ = default_file_ops_.get();
 }
 
+::grpc::Status backend_shared_impl::begin_backup(datastore& datastore_, const limestone::grpc::proto::BeginBackupRequest* request,
+                                                 limestone::grpc::proto::BeginBackupResponse* response) noexcept {
+    try {
+		// Call the exception injection hook if it is set (for testing)
+        if (exception_hook_) {
+            exception_hook_();
+        }
+        if (request->version() != begin_backup_message_version) {
+            return {::grpc::StatusCode::INVALID_ARGUMENT, std::string("unsupported begin_backup request version: ") + std::to_string(request->version())};
+        }
+        uint32_t begin_epoch = request->begin_epoch();
+        uint32_t end_epoch = request->end_epoch();
+        // Create a session for this backup. The second argument is a callback
+        // that will be invoked when the session is removed (expired or deleted).
+        // In this callback, decrement_backup_counter() is called to update the backup counter.
+        auto session = create_and_register_session(
+            begin_epoch,
+            end_epoch,
+            session_timeout_seconds,
+            [&datastore_]() {
+                datastore_.get_impl()->decrement_backup_counter();
+            }
+        );
+        if (!session) {
+            return {::grpc::StatusCode::INTERNAL, "failed to create session"};
+        }
 
+        response->set_session_id(session->session_id());
+        response->set_expire_at(session->expire_at());
+        bool is_full_backup = (begin_epoch == 0 && end_epoch == 0);
+        compaction_catalog& catalog = datastore_.get_impl()->get_compaction_catalog();
+        if (!is_full_backup) {
+            // differential backup
+            if (begin_epoch >= end_epoch) {
+                return {::grpc::StatusCode::INVALID_ARGUMENT,
+                        "begin_epoch must be less than end_epoch: begin_epoch=" + std::to_string(begin_epoch) + ", end_epoch=" + std::to_string(end_epoch)};
+            }
+            auto snapshot_epoch_id = catalog.get_max_epoch_id();
+            if (begin_epoch <= snapshot_epoch_id) {
+                return {::grpc::StatusCode::INVALID_ARGUMENT, "begin_epoch must be strictly greater than the epoch id of the last snapshot: begin_epoch=" +
+                                                                  std::to_string(begin_epoch) + ", snapshot_epoch_id=" + std::to_string(snapshot_epoch_id)};
+            }
+            auto current_epoch_id = datastore_.last_epoch();
+            if (end_epoch > current_epoch_id) {
+                return {::grpc::StatusCode::INVALID_ARGUMENT, "end_epoch must be less than or equal to the current epoch id: end_epoch=" +
+                                                                  std::to_string(end_epoch) + ", current_epoch_id=" + std::to_string(current_epoch_id)};
+            }
+			auto boot_durable_epoch_id = datastore_.get_impl()->get_boot_durable_epoch_id();
+			if (end_epoch < boot_durable_epoch_id) {
+				return {::grpc::StatusCode::INVALID_ARGUMENT, "end_epoch must be strictly greater than the durable epoch id at boot time: end_epoch=" +
+																  std::to_string(end_epoch) + ", boot_durable_epoch_id=" + std::to_string(boot_durable_epoch_id)};
+			}
+		} 
+        response->set_start_epoch(begin_epoch);
+        response->set_finish_epoch(end_epoch);
+
+        backup_detail_and_rotation_result result = datastore_.get_impl()->begin_backup_with_rotation_result(backup_type::transaction);
+        if (result.detail) {
+            for (const auto& entry : result.detail->entries()) {
+                auto obj = backend_shared_impl::make_backup_object_from_path(entry.source_path());
+                if (obj) {
+                    session_store_.add_backup_object_to_session(session->session_id(), *obj);
+                    *response->add_objects() = obj->to_proto();
+                }
+            }
+        }
+        return ::grpc::Status::OK;
+    } catch (const std::exception& e) {
+        VLOG_LP(log_info) << "begin_backup failed: " << e.what();
+        std::string msg = e.what();
+        return {::grpc::StatusCode::INTERNAL, msg};
+    }
+}
 
 }  // namespace limestone::grpc::backend

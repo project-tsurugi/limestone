@@ -27,7 +27,14 @@ using limestone::grpc::service::list_wal_history_message_version;
 
 
 standalone_backend::standalone_backend(const boost::filesystem::path& log_dir)
-	: log_dir_(log_dir), backend_shared_impl_(log_dir)
+    : log_dir_(log_dir)
+    , backend_shared_impl_(log_dir)
+    , datastore_([&]{
+    std::vector<boost::filesystem::path> data_locations{};
+    data_locations.emplace_back(log_dir);
+    limestone::api::configuration conf(data_locations, log_dir);
+        return limestone::api::datastore(conf);
+    }())
 {
 }
 
@@ -57,12 +64,8 @@ standalone_backend::standalone_backend(const boost::filesystem::path& log_dir)
 }
 
 
-::grpc::Status standalone_backend::begin_backup(const BeginBackupRequest* request, BeginBackupResponse* /*response*/) noexcept {
-    if (request->version() != limestone::grpc::service::begin_backup_message_version) {
-        return {::grpc::StatusCode::INVALID_ARGUMENT, "unsupported begin backup request version"};
-    }
-
-    return {::grpc::StatusCode::UNIMPLEMENTED, "begin_backup not implemented"};
+::grpc::Status standalone_backend::begin_backup(const BeginBackupRequest* request, BeginBackupResponse* response) noexcept {
+    return backend_shared_impl_.begin_backup(datastore_, request, response);
 }
 
 

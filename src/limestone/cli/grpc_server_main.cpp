@@ -47,15 +47,26 @@ void show_usage(const std::string& program_name) {
     std::cout << "  <logdir>           Target log directory\n";
 }
 
-std::atomic<bool> shutdown_requested{false};
+// Use a function-local static to avoid a non-const global variable.
+std::atomic<bool>& shutdown_requested() {
+    static std::atomic<bool> instance{false};
+    return instance;
+}
+
 void handle_signal(int) {
-    shutdown_requested.store(true);
+    shutdown_requested().store(true);
 }
 
 void initialize_and_run_grpc_server(const std::string& logdir, const std::string& host, int port) {
     // Setup signal handler for graceful shutdown
-    std::signal(SIGINT, handle_signal);
-    std::signal(SIGTERM, handle_signal);
+    if (std::signal(SIGINT, handle_signal) == SIG_ERR) {
+        std::cerr << "Failed to set SIGINT handler" << std::endl;
+        std::exit(1);
+    }
+    if (std::signal(SIGTERM, handle_signal) == SIG_ERR) {
+        std::cerr << "Failed to set SIGTERM handler" << std::endl;
+        std::exit(1);
+    }
 
     // Create backend
     auto backend = limestone::grpc::backend::grpc_service_backend::create_standalone(logdir);
@@ -82,7 +93,7 @@ void initialize_and_run_grpc_server(const std::string& logdir, const std::string
     std::cout << "gRPC server started on " << server_address << std::endl;
 
     // Wait for shutdown signal
-    while (!shutdown_requested.load()) {
+    while (!shutdown_requested().load()) {
         std::this_thread::sleep_for(std::chrono::milliseconds(200));
     }
     std::cout << "Shutdown signal received. Stopping server..." << std::endl;
@@ -94,10 +105,12 @@ void initialize_and_run_grpc_server(const std::string& logdir, const std::string
 } // namespace
 
 int main(int argc, char* argv[]) {
+    std::vector<std::string> args(argv, argv + argc);
+
     gflags::SetUsageMessage("Usage: tg-grpc-backupd [options] <logdir>");
     gflags::ParseCommandLineFlags(&argc, &argv, true);
 
-    const std::string program_name = boost::filesystem::path(argv[0]).filename().string();
+    const std::string program_name = boost::filesystem::path(std::string(args.at(0))).filename().string();
 
     if (FLAGS_help) {
         show_usage(program_name);
@@ -110,7 +123,7 @@ int main(int argc, char* argv[]) {
         return 1;
     }
 
-    std::string logdir = argv[1];
+    std::string logdir = args.at(1);
     boost::filesystem::path log_dir_path(logdir);
     if (!boost::filesystem::exists(log_dir_path)) {
         std::cerr << "Error: Directory does not exist: " << logdir << std::endl;

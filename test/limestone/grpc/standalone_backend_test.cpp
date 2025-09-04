@@ -70,13 +70,14 @@ TEST_F(standalone_backend_test, get_wal_history_response_empty) {
 
 
 TEST_F(standalone_backend_test, get_wal_history_response_with_records) {
+    standalone_backend backend(temp_dir);
+
     wal_history wh(temp_dir);
     wh.append(100);
     wh.append(200);
     auto expected = wh.list();
     write_epoch_file(200);
 
-    standalone_backend backend(temp_dir);
     WalHistoryRequest request;
     request.set_version(list_wal_history_message_version);
     WalHistoryResponse response;

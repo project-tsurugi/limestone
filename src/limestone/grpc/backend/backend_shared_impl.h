@@ -13,12 +13,14 @@
 #include "session_store.h"
 #include "wal_history.grpc.pb.h"
 #include "wal_sync/wal_history.h"
+#include "limestone/api/datastore.h"
 
 namespace limestone::grpc::backend {
 
 using limestone::grpc::proto::BranchEpoch;
 using limestone::grpc::proto::BackupObject;
 using limestone::api::blob_id_type;
+using limestone::api::datastore;
 
 class i_writer {
 public:
@@ -81,6 +83,9 @@ public:
 
     // Get backup objects
     ::grpc::Status get_object(const limestone::grpc::proto::GetObjectRequest* request, i_writer* writer) noexcept;
+
+    // Shared logic for begin backup
+    ::grpc::Status begin_backup(datastore& datastore_, const limestone::grpc::proto::BeginBackupRequest* request, limestone::grpc::proto::BeginBackupResponse* response) noexcept;
 
     /**
      * @brief Send backup object data as a chunked gRPC stream.
@@ -162,7 +167,10 @@ public:
      */
     static ::grpc::Status make_stream_error_status(const std::string& context, const boost::filesystem::path& path, std::optional<std::streamoff> offset, int err);
 
+    // For testing: set exception injection hook
+    void set_exception_hook(std::function<void()> hook) { exception_hook_ = std::move(hook); }
 private:
+    std::function<void()> exception_hook_;
     boost::filesystem::path log_dir_;
     session_store session_store_;
     std::size_t chunk_size_;
