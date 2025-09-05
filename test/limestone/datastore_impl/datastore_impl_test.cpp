@@ -8,11 +8,12 @@ class datastore_impl_test : public ::testing::Test {
 protected:
     datastore_impl_test() = default;
     ~datastore_impl_test() override = default;
+    datastore dummy_ds;
 };
 
 TEST_F(datastore_impl_test, migration_info_getter_setter) {
-    datastore_impl datastore;
-    
+    datastore_impl datastore(dummy_ds);
+
     // Initially, migration_info should not have a value
     EXPECT_FALSE(datastore.get_migration_info().has_value());
     
@@ -31,8 +32,8 @@ TEST_F(datastore_impl_test, migration_info_getter_setter) {
 }
 
 TEST_F(datastore_impl_test, migration_info_no_rotation_required) {
-    datastore_impl datastore;
-    
+    datastore_impl datastore(dummy_ds);
+
     // Create a migration_info that doesn't require rotation
     limestone::internal::manifest::migration_info info(6, 7);
     datastore.set_migration_info(info);
@@ -46,8 +47,8 @@ TEST_F(datastore_impl_test, migration_info_no_rotation_required) {
 }
 
 TEST_F(datastore_impl_test, migration_info_multiple_sets) {
-    datastore_impl datastore;
-    
+    datastore_impl datastore(dummy_ds);
+
     // Set first migration_info
     limestone::internal::manifest::migration_info info1(3, 4);
     datastore.set_migration_info(info1);
@@ -63,6 +64,18 @@ TEST_F(datastore_impl_test, migration_info_multiple_sets) {
     EXPECT_TRUE(datastore.get_migration_info().has_value());
     EXPECT_EQ(datastore.get_migration_info().value().get_old_version(), 7);
     EXPECT_EQ(datastore.get_migration_info().value().get_new_version(), 8);
+}
+
+TEST_F(datastore_impl_test, backup_counter_getter) {
+    datastore_impl datastore(dummy_ds);
+    // Initial value should be 0
+    EXPECT_EQ(datastore.get_backup_counter(), 0);
+    // Increment
+    datastore.increment_backup_counter();
+    EXPECT_EQ(datastore.get_backup_counter(), 1);
+    // Decrement
+    datastore.decrement_backup_counter();
+    EXPECT_EQ(datastore.get_backup_counter(), 0);
 }
 
 } // namespace limestone::api

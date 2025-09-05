@@ -97,6 +97,9 @@ public:
     // Opens an input file stream
     virtual std::unique_ptr<std::ifstream> open_ifstream(const std::string& path) = 0;
 
+    // Opens an input file stream with a specific open mode
+    virtual std::unique_ptr<std::ifstream> open_ifstream(const std::string& path, std::ios_base::openmode mode) = 0;
+
     // Opens an output file stream
     virtual std::unique_ptr<std::ofstream> open_ofstream(const std::string& path) = 0;
 
@@ -123,6 +126,24 @@ public:
 
     // Reads raw bytes from an ifstream (byte-buffer overload; forwards to the char* virtual)
     virtual void ifs_read(std::ifstream& ifs, std::byte* buf, std::size_t size) = 0;
+
+    // Seeks to a position in the ifstream
+    virtual void ifs_seekg(std::ifstream& ifs, std::streamoff offset, std::ios_base::seekdir way) = 0;
+
+    // Gets the current position in the ifstream
+    virtual std::streampos ifs_tellg(std::ifstream& ifs) = 0;
+
+    // Checks if the ifstream has failed
+    virtual bool ifs_fail(std::ifstream& ifs) = 0;
+
+    // Checks if the ifstream has bad state
+    virtual bool ifs_bad(std::ifstream& ifs) = 0;
+
+    // Gets the number of characters read in the last read operation
+    virtual std::streamsize ifs_gcount(std::ifstream& ifs) = 0;
+
+    // Checks if the ifstream has reached EOF
+    virtual bool ifs_eof(std::ifstream& ifs) = 0;
 
     // -----------------------------------------
     // Boost filesystem operations
@@ -170,6 +191,7 @@ public:
     int close(int fd) override;
 
     std::unique_ptr<std::ifstream> open_ifstream(const std::string& path) override;
+    std::unique_ptr<std::ifstream> open_ifstream(const std::string& path, std::ios_base::openmode mode) override;
     std::unique_ptr<std::ofstream> open_ofstream(const std::string& path) override;
     bool getline(std::ifstream& file, std::string& line) override;
     bool is_eof(std::ifstream& file) override;
@@ -179,6 +201,13 @@ public:
     void ofs_write(std::ofstream& ofs, const std::byte* buf, std::size_t size) override;
     void ifs_read(std::ifstream& ifs, char* buf, std::streamsize size) override;
     void ifs_read(std::ifstream& ifs, std::byte* buf, std::size_t size) override;
+
+    void ifs_seekg(std::ifstream& ifs, std::streamoff offset, std::ios_base::seekdir way) override;
+    std::streampos ifs_tellg(std::ifstream& ifs) override;
+    bool ifs_fail(std::ifstream& ifs) override;
+    bool ifs_bad(std::ifstream& ifs) override;
+    std::streamsize ifs_gcount(std::ifstream& ifs) override;
+    bool ifs_eof(std::ifstream& ifs) override;
 
     bool exists(const boost::filesystem::path& p, boost::system::error_code& ec) override;
     void directory_iterator_next(boost::filesystem::directory_iterator& it, boost::system::error_code& ec) override;

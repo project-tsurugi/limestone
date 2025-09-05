@@ -28,14 +28,21 @@
 namespace limestone::api {
 
 using limestone::internal::manifest;
-using namespace limestone::replication;    
+using limestone::internal::compaction_catalog;
+using namespace limestone::replication;
 
 // Internal implementation class for datastore (Pimpl idiom).
 // This header is for internal use only.
+
+struct backup_detail_and_rotation_result {
+    std::unique_ptr<backup_detail> detail;
+    rotation_result rotation;
+};
+
 class datastore_impl {
 public:
-    // Default constructor initializes the backup counter to zero.
-    datastore_impl();
+    // Constructor initializes the backup counter to zero and sets datastore reference.
+    explicit datastore_impl(datastore& ds);
 
     // Default destructor.
     ~datastore_impl();
@@ -104,9 +111,27 @@ public:
     // Setter for migration_info_
     void set_migration_info(const manifest::migration_info& info) noexcept;
 
+    // Create backup and return both backup_detail and rotation_result (internal use only)
+    backup_detail_and_rotation_result begin_backup_with_rotation_result(backup_type btype);
+
+    // Getter for compaction_catalog_
+    compaction_catalog& get_compaction_catalog() noexcept;
+
+    // Getter for boot_durable_epoch_id_
+    [[nodiscard]] epoch_id_type get_boot_durable_epoch_id() const noexcept;
+
+    // Setter for boot_durable_epoch_id_
+    void set_boot_durable_epoch_id(epoch_id_type epoch_id) noexcept;
+
+    // Getter for backup_counter_ (for testing and monitoring)
+    [[nodiscard]] int get_backup_counter() const noexcept;
+
 private:
+    datastore& datastore_;
     // Atomic counter for tracking active backup operations.
     std::atomic<int> backup_counter_;
+
+    // Atomic flag to indicate if a replica exists
     std::atomic<bool> replica_exists_;
 
     // Role flag (true = master, false = replica)
@@ -124,6 +149,9 @@ private:
   
     // Migration info for the manifest
     std::optional<manifest::migration_info> migration_info_; 
+
+    // Durable epoch ID at boot time
+    std::atomic<epoch_id_type> boot_durable_epoch_id_{0};
 };
 
 }  // namespace limestone::api

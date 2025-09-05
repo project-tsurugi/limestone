@@ -22,6 +22,10 @@ using namespace std::literals;
 using namespace limestone::api;
 using namespace limestone::internal;
   
+class compaction_test : public compaction_test_fixture {
+public:
+    const char* get_location() const override { return "/tmp/compaction_blob_gc_test"; }
+};
 
 TEST_F(compaction_test, basic_blob_gc_test) {
     // Epoch 1: Prepare initial entries.
@@ -59,7 +63,7 @@ TEST_F(compaction_test, basic_blob_gc_test) {
 
     // Verify PWAL content before compaction.
     // Here, we assume that "pwal_0000" aggregates entries from both epoch 1 and epoch 2.
-    std::vector<log_entry> log_entries = read_log_file("pwal_0000", location);
+    std::vector<log_entry> log_entries = read_log_file("pwal_0000", get_location());
     // Expecting six entries: four from epoch 1 and two from epoch 2.
     ASSERT_EQ(log_entries.size(), 6);
     EXPECT_TRUE(AssertLogEntry(log_entries[0], 1, "blob_key1", "blob_value1", 1, 0, {1001, 1002}, log_entry::entry_type::normal_with_blob));
@@ -79,7 +83,7 @@ TEST_F(compaction_test, basic_blob_gc_test) {
     run_compact_with_epoch_switch(3);
 
     // Verify compaction catalog.
-    compaction_catalog catalog = compaction_catalog::from_catalog_file(location);
+    compaction_catalog catalog = compaction_catalog::from_catalog_file(get_location());
     // Ensure that at least one compacted file exists.
     EXPECT_FALSE(catalog.get_compacted_files().empty());
     // Expect the max blob id to be updated to the highest blob id in use (i.e. 2002).
@@ -87,7 +91,7 @@ TEST_F(compaction_test, basic_blob_gc_test) {
 
     // Verify the content of the compacted PWAL.
     // Assuming the compacted file is named "pwal_0000.compacted".
-    log_entries = read_log_file("pwal_0000.compacted", location);
+    log_entries = read_log_file("pwal_0000.compacted", get_location());
     // Expected effective state:
     // - "blob_key1": effective value from epoch 2 ("blob_value1_epoch2") with blob IDs {2001,2002}.
     // - "blob_key2": remains from epoch 1.
@@ -143,7 +147,7 @@ TEST_F(compaction_test, basic_blob_gc_test) {
     EXPECT_EQ(kv_list[4].second, "noblob_value5");
 
     // Verify that no snapshot PWAL file exists.
-    log_entries = read_log_file("data/snapshot", location);
+    log_entries = read_log_file("data/snapshot", get_location());
     ASSERT_TRUE(log_entries.empty());
 
     // Verify that the blob files are still present.
@@ -190,7 +194,7 @@ TEST_F(compaction_test, basic_blob_gc_reboot_test) {
 
     // Verify PWAL content before reboot.
     // Here, we assume that "pwal_0000" aggregates entries from both epoch 1 and epoch 2.
-    std::vector<log_entry> log_entries = read_log_file("pwal_0000", location);
+    std::vector<log_entry> log_entries = read_log_file("pwal_0000", get_location());
     // Expecting six entries: four from epoch 1 and two from epoch 2.
     ASSERT_EQ(log_entries.size(), 6);
     EXPECT_TRUE(AssertLogEntry(log_entries[0], 1, "blob_key1", "blob_value1", 1, 0, {1001, 1002}, log_entry::entry_type::normal_with_blob));
@@ -230,7 +234,7 @@ TEST_F(compaction_test, basic_blob_gc_reboot_test) {
     EXPECT_EQ(kv_list[3].second, "noblob_value2");
 
     // Verify that no snapshot PWAL file exists.
-    log_entries = read_log_file("data/snapshot", location);
+    log_entries = read_log_file("data/snapshot", get_location());
     ASSERT_EQ(log_entries.size(), 4);
     EXPECT_TRUE(AssertLogEntry(log_entries[0], 1, "blob_key1", "blob_value1_epoch2", 2, 0, {2001, 2002}, log_entry::entry_type::normal_with_blob));
     EXPECT_TRUE(AssertLogEntry(log_entries[1], 1, "blob_key2", "blob_value2", 1, 1, {1003}, log_entry::entry_type::normal_with_blob));
@@ -238,7 +242,7 @@ TEST_F(compaction_test, basic_blob_gc_reboot_test) {
     EXPECT_TRUE(AssertLogEntry(log_entries[3], 1, "noblob_key2", "noblob_value2", 1, 3, {}, log_entry::entry_type::normal_entry));
 
     // Verify that the blob files are still present.
-    datastore_->wait_for_blob_file_garbace_collector();
+    datastore_->wait_for_blob_file_garbage_collector();
     EXPECT_FALSE(boost::filesystem::exists(path1001));
     EXPECT_FALSE(boost::filesystem::exists(path1002));
     EXPECT_TRUE(boost::filesystem::exists(path1003));

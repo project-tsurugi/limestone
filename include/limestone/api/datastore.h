@@ -59,6 +59,7 @@ class log_channel;
  */
 class datastore {
     friend class log_channel;
+    friend class datastore_impl; 
 
     enum class state : std::int64_t {
         not_ready = 0,
@@ -359,7 +360,7 @@ protected:  // for tests
         return persistent_blob_ids_;
     }
     write_version_type get_available_boundary_version_for_tests() const noexcept { return available_boundary_version_; }
-    void wait_for_blob_file_garbace_collector_for_tests() const noexcept;
+    void wait_for_blob_file_garbage_collector_for_tests() const noexcept;
 
 
     // These virtual methods are hooks for testing thread synchronization.

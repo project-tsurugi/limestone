@@ -22,13 +22,18 @@ using namespace std::literals;
 using namespace limestone::api;
 using namespace limestone::internal;
     
+class compaction_test : public compaction_test_fixture {
+public:
+    const char* get_location() const override { return "/tmp/compaction_test"; }
+};
+
 
 TEST_F(compaction_test, no_pwals) {
     gen_datastore();
     auto pwals = extract_pwal_files_from_datastore();
     EXPECT_TRUE(pwals.empty());
 
-    compaction_catalog catalog = compaction_catalog::from_catalog_file(location);
+    compaction_catalog catalog = compaction_catalog::from_catalog_file(get_location());
     EXPECT_EQ(catalog.get_max_epoch_id(), 0);
     EXPECT_EQ(catalog.get_compacted_files().size(), 0);
     EXPECT_EQ(catalog.get_detached_pwals().size(), 0);
@@ -37,7 +42,7 @@ TEST_F(compaction_test, no_pwals) {
     run_compact_with_epoch_switch(2);
 
     // No PWALs are present, so the catalog should not be updated.
-    catalog = compaction_catalog::from_catalog_file(location);
+    catalog = compaction_catalog::from_catalog_file(get_location());
     EXPECT_EQ(catalog.get_max_epoch_id(), 0);
     EXPECT_EQ(catalog.get_compacted_files().size(), 0);
     EXPECT_EQ(catalog.get_detached_pwals().size(), 0);
@@ -60,7 +65,7 @@ TEST_F(compaction_test, scenario01) {
     lc1_->add_entry(1, "k2", "v3", {1, 0});
     lc1_->end_session();
 
-    compaction_catalog catalog = compaction_catalog::from_catalog_file(location);
+    compaction_catalog catalog = compaction_catalog::from_catalog_file(get_location());
     EXPECT_EQ(catalog.get_max_epoch_id(), 0);
     EXPECT_EQ(catalog.get_compacted_files().size(), 0);
     EXPECT_EQ(catalog.get_detached_pwals().size(), 0);
@@ -73,7 +78,7 @@ TEST_F(compaction_test, scenario01) {
     // First compaction.
     run_compact_with_epoch_switch(2);
 
-    catalog = compaction_catalog::from_catalog_file(location);
+    catalog = compaction_catalog::from_catalog_file(get_location());
     // EXPECT_EQ(catalog.get_max_epoch_id(), 0);
     EXPECT_EQ(catalog.get_compacted_files().size(), 1);
     ASSERT_PRED_FORMAT3(ContainsCompactedFileInfo, catalog.get_compacted_files(), compacted_filename, 1);
@@ -103,7 +108,7 @@ TEST_F(compaction_test, scenario01) {
     // Compaction run without any changes to PWALs.
     run_compact_with_epoch_switch(3);
 
-    catalog = compaction_catalog::from_catalog_file(location);
+    catalog = compaction_catalog::from_catalog_file(get_location());
     EXPECT_EQ(catalog.get_max_epoch_id(), 1);
     EXPECT_EQ(catalog.get_compacted_files().size(), 1);
     ASSERT_PRED_FORMAT3(ContainsCompactedFileInfo, catalog.get_compacted_files(), compacted_filename, 1);
@@ -129,7 +134,7 @@ TEST_F(compaction_test, scenario01) {
     ASSERT_PRED_FORMAT3(ContainsPrefix, pwals, "pwal_0001.", 1);
 
     // Remove detached PWALs to ensure that only compacted files are read.
-    [[maybe_unused]] int result = std::system(("rm " + std::string(location) + "/pwal_000?.0*").c_str());
+    [[maybe_unused]] int result = std::system(("rm " + std::string(get_location()) + "/pwal_000?.0*").c_str());
 
     pwals = extract_pwal_files_from_datastore();
     EXPECT_EQ(pwals.size(), 3);
@@ -144,7 +149,7 @@ TEST_F(compaction_test, scenario01) {
 
     run_compact_with_epoch_switch(4);
 
-    catalog = compaction_catalog::from_catalog_file(location);
+    catalog = compaction_catalog::from_catalog_file(get_location());
     EXPECT_EQ(catalog.get_max_epoch_id(), 1);
     EXPECT_EQ(catalog.get_compacted_files().size(), 1);
     ASSERT_PRED_FORMAT3(ContainsCompactedFileInfo, catalog.get_compacted_files(), compacted_filename, 1);
@@ -186,7 +191,7 @@ TEST_F(compaction_test, scenario01) {
     ASSERT_PRED_FORMAT2(ContainsString, pwals, "pwal_0002");
 
     run_compact_with_epoch_switch(5);
-    catalog = compaction_catalog::from_catalog_file(location);
+    catalog = compaction_catalog::from_catalog_file(get_location());
     EXPECT_EQ(catalog.get_max_epoch_id(), 1);
     EXPECT_EQ(catalog.get_compacted_files().size(), 1);
     ASSERT_PRED_FORMAT3(ContainsCompactedFileInfo, catalog.get_compacted_files(), compacted_filename, 1);
@@ -219,7 +224,7 @@ TEST_F(compaction_test, scenario01) {
     ASSERT_PRED_FORMAT3(ContainsPrefix, pwals, "pwal_0002.", 1);
 
     // Delete some detached PWALs.
-    [[maybe_unused]] int result2 = std::system(("rm " + std::string(location) + "/pwal_000[12].*").c_str());
+    [[maybe_unused]] int result2 = std::system(("rm " + std::string(get_location()) + "/pwal_000[12].*").c_str());
 
     pwals = extract_pwal_files_from_datastore();
     EXPECT_EQ(pwals.size(), 4);
@@ -272,7 +277,7 @@ TEST_F(compaction_test, scenario01) {
     // Rotate without any data changes.
     run_compact_with_epoch_switch(6);
 
-    catalog = compaction_catalog::from_catalog_file(location);
+    catalog = compaction_catalog::from_catalog_file(get_location());
     EXPECT_EQ(catalog.get_max_epoch_id(), 1);
     EXPECT_EQ(catalog.get_compacted_files().size(), 1);
     ASSERT_PRED_FORMAT3(ContainsCompactedFileInfo, catalog.get_compacted_files(), compacted_filename, 1);
@@ -317,7 +322,7 @@ TEST_F(compaction_test, scenario01) {
     // Rotate.
     run_compact_with_epoch_switch(8);
 
-    catalog = compaction_catalog::from_catalog_file(location);
+    catalog = compaction_catalog::from_catalog_file(get_location());
     EXPECT_EQ(catalog.get_max_epoch_id(), 7);
     EXPECT_EQ(catalog.get_compacted_files().size(), 1);
     ASSERT_PRED_FORMAT3(ContainsCompactedFileInfo, catalog.get_compacted_files(), compacted_filename, 1);
@@ -350,7 +355,7 @@ TEST_F(compaction_test, scenario01) {
 
     // Rotate without reboot.
     run_compact_with_epoch_switch(9);
-    catalog = compaction_catalog::from_catalog_file(location);
+    catalog = compaction_catalog::from_catalog_file(get_location());
     EXPECT_EQ(catalog.get_max_epoch_id(), 8);
     EXPECT_EQ(catalog.get_compacted_files().size(), 1);
     ASSERT_PRED_FORMAT3(ContainsCompactedFileInfo, catalog.get_compacted_files(), compacted_filename, 1);
@@ -407,7 +412,7 @@ TEST_F(compaction_test, scenario02) {
     lc1_->add_entry(1, "k2", "v3", {1, 0});
     lc1_->end_session();
 
-    compaction_catalog catalog = compaction_catalog::from_catalog_file(location);
+    compaction_catalog catalog = compaction_catalog::from_catalog_file(get_location());
     EXPECT_EQ(catalog.get_max_epoch_id(), 0);
     EXPECT_EQ(catalog.get_compacted_files().size(), 0);
     EXPECT_EQ(catalog.get_detached_pwals().size(), 0);
@@ -420,7 +425,7 @@ TEST_F(compaction_test, scenario02) {
     // First compaction.
     run_compact_with_epoch_switch(2);
 
-    catalog = compaction_catalog::from_catalog_file(location);
+    catalog = compaction_catalog::from_catalog_file(get_location());
     EXPECT_EQ(catalog.get_max_epoch_id(), 1);
     EXPECT_EQ(catalog.get_compacted_files().size(), 1);
     ASSERT_PRED_FORMAT3(ContainsCompactedFileInfo, catalog.get_compacted_files(), compacted_filename, 1);
@@ -437,7 +442,7 @@ TEST_F(compaction_test, scenario02) {
     // Compaction run without any changes to PWALs.
     run_compact_with_epoch_switch(3);
 
-    catalog = compaction_catalog::from_catalog_file(location);
+    catalog = compaction_catalog::from_catalog_file(get_location());
     EXPECT_EQ(catalog.get_max_epoch_id(), 1);
     EXPECT_EQ(catalog.get_compacted_files().size(), 1);
     ASSERT_PRED_FORMAT3(ContainsCompactedFileInfo, catalog.get_compacted_files(), compacted_filename, 1);
@@ -451,7 +456,7 @@ TEST_F(compaction_test, scenario02) {
     ASSERT_PRED_FORMAT3(ContainsPrefix, pwals, "pwal_0001.", 1);
 
     // Remove detached PWALs to ensure that only compacted files are read.
-    [[maybe_unused]] int result = std::system(("rm " + std::string(location) + "/pwal_000?.0*").c_str());
+    [[maybe_unused]] int result = std::system(("rm " + std::string(get_location()) + "/pwal_000?.0*").c_str());
 
     pwals = extract_pwal_files_from_datastore();
     EXPECT_EQ(pwals.size(), 3);  // Not yet detected that it has been deleted
@@ -460,7 +465,7 @@ TEST_F(compaction_test, scenario02) {
 
     run_compact_with_epoch_switch(4);
 
-    catalog = compaction_catalog::from_catalog_file(location);
+    catalog = compaction_catalog::from_catalog_file(get_location());
     EXPECT_EQ(catalog.get_max_epoch_id(), 1);
     EXPECT_EQ(catalog.get_compacted_files().size(), 1);
     ASSERT_PRED_FORMAT3(ContainsCompactedFileInfo, catalog.get_compacted_files(), compacted_filename, 1);
@@ -493,7 +498,7 @@ TEST_F(compaction_test, scenario02) {
     ASSERT_PRED_FORMAT3(ContainsPrefix, pwals, "pwal_0001.", 1);
 
     run_compact_with_epoch_switch(5);
-    catalog = compaction_catalog::from_catalog_file(location);
+    catalog = compaction_catalog::from_catalog_file(get_location());
     EXPECT_EQ(catalog.get_max_epoch_id(), 4);
     EXPECT_EQ(catalog.get_compacted_files().size(), 1);
     ASSERT_PRED_FORMAT3(ContainsCompactedFileInfo, catalog.get_compacted_files(), compacted_filename, 1);
@@ -510,7 +515,7 @@ TEST_F(compaction_test, scenario02) {
     ASSERT_PRED_FORMAT3(ContainsPrefix, pwals, "pwal_0002.", 1);
 
     // Delete some detached PWALs.
-    [[maybe_unused]] int result2 = std::system(("rm " + std::string(location) + "/pwal_000[12].*").c_str());
+    [[maybe_unused]] int result2 = std::system(("rm " + std::string(get_location()) + "/pwal_000[12].*").c_str());
 
     pwals = extract_pwal_files_from_datastore();
     EXPECT_EQ(pwals.size(), 4);  // Not yet detected that it has been deleted
@@ -535,7 +540,7 @@ TEST_F(compaction_test, scenario02) {
     // Rotate.
     run_compact_with_epoch_switch(6);
 
-    catalog = compaction_catalog::from_catalog_file(location);
+    catalog = compaction_catalog::from_catalog_file(get_location());
     EXPECT_EQ(catalog.get_max_epoch_id(), 5);
     EXPECT_EQ(catalog.get_compacted_files().size(), 1);
     ASSERT_PRED_FORMAT3(ContainsCompactedFileInfo, catalog.get_compacted_files(), compacted_filename, 1);
@@ -566,7 +571,7 @@ TEST_F(compaction_test, scenario02) {
     // Rotate.
     run_compact_with_epoch_switch(8);
 
-    catalog = compaction_catalog::from_catalog_file(location);
+    catalog = compaction_catalog::from_catalog_file(get_location());
     EXPECT_EQ(catalog.get_max_epoch_id(), 7);
     EXPECT_EQ(catalog.get_compacted_files().size(), 1);
     ASSERT_PRED_FORMAT3(ContainsCompactedFileInfo, catalog.get_compacted_files(), compacted_filename, 1);
@@ -598,7 +603,7 @@ TEST_F(compaction_test, scenario02) {
 
     // Rotate.
     run_compact_with_epoch_switch(9);
-    catalog = compaction_catalog::from_catalog_file(location);
+    catalog = compaction_catalog::from_catalog_file(get_location());
     EXPECT_EQ(catalog.get_max_epoch_id(), 8);
     EXPECT_EQ(catalog.get_compacted_files().size(), 1);
     ASSERT_PRED_FORMAT3(ContainsCompactedFileInfo, catalog.get_compacted_files(), compacted_filename, 1);
@@ -661,15 +666,15 @@ TEST_F(compaction_test, scenario03) {
     ASSERT_PRED_FORMAT2(ContainsString, pwals, "pwal_0001");
     ASSERT_PRED_FORMAT2(ContainsString, pwals, "pwal_0002");
 
-    auto log_entries = read_log_file("pwal_0000", location);
+    auto log_entries = read_log_file("pwal_0000", get_location());
     ASSERT_EQ(log_entries.size(), 3);  // Ensure that there are log entries
     EXPECT_TRUE(AssertLogEntry(log_entries[0], 1, "key1", "value1", 1, 0, {}, log_entry::entry_type::normal_entry));
     EXPECT_TRUE(AssertLogEntry(log_entries[1], 1, "key1", std::nullopt, 1, 1, {}, log_entry::entry_type::remove_entry));
     EXPECT_TRUE(AssertLogEntry(log_entries[2], 1, "key4", std::nullopt, 1, 0, {}, log_entry::entry_type::remove_entry));
-    log_entries = read_log_file("pwal_0001", location);
+    log_entries = read_log_file("pwal_0001", get_location());
     ASSERT_EQ(log_entries.size(), 1);  // Ensure that there are log entries
     EXPECT_TRUE(AssertLogEntry(log_entries[0], 2, "key2", "value2", 1, 0, {}, log_entry::entry_type::normal_entry));
-    log_entries = read_log_file("pwal_0002", location);
+    log_entries = read_log_file("pwal_0002", get_location());
     ASSERT_EQ(log_entries.size(), 2);  // Ensure that there are log entries
     EXPECT_TRUE(AssertLogEntry(log_entries[0], 1, "key3", std::nullopt, 1, 0, {}, log_entry ::entry_type::remove_entry));
     EXPECT_TRUE(AssertLogEntry(log_entries[1], 1, "key3", "value3", 1, 3, {}, log_entry::entry_type::normal_entry));
@@ -678,7 +683,7 @@ TEST_F(compaction_test, scenario03) {
     run_compact_with_epoch_switch(3);
 
     // Check the catalog and PWALs after compaction
-    compaction_catalog catalog = compaction_catalog::from_catalog_file(location);
+    compaction_catalog catalog = compaction_catalog::from_catalog_file(get_location());
     EXPECT_EQ(catalog.get_max_epoch_id(), 2);
     EXPECT_EQ(catalog.get_compacted_files().size(), 1);
     EXPECT_EQ(catalog.get_detached_pwals().size(), 3);
@@ -687,7 +692,7 @@ TEST_F(compaction_test, scenario03) {
     EXPECT_EQ(pwals.size(), 4);  // Includes the compacted file
     ASSERT_PRED_FORMAT2(ContainsString, pwals, "pwal_0000.compacted");
 
-    log_entries = read_log_file("pwal_0000.compacted", location);
+    log_entries = read_log_file("pwal_0000.compacted", get_location());
     ASSERT_EQ(log_entries.size(), 2);                                                                                 // Ensure that there are log entries
     EXPECT_TRUE(AssertLogEntry(log_entries[0], 1, "key3", "value3", 0, 0, {}, log_entry::entry_type::normal_entry));  // write version changed to 0
     EXPECT_TRUE(AssertLogEntry(log_entries[1], 2, "key2", "value2", 0, 0, {}, log_entry::entry_type::normal_entry));  // write version changed to 0
@@ -726,15 +731,15 @@ TEST_F(compaction_test, scenario03) {
     ASSERT_PRED_FORMAT2(ContainsString, pwals, "pwal_0001");
     ASSERT_PRED_FORMAT2(ContainsString, pwals, "pwal_0002");
 
-    log_entries = read_log_file("pwal_0000", location);
+    log_entries = read_log_file("pwal_0000", get_location());
     ASSERT_EQ(log_entries.size(), 3);  // Ensure that there are log entries
     EXPECT_TRUE(AssertLogEntry(log_entries[0], 1, "key11", "value1", 2, 0, {}, log_entry::entry_type::normal_entry));
     EXPECT_TRUE(AssertLogEntry(log_entries[1], 1, "key11", std::nullopt, 2, 1, {}, log_entry::entry_type::remove_entry));
     EXPECT_TRUE(AssertLogEntry(log_entries[2], 1, "key41", std::nullopt, 2, 0, {}, log_entry::entry_type::remove_entry));
-    log_entries = read_log_file("pwal_0001", location);
+    log_entries = read_log_file("pwal_0001", get_location());
     ASSERT_EQ(log_entries.size(), 1);  // Ensure that there are log entries
     EXPECT_TRUE(AssertLogEntry(log_entries[0], 2, "key21", "value2", 2, 0, {}, log_entry::entry_type::normal_entry));
-    log_entries = read_log_file("pwal_0002", location);
+    log_entries = read_log_file("pwal_0002", get_location());
     ASSERT_EQ(log_entries.size(), 2);  // Ensure that there are log entries
     EXPECT_TRUE(AssertLogEntry(log_entries[0], 1, "key31", std::nullopt, 2, 0, {}, log_entry::entry_type::remove_entry));
     EXPECT_TRUE(AssertLogEntry(log_entries[1], 1, "key31", "value3", 2, 3, {}, log_entry::entry_type::normal_entry));
@@ -745,12 +750,12 @@ TEST_F(compaction_test, scenario03) {
     gen_datastore();  // Restart
 
     // 5. check the compacted file and snapshot creating at the boot time
-    log_entries = read_log_file("pwal_0000.compacted", location);
+    log_entries = read_log_file("pwal_0000.compacted", get_location());
     ASSERT_EQ(log_entries.size(), 2);                                                                                 // Ensure that there are log entries
     EXPECT_TRUE(AssertLogEntry(log_entries[0], 1, "key3", "value3", 0, 0, {}, log_entry::entry_type::normal_entry));  // write version changed to 0
     EXPECT_TRUE(AssertLogEntry(log_entries[1], 2, "key2", "value2", 0, 0, {}, log_entry::entry_type::normal_entry));  // write version changed to 0
 
-    log_entries = read_log_file("data/snapshot", location);
+    log_entries = read_log_file("data/snapshot", get_location());
     ASSERT_EQ(log_entries.size(), 4);  // Ensure that there are log entries
     EXPECT_TRUE(AssertLogEntry(log_entries[0], 1, "key11", std::nullopt, 2, 1, {}, log_entry::entry_type::remove_entry));
     EXPECT_TRUE(AssertLogEntry(log_entries[1], 1, "key31", "value3", 2, 3, {}, log_entry::entry_type::normal_entry));
@@ -822,20 +827,20 @@ TEST_F(compaction_test, scenario04) {
     auto pwals = extract_pwal_files_from_datastore();
     EXPECT_EQ(pwals.size(), 3);
 
-    std::vector<log_entry> log_entries = read_log_file("pwal_0000", location);
+    std::vector<log_entry> log_entries = read_log_file("pwal_0000", get_location());
     ASSERT_EQ(log_entries.size(), 3);
     EXPECT_TRUE(AssertLogEntry(log_entries[0], 1, "key1", "value1", 1, 0, {}, log_entry::entry_type::normal_entry));
     EXPECT_TRUE(AssertLogEntry(log_entries[1], 1, "key2", "value2", 1, 1, {}, log_entry::entry_type::normal_entry));
     EXPECT_TRUE(AssertLogEntry(log_entries[2], 1, "key7", "value7", 3, 0, {}, log_entry::entry_type::normal_entry));
 
-    log_entries = read_log_file("pwal_0001", location);
+    log_entries = read_log_file("pwal_0001", get_location());
     ASSERT_EQ(log_entries.size(), 4);
     EXPECT_TRUE(AssertLogEntry(log_entries[0], 2, "key3", "value3", 1, 0, {}, log_entry::entry_type::normal_entry));
     EXPECT_TRUE(AssertLogEntry(log_entries[1], 2, "key4", "value4", 1, 1, {}, log_entry::entry_type::normal_entry));
     EXPECT_TRUE(AssertLogEntry(log_entries[2], 2, "", "", 2, 0, {}, log_entry::entry_type::remove_storage));
     EXPECT_TRUE(AssertLogEntry(log_entries[3], 2, "key8", "value8", 3, 0, {}, log_entry::entry_type::normal_entry));
 
-    log_entries = read_log_file("pwal_0002", location);
+    log_entries = read_log_file("pwal_0002", get_location());
     ASSERT_EQ(log_entries.size(), 2);
     EXPECT_TRUE(AssertLogEntry(log_entries[0], 1, "key5", "value5", 1, 2, {}, log_entry::entry_type::normal_entry));
     EXPECT_TRUE(AssertLogEntry(log_entries[1], 1, "key6", "value6", 1, 3, {}, log_entry::entry_type::normal_entry));
@@ -851,7 +856,7 @@ TEST_F(compaction_test, scenario04) {
     ASSERT_PRED_FORMAT3(ContainsPrefix, pwals, "pwal_0001.", 1);
     ASSERT_PRED_FORMAT3(ContainsPrefix, pwals, "pwal_0002.", 1);
 
-    log_entries = read_log_file("pwal_0000.compacted", location);
+    log_entries = read_log_file("pwal_0000.compacted", get_location());
     ASSERT_EQ(log_entries.size(), 6);
     EXPECT_TRUE(AssertLogEntry(log_entries[0], 1, "key1", "value1", 0, 0, {}, log_entry::entry_type::normal_entry));
     EXPECT_TRUE(AssertLogEntry(log_entries[1], 1, "key2", "value2", 0, 0, {}, log_entry::entry_type::normal_entry));
@@ -910,20 +915,20 @@ TEST_F(compaction_test, scenario04) {
     ASSERT_PRED_FORMAT3(ContainsPrefix, pwals, "pwal_0001.", 1);
     ASSERT_PRED_FORMAT3(ContainsPrefix, pwals, "pwal_0002.", 1);
 
-    log_entries = read_log_file("pwal_0000", location);
+    log_entries = read_log_file("pwal_0000", get_location());
     ASSERT_EQ(log_entries.size(), 3);
     EXPECT_TRUE(AssertLogEntry(log_entries[0], 1, "key11", "value1", 4, 0, {}, log_entry::entry_type::normal_entry));
     EXPECT_TRUE(AssertLogEntry(log_entries[1], 1, "key12", "value2", 4, 1, {}, log_entry::entry_type::normal_entry));
     EXPECT_TRUE(AssertLogEntry(log_entries[2], 1, "key17", "value7", 6, 0, {}, log_entry::entry_type::normal_entry));
 
-    log_entries = read_log_file("pwal_0001", location);
+    log_entries = read_log_file("pwal_0001", get_location());
     ASSERT_EQ(log_entries.size(), 4);
     EXPECT_TRUE(AssertLogEntry(log_entries[0], 2, "key13", "value3", 4, 0, {}, log_entry::entry_type::normal_entry));
     EXPECT_TRUE(AssertLogEntry(log_entries[1], 2, "key14", "value4", 4, 1, {}, log_entry::entry_type::normal_entry));
     EXPECT_TRUE(AssertLogEntry(log_entries[2], 1, "", "", 5, 0, {}, log_entry::entry_type::remove_storage));
     EXPECT_TRUE(AssertLogEntry(log_entries[3], 2, "key18", "value8", 6, 0, {}, log_entry::entry_type::normal_entry));
 
-    log_entries = read_log_file("pwal_0002", location);
+    log_entries = read_log_file("pwal_0002", get_location());
     ASSERT_EQ(log_entries.size(), 2);
     EXPECT_TRUE(AssertLogEntry(log_entries[0], 1, "key15", "value5", 4, 2, {}, log_entry::entry_type::normal_entry));
     EXPECT_TRUE(AssertLogEntry(log_entries[1], 1, "key16", "value6", 4, 3, {}, log_entry::entry_type::normal_entry));
@@ -933,7 +938,7 @@ TEST_F(compaction_test, scenario04) {
     std::vector<std::pair<std::string, std::string>> kv_list = restart_datastore_and_read_snapshot();
 
     // check the compacted file and snapshot creating at the boot time
-    log_entries = read_log_file("pwal_0000.compacted", location);
+    log_entries = read_log_file("pwal_0000.compacted", get_location());
     ASSERT_EQ(log_entries.size(), 6);
     EXPECT_TRUE(AssertLogEntry(log_entries[0], 1, "key1", "value1", 0, 0, {}, log_entry::entry_type::normal_entry));
     EXPECT_TRUE(AssertLogEntry(log_entries[1], 1, "key2", "value2", 0, 0, {}, log_entry::entry_type::normal_entry));
@@ -942,7 +947,7 @@ TEST_F(compaction_test, scenario04) {
     EXPECT_TRUE(AssertLogEntry(log_entries[4], 1, "key7", "value7", 0, 0, {}, log_entry::entry_type::normal_entry));
     EXPECT_TRUE(AssertLogEntry(log_entries[5], 2, "key8", "value8", 0, 0, {}, log_entry::entry_type::normal_entry));
 
-    log_entries = read_log_file("data/snapshot", location);
+    log_entries = read_log_file("data/snapshot", get_location());
     ASSERT_EQ(log_entries.size(), 4);
     EXPECT_TRUE(AssertLogEntry(log_entries[0], 1, "key17", "value7", 6, 0, {}, log_entry::entry_type::normal_entry));
     EXPECT_TRUE(AssertLogEntry(log_entries[1], 2, "key13", "value3", 4, 0, {}, log_entry::entry_type::normal_entry));
@@ -972,7 +977,7 @@ TEST_F(compaction_test, scenario_blob) {
     gen_datastore();
     datastore_->switch_epoch(1);
 
-    compaction_catalog catalog = compaction_catalog::from_catalog_file(location);
+    compaction_catalog catalog = compaction_catalog::from_catalog_file(get_location());
     EXPECT_EQ(catalog.get_max_epoch_id(), 0);
     EXPECT_EQ(catalog.get_max_blob_id(), 0);
     EXPECT_EQ(catalog.get_compacted_files().size(), 0);
@@ -982,7 +987,7 @@ TEST_F(compaction_test, scenario_blob) {
     // No PWALs are present => The catalog should not be updated.
     run_compact_with_epoch_switch(2);
 
-    catalog = compaction_catalog::from_catalog_file(location);
+    catalog = compaction_catalog::from_catalog_file(get_location());
     EXPECT_EQ(catalog.get_max_epoch_id(), 0);
     EXPECT_EQ(catalog.get_max_blob_id(), 0);
     EXPECT_EQ(catalog.get_compacted_files().size(), 0);
@@ -991,7 +996,7 @@ TEST_F(compaction_test, scenario_blob) {
 
     // Update the max_blob_id in the catalog
     catalog.update_catalog_file(0, 123, {}, {});
-    catalog = compaction_catalog::from_catalog_file(location);
+    catalog = compaction_catalog::from_catalog_file(get_location());
     EXPECT_EQ(catalog.get_max_epoch_id(), 0);
     EXPECT_EQ(catalog.get_max_blob_id(), 123);
     EXPECT_EQ(catalog.get_compacted_files().size(), 0);
@@ -1000,7 +1005,7 @@ TEST_F(compaction_test, scenario_blob) {
     // No PWALs are present => The max_blob_id in the catalog should not be updated.
     run_compact_with_epoch_switch(3);
 
-    catalog = compaction_catalog::from_catalog_file(location);
+    catalog = compaction_catalog::from_catalog_file(get_location());
     EXPECT_EQ(catalog.get_max_epoch_id(), 0);
     EXPECT_EQ(catalog.get_max_blob_id(), 123);
     EXPECT_EQ(catalog.get_compacted_files().size(), 0);
@@ -1024,12 +1029,12 @@ TEST_F(compaction_test, scenario_blob) {
     auto pwals = extract_pwal_files_from_datastore();
     EXPECT_EQ(pwals.size(), 2);
 
-    std::vector<log_entry> log_entries = read_log_file("pwal_0000", location);
+    std::vector<log_entry> log_entries = read_log_file("pwal_0000", get_location());
     ASSERT_EQ(log_entries.size(), 2);
     EXPECT_TRUE(AssertLogEntry(log_entries[0], 1, "key1", "value1", 1, 0, {1001, 1002}, log_entry::entry_type::normal_with_blob));
     EXPECT_TRUE(AssertLogEntry(log_entries[1], 1, "key2", "value2", 1, 1, {1003, 1004}, log_entry::entry_type::normal_with_blob));
 
-    log_entries = read_log_file("pwal_0001", location);
+    log_entries = read_log_file("pwal_0001", get_location());
     ASSERT_EQ(log_entries.size(), 1);
     EXPECT_TRUE(AssertLogEntry(log_entries[0], 2, "key3", "value3", 1, 0, {1005, 1006}, log_entry::entry_type::normal_with_blob));
 
@@ -1037,7 +1042,7 @@ TEST_F(compaction_test, scenario_blob) {
     run_compact_with_epoch_switch(5);
 
     // Check compaction catalog
-    catalog = compaction_catalog::from_catalog_file(location);
+    catalog = compaction_catalog::from_catalog_file(get_location());
     EXPECT_EQ(catalog.get_max_epoch_id(), 4);
     EXPECT_EQ(catalog.get_max_blob_id(), 1006);
     ASSERT_EQ(catalog.get_compacted_files().size(), 1);
@@ -1053,7 +1058,7 @@ TEST_F(compaction_test, scenario_blob) {
     ASSERT_PRED_FORMAT3(ContainsPrefix, pwals, "pwal_0000.", 2);
     ASSERT_PRED_FORMAT3(ContainsPrefix, pwals, "pwal_0001.", 1);
 
-    log_entries = read_log_file("pwal_0000.compacted", location);
+    log_entries = read_log_file("pwal_0000.compacted", get_location());
     ASSERT_EQ(log_entries.size(), 3);
     EXPECT_TRUE(AssertLogEntry(log_entries[0], 1, "key1", "value1", 0, 0, {1001, 1002}, log_entry::entry_type::normal_with_blob));
     EXPECT_TRUE(AssertLogEntry(log_entries[1], 1, "key2", "value2", 0, 0, {1003, 1004}, log_entry::entry_type::normal_with_blob));
@@ -1079,7 +1084,7 @@ TEST_F(compaction_test, scenario_blob) {
     run_compact_with_epoch_switch(6);
 
     // Check compaction catalog
-    catalog = compaction_catalog::from_catalog_file(location);
+    catalog = compaction_catalog::from_catalog_file(get_location());
     EXPECT_EQ(catalog.get_max_epoch_id(), 5);
     EXPECT_EQ(catalog.get_max_blob_id(), 1006);
     ASSERT_EQ(catalog.get_compacted_files().size(), 1);
@@ -1097,7 +1102,7 @@ TEST_F(compaction_test, scenario_blob) {
     ASSERT_PRED_FORMAT3(ContainsPrefix, pwals, "pwal_0001.", 1);
     ASSERT_PRED_FORMAT3(ContainsPrefix, pwals, "pwal_0002.", 1);
 
-    log_entries = read_log_file("pwal_0000.compacted", location);
+    log_entries = read_log_file("pwal_0000.compacted", get_location());
     ASSERT_EQ(log_entries.size(), 5);
     EXPECT_TRUE(AssertLogEntry(log_entries[0], 1, "key1", "value1", 0, 0, {1001, 1002}, log_entry::entry_type::normal_with_blob));
     EXPECT_TRUE(AssertLogEntry(log_entries[1], 1, "key15", "value5", 0, 0, {1001, 1002}, log_entry::entry_type::normal_entry));
@@ -1125,7 +1130,7 @@ TEST_F(compaction_test, scenario_blob) {
     run_compact_with_epoch_switch(7);
 
     // Check compaction catalog
-    catalog = compaction_catalog::from_catalog_file(location);
+    catalog = compaction_catalog::from_catalog_file(get_location());
     EXPECT_EQ(catalog.get_max_epoch_id(), 6);
     EXPECT_EQ(catalog.get_max_blob_id(), 1006);
     ASSERT_EQ(catalog.get_compacted_files().size(), 1);
@@ -1143,7 +1148,7 @@ TEST_F(compaction_test, scenario_blob) {
     ASSERT_PRED_FORMAT3(ContainsPrefix, pwals, "pwal_0001.", 1);
     ASSERT_PRED_FORMAT3(ContainsPrefix, pwals, "pwal_0002.", 2);
 
-    log_entries = read_log_file("pwal_0000.compacted", location);
+    log_entries = read_log_file("pwal_0000.compacted", get_location());
     ASSERT_EQ(log_entries.size(), 6);
     EXPECT_TRUE(AssertLogEntry(log_entries[0], 1, "key1", "value1", 0, 0, {1001, 1002}, log_entry::entry_type::normal_with_blob));
     EXPECT_TRUE(AssertLogEntry(log_entries[1], 1, "key15", "value5", 0, 0, {1001, 1002}, log_entry::entry_type::normal_entry));
@@ -1173,7 +1178,7 @@ TEST_F(compaction_test, DISABLED_fail_compact_with_io_error) {
     lc1_->add_entry(1, "k2", "v3", {1, 0});
     lc1_->end_session();
 
-    compaction_catalog catalog = compaction_catalog::from_catalog_file(location);
+    compaction_catalog catalog = compaction_catalog::from_catalog_file(get_location());
     EXPECT_EQ(catalog.get_max_epoch_id(), 0);
     EXPECT_EQ(catalog.get_compacted_files().size(), 0);
     EXPECT_EQ(catalog.get_detached_pwals().size(), 0);
@@ -1184,15 +1189,15 @@ TEST_F(compaction_test, DISABLED_fail_compact_with_io_error) {
     ASSERT_PRED_FORMAT2(ContainsString, pwals, "pwal_0001");
 
     // remove the file to cause an I/O error
-    [[maybe_unused]] int result = std::system(("chmod 0500 " + std::string(location)).c_str());
+    [[maybe_unused]] int result = std::system(("chmod 0500 " + std::string(get_location())).c_str());
 
     // First compaction.
     ASSERT_THROW(run_compact_with_epoch_switch(2), limestone_exception);
 }
 
 TEST_F(compaction_test, safe_rename_success) {
-    boost::filesystem::path from = boost::filesystem::path(location) / "test_file.txt";
-    boost::filesystem::path to = boost::filesystem::path(location) / "renamed_file.txt";
+    boost::filesystem::path from = boost::filesystem::path(get_location()) / "test_file.txt";
+    boost::filesystem::path to = boost::filesystem::path(get_location()) / "renamed_file.txt";
 
     boost::filesystem::ofstream ofs(from);
     ofs << "test content";
@@ -1206,16 +1211,16 @@ TEST_F(compaction_test, safe_rename_success) {
 }
 
 TEST_F(compaction_test, safe_rename_throws_exception) {
-    boost::filesystem::path from = boost::filesystem::path(location) / "non_existent_file.txt";
-    boost::filesystem::path to = boost::filesystem::path(location) / "renamed_file.txt";
+    boost::filesystem::path from = boost::filesystem::path(get_location()) / "non_existent_file.txt";
+    boost::filesystem::path to = boost::filesystem::path(get_location()) / "renamed_file.txt";
 
     ASSERT_THROW(safe_rename(from, to), std::runtime_error);
 }
 
 TEST_F(compaction_test, select_files_for_compaction) {
-    std::set<boost::filesystem::path> rotation_end_files = {boost::filesystem::path(location) / "pwal_0001.0123456",
-                                                            boost::filesystem::path(location) / "pwal_0002.0123456",
-                                                            boost::filesystem::path(location) / "pwal_0003", boost::filesystem::path(location) / "other_file"};
+    std::set<boost::filesystem::path> rotation_end_files = {boost::filesystem::path(get_location()) / "pwal_0001.0123456",
+                                                            boost::filesystem::path(get_location()) / "pwal_0002.0123456",
+                                                            boost::filesystem::path(get_location()) / "pwal_0003", boost::filesystem::path(get_location()) / "other_file"};
     std::set<std::string> detached_pwals = {"pwal_0002.0123456"};
     std::set<std::string> expected = {"pwal_0001.0123456"};
 
@@ -1224,21 +1229,21 @@ TEST_F(compaction_test, select_files_for_compaction) {
 }
 
 TEST_F(compaction_test, ensure_directory_exists_directory_exists) {
-    boost::filesystem::path dir = boost::filesystem::path(location) / "test_dir";
+    boost::filesystem::path dir = boost::filesystem::path(get_location()) / "test_dir";
     boost::filesystem::create_directory(dir);
 
     ASSERT_NO_THROW(ensure_directory_exists(dir));
 }
 
 TEST_F(compaction_test, ensure_directory_exists_directory_created) {
-    boost::filesystem::path dir = boost::filesystem::path(location) / "test_dir";
+    boost::filesystem::path dir = boost::filesystem::path(get_location()) / "test_dir";
 
     ASSERT_NO_THROW(ensure_directory_exists(dir));
     ASSERT_TRUE(boost::filesystem::exists(dir));
 }
 
 TEST_F(compaction_test, ensure_directory_exists_throws_exception) {
-    boost::filesystem::path file = boost::filesystem::path(location) / "test_file.txt";
+    boost::filesystem::path file = boost::filesystem::path(get_location()) / "test_file.txt";
 
     boost::filesystem::ofstream ofs(file);
     ofs.close();
@@ -1247,18 +1252,18 @@ TEST_F(compaction_test, ensure_directory_exists_throws_exception) {
 }
 
 TEST_F(compaction_test, ensure_directory_exists_parent_directory_missing) {
-    boost::filesystem::path dir = boost::filesystem::path(location) / "nonexistent_parent/test_dir";
+    boost::filesystem::path dir = boost::filesystem::path(get_location()) / "nonexistent_parent/test_dir";
     ASSERT_THROW(ensure_directory_exists(dir), std::runtime_error);
 }
 
 TEST_F(compaction_test, handle_existing_compacted_file_no_existing_files) {
-    boost::filesystem::path location_path = boost::filesystem::path(location);
+    boost::filesystem::path location_path = boost::filesystem::path(get_location());
 
     ASSERT_NO_THROW(handle_existing_compacted_file(location_path));
 }
 
 TEST_F(compaction_test, handle_existing_compacted_file_with_existing_file) {
-    boost::filesystem::path location_path = boost::filesystem::path(location);
+    boost::filesystem::path location_path = boost::filesystem::path(get_location());
     boost::filesystem::path compacted_file = location_path / "pwal_0000.compacted";
     boost::filesystem::ofstream ofs(compacted_file);
     ofs.close();
@@ -1268,7 +1273,7 @@ TEST_F(compaction_test, handle_existing_compacted_file_with_existing_file) {
 }
 
 TEST_F(compaction_test, handle_existing_compacted_file_throws_exception) {
-    boost::filesystem::path location_path = boost::filesystem::path(location);
+    boost::filesystem::path location_path = boost::filesystem::path(get_location());
     boost::filesystem::path compacted_file = location_path / "pwal_0000.compacted";
     boost::filesystem::path compacted_prev_file = location_path / "pwal_0000.compacted.prev";
     boost::filesystem::ofstream ofs1(compacted_file);
@@ -1280,7 +1285,7 @@ TEST_F(compaction_test, handle_existing_compacted_file_throws_exception) {
 }
 
 TEST_F(compaction_test, get_files_in_directory) {
-    boost::filesystem::path test_dir = boost::filesystem::path(location);
+    boost::filesystem::path test_dir = boost::filesystem::path(get_location());
     boost::filesystem::path file1 = test_dir / "file1.txt";
     boost::filesystem::path file2 = test_dir / "file2.txt";
     boost::filesystem::ofstream ofs1(file1);
@@ -1295,12 +1300,12 @@ TEST_F(compaction_test, get_files_in_directory) {
 }
 
 TEST_F(compaction_test, get_files_in_directory_directory_not_exists) {
-    boost::filesystem::path non_existent_dir = boost::filesystem::path(location) / "non_existent_dir";
+    boost::filesystem::path non_existent_dir = boost::filesystem::path(get_location()) / "non_existent_dir";
     ASSERT_THROW(get_files_in_directory(non_existent_dir), std::runtime_error);
 }
 
 TEST_F(compaction_test, get_files_in_directory_not_a_directory) {
-    boost::filesystem::path file_path = boost::filesystem::path(location) / "test_file.txt";
+    boost::filesystem::path file_path = boost::filesystem::path(get_location()) / "test_file.txt";
     boost::filesystem::ofstream ofs(file_path);
     ofs.close();
 
@@ -1308,7 +1313,7 @@ TEST_F(compaction_test, get_files_in_directory_not_a_directory) {
 }
 
 TEST_F(compaction_test, get_files_in_directory_with_files) {
-    boost::filesystem::path test_dir = boost::filesystem::path(location) / "test_dir";
+    boost::filesystem::path test_dir = boost::filesystem::path(get_location()) / "test_dir";
     boost::filesystem::create_directory(test_dir);
 
     boost::filesystem::path file1 = test_dir / "file1.txt";
@@ -1323,7 +1328,7 @@ TEST_F(compaction_test, get_files_in_directory_with_files) {
 }
 
 TEST_F(compaction_test, get_files_in_directory_empty_directory) {
-    boost::filesystem::path empty_dir = boost::filesystem::path(location) / "empty_test_dir";
+    boost::filesystem::path empty_dir = boost::filesystem::path(get_location()) / "empty_test_dir";
     boost::filesystem::create_directory(empty_dir);
 
     std::set<std::string> files = get_files_in_directory(empty_dir);
@@ -1331,7 +1336,7 @@ TEST_F(compaction_test, get_files_in_directory_empty_directory) {
 }
 
 TEST_F(compaction_test, remove_file_safely_success) {
-    boost::filesystem::path file = boost::filesystem::path(location) / "test_file_to_remove.txt";
+    boost::filesystem::path file = boost::filesystem::path(get_location()) / "test_file_to_remove.txt";
 
     {
         boost::filesystem::ofstream ofs(file);
@@ -1344,13 +1349,13 @@ TEST_F(compaction_test, remove_file_safely_success) {
 }
 
 TEST_F(compaction_test, remove_file_safely_no_exception_for_nonexistent_file) {
-    boost::filesystem::path file = boost::filesystem::path(location) / "non_existent_file.txt";
+    boost::filesystem::path file = boost::filesystem::path(get_location()) / "non_existent_file.txt";
     ASSERT_NO_THROW(remove_file_safely(file));
 }
 
 // This test is disabled because it is environment-dependent and may not work properly in CI environments.
 TEST_F(compaction_test, DISABLED_remove_file_safely_fails_to_remove_file) {
-    boost::filesystem::path test_dir = boost::filesystem::path(location);
+    boost::filesystem::path test_dir = boost::filesystem::path(get_location());
     boost::filesystem::path file = test_dir / "protected_file.txt";
 
     boost::filesystem::ofstream ofs(file);

@@ -5,9 +5,14 @@
 
 namespace limestone::grpc::service {
 
-class ping_service final : public limestone::grpc::proto::PingService::Service {
+
+using limestone::grpc::proto::PingService;
+using limestone::grpc::proto::PingRequest;
+using limestone::grpc::proto::PingResponse;
+
+class ping_service final : public PingService::Service {
 public:
-    ::grpc::Status Ping(::grpc::ServerContext*, const limestone::grpc::proto::PingRequest*, limestone::grpc::proto::PingResponse*) override;
+    ::grpc::Status Ping(::grpc::ServerContext*, const PingRequest*, PingResponse*) override;
 };
 
 } // namespace limestone::grpc::service

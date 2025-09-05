@@ -148,7 +148,7 @@ TEST_F(datastore_test, prevent_double_start_test) { // NOLINT
 
     auto ds1 = std::make_unique<limestone::api::datastore_test>(conf);
     ds1->ready();
-    ds1->wait_for_blob_file_garbace_collector();
+    ds1->wait_for_blob_file_garbage_collector();
 
     // another process is using the log directory
     ASSERT_DEATH({

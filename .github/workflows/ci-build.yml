@@ -35,11 +35,6 @@ jobs:
         with:
           submodules: true
 
-      - name: Install gRPC
-        run: |
-          apt-get update
-          apt-get install -y libabsl-dev
-
       - name: CMake_Build
         run: |
           mkdir build

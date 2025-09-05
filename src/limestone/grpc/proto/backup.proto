@@ -1,0 +1,140 @@
+syntax = "proto3";
+
+package limestone.grpc.proto;
+
+// Backup service
+service BackupService {
+    // Start backup session.
+    rpc BeginBackup(BeginBackupRequest) returns (BeginBackupResponse);
+
+    // Keep backup session alive.
+    rpc KeepAlive(KeepAliveRequest) returns (KeepAliveResponse);
+
+    // End backup session.
+    rpc EndBackup(EndBackupRequest) returns (EndBackupResponse);
+
+    // Get object data (server streaming).
+    rpc GetObject(GetObjectRequest) returns (stream GetObjectResponse);
+}
+
+// Request to start a backup session
+message BeginBackupRequest {
+    // Message version.
+    uint64 version = 1;
+
+    // Epoch number to start backup (inclusive), or 0 to start from the beginning.
+    uint64 begin_epoch = 2;
+
+    // Epoch number to end backup (exclusive), or 0 to end at the current epoch.
+    uint64 end_epoch = 3;
+}
+
+// Response for starting a backup session
+message BeginBackupResponse {
+    // Session ID.
+    string session_id = 1;
+
+    // Expiration time of the session (UNIX timestamp, seconds since 1970-01-01T00:00:00Z).
+    int64 expire_at = 2;
+
+    // Epoch number to start backup (inclusive). 0 means full backup.
+    uint64 start_epoch = 3;
+
+    // Epoch number to end backup (exclusive). 0 means there is no data to back up.
+    uint64 finish_epoch = 4;
+
+    // List of objects to back up.
+    repeated BackupObject objects = 5;
+}
+
+// Request to refresh a backup session
+message KeepAliveRequest {
+    // Message version.
+    uint64 version = 1;
+
+    // Session ID.
+    string session_id = 2;
+}
+
+// Response for refreshing a backup session
+message KeepAliveResponse {
+    // Expiration time of the session (UNIX timestamp, seconds since 1970-01-01T00:00:00Z).
+    int64 expire_at = 1;
+}
+
+// Request to end a backup session
+message EndBackupRequest {
+    // Message version.
+    uint64 version = 1;
+
+    // Session ID.
+   string session_id = 2;
+}
+
+// Response for ending a backup session
+message EndBackupResponse {
+    // no special fields.
+}
+
+// Request to get object data
+message GetObjectRequest {
+    // Message version.
+    uint64 version = 1;
+
+    // Session ID.
+    string session_id = 2;
+
+    // List of object IDs.
+    repeated string object_id = 3;
+}
+
+// Response for getting object data (chunked, server streaming)
+message GetObjectResponse {
+    // Backup object information (logical/physical mapping).
+    BackupObject object = 1;
+
+    // Total size of the object (set in the first chunk).
+    int64 total_size = 2;
+
+    // Offset of this chunk in the object.
+    int64 offset = 3;
+
+    // Binary data chunk.
+    bytes chunk = 4;
+
+    // True if this is the first chunk of the object.
+    bool is_first = 5;
+
+    // True if this is the last chunk of the object.
+    bool is_last = 6;
+}
+
+
+// Backup object
+message BackupObject {
+    // Object ID.
+    string object_id = 1;
+
+    // Object type.
+    BackupObjectType type = 2;
+
+    // Relative path of the object, relative to the container root of its object type.
+    string path = 3;
+}
+
+enum BackupObjectType {
+    // Unknown object type.
+    UNSPECIFIED = 0;
+
+    // WAL file.
+    LOG = 1;
+
+    // Piece of snapshot files.
+    SNAPSHOT = 2;
+
+    // BLOB files.
+    BLOB = 3;
+
+    // Metadata files.
+    METADATA = 4;
+}

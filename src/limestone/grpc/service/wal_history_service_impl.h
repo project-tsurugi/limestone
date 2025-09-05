@@ -6,9 +6,12 @@
 
 namespace limestone::grpc::service {
 
-using namespace limestone::grpc::backend;
+using limestone::grpc::backend::grpc_service_backend;
+using limestone::grpc::proto::WalHistoryService;
+using limestone::grpc::proto::WalHistoryRequest;
+using limestone::grpc::proto::WalHistoryResponse;
 
-class wal_history_service_impl final : public limestone::grpc::proto::WalHistoryService::Service {
+class wal_history_service_impl final : public WalHistoryService::Service {
 public:
     explicit wal_history_service_impl(grpc_service_backend& backend);
     ~wal_history_service_impl() override = default;
@@ -19,8 +22,8 @@ public:
 
     ::grpc::Status GetWalHistory(
         ::grpc::ServerContext* context,
-        const limestone::grpc::proto::WalHistoryRequest* request,
-        limestone::grpc::proto::WalHistoryResponse* response) override;
+        const WalHistoryRequest* request,
+        WalHistoryResponse* response) override;
 
 private:
     grpc_service_backend& backend_;

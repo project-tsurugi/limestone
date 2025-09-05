@@ -6,9 +6,9 @@ package limestone.grpc.proto;
 message BranchEpoch {
   uint64 epoch = 1;        // Epoch value
   uint64 identity = 2;     // identity of the epoch
-  int64 timestamp = 3;     // UNIX timestamp (seconds since epoch)
+  int64 timestamp = 3;     // UNIX timestamp, seconds since 1970-01-01T00:00:00Z
 }
-
+    
 // Request message for listing WAL history records.
 
 message WalHistoryRequest {

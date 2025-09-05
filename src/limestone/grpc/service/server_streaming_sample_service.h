@@ -9,18 +9,25 @@
 
 namespace limestone::grpc::service {
 
-class FileSizeServiceImpl final : public limestone::grpc::proto::FileSizeService::Service {
+using limestone::grpc::proto::FileSizeService;
+using limestone::grpc::proto::FileChunk;
+using limestone::grpc::proto::FileSizeResponse;
+using limestone::grpc::proto::RandomBytesService;
+using limestone::grpc::proto::RandomBytesRequest;
+using limestone::grpc::proto::RandomBytesChunk;
+
+class FileSizeServiceImpl final : public FileSizeService::Service {
 public:
     ::grpc::Status GetFileSize(::grpc::ServerContext* context,
-                               ::grpc::ServerReader<limestone::grpc::proto::FileChunk>* reader,
-                               limestone::grpc::proto::FileSizeResponse* response) override;
+                               ::grpc::ServerReader<FileChunk>* reader,
+                               FileSizeResponse* response) override;
 };
 
-class RandomBytesServiceImpl final : public limestone::grpc::proto::RandomBytesService::Service {
+class RandomBytesServiceImpl final : public RandomBytesService::Service {
 public:
     ::grpc::Status GenerateRandomBytes(::grpc::ServerContext* context,
-                                       const limestone::grpc::proto::RandomBytesRequest* request,
-                                       ::grpc::ServerWriter<limestone::grpc::proto::RandomBytesChunk>* writer) override;
+                                       const RandomBytesRequest* request,
+                                       ::grpc::ServerWriter<RandomBytesChunk>* writer) override;
 };
 
 } // namespace limestone::grpc::service
