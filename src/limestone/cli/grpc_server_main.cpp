@@ -129,8 +129,20 @@ int main(int argc, char* argv[]) {
         std::cerr << "Error: Directory does not exist: " << logdir << std::endl;
         return 1;
     }
+
     if (!boost::filesystem::is_directory(log_dir_path)) {
         std::cerr << "Error: Specified path is not a directory: " << logdir << std::endl;
+        return 1;
+    }
+    bool has_file = false;
+    for (boost::filesystem::directory_iterator it(log_dir_path), end; it != end; ++it) {
+        if (boost::filesystem::is_regular_file(*it)) {
+            has_file = true;
+            break;
+        }
+    }
+    if (!has_file) {
+        std::cerr << "Error: Directory '" << logdir << "' contains no files." << std::endl;
         return 1;
     }
 
@@ -145,7 +157,4 @@ int main(int argc, char* argv[]) {
 }
 
 // NOLINTEND(performance-avoid-endl)
-
-
-
 
