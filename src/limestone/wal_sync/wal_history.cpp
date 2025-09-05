@@ -146,8 +146,9 @@ void wal_history::append(epoch_id_type epoch) {
     boost::uuids::random_generator uuid_gen;
     boost::uuids::uuid uuid = uuid_gen();
     uint64_t identity = 0;
-        identity = (identity << 8U) | *it;
-        ++it;
+    auto it = uuid.begin();
+    for (unsigned int i = 0; i < 8; ++i) {
+        identity = (identity << 8U) | *it++;
     }
     auto timestamp = static_cast<std::int64_t>(std::time(nullptr));
     records.push_back(record{epoch, identity, timestamp});
