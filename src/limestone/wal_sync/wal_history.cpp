@@ -147,7 +147,7 @@ void wal_history::append(epoch_id_type epoch) {
     boost::uuids::uuid uuid = uuid_gen();
     uint64_t identity = 0;
     auto it = uuid.begin();
-    for (int i = 0; i < 8; ++i) {
+    for (unsigned int i = 0; i < 8; ++i) {
         identity = (identity << 8U) | *it++;
     }
     auto timestamp = static_cast<std::int64_t>(std::time(nullptr));

@@ -48,11 +48,11 @@ BackupServiceImpl::~BackupServiceImpl() = default;
 
 ::grpc::Status BackupServiceImpl::GetObject(
     ::grpc::ServerContext* /*context*/,
-    const GetObjectRequest* /*request*/,
-    ::grpc::ServerWriter<GetObjectResponse>* /*writer*/)
+    const GetObjectRequest* request,
+    ::grpc::ServerWriter<GetObjectResponse>* writer)
 {
-    // TODO: 実装
-    return {::grpc::StatusCode::UNIMPLEMENTED, "GetObject not implemented"};
+    VLOG_LP(log_info) << "GetObject called";
+    return backend_.get_object(request, writer);
 }
 
 } // namespace limestone::grpc::service
