@@ -18,31 +18,35 @@ using limestone::grpc::proto::WalHistoryRequest;
 using limestone::grpc::proto::WalHistoryResponse;
 using limestone::grpc::proto::WalHistoryService;
 
-class wal_history_client_test : public limestone::grpc::testing::grpc_test_helper {
+class wal_history_client_test : public ::testing::Test {
 protected:
+
     static constexpr const char* log_dir = "/tmp/wal_history_client_test";
+    limestone::grpc::testing::grpc_test_helper helper_;
+
 
     void SetUp() override {
         boost::filesystem::remove_all(log_dir);
         boost::filesystem::create_directories(log_dir);
-        set_backend_factory([]() {
+        helper_.set_backend_factory([]() {
             return limestone::grpc::backend::grpc_service_backend::create_standalone(log_dir);
         });
-        set_service_factory([](limestone::grpc::backend::grpc_service_backend& backend) {
+        helper_.add_service_factory([](limestone::grpc::backend::grpc_service_backend& backend) {
             return std::make_unique<limestone::grpc::service::wal_history_service_impl>(backend);
         });
-    limestone::grpc::testing::grpc_test_helper::SetUp();
+        helper_.setup();
     }
 
+
     void TearDown() override {
-    limestone::grpc::testing::grpc_test_helper::TearDown();
+        helper_.tear_down();
         boost::filesystem::remove_all(log_dir);
     }
 };
 
 
 TEST_F(wal_history_client_test, get_wal_history_with_entries) {
-    start_server();
+    helper_.start_server();
 
     // prepare wal history on disk
     limestone::internal::wal_history wh(log_dir);
@@ -60,7 +64,7 @@ TEST_F(wal_history_client_test, get_wal_history_with_entries) {
     WalHistoryResponse resp;
 
     // create client using a pre-made channel (shared)
-    auto channel = ::grpc::CreateChannel(server_address_, ::grpc::InsecureChannelCredentials());
+    auto channel = ::grpc::CreateChannel(helper_.server_address(), ::grpc::InsecureChannelCredentials());
     limestone::grpc::client::wal_history_client client(channel);
     auto status = client.get_wal_history(req, resp, 2000); // 2s timeout
 
@@ -87,7 +91,7 @@ TEST_F(wal_history_client_test, get_wal_history_server_down) {
     req.set_version(list_wal_history_message_version);
     WalHistoryResponse resp;
 
-    limestone::grpc::client::wal_history_client client(server_address_);
+    limestone::grpc::client::wal_history_client client(helper_.server_address());
     // short timeout to fail quickly
     auto status = client.get_wal_history(req, resp, 100);
 
