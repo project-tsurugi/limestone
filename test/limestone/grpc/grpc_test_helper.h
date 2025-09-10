@@ -1,6 +1,4 @@
-#ifndef LIMESTONE_GRPC_SERVER_TEST_BASE_H_
-#define LIMESTONE_GRPC_SERVER_TEST_BASE_H_
-
+#pragma once
 
 #include <gtest/gtest.h>
 #include <grpcpp/grpcpp.h>
@@ -18,9 +16,7 @@
 
 namespace limestone::grpc::testing {
 
-
-
-class grpc_server_test_base : public ::testing::Test {
+class grpc_test_helper : public ::testing::Test {
 protected:
     std::unique_ptr<::grpc::Server> server_;
     std::string server_address_;
@@ -65,8 +61,6 @@ protected:
         backend_.reset();
     }
 
-
-    // Wait until the server is ready (using ping_service)
     void wait_for_server_ready() {
         constexpr int max_attempts = 50;
         constexpr int wait_millis = 10;
@@ -79,7 +73,6 @@ protected:
         throw std::runtime_error("gRPC server did not become ready in time");
     }
 
-    // Use ping_service to check if server is ready
     virtual bool is_server_ready() {
         auto channel = ::grpc::CreateChannel(server_address_, ::grpc::InsecureChannelCredentials());
         limestone::grpc::proto::PingService::Stub stub(channel);
@@ -90,7 +83,6 @@ protected:
         return status.ok();
     }
 
-    // Find and return an available port number in the range 50000-50200
     std::string find_available_address() {
         for (int port = 50000; port <= 50200; ++port) {
             std::string address = "127.0.0.1:" + std::to_string(port);
@@ -101,7 +93,6 @@ protected:
         throw std::runtime_error("No available port found in range 50000-50200");
     }
 
-    // Check if the port is available
     bool is_port_available(int port) {
         int sock = ::socket(AF_INET, SOCK_STREAM, 0);
         if (sock < 0) return false;
@@ -116,5 +107,3 @@ protected:
 };
 
 } // namespace limestone::grpc::testing
-
-#endif // LIMESTONE_GRPC_SERVER_TEST_BASE_H_

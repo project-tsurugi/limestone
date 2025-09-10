@@ -3,7 +3,7 @@
 #include <grpcpp/grpcpp.h>
 #include <gtest/gtest.h>
 
-#include "grpc_server_test_base.h"
+#include "grpc_test_helper.h"
 #include "limestone/grpc/backend/grpc_service_backend.h"
 #include "limestone/grpc/backend/standalone_backend.h"
 #include "limestone/grpc/service/message_versions.h"
@@ -18,7 +18,7 @@ using limestone::grpc::proto::WalHistoryService;
 using limestone::grpc::service::wal_history_service_impl;
 
 
-class wal_history_service_impl_test : public limestone::grpc::testing::grpc_server_test_base {
+class wal_history_service_impl_test : public limestone::grpc::testing::grpc_test_helper {
 protected:
     static constexpr const char* log_dir = "/tmp/wal_history_service_impl_test";
 
@@ -39,11 +39,11 @@ protected:
         set_service_factory([](limestone::grpc::backend::grpc_service_backend& backend) {
             return std::make_unique<wal_history_service_impl>(backend);
         });
-        limestone::grpc::testing::grpc_server_test_base::SetUp();
+    limestone::grpc::testing::grpc_test_helper::SetUp();
     }
 
     void TearDown() override {
-        limestone::grpc::testing::grpc_server_test_base::TearDown();
+    limestone::grpc::testing::grpc_test_helper::TearDown();
         boost::filesystem::remove_all(log_dir);
     }
 };
