@@ -30,7 +30,7 @@ public:
      * @brief Construct wal_sync_client with log directory path
      * @param log_dir log directory path
      */
-    explicit wal_sync_client(boost::filesystem::path const log_dir) noexcept;
+    explicit wal_sync_client(boost::filesystem::path log_dir) noexcept;
 
     wal_sync_client(wal_sync_client const&) = delete;
     wal_sync_client& operator=(wal_sync_client const&) = delete;
