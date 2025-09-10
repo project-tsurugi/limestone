@@ -75,8 +75,8 @@ wal_sync_client::~wal_sync_client() {
     }
 }
 
-wal_sync_client::wal_sync_client(boost::filesystem::path const& log_dir) noexcept
-    : log_dir_(log_dir)
+wal_sync_client::wal_sync_client(boost::filesystem::path log_dir) noexcept
+    : log_dir_(std::move(log_dir))
     , real_file_ops_()
     , file_ops_(&real_file_ops_) {}
 
