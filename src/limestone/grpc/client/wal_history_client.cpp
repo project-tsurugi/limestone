@@ -15,19 +15,6 @@ wal_history_client::wal_history_client(std::shared_ptr<::grpc::Channel> const& c
     LOG(INFO) << "wal_history_client created with custom channel";
 }
 
-::grpc::Status wal_history_client::get_wal_history(WalHistoryRequest const& request, WalHistoryResponse& response) {
-    ::grpc::ClientContext context;
-    LOG(INFO) << "Sending GetWalHistory request.";
-    ::grpc::Status status = stub_->GetWalHistory(&context, request, &response);
-    if (status.ok()) {
-        LOG(INFO) << "GetWalHistory response received.";
-    } else {
-        LOG(ERROR) << "GetWalHistory RPC failed: " << status.error_code()
-                   << ": " << status.error_message();
-    }
-    return status;
-}
-
 ::grpc::Status wal_history_client::get_wal_history(WalHistoryRequest const& request,
                                                    WalHistoryResponse& response,
                                                    int timeout_ms) {

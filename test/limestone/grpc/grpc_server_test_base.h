@@ -6,6 +6,7 @@
 #include <grpcpp/grpcpp.h>
 #include <memory>
 #include <string>
+#include <functional>
 #include <thread>
 #include <chrono>
 #include <stdexcept>
@@ -13,6 +14,7 @@
 #include <netinet/in.h>
 #include <unistd.h>
 #include "limestone/grpc/service/ping_service.h"
+#include "limestone/grpc/backend/grpc_service_backend.h"
 
 namespace limestone::grpc::testing {
 

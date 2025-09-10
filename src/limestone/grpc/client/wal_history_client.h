@@ -33,14 +33,6 @@ public:
     explicit wal_history_client(std::shared_ptr<::grpc::Channel> const& channel);
 
     /**
-     * @brief Get WAL history from the server
-     * @param request WAL history request
-     * @param response Reference to store the response
-     * @return gRPC status of the operation
-     */
-    ::grpc::Status get_wal_history(WalHistoryRequest const& request, WalHistoryResponse& response);
-
-    /**
      * @brief Get WAL history with timeout
      * @param request WAL history request
      * @param response Reference to store the response
