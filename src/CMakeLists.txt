@@ -79,9 +79,11 @@ target_link_libraries(${package_name}
         PRIVATE glog::glog
         PRIVATE ${sort_lib}
         PRIVATE nlohmann_json::nlohmann_json
-        PRIVATE grpc++
-        PRIVATE grpc
-        PRIVATE protobuf
+        PRIVATE gRPC::grpc++
+        PRIVATE gRPC::grpc
+        PRIVATE protobuf::libprotobuf
+        PRIVATE gRPC::gpr
+        PRIVATE absl::synchronization
 )
 
 if (ENABLE_ALTIMETER)
@@ -110,11 +112,11 @@ target_link_libraries(limestone-impl
         INTERFACE glog::glog
         INTERFACE ${sort_lib}
         INTERFACE nlohmann_json::nlohmann_json
-        INTERFACE grpc++
-        INTERFACE grpc
-        INTERFACE protobuf
-        INTERFACE gpr
-        INTERFACE absl_synchronization
+        INTERFACE gRPC::grpc++
+        INTERFACE gRPC::grpc
+        INTERFACE protobuf::libprotobuf
+        INTERFACE gRPC::gpr
+        INTERFACE absl::synchronization
 )
 
 # utils
