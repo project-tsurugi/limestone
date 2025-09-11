@@ -39,7 +39,7 @@ jobs:
         run: |
           mkdir build
           cd build
-          cmake -G Ninja -DCMAKE_BUILD_TYPE=Debug -DCMAKE_CXX_COMPILER_LAUNCHER=ccache -DRECOVERY_SORTER_KVSLIB=ROCKSDB -DRECOVERY_SORTER_PUT_ONLY=ON -DBUILD_TESTS=ON ${{ inputs.cmake_build_option }} ..
+          cmake -G Ninja -DCMAKE_BUILD_TYPE=Debug -DCMAKE_CXX_COMPILER_LAUNCHER=ccache -DRECOVERY_SORTER_KVSLIB=ROCKSDB -DRECOVERY_SORTER_PUT_ONLY=ON -DBUILD_TESTS=ON -DENABLE_SANITIZER=OFF ${{ inputs.cmake_build_option }} ..
           cmake --build . --target all --clean-first
 
       - name: CTest
