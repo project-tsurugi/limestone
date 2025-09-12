@@ -5,13 +5,16 @@
 #include <vector>
 #include <chrono>
 #include <boost/filesystem.hpp> 
+#include <limestone/api/epoch_id_type.h>
+#include <grpc/client/wal_history_client.h>
 
 #include "file_operations.h"
 
 namespace limestone::internal {
 
+using limestone::api::epoch_id_type;    
 struct branch_epoch {
-    std::uint64_t epoch;
+    epoch_id_type epoch;
     std::uint64_t uuid;
 };
 
@@ -25,12 +28,14 @@ struct backup_object {
  * @brief Replica WAL sync client (レプリカ同期クライアント)
  */
 class wal_sync_client {
+
 public:
     /**
-     * @brief Construct wal_sync_client with log directory path
+     * @brief Construct wal_sync_client with log directory path and gRPC channel
      * @param log_dir log directory path
+     * @param channel gRPC channel to use for wal_history_client
      */
-    explicit wal_sync_client(boost::filesystem::path log_dir) noexcept;
+    wal_sync_client(boost::filesystem::path log_dir, std::shared_ptr<::grpc::Channel> channel) noexcept;
 
     wal_sync_client(wal_sync_client const&) = delete;
     wal_sync_client& operator=(wal_sync_client const&) = delete;
@@ -45,14 +50,15 @@ public:
     /**
      * @brief Get the epoch value from the remote backup service.
      * @return remote node's durable epoch value
+     * @throw remote_exception if the remote call fails or the response is invalid
      */
-    std::uint64_t get_remote_epoch();
+    epoch_id_type get_remote_epoch();
 
     /**
      * @brief Get the epoch value of the local node.
      * @return local node's durable epoch value
      */
-    std::uint64_t get_local_epoch();
+    epoch_id_type get_local_epoch();
 
     /**
      * @brief Get WAL compatibility info from the remote backup service.
@@ -159,6 +165,7 @@ private:
     real_file_operations real_file_ops_;
     file_operations* file_ops_;
     int lock_fd_ = -1;
+    std::shared_ptr<limestone::grpc::client::wal_history_client> history_client_;
 };
 
 } // namespace limestone::internal

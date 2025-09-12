@@ -3,7 +3,7 @@
 #include <memory>
 #include <string>
 #include <grpcpp/grpcpp.h>
-#include <wal_history.grpc.pb.h>
+#include "wal_history.grpc.pb.h"
 
 namespace limestone::grpc::client {
 

@@ -4,8 +4,17 @@
 #include "file_operations.h"
 #include "manifest.h"
 #include "dblog_scan.h"
-
+#include "remote_exception.h"
+#include "wal_history.grpc.pb.h"
+#include "grpc/service/message_versions.h"
+#include "grpc/service/grpc_constants.h"
 namespace limestone::internal {
+
+using limestone::grpc::proto::WalHistoryRequest;
+using limestone::grpc::proto::WalHistoryResponse;
+using limestone::grpc::service::list_wal_history_message_version;
+using limestone::grpc::service::grpc_timeout_ms;
+
 bool wal_sync_client::init(std::string& error_message, bool allow_initialize) {
 
     // Check if log_dir_ exists and is a directory
@@ -75,20 +84,28 @@ wal_sync_client::~wal_sync_client() {
     }
 }
 
-wal_sync_client::wal_sync_client(boost::filesystem::path log_dir) noexcept
+
+wal_sync_client::wal_sync_client(boost::filesystem::path log_dir, std::shared_ptr<::grpc::Channel> channel) noexcept
     : log_dir_(std::move(log_dir))
     , real_file_ops_()
-    , file_ops_(&real_file_ops_) {}
+    , file_ops_(&real_file_ops_)
+    , history_client_(std::make_shared<limestone::grpc::client::wal_history_client>(channel)) {}
 
 
 
-std::uint64_t wal_sync_client::get_remote_epoch() {
-    // TODO: implement
-    return 0;
+
+epoch_id_type wal_sync_client::get_remote_epoch() {
+    WalHistoryResponse response;
+    WalHistoryRequest request;
+    request.set_version(list_wal_history_message_version);
+    ::grpc::Status status = history_client_->get_wal_history(request, response, grpc_timeout_ms);
+    if (!status.ok()) {
+        throw remote_exception(status, "WalHistoryService/GetWalHistory");
+    }
+    return response.last_epoch();
 }
 
-
-std::uint64_t wal_sync_client::get_local_epoch() {
+epoch_id_type wal_sync_client::get_local_epoch() {
     dblog_scan scan(log_dir_);
     return scan.last_durable_epoch_in_dir();
 }

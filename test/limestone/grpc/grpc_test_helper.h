@@ -143,6 +143,14 @@ public:
         ::close(sock);
         return result == 0;
     }
+
+    /**
+     * @brief Create a gRPC channel to the test server
+     */
+    std::shared_ptr<::grpc::Channel> create_channel() const {
+        return ::grpc::CreateChannel(server_address_, ::grpc::InsecureChannelCredentials());
+    }
+
 private:
     std::unique_ptr<::grpc::Server> server_;
     std::string server_address_;

@@ -63,9 +63,7 @@ TEST_F(wal_history_client_test, get_wal_history_with_entries) {
     req.set_version(list_wal_history_message_version);
     WalHistoryResponse resp;
 
-    // create client using a pre-made channel (shared)
-    auto channel = ::grpc::CreateChannel(helper_.server_address(), ::grpc::InsecureChannelCredentials());
-    limestone::grpc::client::wal_history_client client(channel);
+    limestone::grpc::client::wal_history_client client(helper_.create_channel());
     auto status = client.get_wal_history(req, resp, 2000); // 2s timeout
 
     EXPECT_TRUE(status.ok());
