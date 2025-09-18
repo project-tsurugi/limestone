@@ -303,6 +303,114 @@ TEST_F(wal_sync_client_test, get_local_wal_compatibility) {
     }
 }
 
+TEST_F(wal_sync_client_test, check_wal_compatibility) {
+    // Arrange
+    std::vector<branch_epoch> local = {
+        {1, 100, 1633024800},
+        {2, 101, 1633028400}
+    };
+
+    std::vector<branch_epoch> remote = {
+        {1, 100, 1633024800},
+        {2, 101, 1633028400},
+        {3, 102, 1633032000}
+    };
+
+    wal_sync_client client(locale_dir, helper_.create_channel());
+
+    // Act & Assert
+    EXPECT_TRUE(client.check_wal_compatibility(local, remote));
+
+    // Modify local to make it incompatible
+    local[1].identity = 999;
+    EXPECT_FALSE(client.check_wal_compatibility(local, remote));
+
+    // Modify local size to make it larger than remote
+    local.push_back({4, 103, 1633035600});
+    EXPECT_FALSE(client.check_wal_compatibility(local, remote));
+}
+
+TEST_F(wal_sync_client_test, check_wal_compatibility_empty_vectors) {
+    // Arrange
+    std::vector<branch_epoch> local;
+    std::vector<branch_epoch> remote;
+
+    wal_sync_client client(locale_dir, helper_.create_channel());
+
+    // Act & Assert
+    EXPECT_FALSE(client.check_wal_compatibility(local, remote));
+
+    remote.push_back({1, 100, 1633024800});
+    EXPECT_FALSE(client.check_wal_compatibility(local, remote));
+
+    local.push_back({1, 100, 1633024800});
+    remote.clear();
+    EXPECT_FALSE(client.check_wal_compatibility(local, remote));
+}
+
+TEST_F(wal_sync_client_test, check_wal_compatibility_partial_match) {
+    // Arrange
+    std::vector<branch_epoch> local = {
+        {1, 100, 1633024800},
+        {2, 101, 1633028400}
+    };
+
+    std::vector<branch_epoch> remote = {
+        {1, 100, 1633024800},
+        {2, 999, 1633028400}, // Mismatch in identity
+        {3, 102, 1633032000}
+    };
+
+    wal_sync_client client(locale_dir, helper_.create_channel());
+
+    // Act & Assert
+    EXPECT_FALSE(client.check_wal_compatibility(local, remote));
+}
+
+TEST_F(wal_sync_client_test, check_wal_compatibility_remote_contains_local_with_differences) {
+    // Arrange
+    std::vector<branch_epoch> local = {
+        {1, 100, 1633024800},
+        {2, 101, 1633028400}
+    };
+
+    std::vector<branch_epoch> remote = {
+        {1, 100, 1633024800},
+        {2, 101, 1633028400},
+        {3, 102, 1633032000},
+        {4, 103, 1633035600} // Extra entry in remote
+    };
+
+    wal_sync_client client(locale_dir, helper_.create_channel());
+
+    // Act & Assert
+    EXPECT_TRUE(client.check_wal_compatibility(local, remote));
+
+    // Modify remote to make it incompatible
+    remote[1].identity = 999;
+    EXPECT_FALSE(client.check_wal_compatibility(local, remote));
+}
+
+TEST_F(wal_sync_client_test, check_wal_compatibility_identical_vectors) {
+    // Arrange
+    std::vector<branch_epoch> local = {
+        {1, 100, 1633024800},
+        {2, 101, 1633028400},
+        {3, 102, 1633032000}
+    };
+
+    std::vector<branch_epoch> remote = {
+        {1, 100, 1633024800},
+        {2, 101, 1633028400},
+        {3, 102, 1633032000}
+    };
+
+    wal_sync_client client(locale_dir, helper_.create_channel());
+
+    // Act & Assert
+    EXPECT_TRUE(client.check_wal_compatibility(local, remote));
+}
+
 
 } // namespace limestone::testing
 

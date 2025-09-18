@@ -147,10 +147,18 @@ bool wal_sync_client::check_wal_compatibility(
     std::vector<branch_epoch> const& local,
     std::vector<branch_epoch> const& remote
 ) {
-    (void)local;
-    (void)remote;
-    // TODO: implement
-    return false;
+    if (local.empty() || remote.empty() || local.size() > remote.size()) {
+        return false;
+    }
+
+    for (std::size_t i = 0; i < local.size(); ++i) {
+        if (local[i].epoch != remote[i].epoch ||
+            local[i].identity != remote[i].identity ||
+            local[i].timestamp != remote[i].timestamp) {
+            return false;
+        }
+    }
+    return true;
 }
 
 std::vector<backup_object> wal_sync_client::begin_backup(
