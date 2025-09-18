@@ -16,6 +16,7 @@
 
 namespace limestone::grpc::backend {
 
+using limestone::api::backup_detail_and_rotation_result;
 using limestone::api::backup_type;
 using limestone::api::log_entry;
 using limestone::grpc::service::begin_backup_message_version;
@@ -24,7 +25,7 @@ using limestone::grpc::service::get_object_message_version;
 using limestone::grpc::service::keep_alive_message_version;
 using limestone::grpc::service::session_timeout_seconds;
 using limestone::internal::compaction_catalog;
-using limestone::api::backup_detail_and_rotation_result;
+using limestone::internal::wal_history;    
 
 std::optional<backup_object> backend_shared_impl::make_backup_object_from_path(const boost::filesystem::path& path) {
     std::string filename = path.filename().string();
@@ -43,7 +44,6 @@ std::optional<backup_object> backend_shared_impl::make_backup_object_from_path(c
     return std::nullopt;
 }
 
-using limestone::internal::wal_history;    
 
 backend_shared_impl::backend_shared_impl(boost::filesystem::path log_dir, std::size_t chunk_size)
     : log_dir_(std::move(log_dir)), chunk_size_(chunk_size), 

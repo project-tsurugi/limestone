@@ -8,14 +8,19 @@
 #include <limestone/api/epoch_id_type.h>
 #include <grpc/client/wal_history_client.h>
 
+
 #include "file_operations.h"
 
 namespace limestone::internal {
 
-using limestone::api::epoch_id_type;    
+using limestone::api::epoch_id_type; 
+
+using unix_timestamp_seconds = std::int64_t;
+
 struct branch_epoch {
     epoch_id_type epoch;
-    std::uint64_t uuid;
+    std::uint64_t identity;
+    unix_timestamp_seconds timestamp;
 };
 
 struct backup_object {
@@ -25,7 +30,7 @@ struct backup_object {
 };
 
 /**
- * @brief Replica WAL sync client (レプリカ同期クライアント)
+ * @brief Replica WAL sync client 
  */
 class wal_sync_client {
 

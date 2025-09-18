@@ -235,5 +235,76 @@ TEST_F(wal_sync_client_test, get_remote_epoch_failure) {
     }
 }
 
+TEST_F(wal_sync_client_test, get_remote_wal_compatibility_success) {
+    helper_.start_server();
+
+    // prepare wal history on disk
+    limestone::internal::wal_history wh(remote_dir);
+    wh.append(42);
+    wh.append(84);
+    auto expected = wh.list();
+    // set last epoch file
+    FILE* fp = std::fopen((remote_dir / "epoch").c_str(), "wb");
+    ASSERT_TRUE(fp != nullptr);
+    limestone::api::log_entry::durable_epoch(fp, 100);
+    std::fclose(fp);
+
+    wal_sync_client client(locale_dir, helper_.create_channel());
+    auto branch_epochs = client.get_remote_wal_compatibility();
+
+    ASSERT_EQ(branch_epochs.size(), expected.size());
+    for (int i = 0; i < branch_epochs.size(); ++i) {
+        const auto& branch_epoch = branch_epochs[i];
+        const auto& exp = expected[i];
+        EXPECT_EQ(branch_epoch.epoch, exp.epoch);
+        EXPECT_EQ(branch_epoch.identity, exp.identity);
+        EXPECT_EQ(branch_epoch.timestamp, static_cast<unix_timestamp_seconds>(exp.timestamp));
+    }
+}
+
+TEST_F(wal_sync_client_test, get_remote_wal_compatibility_failure) {
+    wal_sync_client client(locale_dir, helper_.create_channel());
+
+    // Call the method and expect an exception
+    try {
+        client.get_remote_wal_compatibility();
+        FAIL() << "Expected remote_exception to be thrown";
+    } catch (const remote_exception& ex) {
+        EXPECT_EQ(ex.code(), remote_error_code::unavailable);
+        EXPECT_EQ(ex.method(), "WalHistoryService/GetWalHistory");
+        EXPECT_NE(std::string(ex.what()).find("failed to connect to all addresses"), std::string::npos);
+    } catch (...) {
+        FAIL() << "Expected remote_exception, but caught a different exception";
+    }
+}
+
+TEST_F(wal_sync_client_test, get_local_wal_compatibility) {
+    // prepare wal history on disk
+    limestone::internal::wal_history wh(locale_dir);
+    wh.append(42);
+    wh.append(84);
+    auto expected = wh.list();
+    // set last epoch file
+    FILE* fp = std::fopen((locale_dir / "epoch").c_str(), "wb");
+    ASSERT_TRUE(fp != nullptr);
+    limestone::api::log_entry::durable_epoch(fp, 100);
+    std::fclose(fp);
+
+    wal_sync_client client(locale_dir, helper_.create_channel());
+    auto branch_epochs = client.get_local_wal_compatibility();
+
+    ASSERT_EQ(branch_epochs.size(), expected.size());
+    for (int i = 0; i < branch_epochs.size(); ++i) {
+        const auto& branch_epoch = branch_epochs[i];
+        const auto& exp = expected[i];
+        EXPECT_EQ(branch_epoch.epoch, exp.epoch);
+        EXPECT_EQ(branch_epoch.identity, exp.identity);
+        EXPECT_EQ(branch_epoch.timestamp, static_cast<unix_timestamp_seconds>(exp.timestamp));
+    }
+}
+
+
 } // namespace limestone::testing
+
+
 

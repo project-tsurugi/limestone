@@ -1,4 +1,3 @@
-
 #include <wal_sync/wal_sync_client.h>
 #include <boost/filesystem.hpp>
 #include "file_operations.h"
@@ -8,6 +7,7 @@
 #include "wal_history.grpc.pb.h"
 #include "grpc/service/message_versions.h"
 #include "grpc/service/grpc_constants.h"
+#include "wal_history.h"
 namespace limestone::internal {
 
 using limestone::grpc::proto::WalHistoryRequest;
@@ -111,13 +111,36 @@ epoch_id_type wal_sync_client::get_local_epoch() {
 }
 
 std::vector<branch_epoch> wal_sync_client::get_remote_wal_compatibility() {
-    // TODO: implement
-    return {};
+    WalHistoryResponse response;
+    WalHistoryRequest request;
+    request.set_version(list_wal_history_message_version);
+    ::grpc::Status status = history_client_->get_wal_history(request, response, grpc_timeout_ms);
+    if (!status.ok()) {
+        throw remote_exception(status, "WalHistoryService/GetWalHistory");
+    }
+    std::vector<branch_epoch> result;
+    for (const auto& record : response.records()) {
+        result.emplace_back(branch_epoch{
+            record.epoch(),
+            record.identity(),
+            record.timestamp()
+        });
+    }
+    return result;
 }
 
 std::vector<branch_epoch> wal_sync_client::get_local_wal_compatibility() {
-    // TODO: implement
-    return {};
+    wal_history wal_history_(log_dir_);
+    auto records = wal_history_.list();
+    std::vector<branch_epoch> result;
+    for (const auto& record : records) {
+        result.emplace_back(branch_epoch{
+            record.epoch,
+            record.identity,
+            record.timestamp
+        });
+    }
+    return result;
 }
 
 bool wal_sync_client::check_wal_compatibility(
