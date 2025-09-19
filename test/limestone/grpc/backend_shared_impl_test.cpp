@@ -213,59 +213,91 @@ TEST_F(backend_shared_impl_test, list_wal_history_matches_wal_history_class) {
     }
 }
 
-TEST_F(backend_shared_impl_test, make_backup_object_from_path_metadata_files) {
+TEST_F(backend_shared_impl_test, generate_backup_objects_metadata_files) {
     std::vector<std::string> files = {
         "compaction_catalog",
         "limestone-manifest.json",
         "epoch.1234567890.1"
     };
     for (const auto& fname : files) {
-        auto obj = backend_shared_impl::make_backup_object_from_path(fname, true);
-        ASSERT_TRUE(obj.has_value());
-        EXPECT_EQ(obj->object_id(), fname);
-        EXPECT_EQ(obj->path(), fname);
-        EXPECT_EQ(obj->type(), backup_object_type::metadata);
-        auto obj2 = backend_shared_impl::make_backup_object_from_path(fname, false);
-        ASSERT_FALSE(obj2.has_value());
+        auto objs = backend_shared_impl::generate_backup_objects({fname}, true);
+        ASSERT_EQ(objs.size(), 1);
+        const auto& obj = objs[0];
+        EXPECT_EQ(obj.object_id(), fname);
+        EXPECT_EQ(obj.path(), fname);
+        EXPECT_EQ(obj.type(), backup_object_type::metadata);
+
+        objs = backend_shared_impl::generate_backup_objects({fname}, false);
+        ASSERT_TRUE(objs.empty());
     }
     for (bool is_full_backup : {true, false}) {
         std::string fname = "wal_history";
-        auto obj = backend_shared_impl::make_backup_object_from_path(fname, is_full_backup);
-        ASSERT_TRUE(obj.has_value());
-        EXPECT_EQ(obj->object_id(), fname);
-        EXPECT_EQ(obj->path(), fname);
-        EXPECT_EQ(obj->type(), backup_object_type::metadata);
+        auto objs = backend_shared_impl::generate_backup_objects({fname}, is_full_backup);
+        ASSERT_EQ(objs.size(), 1);
+        const auto& obj = objs[0];
+        EXPECT_EQ(obj.object_id(), fname);
+        EXPECT_EQ(obj.path(), fname);
+        EXPECT_EQ(obj.type(), backup_object_type::metadata);
     }
 }
 
-TEST_F(backend_shared_impl_test, make_backup_object_from_path_snapshot) {
+TEST_F(backend_shared_impl_test, generate_backup_objects_snapshot) {
     std::string fname = "pwal_0000.compacted";
-    auto obj = backend_shared_impl::make_backup_object_from_path(fname, true);
-    ASSERT_TRUE(obj.has_value());
-    EXPECT_EQ(obj->object_id(), fname);
-    EXPECT_EQ(obj->path(), fname);
-    EXPECT_EQ(obj->type(), backup_object_type::snapshot);
-    auto obj2 = backend_shared_impl::make_backup_object_from_path(fname, false);
-    ASSERT_FALSE(obj2.has_value());
+    auto objs = backend_shared_impl::generate_backup_objects({fname}, true);
+    ASSERT_EQ(objs.size(), 1);
+    const auto& obj = objs[0];
+    EXPECT_EQ(obj.object_id(), fname);
+    EXPECT_EQ(obj.path(), fname);
+    EXPECT_EQ(obj.type(), backup_object_type::snapshot);
+
+    objs = backend_shared_impl::generate_backup_objects({fname}, false);
+    ASSERT_TRUE(objs.empty());
 }
 
-TEST_F(backend_shared_impl_test, make_backup_object_from_path_log) {
+TEST_F(backend_shared_impl_test, generate_backup_objects_log) {
     std::string fname = "pwal_0001.1234567890.0";
     for (bool is_full_backup : {true, false}) {
-        auto obj = backend_shared_impl::make_backup_object_from_path(fname, is_full_backup);
-        ASSERT_TRUE(obj.has_value());
-        EXPECT_EQ(obj->object_id(), fname);
-        EXPECT_EQ(obj->path(), fname);
-        EXPECT_EQ(obj->type(), backup_object_type::log);
+        auto objs = backend_shared_impl::generate_backup_objects({fname}, is_full_backup);
+        ASSERT_EQ(objs.size(), 1);
+        const auto& obj = objs[0];
+        EXPECT_EQ(obj.object_id(), fname);
+        EXPECT_EQ(obj.path(), fname);
+        EXPECT_EQ(obj.type(), backup_object_type::log);
     }
 }
 
-TEST_F(backend_shared_impl_test, make_backup_object_from_path_not_matched) {
+TEST_F(backend_shared_impl_test, generate_backup_objects_not_matched) {
     std::string fname = "random_file.txt";
-    auto obj = backend_shared_impl::make_backup_object_from_path(fname, true);
-    EXPECT_FALSE(obj.has_value());
-    auto obj2 = backend_shared_impl::make_backup_object_from_path(fname, false);
-    EXPECT_FALSE(obj2.has_value());
+    auto objs = backend_shared_impl::generate_backup_objects({fname}, true);
+    EXPECT_TRUE(objs.empty());
+
+    objs = backend_shared_impl::generate_backup_objects({fname}, false);
+    EXPECT_TRUE(objs.empty());
+}
+
+TEST_F(backend_shared_impl_test, generate_backup_objects_multiple_elements) {
+    std::vector<boost::filesystem::path> files = {
+        "compaction_catalog",
+        "pwal_0000.compacted",
+        "pwal_0001.1234567890.0"
+    };
+    auto objs = backend_shared_impl::generate_backup_objects(files, true);
+    ASSERT_EQ(objs.size(), 3);
+
+    EXPECT_EQ(objs[0].object_id(), "compaction_catalog");
+    EXPECT_EQ(objs[0].type(), backup_object_type::metadata);
+
+    EXPECT_EQ(objs[1].object_id(), "pwal_0000.compacted");
+    EXPECT_EQ(objs[1].type(), backup_object_type::snapshot);
+
+    EXPECT_EQ(objs[2].object_id(), "pwal_0001.1234567890.0");
+    EXPECT_EQ(objs[2].type(), backup_object_type::log);
+}
+
+TEST_F(backend_shared_impl_test, generate_backup_objects_empty_list) {
+    std::vector<boost::filesystem::path> files;
+    auto objs = backend_shared_impl::generate_backup_objects(files, true);
+    EXPECT_TRUE(objs.empty());
 }
 
 TEST_F(backend_shared_impl_test, keep_alive_success_and_not_found) {
@@ -1668,6 +1700,7 @@ TEST_F(backend_shared_impl_test, begin_backup_exception_handling) {
     EXPECT_EQ(status.error_code(), ::grpc::StatusCode::INTERNAL);
     EXPECT_STREQ(status.error_message().c_str(), "test exception");
 }
+
 
 
 

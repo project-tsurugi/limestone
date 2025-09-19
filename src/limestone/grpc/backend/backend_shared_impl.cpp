@@ -27,29 +27,30 @@ using limestone::grpc::service::session_timeout_seconds;
 using limestone::internal::compaction_catalog;
 using limestone::internal::wal_history;    
 
-std::optional<backup_object> backend_shared_impl::make_backup_object_from_path(const boost::filesystem::path& path, bool is_full_backup) {
-    std::string filename = path.filename().string();
+std::vector<backup_object> backend_shared_impl::generate_backup_objects(const std::vector<boost::filesystem::path>& paths, bool is_full_backup) {
+    std::vector<backup_object> backup_objects;
 
-    static const std::set<std::string> metadata_files = {"compaction_catalog", "limestone-manifest.json", "wal_history"};
+    for (const auto& path : paths) {
+        std::string filename = path.filename().string();
 
-    if (filename == "pwal_0000.compacted") {
-        if (!is_full_backup) {
-            // In incremental backup mode, skip the snapshot file
-            return std::nullopt;
-        }   
-        return backup_object(filename, backup_object_type::snapshot, filename);
-    }
-    if (filename.rfind("pwal_", 0) == 0) {
-        return backup_object(filename, backup_object_type::log, filename);
-    }
-    if ((metadata_files.count(filename) > 0) || filename.rfind("epoch.", 0) == 0) {
-        if (!is_full_backup && filename != "wal_history") {
-            // In incremental backup mode, skip metadata files
-            return std::nullopt;
+        static const std::set<std::string> metadata_files = {"compaction_catalog", "limestone-manifest.json", "wal_history"};
+
+        if (filename == "pwal_0000.compacted") {
+            if (!is_full_backup) {
+                continue; // Skip the snapshot file in incremental backup mode
+            }
+            backup_objects.emplace_back(filename, backup_object_type::snapshot, filename);
+        } else if (filename.rfind("pwal_", 0) == 0) {
+            backup_objects.emplace_back(filename, backup_object_type::log, filename);
+        } else if ((metadata_files.count(filename) > 0) || filename.rfind("epoch.", 0) == 0) {
+            if (!is_full_backup && filename != "wal_history") {
+                continue; // Skip metadata files except wal_history in incremental backup mode
+            }
+            backup_objects.emplace_back(filename, backup_object_type::metadata, filename);
         }
-        return backup_object(filename, backup_object_type::metadata, filename);
     }
-    return std::nullopt;
+
+    return backup_objects;
 }
 
 
@@ -396,14 +397,16 @@ void backend_shared_impl::reset_file_operations_to_default() noexcept {
 
 
         backup_detail_and_rotation_result result = datastore_.get_impl()->begin_backup_with_rotation_result(backup_type::transaction);
+        std::vector<boost::filesystem::path> paths;
         if (result.detail) {
             for (const auto& entry : result.detail->entries()) {
-                auto obj = backend_shared_impl::make_backup_object_from_path(entry.source_path(), is_full_backup);
-                if (obj) {
-                    session_store_.add_backup_object_to_session(session->session_id(), *obj);
-                    *response->add_objects() = obj->to_proto();
-                }
+                paths.push_back(entry.source_path());
             }
+        }
+        auto backup_objects = backend_shared_impl::generate_backup_objects(paths, is_full_backup);
+        for (const auto& obj : backup_objects) {
+            session_store_.add_backup_object_to_session(session->session_id(), obj);
+            *response->add_objects() = obj.to_proto();
         }
 
         // Release the scope guard before returning success.

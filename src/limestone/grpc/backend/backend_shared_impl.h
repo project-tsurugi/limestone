@@ -70,7 +70,7 @@ public:
     google::protobuf::RepeatedPtrField<BranchEpoch> list_wal_history();
 
     // Shared logic for creating backup objects from file paths
-    static std::optional<backup_object> make_backup_object_from_path(const boost::filesystem::path& path, bool is_full_backup);
+    static std::vector<backup_object> generate_backup_objects(const std::vector<boost::filesystem::path>& paths, bool is_full_backup);
 
     // Create and register a session via session_store, return the created session
     std::optional<session> create_and_register_session(epoch_id_type begin_epoch, epoch_id_type end_epoch, int64_t timeout_seconds, session::on_remove_callback_type on_remove = nullptr);
