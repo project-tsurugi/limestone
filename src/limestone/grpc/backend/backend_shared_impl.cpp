@@ -16,8 +16,6 @@
 
 namespace limestone::grpc::backend {
 
-using limestone::api::backup_detail_and_rotation_result;
-using limestone::api::backup_type;
 using limestone::api::log_entry;
 using limestone::grpc::service::begin_backup_message_version;
 using limestone::grpc::service::end_backup_message_version;
@@ -318,8 +316,8 @@ void backend_shared_impl::reset_file_operations_to_default() noexcept {
     file_ops_ = default_file_ops_.get();
 }
 
-::grpc::Status backend_shared_impl::begin_backup(datastore& datastore_, const limestone::grpc::proto::BeginBackupRequest* request,
-                                                 limestone::grpc::proto::BeginBackupResponse* response, backup_path_list_provider_type backup_path_list_provider) noexcept {
+::grpc::Status backend_shared_impl::begin_backup(datastore& datastore_, limestone::grpc::proto::BeginBackupRequest const* request,
+                                                 limestone::grpc::proto::BeginBackupResponse* response, backup_path_list_provider_type const& backup_path_list_provider) noexcept {
     if (!backup_path_list_provider) {
         return {::grpc::StatusCode::INTERNAL, 
                 "Unexpected error: backup_path_list_provider is not set. This may indicate an issue in the server implementation."};

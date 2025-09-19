@@ -95,7 +95,7 @@ public:
 
     // Shared logic for begin backup
     ::grpc::Status begin_backup(datastore& datastore_, const limestone::grpc::proto::BeginBackupRequest* request,
-                                limestone::grpc::proto::BeginBackupResponse* response, backup_path_list_provider_type backup_path_list_provider) noexcept;
+                                limestone::grpc::proto::BeginBackupResponse* response, backup_path_list_provider_type const&backup_path_list_provider) noexcept;
 
     /**
      * @brief Send backup object data as a chunked gRPC stream.
