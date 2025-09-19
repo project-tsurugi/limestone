@@ -27,18 +27,26 @@ using limestone::grpc::service::session_timeout_seconds;
 using limestone::internal::compaction_catalog;
 using limestone::internal::wal_history;    
 
-std::optional<backup_object> backend_shared_impl::make_backup_object_from_path(const boost::filesystem::path& path) {
+std::optional<backup_object> backend_shared_impl::make_backup_object_from_path(const boost::filesystem::path& path, bool is_full_backup) {
     std::string filename = path.filename().string();
 
     static const std::set<std::string> metadata_files = {"compaction_catalog", "limestone-manifest.json", "wal_history"};
 
     if (filename == "pwal_0000.compacted") {
+        if (!is_full_backup) {
+            // In incremental backup mode, skip the snapshot file
+            return std::nullopt;
+        }   
         return backup_object(filename, backup_object_type::snapshot, filename);
     }
     if (filename.rfind("pwal_", 0) == 0) {
         return backup_object(filename, backup_object_type::log, filename);
     }
     if ((metadata_files.count(filename) > 0) || filename.rfind("epoch.", 0) == 0) {
+        if (!is_full_backup && filename != "wal_history") {
+            // In incremental backup mode, skip metadata files
+            return std::nullopt;
+        }
         return backup_object(filename, backup_object_type::metadata, filename);
     }
     return std::nullopt;
@@ -361,6 +369,7 @@ void backend_shared_impl::reset_file_operations_to_default() noexcept {
         );
 
         // Validate the backup parameters
+        compaction_catalog& catalog = datastore_.get_impl()->get_compaction_catalog();
         bool is_full_backup = (begin_epoch == 0 && end_epoch == 0);
         if (!is_full_backup) {
             // differential backup
@@ -368,7 +377,6 @@ void backend_shared_impl::reset_file_operations_to_default() noexcept {
                 return {::grpc::StatusCode::INVALID_ARGUMENT,
                         "begin_epoch must be less than end_epoch: begin_epoch=" + std::to_string(begin_epoch) + ", end_epoch=" + std::to_string(end_epoch)};
             }
-            compaction_catalog& catalog = datastore_.get_impl()->get_compaction_catalog();
             auto snapshot_epoch_id = catalog.get_max_epoch_id();
             if (begin_epoch <= snapshot_epoch_id) {
                 return {::grpc::StatusCode::INVALID_ARGUMENT, "begin_epoch must be strictly greater than the epoch id of the last snapshot: begin_epoch=" +
@@ -390,7 +398,7 @@ void backend_shared_impl::reset_file_operations_to_default() noexcept {
         backup_detail_and_rotation_result result = datastore_.get_impl()->begin_backup_with_rotation_result(backup_type::transaction);
         if (result.detail) {
             for (const auto& entry : result.detail->entries()) {
-                auto obj = backend_shared_impl::make_backup_object_from_path(entry.source_path());
+                auto obj = backend_shared_impl::make_backup_object_from_path(entry.source_path(), is_full_backup);
                 if (obj) {
                     session_store_.add_backup_object_to_session(session->session_id(), *obj);
                     *response->add_objects() = obj->to_proto();
