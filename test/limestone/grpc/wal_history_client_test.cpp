@@ -78,10 +78,6 @@ TEST_F(wal_history_client_test, get_wal_history_with_entries) {
     EXPECT_EQ(resp.last_epoch(), 100);
 }
 
-} // namespace limestone::grpc::service::testing
-
-// Additional failure-case tests
-namespace limestone::grpc::service::testing {
 
 TEST_F(wal_history_client_test, get_wal_history_server_down) {
     // Do NOT start_server(); simulate server unreachable.
