@@ -1284,7 +1284,7 @@ TEST_F(backend_shared_impl_test, get_object_log_corrupted_file_returns_error_sta
     EXPECT_TRUE(writer.responses.empty());
 }
 
-TEST_F(backend_shared_impl_test, begin_backup_version_boundary) {
+TEST_F(backend_shared_impl_test, begin_backup_version_unsupported_0) {
     gen_datastore();
     prepare_backup_test_files();
 
@@ -1298,18 +1298,46 @@ TEST_F(backend_shared_impl_test, begin_backup_version_boundary) {
     request.set_begin_epoch(0);
     request.set_end_epoch(0);
     auto status = backend.begin_backup(*datastore_, &request, &response);
+
     EXPECT_FALSE(status.ok());
+    EXPECT_FALSE(backend.get_session_store().get_session(response.session_id()).has_value());
     EXPECT_EQ(status.error_code(), ::grpc::StatusCode::INVALID_ARGUMENT);
+}
+
+TEST_F(backend_shared_impl_test, begin_backup_version_supported_1) {
+    gen_datastore();
+    prepare_backup_test_files();
+
+    backend_shared_impl backend(get_location(), 4);
+
+    BeginBackupRequest request;
+    BeginBackupResponse response;
 
     // version=1 (supported, but not implemented)
     request.set_version(begin_backup_message_version);
-    status = run_with_epoch_switch([&]() { return backend.begin_backup(*datastore_, &request, &response); }, 7);
+    auto status = run_with_epoch_switch(
+        [&]() { return backend.begin_backup(*datastore_, &request, &response); }, 7);
+
     EXPECT_TRUE(status.ok());
-    
+}
+
+TEST_F(backend_shared_impl_test, begin_backup_version_unsupported_2) {
+    gen_datastore();
+    prepare_backup_test_files();
+
+    backend_shared_impl backend(get_location(), 4);
+
+    BeginBackupRequest request;
+    BeginBackupResponse response;
+
     // version=2 (unsupported)
     request.set_version(2);
-    status = backend.begin_backup(*datastore_, &request, &response);
+    request.set_begin_epoch(0);
+    request.set_end_epoch(0);
+    auto status = backend.begin_backup(*datastore_, &request, &response);
+
     EXPECT_FALSE(status.ok());
+    EXPECT_FALSE(backend.get_session_store().get_session(response.session_id()).has_value());
     EXPECT_EQ(status.error_code(), ::grpc::StatusCode::INVALID_ARGUMENT);
 }
 
@@ -1425,6 +1453,7 @@ TEST_F(backend_shared_impl_test, begin_backup_overall) {
     }
 
     EXPECT_TRUE(status.ok());
+    EXPECT_TRUE(backend.get_session_store().get_session(response.session_id()).has_value());
 }
 
 // begin_epoch > end_epoch
@@ -1439,6 +1468,7 @@ TEST_F(backend_shared_impl_test, begin_backup_epoch_order_ok) {
     request.set_end_epoch(4);
     auto status = run_with_epoch_switch([&]() { return backend.begin_backup(*datastore_, &request, &response); }, 7);
     EXPECT_TRUE(status.ok());
+    EXPECT_TRUE(backend.get_session_store().get_session(response.session_id()).has_value());
 }
 
 TEST_F(backend_shared_impl_test, begin_backup_epoch_order_equal_ng) {
@@ -1452,6 +1482,7 @@ TEST_F(backend_shared_impl_test, begin_backup_epoch_order_equal_ng) {
     request.set_end_epoch(3);
     auto status = backend.begin_backup(*datastore_, &request, &response);
     EXPECT_FALSE(status.ok());
+    EXPECT_FALSE(backend.get_session_store().get_session(response.session_id()).has_value());
     EXPECT_EQ(status.error_code(), ::grpc::StatusCode::INVALID_ARGUMENT);
     EXPECT_EQ(status.error_message(), "begin_epoch must be less than end_epoch: begin_epoch=3, end_epoch=3");
 }
@@ -1467,6 +1498,7 @@ TEST_F(backend_shared_impl_test, begin_backup_epoch_order_gt_ng) {
     request.set_end_epoch(3);
     auto status = backend.begin_backup(*datastore_, &request, &response);
     EXPECT_FALSE(status.ok());
+    EXPECT_FALSE(backend.get_session_store().get_session(response.session_id()).has_value());
     EXPECT_EQ(status.error_code(), ::grpc::StatusCode::INVALID_ARGUMENT);
     EXPECT_EQ(status.error_message(), "begin_epoch must be less than end_epoch: begin_epoch=4, end_epoch=3");
 }
@@ -1483,6 +1515,7 @@ TEST_F(backend_shared_impl_test, begin_backup_begin_epoch_gt_snapshot_ok) {
     request.set_end_epoch(4);
     auto status = run_with_epoch_switch([&]() { return backend.begin_backup(*datastore_, &request, &response); }, 7);
     EXPECT_TRUE(status.ok());
+    EXPECT_TRUE(backend.get_session_store().get_session(response.session_id()).has_value());
 }
 
 TEST_F(backend_shared_impl_test, begin_backup_begin_epoch_eq_snapshot_ng) {
@@ -1497,6 +1530,7 @@ TEST_F(backend_shared_impl_test, begin_backup_begin_epoch_eq_snapshot_ng) {
     request.set_end_epoch(4);
     auto status = backend.begin_backup(*datastore_, &request, &response);
     EXPECT_FALSE(status.ok());
+    EXPECT_FALSE(backend.get_session_store().get_session(response.session_id()).has_value());
     EXPECT_EQ(status.error_code(), ::grpc::StatusCode::INVALID_ARGUMENT);
     EXPECT_EQ(status.error_message(), "begin_epoch must be strictly greater than the epoch id of the last snapshot: begin_epoch=2, snapshot_epoch_id=2");
 }
@@ -1513,6 +1547,7 @@ TEST_F(backend_shared_impl_test, begin_backup_begin_epoch_lt_snapshot_ng) {
     request.set_end_epoch(4);
     auto status = backend.begin_backup(*datastore_, &request, &response);
     EXPECT_FALSE(status.ok());
+    EXPECT_FALSE(backend.get_session_store().get_session(response.session_id()).has_value());
     EXPECT_EQ(status.error_code(), ::grpc::StatusCode::INVALID_ARGUMENT);
     EXPECT_EQ(status.error_message(), "begin_epoch must be strictly greater than the epoch id of the last snapshot: begin_epoch=1, snapshot_epoch_id=2");
 }
@@ -1528,6 +1563,7 @@ TEST_F(backend_shared_impl_test, begin_backup_end_epoch_lt_current_ok) {
     request.set_end_epoch(4); 
     auto status = run_with_epoch_switch([&]() { return backend.begin_backup(*datastore_, &request, &response); }, 7);
     EXPECT_TRUE(status.ok());
+    EXPECT_TRUE(backend.get_session_store().get_session(response.session_id()).has_value());
 }
 
 TEST_F(backend_shared_impl_test, begin_backup_end_epoch_eq_current_ok) {
@@ -1541,6 +1577,7 @@ TEST_F(backend_shared_impl_test, begin_backup_end_epoch_eq_current_ok) {
     request.set_end_epoch(5);
     auto status = run_with_epoch_switch([&]() { return backend.begin_backup(*datastore_, &request, &response); }, 7);
     EXPECT_TRUE(status.ok());
+    EXPECT_TRUE(backend.get_session_store().get_session(response.session_id()).has_value());
 }
 
 TEST_F(backend_shared_impl_test, begin_backup_end_epoch_gt_current_ng) {
@@ -1554,6 +1591,7 @@ TEST_F(backend_shared_impl_test, begin_backup_end_epoch_gt_current_ng) {
     request.set_end_epoch(6); 
     auto status = backend.begin_backup(*datastore_, &request, &response);
     EXPECT_FALSE(status.ok());
+    EXPECT_FALSE(backend.get_session_store().get_session(response.session_id()).has_value());
     EXPECT_EQ(status.error_code(), ::grpc::StatusCode::INVALID_ARGUMENT);
     EXPECT_EQ(status.error_message(), "end_epoch must be less than or equal to the current epoch id: end_epoch=6, current_epoch_id=5");
 }
@@ -1569,6 +1607,7 @@ TEST_F(backend_shared_impl_test, begin_backup_end_epoch_lt_boot_durable_epoch_ng
     request.set_end_epoch(2); 
     auto status = backend.begin_backup(*datastore_, &request, &response);
     EXPECT_FALSE(status.ok());
+    EXPECT_FALSE(backend.get_session_store().get_session(response.session_id()).has_value());
     EXPECT_EQ(status.error_code(), ::grpc::StatusCode::INVALID_ARGUMENT);
     EXPECT_EQ(status.error_message(), "end_epoch must be strictly greater than the durable epoch id at boot time: end_epoch=2, boot_durable_epoch_id=3");
 }
@@ -1584,6 +1623,7 @@ TEST_F(backend_shared_impl_test, begin_backup_end_epoch_eq_boot_durable_epoch_ok
     request.set_end_epoch(3); 
     auto status = run_with_epoch_switch([&]() { return backend.begin_backup(*datastore_, &request, &response); }, 7);
     EXPECT_TRUE(status.ok());
+    EXPECT_TRUE(backend.get_session_store().get_session(response.session_id()).has_value());
 }
 
 TEST_F(backend_shared_impl_test, begin_backup_end_epoch_gt_boot_durable_epoch_ok) {
@@ -1597,6 +1637,7 @@ TEST_F(backend_shared_impl_test, begin_backup_end_epoch_gt_boot_durable_epoch_ok
     request.set_end_epoch(4); 
     auto status = run_with_epoch_switch([&]() { return backend.begin_backup(*datastore_, &request, &response); }, 7);
     EXPECT_TRUE(status.ok());
+    EXPECT_TRUE(backend.get_session_store().get_session(response.session_id()).has_value());
 }
 
 TEST_F(backend_shared_impl_test, begin_backup_exception_handling) {

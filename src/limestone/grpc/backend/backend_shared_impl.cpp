@@ -319,6 +319,7 @@ void backend_shared_impl::reset_file_operations_to_default() noexcept {
         }
         uint32_t begin_epoch = request->begin_epoch();
         uint32_t end_epoch = request->end_epoch();
+
         // Create a session for this backup. The second argument is a callback
         // that will be invoked when the session is removed (expired or deleted).
         // In this callback, decrement_backup_counter() is called to update the backup counter.
@@ -330,20 +331,38 @@ void backend_shared_impl::reset_file_operations_to_default() noexcept {
                 datastore_.get_impl()->decrement_backup_counter();
             }
         );
+
+        // Handle error if session creation fails
         if (!session) {
             return {::grpc::StatusCode::INTERNAL, "failed to create session"};
         }
 
-        response->set_session_id(session->session_id());
-        response->set_expire_at(session->expire_at());
+        // Use a scope guard to ensure the session is removed in case of an error.
+        // This guarantees that the session will not remain active if an exception occurs.
+        struct session_remover {
+            backend_shared_impl* backend;
+            std::string session_id;
+
+            void operator()(limestone::grpc::backend::session* s) {
+                if (s) {
+                    backend->get_session_store().remove_session(session_id);
+                }
+            }
+        };
+        auto session_guard = std::unique_ptr<limestone::grpc::backend::session, session_remover>(
+            &(*session), // Extract the raw pointer from std::optional
+            session_remover{this, session->session_id()}
+        );
+
+        // Validate the backup parameters
         bool is_full_backup = (begin_epoch == 0 && end_epoch == 0);
-        compaction_catalog& catalog = datastore_.get_impl()->get_compaction_catalog();
         if (!is_full_backup) {
             // differential backup
             if (begin_epoch >= end_epoch) {
                 return {::grpc::StatusCode::INVALID_ARGUMENT,
                         "begin_epoch must be less than end_epoch: begin_epoch=" + std::to_string(begin_epoch) + ", end_epoch=" + std::to_string(end_epoch)};
             }
+            compaction_catalog& catalog = datastore_.get_impl()->get_compaction_catalog();
             auto snapshot_epoch_id = catalog.get_max_epoch_id();
             if (begin_epoch <= snapshot_epoch_id) {
                 return {::grpc::StatusCode::INVALID_ARGUMENT, "begin_epoch must be strictly greater than the epoch id of the last snapshot: begin_epoch=" +
@@ -354,14 +373,13 @@ void backend_shared_impl::reset_file_operations_to_default() noexcept {
                 return {::grpc::StatusCode::INVALID_ARGUMENT, "end_epoch must be less than or equal to the current epoch id: end_epoch=" +
                                                                   std::to_string(end_epoch) + ", current_epoch_id=" + std::to_string(current_epoch_id)};
             }
-			auto boot_durable_epoch_id = datastore_.get_impl()->get_boot_durable_epoch_id();
-			if (end_epoch < boot_durable_epoch_id) {
-				return {::grpc::StatusCode::INVALID_ARGUMENT, "end_epoch must be strictly greater than the durable epoch id at boot time: end_epoch=" +
-																  std::to_string(end_epoch) + ", boot_durable_epoch_id=" + std::to_string(boot_durable_epoch_id)};
-			}
-		} 
-        response->set_start_epoch(begin_epoch);
-        response->set_finish_epoch(end_epoch);
+            auto boot_durable_epoch_id = datastore_.get_impl()->get_boot_durable_epoch_id();
+            if (end_epoch < boot_durable_epoch_id) {
+                return {::grpc::StatusCode::INVALID_ARGUMENT, "end_epoch must be strictly greater than the durable epoch id at boot time: end_epoch=" +
+                                                                  std::to_string(end_epoch) + ", boot_durable_epoch_id=" + std::to_string(boot_durable_epoch_id)};
+            }
+        }
+
 
         backup_detail_and_rotation_result result = datastore_.get_impl()->begin_backup_with_rotation_result(backup_type::transaction);
         if (result.detail) {
@@ -373,6 +391,15 @@ void backend_shared_impl::reset_file_operations_to_default() noexcept {
                 }
             }
         }
+
+        // Release the scope guard before returning success.
+        // This ensures the session remains valid after the function exits successfully.
+        session_guard.release();
+
+        response->set_session_id(session->session_id());
+        response->set_expire_at(session->expire_at());
+        response->set_start_epoch(begin_epoch);
+        response->set_finish_epoch(end_epoch);
         return ::grpc::Status::OK;
     } catch (const std::exception& e) {
         VLOG_LP(log_info) << "begin_backup failed: " << e.what();
