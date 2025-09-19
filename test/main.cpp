@@ -21,6 +21,8 @@
 #include <gflags/gflags.h>
 
 int main(int argc, char **argv) {
+    setenv("GRPC_VERBOSITY", "DEBUG", 1);
+    setenv("GRPC_TRACE", "client_channel,subchannel,call,error,connectivity_state", 1);
     google::InitGoogleLogging("limestone tests");
     FLAGS_logtostderr = true;
     ::testing::InitGoogleTest(&argc, argv);
