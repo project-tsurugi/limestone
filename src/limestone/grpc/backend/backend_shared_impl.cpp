@@ -334,6 +334,7 @@ void backend_shared_impl::reset_file_operations_to_default() noexcept {
 
         // Handle error if session creation fails
         if (!session) {
+            // Collision of session_id (UUID) is practically impossible, so this branch is unreachable in normal operation.
             return {::grpc::StatusCode::INTERNAL, "failed to create session"};
         }
 
