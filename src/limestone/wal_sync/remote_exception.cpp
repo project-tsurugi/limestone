@@ -33,7 +33,7 @@ std::ostream& operator<<(std::ostream& os, remote_error_code code) {
 }
 
 
-remote_exception::remote_exception(::grpc::Status const& status, std::string const& method)
+remote_exception::remote_exception(::grpc::Status const& status, std::string method)
     : std::runtime_error(status.error_message()),
       code_([&status]() {
           using grpc::StatusCode;
@@ -58,7 +58,7 @@ remote_exception::remote_exception(::grpc::Status const& status, std::string con
           default: return remote_error_code::unknown;
           }
       }()),
-      method_(method)
+      method_(std::move(method))
 {
 }
 

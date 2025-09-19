@@ -58,12 +58,12 @@ public:
      *   - message : set to status.error_message()
      *   - method  : set to the method argument ("ServiceName/MethodName")
      */
-    remote_exception(::grpc::Status const& status, std::string const& method = {});
+    explicit remote_exception(::grpc::Status const& status, std::string method = {});
 
     /** @brief Get error code */
-    remote_error_code code() const noexcept { return code_; }
+    [[nodiscard]] remote_error_code code() const noexcept { return code_; }
     /** @brief Get method name */
-    std::string const& method() const noexcept { return method_; }
+    [[nodiscard]] std::string const& method() const noexcept { return method_; }
 
 private:
     remote_error_code code_;

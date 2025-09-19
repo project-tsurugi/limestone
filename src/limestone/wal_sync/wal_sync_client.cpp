@@ -85,7 +85,7 @@ wal_sync_client::~wal_sync_client() {
 }
 
 
-wal_sync_client::wal_sync_client(boost::filesystem::path log_dir, std::shared_ptr<::grpc::Channel> channel) noexcept
+wal_sync_client::wal_sync_client(boost::filesystem::path log_dir, std::shared_ptr<::grpc::Channel> const& channel) noexcept
     : log_dir_(std::move(log_dir))
     , real_file_ops_()
     , file_ops_(&real_file_ops_)
@@ -119,6 +119,7 @@ std::vector<branch_epoch> wal_sync_client::get_remote_wal_compatibility() {
         throw remote_exception(status, "WalHistoryService/GetWalHistory");
     }
     std::vector<branch_epoch> result;
+    result.reserve(response.records_size());
     for (const auto& record : response.records()) {
         result.emplace_back(branch_epoch{
             record.epoch(),
@@ -133,6 +134,7 @@ std::vector<branch_epoch> wal_sync_client::get_local_wal_compatibility() {
     wal_history wal_history_(log_dir_);
     auto records = wal_history_.list();
     std::vector<branch_epoch> result;
+    result.reserve(records.size());
     for (const auto& record : records) {
         result.emplace_back(branch_epoch{
             record.epoch,

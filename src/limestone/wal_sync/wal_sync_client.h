@@ -40,7 +40,7 @@ public:
      * @param log_dir log directory path
      * @param channel gRPC channel to use for wal_history_client
      */
-    wal_sync_client(boost::filesystem::path log_dir, std::shared_ptr<::grpc::Channel> channel) noexcept;
+    wal_sync_client(boost::filesystem::path log_dir, std::shared_ptr<::grpc::Channel> const& channel) noexcept;
 
     wal_sync_client(wal_sync_client const&) = delete;
     wal_sync_client& operator=(wal_sync_client const&) = delete;
