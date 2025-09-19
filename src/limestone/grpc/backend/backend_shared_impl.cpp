@@ -399,7 +399,7 @@ void backend_shared_impl::reset_file_operations_to_default() noexcept {
 
         // Release the scope guard before returning success.
         // This ensures the session remains valid after the function exits successfully.
-        session_guard.release();
+        [[maybe_unused]] auto unused = session_guard.release();
 
         response->set_session_id(session->session_id());
         response->set_expire_at(session->expire_at());
