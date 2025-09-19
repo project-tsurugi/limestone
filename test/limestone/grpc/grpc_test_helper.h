@@ -1,19 +1,22 @@
 #pragma once
 
-#include <gtest/gtest.h>
 #include <grpcpp/grpcpp.h>
-#include <memory>
-#include <string>
-#include <functional>
-#include <thread>
-#include <chrono>
-#include <stdexcept>
-#include <sys/socket.h>
+#include <gtest/gtest.h>
 #include <netinet/in.h>
+#include <sys/socket.h>
 #include <unistd.h>
-#include "limestone/grpc/service/ping_service.h"
-#include "limestone/grpc/backend/grpc_service_backend.h"
 
+#include <chrono>
+#include <functional>
+#include <memory>
+#include <stdexcept>
+#include <string>
+#include <thread>
+
+#include "limestone/grpc/backend/grpc_service_backend.h"
+#include "limestone/grpc/service/ping_service.h"
+#include <limestone/logging.h>
+#include "logging_helper.h"
 namespace limestone::grpc::testing {
 
 class grpc_test_helper {
@@ -50,7 +53,10 @@ public:
         ASSERT_FALSE(service_factories_.empty()) << "At least one service_factory must be set before start_server().";
         backend_ = backend_factory_();
         ::grpc::ServerBuilder builder;
-        builder.AddListeningPort(server_address_, ::grpc::InsecureServerCredentials());
+
+        int bound_port = 0; // Variable to store the actual bound port
+        builder.AddListeningPort(server_address_, ::grpc::InsecureServerCredentials(), &bound_port);
+
         ping_service_ = std::make_unique<limestone::grpc::service::ping_service>();
         builder.RegisterService(ping_service_.get());
         for (auto& factory : service_factories_) {
@@ -60,6 +66,10 @@ public:
         }
         server_ = builder.BuildAndStart();
         ASSERT_TRUE(server_ != nullptr);
+
+        // Log the server address and actual bound port
+        server_address_ = "127.0.0.1:" + std::to_string(bound_port);
+        LOG_LP(INFO) << "gRPC server started at: " << server_address_;
         wait_for_server_ready();
     }
 
@@ -67,19 +77,21 @@ public:
      * @brief Initializes the server address (finds an available port).
      */
     void setup() {
-        server_address_ = find_available_address();
+        server_address_ = "127.0.0.1:0";
     }
 
     /**
      * @brief Shuts down the gRPC server and cleans up resources.
      */
     void tear_down() {
+        LOG_LP(INFO) << "teaar down gRPC server start";
         if (server_) {
             server_->Shutdown();
             server_.reset();
         }
         services_.clear();
         backend_.reset();
+        LOG_LP(INFO) << "tear down gRPC server done";
     }
 
     /**
@@ -87,10 +99,12 @@ public:
      * @throws std::runtime_error if the server does not become ready in time.
      */
     void wait_for_server_ready() {
+        LOG_LP(INFO) << "Waiting for gRPC server to become ready...";
         constexpr int max_attempts = 50;
         constexpr int wait_millis = 10;
         for (int attempt = 0; attempt < max_attempts; ++attempt) {
             if (is_server_ready()) {
+                LOG_LP(INFO) << "gRPC server is ready.";
                 return;
             }
             std::this_thread::sleep_for(std::chrono::milliseconds(wait_millis));
@@ -112,20 +126,6 @@ public:
         return status.ok();
     }
 
-    /**
-     * @brief Finds and returns an available address (port) for the server.
-     * @return available address string (e.g. "127.0.0.1:50000")
-     * @throws std::runtime_error if no available port is found
-     */
-    std::string find_available_address() {
-        for (int port = 50000; port <= 50200; ++port) {
-            std::string address = "127.0.0.1:" + std::to_string(port);
-            if (is_port_available(port)) {
-                return address;
-            }
-        }
-        throw std::runtime_error("No available port found in range 50000-50200");
-    }
 
     /**
      * @brief Checks if the specified port is available for binding.
@@ -148,7 +148,9 @@ public:
      * @brief Create a gRPC channel to the test server
      */
     std::shared_ptr<::grpc::Channel> create_channel() const {
-        return ::grpc::CreateChannel(server_address_, ::grpc::InsecureChannelCredentials());
+        auto channel = ::grpc::CreateChannel(server_address_, ::grpc::InsecureChannelCredentials());
+        LOG_LP(INFO) << "Created gRPC channel to " << server_address_;
+        return channel;
     }
 
 private:
