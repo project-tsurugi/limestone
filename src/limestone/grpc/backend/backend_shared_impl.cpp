@@ -340,10 +340,15 @@ void backend_shared_impl::reset_file_operations_to_default() noexcept {
         // Use a scope guard to ensure the session is removed in case of an error.
         // This guarantees that the session will not remain active if an exception occurs.
         struct session_remover {
+        private:
             backend_shared_impl* backend;
             std::string session_id;
 
-            void operator()(limestone::grpc::backend::session* s) {
+        public:
+            session_remover(backend_shared_impl* backend, std::string session_id)
+                : backend(backend), session_id(std::move(session_id)) {}
+
+            void operator()(limestone::grpc::backend::session* s) const {
                 if (s) {
                     backend->get_session_store().remove_session(session_id);
                 }
