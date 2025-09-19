@@ -16,10 +16,10 @@ using limestone::grpc::proto::GetObjectRequest;
 using limestone::grpc::proto::GetObjectResponse;
 
 
-BackupServiceImpl::BackupServiceImpl(grpc_service_backend& backend) : backend_(backend) {}
-BackupServiceImpl::~BackupServiceImpl() = default;
+backup_service_impl::backup_service_impl(grpc_service_backend& backend) : backend_(backend) {}
+backup_service_impl::~backup_service_impl() = default;
 
-::grpc::Status BackupServiceImpl::BeginBackup(
+::grpc::Status backup_service_impl::BeginBackup(
     ::grpc::ServerContext* /*context*/,
     const BeginBackupRequest* request,
     BeginBackupResponse* response)
@@ -28,7 +28,7 @@ BackupServiceImpl::~BackupServiceImpl() = default;
     return backend_.begin_backup(request, response);
 }
 
-::grpc::Status BackupServiceImpl::KeepAlive(
+::grpc::Status backup_service_impl::KeepAlive(
     ::grpc::ServerContext* /*context*/,
     const KeepAliveRequest* request,
     KeepAliveResponse* response)
@@ -37,7 +37,7 @@ BackupServiceImpl::~BackupServiceImpl() = default;
     return backend_.keep_alive(request, response);
 }
 
-::grpc::Status BackupServiceImpl::EndBackup(
+::grpc::Status backup_service_impl::EndBackup(
     ::grpc::ServerContext* /*context*/,
     const EndBackupRequest* request,
     EndBackupResponse* response)
@@ -46,7 +46,7 @@ BackupServiceImpl::~BackupServiceImpl() = default;
     return backend_.end_backup(request, response);
 }
 
-::grpc::Status BackupServiceImpl::GetObject(
+::grpc::Status backup_service_impl::GetObject(
     ::grpc::ServerContext* /*context*/,
     const GetObjectRequest* request,
     ::grpc::ServerWriter<GetObjectResponse>* writer)

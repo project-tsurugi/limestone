@@ -19,15 +19,15 @@ using limestone::grpc::proto::GetObjectResponse;
 using limestone::grpc::proto::KeepAliveRequest;
 using limestone::grpc::proto::KeepAliveResponse;
 
-class BackupServiceImpl final : public BackupService::Service {
+class backup_service_impl final : public BackupService::Service {
 public:
-    explicit BackupServiceImpl(grpc_service_backend& backend);
-    ~BackupServiceImpl() override;
+    explicit backup_service_impl(grpc_service_backend& backend);
+    ~backup_service_impl() override;
 
-    BackupServiceImpl(const BackupServiceImpl&) = delete;
-    BackupServiceImpl& operator=(const BackupServiceImpl&) = delete;
-    BackupServiceImpl(BackupServiceImpl&&) = delete;
-    BackupServiceImpl& operator=(BackupServiceImpl&&) = delete;
+    backup_service_impl(const backup_service_impl&) = delete;
+    backup_service_impl& operator=(const backup_service_impl&) = delete;
+    backup_service_impl(backup_service_impl&&) = delete;
+    backup_service_impl& operator=(backup_service_impl&&) = delete;
         
     ::grpc::Status BeginBackup(::grpc::ServerContext* context,
                              const BeginBackupRequest* request,

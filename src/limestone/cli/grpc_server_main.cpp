@@ -72,7 +72,7 @@ void initialize_and_run_grpc_server(const std::string& logdir, const std::string
     auto backend = limestone::grpc::backend::grpc_service_backend::create_standalone(logdir);
 
     // Create service implementations
-    limestone::grpc::service::BackupServiceImpl backup_service(*backend);
+    limestone::grpc::service::backup_service_impl backup_service(*backend);
     limestone::grpc::service::wal_history_service_impl wal_history_service(*backend);
     limestone::grpc::service::ping_service ping_service;
 
