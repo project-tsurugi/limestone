@@ -24,12 +24,12 @@ using limestone::api::blob_id_type;
 using limestone::api::datastore;
 
 /**
- * @brief Type for path generator function
+ * @brief Type for backup path list provider function
  * 
  * A function that takes datastore and returns a vector of filesystem paths.
  * This allows customization of how paths are extracted from datastore.
  */
-using path_generator_type = std::function<std::vector<boost::filesystem::path>(datastore&)>;
+using backup_path_list_provider_type = std::function<std::vector<boost::filesystem::path>()>;
 
 class i_writer {
 public:
@@ -95,7 +95,7 @@ public:
 
     // Shared logic for begin backup
     ::grpc::Status begin_backup(datastore& datastore_, const limestone::grpc::proto::BeginBackupRequest* request,
-                                limestone::grpc::proto::BeginBackupResponse* response, path_generator_type path_generator = nullptr) noexcept;
+                                limestone::grpc::proto::BeginBackupResponse* response, backup_path_list_provider_type backup_path_list_provider) noexcept;
 
     /**
      * @brief Send backup object data as a chunked gRPC stream.

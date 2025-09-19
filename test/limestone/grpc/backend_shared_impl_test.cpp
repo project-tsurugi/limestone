@@ -177,6 +177,18 @@ protected:
         lc0_->end_session();
         datastore_->switch_epoch(103);
     }
+
+    // Define backup_path_list_provider as a lambda
+    backup_path_list_provider_type backup_path_list_provider = [&]() {
+        backup_detail_and_rotation_result result = datastore_->get_impl()->begin_backup_with_rotation_result(backup_type::transaction);
+        std::vector<boost::filesystem::path> paths;
+        if (result.detail) {
+            for (const auto& entry : result.detail->entries()) {
+                paths.push_back(entry.source_path());
+            }
+        }
+        return paths;
+    };
 };
 
 class dummy_writer : public i_writer {
@@ -1344,7 +1356,7 @@ TEST_F(backend_shared_impl_test, begin_backup_version_unsupported_0) {
     request.set_version(0);
     request.set_begin_epoch(0);
     request.set_end_epoch(0);
-    auto status = backend.begin_backup(*datastore_, &request, &response);
+    auto status = backend.begin_backup(*datastore_, &request, &response, backup_path_list_provider);
 
     EXPECT_FALSE(status.ok());
     EXPECT_FALSE(backend.get_session_store().get_session(response.session_id()).has_value());
@@ -1363,7 +1375,7 @@ TEST_F(backend_shared_impl_test, begin_backup_version_supported_1) {
     // version=1 (supported, but not implemented)
     request.set_version(begin_backup_message_version);
     auto status = run_with_epoch_switch(
-        [&]() { return backend.begin_backup(*datastore_, &request, &response); }, 7);
+        [&]() { return backend.begin_backup(*datastore_, &request, &response, backup_path_list_provider); }, 7);
 
     EXPECT_TRUE(status.ok());
 }
@@ -1381,7 +1393,7 @@ TEST_F(backend_shared_impl_test, begin_backup_version_unsupported_2) {
     request.set_version(2);
     request.set_begin_epoch(0);
     request.set_end_epoch(0);
-    auto status = backend.begin_backup(*datastore_, &request, &response);
+    auto status = backend.begin_backup(*datastore_, &request, &response, backup_path_list_provider);
 
     EXPECT_FALSE(status.ok());
     EXPECT_FALSE(backend.get_session_store().get_session(response.session_id()).has_value());
@@ -1404,7 +1416,7 @@ TEST_F(backend_shared_impl_test, begin_backup_overall) {
     
     // Call begin_backup via run_with_epoch_switch to synchronize with epoch switch and log rotation if needed
     auto before = static_cast<int64_t>(std::time(nullptr));
-    auto status = run_with_epoch_switch([&]() { return backend.begin_backup(*datastore_, &request, &response); }, 7);
+    auto status = run_with_epoch_switch([&]() { return backend.begin_backup(*datastore_, &request, &response, backup_path_list_provider); }, 7);
     auto after = static_cast<int64_t>(std::time(nullptr));
 
     // Check log_dir after begin_backup
@@ -1513,7 +1525,7 @@ TEST_F(backend_shared_impl_test, begin_backup_epoch_order_ok) {
     request.set_version(begin_backup_message_version);
     request.set_begin_epoch(3);
     request.set_end_epoch(4);
-    auto status = run_with_epoch_switch([&]() { return backend.begin_backup(*datastore_, &request, &response); }, 7);
+    auto status = run_with_epoch_switch([&]() { return backend.begin_backup(*datastore_, &request, &response, backup_path_list_provider); }, 7);
     EXPECT_TRUE(status.ok());
     EXPECT_TRUE(backend.get_session_store().get_session(response.session_id()).has_value());
 }
@@ -1527,7 +1539,7 @@ TEST_F(backend_shared_impl_test, begin_backup_epoch_order_equal_ng) {
     request.set_version(begin_backup_message_version);
     request.set_begin_epoch(3);
     request.set_end_epoch(3);
-    auto status = backend.begin_backup(*datastore_, &request, &response);
+    auto status = backend.begin_backup(*datastore_, &request, &response, backup_path_list_provider);
     EXPECT_FALSE(status.ok());
     EXPECT_FALSE(backend.get_session_store().get_session(response.session_id()).has_value());
     EXPECT_EQ(status.error_code(), ::grpc::StatusCode::INVALID_ARGUMENT);
@@ -1543,7 +1555,7 @@ TEST_F(backend_shared_impl_test, begin_backup_epoch_order_gt_ng) {
     request.set_version(begin_backup_message_version);
     request.set_begin_epoch(4);
     request.set_end_epoch(3);
-    auto status = backend.begin_backup(*datastore_, &request, &response);
+    auto status = backend.begin_backup(*datastore_, &request, &response, backup_path_list_provider);
     EXPECT_FALSE(status.ok());
     EXPECT_FALSE(backend.get_session_store().get_session(response.session_id()).has_value());
     EXPECT_EQ(status.error_code(), ::grpc::StatusCode::INVALID_ARGUMENT);
@@ -1560,7 +1572,7 @@ TEST_F(backend_shared_impl_test, begin_backup_begin_epoch_gt_snapshot_ok) {
     EXPECT_EQ(snapshot_epoch_id_, 2);
     request.set_begin_epoch(3);
     request.set_end_epoch(4);
-    auto status = run_with_epoch_switch([&]() { return backend.begin_backup(*datastore_, &request, &response); }, 7);
+    auto status = run_with_epoch_switch([&]() { return backend.begin_backup(*datastore_, &request, &response, backup_path_list_provider); }, 7);
     EXPECT_TRUE(status.ok());
     EXPECT_TRUE(backend.get_session_store().get_session(response.session_id()).has_value());
 }
@@ -1575,7 +1587,7 @@ TEST_F(backend_shared_impl_test, begin_backup_begin_epoch_eq_snapshot_ng) {
     EXPECT_EQ(snapshot_epoch_id_, 2);
     request.set_begin_epoch(2);
     request.set_end_epoch(4);
-    auto status = backend.begin_backup(*datastore_, &request, &response);
+    auto status = backend.begin_backup(*datastore_, &request, &response, backup_path_list_provider);
     EXPECT_FALSE(status.ok());
     EXPECT_FALSE(backend.get_session_store().get_session(response.session_id()).has_value());
     EXPECT_EQ(status.error_code(), ::grpc::StatusCode::INVALID_ARGUMENT);
@@ -1592,7 +1604,7 @@ TEST_F(backend_shared_impl_test, begin_backup_begin_epoch_lt_snapshot_ng) {
     EXPECT_EQ(snapshot_epoch_id_, 2);
     request.set_begin_epoch(1);
     request.set_end_epoch(4);
-    auto status = backend.begin_backup(*datastore_, &request, &response);
+    auto status = backend.begin_backup(*datastore_, &request, &response, backup_path_list_provider);
     EXPECT_FALSE(status.ok());
     EXPECT_FALSE(backend.get_session_store().get_session(response.session_id()).has_value());
     EXPECT_EQ(status.error_code(), ::grpc::StatusCode::INVALID_ARGUMENT);
@@ -1608,7 +1620,7 @@ TEST_F(backend_shared_impl_test, begin_backup_end_epoch_lt_current_ok) {
     request.set_version(begin_backup_message_version);
     request.set_begin_epoch(3);
     request.set_end_epoch(4); 
-    auto status = run_with_epoch_switch([&]() { return backend.begin_backup(*datastore_, &request, &response); }, 7);
+    auto status = run_with_epoch_switch([&]() { return backend.begin_backup(*datastore_, &request, &response, backup_path_list_provider); }, 7);
     EXPECT_TRUE(status.ok());
     EXPECT_TRUE(backend.get_session_store().get_session(response.session_id()).has_value());
 }
@@ -1622,7 +1634,7 @@ TEST_F(backend_shared_impl_test, begin_backup_end_epoch_eq_current_ok) {
     request.set_version(begin_backup_message_version);
     request.set_begin_epoch(3);
     request.set_end_epoch(5);
-    auto status = run_with_epoch_switch([&]() { return backend.begin_backup(*datastore_, &request, &response); }, 7);
+    auto status = run_with_epoch_switch([&]() { return backend.begin_backup(*datastore_, &request, &response, backup_path_list_provider); }, 7);
     EXPECT_TRUE(status.ok());
     EXPECT_TRUE(backend.get_session_store().get_session(response.session_id()).has_value());
 }
@@ -1636,7 +1648,7 @@ TEST_F(backend_shared_impl_test, begin_backup_end_epoch_gt_current_ng) {
     request.set_version(begin_backup_message_version);
     request.set_begin_epoch(3);
     request.set_end_epoch(6); 
-    auto status = backend.begin_backup(*datastore_, &request, &response);
+    auto status = backend.begin_backup(*datastore_, &request, &response, backup_path_list_provider);
     EXPECT_FALSE(status.ok());
     EXPECT_FALSE(backend.get_session_store().get_session(response.session_id()).has_value());
     EXPECT_EQ(status.error_code(), ::grpc::StatusCode::INVALID_ARGUMENT);
@@ -1652,7 +1664,7 @@ TEST_F(backend_shared_impl_test, begin_backup_end_epoch_lt_boot_durable_epoch_ng
     request.set_version(begin_backup_message_version);
     request.set_begin_epoch(1);
     request.set_end_epoch(2); 
-    auto status = backend.begin_backup(*datastore_, &request, &response);
+    auto status = backend.begin_backup(*datastore_, &request, &response, backup_path_list_provider);
     EXPECT_FALSE(status.ok());
     EXPECT_FALSE(backend.get_session_store().get_session(response.session_id()).has_value());
     EXPECT_EQ(status.error_code(), ::grpc::StatusCode::INVALID_ARGUMENT);
@@ -1668,7 +1680,7 @@ TEST_F(backend_shared_impl_test, begin_backup_end_epoch_eq_boot_durable_epoch_ok
     request.set_version(begin_backup_message_version);
     request.set_begin_epoch(1);
     request.set_end_epoch(3); 
-    auto status = run_with_epoch_switch([&]() { return backend.begin_backup(*datastore_, &request, &response); }, 7);
+    auto status = run_with_epoch_switch([&]() { return backend.begin_backup(*datastore_, &request, &response, backup_path_list_provider); }, 7);
     EXPECT_TRUE(status.ok());
     EXPECT_TRUE(backend.get_session_store().get_session(response.session_id()).has_value());
 }
@@ -1682,7 +1694,7 @@ TEST_F(backend_shared_impl_test, begin_backup_end_epoch_gt_boot_durable_epoch_ok
     request.set_version(begin_backup_message_version);
     request.set_begin_epoch(1);
     request.set_end_epoch(4); 
-    auto status = run_with_epoch_switch([&]() { return backend.begin_backup(*datastore_, &request, &response); }, 7);
+    auto status = run_with_epoch_switch([&]() { return backend.begin_backup(*datastore_, &request, &response, backup_path_list_provider); }, 7);
     EXPECT_TRUE(status.ok());
     EXPECT_TRUE(backend.get_session_store().get_session(response.session_id()).has_value());
 }
@@ -1696,7 +1708,7 @@ TEST_F(backend_shared_impl_test, begin_backup_exception_handling) {
     request.set_begin_epoch(1);
     request.set_end_epoch(2);
     BeginBackupResponse response;
-    auto status = backend.begin_backup(*datastore_, &request, &response);
+    auto status = backend.begin_backup(*datastore_, &request, &response, backup_path_list_provider);
     EXPECT_EQ(status.error_code(), ::grpc::StatusCode::INTERNAL);
     EXPECT_STREQ(status.error_message().c_str(), "test exception");
 }

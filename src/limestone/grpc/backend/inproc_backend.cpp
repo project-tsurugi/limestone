@@ -20,9 +20,12 @@
 #include "limestone/logging.h"
 #include "logging_helper.h"
 #include "session.h"
+#include "datastore_impl.h"
 namespace limestone::grpc::backend {
 
 using limestone::grpc::service::list_wal_history_message_version;
+using limestone::api::backup_detail_and_rotation_result;
+using limestone::api::backup_type;
 
 inproc_backend::inproc_backend([[maybe_unused]] limestone::api::datastore& ds, const boost::filesystem::path& log_dir)
 	: datastore_(ds), log_dir_(log_dir), backend_shared_impl_(log_dir)
@@ -50,7 +53,8 @@ inproc_backend::inproc_backend([[maybe_unused]] limestone::api::datastore& ds, c
 }
 
 ::grpc::Status inproc_backend::begin_backup(const BeginBackupRequest* request, BeginBackupResponse* response) noexcept {
-    return backend_shared_impl_.begin_backup(datastore_, request, response);
+    auto generator = [this]() { return this->backup_path_provider(); };
+    return backend_shared_impl_.begin_backup(datastore_, request, response, generator);
 }
 
 boost::filesystem::path inproc_backend::get_log_dir() const noexcept {
@@ -73,6 +77,17 @@ boost::filesystem::path inproc_backend::get_log_dir() const noexcept {
 
 backend_shared_impl& inproc_backend::get_backend_shared_impl() noexcept {
     return backend_shared_impl_;
+}
+
+std::vector<boost::filesystem::path> inproc_backend::backup_path_provider() {
+    backup_detail_and_rotation_result result = datastore_.get_impl()->begin_backup_with_rotation_result(backup_type::transaction);
+    std::vector<boost::filesystem::path> paths;
+    if (result.detail) {
+        for (const auto& entry : result.detail->entries()) {
+            paths.push_back(entry.source_path());
+        }
+    }
+    return paths;
 }
 
 } // namespace limestone::grpc::backend

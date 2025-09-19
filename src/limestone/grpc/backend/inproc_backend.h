@@ -49,6 +49,16 @@ public:
 
     // For testing: get backend_shared_impl_
     [[nodiscard]] backend_shared_impl& get_backend_shared_impl() noexcept;
+
+    /**
+     * @brief Provides a list of backup paths for inproc_backend.
+     *
+     * Retrieves a vector of filesystem paths representing the backup targets
+     * from the datastore. 
+     *
+     * @return std::vector<boost::filesystem::path> Vector of backup target paths.
+     */
+    std::vector<boost::filesystem::path> backup_path_provider();
 private:
     std::function<void()> exception_hook_;
     limestone::api::datastore& datastore_;

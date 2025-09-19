@@ -65,9 +65,14 @@ standalone_backend::standalone_backend(const boost::filesystem::path& log_dir)
 
 
 ::grpc::Status standalone_backend::begin_backup(const BeginBackupRequest* request, BeginBackupResponse* response) noexcept {
-    return backend_shared_impl_.begin_backup(datastore_, request, response);
-}
+    // Temporary lambda to satisfy the path_generator argument
+    backup_path_list_provider_type provider = []() -> std::vector<boost::filesystem::path> {
+        // FIXME: This should be replaced with actual path extraction logic.
+        return {};
+    };
 
+    return backend_shared_impl_.begin_backup(datastore_, request, response, provider);
+}
 
 
 boost::filesystem::path standalone_backend::get_log_dir() const noexcept {
