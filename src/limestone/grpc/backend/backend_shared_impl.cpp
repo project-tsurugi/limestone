@@ -27,6 +27,26 @@ using limestone::grpc::service::session_timeout_seconds;
 using limestone::internal::compaction_catalog;
 using limestone::internal::wal_history;    
 
+/**
+ * @brief Default path generator function
+ * 
+ * Extracts paths from datastore in the standard way.
+ * This function can be used as the default implementation when no custom path generator is provided.
+ * 
+ * @param datastore_ The datastore from which to extract backup paths
+ * @return std::vector<boost::filesystem::path> Vector of extracted source paths
+ */
+std::vector<boost::filesystem::path> default_path_generator(datastore& datastore_) {
+    backup_detail_and_rotation_result result = datastore_.get_impl()->begin_backup_with_rotation_result(backup_type::transaction);
+    std::vector<boost::filesystem::path> paths;
+    if (result.detail) {
+        for (const auto& entry : result.detail->entries()) {
+            paths.push_back(entry.source_path());
+        }
+    }
+    return paths;
+}
+
 std::vector<backup_object> backend_shared_impl::generate_backup_objects(const std::vector<boost::filesystem::path>& paths, bool is_full_backup) {
     std::vector<backup_object> backup_objects;
 
@@ -317,7 +337,7 @@ void backend_shared_impl::reset_file_operations_to_default() noexcept {
 }
 
 ::grpc::Status backend_shared_impl::begin_backup(datastore& datastore_, const limestone::grpc::proto::BeginBackupRequest* request,
-                                                 limestone::grpc::proto::BeginBackupResponse* response) noexcept {
+                                                 limestone::grpc::proto::BeginBackupResponse* response, path_generator_type path_generator) noexcept {
     try {
 		// Call the exception injection hook if it is set (for testing)
         if (exception_hook_) {
@@ -396,13 +416,14 @@ void backend_shared_impl::reset_file_operations_to_default() noexcept {
         }
 
 
-        backup_detail_and_rotation_result result = datastore_.get_impl()->begin_backup_with_rotation_result(backup_type::transaction);
+        // Use custom path generator if provided, otherwise use default implementation
         std::vector<boost::filesystem::path> paths;
-        if (result.detail) {
-            for (const auto& entry : result.detail->entries()) {
-                paths.push_back(entry.source_path());
-            }
+        if (path_generator) {
+            paths = path_generator(datastore_);
+        } else {
+            paths = default_path_generator(datastore_);
         }
+        
         auto backup_objects = backend_shared_impl::generate_backup_objects(paths, is_full_backup);
         for (const auto& obj : backup_objects) {
             session_store_.add_backup_object_to_session(session->session_id(), obj);

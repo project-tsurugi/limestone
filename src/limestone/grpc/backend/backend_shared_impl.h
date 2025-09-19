@@ -2,6 +2,7 @@
 
 #include <google/protobuf/repeated_field.h>
 
+#include <functional>
 #include <memory>
 #include <optional>
 #include <vector>
@@ -21,6 +22,14 @@ using limestone::grpc::proto::BranchEpoch;
 using limestone::grpc::proto::BackupObject;
 using limestone::api::blob_id_type;
 using limestone::api::datastore;
+
+/**
+ * @brief Type for path generator function
+ * 
+ * A function that takes datastore and returns a vector of filesystem paths.
+ * This allows customization of how paths are extracted from datastore.
+ */
+using path_generator_type = std::function<std::vector<boost::filesystem::path>(datastore&)>;
 
 class i_writer {
 public:
@@ -85,7 +94,8 @@ public:
     ::grpc::Status get_object(const limestone::grpc::proto::GetObjectRequest* request, i_writer* writer) noexcept;
 
     // Shared logic for begin backup
-    ::grpc::Status begin_backup(datastore& datastore_, const limestone::grpc::proto::BeginBackupRequest* request, limestone::grpc::proto::BeginBackupResponse* response) noexcept;
+    ::grpc::Status begin_backup(datastore& datastore_, const limestone::grpc::proto::BeginBackupRequest* request,
+                                limestone::grpc::proto::BeginBackupResponse* response, path_generator_type path_generator = nullptr) noexcept;
 
     /**
      * @brief Send backup object data as a chunked gRPC stream.
