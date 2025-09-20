@@ -224,6 +224,25 @@ TEST_F(backend_shared_impl_test, generate_backup_objects_multiple_elements) {
     EXPECT_EQ(objs[2].type(), backup_object_type::log);
 }
 
+TEST_F(backend_shared_impl_test, generate_backup_objects_epoch_file) {
+    std::vector<boost::filesystem::path> files = {
+        "epoch.1234567890.1",
+        "epoch"
+    };
+    auto objs = backend_shared_impl::generate_backup_objects(files, true);
+    ASSERT_EQ(objs.size(), 2);
+
+    EXPECT_EQ(objs[0].object_id(), "epoch.1234567890.1");
+    EXPECT_EQ(objs[0].type(), backup_object_type::metadata);
+
+    EXPECT_EQ(objs[1].object_id(), "epoch");
+    EXPECT_EQ(objs[1].type(), backup_object_type::metadata);
+
+    objs = backend_shared_impl::generate_backup_objects(files, false);
+    ASSERT_TRUE(objs.empty());
+}
+
+
 TEST_F(backend_shared_impl_test, generate_backup_objects_empty_list) {
     std::vector<boost::filesystem::path> files;
     auto objs = backend_shared_impl::generate_backup_objects(files, true);

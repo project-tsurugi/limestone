@@ -192,20 +192,22 @@ protected:
         std::string object_path;
         BackupObjectType object_type;
         bool is_online_backup_target;
+        bool is_offline_backup_target;
     };
 
     const std::vector<backup_condition> backup_conditions =
-        {{"blob/dir_00/00000000000000c8.blob", "blob/dir_00/00000000000000c8.blob", "", "", BackupObjectType::UNSPECIFIED, false},
-         {"compaction_catalog", "compaction_catalog", "compaction_catalog", "compaction_catalog", BackupObjectType::METADATA, true},
-         {"compaction_catalog.back", "compaction_catalog.back", "", "", BackupObjectType::UNSPECIFIED, false},
-         {"data/snapshot", "data/snapshot", "", "", BackupObjectType::UNSPECIFIED, false},
-         {"epoch", "epoch", "epoch", "epoch", BackupObjectType::METADATA, false},
-         {"", "epoch.*.6", "epoch.*.6", "epoch.*.6", BackupObjectType::METADATA, true},
-         {"limestone-manifest.json", "limestone-manifest.json", "limestone-manifest.json", "limestone-manifest.json", BackupObjectType::METADATA, true},
-         {"pwal_0000.*.0", "pwal_0000.*.0", "pwal_0000.*.0", "pwal_0000.*.0", BackupObjectType::LOG, true},
-         {"pwal_0000.compacted", "pwal_0000.compacted", "pwal_0000.compacted", "pwal_0000.compacted", BackupObjectType::SNAPSHOT, true},
-         {"pwal_0001", "pwal_0001.*.0", "pwal_0001.*.0", "pwal_0001.*.0", BackupObjectType::LOG, true},
-         {"wal_history", "wal_history", "wal_history", "wal_history", BackupObjectType::METADATA, true}};
+        {{"blob/dir_00/00000000000000c8.blob", "blob/dir_00/00000000000000c8.blob", "", "", BackupObjectType::UNSPECIFIED, false, false},
+         {"compaction_catalog", "compaction_catalog", "compaction_catalog", "compaction_catalog", BackupObjectType::METADATA, true,true},
+         {"compaction_catalog.back", "compaction_catalog.back", "", "", BackupObjectType::UNSPECIFIED, false,   false},
+         {"data/snapshot", "data/snapshot", "", "", BackupObjectType::UNSPECIFIED, false, false},
+         {"epoch", "epoch", "epoch", "epoch", BackupObjectType::METADATA, false, true},
+         {"", "epoch.*.6", "epoch.*.6", "epoch.*.6", BackupObjectType::METADATA, true, false},
+         {"limestone-manifest.json", "limestone-manifest.json", "limestone-manifest.json", "limestone-manifest.json", BackupObjectType::METADATA, true, true},
+         {"pwal_0000.*.0", "pwal_0000.*.0", "pwal_0000.*.0", "pwal_0000.*.0", BackupObjectType::LOG, true, true},
+         {"pwal_0000.compacted", "pwal_0000.compacted", "pwal_0000.compacted", "pwal_0000.compacted", BackupObjectType::SNAPSHOT, true, true},
+         {"pwal_0001", "pwal_0001.*.0", "pwal_0001.*.0", "pwal_0001.*.0", BackupObjectType::LOG, true, false},
+         {"pwal_0001", "pwal_0001.*.0", "pwal_0001", "pwal_0001", BackupObjectType::LOG, false, true},
+         {"wal_history", "wal_history", "wal_history", "wal_history", BackupObjectType::METADATA, true, true}};
 
 
     // get filtered backup_condition list

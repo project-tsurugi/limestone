@@ -23,9 +23,7 @@ using limestone::grpc::service::get_object_message_version;
 using limestone::grpc::service::keep_alive_message_version;
 using limestone::grpc::service::session_timeout_seconds;
 using limestone::internal::compaction_catalog;
-using limestone::internal::wal_history;    
-
-
+using limestone::internal::wal_history;
 
 std::vector<backup_object> backend_shared_impl::generate_backup_objects(const std::vector<boost::filesystem::path>& paths, bool is_full_backup) {
     std::vector<backup_object> backup_objects;
@@ -37,22 +35,22 @@ std::vector<backup_object> backend_shared_impl::generate_backup_objects(const st
 
         if (filename == "pwal_0000.compacted") {
             if (!is_full_backup) {
-                continue; // Skip the snapshot file in incremental backup mode
+                continue;  // Skip the snapshot file in incremental backup mode
             }
             backup_objects.emplace_back(filename, backup_object_type::snapshot, filename);
         } else if (filename.rfind("pwal_", 0) == 0) {
             backup_objects.emplace_back(filename, backup_object_type::log, filename);
-        } else if ((metadata_files.count(filename) > 0) || filename.rfind("epoch.", 0) == 0) {
+        } else if ((metadata_files.count(filename) > 0)) {
             if (!is_full_backup && filename != "wal_history") {
-                continue; // Skip metadata files except wal_history in incremental backup mode
+                continue;  // Skip metadata files except wal_history in incremental backup mode
             }
+            backup_objects.emplace_back(filename, backup_object_type::metadata, filename);
+        } else if (filename.rfind("epoch", 0) == 0 && is_full_backup) {
             backup_objects.emplace_back(filename, backup_object_type::metadata, filename);
         }
     }
-
     return backup_objects;
 }
-
 
 backend_shared_impl::backend_shared_impl(boost::filesystem::path log_dir, std::size_t chunk_size)
     : log_dir_(std::move(log_dir)), chunk_size_(chunk_size), 
