@@ -28,32 +28,9 @@
 #include "limestone/grpc/service/message_versions.h"
 #include "log_entry.h"
 
-namespace {
 
-using limestone::grpc::proto::BackupObjectType;
 
-// Structure representing backup file conditions for backup test
-struct backup_condition {
-    std::string path_pre_begin_backup;
-    std::string path_post_begin_backup;
-    std::string object_id;
-    std::string object_path;
-    BackupObjectType object_type;
-};
-
-static const std::vector<backup_condition> backup_conditions =
-    {{"blob/dir_00/00000000000000c8.blob", "blob/dir_00/00000000000000c8.blob", "", "", BackupObjectType::UNSPECIFIED},
-     {"compaction_catalog", "compaction_catalog", "compaction_catalog", "compaction_catalog", BackupObjectType::METADATA},
-     {"compaction_catalog.back", "compaction_catalog.back", "", "", BackupObjectType::UNSPECIFIED},
-     {"data/snapshot", "data/snapshot", "", "", BackupObjectType::UNSPECIFIED},
-     {"epoch", "epoch", "", "", BackupObjectType::UNSPECIFIED},
-     {"", "epoch.*.6", "epoch.*.6", "epoch.*.6", BackupObjectType::METADATA},
-     {"limestone-manifest.json", "limestone-manifest.json", "limestone-manifest.json", "limestone-manifest.json", BackupObjectType::METADATA},
-     {"pwal_0000.*.0", "pwal_0000.*.0", "pwal_0000.*.0", "pwal_0000.*.0", BackupObjectType::LOG},
-     {"pwal_0000.compacted", "pwal_0000.compacted", "pwal_0000.compacted", "pwal_0000.compacted", BackupObjectType::SNAPSHOT},
-     {"pwal_0001", "pwal_0001.*.0", "pwal_0001.*.0", "pwal_0001.*.0", BackupObjectType::LOG},
-     {"wal_history", "wal_history", "wal_history", "wal_history", BackupObjectType::METADATA}};
-}  // anonymous namespace
+ 
 
 namespace limestone::testing {
 
@@ -96,66 +73,7 @@ protected:
     };
 
  protected:
-    template <typename Selector>
-    void assert_backup_file_conditions(Selector selector) {
-        namespace fs = boost::filesystem;
-        fs::path dir(get_location());
 
-        std::set<std::string> actual;
-        for (auto& entry : fs::recursive_directory_iterator(dir)) {
-            if (fs::is_regular_file(entry.status())) {
-                fs::path rel = fs::relative(entry.path(), dir);
-                std::string relstr = rel.generic_string();
-                actual.insert(relstr);
-            }
-        }
-
-
-        // Check for expected files
-        for (const auto& cond : backup_conditions) {
-            const std::string& pattern = selector(cond);
-            if (pattern.empty()) {
-                // If empty, the file must NOT exist
-                bool found = false;
-                for (const auto& act : actual) {
-                    if (act.empty()) {
-                        found = true;
-                        break;
-                    }
-                }
-                ASSERT_FALSE(found) << "Unexpected file found (should not exist): <empty pattern>";
-                continue;
-            }
-            bool found = false;
-            std::string regex_pat = wildcard_to_regex(pattern);
-            std::regex re(regex_pat);
-            for (const auto& act : actual) {
-                if (std::regex_match(act, re)) {
-                    found = true;
-                    break;
-                }
-            }
-            ASSERT_TRUE(found) << "Expected file pattern not found: " << pattern;
-        }
-
-        // Check for unexpected files
-        for (const auto& act : actual) {
-            bool matched = false;
-            for (const auto& cond : backup_conditions) {
-                const std::string& pattern = selector(cond);
-                if (pattern.empty()) {
-                    continue;
-                }
-                std::string regex_pat = wildcard_to_regex(pattern);
-                std::regex re(regex_pat);
-                if (std::regex_match(act, re)) {
-                    matched = true;
-                    break;
-                }
-            }
-            ASSERT_TRUE(matched) << "Unexpected file found: " << act;
-        }
-    }
     
     void create_test_pwal_with_blogs() {
         gen_datastore();
@@ -1403,7 +1321,7 @@ TEST_F(backend_shared_impl_test, begin_backup_version_unsupported_2) {
 TEST_F(backend_shared_impl_test, begin_backup_overall) {
     gen_datastore();
     prepare_backup_test_files();
-    assert_backup_file_conditions([](const backup_condition& c) { return c.path_pre_begin_backup; });
+    assert_backup_file_conditions([](const backup_condition& c) { return c.pre_rotation_path; });
 
     // FLAGS_v = 50; // set VLOG level to 50
 
@@ -1420,7 +1338,7 @@ TEST_F(backend_shared_impl_test, begin_backup_overall) {
     auto after = static_cast<int64_t>(std::time(nullptr));
 
     // Check log_dir after begin_backup
-    assert_backup_file_conditions([](const backup_condition& c) { return c.path_post_begin_backup; });
+    assert_backup_file_conditions([](const backup_condition& c) { return c.post_rotation_path; });
 
     // Check that session_id is a valid UUID (xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx)
     const std::string& session_id = response.session_id();
@@ -1434,41 +1352,20 @@ TEST_F(backend_shared_impl_test, begin_backup_overall) {
     EXPECT_EQ(response.start_epoch(), 0);
     EXPECT_EQ(response.finish_epoch(), 0);
 
-    // --- Existing: verify contents of response.objects() ---
-    for (const auto& cond : backup_conditions) {
-        if (cond.object_id.empty() || cond.object_path.empty() || cond.object_type == BackupObjectType::UNSPECIFIED) {
-            continue; // Skip conditions that do not specify object details
-        }
-        bool found = false;
-        std::regex id_re(wildcard_to_regex(cond.object_id));
-        std::regex path_re(wildcard_to_regex(cond.object_path));
-        for (const auto& obj : response.objects()) {
-            if (std::regex_match(obj.object_id(), id_re) &&
-                std::regex_match(obj.path(), path_re) &&
-                obj.type() == cond.object_type) {
-                found = true;
-                break;
-            }
-        }
-        EXPECT_TRUE(found) << "BackupObject not found: id=" << cond.object_id << ", path=" << cond.object_path << ", type=" << cond.object_type;
-    }
-    // If there is an object in response.objects() that does not exist in backup_conditions, report an error
-    for (const auto& obj : response.objects()) {
-        bool found = false;
-        for (const auto& cond : backup_conditions) {
-            if (cond.object_id.empty() || cond.object_path.empty() || cond.object_type == BackupObjectType::UNSPECIFIED) {
-                continue;
-            }
-            std::regex id_re(wildcard_to_regex(cond.object_id));
-            std::regex path_re(wildcard_to_regex(cond.object_path));
-            if (std::regex_match(obj.object_id(), id_re) &&
-                std::regex_match(obj.path(), path_re) &&
-                obj.type() == cond.object_type) {
-                found = true;
-                break;
-            }
-        }
-        EXPECT_TRUE(found) << "Unexpected BackupObject found: id=" << obj.object_id() << ", path=" << obj.path() << ", type=" << obj.type();
+
+    auto conditions = get_filtered_backup_conditions([](const backup_condition& cond) {
+        return cond.object_type != BackupObjectType::UNSPECIFIED;
+    });
+
+    auto objects = response.objects();
+    ASSERT_EQ(conditions.size(), static_cast<size_t>(objects.size())) << "Mismatch in number of backup objects between conditions and response";
+    for(const auto&obj: objects) {
+        auto match = find_matching_backup_conditions(obj.object_id(), conditions);
+        ASSERT_FALSE(match.empty()) << "No matching backup condition found for object: " << obj.object_id();
+        ASSERT_FALSE(match.size() > 1) << "Multiple matching backup conditions found for object: " << obj.object_id();
+        auto cond = match[0];
+        EXPECT_EQ(obj.type(), cond.object_type) << "Type mismatch for object: " << obj.object_id() << ", expected: " << cond.object_type << ", actual: " << obj.type();
+        EXPECT_TRUE(is_path_matching(obj.path(), cond.post_rotation_path)) << "Path mismatch for object: " << obj.object_id() << ", expected: " << cond.post_rotation_path << ", actual: " << obj.path();
     }
 
     const auto& session_store = backend.get_session_store();

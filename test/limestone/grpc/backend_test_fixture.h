@@ -35,6 +35,8 @@
 
 namespace limestone::testing {
 
+using limestone::grpc::proto::BackupObjectType;
+
 class backend_test_fixture : public compaction_test_fixture {
 protected:
     std::unique_ptr<blob_file_resolver> resolver_;
@@ -108,7 +110,66 @@ protected:
         return regex;
     }
 
+    template <typename Selector>
+    void assert_backup_file_conditions(Selector selector) {
+        namespace fs = boost::filesystem;
+        fs::path dir(get_location());
 
+        std::set<std::string> actual;
+        for (auto& entry : fs::recursive_directory_iterator(dir)) {
+            if (fs::is_regular_file(entry.status())) {
+                fs::path rel = fs::relative(entry.path(), dir);
+                std::string relstr = rel.generic_string();
+                actual.insert(relstr);
+            }
+        }
+
+
+        // Check for expected files
+        for (const auto& cond : backup_conditions) {
+            const std::string& pattern = selector(cond);
+            if (pattern.empty()) {
+                // If empty, the file must NOT exist
+                bool found = false;
+                for (const auto& act : actual) {
+                    if (act.empty()) {
+                        found = true;
+                        break;
+                    }
+                }
+                ASSERT_FALSE(found) << "Unexpected file found (should not exist): <empty pattern>";
+                continue;
+            }
+            bool found = false;
+            std::string regex_pat = wildcard_to_regex(pattern);
+            std::regex re(regex_pat);
+            for (const auto& act : actual) {
+                if (std::regex_match(act, re)) {
+                    found = true;
+                    break;
+                }
+            }
+            ASSERT_TRUE(found) << "Expected file pattern not found: " << pattern;
+        }
+
+        // Check for unexpected files
+        for (const auto& act : actual) {
+            bool matched = false;
+            for (const auto& cond : backup_conditions) {
+                const std::string& pattern = selector(cond);
+                if (pattern.empty()) {
+                    continue;
+                }
+                std::string regex_pat = wildcard_to_regex(pattern);
+                std::regex re(regex_pat);
+                if (std::regex_match(act, re)) {
+                    matched = true;
+                    break;
+                }
+            }
+            ASSERT_TRUE(matched) << "Unexpected file found: " << act;
+        }
+    }
 
     void SetUp() override {
         compaction_test_fixture::SetUp();
@@ -118,6 +179,65 @@ protected:
         resolver_.reset();
         compaction_test_fixture::TearDown();
     }
+
+    // Structure representing backup file conditions for backup test
+    struct backup_condition {
+        std::string pre_rotation_path;
+        std::string post_rotation_path;
+        std::string object_id;
+        std::string object_path;
+        BackupObjectType object_type;
+    };
+
+    const std::vector<backup_condition> backup_conditions =
+        {{"blob/dir_00/00000000000000c8.blob", "blob/dir_00/00000000000000c8.blob", "", "", BackupObjectType::UNSPECIFIED},
+         {"compaction_catalog", "compaction_catalog", "compaction_catalog", "compaction_catalog", BackupObjectType::METADATA},
+         {"compaction_catalog.back", "compaction_catalog.back", "", "", BackupObjectType::UNSPECIFIED},
+         {"data/snapshot", "data/snapshot", "", "", BackupObjectType::UNSPECIFIED},
+         {"epoch", "epoch", "", "", BackupObjectType::UNSPECIFIED},
+         {"", "epoch.*.6", "epoch.*.6", "epoch.*.6", BackupObjectType::METADATA},
+         {"limestone-manifest.json", "limestone-manifest.json", "limestone-manifest.json", "limestone-manifest.json", BackupObjectType::METADATA},
+         {"pwal_0000.*.0", "pwal_0000.*.0", "pwal_0000.*.0", "pwal_0000.*.0", BackupObjectType::LOG},
+         {"pwal_0000.compacted", "pwal_0000.compacted", "pwal_0000.compacted", "pwal_0000.compacted", BackupObjectType::SNAPSHOT},
+         {"pwal_0001", "pwal_0001.*.0", "pwal_0001.*.0", "pwal_0001.*.0", BackupObjectType::LOG},
+         {"wal_history", "wal_history", "wal_history", "wal_history", BackupObjectType::METADATA}};
+
+
+    // get filtered backup_condition list
+    template <typename Filter>
+    std::vector<backup_condition> get_filtered_backup_conditions(Filter filter) {
+        std::vector<backup_condition> result;
+        for (const auto& cond : backup_conditions) {
+            if (filter(cond)) {
+                result.push_back(cond);
+            }
+        }
+        return result;
+    }
+
+    // Find matching backup conditions based on object_id with wildcard support
+    std::vector<backup_condition> find_matching_backup_conditions(
+        const std::string& object_id,
+        const std::vector<backup_condition>& conditions) {
+        std::vector<backup_condition> result;
+
+        for (const auto& cond : conditions) {
+            std::string regex_pattern = wildcard_to_regex(cond.object_id);
+            std::regex re(regex_pattern);
+            if (std::regex_match(object_id, re)) {
+                result.push_back(cond);
+            }
+        }
+
+        return result;
+    }
+
+    // Check if the actual path matches the expected path with wildcard support
+    bool is_path_matching(const std::string& actual_path, const std::string& expected_path) {
+        std::string regex_pattern = wildcard_to_regex(expected_path);
+        std::regex re(regex_pattern);
+        return std::regex_match(actual_path, re);
+    }
 };
 
-} // namespace limestone::testing
+}  // namespace limestone::testing
