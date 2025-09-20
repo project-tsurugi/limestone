@@ -84,14 +84,20 @@ public:
      * @brief Shuts down the gRPC server and cleans up resources.
      */
     void tear_down() {
-        LOG_LP(INFO) << "teaar down gRPC server start";
+        LOG_LP(INFO) << "Checking if server is still ready before shutdown...";
+        if (is_server_ready()) {
+            LOG_LP(WARNING) << "Server is still handling requests. Ensure all clients are disconnected.";
+        }
+
         if (server_) {
+            LOG_LP(INFO) << "Shutting down server...";
             server_->Shutdown();
+            LOG_LP(INFO) << "Server shutdown completed.";
             server_.reset();
         }
         services_.clear();
         backend_.reset();
-        LOG_LP(INFO) << "tear down gRPC server done";
+        LOG_LP(INFO) << "gRPC server teardown completed.";
     }
 
     /**

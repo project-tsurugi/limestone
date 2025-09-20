@@ -25,7 +25,9 @@ backup_service_impl::~backup_service_impl() = default;
     BeginBackupResponse* response)
 {
     VLOG_LP(log_info) << "BeginBackup called";
-    return backend_.begin_backup(request, response);
+    auto status = backend_.begin_backup(request, response);
+    VLOG_LP(log_info) << "BeginBackup status: " << status.error_code() << " " << status.error_message();
+    return status;
 }
 
 ::grpc::Status backup_service_impl::KeepAlive(
