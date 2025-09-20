@@ -1354,11 +1354,26 @@ TEST_F(backend_shared_impl_test, begin_backup_overall) {
 
 
     auto conditions = get_filtered_backup_conditions([](const backup_condition& cond) {
-        return cond.object_type != BackupObjectType::UNSPECIFIED;
+        return cond.is_online_backup_target;
     });
 
     auto objects = response.objects();
-    ASSERT_EQ(conditions.size(), static_cast<size_t>(objects.size())) << "Mismatch in number of backup objects between conditions and response";
+    ASSERT_EQ(conditions.size(), static_cast<size_t>(objects.size())) << "Mismatch in number of backup objects between conditions and response\n"
+        << "Conditions object_ids: " << [&]() {
+            std::ostringstream oss;
+            for (const auto& cond : conditions) {
+                oss << cond.object_id << ", ";
+            }
+            return oss.str();
+        }() << "\n"
+        << "Response object_ids: " << [&]() {
+            std::ostringstream oss;
+            for (const auto& obj : objects) {
+                oss << obj.object_id() << ", ";
+            }
+            return oss.str();
+        }();
+
     for(const auto&obj: objects) {
         auto match = find_matching_backup_conditions(obj.object_id(), conditions);
         ASSERT_FALSE(match.empty()) << "No matching backup condition found for object: " << obj.object_id();

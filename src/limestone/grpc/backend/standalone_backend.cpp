@@ -69,7 +69,7 @@ standalone_backend::standalone_backend(const boost::filesystem::path& log_dir)
     // Temporary lambda to satisfy the path_generator argument
     backup_path_list_provider_type provider = [this]() -> std::vector<boost::filesystem::path> {
         auto set = datastore_.get_impl()->get_files();
-        return std::vector<boost::filesystem::path>(set.begin(), set.end());
+        return {set.begin(), set.end()};
     };
 
     return backend_shared_impl_.begin_backup(datastore_, request, response, provider);
