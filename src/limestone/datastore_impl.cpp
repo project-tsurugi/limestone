@@ -18,6 +18,11 @@
 #include "logging_helper.h"
 #include <cstdlib>
 #include <iostream>
+#include <cstring>
+#include <stdexcept>
+#include <openssl/hmac.h>
+#include <openssl/rand.h>
+#include <openssl/evp.h>
 
 #include "replication/replica_connector.h"
 #include "limestone_exception_helper.h"
@@ -45,6 +50,9 @@ datastore_impl::datastore_impl()
     replica_exists_.store(has_replica, std::memory_order_release);
     LOG_LP(INFO) << "Replica " << (has_replica ? "enabled" : "disabled")
                     << "; endpoint valid: " << replication_endpoint_.is_valid();
+    
+    // Generate HMAC secret key for BLOB reference tag generation
+    generate_hmac_secret_key();
 }
 
 // Default destructor.
@@ -223,6 +231,19 @@ const std::optional<manifest::migration_info>& datastore_impl::get_migration_inf
 
 void datastore_impl::set_migration_info(const manifest::migration_info& info) noexcept {
     migration_info_ = info;
+}
+
+void datastore_impl::generate_hmac_secret_key() {
+    // Generate 16 random bytes using OpenSSL RAND_bytes()
+    // TODO: Future improvement - throw exception instead of abort when public API allows it
+    if (RAND_bytes(hmac_secret_key_.data(), static_cast<int>(hmac_secret_key_.size())) != 1) {
+        LOG_LP(ERROR) << "Failed to generate random bytes for BLOB access control secret key";
+        std::abort(); // Current: abort due to noexcept constraint in public API
+    }
+}
+
+const std::array<std::uint8_t, 16>& datastore_impl::get_hmac_secret_key() const noexcept {
+    return hmac_secret_key_;
 }
 
 }  // namespace limestone::api

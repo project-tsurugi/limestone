@@ -17,12 +17,16 @@
 #include "blob_pool_impl.h"
 #include "limestone_exception_helper.h"
 #include "limestone/api/datastore.h"
+#include "datastore_impl.h"
 #include <filesystem>
 #include <boost/filesystem.hpp>
 #include <iostream>
 #include <fstream>
 #include <cstdio>
 #include <memory>
+#include <cstring>
+#include <openssl/hmac.h>
+#include <openssl/evp.h>
 
 
 
@@ -310,6 +314,44 @@ blob_id_type blob_pool_impl::register_data(std::string_view data) {
         blob_ids_.push_back(id);
     }
     return id;
+}
+
+blob_reference_tag_type blob_pool_impl::generate_reference_tag(
+        blob_id_type blob_id,
+        std::uint64_t transaction_id) noexcept {
+    
+    // Prepare input data: concatenate blob_id and transaction_id
+    struct input_data {
+        blob_id_type blob_id;
+        std::uint64_t transaction_id;
+    } __attribute__((packed)) input{blob_id, transaction_id};
+
+    // Get the secret key from datastore_impl
+    const auto& secret_key = datastore_.get_impl()->get_hmac_secret_key();
+
+    // Calculate HMAC-SHA256
+    std::array<unsigned char, EVP_MAX_MD_SIZE> md{};
+    unsigned int md_len = 0;
+    
+    unsigned char* result = HMAC(EVP_sha256(), 
+                                secret_key.data(), 
+                                static_cast<int>(secret_key.size()),
+                                reinterpret_cast<const unsigned char*>(&input), 
+                                sizeof(input),
+                                md.data(), 
+                                &md_len);
+
+    if (result == nullptr) {
+        // Cannot throw exception because noexcept; log and return 0
+        LOG_LP(ERROR) << "Failed to calculate HMAC for BLOB reference tag";
+        return 0;
+    }
+
+    // Use the upper 8 bytes of the HMAC result as the tag
+    blob_reference_tag_type tag = 0;
+    std::memcpy(&tag, md.data(), sizeof(blob_reference_tag_type));
+    
+    return tag;
 }
 
 } // namespace limestone::internal

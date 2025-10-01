@@ -36,6 +36,8 @@ target_link_libraries(${package_name}
         PRIVATE glog::glog
         PRIVATE ${sort_lib}
         PRIVATE nlohmann_json::nlohmann_json
+        PRIVATE OpenSSL::SSL
+        PRIVATE OpenSSL::Crypto
 )
 
 if (ENABLE_ALTIMETER)
@@ -64,6 +66,8 @@ target_link_libraries(limestone-impl
         INTERFACE glog::glog
         INTERFACE ${sort_lib}
         INTERFACE nlohmann_json::nlohmann_json
+        INTERFACE OpenSSL::SSL
+        INTERFACE OpenSSL::Crypto
 )
 
 # utils

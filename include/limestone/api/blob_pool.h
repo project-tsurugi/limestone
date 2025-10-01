@@ -23,6 +23,9 @@ namespace limestone::api {
 /// @brief BLOB reference type.
 using blob_id_type = std::uint64_t;
 
+/// @brief BLOB reference tag type.
+using blob_reference_tag_type = std::uint64_t;
+
 /**
  * @brief represents a pool for provisional registration of BLOB data.
  */
@@ -87,6 +90,16 @@ public:
      * @throws limestone_blob_exception if an I/O error occurs during the operation
      */
     [[nodiscard]] virtual blob_id_type duplicate_data(blob_id_type reference) = 0;
+
+    /**
+     * @brief generates a BLOB reference tag for access control.
+     * @param blob_id the BLOB ID
+     * @param transaction_id the transaction ID that registered this BLOB
+     * @return the generated BLOB reference tag
+     */
+    [[nodiscard]] virtual blob_reference_tag_type generate_reference_tag(
+            blob_id_type blob_id,
+            std::uint64_t transaction_id) noexcept = 0;
 };
 
 } // namespace limestone::api
