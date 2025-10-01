@@ -53,7 +53,7 @@ void blob_pool_impl::handle_hmac_result(unsigned char const* result) {
         if (! has_error) {
             msg += "No OpenSSL error code available.";
         }
-        LOG_AND_THROW_BLOB_EXCEPTION(msg, 0);
+        LOG_AND_THROW_BLOB_EXCEPTION_NO_ERRNO(msg);
     }
 }
 

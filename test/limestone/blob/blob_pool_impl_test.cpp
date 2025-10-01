@@ -1,10 +1,15 @@
+
+#include "blob_pool_impl.h"
+
 #include <gtest/gtest.h>
+#include <openssl/hmac.h>
+
 #include <boost/filesystem.hpp>
 #include <fstream>
-#include "limestone/api/limestone_exception.h"
-#include "blob_pool_impl.h"
+
 #include "blob_file_resolver.h"
 #include "file_operations.h"
+#include "limestone/api/limestone_exception.h"
 
 #define EXPECT_THROW_WITH_PARTIAL_MESSAGE(stmt, expected_exception, expected_partial_message) \
     try { \
@@ -19,7 +24,6 @@
     }
 
 namespace limestone::testing {
-
 using namespace limestone::internal;
 using limestone::api::blob_id_type;
 
@@ -38,6 +42,7 @@ public:
     using blob_pool_impl::create_directories_if_needed;
     using blob_pool_impl::copy_buffer_size;
     using blob_pool_impl::get_blob_ids;
+    using blob_pool_impl::handle_hmac_result;
 };
 
 class blob_pool_impl_test : public ::testing::Test {
@@ -119,7 +124,7 @@ TEST_F(blob_pool_impl_test, register_file_with_existing_file) {
     // Verify blob_ids_ contains the registered ID
     EXPECT_TRUE(pool_->get_blob_ids().size() == 1);
     EXPECT_TRUE(*pool_->get_blob_ids().begin() == 1);
-}
+} 
 
 TEST_F(blob_pool_impl_test, register_file_with_temporary_file) {
     boost::filesystem::path test_source("/tmp/blob_pool_impl_test/source_blob_temp");
@@ -1389,5 +1394,83 @@ TEST_F(blob_pool_impl_test, release_with_partial_failure) {
     EXPECT_FALSE(boost::filesystem::exists(path3));
     EXPECT_TRUE(pool_->get_blob_ids().empty());
 }
+
+TEST_F(blob_pool_impl_test, handle_hmac_result_nullptr_throws) {
+    unsigned char const* null_ptr = nullptr;
+    EXPECT_THROW(pool_->handle_hmac_result(null_ptr), limestone_blob_exception);
+}
+
+TEST_F(blob_pool_impl_test, handle_hmac_result_non_nullptr_no_throw) {
+    unsigned char const dummy[1] = {0};
+    EXPECT_NO_THROW(pool_->handle_hmac_result(dummy));
+}
+
+
+TEST_F(blob_pool_impl_test, handle_hmac_result_with_failed_hmac_throws) {
+    unsigned char data[1] = {0};
+    // digest=nullptr で失敗を誘発
+    unsigned char* result = HMAC(nullptr, data, sizeof(data), data, sizeof(data), nullptr, nullptr);
+    EXPECT_EQ(result, nullptr); // HMAC失敗を確認
+
+    try {
+        pool_->handle_hmac_result(result);
+        FAIL() << "Expected exception of type limestone_blob_exception";
+    } catch (const limestone_blob_exception& e) {
+        std::cout << "exception message: " << e.what() << std::endl;
+        EXPECT_TRUE(std::string(e.what()).find("Failed to calculate reference tag") != std::string::npos)
+            << "Expected partial message: 'Failed to calculate reference tag'\nActual message: '" << e.what() << "'";
+    } catch (...) {
+        FAIL() << "Expected exception of type limestone_blob_exception";
+    }
+}
+
+
+
+TEST_F(blob_pool_impl_test, generate_reference_tag_deterministic_and_unique) {
+    blob_id_type blob_id1 = pool_->register_data("dummy1");
+    blob_id_type blob_id2 = pool_->register_data("dummy2");
+    std::uint64_t txid1 = 100;
+    std::uint64_t txid2 = 200;
+
+    // The same input yields the same tag
+    auto tag1a = pool_->generate_reference_tag(blob_id1, txid1);
+    auto tag1b = pool_->generate_reference_tag(blob_id1, txid1);
+    EXPECT_EQ(tag1a, tag1b);
+
+    // Different blob_id yields a different tag
+    auto tag2 = pool_->generate_reference_tag(blob_id2, txid1);
+    EXPECT_NE(tag1a, tag2);
+
+    // Different transaction_id yields a different tag
+    auto tag3 = pool_->generate_reference_tag(blob_id1, txid2);
+    EXPECT_NE(tag1a, tag3);
+}
+
+TEST_F(blob_pool_impl_test, generate_reference_tag_changes_after_datastore_restart) {
+    blob_id_type blob_id = pool_->register_data("dummy");
+    std::uint64_t txid = 12345;
+    auto tag_before = pool_->generate_reference_tag(blob_id, txid);
+
+    // Restart datastore
+    pool_.reset();
+    resolver_.reset();
+    datastore_->shutdown();
+    datastore_.reset();
+
+    // Create a new datastore/pool
+    std::vector<boost::filesystem::path> data_locations{base_directory};
+    boost::filesystem::path metadata_location_path{metadata_location};
+    limestone::api::configuration conf(data_locations, metadata_location_path);
+    datastore_ = std::make_unique<limestone::api::datastore>(conf);
+    resolver_ = std::make_unique<blob_file_resolver>(boost::filesystem::path(blob_directory));
+    pool_ = std::make_unique<testable_blob_pool_impl>(id_generator_, *resolver_, *datastore_);
+
+    auto tag_after = pool_->generate_reference_tag(blob_id, txid);
+
+    // The tag changes after datastore restart (because the HMAC secret key changes)
+    EXPECT_NE(tag_before, tag_after);
+}
+
+
 
 }  // namespace limestone::testing
