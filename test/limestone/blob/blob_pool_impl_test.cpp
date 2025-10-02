@@ -1408,7 +1408,7 @@ TEST_F(blob_pool_impl_test, handle_hmac_result_non_nullptr_no_throw) {
 
 TEST_F(blob_pool_impl_test, handle_hmac_result_with_failed_hmac_throws) {
     unsigned char data[1] = {0};
-    // digest=nullptr で失敗を誘発
+    // Force failure with digest=nullptr
     unsigned char* result = HMAC(nullptr, data, sizeof(data), data, sizeof(data), nullptr, nullptr);
     EXPECT_EQ(result, nullptr); // HMAC失敗を確認
 
