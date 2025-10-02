@@ -345,15 +345,10 @@ blob_reference_tag_type blob_pool_impl::generate_reference_tag(
     blob_id_type blob_id,
     std::uint64_t transaction_id) {
     
-    // Prepare input data: concatenate blob_id and transaction_id
-    struct input_data {
-        blob_id_type blob_id;
-        std::uint64_t transaction_id;
-    } __attribute__((packed)) input{blob_id, transaction_id};
-
-    // Convert input_data to byte array
-    std::array<unsigned char, sizeof(input)> input_bytes{};
-    std::memcpy(input_bytes.data(), &input, sizeof(input));
+    // Prepare input data: concatenate blob_id and transaction_id using portable approach
+    std::array<unsigned char, sizeof(blob_id_type) + sizeof(std::uint64_t)> input_bytes{};
+    std::memcpy(input_bytes.data(), &blob_id, sizeof(blob_id_type));
+    std::memcpy(input_bytes.data() + sizeof(blob_id_type), &transaction_id, sizeof(std::uint64_t));
 
     // Get the secret key from datastore_impl
     const auto& secret_key = datastore_.get_impl()->get_hmac_secret_key();
@@ -369,7 +364,7 @@ blob_reference_tag_type blob_pool_impl::generate_reference_tag(
                                 secret_key.data(), 
                                 static_cast<int>(secret_key.size()),
                                 input_bytes.data(),
-                                sizeof(input),
+                                input_bytes.size(),
                                 md.data(), 
                                 &md_len);
 
