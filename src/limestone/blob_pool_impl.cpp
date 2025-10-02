@@ -375,7 +375,7 @@ blob_reference_tag_type blob_pool_impl::generate_reference_tag(
 
     this->handle_hmac_result(result);
 
-    // Use the upper 8 bytes of the HMAC result as the tag
+    // Use the first 8 bytes of the HMAC result as the tag
     blob_reference_tag_type tag = 0;
     std::memcpy(&tag, md.data(), sizeof(blob_reference_tag_type));
     
