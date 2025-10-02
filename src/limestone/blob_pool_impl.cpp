@@ -17,16 +17,45 @@
 #include "blob_pool_impl.h"
 #include "limestone_exception_helper.h"
 #include "limestone/api/datastore.h"
+#include "datastore_impl.h"
 #include <filesystem>
 #include <boost/filesystem.hpp>
 #include <iostream>
 #include <fstream>
 #include <cstdio>
 #include <memory>
+#include <cstring>
+
+#include <openssl/hmac.h>
+#include <openssl/evp.h>
+#include <openssl/err.h>
 
 
 
 namespace limestone::internal {
+
+
+void blob_pool_impl::handle_hmac_result(unsigned char const* result) {
+    if (result == nullptr) {
+        // Retrieve all OpenSSL error codes and error strings
+        std::string msg = "Failed to calculate reference tag: ";
+        // NOLINTNEXTLINE(google-runtime-int) : OpenSSL API requires unsigned long
+        unsigned long openssl_err = 0;
+        bool has_error = false;
+        while ((openssl_err = ERR_get_error()) != 0) {
+            has_error = true;
+            std::array<char, 256> err_msg_buf{};
+            ERR_error_string_n(openssl_err,
+                              err_msg_buf.data(),
+                              err_msg_buf.size());
+            msg += "[" + std::to_string(openssl_err) + ": " + err_msg_buf.data() + "] ";
+        }
+        if (! has_error) {
+            msg += "No OpenSSL error code available.";
+        }
+        LOG_AND_THROW_BLOB_EXCEPTION_NO_ERRNO(msg);
+    }
+}
 
 blob_pool_impl::blob_pool_impl(std::function<blob_id_type()> id_generator,
                                limestone::internal::blob_file_resolver& resolver,
@@ -310,6 +339,42 @@ blob_id_type blob_pool_impl::register_data(std::string_view data) {
         blob_ids_.push_back(id);
     }
     return id;
+}
+
+blob_reference_tag_type blob_pool_impl::generate_reference_tag(
+    blob_id_type blob_id,
+    std::uint64_t transaction_id) {
+    
+    // Prepare input data: concatenate blob_id and transaction_id using portable approach
+    std::array<unsigned char, sizeof(blob_id_type) + sizeof(std::uint64_t)> input_bytes{};
+    std::memcpy(input_bytes.data(), &blob_id, sizeof(blob_id_type));
+    std::memcpy(input_bytes.data() + sizeof(blob_id_type), &transaction_id, sizeof(std::uint64_t));
+
+    // Get the secret key from datastore_impl
+    const auto& secret_key = datastore_.get_impl()->get_hmac_secret_key();
+
+    // Clear OpenSSL error queue to avoid noise from previous API calls
+    ERR_clear_error();
+
+    // Calculate HMAC-SHA256
+    std::array<unsigned char, EVP_MAX_MD_SIZE> md{};
+    unsigned int md_len = 0;
+
+    unsigned char* result = HMAC(EVP_sha256(), 
+                                secret_key.data(), 
+                                static_cast<int>(secret_key.size()),
+                                input_bytes.data(),
+                                input_bytes.size(),
+                                md.data(), 
+                                &md_len);
+
+    this->handle_hmac_result(result);
+
+    // Use the first 8 bytes of the HMAC result as the tag
+    blob_reference_tag_type tag = 0;
+    std::memcpy(&tag, md.data(), sizeof(blob_reference_tag_type));
+    
+    return tag;
 }
 
 } // namespace limestone::internal

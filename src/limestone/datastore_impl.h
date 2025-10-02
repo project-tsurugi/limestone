@@ -16,10 +16,12 @@
 #pragma once
 
 #include <limestone/api/datastore.h>
+#include <limestone/api/blob_pool.h>
 
 #include <atomic>
 #include <memory>
 #include <optional>
+#include <array>
 
 #include "manifest.h"
 #include "replication/replica_connector.h"
@@ -104,6 +106,12 @@ public:
     // Setter for migration_info_
     void set_migration_info(const manifest::migration_info& info) noexcept;
 
+    /**
+     * @brief gets the HMAC secret key for BLOB reference tag generation.
+     * @return reference to the HMAC secret key
+     */
+    [[nodiscard]] const std::array<std::uint8_t, 16>& get_hmac_secret_key() const noexcept;
+
 private:
     // Atomic counter for tracking active backup operations.
     std::atomic<int> backup_counter_;
@@ -123,7 +131,15 @@ private:
     bool async_group_commit_enabled_;
   
     // Migration info for the manifest
-    std::optional<manifest::migration_info> migration_info_; 
+    std::optional<manifest::migration_info> migration_info_;
+
+    // HMAC secret key for BLOB reference tag generation (16 bytes)
+    std::array<std::uint8_t, 16> hmac_secret_key_{};
+
+    /**
+     * @brief generates HMAC secret key for BLOB reference tag generation.
+     */
+    void generate_hmac_secret_key();
 };
 
 }  // namespace limestone::api
