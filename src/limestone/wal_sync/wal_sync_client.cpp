@@ -1,6 +1,10 @@
 #include <wal_sync/wal_sync_client.h>
+
 #include <boost/filesystem.hpp>
+#include <glog/logging.h>
 #include <grpc/client/backup_client.h>
+#include <wal_sync/response_chunk_processor.h>
+
 #include "file_operations.h"
 #include "manifest.h"
 #include "dblog_scan.h"
@@ -15,10 +19,14 @@ using limestone::grpc::proto::BeginBackupRequest;
 using limestone::grpc::proto::BeginBackupResponse;
 using limestone::grpc::proto::WalHistoryRequest;
 using limestone::grpc::proto::WalHistoryResponse;
-using limestone::internal::backup_object_type_helper;
+using limestone::grpc::proto::GetObjectRequest;
+using limestone::grpc::proto::GetObjectResponse;
 using limestone::grpc::service::begin_backup_message_version;
 using limestone::grpc::service::list_wal_history_message_version;
 using limestone::grpc::service::grpc_timeout_ms;
+using limestone::grpc::service::get_object_message_version;
+
+using limestone::internal::response_chunk_processor;
 
 bool wal_sync_client::init(std::string& error_message, bool allow_initialize) {
 
@@ -201,12 +209,63 @@ begin_backup_result wal_sync_client::begin_backup(
 
 bool wal_sync_client::copy_backup_objects(
     std::string const& session_token,
-    std::vector<backup_object> const& objects
+    std::vector<backup_object> const& objects,
+    boost::filesystem::path const& output_dir
 ) {
-    (void)session_token;
-    (void)objects;
-    // TODO: implement
-    return false;
+    if (objects.empty()) {
+        return true;
+    }
+
+    if (!file_ops_) {
+        LOG(ERROR) << "file operations interface is not configured";
+        return false;
+    }
+
+    boost::system::error_code dir_ec;
+    file_ops_->create_directories(output_dir, dir_ec);
+    if (dir_ec) {
+        LOG(ERROR) << "failed to prepare output directory: " << output_dir.string()
+                   << ", ec=" << dir_ec.message();
+        return false;
+    }
+
+    response_chunk_processor processor(*file_ops_, output_dir, objects);
+
+    auto handler = [&processor](GetObjectResponse const& response) {
+        processor.handle_response(response);
+    };
+
+    GetObjectRequest request;
+    request.set_version(get_object_message_version);
+    request.set_session_id(session_token);
+    for (auto const& object : objects) {
+        request.add_object_id(object.id);
+    }
+
+    ::grpc::Status status = backup_client_->get_object(request, handler, grpc_timeout_ms);
+    if (!status.ok()) {
+        LOG(ERROR) << "get_object RPC failed: " << status.error_code()
+                   << " / " << status.error_message();
+        processor.cleanup_partials();
+        return false;
+    }
+
+    if (processor.failed()) {
+        LOG(ERROR) << "failed to copy backup objects: " << processor.error_message();
+        processor.cleanup_partials();
+        return false;
+    }
+
+    if (!processor.all_completed()) {
+        auto incomplete = processor.incomplete_object_ids();
+        for (auto const& id : incomplete) {
+            LOG(ERROR) << "copy incomplete for object_id: " << id;
+        }
+        processor.cleanup_partials();
+        return false;
+    }
+
+    return true;
 }
 
 bool wal_sync_client::keepalive_session(std::string const& session_token) {

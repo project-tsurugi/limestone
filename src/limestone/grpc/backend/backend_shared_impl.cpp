@@ -268,9 +268,9 @@ std::optional<byte_range> backend_shared_impl::prepare_log_object_copy(
         obj->set_path(object.path().string());
 
         if (is_first) {
-            resp.set_total_size(static_cast<int64_t>(total_size));
+            resp.set_total_size(static_cast<std::uint64_t>(total_size));
         }
-        resp.set_offset(static_cast<int64_t>(offset));
+        resp.set_offset(static_cast<std::uint64_t>(offset));
         resp.set_chunk(buffer.data(), static_cast<size_t>(bytes_read));
         resp.set_is_first(is_first);
         resp.set_is_last(offset + bytes_read >= effective_end);

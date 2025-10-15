@@ -121,6 +121,12 @@ public:
     // Writes data to an ofstream (byte-buffer overload; forwards to the char* virtual)
     virtual void ofs_write(std::ofstream& ofs, const std::byte* buf, std::size_t size) = 0;
 
+    // Flushes an ofstream
+    virtual void ofs_flush(std::ofstream& ofs) = 0;
+
+    // Closes an ofstream
+    virtual void ofs_close(std::ofstream& ofs) = 0;
+
     // Reads raw bytes from an ifstream (wrapper for testability)
     virtual void ifs_read(std::ifstream& ifs, char* buf, std::streamsize size) = 0;
 
@@ -194,12 +200,14 @@ public:
     std::unique_ptr<std::ifstream> open_ifstream(const std::string& path, std::ios_base::openmode mode) override;
     std::unique_ptr<std::ofstream> open_ofstream(const std::string& path) override;
     bool getline(std::ifstream& file, std::string& line) override;
-    bool is_eof(std::ifstream& file) override;
-    bool is_open(std::ifstream& file) override;
-    bool has_error(std::ifstream& file) override;
-    void ofs_write(std::ofstream& ofs, const char* buf, std::streamsize size) override;
-    void ofs_write(std::ofstream& ofs, const std::byte* buf, std::size_t size) override;
-    void ifs_read(std::ifstream& ifs, char* buf, std::streamsize size) override;
+   bool is_eof(std::ifstream& file) override;
+   bool is_open(std::ifstream& file) override;
+   bool has_error(std::ifstream& file) override;
+   void ofs_write(std::ofstream& ofs, const char* buf, std::streamsize size) override;
+   void ofs_write(std::ofstream& ofs, const std::byte* buf, std::size_t size) override;
+    void ofs_flush(std::ofstream& ofs) override;
+    void ofs_close(std::ofstream& ofs) override;
+   void ifs_read(std::ifstream& ifs, char* buf, std::streamsize size) override;
     void ifs_read(std::ifstream& ifs, std::byte* buf, std::size_t size) override;
 
     void ifs_seekg(std::ifstream& ifs, std::streamoff offset, std::ios_base::seekdir way) override;
@@ -237,4 +245,3 @@ public:
 };
 
 }  // namespace limestone::internal
-

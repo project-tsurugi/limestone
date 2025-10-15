@@ -114,13 +114,19 @@ public:
 
     /**
      * @brief Request copy of backup objects from remote.
+     *
+     * This function assumes that the `objects` parameter is the list obtained from begin_backup().
+     * When using any other source, the caller must perform necessary validation beforehand.
+     *
      * @param session_token session token
-     * @param objects list of objects to copy
+     * @param objects list of objects to copy (begin_backup() result is assumed)
+     * @param output_dir directory where retrieved objects are written
      * @return true if copy succeeded
      */
     bool copy_backup_objects(
         std::string const& session_token,
-        std::vector<backup_object> const& objects
+        std::vector<backup_object> const& objects,
+        boost::filesystem::path const& output_dir
     );
 
     /**
