@@ -15,6 +15,7 @@ using limestone::grpc::proto::BeginBackupRequest;
 using limestone::grpc::proto::BeginBackupResponse;
 using limestone::grpc::proto::WalHistoryRequest;
 using limestone::grpc::proto::WalHistoryResponse;
+using limestone::internal::backup_object_type_helper;
 using limestone::grpc::service::begin_backup_message_version;
 using limestone::grpc::service::list_wal_history_message_version;
 using limestone::grpc::service::grpc_timeout_ms;
@@ -191,7 +192,7 @@ begin_backup_result wal_sync_client::begin_backup(
     for (auto const& object : response.objects()) {
         result.objects.emplace_back(backup_object{
             object.object_id(),
-            static_cast<backup_object_type>(object.type()),
+            backup_object_type_helper::from_proto(object.type()),
             object.path()
         });
     }

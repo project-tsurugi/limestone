@@ -21,6 +21,7 @@
 namespace limestone::testing {
 using namespace limestone::internal;
 using limestone::grpc::service::session_timeout_seconds;
+using limestone::internal::backup_object_type_helper::from_proto;
 
 
 class wal_sync_client_test : public backend_test_fixture {
@@ -331,7 +332,7 @@ TEST_F(wal_sync_client_test, begin_backup_success) {
         ASSERT_FALSE(matched.empty()) << "no expected condition for object id: " << object.id;
         ASSERT_LT(matched.size(), static_cast<std::size_t>(2)) << "multiple conditions matched object id: " << object.id;
         auto const& cond = matched.front();
-        EXPECT_EQ(object.type, static_cast<limestone::grpc::backend::backup_object_type>(cond.object_type));
+        EXPECT_EQ(object.type, from_proto(cond.object_type));
         EXPECT_TRUE(is_path_matching(object.path, cond.object_path))
             << "object path mismatch for id " << object.id << ": " << object.path << " expected pattern " << cond.object_path;
         remaining_ids.erase(cond.object_id);

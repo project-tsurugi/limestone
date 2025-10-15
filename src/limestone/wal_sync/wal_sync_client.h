@@ -1,23 +1,23 @@
 #pragma once
 
-#include <grpc/backend/backup_object.h>
-#include <grpc/client/backup_client.h>
-#include <grpc/client/wal_history_client.h>
-#include <limestone/api/epoch_id_type.h>
-
-#include <boost/filesystem.hpp>
 #include <chrono>
 #include <cstdint>
 #include <memory>
 #include <string>
 #include <vector>
+#include <boost/filesystem.hpp>
+
+#include <grpc/client/backup_client.h>
+#include <grpc/client/wal_history_client.h>
+#include <limestone/api/epoch_id_type.h>
+#include <wal_sync/backup_object_type.h>
 
 #include "file_operations.h"
 
 namespace limestone::internal {
 
 using limestone::api::epoch_id_type; 
-using limestone::grpc::backend::backup_object_type;
+using limestone::internal::backup_object_type;
 
 using unix_timestamp_seconds = std::int64_t;
 

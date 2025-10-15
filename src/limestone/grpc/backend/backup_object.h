@@ -2,21 +2,14 @@
 
 #include <string>
 #include <boost/filesystem.hpp>
+
+#include <wal_sync/backup_object_type.h>
 #include "backup.pb.h"
 
 namespace limestone::grpc::backend {
 
-/**
- * @brief Type of backup object.
- * Corresponds to BackupObjectType in backup.proto.
- */
-enum class backup_object_type {
-    unspecified = 0, /**< Unknown object type. */
-    log = 1,         /**< WAL file. */
-    snapshot = 2,    /**< Piece of snapshot files. */
-    blob = 3,        /**< BLOB files. */
-    metadata = 4,    /**< Metadata files. */
-};
+using limestone::internal::backup_object_type;
+namespace backup_object_type_helper = limestone::internal::backup_object_type_helper;
 
 /**
  * @brief Backup object information.

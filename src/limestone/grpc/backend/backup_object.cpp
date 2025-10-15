@@ -21,14 +21,14 @@ backup_object::backup_object(
 }
 
 backup_object backup_object::from_proto(const limestone::grpc::proto::BackupObject& src) {
-    auto type = static_cast<backup_object_type>(src.type());
+    auto type = backup_object_type_helper::from_proto(src.type());
     return backup_object(src.object_id(), type, boost::filesystem::path(src.path()));
 }
 
 limestone::grpc::proto::BackupObject backup_object::to_proto() const {
     limestone::grpc::proto::BackupObject dst;
     dst.set_object_id(object_id_);
-    dst.set_type(static_cast<limestone::grpc::proto::BackupObjectType>(type_));
+    dst.set_type(backup_object_type_helper::to_proto(type_));
     dst.set_path(path_.string());
     return dst;
 }
