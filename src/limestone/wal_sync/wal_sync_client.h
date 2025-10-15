@@ -1,19 +1,23 @@
 #pragma once
 
+#include <grpc/backend/backup_object.h>
+#include <grpc/client/backup_client.h>
+#include <grpc/client/wal_history_client.h>
+#include <limestone/api/epoch_id_type.h>
+
+#include <boost/filesystem.hpp>
+#include <chrono>
 #include <cstdint>
+#include <memory>
 #include <string>
 #include <vector>
-#include <chrono>
-#include <boost/filesystem.hpp> 
-#include <limestone/api/epoch_id_type.h>
-#include <grpc/client/wal_history_client.h>
-
 
 #include "file_operations.h"
 
 namespace limestone::internal {
 
 using limestone::api::epoch_id_type; 
+using limestone::grpc::backend::backup_object_type;
 
 using unix_timestamp_seconds = std::int64_t;
 
@@ -25,8 +29,17 @@ struct branch_epoch {
 
 struct backup_object {
     std::string id;
-    int type; // enum ObjectType などに置き換え可
+    backup_object_type type;
     std::string path;
+};
+
+/**
+ * @brief Result of begin_backup operation.
+ */
+struct begin_backup_result {
+    std::string session_token;
+    std::chrono::system_clock::time_point expire_at;
+    std::vector<backup_object> objects;
 };
 
 /**
@@ -92,15 +105,11 @@ public:
      * @brief Start backup session and get list of backup objects.
      * @param begin_epoch start epoch (inclusive)
      * @param end_epoch end epoch (exclusive, 0 for latest)
-     * @param[out] session_token session token string
-     * @param[out] expire_at session expiration time
-     * @return list of backup objects
+     * @return result containing session token, expiration, and objects
      */
-    std::vector<backup_object> begin_backup(
+    begin_backup_result begin_backup(
         std::uint64_t begin_epoch,
-        std::uint64_t end_epoch,
-        std::string& session_token,
-        std::chrono::system_clock::time_point& expire_at
+        std::uint64_t end_epoch
     );
 
     /**
@@ -171,6 +180,7 @@ private:
     file_operations* file_ops_;
     int lock_fd_ = -1;
     std::shared_ptr<limestone::grpc::client::wal_history_client> history_client_;
+    std::shared_ptr<limestone::grpc::client::backup_client> backup_client_;
 };
 
 } // namespace limestone::internal

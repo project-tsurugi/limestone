@@ -1,5 +1,6 @@
 #include <wal_sync/wal_sync_client.h>
 #include <boost/filesystem.hpp>
+#include <grpc/client/backup_client.h>
 #include "file_operations.h"
 #include "manifest.h"
 #include "dblog_scan.h"
@@ -10,8 +11,11 @@
 #include "wal_history.h"
 namespace limestone::internal {
 
+using limestone::grpc::proto::BeginBackupRequest;
+using limestone::grpc::proto::BeginBackupResponse;
 using limestone::grpc::proto::WalHistoryRequest;
 using limestone::grpc::proto::WalHistoryResponse;
+using limestone::grpc::service::begin_backup_message_version;
 using limestone::grpc::service::list_wal_history_message_version;
 using limestone::grpc::service::grpc_timeout_ms;
 
@@ -89,7 +93,9 @@ wal_sync_client::wal_sync_client(boost::filesystem::path log_dir, std::shared_pt
     : log_dir_(std::move(log_dir))
     , real_file_ops_()
     , file_ops_(&real_file_ops_)
-    , history_client_(std::make_shared<limestone::grpc::client::wal_history_client>(channel)) {}
+    , history_client_(std::make_shared<limestone::grpc::client::wal_history_client>(channel))
+    , backup_client_(std::make_shared<limestone::grpc::client::backup_client>(channel)) {}
+
 
 
 
@@ -163,18 +169,33 @@ bool wal_sync_client::check_wal_compatibility(
     return true;
 }
 
-std::vector<backup_object> wal_sync_client::begin_backup(
+begin_backup_result wal_sync_client::begin_backup(
     std::uint64_t begin_epoch,
-    std::uint64_t end_epoch,
-    std::string& session_token,
-    std::chrono::system_clock::time_point& expire_at
+    std::uint64_t end_epoch
 ) {
-    (void)begin_epoch;
-    (void)end_epoch;
-    (void)session_token;
-    (void)expire_at;
-    // TODO: implement
-    return {};
+    BeginBackupRequest request;
+    request.set_version(begin_backup_message_version);
+    request.set_begin_epoch(begin_epoch);
+    request.set_end_epoch(end_epoch);
+
+    BeginBackupResponse response;
+    ::grpc::Status status = backup_client_->begin_backup(request, response, grpc_timeout_ms);
+    if (!status.ok()) {
+        throw remote_exception(status, "BackupService/BeginBackup");
+    }
+
+    begin_backup_result result{};
+    result.session_token = response.session_id();
+    result.expire_at = std::chrono::system_clock::time_point{std::chrono::seconds{response.expire_at()}};
+    result.objects.reserve(static_cast<std::size_t>(response.objects_size()));
+    for (auto const& object : response.objects()) {
+        result.objects.emplace_back(backup_object{
+            object.object_id(),
+            static_cast<backup_object_type>(object.type()),
+            object.path()
+        });
+    }
+    return result;
 }
 
 bool wal_sync_client::copy_backup_objects(

@@ -1,8 +1,13 @@
+
 #include "wal_sync/wal_sync_client.h"
 
-#include <gtest/gtest.h>
+#include <chrono>
+#include <regex>
+#include <sstream>
+#include <unordered_set>
 
 #include <boost/filesystem.hpp>
+#include <gtest/gtest.h>
 
 #include "limestone/grpc/grpc_test_helper.h"
 #include "limestone/grpc/backend_test_fixture.h"
@@ -10,8 +15,12 @@
 #include "test_root.h"
 #include "wal_sync/remote_exception.h"
 #include "limestone/grpc/service/wal_history_service_impl.h"
+#include "limestone/grpc/service/backup_service_impl.h"
+#include "limestone/grpc/service/grpc_constants.h"
+
 namespace limestone::testing {
 using namespace limestone::internal;
+using limestone::grpc::service::session_timeout_seconds;
 
 
 class wal_sync_client_test : public backend_test_fixture {
@@ -36,6 +45,9 @@ protected:
         });
         helper_.add_service_factory([](limestone::grpc::backend::grpc_service_backend& backend) {
             return std::make_unique<limestone::grpc::service::wal_history_service_impl>(backend);
+        });
+        helper_.add_service_factory([](limestone::grpc::backend::grpc_service_backend& backend) {
+            return std::make_unique<limestone::grpc::service::backup_service_impl>(backend);
         });
         helper_.setup();
     }
@@ -278,6 +290,78 @@ TEST_F(wal_sync_client_test, get_remote_wal_compatibility_failure) {
     }
 }
 
+TEST_F(wal_sync_client_test, begin_backup_success) {
+    gen_datastore();
+    prepare_backup_test_files();
+    datastore_->shutdown();
+    datastore_ = nullptr;
+    assert_backup_file_conditions([](const backup_condition& c) { return c.pre_rotation_path; });
+
+    helper_.start_server();
+
+    wal_sync_client client(locale_dir, helper_.create_channel());
+    std::string error;
+    ASSERT_TRUE(client.init(error, true));
+
+    auto before = std::chrono::system_clock::now();
+    auto result = client.begin_backup(0, 0);
+    auto after = std::chrono::system_clock::now();
+
+    ASSERT_FALSE(result.objects.empty());
+
+    std::regex uuid_regex(R"([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})");
+    EXPECT_TRUE(std::regex_match(result.session_token, uuid_regex)) << "session token is not UUID: " << result.session_token;
+
+    auto expire_seconds = std::chrono::duration_cast<std::chrono::seconds>(result.expire_at.time_since_epoch()).count();
+    auto before_seconds = std::chrono::duration_cast<std::chrono::seconds>(before.time_since_epoch()).count();
+    auto after_seconds = std::chrono::duration_cast<std::chrono::seconds>(after.time_since_epoch()).count();
+    EXPECT_GE(expire_seconds, before_seconds + session_timeout_seconds);
+    EXPECT_LE(expire_seconds, after_seconds + session_timeout_seconds);
+
+    auto filtered_conditions = get_filtered_backup_conditions([](const backup_condition& c) {
+        return c.is_offline_backup_target;
+    });
+    std::unordered_set<std::string> remaining_ids;
+    for (auto const& cond : filtered_conditions) {
+        remaining_ids.insert(cond.object_id);
+    }
+
+    for (auto const& object : result.objects) {
+        auto matched = find_matching_backup_conditions(object.id, filtered_conditions);
+        ASSERT_FALSE(matched.empty()) << "no expected condition for object id: " << object.id;
+        ASSERT_LT(matched.size(), static_cast<std::size_t>(2)) << "multiple conditions matched object id: " << object.id;
+        auto const& cond = matched.front();
+        EXPECT_EQ(object.type, static_cast<limestone::grpc::backend::backup_object_type>(cond.object_type));
+        EXPECT_TRUE(is_path_matching(object.path, cond.object_path))
+            << "object path mismatch for id " << object.id << ": " << object.path << " expected pattern " << cond.object_path;
+        remaining_ids.erase(cond.object_id);
+    }
+
+    EXPECT_TRUE(remaining_ids.empty()) << "missing expected objects: " << [&]() {
+        std::ostringstream oss;
+        for (auto const& id : remaining_ids) {
+            oss << id << ", ";
+        }
+        return oss.str();
+    }();
+}
+
+TEST_F(wal_sync_client_test, begin_backup_failure) {
+    wal_sync_client client(locale_dir, helper_.create_channel());
+    std::string error;
+    ASSERT_TRUE(client.init(error, true));
+
+    try {
+        static_cast<void>(client.begin_backup(0, 0));
+        FAIL() << "Expected remote_exception to be thrown";
+    } catch (const remote_exception& ex) {
+        EXPECT_EQ(ex.code(), remote_error_code::unavailable);
+        EXPECT_EQ(ex.method(), "BackupService/BeginBackup");
+    } catch (...) {
+        FAIL() << "Expected remote_exception, but caught different exception";
+    }
+}
+
 TEST_F(wal_sync_client_test, get_local_wal_compatibility) {
     // prepare wal history on disk
     limestone::internal::wal_history wh(locale_dir);
@@ -413,6 +497,3 @@ TEST_F(wal_sync_client_test, check_wal_compatibility_identical_vectors) {
 
 
 } // namespace limestone::testing
-
-
-
