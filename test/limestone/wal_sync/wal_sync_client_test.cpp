@@ -5,8 +5,11 @@
 #include <regex>
 #include <sstream>
 #include <unordered_set>
+#include <set>
 
 #include <boost/filesystem.hpp>
+#include <boost/system/error_code.hpp>
+#include <grpcpp/grpcpp.h>
 #include <gtest/gtest.h>
 
 #include "limestone/grpc/grpc_test_helper.h"
@@ -17,6 +20,32 @@
 #include "limestone/grpc/service/wal_history_service_impl.h"
 #include "limestone/grpc/service/backup_service_impl.h"
 #include "limestone/grpc/service/grpc_constants.h"
+#include "backup.pb.h"
+
+namespace {
+
+class scripted_backup_service final : public limestone::grpc::proto::BackupService::Service {
+public:
+    void set_responses(std::vector<limestone::grpc::proto::GetObjectResponse> responses) {
+        responses_ = std::move(responses);
+    }
+
+    ::grpc::Status GetObject(
+        ::grpc::ServerContext* /*context*/,
+        const limestone::grpc::proto::GetObjectRequest* /*request*/,
+        ::grpc::ServerWriter<limestone::grpc::proto::GetObjectResponse>* writer
+    ) override {
+        for (auto const& response : responses_) {
+            writer->Write(response);
+        }
+        return ::grpc::Status::OK;
+    }
+
+private:
+    std::vector<limestone::grpc::proto::GetObjectResponse> responses_;
+};
+
+} // namespace
 
 namespace limestone::testing {
 using namespace limestone::internal;
@@ -291,6 +320,67 @@ TEST_F(wal_sync_client_test, get_remote_wal_compatibility_failure) {
     }
 }
 
+class wal_sync_client_processor_error_test : public ::testing::Test {
+protected:
+    void SetUp() override {
+        boost::filesystem::remove_all(base_dir_);
+        ASSERT_TRUE(boost::filesystem::create_directories(base_dir_));
+        ::grpc::ServerBuilder builder;
+        builder.AddListeningPort("127.0.0.1:0", ::grpc::InsecureServerCredentials(), &port_);
+        builder.RegisterService(&service_);
+        server_ = builder.BuildAndStart();
+        ASSERT_TRUE(server_ != nullptr);
+        actual_address_ = "127.0.0.1:" + std::to_string(port_);
+        channel_ = ::grpc::CreateChannel(actual_address_, ::grpc::InsecureChannelCredentials());
+        ASSERT_TRUE(channel_->WaitForConnected(std::chrono::system_clock::now() + std::chrono::seconds(1)));
+        client_ = std::make_unique<wal_sync_client>(base_dir_, channel_);
+        std::string error;
+        ASSERT_TRUE(client_->init(error, true));
+    }
+
+    void TearDown() override {
+        client_.reset();
+        if (server_ != nullptr) {
+            server_->Shutdown();
+            server_->Wait();
+        }
+        boost::filesystem::remove_all(base_dir_);
+    }
+
+    static limestone::grpc::proto::GetObjectResponse make_single_chunk(
+        std::string const& object_id,
+        std::string const& path,
+        std::string const& data,
+        bool is_last = true
+    ) {
+        limestone::grpc::proto::GetObjectResponse response;
+        auto* object = response.mutable_object();
+        object->set_object_id(object_id);
+        object->set_path(path);
+        response.set_is_first(true);
+        response.set_is_last(is_last);
+        response.set_offset(0);
+        response.set_total_size(static_cast<std::uint64_t>(data.size()));
+        response.set_chunk(data);
+        return response;
+    }
+
+    struct failing_open_file_operations : public real_file_operations {
+        std::unique_ptr<std::ofstream> open_ofstream(const std::string& /*path*/) override {
+            return std::make_unique<std::ofstream>();
+        }
+    };
+
+    boost::filesystem::path base_dir_ = boost::filesystem::path{"/tmp/wal_sync_client_processor_test"};
+    std::shared_ptr<::grpc::Channel> channel_;
+    std::unique_ptr<::grpc::Server> server_;
+    int port_ = 0;
+    std::string actual_address_;
+    scripted_backup_service service_;
+    std::unique_ptr<wal_sync_client> client_;
+    failing_open_file_operations failing_ops_;
+};
+
 TEST_F(wal_sync_client_test, begin_backup_success) {
     gen_datastore();
     prepare_backup_test_files();
@@ -345,6 +435,187 @@ TEST_F(wal_sync_client_test, begin_backup_success) {
         }
         return oss.str();
     }();
+}
+
+TEST_F(wal_sync_client_test, copy_backup_objects_success) {
+    // Build remote datastore so begin_backup() enumerates actual backup targets.
+    gen_datastore();
+    prepare_backup_test_files();
+    datastore_->shutdown();
+    datastore_ = nullptr;
+
+    helper_.start_server();
+
+    wal_sync_client client(locale_dir, helper_.create_channel());
+    std::string error;
+    ASSERT_TRUE(client.init(error, true));
+
+    // Fetch session token and backup object list from the remote backup service.
+    auto begin_result = client.begin_backup(0, 0);
+    ASSERT_FALSE(begin_result.objects.empty());
+
+    // Derive the list of expected objects from the fixture configuration.
+    auto filtered_conditions = get_filtered_backup_conditions([](const backup_condition& condition) {
+        return condition.is_offline_backup_target;
+    });
+
+    // Keep track of expected IDs that must appear in the begin_backup() result.
+    std::unordered_set<std::string> remaining_ids;
+    for (auto const& condition : filtered_conditions) {
+        if (!condition.object_id.empty()) {
+            remaining_ids.insert(condition.object_id);
+        }
+    }
+
+    // Record the expected relative paths so we can later verify the files produced by copy_backup_objects().
+    std::unordered_set<std::string> expected_paths;
+    expected_paths.reserve(begin_result.objects.size());
+
+    // Ensure every returned object corresponds to exactly one expected condition.
+    for (auto const& object : begin_result.objects) {
+        auto matched = find_matching_backup_conditions(object.id, filtered_conditions);
+        ASSERT_FALSE(matched.empty()) << "no expected condition for object id: " << object.id;
+        ASSERT_LT(matched.size(), static_cast<std::size_t>(2)) << "multiple conditions matched object id: " << object.id;
+        auto const& condition = matched.front();
+        EXPECT_TRUE(is_path_matching(object.path, condition.object_path))
+            << "object path mismatch for id " << object.id << ": " << object.path
+            << " expected pattern " << condition.object_path;
+        if (!condition.object_id.empty()) {
+            remaining_ids.erase(condition.object_id);
+        }
+        expected_paths.insert(object.path);
+    }
+
+    // All expected IDs must have been matched by the begin_backup() response.
+    EXPECT_TRUE(remaining_ids.empty()) << "missing expected objects: " << [&]() {
+        std::ostringstream oss;
+        for (auto const& id : remaining_ids) {
+            oss << id << ", ";
+        }
+        return oss.str();
+    }();
+
+    boost::filesystem::path output_dir = locale_dir / "copied_backup";
+    boost::filesystem::remove_all(output_dir);
+
+    // Execute the copy and confirm the destination directory exists.
+    auto copy_result = client.copy_backup_objects(begin_result.session_token, begin_result.objects, output_dir);
+    ASSERT_TRUE(copy_result.success);
+    EXPECT_TRUE(copy_result.error_message.empty());
+    EXPECT_TRUE(copy_result.incomplete_object_ids.empty());
+    EXPECT_TRUE(boost::filesystem::exists(output_dir));
+
+    std::set<std::string> actual_paths;
+    // Collect relative paths of produced files to compare with the expected manifest.
+    for (boost::filesystem::recursive_directory_iterator it(output_dir), end; it != end; ++it) {
+        if (boost::filesystem::is_regular_file(it->path())) {
+            auto rel = boost::filesystem::relative(it->path(), output_dir);
+            actual_paths.insert(rel.generic_string());
+        }
+    }
+
+    // The set of files produced locally must match the expected list exactly.
+    EXPECT_EQ(actual_paths.size(), expected_paths.size());
+    for (auto const& path : actual_paths) {
+        EXPECT_TRUE(expected_paths.find(path) != expected_paths.end())
+            << "unexpected copied file: " << path;
+    }
+
+    // Optionally compare file sizes with the remote source as an additional sanity check.
+    for (auto const& object : begin_result.objects) {
+        boost::filesystem::path local_path = output_dir / object.path;
+        EXPECT_TRUE(boost::filesystem::exists(local_path))
+            << "missing copied file: " << local_path.string();
+
+        boost::filesystem::path remote_path = remote_dir / object.path;
+        if (boost::filesystem::exists(remote_path)
+            && boost::filesystem::is_regular_file(remote_path)
+            && boost::filesystem::is_regular_file(local_path)) {
+            EXPECT_EQ(
+                boost::filesystem::file_size(local_path),
+                boost::filesystem::file_size(remote_path)
+            ) << "size mismatch for copied file: " << object.path;
+        }
+    }
+}
+
+TEST_F(wal_sync_client_test, copy_backup_objects_returns_true_when_no_objects) {
+    // With no objects to copy, the method should short-circuit without touching the filesystem.
+    wal_sync_client client(locale_dir, helper_.create_channel());
+    std::string error;
+    ASSERT_TRUE(client.init(error, true));
+
+    boost::filesystem::path output_dir = locale_dir / "no_objects";
+    boost::filesystem::remove_all(output_dir);
+
+    auto copy_result = client.copy_backup_objects("unused_session", {}, output_dir);
+    EXPECT_TRUE(copy_result.success);
+    EXPECT_TRUE(copy_result.error_message.empty());
+    EXPECT_TRUE(copy_result.incomplete_object_ids.empty());
+    EXPECT_FALSE(boost::filesystem::exists(output_dir));
+}
+
+TEST_F(wal_sync_client_test, copy_backup_objects_fails_when_directory_creation_fails) {
+    class failing_file_operations : public real_file_operations {
+    public:
+        void create_directories(const boost::filesystem::path& path, boost::system::error_code& ec) override {
+            (void)path;
+            ec = boost::system::errc::make_error_code(boost::system::errc::permission_denied);
+        }
+    };
+    failing_file_operations mock_ops;
+
+    wal_sync_client client(locale_dir, helper_.create_channel());
+    std::string error;
+    ASSERT_TRUE(client.init(error, true));
+
+    client.set_file_operations(mock_ops);
+
+    std::vector<backup_object> objects{
+        {"meta", backup_object_type::metadata, "meta/info"}
+    };
+    boost::filesystem::path output_dir = locale_dir / "dir_creation_failure";
+    boost::filesystem::remove_all(output_dir);
+
+    auto copy_result = client.copy_backup_objects("session", objects, output_dir);
+    EXPECT_FALSE(copy_result.success);
+    EXPECT_FALSE(copy_result.error_message.empty());
+    EXPECT_TRUE(copy_result.incomplete_object_ids.empty());
+    EXPECT_FALSE(boost::filesystem::exists(output_dir));
+}
+
+TEST_F(wal_sync_client_test, copy_backup_objects_fails_when_rpc_error) {
+    // Prepare objects and session token while the server is available.
+    gen_datastore();
+    prepare_backup_test_files();
+    datastore_->shutdown();
+    datastore_ = nullptr;
+
+    helper_.start_server();
+
+    wal_sync_client client(locale_dir, helper_.create_channel());
+    std::string error;
+    ASSERT_TRUE(client.init(error, true));
+
+    auto begin_result = client.begin_backup(0, 0);
+    ASSERT_FALSE(begin_result.objects.empty());
+
+    // Simulate RPC failure by stopping the server before issuing copy_backup_objects().
+    helper_.tear_down();
+
+    boost::filesystem::path output_dir = locale_dir / "rpc_failure";
+    boost::filesystem::remove_all(output_dir);
+
+    auto copy_result = client.copy_backup_objects(begin_result.session_token, begin_result.objects, output_dir);
+    EXPECT_FALSE(copy_result.success);
+    EXPECT_FALSE(copy_result.error_message.empty());
+    // Could not finish copying, but processor cleanup already removed partial files.
+
+    // Directories may have been created, but no files should remain on disk.
+    if (boost::filesystem::exists(output_dir)) {
+        bool const empty = boost::filesystem::directory_iterator(output_dir) == boost::filesystem::directory_iterator();
+        EXPECT_TRUE(empty) << "output directory should be empty after failure";
+    }
 }
 
 TEST_F(wal_sync_client_test, begin_backup_failure) {
@@ -494,6 +765,45 @@ TEST_F(wal_sync_client_test, check_wal_compatibility_identical_vectors) {
 
     // Act & Assert
     EXPECT_TRUE(client.check_wal_compatibility(local, remote));
+}
+
+TEST_F(wal_sync_client_processor_error_test, copy_backup_objects_reports_processor_failure) {
+    service_.set_responses({make_single_chunk("meta", "meta/info", "data")});
+
+    client_->set_file_operations(failing_ops_);
+
+    std::vector<backup_object> objects{
+        {"meta", backup_object_type::metadata, "meta/info"}
+    };
+    boost::filesystem::path output_dir = base_dir_ / "processor_failure";
+    boost::filesystem::remove_all(output_dir);
+
+    auto copy_result = client_->copy_backup_objects("session", objects, output_dir);
+
+    EXPECT_FALSE(copy_result.success);
+    EXPECT_TRUE(copy_result.error_message.find("failed to open output file") != std::string::npos);
+    EXPECT_TRUE(copy_result.incomplete_object_ids.empty());
+    EXPECT_FALSE(boost::filesystem::exists(output_dir / "meta/info"));
+}
+
+TEST_F(wal_sync_client_processor_error_test, copy_backup_objects_reports_incomplete_objects) {
+    service_.set_responses({make_single_chunk("meta", "meta/info", "data")});
+
+    std::vector<backup_object> objects{
+        {"meta", backup_object_type::metadata, "meta/info"},
+        {"orphan", backup_object_type::metadata, "orphan/info"}
+    };
+    boost::filesystem::path output_dir = base_dir_ / "incomplete_copy";
+    boost::filesystem::remove_all(output_dir);
+
+    auto copy_result = client_->copy_backup_objects("session", objects, output_dir);
+
+    EXPECT_FALSE(copy_result.success);
+    EXPECT_EQ(copy_result.error_message, "copy incomplete for one or more objects");
+    ASSERT_EQ(copy_result.incomplete_object_ids.size(), 1U);
+    EXPECT_EQ(copy_result.incomplete_object_ids.front(), "orphan");
+    EXPECT_TRUE(boost::filesystem::exists(output_dir / "meta/info"));
+    EXPECT_FALSE(boost::filesystem::exists(output_dir / "orphan/info"));
 }
 
 

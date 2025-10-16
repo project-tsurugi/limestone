@@ -113,6 +113,15 @@ public:
     );
 
     /**
+     * @brief Result of copy_backup_objects operation.
+     */
+    struct copy_backup_result {
+        bool success = false;
+        std::string error_message;
+        std::vector<std::string> incomplete_object_ids;
+    };
+
+    /**
      * @brief Request copy of backup objects from remote.
      *
      * This function assumes that the `objects` parameter is the list obtained from begin_backup().
@@ -121,9 +130,9 @@ public:
      * @param session_token session token
      * @param objects list of objects to copy (begin_backup() result is assumed)
      * @param output_dir directory where retrieved objects are written
-     * @return true if copy succeeded
+     * @return copy_backup_result containing success flag, error message, and incomplete object IDs
      */
-    bool copy_backup_objects(
+    copy_backup_result copy_backup_objects(
         std::string const& session_token,
         std::vector<backup_object> const& objects,
         boost::filesystem::path const& output_dir

@@ -3,6 +3,7 @@
 #include <boost/filesystem.hpp>
 #include <glog/logging.h>
 #include <grpc/client/backup_client.h>
+#include <sstream>
 #include <wal_sync/response_chunk_processor.h>
 
 #include "file_operations.h"
@@ -207,26 +208,27 @@ begin_backup_result wal_sync_client::begin_backup(
     return result;
 }
 
-bool wal_sync_client::copy_backup_objects(
+wal_sync_client::copy_backup_result wal_sync_client::copy_backup_objects(
     std::string const& session_token,
     std::vector<backup_object> const& objects,
     boost::filesystem::path const& output_dir
 ) {
-    if (objects.empty()) {
-        return true;
-    }
+    copy_backup_result result{};
 
-    if (!file_ops_) {
-        LOG(ERROR) << "file operations interface is not configured";
-        return false;
+    if (objects.empty()) {
+        result.success = true;
+        return result;
     }
 
     boost::system::error_code dir_ec;
     file_ops_->create_directories(output_dir, dir_ec);
     if (dir_ec) {
-        LOG(ERROR) << "failed to prepare output directory: " << output_dir.string()
-                   << ", ec=" << dir_ec.message();
-        return false;
+        std::ostringstream oss;
+        oss << "failed to prepare output directory: " << output_dir.string()
+            << ", ec=" << dir_ec.message();
+        result.error_message = oss.str();
+        LOG(ERROR) << result.error_message;
+        return result;
     }
 
     response_chunk_processor processor(*file_ops_, output_dir, objects);
@@ -244,16 +246,20 @@ bool wal_sync_client::copy_backup_objects(
 
     ::grpc::Status status = backup_client_->get_object(request, handler, grpc_timeout_ms);
     if (!status.ok()) {
-        LOG(ERROR) << "get_object RPC failed: " << status.error_code()
-                   << " / " << status.error_message();
+        std::ostringstream oss;
+        oss << "get_object RPC failed: " << status.error_code()
+            << " / " << status.error_message();
+        result.error_message = oss.str();
+        LOG(ERROR) << result.error_message;
         processor.cleanup_partials();
-        return false;
+        return result;
     }
 
     if (processor.failed()) {
-        LOG(ERROR) << "failed to copy backup objects: " << processor.error_message();
+        result.error_message = processor.error_message();
+        LOG(ERROR) << "failed to copy backup objects: " << result.error_message;
         processor.cleanup_partials();
-        return false;
+        return result;
     }
 
     if (!processor.all_completed()) {
@@ -261,11 +267,14 @@ bool wal_sync_client::copy_backup_objects(
         for (auto const& id : incomplete) {
             LOG(ERROR) << "copy incomplete for object_id: " << id;
         }
+        result.error_message = "copy incomplete for one or more objects";
+        result.incomplete_object_ids = std::move(incomplete);
         processor.cleanup_partials();
-        return false;
+        return result;
     }
 
-    return true;
+    result.success = true;
+    return result;
 }
 
 bool wal_sync_client::keepalive_session(std::string const& session_token) {
