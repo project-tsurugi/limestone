@@ -16,6 +16,7 @@
 
 #include <wal_sync/response_chunk_processor.h>
 
+#include <algorithm>
 #include <utility>
 
 #include <boost/system/error_code.hpp>
@@ -24,11 +25,11 @@ namespace limestone::internal {
 
 response_chunk_processor::response_chunk_processor(
     file_operations& file_ops,
-    boost::filesystem::path const& output_dir,
+    boost::filesystem::path output_dir,
     std::vector<backup_object> const& objects
 )
     : file_ops_(file_ops)
-    , base_dir_(output_dir) {
+    , base_dir_(std::move(output_dir)) {
     states_.reserve(objects.size());
     for (auto const& object : objects) {
         transfer_state state{};
@@ -56,11 +57,16 @@ void response_chunk_processor::handle_response(limestone::grpc::proto::GetObject
             set_failure("object path must be relative for object_id: " + object_proto.object_id(), state);
             return false;
         }
-        for (auto const& component : rel_path) {
-            if (component == "..") {
-                set_failure("object path must not contain '..' for object_id: " + object_proto.object_id(), state);
-                return false;
+        auto contains_dotdot = std::any_of(
+            rel_path.begin(),
+            rel_path.end(),
+            [](boost::filesystem::path const& component) {
+                return component == "..";
             }
+        );
+        if (contains_dotdot) {
+            set_failure("object path must not contain '..' for object_id: " + object_proto.object_id(), state);
+            return false;
         }
         return true;
     };
@@ -185,12 +191,13 @@ void response_chunk_processor::cleanup_partials() {
 }
 
 bool response_chunk_processor::all_completed() const noexcept {
-    for (auto const& entry : states_) {
-        if (!entry.second.completed) {
-            return false;
+    return std::all_of(
+        states_.cbegin(),
+        states_.cend(),
+        [](auto const& entry) {
+            return entry.second.completed;
         }
-    }
-    return true;
+    );
 }
 
 std::vector<std::string> response_chunk_processor::incomplete_object_ids() const {

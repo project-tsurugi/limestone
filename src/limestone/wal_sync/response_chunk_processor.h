@@ -44,9 +44,14 @@ public:
      */
     response_chunk_processor(
         file_operations& file_ops,
-        boost::filesystem::path const& output_dir,
+        boost::filesystem::path output_dir,
         std::vector<backup_object> const& objects
     );
+    ~response_chunk_processor() = default;
+    response_chunk_processor(response_chunk_processor const&) = delete;
+    response_chunk_processor& operator=(response_chunk_processor const&) = delete;
+    response_chunk_processor(response_chunk_processor&&) = delete;
+    response_chunk_processor& operator=(response_chunk_processor&&) = delete;
 
     /**
      * @brief Process a GetObjectResponse chunk.

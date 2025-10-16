@@ -25,26 +25,28 @@ namespace limestone::internal {
 
 using limestone::grpc::proto::BackupObjectType;
 
-namespace {
-constexpr std::string_view names[]{
-    "unspecified",
-    "log",
-    "snapshot",
-    "blob",
-    "metadata",
-};
-constexpr std::size_t names_count = sizeof(names) / sizeof(names[0]);
-
-} // namespace
-
 namespace backup_object_type_helper {
 
+/**
+ * @brief Returns the string representation of the backup_object_type enum value.
+ * @param value The backup_object_type enum value.
+ * @return The string_view representing the enum value.
+ */
 std::string_view to_string_view(backup_object_type value) noexcept {
-    auto index = static_cast<std::size_t>(value);
-    if (index < names_count) {
-        return names[index];
+    switch (value) {
+        case backup_object_type::unspecified:
+            return "unspecified";
+        case backup_object_type::log:
+            return "log";
+        case backup_object_type::snapshot:
+            return "snapshot";
+        case backup_object_type::blob:
+            return "blob";
+        case backup_object_type::metadata:
+            return "metadata";
+        default:
+            return "unspecified";
     }
-    return names[0];
 }
 
 std::ostream& operator<<(std::ostream& os, backup_object_type value) {
