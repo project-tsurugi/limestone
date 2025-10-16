@@ -122,6 +122,21 @@ TEST_F(response_chunk_processor_test, known_objects_are_written) {
     EXPECT_EQ(produced, "hello");
 }
 
+TEST_F(response_chunk_processor_test, empty_chunk_is_handled) {
+    std::vector<test_object> objects{{"meta", "meta/info", ""}};
+    auto backup_objects = to_backup_objects(objects);
+    response_chunk_processor processor(file_ops_, base_dir_, backup_objects);
+
+    auto response = build_chunk("meta", "meta/info", "", 0, true, true, std::uint64_t{0});
+    processor.handle_response(response);
+
+    EXPECT_TRUE(processor.all_completed());
+    EXPECT_TRUE(! processor.failed());
+
+    auto produced = load_file(base_dir_ / "meta/info");
+    EXPECT_TRUE(produced.empty());
+}
+
 TEST_F(response_chunk_processor_test, missing_object_metadata_fails) {
     std::vector<test_object> objects{{"meta", "meta/info", "data"}};
     auto backup_objects = to_backup_objects(objects);

@@ -114,6 +114,38 @@ public:
     [[nodiscard]] std::vector<transfer_state_snapshot> snapshot_states() const;
 
 private:
+    bool ensure_metadata_and_path(
+        limestone::grpc::proto::GetObjectResponse const& response,
+        boost::filesystem::path& rel_path
+    );
+    transfer_state* find_or_create_state(
+        limestone::grpc::proto::BackupObject const& object_proto,
+        boost::filesystem::path const& rel_path,
+        bool is_first
+    );
+    bool prepare_first_chunk_if_needed(
+        transfer_state& state,
+        limestone::grpc::proto::GetObjectResponse const& response,
+        boost::filesystem::path const& rel_path
+    );
+    bool validate_stream_and_offset(
+        transfer_state& state,
+        limestone::grpc::proto::GetObjectResponse const& response
+    );
+    bool write_chunk(
+        transfer_state& state,
+        limestone::grpc::proto::GetObjectResponse const& response
+    );
+    bool finalize_if_last(
+        transfer_state& state,
+        limestone::grpc::proto::GetObjectResponse const& response
+    );
+    bool validate_relative_path(
+        std::string const& object_id,
+        boost::filesystem::path const& rel_path,
+        transfer_state* state
+    );
+
     file_operations& file_ops_;
     boost::filesystem::path base_dir_;
     std::unordered_map<std::string, transfer_state> states_;
