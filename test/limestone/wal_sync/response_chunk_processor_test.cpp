@@ -1,3 +1,4 @@
+#include <algorithm>
 #include <fstream>
 #include <optional>
 #include <string>
@@ -449,5 +450,45 @@ TEST_F(response_chunk_processor_test, write_failure_is_reported) {
 
     EXPECT_TRUE(processor.failed());
     EXPECT_NE(processor.error_message().find("failed to write chunk"), std::string::npos);
+}
+
+TEST_F(response_chunk_processor_test, cleanup_partials_removes_incomplete_files) {
+    std::vector<test_object> objects{
+        {"meta", "meta/info", "abcdef"},
+        {"child", "meta/child", "xyz"}
+    };
+    auto backup_objects = to_backup_objects(objects);
+    response_chunk_processor processor(file_ops_, base_dir_, backup_objects);
+
+    processor.handle_response(build_chunk("meta", "meta/info", "abcdef", 0, true, true, std::uint64_t{6}));
+    processor.handle_response(build_chunk("child", "meta/child", "xyz", 0, true, false, std::uint64_t{3}));
+
+    boost::filesystem::path complete_path = base_dir_ / "meta/info";
+    boost::filesystem::path partial_path = base_dir_ / "meta/child";
+    EXPECT_TRUE(boost::filesystem::exists(complete_path));
+    EXPECT_TRUE(boost::filesystem::exists(partial_path));
+
+    processor.cleanup_partials();
+
+    EXPECT_TRUE(boost::filesystem::exists(complete_path));
+    EXPECT_TRUE(! boost::filesystem::exists(partial_path));
+}
+
+TEST_F(response_chunk_processor_test, incomplete_object_ids_returns_pending_ids) {
+    std::vector<test_object> objects{
+        {"meta", "meta/info", "abcdef"},
+        {"child", "meta/child", "xyz"},
+        {"orphan", "meta/orphan", "uvw"}
+    };
+    auto backup_objects = to_backup_objects(objects);
+    response_chunk_processor processor(file_ops_, base_dir_, backup_objects);
+
+    processor.handle_response(build_chunk("meta", "meta/info", "abcdef", 0, true, true, std::uint64_t{6}));
+    processor.handle_response(build_chunk("child", "meta/child", "xyz", 0, true, false, std::uint64_t{3}));
+
+    auto incomplete = processor.incomplete_object_ids();
+    std::sort(incomplete.begin(), incomplete.end());
+    std::vector<std::string> expected{"child", "orphan"};
+    EXPECT_EQ(incomplete, expected);
 }
 } // namespace limestone::testing
