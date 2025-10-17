@@ -13,8 +13,6 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-// TODO エラー発生時の処理りが例外をスローするのか結果を戻り値で返すのかを統一する。
-// TODO バックアップ結果の構造体が複数定義されているので共通化できれば共通化する。
 
 #include <wal_sync/wal_sync_client.h>
 
@@ -28,7 +26,6 @@
 #include "file_operations.h"
 #include "manifest.h"
 #include "dblog_scan.h"
-#include "remote_exception.h"
 #include "wal_history.grpc.pb.h"
 #include "grpc/service/message_versions.h"
 #include "grpc/service/grpc_constants.h"
@@ -136,13 +133,15 @@ wal_sync_client::wal_sync_client(boost::filesystem::path log_dir, std::shared_pt
 
 
 
-epoch_id_type wal_sync_client::get_remote_epoch() {
+std::optional<epoch_id_type> wal_sync_client::get_remote_epoch() {
     WalHistoryResponse response;
     WalHistoryRequest request;
     request.set_version(list_wal_history_message_version);
     ::grpc::Status status = history_client_->get_wal_history(request, response, grpc_timeout_ms);
     if (!status.ok()) {
-        throw remote_exception(status, "WalHistoryService/GetWalHistory");
+        LOG(ERROR) << "get_remote_epoch failed: "
+                   << status.error_code() << " / " << status.error_message();
+        return std::nullopt;
     }
     return response.last_epoch();
 }
@@ -152,13 +151,15 @@ epoch_id_type wal_sync_client::get_local_epoch() {
     return scan.last_durable_epoch_in_dir();
 }
 
-std::vector<branch_epoch> wal_sync_client::get_remote_wal_compatibility() {
+std::optional<std::vector<branch_epoch>> wal_sync_client::get_remote_wal_compatibility() {
     WalHistoryResponse response;
     WalHistoryRequest request;
     request.set_version(list_wal_history_message_version);
     ::grpc::Status status = history_client_->get_wal_history(request, response, grpc_timeout_ms);
     if (!status.ok()) {
-        throw remote_exception(status, "WalHistoryService/GetWalHistory");
+        LOG(ERROR) << "get_remote_wal_compatibility failed: "
+                   << status.error_code() << " / " << status.error_message();
+        return std::nullopt;
     }
     std::vector<branch_epoch> result;
     result.reserve(response.records_size());
@@ -205,7 +206,7 @@ bool wal_sync_client::check_wal_compatibility(
     return true;
 }
 
-begin_backup_result wal_sync_client::begin_backup(
+std::optional<begin_backup_result> wal_sync_client::begin_backup(
     std::uint64_t begin_epoch,
     std::uint64_t end_epoch
 ) {
@@ -217,7 +218,9 @@ begin_backup_result wal_sync_client::begin_backup(
     BeginBackupResponse response;
     ::grpc::Status status = backup_client_->begin_backup(request, response, grpc_timeout_ms);
     if (!status.ok()) {
-        throw remote_exception(status, "BackupService/BeginBackup");
+        LOG(ERROR) << "begin_backup failed: "
+                   << status.error_code() << " / " << status.error_message();
+        return std::nullopt;
     }
 
     begin_backup_result result{};
@@ -340,13 +343,12 @@ remote_backup_result wal_sync_client::execute_remote_backup(
 ) {
     remote_backup_result result{};
 
-    begin_backup_result begin_result{};
-    try {
-        begin_result = begin_backup(begin_epoch, end_epoch);
-    } catch (const remote_exception& ex) {
-        result.error_message = ex.what();
+    auto begin_result_opt = begin_backup(begin_epoch, end_epoch);
+    if (!begin_result_opt) {
+        result.error_message = "begin_backup failed";
         return result;
     }
+    begin_backup_result begin_result = std::move(*begin_result_opt);
 
     std::atomic<bool> keepalive_running{true};
     std::atomic<bool> keepalive_failed{false};

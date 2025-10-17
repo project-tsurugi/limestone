@@ -31,7 +31,6 @@
 #include "limestone/grpc/backend_test_fixture.h"
 #include "manifest.h"
 #include "test_root.h"
-#include "wal_sync/remote_exception.h"
 #include "limestone/grpc/service/wal_history_service_impl.h"
 #include "limestone/grpc/service/backup_service_impl.h"
 #include "limestone/grpc/service/grpc_constants.h"
@@ -273,23 +272,16 @@ TEST_F(wal_sync_client_test, get_remote_epoch_success) {
 	wal_sync_client client(locale_dir, helper_.create_channel());
 
     // Should return the highest epoch (5)
-    EXPECT_EQ(client.get_remote_epoch(), 5);
+    auto epoch = client.get_remote_epoch();
+    ASSERT_TRUE(epoch.has_value());
+    EXPECT_EQ(epoch.value(), 5);
 }
 
 TEST_F(wal_sync_client_test, get_remote_epoch_failure) {
     wal_sync_client client(locale_dir, helper_.create_channel());
 
-    // Call the method and expect an exception
-    try {
-        client.get_remote_epoch();
-        FAIL() << "Expected remote_exception to be thrown";
-    } catch (const remote_exception& ex) {
-        EXPECT_EQ(ex.code(), remote_error_code::unavailable);
-        EXPECT_EQ(ex.method(), "WalHistoryService/GetWalHistory");
-        EXPECT_NE(std::string(ex.what()).find("failed to connect to all addresses"), std::string::npos);
-    } catch (...) {
-        FAIL() << "Expected remote_exception, but caught a different exception";
-    }
+    auto epoch = client.get_remote_epoch();
+    ASSERT_FALSE(epoch.has_value());
 }
 
 TEST_F(wal_sync_client_test, get_remote_wal_compatibility_success) {
@@ -308,10 +300,10 @@ TEST_F(wal_sync_client_test, get_remote_wal_compatibility_success) {
 
     wal_sync_client client(locale_dir, helper_.create_channel());
     auto branch_epochs = client.get_remote_wal_compatibility();
-
-    ASSERT_EQ(branch_epochs.size(), expected.size());
-    for (int i = 0; i < branch_epochs.size(); ++i) {
-        const auto& branch_epoch = branch_epochs[i];
+    ASSERT_TRUE(branch_epochs.has_value());
+    ASSERT_EQ(branch_epochs->size(), expected.size());
+    for (std::size_t i = 0; i < branch_epochs->size(); ++i) {
+        const auto& branch_epoch = branch_epochs->at(i);
         const auto& exp = expected[i];
         EXPECT_EQ(branch_epoch.epoch, exp.epoch);
         EXPECT_EQ(branch_epoch.identity, exp.identity);
@@ -322,17 +314,8 @@ TEST_F(wal_sync_client_test, get_remote_wal_compatibility_success) {
 TEST_F(wal_sync_client_test, get_remote_wal_compatibility_failure) {
     wal_sync_client client(locale_dir, helper_.create_channel());
 
-    // Call the method and expect an exception
-    try {
-        client.get_remote_wal_compatibility();
-        FAIL() << "Expected remote_exception to be thrown";
-    } catch (const remote_exception& ex) {
-        EXPECT_EQ(ex.code(), remote_error_code::unavailable);
-        EXPECT_EQ(ex.method(), "WalHistoryService/GetWalHistory");
-        EXPECT_NE(std::string(ex.what()).find("failed to connect to all addresses"), std::string::npos);
-    } catch (...) {
-        FAIL() << "Expected remote_exception, but caught a different exception";
-    }
+    auto branch_epochs = client.get_remote_wal_compatibility();
+    ASSERT_FALSE(branch_epochs.has_value());
 }
 
 TEST_F(wal_sync_client_test, keepalive_session_success) {
@@ -348,7 +331,8 @@ TEST_F(wal_sync_client_test, keepalive_session_success) {
     ASSERT_TRUE(client.init(error, true));
 
     auto begin_result = client.begin_backup(0, 0);
-    EXPECT_TRUE(client.keepalive_session(begin_result.session_token));
+    ASSERT_TRUE(begin_result.has_value());
+    EXPECT_TRUE(client.keepalive_session(begin_result->session_token));
 }
 
 TEST_F(wal_sync_client_test, keepalive_session_failure) {
@@ -374,7 +358,8 @@ TEST_F(wal_sync_client_test, end_backup_success) {
     ASSERT_TRUE(client.init(error, true));
 
     auto begin_result = client.begin_backup(0, 0);
-    EXPECT_TRUE(client.end_backup(begin_result.session_token));
+    ASSERT_TRUE(begin_result.has_value());
+    EXPECT_TRUE(client.end_backup(begin_result->session_token));
 }
 
 TEST_F(wal_sync_client_test, end_backup_failure) {
@@ -527,9 +512,11 @@ TEST_F(wal_sync_client_test, begin_backup_success) {
     ASSERT_TRUE(client.init(error, true));
 
     auto before = std::chrono::system_clock::now();
-    auto result = client.begin_backup(0, 0);
+    auto result_opt = client.begin_backup(0, 0);
     auto after = std::chrono::system_clock::now();
 
+    ASSERT_TRUE(result_opt.has_value());
+    const auto& result = result_opt.value();
     ASSERT_FALSE(result.objects.empty());
 
     std::regex uuid_regex(R"([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})");
@@ -583,7 +570,9 @@ TEST_F(wal_sync_client_test, copy_backup_objects_success) {
     ASSERT_TRUE(client.init(error, true));
 
     // Fetch session token and backup object list from the remote backup service.
-    auto begin_result = client.begin_backup(0, 0);
+    auto begin_result_opt = client.begin_backup(0, 0);
+    ASSERT_TRUE(begin_result_opt.has_value());
+    auto const& begin_result = begin_result_opt.value();
     ASSERT_FALSE(begin_result.objects.empty());
 
     // Derive the list of expected objects from the fixture configuration.
@@ -729,7 +718,9 @@ TEST_F(wal_sync_client_test, copy_backup_objects_fails_when_rpc_error) {
     std::string error;
     ASSERT_TRUE(client.init(error, true));
 
-    auto begin_result = client.begin_backup(0, 0);
+    auto begin_result_opt = client.begin_backup(0, 0);
+    ASSERT_TRUE(begin_result_opt.has_value());
+    auto begin_result = begin_result_opt.value();
     ASSERT_FALSE(begin_result.objects.empty());
 
     // Simulate RPC failure by stopping the server before issuing copy_backup_objects().
@@ -755,15 +746,8 @@ TEST_F(wal_sync_client_test, begin_backup_failure) {
     std::string error;
     ASSERT_TRUE(client.init(error, true));
 
-    try {
-        static_cast<void>(client.begin_backup(0, 0));
-        FAIL() << "Expected remote_exception to be thrown";
-    } catch (const remote_exception& ex) {
-        EXPECT_EQ(ex.code(), remote_error_code::unavailable);
-        EXPECT_EQ(ex.method(), "BackupService/BeginBackup");
-    } catch (...) {
-        FAIL() << "Expected remote_exception, but caught different exception";
-    }
+    auto result = client.begin_backup(0, 0);
+    ASSERT_FALSE(result.has_value());
 }
 
 TEST_F(wal_sync_client_test, get_local_wal_compatibility) {

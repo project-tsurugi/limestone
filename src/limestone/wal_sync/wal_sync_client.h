@@ -21,6 +21,7 @@
 #include <memory>
 #include <string>
 #include <vector>
+#include <optional>
 #include <boost/filesystem.hpp>
 
 #include <grpc/client/backup_client.h>
@@ -89,10 +90,9 @@ public:
 
     /**
      * @brief Get the epoch value from the remote backup service.
-     * @return remote node's durable epoch value
-     * @throw remote_exception if the remote call fails or the response is invalid
+     * @return remote node's durable epoch value; std::nullopt on failure
      */
-    epoch_id_type get_remote_epoch();
+    std::optional<epoch_id_type> get_remote_epoch();
 
     /**
      * @brief Get the epoch value of the local node.
@@ -102,9 +102,9 @@ public:
 
     /**
      * @brief Get WAL compatibility info from the remote backup service.
-     * @return WAL history/compatibility info
+     * @return WAL history/compatibility info; std::nullopt on failure
      */
-    std::vector<branch_epoch> get_remote_wal_compatibility();
+    std::optional<std::vector<branch_epoch>> get_remote_wal_compatibility();
 
     /**
      * @brief Get WAL compatibility info of the local node.
@@ -127,9 +127,9 @@ public:
      * @brief Start backup session and get list of backup objects.
      * @param begin_epoch start epoch (inclusive)
      * @param end_epoch end epoch (exclusive, 0 for latest)
-     * @return result containing session token, expiration, and objects
+     * @return result containing session token, expiration, and objects; std::nullopt on failure
      */
-    begin_backup_result begin_backup(
+    std::optional<begin_backup_result> begin_backup(
         std::uint64_t begin_epoch,
         std::uint64_t end_epoch
     );
