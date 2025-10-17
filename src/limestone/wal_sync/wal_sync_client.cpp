@@ -16,12 +16,23 @@
 
 #include <wal_sync/wal_sync_client.h>
 
+#include <atomic>
+#include <condition_variable>
+#include <functional>
+#include <future>
+#include <memory>
+#include <sstream>
+#include <thread>
+#include <vector>
+#include <mutex>
+#include <limits>
+
 #include <boost/filesystem.hpp>
 #include <glog/logging.h>
 #include <grpc/client/backup_client.h>
-#include <atomic>
-#include <sstream>
-#include <thread>
+#include <limestone/api/configuration.h>
+#include <limestone/api/datastore.h>
+#include <limestone/status.h>
 #include <wal_sync/response_chunk_processor.h>
 #include "file_operations.h"
 #include "manifest.h"
@@ -51,6 +62,33 @@ using limestone::grpc::service::end_backup_message_version;
 using limestone::grpc::service::keepalive_interval_ms;
 
 using limestone::internal::response_chunk_processor;
+
+rotation_aware_datastore::rotation_aware_datastore(limestone::api::configuration const& conf)
+    : limestone::api::datastore(conf) {}
+
+void rotation_aware_datastore::set_rotation_handler(std::function<void()> handler) {
+    rotation_handler_ = std::move(handler);
+}
+
+void rotation_aware_datastore::on_rotate_log_files() noexcept {
+    if (rotation_handler_) {
+        rotation_handler_();
+    }
+}
+
+void rotation_aware_datastore::trigger_rotation_handler_for_tests() {
+    if (rotation_handler_) {
+        rotation_handler_();
+    }
+}
+
+void rotation_aware_datastore::perform_compaction() {
+    compact_with_online();
+}
+
+void rotation_aware_datastore::perform_switch_epoch(epoch_id_type value) {
+    switch_epoch(value);
+}
 
 bool wal_sync_client::init(std::string& error_message, bool allow_initialize) {
 
@@ -370,6 +408,231 @@ private:
 
 } // namespace
 
+std::unique_ptr<rotation_aware_datastore> wal_sync_client::create_rotation_aware_datastore() {
+    std::vector<boost::filesystem::path> data_locations{};
+    data_locations.emplace_back(log_dir_);
+    limestone::api::configuration conf(data_locations, log_dir_);
+    return std::make_unique<rotation_aware_datastore>(conf);
+}
+
+std::pair<epoch_id_type, bool> wal_sync_client::prepare_for_compaction(
+    rotation_aware_datastore& datastore,
+    std::atomic<bool>& rotation_triggered,
+    std::condition_variable& rotation_cv,
+    std::mutex& rotation_mutex
+) {
+    (void)rotation_mutex;
+    datastore.set_rotation_handler([&rotation_triggered, &rotation_cv]() noexcept {
+        rotation_triggered.store(true, std::memory_order_relaxed);
+        rotation_cv.notify_one();
+    });
+
+    // Open datastore and obtain the last durable epoch as the baseline for incremental restore.
+    epoch_id_type current_epoch = 0;
+    try {
+        ready_datastore(datastore);
+        current_epoch = query_last_epoch(datastore);
+    } catch (std::exception const& ex) {
+        LOG(ERROR) << "failed to prepare datastore before incremental restore: " << ex.what();
+        datastore.set_rotation_handler({});
+        return {0, false};
+    } catch (...) {
+        LOG(ERROR) << "failed to prepare datastore before incremental restore due to unknown error";
+        datastore.set_rotation_handler({});
+        return {0, false};
+    }
+
+    if (current_epoch == 0) {
+        LOG(ERROR) << "incremental restore aborted: last_epoch is 0 (log directory may be corrupt)";
+        datastore.set_rotation_handler({});
+        return {0, false};
+    }
+
+    return {current_epoch, true};
+}
+
+void wal_sync_client::ready_datastore(rotation_aware_datastore& datastore) {
+    datastore.ready();
+}
+
+epoch_id_type wal_sync_client::query_last_epoch(rotation_aware_datastore const& datastore) const {
+    return datastore.last_epoch();
+}
+
+std::thread wal_sync_client::launch_compaction_thread(
+    rotation_aware_datastore& datastore,
+    std::exception_ptr& compaction_error,
+    std::atomic<bool>& /*rotation_triggered*/,
+    std::condition_variable& rotation_cv,
+    std::mutex& rotation_mutex,
+    bool& compaction_done
+) {
+    return std::thread([
+        &datastore,
+        &compaction_error,
+        &rotation_cv,
+        &rotation_mutex,
+        &compaction_done
+    ]() {
+        std::exception_ptr thread_error{};
+        try {
+            datastore.perform_compaction();
+        } catch (...) {
+            thread_error = std::current_exception();
+        }
+        {
+            std::lock_guard<std::mutex> lock(rotation_mutex);
+            compaction_done = true;
+            if (thread_error) {
+                compaction_error = thread_error;
+            }
+        }
+        rotation_cv.notify_one();
+    });
+}
+
+bool wal_sync_client::wait_for_rotation_or_completion(
+    std::atomic<bool>& rotation_triggered,
+    std::condition_variable& rotation_cv,
+    std::mutex& rotation_mutex,
+    bool& compaction_done,
+    std::exception_ptr& compaction_error
+) {
+    std::unique_lock<std::mutex> lock(rotation_mutex);
+    rotation_cv.wait(lock, [&]() {
+        return rotation_triggered.load(std::memory_order_relaxed)
+            || compaction_done
+            || static_cast<bool>(compaction_error);
+    });
+    return rotation_triggered.load(std::memory_order_relaxed);
+}
+
+bool wal_sync_client::handle_rotation_after_trigger(
+    rotation_aware_datastore& datastore,
+    epoch_id_type current_epoch,
+    std::atomic<bool>& rotation_triggered,
+    std::condition_variable& rotation_cv,
+    std::mutex& rotation_mutex,
+    bool& compaction_done,
+    std::exception_ptr& compaction_error
+) {
+    if (!rotation_triggered.load(std::memory_order_relaxed)) {
+        return true;
+    }
+
+    bool switch_failed = false;
+    try {
+        datastore.perform_switch_epoch(static_cast<epoch_id_type>(current_epoch + 1));
+    } catch (std::exception const& ex) {
+        LOG(ERROR) << "failed to switch epoch during incremental restore: " << ex.what();
+        switch_failed = true;
+    } catch (...) {
+        LOG(ERROR) << "failed to switch epoch during incremental restore due to unknown error";
+        switch_failed = true;
+    }
+
+    if (!switch_failed) {
+        return true;
+    }
+
+    std::unique_lock<std::mutex> lock(rotation_mutex);
+    rotation_cv.wait(lock, [&]() {
+        return compaction_done || static_cast<bool>(compaction_error);
+    });
+    return false;
+}
+
+bool wal_sync_client::wait_for_compaction_completion(
+    std::condition_variable& rotation_cv,
+    std::mutex& rotation_mutex,
+    bool& compaction_done,
+    std::exception_ptr& compaction_error
+) {
+    std::unique_lock<std::mutex> lock(rotation_mutex);
+    rotation_cv.wait(lock, [&]() {
+        return compaction_done || static_cast<bool>(compaction_error);
+    });
+    return !static_cast<bool>(compaction_error);
+}
+
+bool wal_sync_client::run_compaction_with_rotation(
+    rotation_aware_datastore& datastore,
+    epoch_id_type current_epoch,
+    std::atomic<bool>& rotation_triggered,
+    std::condition_variable& rotation_cv,
+    std::mutex& rotation_mutex,
+    std::exception_ptr& compaction_error
+) {
+    compaction_error = nullptr;
+    bool compaction_done = false;
+
+    std::thread compaction_thread = launch_compaction_thread(
+        datastore,
+        compaction_error,
+        rotation_triggered,
+        rotation_cv,
+        rotation_mutex,
+        compaction_done
+    );
+
+    auto join_thread = [&]() {
+        if (compaction_thread.joinable()) {
+            compaction_thread.join();
+        }
+    };
+
+    (void)wait_for_rotation_or_completion(
+        rotation_triggered,
+        rotation_cv,
+        rotation_mutex,
+        compaction_done,
+        compaction_error
+    );
+
+    if (compaction_error) {
+        join_thread();
+        try {
+            std::rethrow_exception(compaction_error);
+        } catch (std::exception const& ex) {
+            LOG(ERROR) << "compact_with_online failed: " << ex.what();
+        } catch (...) {
+            LOG(ERROR) << "compact_with_online failed with unknown error";
+        }
+        return false;
+    }
+
+    if (!handle_rotation_after_trigger(
+            datastore,
+            current_epoch,
+            rotation_triggered,
+            rotation_cv,
+            rotation_mutex,
+            compaction_done,
+            compaction_error)) {
+        join_thread();
+        return false;
+    }
+
+    if (!wait_for_compaction_completion(rotation_cv, rotation_mutex, compaction_done, compaction_error)) {
+        join_thread();
+        try {
+            std::rethrow_exception(compaction_error);
+        } catch (std::exception const& ex) {
+            LOG(ERROR) << "compact_with_online failed: " << ex.what();
+        } catch (...) {
+            // NOTE: This branch is intentionally left without dedicated test coverage.
+            // It only executes when the compaction thread reports an error after rotation
+            // has already unblocked the main thread, which is difficult to reproduce deterministically.
+            LOG(ERROR) << "compact_with_online failed with unknown error";
+        }
+        return false;
+    }
+
+    join_thread();
+
+    return true;
+}
+
 remote_backup_result wal_sync_client::execute_remote_backup(
     std::uint64_t begin_epoch,
     std::uint64_t end_epoch,
@@ -426,16 +689,86 @@ remote_backup_result wal_sync_client::execute_remote_backup(
     return final_result;
 }
 
-bool wal_sync_client::deploy_objects(std::vector<backup_object> const& objects) {
-    (void)objects;
-    // TODO: implement
-    return false;
+bool wal_sync_client::restore(
+    std::uint64_t begin_epoch,
+    std::uint64_t end_epoch,
+    boost::filesystem::path const& output_dir
+) {
+    bool const is_full_restore = begin_epoch == 0 && end_epoch == 0;
+
+    if (!is_full_restore) {
+        if (compact_wal()) {
+            LOG(INFO) << "WAL compaction completed successfully before incremental restore.";
+        } else {
+            LOG(ERROR) << "WAL compaction failed before incremental restore.";
+            return false;
+        }
+    }
+    std::vector<boost::filesystem::path> data_locations{};
+    data_locations.emplace_back(log_dir_);
+    limestone::api::configuration conf(data_locations, log_dir_);
+    limestone::api::datastore datastore_instance(conf);
+
+    limestone::status const restore_status = datastore_instance.restore(output_dir.string(), false);
+    if (restore_status != limestone::status::ok) {
+        LOG(ERROR) << "restore failed: status=" << restore_status;
+        return false;
+    }
+    return true;
 }
 
 bool wal_sync_client::compact_wal() {
-    // TODO: implement
-    return false;
+    std::atomic<bool> rotation_triggered{false};
+    std::mutex rotation_mutex;
+    std::condition_variable rotation_cv;
+    std::exception_ptr compaction_error{};
+
+    // Build a dedicated datastore instance for compaction.
+    auto datastore = create_rotation_aware_datastore();
+    if (!datastore) {
+        LOG(ERROR) << "failed to create datastore for compaction";
+        return false;
+    }
+
+    // Prepare the datastore and obtain the epoch baseline.
+    auto prepared = prepare_for_compaction(*datastore, rotation_triggered, rotation_cv, rotation_mutex);
+    epoch_id_type current_epoch = prepared.first;
+    bool prepared_successfully = prepared.second;
+    if (!prepared_successfully) {
+        return false;
+    }
+
+    bool const compaction_succeeded = run_compaction_with_rotation(
+        *datastore,
+        current_epoch,
+        rotation_triggered,
+        rotation_cv,
+        rotation_mutex,
+        compaction_error
+    );
+
+    // Compaction failure (including exception) has already been logged.
+    if (!compaction_succeeded) {
+        return false;
+    }
+
+    std::future<void> shutdown_future;
+    try {
+        shutdown_future = datastore->shutdown();
+    } catch (std::exception const& ex) {
+        LOG(ERROR) << "failed to shutdown datastore after compaction: " << ex.what();
+        return false;
+    } catch (...) {
+        LOG(ERROR) << "failed to shutdown datastore after compaction due to unknown error";
+        return false;
+    }
+    if (shutdown_future.valid()) {
+        shutdown_future.wait();
+    }
+
+    return true;
 }
+
 
 void wal_sync_client::set_file_operations(file_operations& file_ops) {
     file_ops_ = &file_ops;

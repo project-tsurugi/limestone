@@ -21,6 +21,8 @@
 #include <sstream>
 #include <unordered_set>
 #include <set>
+#include <stdexcept>
+#include <future>
 
 #include <boost/filesystem.hpp>
 #include <boost/system/error_code.hpp>
@@ -35,6 +37,7 @@
 #include "limestone/grpc/service/backup_service_impl.h"
 #include "limestone/grpc/service/grpc_constants.h"
 #include "backup.pb.h"
+#include "limestone/limestone_exception_helper.h"
 
 namespace {
 
@@ -110,6 +113,9 @@ public:
     using wal_sync_client::copy_backup_objects;
     using wal_sync_client::keepalive_session;
     using wal_sync_client::end_backup;
+    using wal_sync_client::create_rotation_aware_datastore;
+    using wal_sync_client::prepare_for_compaction;
+    using wal_sync_client::run_compaction_with_rotation;
 };
 
 TEST_F(wal_sync_client_test, init_creates_manifest_when_dir_not_exist_and_allowed) {
@@ -443,6 +449,696 @@ TEST_F(wal_sync_client_test, execute_remote_backup_begin_failure) {
     EXPECT_FALSE(backup_result.error_message.empty());
     EXPECT_TRUE(backup_result.incomplete_object_ids.empty());
     EXPECT_FALSE(boost::filesystem::exists(output_dir));
+}
+
+TEST_F(wal_sync_client_test, create_rotation_aware_datastore_initializes_with_log_dir) {
+    wal_sync_client_testable client(locale_dir, helper_.create_channel());
+
+    auto datastore = client.create_rotation_aware_datastore();
+    ASSERT_NE(datastore, nullptr);
+}
+
+namespace {
+
+class fake_rotation_datastore final : public rotation_aware_datastore {
+public:
+    fake_rotation_datastore(limestone::api::configuration const& conf)
+        : rotation_aware_datastore(conf) {}
+
+    void set_ready_behavior(bool should_throw) {
+        throw_on_ready_ = should_throw;
+    }
+
+    void set_last_epoch(epoch_id_type value) {
+        epoch_ = value;
+    }
+
+    void set_compaction_behavior(std::function<void()> behavior) {
+        compaction_behavior_ = std::move(behavior);
+    }
+
+    void set_epoch_switch_behavior(std::function<void(epoch_id_type)> behavior) {
+        epoch_switch_behavior_ = std::move(behavior);
+    }
+
+    void simulate_ready() {
+        if (throw_on_ready_) {
+            throw std::runtime_error("ready failed");
+        }
+    }
+
+    epoch_id_type simulated_last_epoch() const {
+        return epoch_;
+    }
+
+    void perform_compaction() override {
+        if (compaction_behavior_) {
+            compaction_behavior_();
+        }
+    }
+
+    void perform_switch_epoch(epoch_id_type value) override {
+        if (epoch_switch_behavior_) {
+            epoch_switch_behavior_(value);
+        }
+    }
+
+private:
+    epoch_id_type epoch_{0};
+    bool throw_on_ready_ = false;
+    std::function<void()> compaction_behavior_{};
+    std::function<void(epoch_id_type)> epoch_switch_behavior_{};
+};
+
+class wal_sync_client_prepare_testable : public wal_sync_client_testable {
+public:
+    using wal_sync_client_testable::wal_sync_client_testable;
+
+    void set_fake_datastore(std::unique_ptr<rotation_aware_datastore> datastore) {
+        fake_datastore_ = std::move(datastore);
+    }
+
+protected:
+    std::unique_ptr<rotation_aware_datastore> create_rotation_aware_datastore() override {
+        if (fake_datastore_) {
+            return std::move(fake_datastore_);
+        }
+        return wal_sync_client_testable::create_rotation_aware_datastore();
+    }
+
+    void ready_datastore(rotation_aware_datastore& datastore) override {
+        auto& fake = static_cast<fake_rotation_datastore&>(datastore);
+        fake.simulate_ready();
+    }
+
+    epoch_id_type query_last_epoch(rotation_aware_datastore const& datastore) const override {
+        auto const& fake = static_cast<fake_rotation_datastore const&>(datastore);
+        return fake.simulated_last_epoch();
+    }
+
+private:
+    std::unique_ptr<rotation_aware_datastore> fake_datastore_{};
+};
+
+class wal_sync_client_prepare_unknown_testable : public wal_sync_client_prepare_testable {
+public:
+    using wal_sync_client_prepare_testable::wal_sync_client_prepare_testable;
+
+protected:
+    void ready_datastore(rotation_aware_datastore& /*datastore*/) override {
+        throw 42;
+    }
+};
+
+class wal_sync_client_run_compaction_testable : public wal_sync_client_prepare_testable {
+public:
+    using wal_sync_client_prepare_testable::wal_sync_client_prepare_testable;
+
+    void set_compaction_behavior(std::function<void()> behavior) {
+        compaction_behavior_ = std::move(behavior);
+    }
+
+    void set_epoch_switch_behavior(std::function<void(epoch_id_type)> behavior) {
+        epoch_switch_behavior_ = std::move(behavior);
+    }
+
+protected:
+    std::unique_ptr<rotation_aware_datastore> create_rotation_aware_datastore() override {
+        auto datastore = wal_sync_client_prepare_testable::create_rotation_aware_datastore();
+        auto* fake = static_cast<fake_rotation_datastore*>(datastore.get());
+        fake->set_compaction_behavior(compaction_behavior_);
+        fake->set_epoch_switch_behavior(epoch_switch_behavior_);
+        return datastore;
+    }
+
+private:
+    std::function<void()> compaction_behavior_{};
+    std::function<void(epoch_id_type)> epoch_switch_behavior_{};
+};
+
+class wal_sync_client_compact_testable : public wal_sync_client_prepare_testable {
+public:
+    using wal_sync_client_prepare_testable::wal_sync_client_prepare_testable;
+    using wal_sync_client_prepare_testable::compact_wal;
+
+    void set_prepare_result(epoch_id_type epoch, bool success) {
+        prepare_result_ = {epoch, success};
+    }
+
+    void set_run_result(bool value) {
+        run_result_ = value;
+    }
+
+    void set_create_datastore_should_fail(bool value) {
+        create_datastore_should_fail_ = value;
+    }
+
+    bool prepare_called() const {
+        return prepare_called_;
+    }
+
+    bool run_called() const {
+        return run_called_;
+    }
+
+protected:
+    std::pair<epoch_id_type, bool> prepare_for_compaction(
+        rotation_aware_datastore& /*datastore*/,
+        std::atomic<bool>& /*rotation_triggered*/,
+        std::condition_variable& /*rotation_cv*/,
+        std::mutex& /*rotation_mutex*/
+    ) override {
+        prepare_called_ = true;
+        return prepare_result_;
+    }
+
+    bool run_compaction_with_rotation(
+        rotation_aware_datastore& /*datastore*/,
+        epoch_id_type /*current_epoch*/,
+        std::atomic<bool>& /*rotation_triggered*/,
+        std::condition_variable& /*rotation_cv*/,
+        std::mutex& /*rotation_mutex*/,
+        std::exception_ptr& /*compaction_error*/
+    ) override {
+        run_called_ = true;
+        return run_result_;
+    }
+
+    std::unique_ptr<rotation_aware_datastore> create_rotation_aware_datastore() override {
+        if (create_datastore_should_fail_) {
+            return {};
+        }
+        return wal_sync_client_prepare_testable::create_rotation_aware_datastore();
+    }
+
+private:
+    std::pair<epoch_id_type, bool> prepare_result_{1, true};
+    bool run_result_ = true;
+    bool prepare_called_ = false;
+    bool run_called_ = false;
+    bool create_datastore_should_fail_ = false;
+};
+
+} // namespace
+
+TEST_F(wal_sync_client_test, prepare_for_compaction_success_sets_rotation_handler) {
+    wal_sync_client_prepare_testable client(locale_dir, helper_.create_channel());
+
+    auto fake = std::make_unique<fake_rotation_datastore>(
+        limestone::api::configuration({locale_dir}, locale_dir));
+    fake->set_last_epoch(42);
+    fake_rotation_datastore* fake_ptr = fake.get();
+    client.set_fake_datastore(std::move(fake));
+
+    std::atomic<bool> rotation_triggered{false};
+    std::condition_variable rotation_cv;
+    std::mutex rotation_mutex;
+
+    auto result = client.prepare_for_compaction(*fake_ptr, rotation_triggered, rotation_cv, rotation_mutex);
+    EXPECT_TRUE(result.second);
+    EXPECT_EQ(result.first, 42);
+
+    fake_ptr->trigger_rotation_handler_for_tests();
+    EXPECT_TRUE(rotation_triggered.load());
+}
+
+TEST_F(wal_sync_client_test, prepare_for_compaction_fails_on_zero_epoch) {
+    wal_sync_client_prepare_testable client(locale_dir, helper_.create_channel());
+    auto fake = std::make_unique<fake_rotation_datastore>(
+        limestone::api::configuration({locale_dir}, locale_dir));
+    fake->set_last_epoch(0);
+    fake_rotation_datastore* fake_ptr = fake.get();
+    client.set_fake_datastore(std::move(fake));
+
+    std::atomic<bool> rotation_triggered{false};
+    std::condition_variable rotation_cv;
+    std::mutex rotation_mutex;
+
+    auto result = client.prepare_for_compaction(*fake_ptr, rotation_triggered, rotation_cv, rotation_mutex);
+    EXPECT_FALSE(result.second);
+    EXPECT_EQ(result.first, 0);
+}
+
+TEST_F(wal_sync_client_test, prepare_for_compaction_fails_on_ready_exception) {
+    wal_sync_client_prepare_testable client(locale_dir, helper_.create_channel());
+    auto fake = std::make_unique<fake_rotation_datastore>(
+        limestone::api::configuration({locale_dir}, locale_dir));
+    fake->set_last_epoch(10);
+    fake->set_ready_behavior(true);
+    fake_rotation_datastore* fake_ptr = fake.get();
+    client.set_fake_datastore(std::move(fake));
+
+    std::atomic<bool> rotation_triggered{false};
+    std::condition_variable rotation_cv;
+    std::mutex rotation_mutex;
+
+    auto result = client.prepare_for_compaction(*fake_ptr, rotation_triggered, rotation_cv, rotation_mutex);
+    EXPECT_FALSE(result.second);
+    EXPECT_EQ(result.first, 0);
+}
+
+TEST_F(wal_sync_client_test, run_compaction_with_rotation_success) {
+    wal_sync_client_run_compaction_testable client(locale_dir, helper_.create_channel());
+    auto fake = std::make_unique<fake_rotation_datastore>(
+        limestone::api::configuration({locale_dir}, locale_dir));
+    fake->set_last_epoch(5);
+    auto* fake_ptr = fake.get();
+    client.set_fake_datastore(std::move(fake));
+
+    std::atomic<bool> rotation_triggered{false};
+    std::condition_variable rotation_cv;
+    std::mutex rotation_mutex;
+    std::exception_ptr compaction_error{};
+
+    auto prep = client.prepare_for_compaction(*fake_ptr, rotation_triggered, rotation_cv, rotation_mutex);
+    ASSERT_TRUE(prep.second);
+
+    bool epoch_switched = false;
+    epoch_id_type switched_epoch = 0;
+
+    fake_ptr->set_compaction_behavior([&]() {
+        fake_ptr->trigger_rotation_handler_for_tests();
+    });
+    fake_ptr->set_epoch_switch_behavior([&](epoch_id_type value) {
+        epoch_switched = true;
+        switched_epoch = value;
+    });
+
+    bool const result = client.run_compaction_with_rotation(
+        *fake_ptr,
+        prep.first,
+        rotation_triggered,
+        rotation_cv,
+        rotation_mutex,
+        compaction_error
+    );
+
+    EXPECT_TRUE(result);
+    EXPECT_TRUE(epoch_switched);
+    EXPECT_EQ(switched_epoch, prep.first + 1);
+    EXPECT_FALSE(static_cast<bool>(compaction_error));
+}
+
+TEST_F(wal_sync_client_test, run_compaction_with_rotation_handles_compaction_exception) {
+    wal_sync_client_run_compaction_testable client(locale_dir, helper_.create_channel());
+    auto fake = std::make_unique<fake_rotation_datastore>(
+        limestone::api::configuration({locale_dir}, locale_dir));
+    fake->set_last_epoch(5);
+    auto* fake_ptr = fake.get();
+    client.set_fake_datastore(std::move(fake));
+
+    std::atomic<bool> rotation_triggered{false};
+    std::condition_variable rotation_cv;
+    std::mutex rotation_mutex;
+    std::exception_ptr compaction_error{};
+
+    auto prep = client.prepare_for_compaction(*fake_ptr, rotation_triggered, rotation_cv, rotation_mutex);
+    ASSERT_TRUE(prep.second);
+
+    fake_ptr->set_compaction_behavior([]() {
+        throw std::runtime_error("compaction failure");
+    });
+
+    bool const result = client.run_compaction_with_rotation(
+        *fake_ptr,
+        prep.first,
+        rotation_triggered,
+        rotation_cv,
+        rotation_mutex,
+        compaction_error
+    );
+
+    EXPECT_FALSE(result);
+    EXPECT_TRUE(static_cast<bool>(compaction_error));
+}
+
+TEST_F(wal_sync_client_test, run_compaction_with_rotation_handles_epoch_switch_exception) {
+    wal_sync_client_run_compaction_testable client(locale_dir, helper_.create_channel());
+    auto fake = std::make_unique<fake_rotation_datastore>(
+        limestone::api::configuration({locale_dir}, locale_dir));
+    fake->set_last_epoch(7);
+    auto* fake_ptr = fake.get();
+    client.set_fake_datastore(std::move(fake));
+
+    std::atomic<bool> rotation_triggered{false};
+    std::condition_variable rotation_cv;
+    std::mutex rotation_mutex;
+    std::exception_ptr compaction_error{};
+
+    auto prep = client.prepare_for_compaction(*fake_ptr, rotation_triggered, rotation_cv, rotation_mutex);
+    ASSERT_TRUE(prep.second);
+
+    fake_ptr->set_compaction_behavior([&]() {
+        fake_ptr->trigger_rotation_handler_for_tests();
+    });
+    fake_ptr->set_epoch_switch_behavior([](epoch_id_type) {
+        throw std::runtime_error("switch failure");
+    });
+
+    bool const result = client.run_compaction_with_rotation(
+        *fake_ptr,
+        prep.first,
+        rotation_triggered,
+        rotation_cv,
+        rotation_mutex,
+        compaction_error
+    );
+
+    EXPECT_FALSE(result);
+    EXPECT_FALSE(static_cast<bool>(compaction_error));
+}
+
+TEST_F(wal_sync_client_test, run_compaction_with_rotation_without_rotation_trigger) {
+    wal_sync_client_run_compaction_testable client(locale_dir, helper_.create_channel());
+    auto fake = std::make_unique<fake_rotation_datastore>(
+        limestone::api::configuration({locale_dir}, locale_dir));
+    fake->set_last_epoch(9);
+    auto* fake_ptr = fake.get();
+    client.set_fake_datastore(std::move(fake));
+
+    std::atomic<bool> rotation_triggered{false};
+    std::condition_variable rotation_cv;
+    std::mutex rotation_mutex;
+    std::exception_ptr compaction_error{};
+
+    auto prep = client.prepare_for_compaction(*fake_ptr, rotation_triggered, rotation_cv, rotation_mutex);
+    ASSERT_TRUE(prep.second);
+
+    bool epoch_switched = false;
+    fake_ptr->set_compaction_behavior([]() {
+        // No rotation trigger to simulate non-rotation compaction path.
+    });
+    fake_ptr->set_epoch_switch_behavior([&](epoch_id_type) {
+        epoch_switched = true;
+    });
+
+    bool const result = client.run_compaction_with_rotation(
+        *fake_ptr,
+        prep.first,
+        rotation_triggered,
+        rotation_cv,
+        rotation_mutex,
+        compaction_error
+    );
+
+    EXPECT_TRUE(result);
+    EXPECT_FALSE(epoch_switched);
+    EXPECT_FALSE(rotation_triggered.load());
+    EXPECT_FALSE(static_cast<bool>(compaction_error));
+}
+
+TEST_F(wal_sync_client_test, run_compaction_with_rotation_handles_unknown_compaction_exception) {
+    wal_sync_client_run_compaction_testable client(locale_dir, helper_.create_channel());
+    auto fake = std::make_unique<fake_rotation_datastore>(
+        limestone::api::configuration({locale_dir}, locale_dir));
+    fake->set_last_epoch(4);
+    auto* fake_ptr = fake.get();
+    client.set_fake_datastore(std::move(fake));
+
+    std::atomic<bool> rotation_triggered{false};
+    std::condition_variable rotation_cv;
+    std::mutex rotation_mutex;
+    std::exception_ptr compaction_error{};
+
+    auto prep = client.prepare_for_compaction(*fake_ptr, rotation_triggered, rotation_cv, rotation_mutex);
+    ASSERT_TRUE(prep.second);
+
+    fake_ptr->set_compaction_behavior([]() {
+        throw 123;
+    });
+
+    bool const result = client.run_compaction_with_rotation(
+        *fake_ptr,
+        prep.first,
+        rotation_triggered,
+        rotation_cv,
+        rotation_mutex,
+        compaction_error
+    );
+
+    EXPECT_FALSE(result);
+}
+
+TEST_F(wal_sync_client_test, run_compaction_with_rotation_handles_unknown_switch_exception) {
+    wal_sync_client_run_compaction_testable client(locale_dir, helper_.create_channel());
+    auto fake = std::make_unique<fake_rotation_datastore>(
+        limestone::api::configuration({locale_dir}, locale_dir));
+    fake->set_last_epoch(8);
+    auto* fake_ptr = fake.get();
+    client.set_fake_datastore(std::move(fake));
+
+    std::atomic<bool> rotation_triggered{false};
+    std::condition_variable rotation_cv;
+    std::mutex rotation_mutex;
+    std::exception_ptr compaction_error{};
+
+    auto prep = client.prepare_for_compaction(*fake_ptr, rotation_triggered, rotation_cv, rotation_mutex);
+    ASSERT_TRUE(prep.second);
+
+    fake_ptr->set_compaction_behavior([&]() {
+        fake_ptr->trigger_rotation_handler_for_tests();
+    });
+    fake_ptr->set_epoch_switch_behavior([](epoch_id_type) {
+        throw 456;
+    });
+
+    bool const result = client.run_compaction_with_rotation(
+        *fake_ptr,
+        prep.first,
+        rotation_triggered,
+        rotation_cv,
+        rotation_mutex,
+        compaction_error
+    );
+
+    EXPECT_FALSE(result);
+    EXPECT_TRUE(rotation_triggered.load());
+    EXPECT_FALSE(static_cast<bool>(compaction_error));
+}
+
+TEST_F(wal_sync_client_test, run_compaction_with_rotation_propagates_compaction_error_after_thread_completion) {
+    wal_sync_client_run_compaction_testable client(locale_dir, helper_.create_channel());
+    auto fake = std::make_unique<fake_rotation_datastore>(
+        limestone::api::configuration({locale_dir}, locale_dir));
+    fake->set_last_epoch(11);
+    auto* fake_ptr = fake.get();
+    client.set_fake_datastore(std::move(fake));
+
+    std::atomic<bool> rotation_triggered{false};
+    std::condition_variable rotation_cv;
+    std::mutex rotation_mutex;
+    std::exception_ptr compaction_error{};
+
+    auto prep = client.prepare_for_compaction(*fake_ptr, rotation_triggered, rotation_cv, rotation_mutex);
+    ASSERT_TRUE(prep.second);
+
+    fake_ptr->set_compaction_behavior([]() {
+        std::this_thread::sleep_for(std::chrono::milliseconds(50));
+        throw std::runtime_error("delayed compaction failure");
+    });
+
+    bool const result = client.run_compaction_with_rotation(
+        *fake_ptr,
+        prep.first,
+        rotation_triggered,
+        rotation_cv,
+        rotation_mutex,
+        compaction_error
+    );
+
+    EXPECT_FALSE(result);
+    ASSERT_TRUE(static_cast<bool>(compaction_error));
+    try {
+        std::rethrow_exception(compaction_error);
+    } catch (std::runtime_error const& ex) {
+        EXPECT_STREQ(ex.what(), "delayed compaction failure");
+    } catch (...) {
+        FAIL() << "unexpected exception type";
+    }
+}
+
+TEST_F(wal_sync_client_test, run_compaction_with_rotation_handles_rotation_then_compaction_failure) {
+    wal_sync_client_run_compaction_testable client(locale_dir, helper_.create_channel());
+    auto fake = std::make_unique<fake_rotation_datastore>(
+        limestone::api::configuration({locale_dir}, locale_dir));
+    fake->set_last_epoch(12);
+    auto* fake_ptr = fake.get();
+    client.set_fake_datastore(std::move(fake));
+
+    std::atomic<bool> rotation_triggered{false};
+    std::condition_variable rotation_cv;
+    std::mutex rotation_mutex;
+    std::exception_ptr compaction_error{};
+
+    auto prep = client.prepare_for_compaction(*fake_ptr, rotation_triggered, rotation_cv, rotation_mutex);
+    ASSERT_TRUE(prep.second);
+
+    bool epoch_switched = false;
+    fake_ptr->set_compaction_behavior([&]() {
+        fake_ptr->trigger_rotation_handler_for_tests();
+        std::this_thread::sleep_for(std::chrono::milliseconds(50));
+        throw std::runtime_error("post rotation failure");
+    });
+    fake_ptr->set_epoch_switch_behavior([&](epoch_id_type) {
+        epoch_switched = true;
+    });
+
+    bool const result = client.run_compaction_with_rotation(
+        *fake_ptr,
+        prep.first,
+        rotation_triggered,
+        rotation_cv,
+        rotation_mutex,
+        compaction_error
+    );
+
+    EXPECT_FALSE(result);
+    EXPECT_TRUE(epoch_switched);
+    ASSERT_TRUE(static_cast<bool>(compaction_error));
+    try {
+        std::rethrow_exception(compaction_error);
+    } catch (std::runtime_error const& ex) {
+        EXPECT_STREQ(ex.what(), "post rotation failure");
+    } catch (...) {
+        FAIL() << "unexpected exception type";
+    }
+}
+
+TEST_F(wal_sync_client_test, compact_wal_success) {
+    wal_sync_client_compact_testable client(locale_dir, helper_.create_channel());
+    client.set_prepare_result(5, true);
+    client.set_run_result(true);
+
+    EXPECT_TRUE(client.compact_wal());
+    EXPECT_TRUE(client.prepare_called());
+    EXPECT_TRUE(client.run_called());
+}
+
+TEST_F(wal_sync_client_test, compact_wal_returns_false_when_prepare_fails) {
+    wal_sync_client_compact_testable client(locale_dir, helper_.create_channel());
+    client.set_prepare_result(0, false);
+
+    EXPECT_FALSE(client.compact_wal());
+    EXPECT_TRUE(client.prepare_called());
+    EXPECT_FALSE(client.run_called());
+}
+
+TEST_F(wal_sync_client_test, compact_wal_returns_false_when_run_compaction_fails) {
+    wal_sync_client_compact_testable client(locale_dir, helper_.create_channel());
+    client.set_prepare_result(6, true);
+    client.set_run_result(false);
+
+    EXPECT_FALSE(client.compact_wal());
+    EXPECT_TRUE(client.prepare_called());
+    EXPECT_TRUE(client.run_called());
+}
+
+TEST_F(wal_sync_client_test, compact_wal_returns_false_when_datastore_creation_fails) {
+    wal_sync_client_compact_testable client(locale_dir, helper_.create_channel());
+    client.set_create_datastore_should_fail(true);
+
+    EXPECT_FALSE(client.compact_wal());
+    EXPECT_FALSE(client.prepare_called());
+    EXPECT_FALSE(client.run_called());
+}
+
+TEST_F(wal_sync_client_test, prepare_for_compaction_handles_unknown_exception) {
+    wal_sync_client_prepare_unknown_testable client(locale_dir, helper_.create_channel());
+    auto fake = std::make_unique<fake_rotation_datastore>(
+        limestone::api::configuration({locale_dir}, locale_dir));
+    fake->set_last_epoch(10);
+    fake_rotation_datastore* fake_ptr = fake.get();
+    client.set_fake_datastore(std::move(fake));
+
+    std::atomic<bool> rotation_triggered{false};
+    std::condition_variable rotation_cv;
+    std::mutex rotation_mutex;
+
+    auto result = client.prepare_for_compaction(*fake_ptr, rotation_triggered, rotation_cv, rotation_mutex);
+    EXPECT_FALSE(result.second);
+    EXPECT_EQ(result.first, 0);
+}
+
+TEST_F(wal_sync_client_test, restore_full_success) {
+    bool const prev_throwing = limestone::testing::enable_exception_throwing;
+    limestone::testing::enable_exception_throwing = true;
+
+    if (!boost::filesystem::exists(test_dir)) {
+        ASSERT_TRUE(boost::filesystem::create_directories(test_dir));
+    }
+
+    wal_sync_client client(locale_dir, helper_.create_channel());
+
+    boost::filesystem::path backup_dir = test_dir / "restore_full_success";
+    boost::filesystem::remove_all(backup_dir);
+    ASSERT_TRUE(boost::filesystem::create_directories(backup_dir));
+    limestone::internal::manifest::create_initial(backup_dir);
+
+    EXPECT_TRUE(client.restore(0, 0, backup_dir));
+
+    boost::filesystem::path manifest_path = locale_dir / std::string(limestone::internal::manifest::file_name);
+    EXPECT_TRUE(boost::filesystem::exists(manifest_path));
+    EXPECT_TRUE(boost::filesystem::is_empty(backup_dir));
+
+    limestone::testing::enable_exception_throwing = prev_throwing;
+}
+
+TEST_F(wal_sync_client_test, restore_full_failure_without_manifest) {
+    bool const prev_throwing = limestone::testing::enable_exception_throwing;
+    limestone::testing::enable_exception_throwing = true;
+
+    if (!boost::filesystem::exists(test_dir)) {
+        ASSERT_TRUE(boost::filesystem::create_directories(test_dir));
+    }
+
+    wal_sync_client client(locale_dir, helper_.create_channel());
+
+    boost::filesystem::path backup_dir = test_dir / "restore_full_missing_manifest";
+    boost::filesystem::remove_all(backup_dir);
+    ASSERT_TRUE(boost::filesystem::create_directories(backup_dir));
+
+    EXPECT_FALSE(client.restore(0, 0, backup_dir));
+
+    limestone::testing::enable_exception_throwing = prev_throwing;
+}
+
+TEST_F(wal_sync_client_test, restore_incremental_success_when_compaction_succeeds) {
+    bool const prev_throwing = limestone::testing::enable_exception_throwing;
+    limestone::testing::enable_exception_throwing = true;
+
+    if (!boost::filesystem::exists(test_dir)) {
+        ASSERT_TRUE(boost::filesystem::create_directories(test_dir));
+    }
+
+    wal_sync_client_compact_testable client(locale_dir, helper_.create_channel());
+    client.set_prepare_result(5, true);
+    client.set_run_result(true);
+
+    boost::filesystem::path backup_dir = test_dir / "restore_incremental_success";
+    boost::filesystem::remove_all(backup_dir);
+    ASSERT_TRUE(boost::filesystem::create_directories(backup_dir));
+    limestone::internal::manifest::create_initial(backup_dir);
+
+    EXPECT_TRUE(client.restore(1, 0, backup_dir));
+    EXPECT_TRUE(client.prepare_called());
+    EXPECT_TRUE(client.run_called());
+
+    limestone::testing::enable_exception_throwing = prev_throwing;
+}
+
+TEST_F(wal_sync_client_test, restore_incremental_fails_when_compaction_fails) {
+    bool const prev_throwing = limestone::testing::enable_exception_throwing;
+    limestone::testing::enable_exception_throwing = true;
+
+    wal_sync_client_compact_testable client(locale_dir, helper_.create_channel());
+    client.set_prepare_result(3, true);
+    client.set_run_result(false);
+
+    EXPECT_FALSE(client.restore(1, 0, remote_dir));
+    EXPECT_TRUE(client.prepare_called());
+    EXPECT_TRUE(client.run_called());
+
+    limestone::testing::enable_exception_throwing = prev_throwing;
 }
 
 class wal_sync_client_processor_error_test : public ::testing::Test {
