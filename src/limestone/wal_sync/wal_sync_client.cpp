@@ -23,7 +23,6 @@
 #include <grpc/client/backup_client.h>
 #include <atomic>
 #include <sstream>
-#include <stdexcept>
 #include <thread>
 #include <wal_sync/response_chunk_processor.h>
 #include "file_operations.h"
@@ -319,7 +318,7 @@ bool wal_sync_client::keepalive_session(std::string const& session_token) {
     return true;
 }
 
-void wal_sync_client::end_backup(std::string const& session_token) {
+bool wal_sync_client::end_backup(std::string const& session_token) {
     EndBackupRequest request;
     request.set_version(end_backup_message_version);
     request.set_session_id(session_token);
@@ -329,8 +328,9 @@ void wal_sync_client::end_backup(std::string const& session_token) {
     if (!status.ok()) {
         LOG(ERROR) << "end_backup RPC failed: " << status.error_code()
                    << " / " << status.error_message();
-        throw remote_exception(status, "BackupService/EndBackup");
+        return false;
     }
+    return true;
 }
 
 remote_backup_result wal_sync_client::execute_remote_backup(
@@ -426,18 +426,28 @@ remote_backup_result wal_sync_client::execute_remote_backup(
         }
     }
 
-    end_backup(begin_result.session_token);
+    bool end_result = end_backup(begin_result.session_token);
+    if (!end_result) {
+        if (final_result.success) {
+            final_result.success = false;
+            final_result.error_message = "end_backup RPC failed";
+        } else if (final_result.error_message.empty()) {
+            final_result.error_message = "end_backup RPC failed";
+        }
+    }
 
     return final_result;
 }
 
-[[noreturn]] void wal_sync_client::deploy_objects(std::vector<backup_object> const& objects) {
+bool wal_sync_client::deploy_objects(std::vector<backup_object> const& objects) {
     (void)objects;
-    throw std::logic_error("deploy_objects() is not implemented");
+    // TODO: implement
+    return false;
 }
 
-[[noreturn]] void wal_sync_client::compact_wal() {
-    throw std::logic_error("compact_wal() is not implemented");
+bool wal_sync_client::compact_wal() {
+    // TODO: implement
+    return false;
 }
 
 void wal_sync_client::set_file_operations(file_operations& file_ops) {

@@ -374,7 +374,7 @@ TEST_F(wal_sync_client_test, end_backup_success) {
     ASSERT_TRUE(client.init(error, true));
 
     auto begin_result = client.begin_backup(0, 0);
-    EXPECT_NO_THROW(client.end_backup(begin_result.session_token));
+    EXPECT_TRUE(client.end_backup(begin_result.session_token));
 }
 
 TEST_F(wal_sync_client_test, end_backup_failure) {
@@ -386,7 +386,7 @@ TEST_F(wal_sync_client_test, end_backup_failure) {
 
     helper_.tear_down();
 
-    EXPECT_THROW(client.end_backup("invalid-session-token"), remote_exception);
+    EXPECT_FALSE(client.end_backup("invalid-session-token"));
 }
 
 TEST_F(wal_sync_client_test, execute_remote_backup_success) {

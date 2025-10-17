@@ -180,22 +180,22 @@ public:
     /**
      * @brief End the backup session.
      * @param session_token session token
-     * @throw remote_exception when the RPC fails
+     * @return true if session ended successfully
      */
-    void end_backup(std::string const& session_token);
+    bool end_backup(std::string const& session_token);
 
     /**
      * @brief Deploy copied files to the local data directory.
      * @param objects list of objects to deploy
-     * @throw std::logic_error until implemented
+     * @return true if deployment succeeded
      */
-    [[noreturn]] void deploy_objects(std::vector<backup_object> const& objects);
+    bool deploy_objects(std::vector<backup_object> const& objects);
 
     /**
      * @brief Merge/compact WAL files if needed after incremental backup.
-     * @throw std::logic_error until implemented
+     * @return true if compaction succeeded
      */
-    [[noreturn]] void compact_wal();
+    bool compact_wal();
 
     /**
      * @brief Initialize the client and validate or initialize the log directory and manifest.
