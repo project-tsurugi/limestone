@@ -86,7 +86,7 @@ public:
     /**
      * @brief Destructor.
      */
-    ~wal_sync_client();
+    virtual ~wal_sync_client();
 
     /**
      * @brief Get the epoch value from the remote backup service.
@@ -174,8 +174,9 @@ public:
      * @brief Extend the session expiration.
      * @param session_token session token
      * @return true if extension succeeded
+     * @note Declared virtual so tests can override keepalive behavior.
      */
-    bool keepalive_session(std::string const& session_token);
+    virtual bool keepalive_session(std::string const& session_token);
 
     /**
      * @brief End the backup session.

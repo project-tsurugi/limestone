@@ -336,6 +336,40 @@ bool wal_sync_client::end_backup(std::string const& session_token) {
     return true;
 }
 
+namespace {
+
+class keepalive_thread_guard final {
+public:
+    keepalive_thread_guard(std::atomic<bool>& running, std::thread& thread)
+        : running_(running)
+        , thread_(thread) {}
+
+    keepalive_thread_guard(keepalive_thread_guard const&) = delete;
+    keepalive_thread_guard& operator=(keepalive_thread_guard const&) = delete;
+    keepalive_thread_guard(keepalive_thread_guard&&) = delete;
+    keepalive_thread_guard& operator=(keepalive_thread_guard&&) = delete;
+
+    ~keepalive_thread_guard() {
+        if (!dismissed_) {
+            running_.store(false, std::memory_order_relaxed);
+            if (thread_.joinable()) {
+                thread_.join();
+            }
+        }
+    }
+
+    void dismiss() {
+        dismissed_ = true;
+    }
+
+private:
+    std::atomic<bool>& running_;
+    std::thread& thread_;
+    bool dismissed_ = false;
+};
+
+} // namespace
+
 remote_backup_result wal_sync_client::execute_remote_backup(
     std::uint64_t begin_epoch,
     std::uint64_t end_epoch,
@@ -351,92 +385,43 @@ remote_backup_result wal_sync_client::execute_remote_backup(
     begin_backup_result begin_result = std::move(*begin_result_opt);
 
     std::atomic<bool> keepalive_running{true};
-    std::atomic<bool> keepalive_failed{false};
     std::thread keepalive_thread;
 
-    struct keepalive_thread_guard final {
-    public:
-        keepalive_thread_guard(std::atomic<bool>& running, std::thread& thread)
-            : running_(running)
-            , thread_(thread) {}
+    remote_backup_result copy_result{};
+    {
+        keepalive_thread_guard keepalive_guard{keepalive_running, keepalive_thread};
 
-        keepalive_thread_guard(keepalive_thread_guard const&) = delete;
-        keepalive_thread_guard& operator=(keepalive_thread_guard const&) = delete;
-        keepalive_thread_guard(keepalive_thread_guard&&) = delete;
-        keepalive_thread_guard& operator=(keepalive_thread_guard&&) = delete;
-
-        ~keepalive_thread_guard() {
-            if (!dismissed_) {
-                running_.store(false, std::memory_order_relaxed);
-                if (thread_.joinable()) {
-                    thread_.join();
+        std::chrono::milliseconds keepalive_interval{keepalive_interval_ms};
+        if (keepalive_interval.count() > 0 && !begin_result.session_token.empty()) {
+            keepalive_thread = std::thread([
+                this,
+                session_token = begin_result.session_token,
+                keepalive_interval,
+                &keepalive_running
+            ]() {
+                while (keepalive_running.load(std::memory_order_relaxed)) {
+                    if (!keepalive_session(session_token)) {
+                        LOG(ERROR) << "keepalive_session failed during execute_remote_backup";
+                        break;
+                    }
+                    auto elapsed = std::chrono::milliseconds{0};
+                    while (keepalive_running.load(std::memory_order_relaxed) && elapsed < keepalive_interval) {
+                        auto step = std::chrono::milliseconds{50};
+                        std::this_thread::sleep_for(step);
+                        elapsed += step;
+                    }
                 }
-            }
+            });
         }
 
-        void dismiss() {
-            dismissed_ = true;
-        }
+        copy_result = copy_backup_objects(begin_result.session_token, begin_result.objects, output_dir);
 
-    private:
-        std::atomic<bool>& running_;
-        std::thread& thread_;
-        bool dismissed_ = false;
-    } keepalive_guard{keepalive_running, keepalive_thread};
-
-    std::chrono::milliseconds keepalive_interval{keepalive_interval_ms};
-    if (keepalive_interval.count() > 0 && !begin_result.session_token.empty()) {
-        keepalive_thread = std::thread([
-            this,
-            session_token = begin_result.session_token,
-            keepalive_interval,
-            &keepalive_running,
-            &keepalive_failed
-        ]() {
-            while (keepalive_running.load(std::memory_order_relaxed)) {
-                if (!keepalive_session(session_token)) {
-                    LOG(ERROR) << "keepalive_session failed during execute_remote_backup";
-                    keepalive_failed.store(true, std::memory_order_relaxed);
-                    break;
-                }
-                auto elapsed = std::chrono::milliseconds{0};
-                while (keepalive_running.load(std::memory_order_relaxed) && elapsed < keepalive_interval) {
-                    auto step = std::chrono::milliseconds{50};
-                    std::this_thread::sleep_for(step);
-                    elapsed += step;
-                }
-            }
-        });
+        keepalive_running.store(false, std::memory_order_relaxed);
     }
-
-    remote_backup_result copy_result = copy_backup_objects(begin_result.session_token, begin_result.objects, output_dir);
-
-    keepalive_running.store(false, std::memory_order_relaxed);
-    if (keepalive_thread.joinable()) {
-        keepalive_thread.join();
-    }
-    keepalive_guard.dismiss();
 
     remote_backup_result final_result = copy_result;
 
-    if (keepalive_failed.load(std::memory_order_relaxed)) {
-        if (final_result.success) {
-            final_result.success = false;
-            final_result.error_message = "keepalive_session failed during remote backup";
-        } else if (final_result.error_message.empty()) {
-            final_result.error_message = "keepalive_session failed during remote backup";
-        }
-    }
-
-    bool end_result = end_backup(begin_result.session_token);
-    if (!end_result) {
-        if (final_result.success) {
-            final_result.success = false;
-            final_result.error_message = "end_backup RPC failed";
-        } else if (final_result.error_message.empty()) {
-            final_result.error_message = "end_backup RPC failed";
-        }
-    }
+    (void)end_backup(begin_result.session_token);
 
     return final_result;
 }

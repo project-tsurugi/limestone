@@ -498,6 +498,37 @@ protected:
     failing_open_file_operations failing_ops_;
 };
 
+class failing_keepalive_wal_sync_client : public wal_sync_client {
+public:
+    using wal_sync_client::wal_sync_client;
+
+    bool keepalive_session(std::string const& /*session_token*/) override {
+        return false;
+    }
+};
+
+TEST_F(wal_sync_client_test, execute_remote_backup_keepalive_failure) {
+    gen_datastore();
+    prepare_backup_test_files();
+    datastore_->shutdown();
+    datastore_ = nullptr;
+
+    helper_.start_server();
+
+    failing_keepalive_wal_sync_client client(locale_dir, helper_.create_channel());
+    std::string error;
+    ASSERT_TRUE(client.init(error, true));
+
+    boost::filesystem::path output_dir = locale_dir / "remote_backup_keepalive_failure";
+    boost::filesystem::remove_all(output_dir);
+
+    auto backup_result = client.execute_remote_backup(0, 0, output_dir);
+    EXPECT_TRUE(backup_result.success);
+    EXPECT_TRUE(backup_result.error_message.empty());
+    EXPECT_TRUE(backup_result.incomplete_object_ids.empty());
+    EXPECT_TRUE(boost::filesystem::exists(output_dir));
+}
+
 TEST_F(wal_sync_client_test, begin_backup_success) {
     gen_datastore();
     prepare_backup_test_files();
