@@ -1,11 +1,30 @@
+/*
+ * Copyright 2023-2025 Project Tsurugi.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+// TODO エラー発生時の処理りが例外をスローするのか結果を戻り値で返すのかを統一する。
+// TODO バックアップ結果の構造体が複数定義されているので共通化できれば共通化する。
+
 #include <wal_sync/wal_sync_client.h>
 
 #include <boost/filesystem.hpp>
 #include <glog/logging.h>
 #include <grpc/client/backup_client.h>
+#include <atomic>
 #include <sstream>
+#include <thread>
 #include <wal_sync/response_chunk_processor.h>
-
 #include "file_operations.h"
 #include "manifest.h"
 #include "dblog_scan.h"
@@ -22,10 +41,17 @@ using limestone::grpc::proto::WalHistoryRequest;
 using limestone::grpc::proto::WalHistoryResponse;
 using limestone::grpc::proto::GetObjectRequest;
 using limestone::grpc::proto::GetObjectResponse;
+using limestone::grpc::proto::KeepAliveRequest;
+using limestone::grpc::proto::KeepAliveResponse;
+using limestone::grpc::proto::EndBackupRequest;
+using limestone::grpc::proto::EndBackupResponse;
 using limestone::grpc::service::begin_backup_message_version;
 using limestone::grpc::service::list_wal_history_message_version;
 using limestone::grpc::service::grpc_timeout_ms;
 using limestone::grpc::service::get_object_message_version;
+using limestone::grpc::service::keep_alive_message_version;
+using limestone::grpc::service::end_backup_message_version;
+using limestone::grpc::service::keepalive_interval_ms;
 
 using limestone::internal::response_chunk_processor;
 
@@ -208,12 +234,12 @@ begin_backup_result wal_sync_client::begin_backup(
     return result;
 }
 
-wal_sync_client::copy_backup_result wal_sync_client::copy_backup_objects(
+remote_backup_result wal_sync_client::copy_backup_objects(
     std::string const& session_token,
     std::vector<backup_object> const& objects,
     boost::filesystem::path const& output_dir
 ) {
-    copy_backup_result result{};
+    remote_backup_result result{};
 
     if (objects.empty()) {
         result.success = true;
@@ -278,15 +304,139 @@ wal_sync_client::copy_backup_result wal_sync_client::copy_backup_objects(
 }
 
 bool wal_sync_client::keepalive_session(std::string const& session_token) {
-    (void)session_token;
-    // TODO: implement
-    return false;
+    KeepAliveRequest request;
+    request.set_version(keep_alive_message_version);
+    request.set_session_id(session_token);
+
+    KeepAliveResponse response;
+    ::grpc::Status status = backup_client_->keep_alive(request, response, grpc_timeout_ms);
+    if (!status.ok()) {
+        LOG(ERROR) << "keep_alive RPC failed: " << status.error_code()
+                   << " / " << status.error_message();
+        return false;
+    }
+    return true;
 }
 
 bool wal_sync_client::end_backup(std::string const& session_token) {
-    (void)session_token;
-    // TODO: implement
-    return false;
+    EndBackupRequest request;
+    request.set_version(end_backup_message_version);
+    request.set_session_id(session_token);
+
+    EndBackupResponse response;
+    ::grpc::Status status = backup_client_->end_backup(request, response, grpc_timeout_ms);
+    if (!status.ok()) {
+        LOG(ERROR) << "end_backup RPC failed: " << status.error_code()
+                   << " / " << status.error_message();
+        return false;
+    }
+    return true;
+}
+
+remote_backup_result wal_sync_client::execute_remote_backup(
+    std::uint64_t begin_epoch,
+    std::uint64_t end_epoch,
+    boost::filesystem::path const& output_dir
+) {
+    remote_backup_result result{};
+
+    begin_backup_result begin_result{};
+    try {
+        begin_result = begin_backup(begin_epoch, end_epoch);
+    } catch (const remote_exception& ex) {
+        result.error_message = ex.what();
+        return result;
+    }
+
+    std::atomic<bool> keepalive_running{true};
+    std::atomic<bool> keepalive_failed{false};
+    std::thread keepalive_thread;
+
+    struct keepalive_thread_guard final {
+    public:
+        keepalive_thread_guard(std::atomic<bool>& running, std::thread& thread)
+            : running_(running)
+            , thread_(thread) {}
+
+        keepalive_thread_guard(keepalive_thread_guard const&) = delete;
+        keepalive_thread_guard& operator=(keepalive_thread_guard const&) = delete;
+        keepalive_thread_guard(keepalive_thread_guard&&) = delete;
+        keepalive_thread_guard& operator=(keepalive_thread_guard&&) = delete;
+
+        ~keepalive_thread_guard() {
+            if (!dismissed_) {
+                running_.store(false, std::memory_order_relaxed);
+                if (thread_.joinable()) {
+                    thread_.join();
+                }
+            }
+        }
+
+        void dismiss() {
+            dismissed_ = true;
+        }
+
+    private:
+        std::atomic<bool>& running_;
+        std::thread& thread_;
+        bool dismissed_ = false;
+    } keepalive_guard{keepalive_running, keepalive_thread};
+
+    std::chrono::milliseconds keepalive_interval{keepalive_interval_ms};
+    if (keepalive_interval.count() > 0 && !begin_result.session_token.empty()) {
+        keepalive_thread = std::thread([
+            this,
+            session_token = begin_result.session_token,
+            keepalive_interval,
+            &keepalive_running,
+            &keepalive_failed
+        ]() {
+            while (keepalive_running.load(std::memory_order_relaxed)) {
+                if (!keepalive_session(session_token)) {
+                    LOG(ERROR) << "keepalive_session failed during execute_remote_backup";
+                    keepalive_failed.store(true, std::memory_order_relaxed);
+                    break;
+                }
+                auto elapsed = std::chrono::milliseconds{0};
+                while (keepalive_running.load(std::memory_order_relaxed) && elapsed < keepalive_interval) {
+                    auto step = std::chrono::milliseconds{50};
+                    std::this_thread::sleep_for(step);
+                    elapsed += step;
+                }
+            }
+        });
+    }
+
+    remote_backup_result copy_result = copy_backup_objects(begin_result.session_token, begin_result.objects, output_dir);
+
+    keepalive_running.store(false, std::memory_order_relaxed);
+    if (keepalive_thread.joinable()) {
+        keepalive_thread.join();
+    }
+    keepalive_guard.dismiss();
+
+    remote_backup_result final_result = copy_result;
+
+    if (keepalive_failed.load(std::memory_order_relaxed)) {
+        if (final_result.success) {
+            final_result.success = false;
+            final_result.error_message = "keepalive_session failed during remote backup";
+        } else if (final_result.error_message.empty()) {
+            final_result.error_message = "keepalive_session failed during remote backup";
+        }
+    }
+
+    bool end_result = end_backup(begin_result.session_token);
+    if (!end_result) {
+        if (final_result.success) {
+            final_result.success = false;
+            final_result.error_message = "end_backup RPC failed";
+        } else if (final_result.error_message.empty()) {
+            final_result.error_message = "end_backup RPC failed";
+        }
+    }
+
+    return final_result;
 }
 
 bool wal_sync_client::deploy_objects(std::vector<backup_object> const& objects) {

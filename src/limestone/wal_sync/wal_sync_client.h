@@ -1,3 +1,19 @@
+/*
+ * Copyright 2023-2025 Project Tsurugi.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
 #pragma once
 
 #include <chrono>
@@ -40,6 +56,12 @@ struct begin_backup_result {
     std::string session_token;
     std::chrono::system_clock::time_point expire_at;
     std::vector<backup_object> objects;
+};
+
+struct remote_backup_result {
+    bool success = false;
+    std::string error_message;
+    std::vector<std::string> incomplete_object_ids;
 };
 
 /**
@@ -113,15 +135,6 @@ public:
     );
 
     /**
-     * @brief Result of copy_backup_objects operation.
-     */
-    struct copy_backup_result {
-        bool success = false;
-        std::string error_message;
-        std::vector<std::string> incomplete_object_ids;
-    };
-
-    /**
      * @brief Request copy of backup objects from remote.
      *
      * This function assumes that the `objects` parameter is the list obtained from begin_backup().
@@ -130,11 +143,30 @@ public:
      * @param session_token session token
      * @param objects list of objects to copy (begin_backup() result is assumed)
      * @param output_dir directory where retrieved objects are written
-     * @return copy_backup_result containing success flag, error message, and incomplete object IDs
+     * @return remote_backup_result containing success flag, error message, and incomplete object IDs
      */
-    copy_backup_result copy_backup_objects(
+    remote_backup_result copy_backup_objects(
         std::string const& session_token,
         std::vector<backup_object> const& objects,
+        boost::filesystem::path const& output_dir
+    );
+
+    /**
+     * @brief Execute remote backup end-to-end sequence.
+     *
+     * This method performs begin_backup(), copy_backup_objects(), and end_backup()
+     * as a single operation. While copying, it periodically calls keepalive_session()
+     * on a background thread to keep the remote session alive. The interval is defined by
+     * limestone::grpc::service::keepalive_interval_ms.
+     *
+     * @param begin_epoch start epoch (inclusive) passed to begin_backup()
+     * @param end_epoch end epoch (exclusive, 0 for latest) passed to begin_backup()
+     * @param output_dir directory where retrieved objects are written
+     * @return remote_backup_result with success flag, error message, and incomplete object IDs
+     */
+    remote_backup_result execute_remote_backup(
+        std::uint64_t begin_epoch,
+        std::uint64_t end_epoch,
         boost::filesystem::path const& output_dir
     );
 

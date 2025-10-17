@@ -1,3 +1,18 @@
+/*
+ * Copyright 2023-2025 Project Tsurugi.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
 
 #include "wal_sync/wal_sync_client.h"
 
@@ -318,6 +333,123 @@ TEST_F(wal_sync_client_test, get_remote_wal_compatibility_failure) {
     } catch (...) {
         FAIL() << "Expected remote_exception, but caught a different exception";
     }
+}
+
+TEST_F(wal_sync_client_test, keepalive_session_success) {
+    gen_datastore();
+    prepare_backup_test_files();
+    datastore_->shutdown();
+    datastore_ = nullptr;
+
+    helper_.start_server();
+
+    wal_sync_client client(locale_dir, helper_.create_channel());
+    std::string error;
+    ASSERT_TRUE(client.init(error, true));
+
+    auto begin_result = client.begin_backup(0, 0);
+    EXPECT_TRUE(client.keepalive_session(begin_result.session_token));
+}
+
+TEST_F(wal_sync_client_test, keepalive_session_failure) {
+    helper_.start_server();
+
+    wal_sync_client client(locale_dir, helper_.create_channel());
+    std::string error;
+    ASSERT_TRUE(client.init(error, true));
+
+    EXPECT_FALSE(client.keepalive_session("invalid-session-token"));
+}
+
+TEST_F(wal_sync_client_test, end_backup_success) {
+    gen_datastore();
+    prepare_backup_test_files();
+    datastore_->shutdown();
+    datastore_ = nullptr;
+
+    helper_.start_server();
+
+    wal_sync_client client(locale_dir, helper_.create_channel());
+    std::string error;
+    ASSERT_TRUE(client.init(error, true));
+
+    auto begin_result = client.begin_backup(0, 0);
+    EXPECT_TRUE(client.end_backup(begin_result.session_token));
+}
+
+TEST_F(wal_sync_client_test, end_backup_failure) {
+    helper_.start_server();
+
+    wal_sync_client client(locale_dir, helper_.create_channel());
+    std::string error;
+    ASSERT_TRUE(client.init(error, true));
+
+    helper_.tear_down();
+
+    EXPECT_FALSE(client.end_backup("invalid-session-token"));
+}
+
+TEST_F(wal_sync_client_test, execute_remote_backup_success) {
+    gen_datastore();
+    prepare_backup_test_files();
+    datastore_->shutdown();
+    datastore_ = nullptr;
+
+    helper_.start_server();
+
+    wal_sync_client client(locale_dir, helper_.create_channel());
+    std::string error;
+    ASSERT_TRUE(client.init(error, true));
+
+    auto filtered_conditions = get_filtered_backup_conditions([](const backup_condition& condition) {
+        return condition.is_offline_backup_target;
+    });
+
+    boost::filesystem::path output_dir = locale_dir / "remote_backup_success";
+    boost::filesystem::remove_all(output_dir);
+
+    auto backup_result = client.execute_remote_backup(0, 0, output_dir);
+    ASSERT_TRUE(backup_result.success);
+    EXPECT_TRUE(backup_result.error_message.empty());
+    EXPECT_TRUE(backup_result.incomplete_object_ids.empty());
+    EXPECT_TRUE(boost::filesystem::exists(output_dir));
+
+    std::set<std::string> actual_paths;
+    for (boost::filesystem::recursive_directory_iterator it(output_dir), end; it != end; ++it) {
+        if (boost::filesystem::is_regular_file(it->path())) {
+            auto rel = boost::filesystem::relative(it->path(), output_dir);
+            actual_paths.insert(rel.generic_string());
+        }
+    }
+
+    EXPECT_FALSE(actual_paths.empty());
+    for (auto const& path : actual_paths) {
+        bool matched = false;
+        for (auto const& condition : filtered_conditions) {
+            if (condition.object_path.empty()) {
+                continue;
+            }
+            if (is_path_matching(path, condition.object_path)) {
+                matched = true;
+                break;
+            }
+        }
+        EXPECT_TRUE(matched) << "unexpected file copied: " << path;
+    }
+}
+
+TEST_F(wal_sync_client_test, execute_remote_backup_begin_failure) {
+    wal_sync_client client(locale_dir, helper_.create_channel());
+    std::string error;
+    ASSERT_TRUE(client.init(error, true));
+
+    boost::filesystem::path output_dir = locale_dir / "remote_backup_begin_failure";
+    auto backup_result = client.execute_remote_backup(0, 0, output_dir);
+
+    EXPECT_FALSE(backup_result.success);
+    EXPECT_FALSE(backup_result.error_message.empty());
+    EXPECT_TRUE(backup_result.incomplete_object_ids.empty());
+    EXPECT_FALSE(boost::filesystem::exists(output_dir));
 }
 
 class wal_sync_client_processor_error_test : public ::testing::Test {
