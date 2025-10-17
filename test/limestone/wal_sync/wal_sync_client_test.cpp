@@ -104,6 +104,14 @@ protected:
     }
 };
 
+class wal_sync_client_testable : public wal_sync_client {
+public:
+    using wal_sync_client::wal_sync_client;
+    using wal_sync_client::copy_backup_objects;
+    using wal_sync_client::keepalive_session;
+    using wal_sync_client::end_backup;
+};
+
 TEST_F(wal_sync_client_test, init_creates_manifest_when_dir_not_exist_and_allowed) {
 	wal_sync_client client(locale_dir, helper_.create_channel());
 	boost::filesystem::remove_all(locale_dir);
@@ -242,7 +250,7 @@ TEST_F(wal_sync_client_test, init_fails_when_lock_cannot_be_acquired) {
 TEST_F(wal_sync_client_test, get_local_epoch_returns_zero_when_no_wal_files) {
     limestone::internal::manifest::create_initial(locale_dir);
 
-    wal_sync_client client(locale_dir, helper_.create_channel());
+    wal_sync_client_testable client(locale_dir, helper_.create_channel());
     std::string error;
     ASSERT_TRUE(client.init(error, false));
 
@@ -278,7 +286,7 @@ TEST_F(wal_sync_client_test, get_remote_epoch_success) {
 }
 
 TEST_F(wal_sync_client_test, get_remote_epoch_failure) {
-    wal_sync_client client(locale_dir, helper_.create_channel());
+    wal_sync_client_testable client(locale_dir, helper_.create_channel());
 
     auto epoch = client.get_remote_epoch();
     ASSERT_FALSE(epoch.has_value());
@@ -298,7 +306,7 @@ TEST_F(wal_sync_client_test, get_remote_wal_compatibility_success) {
     limestone::api::log_entry::durable_epoch(fp, 100);
     std::fclose(fp);
 
-    wal_sync_client client(locale_dir, helper_.create_channel());
+    wal_sync_client_testable client(locale_dir, helper_.create_channel());
     auto branch_epochs = client.get_remote_wal_compatibility();
     ASSERT_TRUE(branch_epochs.has_value());
     ASSERT_EQ(branch_epochs->size(), expected.size());
@@ -312,7 +320,7 @@ TEST_F(wal_sync_client_test, get_remote_wal_compatibility_success) {
 }
 
 TEST_F(wal_sync_client_test, get_remote_wal_compatibility_failure) {
-    wal_sync_client client(locale_dir, helper_.create_channel());
+    wal_sync_client_testable client(locale_dir, helper_.create_channel());
 
     auto branch_epochs = client.get_remote_wal_compatibility();
     ASSERT_FALSE(branch_epochs.has_value());
@@ -326,7 +334,7 @@ TEST_F(wal_sync_client_test, keepalive_session_success) {
 
     helper_.start_server();
 
-    wal_sync_client client(locale_dir, helper_.create_channel());
+    wal_sync_client_testable client(locale_dir, helper_.create_channel());
     std::string error;
     ASSERT_TRUE(client.init(error, true));
 
@@ -338,7 +346,7 @@ TEST_F(wal_sync_client_test, keepalive_session_success) {
 TEST_F(wal_sync_client_test, keepalive_session_failure) {
     helper_.start_server();
 
-    wal_sync_client client(locale_dir, helper_.create_channel());
+    wal_sync_client_testable client(locale_dir, helper_.create_channel());
     std::string error;
     ASSERT_TRUE(client.init(error, true));
 
@@ -353,7 +361,7 @@ TEST_F(wal_sync_client_test, end_backup_success) {
 
     helper_.start_server();
 
-    wal_sync_client client(locale_dir, helper_.create_channel());
+    wal_sync_client_testable client(locale_dir, helper_.create_channel());
     std::string error;
     ASSERT_TRUE(client.init(error, true));
 
@@ -365,7 +373,7 @@ TEST_F(wal_sync_client_test, end_backup_success) {
 TEST_F(wal_sync_client_test, end_backup_failure) {
     helper_.start_server();
 
-    wal_sync_client client(locale_dir, helper_.create_channel());
+    wal_sync_client_testable client(locale_dir, helper_.create_channel());
     std::string error;
     ASSERT_TRUE(client.init(error, true));
 
@@ -382,7 +390,7 @@ TEST_F(wal_sync_client_test, execute_remote_backup_success) {
 
     helper_.start_server();
 
-    wal_sync_client client(locale_dir, helper_.create_channel());
+    wal_sync_client_testable client(locale_dir, helper_.create_channel());
     std::string error;
     ASSERT_TRUE(client.init(error, true));
 
@@ -424,7 +432,7 @@ TEST_F(wal_sync_client_test, execute_remote_backup_success) {
 }
 
 TEST_F(wal_sync_client_test, execute_remote_backup_begin_failure) {
-    wal_sync_client client(locale_dir, helper_.create_channel());
+    wal_sync_client_testable client(locale_dir, helper_.create_channel());
     std::string error;
     ASSERT_TRUE(client.init(error, true));
 
@@ -450,7 +458,7 @@ protected:
         actual_address_ = "127.0.0.1:" + std::to_string(port_);
         channel_ = ::grpc::CreateChannel(actual_address_, ::grpc::InsecureChannelCredentials());
         ASSERT_TRUE(channel_->WaitForConnected(std::chrono::system_clock::now() + std::chrono::seconds(1)));
-        client_ = std::make_unique<wal_sync_client>(base_dir_, channel_);
+        client_ = std::make_unique<wal_sync_client_testable>(base_dir_, channel_);
         std::string error;
         ASSERT_TRUE(client_->init(error, true));
     }
@@ -494,13 +502,13 @@ protected:
     int port_ = 0;
     std::string actual_address_;
     scripted_backup_service service_;
-    std::unique_ptr<wal_sync_client> client_;
+    std::unique_ptr<wal_sync_client_testable> client_;
     failing_open_file_operations failing_ops_;
 };
 
-class failing_keepalive_wal_sync_client : public wal_sync_client {
+class failing_keepalive_wal_sync_client : public wal_sync_client_testable {
 public:
-    using wal_sync_client::wal_sync_client;
+    using wal_sync_client_testable::wal_sync_client_testable;
 
     bool keepalive_session(std::string const& /*session_token*/) override {
         return false;
@@ -538,7 +546,7 @@ TEST_F(wal_sync_client_test, begin_backup_success) {
 
     helper_.start_server();
 
-    wal_sync_client client(locale_dir, helper_.create_channel());
+    wal_sync_client_testable client(locale_dir, helper_.create_channel());
     std::string error;
     ASSERT_TRUE(client.init(error, true));
 
@@ -596,7 +604,7 @@ TEST_F(wal_sync_client_test, copy_backup_objects_success) {
 
     helper_.start_server();
 
-    wal_sync_client client(locale_dir, helper_.create_channel());
+    wal_sync_client_testable client(locale_dir, helper_.create_channel());
     std::string error;
     ASSERT_TRUE(client.init(error, true));
 
@@ -693,7 +701,7 @@ TEST_F(wal_sync_client_test, copy_backup_objects_success) {
 
 TEST_F(wal_sync_client_test, copy_backup_objects_returns_true_when_no_objects) {
     // With no objects to copy, the method should short-circuit without touching the filesystem.
-    wal_sync_client client(locale_dir, helper_.create_channel());
+    wal_sync_client_testable client(locale_dir, helper_.create_channel());
     std::string error;
     ASSERT_TRUE(client.init(error, true));
 
@@ -717,7 +725,7 @@ TEST_F(wal_sync_client_test, copy_backup_objects_fails_when_directory_creation_f
     };
     failing_file_operations mock_ops;
 
-    wal_sync_client client(locale_dir, helper_.create_channel());
+    wal_sync_client_testable client(locale_dir, helper_.create_channel());
     std::string error;
     ASSERT_TRUE(client.init(error, true));
 
@@ -745,7 +753,7 @@ TEST_F(wal_sync_client_test, copy_backup_objects_fails_when_rpc_error) {
 
     helper_.start_server();
 
-    wal_sync_client client(locale_dir, helper_.create_channel());
+    wal_sync_client_testable client(locale_dir, helper_.create_channel());
     std::string error;
     ASSERT_TRUE(client.init(error, true));
 

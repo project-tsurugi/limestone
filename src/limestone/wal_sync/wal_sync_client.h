@@ -135,23 +135,6 @@ public:
     );
 
     /**
-     * @brief Request copy of backup objects from remote.
-     *
-     * This function assumes that the `objects` parameter is the list obtained from begin_backup().
-     * When using any other source, the caller must perform necessary validation beforehand.
-     *
-     * @param session_token session token
-     * @param objects list of objects to copy (begin_backup() result is assumed)
-     * @param output_dir directory where retrieved objects are written
-     * @return remote_backup_result containing success flag, error message, and incomplete object IDs
-     */
-    remote_backup_result copy_backup_objects(
-        std::string const& session_token,
-        std::vector<backup_object> const& objects,
-        boost::filesystem::path const& output_dir
-    );
-
-    /**
      * @brief Execute remote backup end-to-end sequence.
      *
      * This method performs begin_backup(), copy_backup_objects(), and end_backup()
@@ -169,21 +152,6 @@ public:
         std::uint64_t end_epoch,
         boost::filesystem::path const& output_dir
     );
-
-    /**
-     * @brief Extend the session expiration.
-     * @param session_token session token
-     * @return true if extension succeeded
-     * @note Declared virtual so tests can override keepalive behavior.
-     */
-    virtual bool keepalive_session(std::string const& session_token);
-
-    /**
-     * @brief End the backup session.
-     * @param session_token session token
-     * @return true if session ended successfully
-     */
-    bool end_backup(std::string const& session_token);
 
     /**
      * @brief Deploy copied files to the local data directory.
@@ -221,6 +189,39 @@ public:
      * @param file_ops file_operations implementation to use
      */
     void set_file_operations(file_operations& file_ops);
+
+protected:
+    /**
+     * @brief Request copy of backup objects from remote.
+     *
+     * This function assumes that the `objects` parameter is the list obtained from begin_backup().
+     * When using any other source, the caller must perform necessary validation beforehand.
+     *
+     * @param session_token session token
+     * @param objects list of objects to copy (begin_backup() result is assumed)
+     * @param output_dir directory where retrieved objects are written
+     * @return remote_backup_result containing success flag, error message, and incomplete object IDs
+     */
+    remote_backup_result copy_backup_objects(
+        std::string const& session_token,
+        std::vector<backup_object> const& objects,
+        boost::filesystem::path const& output_dir
+    );
+
+    /**
+     * @brief Extend the session expiration.
+     * @param session_token session token
+     * @return true if extension succeeded
+     * @note Declared virtual so tests can override keepalive behavior.
+     */
+    virtual bool keepalive_session(std::string const& session_token);
+
+    /**
+     * @brief End the backup session.
+     * @param session_token session token
+     * @return true if session ended successfully
+     */
+    bool end_backup(std::string const& session_token);
 
 private:
     boost::filesystem::path log_dir_;
