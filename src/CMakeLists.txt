@@ -82,6 +82,8 @@ target_link_libraries(${package_name}
         PRIVATE grpc++
         PRIVATE grpc
         PRIVATE protobuf
+        PRIVATE OpenSSL::SSL
+        PRIVATE OpenSSL::Crypto
 )
 
 if (ENABLE_ALTIMETER)
@@ -115,6 +117,8 @@ target_link_libraries(limestone-impl
         INTERFACE protobuf
         INTERFACE gpr
         INTERFACE absl_synchronization
+        INTERFACE OpenSSL::SSL
+        INTERFACE OpenSSL::Crypto
 )
 
 # utils

@@ -16,10 +16,12 @@
 #pragma once
 
 #include <limestone/api/datastore.h>
+#include <limestone/api/blob_pool.h>
 
 #include <atomic>
 #include <memory>
 #include <optional>
+#include <array>
 
 #include "manifest.h"
 #include "replication/replica_connector.h"
@@ -131,6 +133,11 @@ public:
      * @return A set of file paths.
      */
     [[nodiscard]] std::set<boost::filesystem::path> get_files() const;
+    /**
+     * @brief gets the HMAC secret key for BLOB reference tag generation.
+     * @return reference to the HMAC secret key
+     */
+    [[nodiscard]] const std::array<std::uint8_t, 16>& get_hmac_secret_key() const noexcept;
 
 private:
     datastore& datastore_;
@@ -158,6 +165,14 @@ private:
 
     // Durable epoch ID at boot time
     std::atomic<epoch_id_type> boot_durable_epoch_id_{0};
+
+    // HMAC secret key for BLOB reference tag generation (16 bytes)
+    std::array<std::uint8_t, 16> hmac_secret_key_{};
+
+    /**
+     * @brief generates HMAC secret key for BLOB reference tag generation.
+     */
+    void generate_hmac_secret_key();
 };
 
 }  // namespace limestone::api
