@@ -25,6 +25,91 @@ using limestone::grpc::service::session_timeout_seconds;
 using limestone::internal::compaction_catalog;
 using limestone::internal::wal_history;
 
+namespace {
+
+::grpc::Status send_zero_length_response(
+    const backup_object& object,
+    i_writer* writer
+) {
+    limestone::grpc::proto::GetObjectResponse resp;
+    auto* obj = resp.mutable_object();
+    obj->set_object_id(object.object_id());
+    obj->set_type(static_cast<limestone::grpc::proto::BackupObjectType>(object.type()));
+    obj->set_path(object.path().string());
+    resp.set_total_size(static_cast<std::uint64_t>(0));
+    resp.set_offset(static_cast<std::uint64_t>(0));
+    resp.set_is_first(true);
+    resp.set_is_last(true);
+    if (!writer->Write(resp)) {
+        return {::grpc::StatusCode::UNKNOWN, "stream write failed"};
+    }
+    return ::grpc::Status::OK;
+}
+
+::grpc::Status stream_file_chunks(
+    limestone::internal::file_operations* file_ops,
+    std::ifstream& ifs,
+    std::vector<char>& buffer,
+    const backup_object& object,
+    i_writer* writer,
+    std::streamsize send_size,
+    std::streamsize start_offset,
+    const boost::filesystem::path& abs_path
+) {
+    std::streamsize offset = start_offset;
+    std::streamsize remaining = send_size;
+    std::streamsize stream_offset = 0;
+    bool is_first = true;
+
+    while (remaining > 0) {
+        std::streamsize to_read = std::min(static_cast<std::streamsize>(buffer.size()), remaining);
+        file_ops->ifs_read(ifs, buffer.data(), to_read);
+        if (file_ops->ifs_bad(ifs)) {
+            int saved_errno = errno;
+            return backend_shared_impl::make_stream_error_status("failed to read file chunk", abs_path, offset, saved_errno);
+        }
+        std::streamsize bytes_read = file_ops->ifs_gcount(ifs);
+        if (bytes_read <= 0) {
+            if (file_ops->ifs_fail(ifs) || !file_ops->ifs_eof(ifs)) {
+                int saved_errno = errno;
+                return backend_shared_impl::make_stream_error_status("failed to read file chunk", abs_path, offset, saved_errno);
+            }
+            break;
+        }
+
+        limestone::grpc::proto::GetObjectResponse resp;
+        auto* obj = resp.mutable_object();
+        obj->set_object_id(object.object_id());
+        obj->set_type(static_cast<limestone::grpc::proto::BackupObjectType>(object.type()));
+        obj->set_path(object.path().string());
+
+        if (is_first) {
+            resp.set_total_size(static_cast<std::uint64_t>(send_size));
+        }
+        resp.set_offset(static_cast<std::uint64_t>(stream_offset));
+        resp.set_chunk(buffer.data(), static_cast<size_t>(bytes_read));
+        resp.set_is_first(is_first);
+        resp.set_is_last(stream_offset + bytes_read >= send_size);
+
+        if (!writer->Write(resp)) {
+            return {::grpc::StatusCode::UNKNOWN, "stream write failed"};
+        }
+
+        offset += bytes_read;
+        remaining -= bytes_read;
+        stream_offset += bytes_read;
+        is_first = false;
+    }
+
+    if (offset < start_offset + send_size) {
+        return {::grpc::StatusCode::DATA_LOSS, "file truncated during read: " + abs_path.string()};
+    }
+
+    return ::grpc::Status::OK;
+}
+
+} // namespace
+
 std::vector<backup_object> backend_shared_impl::generate_backup_objects(const std::vector<boost::filesystem::path>& paths, bool is_full_backup) {
     std::vector<backup_object> backup_objects;
 
@@ -245,25 +330,12 @@ std::optional<byte_range> backend_shared_impl::prepare_log_object_copy(
     // stream_offset tracks the offset within this stream (0-based) that is
     // reported to the client. We keep a separate file read offset for the
     // underlying file handle.
-    std::streamsize stream_offset = 0;
     // If there's nothing to send, emit one empty GetObjectResponse so the
     // client can treat the object as completed. This avoids leaving the
     // client's transfer state incomplete for objects with a zero-length
     // range (e.g., no entries match the requested epoch interval).
     if (send_size == 0) {
-        limestone::grpc::proto::GetObjectResponse resp;
-        auto* obj = resp.mutable_object();
-        obj->set_object_id(object.object_id());
-        obj->set_type(static_cast<limestone::grpc::proto::BackupObjectType>(object.type()));
-        obj->set_path(object.path().string());
-        resp.set_total_size(static_cast<std::uint64_t>(0));
-        resp.set_offset(static_cast<std::uint64_t>(0));
-        resp.set_is_first(true);
-        resp.set_is_last(true);
-        if (!writer->Write(resp)) {
-            return {::grpc::StatusCode::UNKNOWN, "stream write failed"};
-        }
-        return ::grpc::Status::OK;
+        return send_zero_length_response(object, writer);
     }
 
     file_ops_->ifs_seekg(*ifs, range.start_offset, std::ios::beg);
@@ -273,53 +345,7 @@ std::optional<byte_range> backend_shared_impl::prepare_log_object_copy(
     }
 
     std::vector<char> buffer(chunk_size_);
-    std::streamsize offset = range.start_offset;
-    bool is_first = true;
-    std::streamsize remaining = send_size;
-    while (remaining > 0) {
-        std::streamsize to_read = std::min(static_cast<std::streamsize>(buffer.size()), remaining);
-        file_ops_->ifs_read(*ifs, buffer.data(), to_read);
-        if (file_ops_->ifs_bad(*ifs)) {
-            int saved_errno = errno;
-            return backend_shared_impl::make_stream_error_status("failed to read file chunk", abs_path, offset, saved_errno);
-        }
-        std::streamsize bytes_read = file_ops_->ifs_gcount(*ifs);
-        if (bytes_read <= 0) {
-            if (file_ops_->ifs_fail(*ifs) || !file_ops_->ifs_eof(*ifs)) {
-                int saved_errno = errno;
-                return backend_shared_impl::make_stream_error_status("failed to read file chunk", abs_path, offset, saved_errno);
-            }
-            break;
-        }
-        limestone::grpc::proto::GetObjectResponse resp;
-        // Fill BackupObject info
-        auto* obj = resp.mutable_object();
-        obj->set_object_id(object.object_id());
-        obj->set_type(static_cast<limestone::grpc::proto::BackupObjectType>(object.type()));
-        obj->set_path(object.path().string());
-
-        if (is_first) {
-            // Report the total number of bytes that will be sent in this stream.
-            resp.set_total_size(static_cast<std::uint64_t>(send_size));
-        }
-        // Report offset relative to the start of this stream (0-based).
-        resp.set_offset(static_cast<std::uint64_t>(stream_offset));
-        resp.set_chunk(buffer.data(), static_cast<size_t>(bytes_read));
-        resp.set_is_first(is_first);
-        resp.set_is_last(stream_offset + bytes_read >= send_size);
-
-        if (!writer->Write(resp)) {
-            return {::grpc::StatusCode::UNKNOWN, "stream write failed"};
-        }
-    offset += bytes_read;
-    remaining -= bytes_read;
-    stream_offset += bytes_read;
-        is_first = false;
-    }
-    if (offset < range.start_offset + send_size) {
-        return {::grpc::StatusCode::DATA_LOSS, "file truncated during read: " + abs_path.string()};
-    }
-    return ::grpc::Status::OK;
+    return stream_file_chunks(file_ops_, *ifs, buffer, object, writer, send_size, range.start_offset, abs_path);
 }
 
 ::grpc::Status backend_shared_impl::make_stream_error_status(const std::string& context, const boost::filesystem::path& path, std::optional<std::streamoff> offset, int err) {

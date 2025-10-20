@@ -164,6 +164,7 @@ status copy_backup_files(const boost::filesystem::path& from_dir, const std::vec
 
 namespace limestone::api {
 
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
 status datastore::restore(std::string_view from, bool keep_backup, bool purge_destination) const noexcept {
     VLOG_LP(log_debug) << "restore begin, from directory = " << from << " , keep_backup = " << std::boolalpha << keep_backup
                        << " , purge_destination = " << std::boolalpha << purge_destination;
