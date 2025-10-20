@@ -376,7 +376,7 @@ void backend_shared_impl::reset_file_operations_to_default() noexcept {
 
 ::grpc::Status backend_shared_impl::begin_backup(datastore& datastore_, limestone::grpc::proto::BeginBackupRequest const* request,
                                                  limestone::grpc::proto::BeginBackupResponse* response, backup_path_list_provider_type const& backup_path_list_provider,
-                                                 std::function<epoch_id_type()> current_epoch_provider) noexcept {
+                                                 std::function<epoch_id_type()> const& current_epoch_provider) noexcept {
     if (!backup_path_list_provider) {
         return {::grpc::StatusCode::INTERNAL, 
                 "Unexpected error: backup_path_list_provider is not set. This may indicate an issue in the server implementation."};

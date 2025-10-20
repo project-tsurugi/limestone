@@ -111,7 +111,7 @@ public:
      */
     ::grpc::Status begin_backup(datastore& datastore_, const limestone::grpc::proto::BeginBackupRequest* request,
                                 limestone::grpc::proto::BeginBackupResponse* response, backup_path_list_provider_type const& backup_path_list_provider,
-                                std::function<epoch_id_type()> current_epoch_provider = {}) noexcept;
+                                std::function<epoch_id_type()> const& current_epoch_provider = {}) noexcept;
 
     /**
      * @brief Send backup object data as a chunked gRPC stream.

@@ -835,16 +835,6 @@ bool wal_sync_client::write_epoch_marker(
         return false;
     }
 
-    struct file_guard {
-        file_operations* ops{};
-        FILE* handle{};
-        ~file_guard() {
-            if (handle) {
-                ops->fclose(handle);
-            }
-        }
-    } guard{file_ops_, fp};
-
     limestone::api::log_entry::durable_epoch(fp, epoch);
 
     if (file_ops_->fflush(fp) != 0) {
@@ -852,6 +842,7 @@ bool wal_sync_client::write_epoch_marker(
         oss << "failed to flush epoch file: " << epoch_path.string()
             << ", errno=" << errno << " (" << std::strerror(errno) << ")";
         error_message = oss.str();
+        file_ops_->fclose(fp);
         return false;
     }
     int fd = file_ops_->fileno(fp);
@@ -860,9 +851,12 @@ bool wal_sync_client::write_epoch_marker(
         oss << "failed to fsync epoch file: " << epoch_path.string()
             << ", errno=" << errno << " (" << std::strerror(errno) << ")";
         error_message = oss.str();
+        file_ops_->fclose(fp);
         return false;
     }
 
+    // Close file before returning success
+    file_ops_->fclose(fp);
     return true;
 }
 

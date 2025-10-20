@@ -292,17 +292,48 @@ protected:
         std::exception_ptr& compaction_error
     );
 
-        // Cleanup detached pwal files after compaction but before datastore shutdown.
-        // Implemented in the .cpp file. Accepts a reference to the datastore instance
-        // so it can access the internal compaction catalog via get_impl().
-        void cleanup_detached_pwals(limestone::api::datastore& datastore);
+        /**
+         * @brief Cleans up detached persistent write-ahead logs (PWALs) from the datastore.
+         *
+         * This function scans the provided datastore and removes any PWALs that are no longer attached
+         * or associated with active data structures. It is typically used to reclaim resources and
+         * maintain the integrity of the WAL system by ensuring that obsolete or orphaned logs do not persist.
+         *
+         * @param ds Reference to the datastore from which detached PWALs should be cleaned up.
+         */
+        void cleanup_detached_pwals(limestone::api::datastore& ds);
 
+    /**
+     * @brief Writes an epoch file to the specified output directory.
+     *
+     * This function creates a marker file associated with the given epoch in the provided
+     * output directory. The marker can be used to indicate the completion or presence of
+     * a specific epoch in the WAL (Write-Ahead Logging) synchronization process.
+     *
+     * @param output_dir The directory where the epoch file will be written.
+     * @param epoch The identifier of the epoch to mark.
+     * @param error_message Reference to a string where an error message will be stored if the operation fails.
+     * @return true if the file was written successfully; false otherwise.
+     */
     bool write_epoch_marker(
         const boost::filesystem::path& output_dir,
         epoch_id_type epoch,
         std::string& error_message
     );
 
+    /**
+     * @brief Writes a snapshot of the WAL (Write-Ahead Log) history to the specified output directory.
+     *
+     * This function serializes the provided remote WAL history and writes it to a file in the given output directory.
+     * It is typically used to persist the state of WAL history up to a specified epoch, which can be useful for
+     * recovery, synchronization, or backup purposes.
+     *
+     * @param remote_history The vector containing the remote branch epochs to be included in the snapshot.
+     * @param finish_epoch The epoch ID up to which the WAL history should be written.
+     * @param output_dir The directory where the snapshot file will be created.
+     * @param error_message Reference to a string that will be populated with an error message if the operation fails.
+     * @return true if the snapshot was written successfully; false otherwise.
+     */
     bool write_wal_history_snapshot(
         const std::vector<branch_epoch>& remote_history,
         epoch_id_type finish_epoch,
