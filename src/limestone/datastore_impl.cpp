@@ -347,4 +347,8 @@ int datastore_impl::get_backup_counter() const noexcept {
     return backup_counter_.load();
 }
 
+std::set<boost::filesystem::path> datastore_impl::get_files() const {
+    return datastore_.get_files();
+}
+
 }  // namespace limestone::api

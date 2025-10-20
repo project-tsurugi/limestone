@@ -195,6 +195,48 @@ std::vector<wal_history::record> wal_history::list() const {
     return read_all_records(file_path);
 }
 
+void wal_history::write_records(const std::vector<record>& records) {
+    boost::filesystem::path file_path = dir_path_ / file_name_;
+    boost::filesystem::path tmp_path = dir_path_ / tmp_file_name_;
+
+    FILE* fp = file_ops_->fopen(tmp_path.string().c_str(), "wb");
+    int err = errno;
+    if (!fp) {
+        LOG_AND_THROW_IO_EXCEPTION("Failed to open wal_history.tmp for write: " + tmp_path.string(), err);
+    }
+
+    for (const auto& rec : records) {
+        write_record(fp, rec.epoch, rec.identity, rec.timestamp);
+    }
+
+    if (file_ops_->fflush(fp) != 0) {
+        int flush_err = errno;
+        file_ops_->fclose(fp);
+        LOG_AND_THROW_IO_EXCEPTION("Failed to flush wal_history.tmp: " + tmp_path.string(), flush_err);
+    }
+    int fd = file_ops_->fileno(fp);
+    if (fd < 0) {
+        int fileno_err = errno;
+        file_ops_->fclose(fp);
+        LOG_AND_THROW_IO_EXCEPTION("Failed to get file descriptor for wal_history.tmp: " + tmp_path.string(), fileno_err);
+    }
+    if (file_ops_->fsync(fd) != 0) {
+        int fsync_err = errno;
+        file_ops_->fclose(fp);
+        LOG_AND_THROW_IO_EXCEPTION("Failed to fsync wal_history.tmp: " + tmp_path.string(), fsync_err);
+    }
+    if (file_ops_->fclose(fp) != 0) {
+        int close_err = errno;
+        LOG_AND_THROW_IO_EXCEPTION("Failed to close wal_history.tmp: " + tmp_path.string(), close_err);
+    }
+
+    boost::system::error_code ec;
+    file_ops_->rename(tmp_path, file_path, ec);
+    if (ec) {
+        LOG_AND_THROW_IO_EXCEPTION("Failed to rename wal_history.tmp to wal_history: " + tmp_path.string() + " -> " + file_path.string(), ec.value());
+    }
+}
+
 void wal_history::check_and_recover() {
     boost::filesystem::path file_path = dir_path_ / file_name_;
     boost::filesystem::path tmp_path = dir_path_ / tmp_file_name_;

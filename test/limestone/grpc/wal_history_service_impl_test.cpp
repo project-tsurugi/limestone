@@ -3,7 +3,7 @@
 #include <grpcpp/grpcpp.h>
 #include <gtest/gtest.h>
 
-#include "grpc_server_test_base.h"
+#include "grpc_test_helper.h"
 #include "limestone/grpc/backend/grpc_service_backend.h"
 #include "limestone/grpc/backend/standalone_backend.h"
 #include "limestone/grpc/service/message_versions.h"
@@ -18,9 +18,10 @@ using limestone::grpc::proto::WalHistoryService;
 using limestone::grpc::service::wal_history_service_impl;
 
 
-class wal_history_service_impl_test : public limestone::grpc::testing::grpc_server_test_base {
+class wal_history_service_impl_test : public ::testing::Test {
 protected:
     static constexpr const char* log_dir = "/tmp/wal_history_service_impl_test";
+    limestone::grpc::testing::grpc_test_helper helper_;
 
     void write_epoch_file(uint64_t epoch_id) {
         auto epoch_file = boost::filesystem::path(log_dir) / "epoch";
@@ -33,38 +34,38 @@ protected:
     void SetUp() override {
         boost::filesystem::remove_all(log_dir);
         boost::filesystem::create_directories(log_dir);
-        set_backend_factory([]() {
+        helper_.set_backend_factory([]() {
             return limestone::grpc::backend::grpc_service_backend::create_standalone(log_dir);
         });
-        set_service_factory([](limestone::grpc::backend::grpc_service_backend& backend) {
+        helper_.add_service_factory([](limestone::grpc::backend::grpc_service_backend& backend) {
             return std::make_unique<wal_history_service_impl>(backend);
         });
-        limestone::grpc::testing::grpc_server_test_base::SetUp();
+        helper_.setup();
     }
 
     void TearDown() override {
-        limestone::grpc::testing::grpc_server_test_base::TearDown();
+        helper_.tear_down();
         boost::filesystem::remove_all(log_dir);
     }
 };
 
 
 TEST_F(wal_history_service_impl_test, list_wal_history_empty) {
-    start_server();
+    helper_.start_server();
 
     WalHistoryRequest request;
     request.set_version(list_wal_history_message_version);
     WalHistoryResponse response;
     ::grpc::ClientContext context;
     auto stub = WalHistoryService::NewStub(
-        ::grpc::CreateChannel(server_address_, ::grpc::InsecureChannelCredentials()));
+        ::grpc::CreateChannel(helper_.server_address(), ::grpc::InsecureChannelCredentials()));
     auto status = stub->GetWalHistory(&context, request, &response);
     EXPECT_TRUE(status.ok());
     EXPECT_EQ(response.records_size(), 0);
 }
 
 TEST_F(wal_history_service_impl_test, list_wal_history_single) {
-    start_server();
+    helper_.start_server();
 
     limestone::internal::wal_history wh(log_dir);
     wh.append(123);
@@ -76,7 +77,7 @@ TEST_F(wal_history_service_impl_test, list_wal_history_single) {
     WalHistoryResponse response;
     ::grpc::ClientContext context;
     auto stub = WalHistoryService::NewStub(
-        ::grpc::CreateChannel(server_address_, ::grpc::InsecureChannelCredentials()));
+        ::grpc::CreateChannel(helper_.server_address(), ::grpc::InsecureChannelCredentials()));
     auto status = stub->GetWalHistory(&context, request, &response);
     EXPECT_TRUE(status.ok());
     ASSERT_EQ(response.records_size(), expected.size());
@@ -91,7 +92,7 @@ TEST_F(wal_history_service_impl_test, list_wal_history_single) {
 }
 
 TEST_F(wal_history_service_impl_test, list_wal_history_multiple) {
-    start_server();
+    helper_.start_server();
 
     limestone::internal::wal_history wh(log_dir);
     wh.append(111);
@@ -105,7 +106,7 @@ TEST_F(wal_history_service_impl_test, list_wal_history_multiple) {
     WalHistoryResponse response;
     ::grpc::ClientContext context;
     auto stub = WalHistoryService::NewStub(
-        ::grpc::CreateChannel(server_address_, ::grpc::InsecureChannelCredentials()));
+        ::grpc::CreateChannel(helper_.server_address(), ::grpc::InsecureChannelCredentials()));
     auto status = stub->GetWalHistory(&context, request, &response);
     EXPECT_TRUE(status.ok());
     ASSERT_EQ(response.records_size(), expected.size());
@@ -120,7 +121,7 @@ TEST_F(wal_history_service_impl_test, list_wal_history_multiple) {
 }
 
 TEST_F(wal_history_service_impl_test, list_wal_history_with_max_last_epoch) {
-    start_server();
+    helper_.start_server();
 
     limestone::internal::wal_history wh(log_dir);
     wh.append(std::numeric_limits<uint64_t>::max());
@@ -132,7 +133,7 @@ TEST_F(wal_history_service_impl_test, list_wal_history_with_max_last_epoch) {
     WalHistoryResponse response;
     ::grpc::ClientContext context;
     auto stub = WalHistoryService::NewStub(
-        ::grpc::CreateChannel(server_address_, ::grpc::InsecureChannelCredentials()));
+        ::grpc::CreateChannel(helper_.server_address(), ::grpc::InsecureChannelCredentials()));
     auto status = stub->GetWalHistory(&context, request, &response);
     EXPECT_TRUE(status.ok());
     ASSERT_EQ(response.records_size(), expected.size());
@@ -149,7 +150,7 @@ TEST_F(wal_history_service_impl_test, list_wal_history_with_max_last_epoch) {
 // NOTE: This test is disabled because AddressSanitizer (ASan) reports a memory leak in CI environments.
 // The root cause could not be identified after investigation. The test is kept for reference but is not run by default.
 TEST_F(wal_history_service_impl_test, DISABLED_list_wal_history_epoch_greater_than_last_epoch_should_throw) {
-    start_server();
+    helper_.start_server();
 
     limestone::internal::wal_history wh(log_dir);
     wh.append(1000); // epoch of wal_history
@@ -160,7 +161,7 @@ TEST_F(wal_history_service_impl_test, DISABLED_list_wal_history_epoch_greater_th
     limestone::grpc::proto::WalHistoryResponse response;
     ::grpc::ClientContext context;
     auto stub = limestone::grpc::proto::WalHistoryService::NewStub(
-        ::grpc::CreateChannel(server_address_, ::grpc::InsecureChannelCredentials()));
+        ::grpc::CreateChannel(helper_.server_address(), ::grpc::InsecureChannelCredentials()));
     auto status = stub->GetWalHistory(&context, request, &response);
     EXPECT_FALSE(status.ok());
     EXPECT_EQ(status.error_code(), ::grpc::StatusCode::INTERNAL);

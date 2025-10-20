@@ -16,7 +16,6 @@
 
 namespace limestone::grpc::backend {
 
-using limestone::api::backup_type;
 using limestone::api::log_entry;
 using limestone::grpc::service::begin_backup_message_version;
 using limestone::grpc::service::end_backup_message_version;
@@ -24,26 +23,122 @@ using limestone::grpc::service::get_object_message_version;
 using limestone::grpc::service::keep_alive_message_version;
 using limestone::grpc::service::session_timeout_seconds;
 using limestone::internal::compaction_catalog;
-using limestone::api::backup_detail_and_rotation_result;
+using limestone::internal::wal_history;
 
-std::optional<backup_object> backend_shared_impl::make_backup_object_from_path(const boost::filesystem::path& path) {
-    std::string filename = path.filename().string();
+namespace {
 
-    static const std::set<std::string> metadata_files = {"compaction_catalog", "limestone-manifest.json", "wal_history"};
-
-    if (filename == "pwal_0000.compacted") {
-        return backup_object(filename, backup_object_type::snapshot, filename);
+::grpc::Status send_zero_length_response(
+    const backup_object& object,
+    i_writer* writer
+) {
+    limestone::grpc::proto::GetObjectResponse resp;
+    auto* obj = resp.mutable_object();
+    obj->set_object_id(object.object_id());
+    obj->set_type(static_cast<limestone::grpc::proto::BackupObjectType>(object.type()));
+    obj->set_path(object.path().string());
+    resp.set_total_size(static_cast<std::uint64_t>(0));
+    resp.set_offset(static_cast<std::uint64_t>(0));
+    resp.set_is_first(true);
+    resp.set_is_last(true);
+    if (!writer->Write(resp)) {
+        return {::grpc::StatusCode::UNKNOWN, "stream write failed"};
     }
-    if (filename.rfind("pwal_", 0) == 0) {
-        return backup_object(filename, backup_object_type::log, filename);
-    }
-    if ((metadata_files.count(filename) > 0) || filename.rfind("epoch.", 0) == 0) {
-        return backup_object(filename, backup_object_type::metadata, filename);
-    }
-    return std::nullopt;
+    return ::grpc::Status::OK;
 }
 
-using limestone::internal::wal_history;    
+::grpc::Status stream_file_chunks(
+    limestone::internal::file_operations* file_ops,
+    std::ifstream& ifs,
+    std::vector<char>& buffer,
+    const backup_object& object,
+    i_writer* writer,
+    std::streamsize send_size,
+    std::streamsize start_offset,
+    const boost::filesystem::path& abs_path
+) {
+    std::streamsize offset = start_offset;
+    std::streamsize remaining = send_size;
+    std::streamsize stream_offset = 0;
+    bool is_first = true;
+
+    while (remaining > 0) {
+        std::streamsize to_read = std::min(static_cast<std::streamsize>(buffer.size()), remaining);
+        file_ops->ifs_read(ifs, buffer.data(), to_read);
+        if (file_ops->ifs_bad(ifs)) {
+            int saved_errno = errno;
+            return backend_shared_impl::make_stream_error_status("failed to read file chunk", abs_path, offset, saved_errno);
+        }
+        std::streamsize bytes_read = file_ops->ifs_gcount(ifs);
+        if (bytes_read <= 0) {
+            if (file_ops->ifs_fail(ifs) || !file_ops->ifs_eof(ifs)) {
+                int saved_errno = errno;
+                return backend_shared_impl::make_stream_error_status("failed to read file chunk", abs_path, offset, saved_errno);
+            }
+            break;
+        }
+
+        limestone::grpc::proto::GetObjectResponse resp;
+        auto* obj = resp.mutable_object();
+        obj->set_object_id(object.object_id());
+        obj->set_type(static_cast<limestone::grpc::proto::BackupObjectType>(object.type()));
+        obj->set_path(object.path().string());
+
+        if (is_first) {
+            resp.set_total_size(static_cast<std::uint64_t>(send_size));
+        }
+        resp.set_offset(static_cast<std::uint64_t>(stream_offset));
+        resp.set_chunk(buffer.data(), static_cast<size_t>(bytes_read));
+        resp.set_is_first(is_first);
+        resp.set_is_last(stream_offset + bytes_read >= send_size);
+
+        if (!writer->Write(resp)) {
+            return {::grpc::StatusCode::UNKNOWN, "stream write failed"};
+        }
+
+        offset += bytes_read;
+        remaining -= bytes_read;
+        stream_offset += bytes_read;
+        is_first = false;
+    }
+
+    if (offset < start_offset + send_size) {
+        return {::grpc::StatusCode::DATA_LOSS, "file truncated during read: " + abs_path.string()};
+    }
+
+    return ::grpc::Status::OK;
+}
+
+} // namespace
+
+std::vector<backup_object> backend_shared_impl::generate_backup_objects(const std::vector<boost::filesystem::path>& paths, bool is_full_backup) {
+    std::vector<backup_object> backup_objects;
+
+    for (const auto& path : paths) {
+        std::string filename = path.filename().string();
+
+        static const std::set<std::string> metadata_files = {"compaction_catalog", "limestone-manifest.json", "wal_history"};
+
+        if (filename == "pwal_0000.compacted") {
+            if (!is_full_backup) {
+                continue;  // Skip the snapshot file in incremental backup mode
+            }
+            backup_objects.emplace_back(filename, backup_object_type::snapshot, filename);
+        } else if (filename.rfind("pwal_", 0) == 0) {
+            backup_objects.emplace_back(filename, backup_object_type::log, filename);
+        } else if ((metadata_files.count(filename) > 0)) {
+            // For incremental backups (is_full_backup == false), only 
+            // 'limestone-manifest.json' are included; other metadata files
+            // listed above are skipped.
+            if (!is_full_backup && filename != "limestone-manifest.json") {
+                continue;
+            }
+            backup_objects.emplace_back(filename, backup_object_type::metadata, filename);
+        } else if (filename.rfind("epoch", 0) == 0 && is_full_backup) {
+            backup_objects.emplace_back(filename, backup_object_type::metadata, filename);
+        }
+    }
+    return backup_objects;
+}
 
 backend_shared_impl::backend_shared_impl(boost::filesystem::path log_dir, std::size_t chunk_size)
     : log_dir_(std::move(log_dir)), chunk_size_(chunk_size), 
@@ -132,9 +227,13 @@ void backend_shared_impl::set_file_operations(limestone::internal::file_operatio
             if (!range) {
                 return error_status;
             }
-            if (range->end_offset.has_value() && range->end_offset == 0) {
-                continue; // File does not have a copy target
-            }
+            // If end_offset == 0 we previously skipped this object entirely.
+            // That causes the client to receive an object in the begin_backup
+            // list but never get any GetObjectResponse for it, leaving the
+            // client-side transfer state incomplete. Instead, do not skip;
+            // allow send_backup_object_data to be called with a zero-length
+            // range so the server can emit a single empty response and the
+            // client will mark the object as completed.
         }
         auto send_status = send_backup_object_data(*backup_object, writer, range.value());
         if (!send_status.ok()) {
@@ -183,11 +282,11 @@ std::optional<byte_range> backend_shared_impl::prepare_log_object_copy(
             if (!start_offset.has_value() && entry.epoch_id() >= begin_epoch) {
                 start_offset = fpos_before_read_entry;
             }
-            if (!end_offset.has_value() && entry.epoch_id() >= end_epoch) {
+            if (!end_offset.has_value() && entry.epoch_id() > end_epoch) {
                 end_offset = fpos_before_read_entry;
             }
         }
-        if (entry.type() == log_entry::entry_type::normal_with_blob && current_epoch_id >= begin_epoch && current_epoch_id < end_epoch) {
+        if (entry.type() == log_entry::entry_type::normal_with_blob && current_epoch_id >= begin_epoch && current_epoch_id <= end_epoch) {
             auto blob_ids = entry.get_blob_ids();
             required_blobs.insert(blob_ids.begin(), blob_ids.end());
         }
@@ -228,6 +327,17 @@ std::optional<byte_range> backend_shared_impl::prepare_log_object_copy(
         return {::grpc::StatusCode::OUT_OF_RANGE, "end_offset before start_offset"};
     }
     std::streamsize send_size = effective_end - range.start_offset;
+    // stream_offset tracks the offset within this stream (0-based) that is
+    // reported to the client. We keep a separate file read offset for the
+    // underlying file handle.
+    // If there's nothing to send, emit one empty GetObjectResponse so the
+    // client can treat the object as completed. This avoids leaving the
+    // client's transfer state incomplete for objects with a zero-length
+    // range (e.g., no entries match the requested epoch interval).
+    if (send_size == 0) {
+        return send_zero_length_response(object, writer);
+    }
+
     file_ops_->ifs_seekg(*ifs, range.start_offset, std::ios::beg);
     if (file_ops_->ifs_fail(*ifs)) {
         int saved_errno = errno;
@@ -235,50 +345,7 @@ std::optional<byte_range> backend_shared_impl::prepare_log_object_copy(
     }
 
     std::vector<char> buffer(chunk_size_);
-    std::streamsize offset = range.start_offset;
-    bool is_first = true;
-    std::streamsize remaining = send_size;
-    while (remaining > 0) {
-        std::streamsize to_read = std::min(static_cast<std::streamsize>(buffer.size()), remaining);
-        file_ops_->ifs_read(*ifs, buffer.data(), to_read);
-        if (file_ops_->ifs_bad(*ifs)) {
-            int saved_errno = errno;
-            return backend_shared_impl::make_stream_error_status("failed to read file chunk", abs_path, offset, saved_errno);
-        }
-        std::streamsize bytes_read = file_ops_->ifs_gcount(*ifs);
-        if (bytes_read <= 0) {
-            if (file_ops_->ifs_fail(*ifs) || !file_ops_->ifs_eof(*ifs)) {
-                int saved_errno = errno;
-                return backend_shared_impl::make_stream_error_status("failed to read file chunk", abs_path, offset, saved_errno);
-            }
-            break;
-        }
-        limestone::grpc::proto::GetObjectResponse resp;
-        // Fill BackupObject info
-        auto* obj = resp.mutable_object();
-        obj->set_object_id(object.object_id());
-        obj->set_type(static_cast<limestone::grpc::proto::BackupObjectType>(object.type()));
-        obj->set_path(object.path().string());
-
-        if (is_first) {
-            resp.set_total_size(static_cast<int64_t>(total_size));
-        }
-        resp.set_offset(static_cast<int64_t>(offset));
-        resp.set_chunk(buffer.data(), static_cast<size_t>(bytes_read));
-        resp.set_is_first(is_first);
-        resp.set_is_last(offset + bytes_read >= effective_end);
-
-        if (!writer->Write(resp)) {
-            return {::grpc::StatusCode::UNKNOWN, "stream write failed"};
-        }
-        offset += bytes_read;
-        remaining -= bytes_read;
-        is_first = false;
-    }
-    if (offset < range.start_offset + send_size) {
-        return {::grpc::StatusCode::DATA_LOSS, "file truncated during read: " + abs_path.string()};
-    }
-    return ::grpc::Status::OK;
+    return stream_file_chunks(file_ops_, *ifs, buffer, object, writer, send_size, range.start_offset, abs_path);
 }
 
 ::grpc::Status backend_shared_impl::make_stream_error_status(const std::string& context, const boost::filesystem::path& path, std::optional<std::streamoff> offset, int err) {
@@ -307,8 +374,13 @@ void backend_shared_impl::reset_file_operations_to_default() noexcept {
     file_ops_ = default_file_ops_.get();
 }
 
-::grpc::Status backend_shared_impl::begin_backup(datastore& datastore_, const limestone::grpc::proto::BeginBackupRequest* request,
-                                                 limestone::grpc::proto::BeginBackupResponse* response) noexcept {
+::grpc::Status backend_shared_impl::begin_backup(datastore& datastore_, limestone::grpc::proto::BeginBackupRequest const* request,
+                                                 limestone::grpc::proto::BeginBackupResponse* response, backup_path_list_provider_type const& backup_path_list_provider,
+                                                 std::function<epoch_id_type()> const& current_epoch_provider) noexcept {
+    if (!backup_path_list_provider) {
+        return {::grpc::StatusCode::INTERNAL, 
+                "Unexpected error: backup_path_list_provider is not set. This may indicate an issue in the server implementation."};
+    }
     try {
 		// Call the exception injection hook if it is set (for testing)
         if (exception_hook_) {
@@ -319,6 +391,7 @@ void backend_shared_impl::reset_file_operations_to_default() noexcept {
         }
         uint32_t begin_epoch = request->begin_epoch();
         uint32_t end_epoch = request->end_epoch();
+
         // Create a session for this backup. The second argument is a callback
         // that will be invoked when the session is removed (expired or deleted).
         // In this callback, decrement_backup_counter() is called to update the backup counter.
@@ -330,14 +403,38 @@ void backend_shared_impl::reset_file_operations_to_default() noexcept {
                 datastore_.get_impl()->decrement_backup_counter();
             }
         );
+
+        // Handle error if session creation fails
         if (!session) {
+            // Collision of session_id (UUID) is practically impossible, so this branch is unreachable in normal operation.
             return {::grpc::StatusCode::INTERNAL, "failed to create session"};
         }
 
-        response->set_session_id(session->session_id());
-        response->set_expire_at(session->expire_at());
-        bool is_full_backup = (begin_epoch == 0 && end_epoch == 0);
+        // Use a scope guard to ensure the session is removed in case of an error.
+        // This guarantees that the session will not remain active if an exception occurs.
+        struct session_remover {
+        private:
+            backend_shared_impl* backend;
+            std::string session_id;
+
+        public:
+            session_remover(backend_shared_impl* backend, std::string session_id)
+                : backend(backend), session_id(std::move(session_id)) {}
+
+            void operator()(limestone::grpc::backend::session* s) const {
+                if (s) {
+                    backend->get_session_store().remove_session(session_id);
+                }
+            }
+        };
+        auto session_guard = std::unique_ptr<limestone::grpc::backend::session, session_remover>(
+            &(*session), // Extract the raw pointer from std::optional
+            session_remover{this, session->session_id()}
+        );
+
+        // Validate the backup parameters
         compaction_catalog& catalog = datastore_.get_impl()->get_compaction_catalog();
+        bool is_full_backup = (begin_epoch == 0 && end_epoch == 0);
         if (!is_full_backup) {
             // differential backup
             if (begin_epoch >= end_epoch) {
@@ -349,30 +446,46 @@ void backend_shared_impl::reset_file_operations_to_default() noexcept {
                 return {::grpc::StatusCode::INVALID_ARGUMENT, "begin_epoch must be strictly greater than the epoch id of the last snapshot: begin_epoch=" +
                                                                   std::to_string(begin_epoch) + ", snapshot_epoch_id=" + std::to_string(snapshot_epoch_id)};
             }
-            auto current_epoch_id = datastore_.last_epoch();
+            // Use the provided epoch provider if available; otherwise fall back to datastore_.last_epoch().
+            // TODO: Replace this lambda-based approach with a backend_context/strategy to
+            // centralize environment-specific logic (inproc vs standalone).
+            epoch_id_type current_epoch_id = 0;
+            if (current_epoch_provider) {
+                current_epoch_id = current_epoch_provider();
+            } else {
+                current_epoch_id = datastore_.last_epoch();
+            }
             if (end_epoch > current_epoch_id) {
                 return {::grpc::StatusCode::INVALID_ARGUMENT, "end_epoch must be less than or equal to the current epoch id: end_epoch=" +
                                                                   std::to_string(end_epoch) + ", current_epoch_id=" + std::to_string(current_epoch_id)};
             }
-			auto boot_durable_epoch_id = datastore_.get_impl()->get_boot_durable_epoch_id();
-			if (end_epoch < boot_durable_epoch_id) {
-				return {::grpc::StatusCode::INVALID_ARGUMENT, "end_epoch must be strictly greater than the durable epoch id at boot time: end_epoch=" +
-																  std::to_string(end_epoch) + ", boot_durable_epoch_id=" + std::to_string(boot_durable_epoch_id)};
-			}
-		} 
-        response->set_start_epoch(begin_epoch);
-        response->set_finish_epoch(end_epoch);
-
-        backup_detail_and_rotation_result result = datastore_.get_impl()->begin_backup_with_rotation_result(backup_type::transaction);
-        if (result.detail) {
-            for (const auto& entry : result.detail->entries()) {
-                auto obj = backend_shared_impl::make_backup_object_from_path(entry.source_path());
-                if (obj) {
-                    session_store_.add_backup_object_to_session(session->session_id(), *obj);
-                    *response->add_objects() = obj->to_proto();
-                }
+            epoch_id_type boot_durable_epoch_id = datastore_.get_impl()->get_boot_durable_epoch_id();
+            // Note: we currently always use datastore_.get_impl()->get_boot_durable_epoch_id().
+            // If a different source is required for standalone, consider passing a boot_epoch_provider similarly.
+            if (end_epoch < boot_durable_epoch_id) {
+                return {::grpc::StatusCode::INVALID_ARGUMENT, "end_epoch must be strictly greater than the durable epoch id at boot time: end_epoch=" +
+                                                                  std::to_string(end_epoch) + ", boot_durable_epoch_id=" + std::to_string(boot_durable_epoch_id)};
             }
         }
+
+
+        // Use custom path provider if provided, otherwise use default implementation
+        auto paths = backup_path_list_provider();
+
+        auto backup_objects = backend_shared_impl::generate_backup_objects(paths, is_full_backup);
+        for (const auto& obj : backup_objects) {
+            session_store_.add_backup_object_to_session(session->session_id(), obj);
+            *response->add_objects() = obj.to_proto();
+        }
+
+        // Release the scope guard before returning success.
+        // This ensures the session remains valid after the function exits successfully.
+        [[maybe_unused]] auto unused = session_guard.release();
+
+        response->set_session_id(session->session_id());
+        response->set_expire_at(session->expire_at());
+        response->set_start_epoch(begin_epoch);
+        response->set_finish_epoch(end_epoch);
         return ::grpc::Status::OK;
     } catch (const std::exception& e) {
         VLOG_LP(log_info) << "begin_backup failed: " << e.what();

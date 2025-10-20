@@ -81,7 +81,7 @@ status check_manifest(const boost::filesystem::path& manifest_path) {
 status validate_manifest_files(const boost::filesystem::path& from_dir, const std::vector<file_set_entry>& entries) {
     int manifest_count = 0;
     for (auto & ent : entries) {
-        if (ent.destination_path().string() != internal::manifest::file_name) {
+        if (ent.destination_path().string() != std::string(internal::manifest::file_name)) {
             continue;
         }
         boost::filesystem::path src{ent.source_path()};
@@ -139,14 +139,16 @@ status copy_backup_files(const boost::filesystem::path& from_dir, const std::vec
         }
         try {
             if (!resolver.is_blob_file(src)) {
-                boost::filesystem::copy_file(src, location / dst);
+                // overwrite if destination exists
+                boost::filesystem::copy_file(src, location / dst, boost::filesystem::copy_options::overwrite_existing);
             } else {
                 boost::filesystem::path full_dst = resolver.resolve_path(resolver.extract_blob_id(src));
                 boost::filesystem::path dst_dir = full_dst.parent_path();
                 if (!boost::filesystem::exists(dst_dir)) {
                     boost::filesystem::create_directories(dst_dir);
                 }
-                boost::filesystem::copy_file(src, full_dst);
+                // overwrite blob file if destination exists
+                boost::filesystem::copy_file(src, full_dst, boost::filesystem::copy_options::overwrite_existing);
             }
         } catch (boost::filesystem::filesystem_error& ex) {
             LOG_LP(ERROR) << ex.what() << " file = " << src.string();
@@ -162,8 +164,10 @@ status copy_backup_files(const boost::filesystem::path& from_dir, const std::vec
 
 namespace limestone::api {
 
-status datastore::restore(std::string_view from, bool keep_backup) const noexcept {
-    VLOG_LP(log_debug) << "restore begin, from directory = " << from << " , keep_backup = " << std::boolalpha << keep_backup;
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+status datastore::restore(std::string_view from, bool keep_backup, bool purge_destination) const noexcept {
+    VLOG_LP(log_debug) << "restore begin, from directory = " << from << " , keep_backup = " << std::boolalpha << keep_backup
+                       << " , purge_destination = " << std::boolalpha << purge_destination;
     limestone::internal::blob_file_resolver resolver{location_};
     auto from_dir = boost::filesystem::path(std::string(from));
 
@@ -181,20 +185,40 @@ status datastore::restore(std::string_view from, bool keep_backup) const noexcep
     }
     if (auto rc = check_manifest(manifest_path); rc != status::ok) { return rc; }
 
-    if (auto rc = internal::purge_dir(location_); rc != status::ok) { return rc; }
+    if (purge_destination) {
+        if (auto rc = internal::purge_dir(location_); rc != status::ok) { return rc; }
+    }
 
     try {
         for (const boost::filesystem::path& p : boost::filesystem::directory_iterator(from_dir)) {
             try {
+                // If this is the manifest file and we are NOT purging the destination,
+                // skip copying it when destination already contains a manifest.
+                if (p.filename() == boost::filesystem::path(std::string(internal::manifest::file_name))) {
+                    boost::filesystem::path dst_manifest = location_ / std::string(internal::manifest::file_name);
+                    try {
+                        if (boost::filesystem::exists(dst_manifest)) {
+                            VLOG_LP(log_info) << "skip copying manifest since destination already has one: " << dst_manifest.string();
+                            continue;
+                        }
+                    } catch (const boost::filesystem::filesystem_error& ex) {
+                        LOG_LP(ERROR) << "Filesystem error while checking destination manifest: " << ex.what()
+                                       << " file = " << dst_manifest.string();
+                        return status::err_permission_error;
+                    }
+                }
+
                 if (!resolver.is_blob_file(p)) {
-                boost::filesystem::copy_file(p, location_ / p.filename());
+                    // overwrite destination file if exists
+                    boost::filesystem::copy_file(p, location_ / p.filename(), boost::filesystem::copy_options::overwrite_existing);
                 } else {
                     boost::filesystem::path full_dst = resolver.resolve_path(resolver.extract_blob_id(p));
                     boost::filesystem::path dst_dir = full_dst.parent_path();
                     if (!boost::filesystem::exists(dst_dir)) {
                         boost::filesystem::create_directories(dst_dir);
                     }
-                    boost::filesystem::copy_file(p, full_dst);
+                    // overwrite blob file if exists
+                    boost::filesystem::copy_file(p, full_dst, boost::filesystem::copy_options::overwrite_existing);
                 }
             } catch (boost::filesystem::filesystem_error& ex) {
                 LOG_LP(ERROR) << ex.what() << " file = " << p.string();

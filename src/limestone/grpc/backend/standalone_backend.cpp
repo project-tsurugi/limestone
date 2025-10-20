@@ -19,6 +19,7 @@
 #include "limestone/logging.h"
 #include "logging_helper.h"
 #include "grpc/service/message_versions.h"
+#include "datastore_impl.h"
 namespace limestone::grpc::backend {
 
 
@@ -65,9 +66,16 @@ standalone_backend::standalone_backend(const boost::filesystem::path& log_dir)
 
 
 ::grpc::Status standalone_backend::begin_backup(const BeginBackupRequest* request, BeginBackupResponse* response) noexcept {
-    return backend_shared_impl_.begin_backup(datastore_, request, response);
+    backup_path_list_provider_type provider = [this]() -> std::vector<boost::filesystem::path> {
+        auto set = datastore_.get_impl()->get_files();
+        return {set.begin(), set.end()};
+    };
+    auto epoch_provider = [this]() -> epoch_id_type {
+        limestone::internal::dblog_scan scan(log_dir_);
+        return scan.last_durable_epoch_in_dir();
+    };
+    return backend_shared_impl_.begin_backup(datastore_, request, response, provider, epoch_provider);
 }
-
 
 
 boost::filesystem::path standalone_backend::get_log_dir() const noexcept {

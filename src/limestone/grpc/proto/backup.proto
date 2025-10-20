@@ -94,10 +94,10 @@ message GetObjectResponse {
     BackupObject object = 1;
 
     // Total size of the object (set in the first chunk).
-    int64 total_size = 2;
+    uint64 total_size = 2;
 
     // Offset of this chunk in the object.
-    int64 offset = 3;
+    uint64 offset = 3;
 
     // Binary data chunk.
     bytes chunk = 4;

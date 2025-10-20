@@ -2,6 +2,7 @@
 
 #include <google/protobuf/repeated_field.h>
 
+#include <functional>
 #include <memory>
 #include <optional>
 #include <vector>
@@ -21,6 +22,14 @@ using limestone::grpc::proto::BranchEpoch;
 using limestone::grpc::proto::BackupObject;
 using limestone::api::blob_id_type;
 using limestone::api::datastore;
+
+/**
+ * @brief Type for backup path list provider function
+ * 
+ * A function that takes datastore and returns a vector of filesystem paths.
+ * This allows customization of how paths are extracted from datastore.
+ */
+using backup_path_list_provider_type = std::function<std::vector<boost::filesystem::path>()>;
 
 class i_writer {
 public:
@@ -70,7 +79,7 @@ public:
     google::protobuf::RepeatedPtrField<BranchEpoch> list_wal_history();
 
     // Shared logic for creating backup objects from file paths
-    static std::optional<backup_object> make_backup_object_from_path(const boost::filesystem::path& path);
+    static std::vector<backup_object> generate_backup_objects(const std::vector<boost::filesystem::path>& paths, bool is_full_backup);
 
     // Create and register a session via session_store, return the created session
     std::optional<session> create_and_register_session(epoch_id_type begin_epoch, epoch_id_type end_epoch, int64_t timeout_seconds, session::on_remove_callback_type on_remove = nullptr);
@@ -85,7 +94,24 @@ public:
     ::grpc::Status get_object(const limestone::grpc::proto::GetObjectRequest* request, i_writer* writer) noexcept;
 
     // Shared logic for begin backup
-    ::grpc::Status begin_backup(datastore& datastore_, const limestone::grpc::proto::BeginBackupRequest* request, limestone::grpc::proto::BeginBackupResponse* response) noexcept;
+    /**
+     * @brief Shared logic for begin backup.
+     *
+     * @param datastore_ Datastore reference used for some validation and callbacks.
+     * @param request BeginBackupRequest proto pointer.
+     * @param response BeginBackupResponse proto pointer to populate.
+     * @param backup_path_list_provider Provider function that returns backup paths.
+     * @param current_epoch_provider Optional function that returns the current epoch id in an
+     *        environment-specific way. If not provided, datastore_.last_epoch() is used.
+     *
+     * TODO: Consider replacing the ad-hoc lambda provider with a structured
+     * backend_context / strategy object to fully encapsulate environment-specific
+     * behavior (see design notes). This parameter is a minimal, temporary
+     * mechanism to avoid duplicating logic in callers.
+     */
+    ::grpc::Status begin_backup(datastore& datastore_, const limestone::grpc::proto::BeginBackupRequest* request,
+                                limestone::grpc::proto::BeginBackupResponse* response, backup_path_list_provider_type const& backup_path_list_provider,
+                                std::function<epoch_id_type()> const& current_epoch_provider = {}) noexcept;
 
     /**
      * @brief Send backup object data as a chunked gRPC stream.

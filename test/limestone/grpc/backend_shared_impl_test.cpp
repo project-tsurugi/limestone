@@ -28,32 +28,9 @@
 #include "limestone/grpc/service/message_versions.h"
 #include "log_entry.h"
 
-namespace {
 
-using limestone::grpc::proto::BackupObjectType;
 
-// Structure representing backup file conditions for backup test
-struct backup_condition {
-    std::string path_pre_begin_backup;
-    std::string path_post_begin_backup;
-    std::string object_id;
-    std::string object_path;
-    BackupObjectType object_type;
-};
-
-static const std::vector<backup_condition> backup_conditions =
-    {{"blob/dir_00/00000000000000c8.blob", "blob/dir_00/00000000000000c8.blob", "", "", BackupObjectType::UNSPECIFIED},
-     {"compaction_catalog", "compaction_catalog", "compaction_catalog", "compaction_catalog", BackupObjectType::METADATA},
-     {"compaction_catalog.back", "compaction_catalog.back", "", "", BackupObjectType::UNSPECIFIED},
-     {"data/snapshot", "data/snapshot", "", "", BackupObjectType::UNSPECIFIED},
-     {"epoch", "epoch", "", "", BackupObjectType::UNSPECIFIED},
-     {"", "epoch.*.6", "epoch.*.6", "epoch.*.6", BackupObjectType::METADATA},
-     {"limestone-manifest.json", "limestone-manifest.json", "limestone-manifest.json", "limestone-manifest.json", BackupObjectType::METADATA},
-     {"pwal_0000.*.0", "pwal_0000.*.0", "pwal_0000.*.0", "pwal_0000.*.0", BackupObjectType::LOG},
-     {"pwal_0000.compacted", "pwal_0000.compacted", "pwal_0000.compacted", "pwal_0000.compacted", BackupObjectType::SNAPSHOT},
-     {"pwal_0001", "pwal_0001.*.0", "pwal_0001.*.0", "pwal_0001.*.0", BackupObjectType::LOG},
-     {"wal_history", "wal_history", "wal_history", "wal_history", BackupObjectType::METADATA}};
-}  // anonymous namespace
+ 
 
 namespace limestone::testing {
 
@@ -96,66 +73,7 @@ protected:
     };
 
  protected:
-    template <typename Selector>
-    void assert_backup_file_conditions(Selector selector) {
-        namespace fs = boost::filesystem;
-        fs::path dir(get_location());
 
-        std::set<std::string> actual;
-        for (auto& entry : fs::recursive_directory_iterator(dir)) {
-            if (fs::is_regular_file(entry.status())) {
-                fs::path rel = fs::relative(entry.path(), dir);
-                std::string relstr = rel.generic_string();
-                actual.insert(relstr);
-            }
-        }
-
-
-        // Check for expected files
-        for (const auto& cond : backup_conditions) {
-            const std::string& pattern = selector(cond);
-            if (pattern.empty()) {
-                // If empty, the file must NOT exist
-                bool found = false;
-                for (const auto& act : actual) {
-                    if (act.empty()) {
-                        found = true;
-                        break;
-                    }
-                }
-                ASSERT_FALSE(found) << "Unexpected file found (should not exist): <empty pattern>";
-                continue;
-            }
-            bool found = false;
-            std::string regex_pat = wildcard_to_regex(pattern);
-            std::regex re(regex_pat);
-            for (const auto& act : actual) {
-                if (std::regex_match(act, re)) {
-                    found = true;
-                    break;
-                }
-            }
-            ASSERT_TRUE(found) << "Expected file pattern not found: " << pattern;
-        }
-
-        // Check for unexpected files
-        for (const auto& act : actual) {
-            bool matched = false;
-            for (const auto& cond : backup_conditions) {
-                const std::string& pattern = selector(cond);
-                if (pattern.empty()) {
-                    continue;
-                }
-                std::string regex_pat = wildcard_to_regex(pattern);
-                std::regex re(regex_pat);
-                if (std::regex_match(act, re)) {
-                    matched = true;
-                    break;
-                }
-            }
-            ASSERT_TRUE(matched) << "Unexpected file found: " << act;
-        }
-    }
     
     void create_test_pwal_with_blogs() {
         gen_datastore();
@@ -177,6 +95,18 @@ protected:
         lc0_->end_session();
         datastore_->switch_epoch(103);
     }
+
+    // Define backup_path_list_provider as a lambda
+    backup_path_list_provider_type backup_path_list_provider = [&]() {
+        backup_detail_and_rotation_result result = datastore_->get_impl()->begin_backup_with_rotation_result(backup_type::transaction);
+        std::vector<boost::filesystem::path> paths;
+        if (result.detail) {
+            for (const auto& entry : result.detail->entries()) {
+                paths.push_back(entry.source_path());
+            }
+        }
+        return paths;
+    };
 };
 
 class dummy_writer : public i_writer {
@@ -213,44 +143,110 @@ TEST_F(backend_shared_impl_test, list_wal_history_matches_wal_history_class) {
     }
 }
 
-TEST_F(backend_shared_impl_test, make_backup_object_from_path_metadata_files) {
+TEST_F(backend_shared_impl_test, generate_backup_objects_metadata_files) {
     std::vector<std::string> files = {
         "compaction_catalog",
-        "limestone-manifest.json",
         "wal_history",
         "epoch.1234567890.1"
     };
     for (const auto& fname : files) {
-        auto obj = backend_shared_impl::make_backup_object_from_path(fname);
-        ASSERT_TRUE(obj.has_value());
-        EXPECT_EQ(obj->object_id(), fname);
-        EXPECT_EQ(obj->path(), fname);
-        EXPECT_EQ(obj->type(), backup_object_type::metadata);
+        auto objs = backend_shared_impl::generate_backup_objects({fname}, true);
+        ASSERT_EQ(objs.size(), 1);
+        const auto& obj = objs[0];
+        EXPECT_EQ(obj.object_id(), fname);
+        EXPECT_EQ(obj.path(), fname);
+        EXPECT_EQ(obj.type(), backup_object_type::metadata);
+
+        objs = backend_shared_impl::generate_backup_objects({fname}, false);
+        ASSERT_TRUE(objs.empty());
+    }
+    for (bool is_full_backup : {true, false}) {
+        std::string fname = "limestone-manifest.json";
+        auto objs = backend_shared_impl::generate_backup_objects({fname}, is_full_backup);
+        ASSERT_EQ(objs.size(), 1);
+        const auto& obj = objs[0];
+        EXPECT_EQ(obj.object_id(), fname);
+        EXPECT_EQ(obj.path(), fname);
+        EXPECT_EQ(obj.type(), backup_object_type::metadata);
     }
 }
 
-TEST_F(backend_shared_impl_test, make_backup_object_from_path_snapshot) {
+TEST_F(backend_shared_impl_test, generate_backup_objects_snapshot) {
     std::string fname = "pwal_0000.compacted";
-    auto obj = backend_shared_impl::make_backup_object_from_path(fname);
-    ASSERT_TRUE(obj.has_value());
-    EXPECT_EQ(obj->object_id(), fname);
-    EXPECT_EQ(obj->path(), fname);
-    EXPECT_EQ(obj->type(), backup_object_type::snapshot);
+    auto objs = backend_shared_impl::generate_backup_objects({fname}, true);
+    ASSERT_EQ(objs.size(), 1);
+    const auto& obj = objs[0];
+    EXPECT_EQ(obj.object_id(), fname);
+    EXPECT_EQ(obj.path(), fname);
+    EXPECT_EQ(obj.type(), backup_object_type::snapshot);
+
+    objs = backend_shared_impl::generate_backup_objects({fname}, false);
+    ASSERT_TRUE(objs.empty());
 }
 
-TEST_F(backend_shared_impl_test, make_backup_object_from_path_log) {
+TEST_F(backend_shared_impl_test, generate_backup_objects_log) {
     std::string fname = "pwal_0001.1234567890.0";
-    auto obj = backend_shared_impl::make_backup_object_from_path(fname);
-    ASSERT_TRUE(obj.has_value());
-    EXPECT_EQ(obj->object_id(), fname);
-    EXPECT_EQ(obj->path(), fname);
-    EXPECT_EQ(obj->type(), backup_object_type::log);
+    for (bool is_full_backup : {true, false}) {
+        auto objs = backend_shared_impl::generate_backup_objects({fname}, is_full_backup);
+        ASSERT_EQ(objs.size(), 1);
+        const auto& obj = objs[0];
+        EXPECT_EQ(obj.object_id(), fname);
+        EXPECT_EQ(obj.path(), fname);
+        EXPECT_EQ(obj.type(), backup_object_type::log);
+    }
 }
 
-TEST_F(backend_shared_impl_test, make_backup_object_from_path_not_matched) {
+TEST_F(backend_shared_impl_test, generate_backup_objects_not_matched) {
     std::string fname = "random_file.txt";
-    auto obj = backend_shared_impl::make_backup_object_from_path(fname);
-    EXPECT_FALSE(obj.has_value());
+    auto objs = backend_shared_impl::generate_backup_objects({fname}, true);
+    EXPECT_TRUE(objs.empty());
+
+    objs = backend_shared_impl::generate_backup_objects({fname}, false);
+    EXPECT_TRUE(objs.empty());
+}
+
+TEST_F(backend_shared_impl_test, generate_backup_objects_multiple_elements) {
+    std::vector<boost::filesystem::path> files = {
+        "compaction_catalog",
+        "pwal_0000.compacted",
+        "pwal_0001.1234567890.0"
+    };
+    auto objs = backend_shared_impl::generate_backup_objects(files, true);
+    ASSERT_EQ(objs.size(), 3);
+
+    EXPECT_EQ(objs[0].object_id(), "compaction_catalog");
+    EXPECT_EQ(objs[0].type(), backup_object_type::metadata);
+
+    EXPECT_EQ(objs[1].object_id(), "pwal_0000.compacted");
+    EXPECT_EQ(objs[1].type(), backup_object_type::snapshot);
+
+    EXPECT_EQ(objs[2].object_id(), "pwal_0001.1234567890.0");
+    EXPECT_EQ(objs[2].type(), backup_object_type::log);
+}
+
+TEST_F(backend_shared_impl_test, generate_backup_objects_epoch_file) {
+    std::vector<boost::filesystem::path> files = {
+        "epoch.1234567890.1",
+        "epoch"
+    };
+    auto objs = backend_shared_impl::generate_backup_objects(files, true);
+    ASSERT_EQ(objs.size(), 2);
+
+    EXPECT_EQ(objs[0].object_id(), "epoch.1234567890.1");
+    EXPECT_EQ(objs[0].type(), backup_object_type::metadata);
+
+    EXPECT_EQ(objs[1].object_id(), "epoch");
+    EXPECT_EQ(objs[1].type(), backup_object_type::metadata);
+
+    objs = backend_shared_impl::generate_backup_objects(files, false);
+    ASSERT_TRUE(objs.empty());
+}
+
+
+TEST_F(backend_shared_impl_test, generate_backup_objects_empty_list) {
+    std::vector<boost::filesystem::path> files;
+    auto objs = backend_shared_impl::generate_backup_objects(files, true);
+    EXPECT_TRUE(objs.empty());
 }
 
 TEST_F(backend_shared_impl_test, keep_alive_success_and_not_found) {
@@ -410,7 +406,7 @@ TEST_F(backend_shared_impl_test, send_backup_object_data_with_offset_and_end_off
     EXPECT_EQ(writer.responses[0].chunk(), "cde");
     EXPECT_TRUE(writer.responses[0].is_first());
     EXPECT_TRUE(writer.responses[0].is_last());
-    EXPECT_EQ(writer.responses[0].offset(), 2);
+    EXPECT_EQ(writer.responses[0].offset(), 0);
 }
 
 TEST_F(backend_shared_impl_test, send_backup_object_data_start_offset_out_of_range) {
@@ -921,8 +917,9 @@ TEST_F(backend_shared_impl_test, prepare_log_object_copy_begin0_end100) {
     EXPECT_TRUE(result.has_value());
     EXPECT_EQ(result->start_offset, 0);
     EXPECT_TRUE(result->end_offset.has_value());
-    EXPECT_EQ(result->end_offset, 0);
-    EXPECT_TRUE(required_blobs.empty());
+    EXPECT_EQ(result->end_offset, 74);
+    EXPECT_EQ(required_blobs.size(), 1);
+    EXPECT_TRUE(required_blobs.count(blob_id_type{100}) > 0);
 }
 
 TEST_F(backend_shared_impl_test, prepare_log_object_copy_begin0_end101) {
@@ -940,9 +937,11 @@ TEST_F(backend_shared_impl_test, prepare_log_object_copy_begin0_end101) {
     );
     EXPECT_TRUE(result.has_value());
     EXPECT_EQ(result->start_offset, 0);
-    EXPECT_EQ(result->end_offset, 74);
-    EXPECT_EQ(required_blobs.size(), 1);
+    EXPECT_EQ(result->end_offset, 156);
+    EXPECT_EQ(required_blobs.size(), 3);
     EXPECT_TRUE(required_blobs.count(blob_id_type{100}) > 0);
+    EXPECT_TRUE(required_blobs.count(blob_id_type{200}) > 0);
+    EXPECT_TRUE(required_blobs.count(blob_id_type{300}) > 0);
 }
 
 TEST_F(backend_shared_impl_test, prepare_log_object_copy_begin0_end102) {
@@ -960,7 +959,7 @@ TEST_F(backend_shared_impl_test, prepare_log_object_copy_begin0_end102) {
     );
     EXPECT_TRUE(result.has_value());
     EXPECT_EQ(result->start_offset, 0);
-    EXPECT_EQ(result->end_offset, 156);
+    EXPECT_EQ(result->end_offset, std::nullopt);
     EXPECT_EQ(required_blobs.size(), 3);
     EXPECT_TRUE(required_blobs.count(blob_id_type{100}) > 0);
     EXPECT_TRUE(required_blobs.count(blob_id_type{200}) > 0);
@@ -1025,8 +1024,9 @@ TEST_F(backend_shared_impl_test, prepare_log_object_copy_begin99_end100) {
     EXPECT_TRUE(result.has_value());
     EXPECT_EQ(result->start_offset, 0);
     EXPECT_TRUE(result->end_offset.has_value());
-    EXPECT_EQ(result->end_offset, 0);
-    EXPECT_TRUE(required_blobs.empty());
+    EXPECT_EQ(result->end_offset, 74);
+    EXPECT_EQ(required_blobs.size(), 1);
+    EXPECT_TRUE(required_blobs.count(blob_id_type{100}) > 0);
 }
 
 TEST_F(backend_shared_impl_test, prepare_log_object_copy_begin100_end101) {
@@ -1044,9 +1044,11 @@ TEST_F(backend_shared_impl_test, prepare_log_object_copy_begin100_end101) {
     );
     EXPECT_TRUE(result.has_value());
     EXPECT_EQ(result->start_offset, 0);
-    EXPECT_EQ(result->end_offset, 74);
-    EXPECT_EQ(required_blobs.size(), 1);
+    EXPECT_EQ(result->end_offset, 156);
+    EXPECT_EQ(required_blobs.size(), 3);
     EXPECT_TRUE(required_blobs.count(blob_id_type{100}) > 0);
+    EXPECT_TRUE(required_blobs.count(blob_id_type{200}) > 0);
+    EXPECT_TRUE(required_blobs.count(blob_id_type{300}) > 0);
 }
 
 TEST_F(backend_shared_impl_test, prepare_log_object_copy_begin101_end102) {
@@ -1064,7 +1066,7 @@ TEST_F(backend_shared_impl_test, prepare_log_object_copy_begin101_end102) {
     );
     EXPECT_TRUE(result.has_value());
     EXPECT_EQ(result->start_offset, 74);
-    EXPECT_EQ(result->end_offset, 156);
+    EXPECT_EQ(result->end_offset, std::nullopt);
     EXPECT_EQ(required_blobs.size(), 2);
     EXPECT_TRUE(required_blobs.count(blob_id_type{200}) > 0);
     EXPECT_TRUE(required_blobs.count(blob_id_type{300}) > 0);
@@ -1243,10 +1245,16 @@ TEST_F(backend_shared_impl_test, get_object_log_continue_if_no_end_offset) {
     req.add_object_id("pwal_0001");
 
     dummy_writer writer;
-    // Execute: goes through the continue branch, but send_backup_object_data is not called so the response is empty
+    // Execute: server emits a single empty GetObjectResponse for zero-length ranges
     auto status = backend.get_object(&req, &writer);
     EXPECT_TRUE(status.ok());
-    EXPECT_TRUE(writer.responses.empty());
+    ASSERT_EQ(writer.responses.size(), 1u);
+    const auto& resp = writer.responses[0];
+    // It should be an empty response marking the object complete
+    EXPECT_EQ(resp.total_size(), 0u);
+    EXPECT_EQ(resp.offset(), 0u);
+    EXPECT_TRUE(resp.is_first());
+    EXPECT_TRUE(resp.is_last());
 }
 
 TEST_F(backend_shared_impl_test, get_object_log_corrupted_file_returns_error_status) {
@@ -1284,7 +1292,7 @@ TEST_F(backend_shared_impl_test, get_object_log_corrupted_file_returns_error_sta
     EXPECT_TRUE(writer.responses.empty());
 }
 
-TEST_F(backend_shared_impl_test, begin_backup_version_boundary) {
+TEST_F(backend_shared_impl_test, begin_backup_version_unsupported_0) {
     gen_datastore();
     prepare_backup_test_files();
 
@@ -1297,26 +1305,54 @@ TEST_F(backend_shared_impl_test, begin_backup_version_boundary) {
     request.set_version(0);
     request.set_begin_epoch(0);
     request.set_end_epoch(0);
-    auto status = backend.begin_backup(*datastore_, &request, &response);
+    auto status = backend.begin_backup(*datastore_, &request, &response, backup_path_list_provider);
+
     EXPECT_FALSE(status.ok());
+    EXPECT_FALSE(backend.get_session_store().get_session(response.session_id()).has_value());
     EXPECT_EQ(status.error_code(), ::grpc::StatusCode::INVALID_ARGUMENT);
+}
+
+TEST_F(backend_shared_impl_test, begin_backup_version_supported_1) {
+    gen_datastore();
+    prepare_backup_test_files();
+
+    backend_shared_impl backend(get_location(), 4);
+
+    BeginBackupRequest request;
+    BeginBackupResponse response;
 
     // version=1 (supported, but not implemented)
     request.set_version(begin_backup_message_version);
-    status = run_with_epoch_switch([&]() { return backend.begin_backup(*datastore_, &request, &response); }, 7);
+    auto status = run_with_epoch_switch(
+        [&]() { return backend.begin_backup(*datastore_, &request, &response, backup_path_list_provider); }, 7);
+
     EXPECT_TRUE(status.ok());
-    
+}
+
+TEST_F(backend_shared_impl_test, begin_backup_version_unsupported_2) {
+    gen_datastore();
+    prepare_backup_test_files();
+
+    backend_shared_impl backend(get_location(), 4);
+
+    BeginBackupRequest request;
+    BeginBackupResponse response;
+
     // version=2 (unsupported)
     request.set_version(2);
-    status = backend.begin_backup(*datastore_, &request, &response);
+    request.set_begin_epoch(0);
+    request.set_end_epoch(0);
+    auto status = backend.begin_backup(*datastore_, &request, &response, backup_path_list_provider);
+
     EXPECT_FALSE(status.ok());
+    EXPECT_FALSE(backend.get_session_store().get_session(response.session_id()).has_value());
     EXPECT_EQ(status.error_code(), ::grpc::StatusCode::INVALID_ARGUMENT);
 }
 
 TEST_F(backend_shared_impl_test, begin_backup_overall) {
     gen_datastore();
     prepare_backup_test_files();
-    assert_backup_file_conditions([](const backup_condition& c) { return c.path_pre_begin_backup; });
+    assert_backup_file_conditions([](const backup_condition& c) { return c.pre_rotation_path; });
 
     // FLAGS_v = 50; // set VLOG level to 50
 
@@ -1329,11 +1365,11 @@ TEST_F(backend_shared_impl_test, begin_backup_overall) {
     
     // Call begin_backup via run_with_epoch_switch to synchronize with epoch switch and log rotation if needed
     auto before = static_cast<int64_t>(std::time(nullptr));
-    auto status = run_with_epoch_switch([&]() { return backend.begin_backup(*datastore_, &request, &response); }, 7);
+    auto status = run_with_epoch_switch([&]() { return backend.begin_backup(*datastore_, &request, &response, backup_path_list_provider); }, 7);
     auto after = static_cast<int64_t>(std::time(nullptr));
 
     // Check log_dir after begin_backup
-    assert_backup_file_conditions([](const backup_condition& c) { return c.path_post_begin_backup; });
+    assert_backup_file_conditions([](const backup_condition& c) { return c.post_rotation_path; });
 
     // Check that session_id is a valid UUID (xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx)
     const std::string& session_id = response.session_id();
@@ -1347,41 +1383,35 @@ TEST_F(backend_shared_impl_test, begin_backup_overall) {
     EXPECT_EQ(response.start_epoch(), 0);
     EXPECT_EQ(response.finish_epoch(), 0);
 
-    // --- Existing: verify contents of response.objects() ---
-    for (const auto& cond : backup_conditions) {
-        if (cond.object_id.empty() || cond.object_path.empty() || cond.object_type == BackupObjectType::UNSPECIFIED) {
-            continue; // Skip conditions that do not specify object details
-        }
-        bool found = false;
-        std::regex id_re(wildcard_to_regex(cond.object_id));
-        std::regex path_re(wildcard_to_regex(cond.object_path));
-        for (const auto& obj : response.objects()) {
-            if (std::regex_match(obj.object_id(), id_re) &&
-                std::regex_match(obj.path(), path_re) &&
-                obj.type() == cond.object_type) {
-                found = true;
-                break;
+
+    auto conditions = get_filtered_backup_conditions([](const backup_condition& cond) {
+        return cond.is_online_backup_target;
+    });
+
+    auto objects = response.objects();
+    ASSERT_EQ(conditions.size(), static_cast<size_t>(objects.size())) << "Mismatch in number of backup objects between conditions and response\n"
+        << "Conditions object_ids: " << [&]() {
+            std::ostringstream oss;
+            for (const auto& cond : conditions) {
+                oss << cond.object_id << ", ";
             }
-        }
-        EXPECT_TRUE(found) << "BackupObject not found: id=" << cond.object_id << ", path=" << cond.object_path << ", type=" << cond.object_type;
-    }
-    // If there is an object in response.objects() that does not exist in backup_conditions, report an error
-    for (const auto& obj : response.objects()) {
-        bool found = false;
-        for (const auto& cond : backup_conditions) {
-            if (cond.object_id.empty() || cond.object_path.empty() || cond.object_type == BackupObjectType::UNSPECIFIED) {
-                continue;
+            return oss.str();
+        }() << "\n"
+        << "Response object_ids: " << [&]() {
+            std::ostringstream oss;
+            for (const auto& obj : objects) {
+                oss << obj.object_id() << ", ";
             }
-            std::regex id_re(wildcard_to_regex(cond.object_id));
-            std::regex path_re(wildcard_to_regex(cond.object_path));
-            if (std::regex_match(obj.object_id(), id_re) &&
-                std::regex_match(obj.path(), path_re) &&
-                obj.type() == cond.object_type) {
-                found = true;
-                break;
-            }
-        }
-        EXPECT_TRUE(found) << "Unexpected BackupObject found: id=" << obj.object_id() << ", path=" << obj.path() << ", type=" << obj.type();
+            return oss.str();
+        }();
+
+    for(const auto&obj: objects) {
+        auto match = find_matching_backup_conditions(obj.object_id(), conditions);
+        ASSERT_FALSE(match.empty()) << "No matching backup condition found for object: " << obj.object_id();
+        ASSERT_FALSE(match.size() > 1) << "Multiple matching backup conditions found for object: " << obj.object_id();
+        auto cond = match[0];
+        EXPECT_EQ(obj.type(), cond.object_type) << "Type mismatch for object: " << obj.object_id() << ", expected: " << cond.object_type << ", actual: " << obj.type();
+        EXPECT_TRUE(is_path_matching(obj.path(), cond.post_rotation_path)) << "Path mismatch for object: " << obj.object_id() << ", expected: " << cond.post_rotation_path << ", actual: " << obj.path();
     }
 
     const auto& session_store = backend.get_session_store();
@@ -1425,6 +1455,7 @@ TEST_F(backend_shared_impl_test, begin_backup_overall) {
     }
 
     EXPECT_TRUE(status.ok());
+    EXPECT_TRUE(backend.get_session_store().get_session(response.session_id()).has_value());
 }
 
 // begin_epoch > end_epoch
@@ -1437,8 +1468,9 @@ TEST_F(backend_shared_impl_test, begin_backup_epoch_order_ok) {
     request.set_version(begin_backup_message_version);
     request.set_begin_epoch(3);
     request.set_end_epoch(4);
-    auto status = run_with_epoch_switch([&]() { return backend.begin_backup(*datastore_, &request, &response); }, 7);
+    auto status = run_with_epoch_switch([&]() { return backend.begin_backup(*datastore_, &request, &response, backup_path_list_provider); }, 7);
     EXPECT_TRUE(status.ok());
+    EXPECT_TRUE(backend.get_session_store().get_session(response.session_id()).has_value());
 }
 
 TEST_F(backend_shared_impl_test, begin_backup_epoch_order_equal_ng) {
@@ -1450,8 +1482,9 @@ TEST_F(backend_shared_impl_test, begin_backup_epoch_order_equal_ng) {
     request.set_version(begin_backup_message_version);
     request.set_begin_epoch(3);
     request.set_end_epoch(3);
-    auto status = backend.begin_backup(*datastore_, &request, &response);
+    auto status = backend.begin_backup(*datastore_, &request, &response, backup_path_list_provider);
     EXPECT_FALSE(status.ok());
+    EXPECT_FALSE(backend.get_session_store().get_session(response.session_id()).has_value());
     EXPECT_EQ(status.error_code(), ::grpc::StatusCode::INVALID_ARGUMENT);
     EXPECT_EQ(status.error_message(), "begin_epoch must be less than end_epoch: begin_epoch=3, end_epoch=3");
 }
@@ -1465,8 +1498,9 @@ TEST_F(backend_shared_impl_test, begin_backup_epoch_order_gt_ng) {
     request.set_version(begin_backup_message_version);
     request.set_begin_epoch(4);
     request.set_end_epoch(3);
-    auto status = backend.begin_backup(*datastore_, &request, &response);
+    auto status = backend.begin_backup(*datastore_, &request, &response, backup_path_list_provider);
     EXPECT_FALSE(status.ok());
+    EXPECT_FALSE(backend.get_session_store().get_session(response.session_id()).has_value());
     EXPECT_EQ(status.error_code(), ::grpc::StatusCode::INVALID_ARGUMENT);
     EXPECT_EQ(status.error_message(), "begin_epoch must be less than end_epoch: begin_epoch=4, end_epoch=3");
 }
@@ -1481,8 +1515,9 @@ TEST_F(backend_shared_impl_test, begin_backup_begin_epoch_gt_snapshot_ok) {
     EXPECT_EQ(snapshot_epoch_id_, 2);
     request.set_begin_epoch(3);
     request.set_end_epoch(4);
-    auto status = run_with_epoch_switch([&]() { return backend.begin_backup(*datastore_, &request, &response); }, 7);
+    auto status = run_with_epoch_switch([&]() { return backend.begin_backup(*datastore_, &request, &response, backup_path_list_provider); }, 7);
     EXPECT_TRUE(status.ok());
+    EXPECT_TRUE(backend.get_session_store().get_session(response.session_id()).has_value());
 }
 
 TEST_F(backend_shared_impl_test, begin_backup_begin_epoch_eq_snapshot_ng) {
@@ -1495,8 +1530,9 @@ TEST_F(backend_shared_impl_test, begin_backup_begin_epoch_eq_snapshot_ng) {
     EXPECT_EQ(snapshot_epoch_id_, 2);
     request.set_begin_epoch(2);
     request.set_end_epoch(4);
-    auto status = backend.begin_backup(*datastore_, &request, &response);
+    auto status = backend.begin_backup(*datastore_, &request, &response, backup_path_list_provider);
     EXPECT_FALSE(status.ok());
+    EXPECT_FALSE(backend.get_session_store().get_session(response.session_id()).has_value());
     EXPECT_EQ(status.error_code(), ::grpc::StatusCode::INVALID_ARGUMENT);
     EXPECT_EQ(status.error_message(), "begin_epoch must be strictly greater than the epoch id of the last snapshot: begin_epoch=2, snapshot_epoch_id=2");
 }
@@ -1511,8 +1547,9 @@ TEST_F(backend_shared_impl_test, begin_backup_begin_epoch_lt_snapshot_ng) {
     EXPECT_EQ(snapshot_epoch_id_, 2);
     request.set_begin_epoch(1);
     request.set_end_epoch(4);
-    auto status = backend.begin_backup(*datastore_, &request, &response);
+    auto status = backend.begin_backup(*datastore_, &request, &response, backup_path_list_provider);
     EXPECT_FALSE(status.ok());
+    EXPECT_FALSE(backend.get_session_store().get_session(response.session_id()).has_value());
     EXPECT_EQ(status.error_code(), ::grpc::StatusCode::INVALID_ARGUMENT);
     EXPECT_EQ(status.error_message(), "begin_epoch must be strictly greater than the epoch id of the last snapshot: begin_epoch=1, snapshot_epoch_id=2");
 }
@@ -1526,8 +1563,9 @@ TEST_F(backend_shared_impl_test, begin_backup_end_epoch_lt_current_ok) {
     request.set_version(begin_backup_message_version);
     request.set_begin_epoch(3);
     request.set_end_epoch(4); 
-    auto status = run_with_epoch_switch([&]() { return backend.begin_backup(*datastore_, &request, &response); }, 7);
+    auto status = run_with_epoch_switch([&]() { return backend.begin_backup(*datastore_, &request, &response, backup_path_list_provider); }, 7);
     EXPECT_TRUE(status.ok());
+    EXPECT_TRUE(backend.get_session_store().get_session(response.session_id()).has_value());
 }
 
 TEST_F(backend_shared_impl_test, begin_backup_end_epoch_eq_current_ok) {
@@ -1539,8 +1577,9 @@ TEST_F(backend_shared_impl_test, begin_backup_end_epoch_eq_current_ok) {
     request.set_version(begin_backup_message_version);
     request.set_begin_epoch(3);
     request.set_end_epoch(5);
-    auto status = run_with_epoch_switch([&]() { return backend.begin_backup(*datastore_, &request, &response); }, 7);
+    auto status = run_with_epoch_switch([&]() { return backend.begin_backup(*datastore_, &request, &response, backup_path_list_provider); }, 7);
     EXPECT_TRUE(status.ok());
+    EXPECT_TRUE(backend.get_session_store().get_session(response.session_id()).has_value());
 }
 
 TEST_F(backend_shared_impl_test, begin_backup_end_epoch_gt_current_ng) {
@@ -1552,8 +1591,9 @@ TEST_F(backend_shared_impl_test, begin_backup_end_epoch_gt_current_ng) {
     request.set_version(begin_backup_message_version);
     request.set_begin_epoch(3);
     request.set_end_epoch(6); 
-    auto status = backend.begin_backup(*datastore_, &request, &response);
+    auto status = backend.begin_backup(*datastore_, &request, &response, backup_path_list_provider);
     EXPECT_FALSE(status.ok());
+    EXPECT_FALSE(backend.get_session_store().get_session(response.session_id()).has_value());
     EXPECT_EQ(status.error_code(), ::grpc::StatusCode::INVALID_ARGUMENT);
     EXPECT_EQ(status.error_message(), "end_epoch must be less than or equal to the current epoch id: end_epoch=6, current_epoch_id=5");
 }
@@ -1567,8 +1607,9 @@ TEST_F(backend_shared_impl_test, begin_backup_end_epoch_lt_boot_durable_epoch_ng
     request.set_version(begin_backup_message_version);
     request.set_begin_epoch(1);
     request.set_end_epoch(2); 
-    auto status = backend.begin_backup(*datastore_, &request, &response);
+    auto status = backend.begin_backup(*datastore_, &request, &response, backup_path_list_provider);
     EXPECT_FALSE(status.ok());
+    EXPECT_FALSE(backend.get_session_store().get_session(response.session_id()).has_value());
     EXPECT_EQ(status.error_code(), ::grpc::StatusCode::INVALID_ARGUMENT);
     EXPECT_EQ(status.error_message(), "end_epoch must be strictly greater than the durable epoch id at boot time: end_epoch=2, boot_durable_epoch_id=3");
 }
@@ -1582,8 +1623,9 @@ TEST_F(backend_shared_impl_test, begin_backup_end_epoch_eq_boot_durable_epoch_ok
     request.set_version(begin_backup_message_version);
     request.set_begin_epoch(1);
     request.set_end_epoch(3); 
-    auto status = run_with_epoch_switch([&]() { return backend.begin_backup(*datastore_, &request, &response); }, 7);
+    auto status = run_with_epoch_switch([&]() { return backend.begin_backup(*datastore_, &request, &response, backup_path_list_provider); }, 7);
     EXPECT_TRUE(status.ok());
+    EXPECT_TRUE(backend.get_session_store().get_session(response.session_id()).has_value());
 }
 
 TEST_F(backend_shared_impl_test, begin_backup_end_epoch_gt_boot_durable_epoch_ok) {
@@ -1595,8 +1637,9 @@ TEST_F(backend_shared_impl_test, begin_backup_end_epoch_gt_boot_durable_epoch_ok
     request.set_version(begin_backup_message_version);
     request.set_begin_epoch(1);
     request.set_end_epoch(4); 
-    auto status = run_with_epoch_switch([&]() { return backend.begin_backup(*datastore_, &request, &response); }, 7);
+    auto status = run_with_epoch_switch([&]() { return backend.begin_backup(*datastore_, &request, &response, backup_path_list_provider); }, 7);
     EXPECT_TRUE(status.ok());
+    EXPECT_TRUE(backend.get_session_store().get_session(response.session_id()).has_value());
 }
 
 TEST_F(backend_shared_impl_test, begin_backup_exception_handling) {
@@ -1608,12 +1651,12 @@ TEST_F(backend_shared_impl_test, begin_backup_exception_handling) {
     request.set_begin_epoch(1);
     request.set_end_epoch(2);
     BeginBackupResponse response;
-    auto status = backend.begin_backup(*datastore_, &request, &response);
+    auto status = backend.begin_backup(*datastore_, &request, &response, backup_path_list_provider);
     EXPECT_EQ(status.error_code(), ::grpc::StatusCode::INTERNAL);
     EXPECT_STREQ(status.error_message().c_str(), "test exception");
 }
 
 
 
-} // namespace limestone::testing
 
+} // namespace limestone::testing

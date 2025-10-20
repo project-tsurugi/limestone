@@ -126,6 +126,12 @@ public:
     // Getter for backup_counter_ (for testing and monitoring)
     [[nodiscard]] int get_backup_counter() const noexcept;
 
+    /**
+     * @brief Retrieves the list of files managed by the datastore.
+     * @return A set of file paths.
+     */
+    [[nodiscard]] std::set<boost::filesystem::path> get_files() const;
+
 private:
     datastore& datastore_;
     // Atomic counter for tracking active backup operations.

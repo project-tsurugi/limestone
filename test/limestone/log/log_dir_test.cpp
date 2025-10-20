@@ -400,6 +400,33 @@ TEST_F(log_dir_test, setup_initial_logdir_creates_manifest_file) {
     EXPECT_EQ(manifest["persistent_format_version"], 7);
 }
 
+TEST_F(log_dir_test, restore_skips_manifest_when_destination_has_one) {
+    // initialize datastore first (it will create manifest in destination)
+    gen_datastore();
+
+    // prepare backup directory (bk) with a manifest
+    boost::filesystem::path bk_path = boost::filesystem::path(location) / "bk";
+    if (!boost::filesystem::create_directory(bk_path)) {
+        LOG(FATAL) << "cannot make directory";
+    }
+
+    // backup manifest with persistent_format_version = 2
+    boost::filesystem::copy_file(manifest_path, bk_path / std::string(limestone::internal::manifest::file_name));
+
+    // overwrite the destination manifest to simulate an existing manifest with different content
+    create_file(manifest_path, data_manifest(999));
+
+    // run restore with purge_destination = false so destination manifest should not be overwritten
+    auto rc = datastore_->restore(bk_path.string(), true, false);
+    EXPECT_EQ(rc, limestone::status::ok);
+
+    // verify destination manifest still contains persistent_format_version = 999
+    std::ifstream f(manifest_path.string());
+    ASSERT_TRUE(f.is_open());
+    std::string content((std::istreambuf_iterator<char>(f)), std::istreambuf_iterator<char>());
+    EXPECT_NE(content.find("999"), std::string::npos);
+}
+
 TEST_F(log_dir_test, setup_initial_logdir_creates_compaction_catalog_if_not_exists) {
     // Ensure that the compaction catalog does not exist before
     boost::filesystem::remove(compaction_catalog_path);

@@ -124,8 +124,16 @@ void real_file_operations::ofs_write(std::ofstream& ofs, const char* buf, std::s
 
 void real_file_operations::ofs_write(std::ofstream& ofs, const std::byte* buf, std::size_t size) {
     ofs_write(ofs,
-              reinterpret_cast<const char*>(buf),  // NOLINT(cppcoreguidelines-pro-type-reinterpret-cast) ostream::write requires const char*
-              static_cast<std::streamsize>(size));
+             reinterpret_cast<const char*>(buf),  // NOLINT(cppcoreguidelines-pro-type-reinterpret-cast) ostream::write requires const char*
+             static_cast<std::streamsize>(size));
+}
+
+void real_file_operations::ofs_flush(std::ofstream& ofs) {
+    ofs.flush();
+}
+
+void real_file_operations::ofs_close(std::ofstream& ofs) {
+    ofs.close();
 }
 
 void real_file_operations::ifs_read(std::ifstream& ifs, char* buf, std::streamsize size) {
@@ -227,5 +235,4 @@ void real_file_operations::create_hard_link(const boost::filesystem::path& targe
 }
 
 }  // namespace limestone::internal
-
 

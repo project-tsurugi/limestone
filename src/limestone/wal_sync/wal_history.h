@@ -68,6 +68,13 @@ public:
     [[nodiscard]] std::vector<record> list() const;
 
     /**
+     * @brief Overwrites wal_history file with provided records.
+     * @param records records to write in order
+     * @throws limestone::api::limestone_io_exception I/O error
+     */
+    void write_records(const std::vector<record>& records);
+
+    /**
      * @brief Checks the WAL history file and recovers if necessary.
      * @throws limestone::api::limestone_io_exception I/O error
      */
