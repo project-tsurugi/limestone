@@ -16,7 +16,9 @@
 
 #include "wal_sync/wal_sync_client.h"
 
+#include <array>
 #include <chrono>
+#include <fstream>
 #include <regex>
 #include <sstream>
 #include <unordered_set>
@@ -38,8 +40,38 @@
 #include "limestone/grpc/service/grpc_constants.h"
 #include "backup.pb.h"
 #include "limestone/limestone_exception_helper.h"
+#include "log_entry.h"
 
 namespace {
+
+void expect_epoch_file(const boost::filesystem::path& dir, std::uint64_t expected_epoch) {
+    boost::filesystem::path epoch_path = dir / "epoch";
+    ASSERT_TRUE(boost::filesystem::exists(epoch_path))
+        << "epoch file not found: " << epoch_path.string();
+
+    std::ifstream ifs(epoch_path.string(), std::ios::binary);
+    ASSERT_TRUE(ifs.is_open()) << "failed to open epoch file: " << epoch_path.string();
+
+    unsigned char marker_type = 0;
+    ifs.read(reinterpret_cast<char*>(&marker_type), 1);
+    ASSERT_EQ(ifs.gcount(), 1) << "failed to read epoch marker type";
+    EXPECT_EQ(marker_type, static_cast<unsigned char>(limestone::api::log_entry::entry_type::marker_durable))
+        << "unexpected epoch marker type";
+
+    std::array<unsigned char, sizeof(std::uint64_t)> buffer{};
+    ifs.read(reinterpret_cast<char*>(buffer.data()), static_cast<std::streamsize>(buffer.size()));
+    ASSERT_EQ(ifs.gcount(), static_cast<std::streamsize>(buffer.size()))
+        << "failed to read epoch marker payload";
+
+    std::uint64_t epoch_value = 0;
+    for (std::size_t i = 0; i < buffer.size(); ++i) {
+        epoch_value |= static_cast<std::uint64_t>(buffer[i]) << (8U * i);
+    }
+    EXPECT_EQ(epoch_value, expected_epoch) << "epoch marker value mismatch";
+
+    ifs.get();
+    EXPECT_TRUE(ifs.eof()) << "epoch file contains unexpected extra data";
+}
 
 class scripted_backup_service final : public limestone::grpc::proto::BackupService::Service {
 public:
@@ -135,27 +167,6 @@ TEST_F(wal_sync_client_test, init_fails_when_dir_not_exist_and_not_allowed) {
 	EXPECT_NE(error.find("log_dir does not exist"), std::string::npos);
 }
 
-TEST_F(wal_sync_client_test, init_acquires_and_releases_manifest_lock) {
-	// Prepare: create directory and manifest
-	limestone::internal::manifest::create_initial(locale_dir);
-
-	// 1. Acquire lock by wal_sync_client::init
-	{
-		wal_sync_client client(locale_dir, helper_.create_channel());
-		std::string error;
-		ASSERT_TRUE(client.init(error, false));
-
-		// 2. Try to acquire the same lock (should fail: flock is exclusive in the same process)
-		int fd = limestone::internal::manifest::acquire_lock(locale_dir);
-		EXPECT_EQ(fd, -1) << "lock should be held by wal_sync_client";
-	}
-	// 3. After client destruction, lock should be released and can be acquired again
-	int fd2 = limestone::internal::manifest::acquire_lock(locale_dir);
-	EXPECT_GE(fd2, 0) << "lock should be released after wal_sync_client destruction";
-	if (fd2 >= 0) {
-		::close(fd2);
-	}
-}
 
 TEST_F(wal_sync_client_test, init_fails_when_dir_creation_fails) {
     boost::filesystem::remove_all(test_dir);
@@ -239,18 +250,6 @@ TEST_F(wal_sync_client_test, init_fails_when_manifest_is_broken) {
 	std::string error;
 	EXPECT_FALSE(client.init(error, false));
 	EXPECT_NE(error.find("manifest file not found or invalid"), std::string::npos);
-}
-
-TEST_F(wal_sync_client_test, init_fails_when_lock_cannot_be_acquired) {
-	limestone::internal::manifest::create_initial(locale_dir);
-	// Acquire lock manually
-	int fd = limestone::internal::manifest::acquire_lock(locale_dir);
-	ASSERT_GE(fd, 0);
-	wal_sync_client client(locale_dir, helper_.create_channel());
-	std::string error;
-	EXPECT_FALSE(client.init(error, false));
-	EXPECT_NE(error.find("failed to acquire manifest lock"), std::string::npos);
-	::close(fd);
 }
 
 TEST_F(wal_sync_client_test, get_local_epoch_returns_zero_when_no_wal_files) {
@@ -412,7 +411,7 @@ TEST_F(wal_sync_client_test, execute_remote_backup_success) {
     EXPECT_TRUE(backup_result.error_message.empty());
     EXPECT_TRUE(backup_result.incomplete_object_ids.empty());
     EXPECT_TRUE(boost::filesystem::exists(output_dir));
-
+    
     std::set<std::string> actual_paths;
     for (boost::filesystem::recursive_directory_iterator it(output_dir), end; it != end; ++it) {
         if (boost::filesystem::is_regular_file(it->path())) {
@@ -1395,6 +1394,8 @@ TEST_F(wal_sync_client_test, copy_backup_objects_success) {
     }
 }
 
+
+
 TEST_F(wal_sync_client_test, copy_backup_objects_returns_true_when_no_objects) {
     // With no objects to copy, the method should short-circuit without touching the filesystem.
     wal_sync_client_testable client(locale_dir, helper_.create_channel());
@@ -1657,5 +1658,188 @@ TEST_F(wal_sync_client_processor_error_test, copy_backup_objects_reports_incompl
     EXPECT_FALSE(boost::filesystem::exists(output_dir / "orphan/info"));
 }
 
+
+TEST_F(wal_sync_client_test, wal_sync_full_scenario_copy_backup) {
+    // Build remote datastore so begin_backup() enumerates actual backup targets.
+    gen_datastore();
+    prepare_backup_test_files();
+    datastore_->shutdown();
+    datastore_ = nullptr;
+
+    helper_.start_server();
+
+    wal_sync_client_testable client(locale_dir, helper_.create_channel());
+    std::string error;
+    ASSERT_TRUE(client.init(error, true));
+
+    // Validate local and remote epochs before running the scenario.
+    auto remote_epoch = client.get_remote_epoch();
+    ASSERT_TRUE(remote_epoch.has_value());
+    EXPECT_EQ(remote_epoch.value(), 5);
+    EXPECT_EQ(client.get_local_epoch(), 0);
+
+    // Fetch session token and backup object list from the remote backup service.
+    boost::filesystem::path output_dir = test_dir / "copied_backup";
+    boost::filesystem::remove_all(output_dir);
+
+    // Execute the end-to-end backup and confirm success.
+    auto execute_result = client.execute_remote_backup(0, 0, output_dir);
+    if (!execute_result.success) {
+        std::cerr << "execute_remote_backup failed; incomplete_object_ids:";
+        for (auto const& id : execute_result.incomplete_object_ids) {
+            std::cerr << ' ' << id;
+        }
+        std::cerr << std::endl;
+    }
+    ASSERT_TRUE(execute_result.success);
+    EXPECT_TRUE(execute_result.error_message.empty());
+    EXPECT_TRUE(execute_result.incomplete_object_ids.empty());
+    EXPECT_TRUE(boost::filesystem::exists(output_dir));
+
+    bool restore_result = client.restore(0, 0, output_dir);
+    if (!restore_result) {
+        // reproduce internal call to obtain detailed status for debugging
+        std::vector<boost::filesystem::path> data_locations{locale_dir};
+        limestone::api::configuration conf(data_locations, locale_dir);
+        limestone::api::datastore ds(conf);
+        limestone::status s = ds.restore(output_dir.string(), false, /*purge_destination=*/true);
+        std::cerr << "datastore::restore returned status: " << s << std::endl;
+    }
+    EXPECT_TRUE(restore_result);
+
+    // Verify that the local files and remote files for backup targets are identical
+    auto filtered_conditions = get_filtered_backup_conditions([](const backup_condition& c) {
+        return c.is_offline_backup_target;
+    });
+
+    for (boost::filesystem::recursive_directory_iterator it(remote_dir), end; it != end; ++it) {
+        if (!boost::filesystem::is_regular_file(it->path())) {
+            continue;
+        }
+        boost::filesystem::path relative_path = boost::filesystem::relative(it->path(), remote_dir);
+        // Only consider files that are declared as offline backup targets
+        bool is_target = false;
+        for (auto const& cond : filtered_conditions) {
+            if (cond.object_path.empty()) {
+                continue;
+            }
+            if (is_path_matching(relative_path.generic_string(), cond.object_path)) {
+                is_target = true;
+                break;
+            }
+        }
+        if (!is_target) {
+            continue;
+        }
+
+        boost::filesystem::path local_path = locale_dir / relative_path;
+        EXPECT_TRUE(boost::filesystem::exists(local_path))
+            << "missing local file: " << local_path.string();
+    }
+
+    EXPECT_EQ(client.get_local_epoch(), 5);
+
+    // update the remote database
+    helper_.tear_down();
+    gen_datastore();
+    datastore_->switch_epoch(7);
+    lc0_->begin_session();
+    lc0_->add_entry(1, "key6", "value6", {7, 7});
+    lc0_->end_session();
+    datastore_->switch_epoch(8);
+    lc0_->begin_session();
+    lc0_->add_entry(1, "key7", "value7", {8, 8});
+    lc0_->end_session();
+    datastore_->switch_epoch(9);
+    lc0_->begin_session();
+    lc0_->add_entry(1, "key8", "value8", {9, 9});
+    lc0_->end_session();
+    datastore_->switch_epoch(10);
+    datastore_->shutdown();
+    datastore_ = nullptr;
+
+    // Check backup conditions
+    helper_.start_server();
+    remote_epoch = client.get_remote_epoch();
+    ASSERT_TRUE(remote_epoch.has_value());
+    EXPECT_EQ(remote_epoch.value(), 9);
+    EXPECT_EQ(client.get_local_epoch(), 5);
+
+    auto remote_wal_compatibility = client.get_remote_wal_compatibility();
+    auto local_wal_compatibility = client.get_local_wal_compatibility();
+    EXPECT_TRUE(remote_wal_compatibility.has_value());
+    EXPECT_TRUE(client.check_wal_compatibility(local_wal_compatibility, remote_wal_compatibility.value()));
+    EXPECT_FALSE(client.check_wal_compatibility(remote_wal_compatibility.value(), local_wal_compatibility));
+
+    // Execute incremental backup
+    boost::filesystem::remove_all(output_dir);
+    auto begin = client.get_local_epoch();
+    auto end = client.get_remote_epoch();
+    ASSERT_TRUE(end.has_value());
+
+    execute_result = client.execute_remote_backup(begin, end.value(), output_dir);
+    ASSERT_TRUE(execute_result.success);
+    EXPECT_TRUE(execute_result.error_message.empty());
+    EXPECT_TRUE(execute_result.incomplete_object_ids.empty());
+    EXPECT_TRUE(boost::filesystem::exists(output_dir));
+    expect_epoch_file(output_dir, end.value());
+
+    restore_result = client.restore(begin, end.value(), output_dir);
+    EXPECT_TRUE(restore_result);
+
+    // Also verify datastore-level equality: last_epoch and snapshot contents must match
+    // Create a temporary datastore for the remote (original) and restored output and compare.
+    {
+        helper_.tear_down();
+        // Remote datastore: open and create snapshot
+        std::vector<std::pair<std::string, std::string>> remote_kv;
+        {
+            // construct datastore_test for remote_dir
+            std::vector<boost::filesystem::path> data_locations{remote_dir};
+            boost::filesystem::path metadata_location{remote_dir};
+            limestone::api::configuration conf(data_locations, metadata_location);
+            auto remote_ds = std::make_unique<limestone::api::datastore_test>(conf);
+            // ensure snapshot exists
+            remote_ds->ready();
+            epoch_id_type remote_epoch = remote_ds->last_epoch();
+
+            // read snapshot contents
+            std::unique_ptr<limestone::api::snapshot> remote_snapshot = remote_ds->get_snapshot();
+            std::unique_ptr<limestone::api::cursor> remote_cursor = remote_snapshot->get_cursor();
+            while (remote_cursor->next()) {
+                std::string key, value;
+                remote_cursor->key(key);
+                remote_cursor->value(value);
+                remote_kv.emplace_back(key, value);
+            }
+
+            // Restored datastore
+            std::vector<std::pair<std::string, std::string>> restored_kv;
+            std::vector<boost::filesystem::path> restored_data_locations{locale_dir};
+            boost::filesystem::path restored_metadata_location{locale_dir};
+            limestone::api::configuration restored_conf(restored_data_locations, restored_metadata_location);
+            auto restored_ds = std::make_unique<limestone::api::datastore_test>(restored_conf);
+            restored_ds->ready();
+            epoch_id_type restored_epoch = restored_ds->last_epoch();
+
+            std::unique_ptr<limestone::api::snapshot> restored_snapshot = restored_ds->get_snapshot();
+            std::unique_ptr<limestone::api::cursor> restored_cursor = restored_snapshot->get_cursor();
+            while (restored_cursor->next()) {
+                std::string key, value;
+                restored_cursor->key(key);
+                restored_cursor->value(value);
+                restored_kv.emplace_back(key, value);
+            }
+
+            // Compare epochs
+            EXPECT_EQ(remote_epoch, restored_epoch) << "last_epoch mismatch between remote and restored datastore";
+
+            // Compare snapshot key/value sets (order-insensitive)
+            std::multiset<std::pair<std::string, std::string>> a(remote_kv.begin(), remote_kv.end());
+            std::multiset<std::pair<std::string, std::string>> b(restored_kv.begin(), restored_kv.end());
+            EXPECT_EQ(a, b) << "snapshot contents differ between remote and restored datastore";
+        }
+    }
+}
 
 } // namespace limestone::testing

@@ -54,7 +54,8 @@ inproc_backend::inproc_backend([[maybe_unused]] limestone::api::datastore& ds, c
 
 ::grpc::Status inproc_backend::begin_backup(const BeginBackupRequest* request, BeginBackupResponse* response) noexcept {
     auto generator = [this]() { return this->backup_path_provider(); };
-    return backend_shared_impl_.begin_backup(datastore_, request, response, generator);
+    auto epoch_provider = [this]() { return this->datastore_.last_epoch(); };
+    return backend_shared_impl_.begin_backup(datastore_, request, response, generator, epoch_provider);
 }
 
 boost::filesystem::path inproc_backend::get_log_dir() const noexcept {

@@ -94,8 +94,24 @@ public:
     ::grpc::Status get_object(const limestone::grpc::proto::GetObjectRequest* request, i_writer* writer) noexcept;
 
     // Shared logic for begin backup
+    /**
+     * @brief Shared logic for begin backup.
+     *
+     * @param datastore_ Datastore reference used for some validation and callbacks.
+     * @param request BeginBackupRequest proto pointer.
+     * @param response BeginBackupResponse proto pointer to populate.
+     * @param backup_path_list_provider Provider function that returns backup paths.
+     * @param current_epoch_provider Optional function that returns the current epoch id in an
+     *        environment-specific way. If not provided, datastore_.last_epoch() is used.
+     *
+     * TODO: Consider replacing the ad-hoc lambda provider with a structured
+     * backend_context / strategy object to fully encapsulate environment-specific
+     * behavior (see design notes). This parameter is a minimal, temporary
+     * mechanism to avoid duplicating logic in callers.
+     */
     ::grpc::Status begin_backup(datastore& datastore_, const limestone::grpc::proto::BeginBackupRequest* request,
-                                limestone::grpc::proto::BeginBackupResponse* response, backup_path_list_provider_type const&backup_path_list_provider) noexcept;
+                                limestone::grpc::proto::BeginBackupResponse* response, backup_path_list_provider_type const& backup_path_list_provider,
+                                std::function<epoch_id_type()> current_epoch_provider = {}) noexcept;
 
     /**
      * @brief Send backup object data as a chunked gRPC stream.

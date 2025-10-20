@@ -105,12 +105,13 @@ public:
 
     /**
      * @brief restore log files, etc. located at from directory
-     * @details log file, etc. stored in from directroy are to be copied to log directory.
-     * @param from the location of the log files backuped
+     * @param from the location of the log files backed up
+     * @param keep_backup when true, do not remove files from the backup directory after restore
+     * @param purge_destination when true (default), purge the destination log directory before copying
      * @attention this function is not thread-safe.
      * @return status indicating whether the process ends successfully or not
      */
-    status restore(std::string_view from, bool keep_backup) const noexcept;
+    status restore(std::string_view from, bool keep_backup, bool purge_destination = true) const noexcept;
 
     // restore (prusik era)
     status restore(std::string_view from, std::vector<file_set_entry>& entries) noexcept;

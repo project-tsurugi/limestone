@@ -146,7 +146,7 @@ TEST_F(backend_shared_impl_test, list_wal_history_matches_wal_history_class) {
 TEST_F(backend_shared_impl_test, generate_backup_objects_metadata_files) {
     std::vector<std::string> files = {
         "compaction_catalog",
-        "limestone-manifest.json",
+        "wal_history",
         "epoch.1234567890.1"
     };
     for (const auto& fname : files) {
@@ -161,7 +161,7 @@ TEST_F(backend_shared_impl_test, generate_backup_objects_metadata_files) {
         ASSERT_TRUE(objs.empty());
     }
     for (bool is_full_backup : {true, false}) {
-        std::string fname = "wal_history";
+        std::string fname = "limestone-manifest.json";
         auto objs = backend_shared_impl::generate_backup_objects({fname}, is_full_backup);
         ASSERT_EQ(objs.size(), 1);
         const auto& obj = objs[0];
@@ -406,7 +406,7 @@ TEST_F(backend_shared_impl_test, send_backup_object_data_with_offset_and_end_off
     EXPECT_EQ(writer.responses[0].chunk(), "cde");
     EXPECT_TRUE(writer.responses[0].is_first());
     EXPECT_TRUE(writer.responses[0].is_last());
-    EXPECT_EQ(writer.responses[0].offset(), 2);
+    EXPECT_EQ(writer.responses[0].offset(), 0);
 }
 
 TEST_F(backend_shared_impl_test, send_backup_object_data_start_offset_out_of_range) {
@@ -917,8 +917,9 @@ TEST_F(backend_shared_impl_test, prepare_log_object_copy_begin0_end100) {
     EXPECT_TRUE(result.has_value());
     EXPECT_EQ(result->start_offset, 0);
     EXPECT_TRUE(result->end_offset.has_value());
-    EXPECT_EQ(result->end_offset, 0);
-    EXPECT_TRUE(required_blobs.empty());
+    EXPECT_EQ(result->end_offset, 74);
+    EXPECT_EQ(required_blobs.size(), 1);
+    EXPECT_TRUE(required_blobs.count(blob_id_type{100}) > 0);
 }
 
 TEST_F(backend_shared_impl_test, prepare_log_object_copy_begin0_end101) {
@@ -936,9 +937,11 @@ TEST_F(backend_shared_impl_test, prepare_log_object_copy_begin0_end101) {
     );
     EXPECT_TRUE(result.has_value());
     EXPECT_EQ(result->start_offset, 0);
-    EXPECT_EQ(result->end_offset, 74);
-    EXPECT_EQ(required_blobs.size(), 1);
+    EXPECT_EQ(result->end_offset, 156);
+    EXPECT_EQ(required_blobs.size(), 3);
     EXPECT_TRUE(required_blobs.count(blob_id_type{100}) > 0);
+    EXPECT_TRUE(required_blobs.count(blob_id_type{200}) > 0);
+    EXPECT_TRUE(required_blobs.count(blob_id_type{300}) > 0);
 }
 
 TEST_F(backend_shared_impl_test, prepare_log_object_copy_begin0_end102) {
@@ -956,7 +959,7 @@ TEST_F(backend_shared_impl_test, prepare_log_object_copy_begin0_end102) {
     );
     EXPECT_TRUE(result.has_value());
     EXPECT_EQ(result->start_offset, 0);
-    EXPECT_EQ(result->end_offset, 156);
+    EXPECT_EQ(result->end_offset, std::nullopt);
     EXPECT_EQ(required_blobs.size(), 3);
     EXPECT_TRUE(required_blobs.count(blob_id_type{100}) > 0);
     EXPECT_TRUE(required_blobs.count(blob_id_type{200}) > 0);
@@ -1021,8 +1024,9 @@ TEST_F(backend_shared_impl_test, prepare_log_object_copy_begin99_end100) {
     EXPECT_TRUE(result.has_value());
     EXPECT_EQ(result->start_offset, 0);
     EXPECT_TRUE(result->end_offset.has_value());
-    EXPECT_EQ(result->end_offset, 0);
-    EXPECT_TRUE(required_blobs.empty());
+    EXPECT_EQ(result->end_offset, 74);
+    EXPECT_EQ(required_blobs.size(), 1);
+    EXPECT_TRUE(required_blobs.count(blob_id_type{100}) > 0);
 }
 
 TEST_F(backend_shared_impl_test, prepare_log_object_copy_begin100_end101) {
@@ -1040,9 +1044,11 @@ TEST_F(backend_shared_impl_test, prepare_log_object_copy_begin100_end101) {
     );
     EXPECT_TRUE(result.has_value());
     EXPECT_EQ(result->start_offset, 0);
-    EXPECT_EQ(result->end_offset, 74);
-    EXPECT_EQ(required_blobs.size(), 1);
+    EXPECT_EQ(result->end_offset, 156);
+    EXPECT_EQ(required_blobs.size(), 3);
     EXPECT_TRUE(required_blobs.count(blob_id_type{100}) > 0);
+    EXPECT_TRUE(required_blobs.count(blob_id_type{200}) > 0);
+    EXPECT_TRUE(required_blobs.count(blob_id_type{300}) > 0);
 }
 
 TEST_F(backend_shared_impl_test, prepare_log_object_copy_begin101_end102) {
@@ -1060,7 +1066,7 @@ TEST_F(backend_shared_impl_test, prepare_log_object_copy_begin101_end102) {
     );
     EXPECT_TRUE(result.has_value());
     EXPECT_EQ(result->start_offset, 74);
-    EXPECT_EQ(result->end_offset, 156);
+    EXPECT_EQ(result->end_offset, std::nullopt);
     EXPECT_EQ(required_blobs.size(), 2);
     EXPECT_TRUE(required_blobs.count(blob_id_type{200}) > 0);
     EXPECT_TRUE(required_blobs.count(blob_id_type{300}) > 0);
@@ -1239,10 +1245,16 @@ TEST_F(backend_shared_impl_test, get_object_log_continue_if_no_end_offset) {
     req.add_object_id("pwal_0001");
 
     dummy_writer writer;
-    // Execute: goes through the continue branch, but send_backup_object_data is not called so the response is empty
+    // Execute: server emits a single empty GetObjectResponse for zero-length ranges
     auto status = backend.get_object(&req, &writer);
     EXPECT_TRUE(status.ok());
-    EXPECT_TRUE(writer.responses.empty());
+    ASSERT_EQ(writer.responses.size(), 1u);
+    const auto& resp = writer.responses[0];
+    // It should be an empty response marking the object complete
+    EXPECT_EQ(resp.total_size(), 0u);
+    EXPECT_EQ(resp.offset(), 0u);
+    EXPECT_TRUE(resp.is_first());
+    EXPECT_TRUE(resp.is_last());
 }
 
 TEST_F(backend_shared_impl_test, get_object_log_corrupted_file_returns_error_status) {
@@ -1648,4 +1660,3 @@ TEST_F(backend_shared_impl_test, begin_backup_exception_handling) {
 
 
 } // namespace limestone::testing
-

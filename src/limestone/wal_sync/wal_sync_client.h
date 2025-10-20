@@ -81,6 +81,7 @@ struct begin_backup_result {
     std::string session_token;
     std::chrono::system_clock::time_point expire_at;
     std::vector<backup_object> objects;
+    uint64_t finish_epoch{0};
 };
 
 struct remote_backup_result {
@@ -110,7 +111,7 @@ public:
     /**
      * @brief Destructor.
      */
-    virtual ~wal_sync_client();
+    virtual ~wal_sync_client() = default;
 
     /**
      * @brief Get the epoch value from the remote backup service.
@@ -291,6 +292,11 @@ protected:
         std::exception_ptr& compaction_error
     );
 
+        // Cleanup detached pwal files after compaction but before datastore shutdown.
+        // Implemented in the .cpp file. Accepts a reference to the datastore instance
+        // so it can access the internal compaction catalog via get_impl().
+        void cleanup_detached_pwals(limestone::api::datastore& datastore);
+
 
     /**
      * @brief Extend the session expiration.
@@ -342,10 +348,15 @@ private:
         std::exception_ptr& compaction_error
     );
 
+    bool write_epoch_marker(
+        const boost::filesystem::path& output_dir,
+        epoch_id_type epoch,
+        std::string& error_message
+    );
+
     boost::filesystem::path log_dir_;
     real_file_operations real_file_ops_;
     file_operations* file_ops_;
-    int lock_fd_ = -1;
     std::shared_ptr<limestone::grpc::client::wal_history_client> history_client_;
     std::shared_ptr<limestone::grpc::client::backup_client> backup_client_;
 };

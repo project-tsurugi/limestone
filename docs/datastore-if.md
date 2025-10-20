@@ -352,13 +352,16 @@
       * この操作は `datastore::read()` 呼び出しの前後いずれでも利用可能
     * since
       * `BACKUP-1`
-  * `datastore::restore(std::string_view from, bool keep_backup) -> restore_result`
-    * overview
-      * データストアのリストア操作を行う
-      * keep_backupがfalseの場合は、fromディレクトリにあるWALファイル群を消去する
-    * note
-      * この操作は `datastore::ready()` 実行前に行う必要がある
-      * `LOG-0`のリストア操作は、fromディレクトリにバックアップされているWALファイル群をlogディレクトリにコピーする操作となる
+  * `datastore::restore(std::string_view from, bool keep_backup, bool purge_destination = true) -> restore_result`
+      * overview
+        * データストアのリストア操作を行う
+        * `keep_backup` が false の場合は、`from` ディレクトリにある WAL ファイル群を削除する
+        * `purge_destination` はリストア先（`datastore` の `location_`）の既存ファイルを事前に消去するかどうかを制御するフラグで、デフォルトは `true`（従来の挙動）です。
+        * `purge_destination = true` の場合はリストア先ディレクトリが事前にパージ（空に）されてからバックアップファイルがコピーされます。
+        * `purge_destination = false` の場合は既存のファイルを残したままバックアップファイルがコピーされます。既存ファイルとの競合に注意してください。
+      * note
+        * この操作は `datastore::ready()` 実行前に行う必要がある
+        * `LOG-0` のリストア操作は、`from` ディレクトリにバックアップされている WAL ファイル群を log ディレクトリにコピーする操作となる
 * `class backup`
   * class
     * overview

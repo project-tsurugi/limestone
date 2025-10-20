@@ -14,32 +14,38 @@
  * limitations under the License.
  */
 
-#include <wal_sync/wal_sync_client.h>
-
-#include <atomic>
-#include <condition_variable>
-#include <functional>
-#include <future>
-#include <memory>
-#include <sstream>
-#include <thread>
-#include <vector>
-#include <mutex>
-#include <limits>
-
-#include <boost/filesystem.hpp>
 #include <glog/logging.h>
 #include <grpc/client/backup_client.h>
 #include <limestone/api/configuration.h>
 #include <limestone/api/datastore.h>
 #include <limestone/status.h>
 #include <wal_sync/response_chunk_processor.h>
-#include "file_operations.h"
-#include "manifest.h"
+#include <wal_sync/wal_sync_client.h>
+
+#include <atomic>
+#include <boost/filesystem.hpp>
+#include <condition_variable>
+#include <cerrno>
+#include <functional>
+#include <future>
+#include <limits>
+#include <memory>
+#include <mutex>
+#include <sstream>
+#include <cstring>
+#include <thread>
+#include <vector>
+
+#include "compaction_catalog.h"
+#include "datastore_impl.h"
 #include "dblog_scan.h"
-#include "wal_history.grpc.pb.h"
-#include "grpc/service/message_versions.h"
+#include "file_operations.h"
 #include "grpc/service/grpc_constants.h"
+#include "grpc/service/message_versions.h"
+#include "internal.h"
+#include "manifest.h"
+#include "log_entry.h"
+#include "wal_history.grpc.pb.h"
 #include "wal_history.h"
 namespace limestone::internal {
 
@@ -142,23 +148,8 @@ bool wal_sync_client::init(std::string& error_message, bool allow_initialize) {
         return false;
     }
 
-    // Acquire manifest lock (will be released in destructor)
-    lock_fd_ = manifest::acquire_lock(log_dir_, *file_ops_);
-    if (lock_fd_ < 0) {
-        error_message = "failed to acquire manifest lock: " + log_dir_.string();
-        return false;
-    }
     return true;
 }
-
-// destructor: release manifest lock if held
-wal_sync_client::~wal_sync_client() {
-    if (lock_fd_ >= 0 && file_ops_) {
-        file_ops_->close(lock_fd_);
-        lock_fd_ = -1;
-    }
-}
-
 
 wal_sync_client::wal_sync_client(boost::filesystem::path log_dir, std::shared_ptr<::grpc::Channel> const& channel) noexcept
     : log_dir_(std::move(log_dir))
@@ -263,6 +254,7 @@ std::optional<begin_backup_result> wal_sync_client::begin_backup(
 
     begin_backup_result result{};
     result.session_token = response.session_id();
+    result.finish_epoch = response.finish_epoch();
     result.expire_at = std::chrono::system_clock::time_point{std::chrono::seconds{response.expire_at()}};
     result.objects.reserve(static_cast<std::size_t>(response.objects_size()));
     for (auto const& object : response.objects()) {
@@ -647,6 +639,17 @@ remote_backup_result wal_sync_client::execute_remote_backup(
     }
     begin_backup_result begin_result = std::move(*begin_result_opt);
 
+    bool const is_fullbackup = (begin_epoch == 0 && end_epoch == 0);
+    if (!is_fullbackup) {
+        std::string epoch_error;
+        if (!write_epoch_marker(output_dir, begin_result.finish_epoch, epoch_error)) {
+            result.error_message = std::move(epoch_error);
+            (void)end_backup(begin_result.session_token);
+            return result;
+        }
+    }
+
+    
     std::atomic<bool> keepalive_running{true};
     std::thread keepalive_thread;
 
@@ -709,7 +712,8 @@ bool wal_sync_client::restore(
     limestone::api::configuration conf(data_locations, log_dir_);
     limestone::api::datastore datastore_instance(conf);
 
-    limestone::status const restore_status = datastore_instance.restore(output_dir.string(), false);
+
+    limestone::status const restore_status = datastore_instance.restore(output_dir.string(), false, is_full_restore);
     if (restore_status != limestone::status::ok) {
         LOG(ERROR) << "restore failed: status=" << restore_status;
         return false;
@@ -722,6 +726,19 @@ bool wal_sync_client::compact_wal() {
     std::mutex rotation_mutex;
     std::condition_variable rotation_cv;
     std::exception_ptr compaction_error{};
+    // Before building a datastore instance, ensure any attached pwal files are
+    // detached (renamed) so they become selectable for compaction. This mirrors
+    // the behavior of the dblogutil repair flow.
+    try {
+        dblog_scan ds(log_dir_);
+        ds.detach_wal_files();
+    } catch (std::exception const& ex) {
+        LOG(ERROR) << "failed to detach wal files before compaction: " << ex.what();
+        return false;
+    } catch (...) {
+        LOG(ERROR) << "failed to detach wal files before compaction due to unknown error";
+        return false;
+    }
 
     // Build a dedicated datastore instance for compaction.
     auto datastore = create_rotation_aware_datastore();
@@ -752,6 +769,17 @@ bool wal_sync_client::compact_wal() {
         return false;
     }
 
+    // Cleanup detached pwals before shutting down the datastore. The
+    // compaction_catalog is held by the datastore_impl and can be accessed
+    // via datastore->get_impl()->get_compaction_catalog().
+    try {
+        cleanup_detached_pwals(*datastore);
+    } catch (std::exception const& ex) {
+        LOG(ERROR) << "cleanup_detached_pwals threw exception: " << ex.what();
+    } catch (...) {
+        LOG(ERROR) << "cleanup_detached_pwals threw unknown exception";
+    }
+
     std::future<void> shutdown_future;
     try {
         shutdown_future = datastore->shutdown();
@@ -767,6 +795,112 @@ bool wal_sync_client::compact_wal() {
     }
 
     return true;
+}
+
+bool wal_sync_client::write_epoch_marker(
+    const boost::filesystem::path& output_dir,
+    epoch_id_type epoch,
+    std::string& error_message
+) {
+    boost::system::error_code dir_ec;
+    file_ops_->create_directories(output_dir, dir_ec);
+    if (dir_ec) {
+        std::ostringstream oss;
+        oss << "failed to prepare output directory: " << output_dir.string()
+            << ", ec=" << dir_ec.message();
+        error_message = oss.str();
+        return false;
+    }
+
+    auto epoch_path = output_dir / std::string(limestone::internal::epoch_file_name);
+    FILE* fp = file_ops_->fopen(epoch_path.string().c_str(), "wb");
+    if (!fp) {
+        std::ostringstream oss;
+        oss << "failed to create epoch file: " << epoch_path.string()
+            << ", errno=" << errno << " (" << std::strerror(errno) << ")";
+        error_message = oss.str();
+        return false;
+    }
+
+    struct file_guard {
+        file_operations* ops{};
+        FILE* handle{};
+        ~file_guard() {
+            if (handle) {
+                ops->fclose(handle);
+            }
+        }
+    } guard{file_ops_, fp};
+
+    limestone::api::log_entry::durable_epoch(fp, epoch);
+
+    if (file_ops_->fflush(fp) != 0) {
+        std::ostringstream oss;
+        oss << "failed to flush epoch file: " << epoch_path.string()
+            << ", errno=" << errno << " (" << std::strerror(errno) << ")";
+        error_message = oss.str();
+        return false;
+    }
+    int fd = file_ops_->fileno(fp);
+    if (fd >= 0 && file_ops_->fsync(fd) != 0) {
+        std::ostringstream oss;
+        oss << "failed to fsync epoch file: " << epoch_path.string()
+            << ", errno=" << errno << " (" << std::strerror(errno) << ")";
+        error_message = oss.str();
+        return false;
+    }
+
+    return true;
+}
+
+
+void wal_sync_client::cleanup_detached_pwals(limestone::api::datastore& ds) {
+    try {
+        // Obtain compaction catalog via datastore_impl accessor
+        auto impl = ds.get_impl();
+        compaction_catalog& catalog = impl->get_compaction_catalog();
+
+        std::set<std::string> detached = catalog.get_detached_pwals();
+        std::set<compacted_file_info> compacted_files = catalog.get_compacted_files();
+        epoch_id_type max_epoch = catalog.get_max_epoch_id();
+        blob_id_type max_blob = catalog.get_max_blob_id();
+
+        if (detached.empty()) {
+            return;
+        }
+
+        boost::system::error_code ec;
+        for (auto it = detached.begin(); it != detached.end();) {
+            const std::string filename = *it;
+            // skip compacted snapshot files
+            if (filename == compaction_catalog::get_compacted_filename()
+                || filename == compaction_catalog::get_compacted_backup_filename()) {
+                ++it;
+                continue;
+            }
+            boost::filesystem::path p = log_dir_ / filename;
+            file_ops_->remove(p, ec);
+            if (ec) {
+                LOG(ERROR) << "failed to remove detached pwal: " << p.string() << ", ec=" << ec.message();
+                ++it; // keep name in catalog for future retry
+            } else {
+                LOG(INFO) << "removed detached pwal: " << p.string();
+                it = detached.erase(it);
+            }
+        }
+
+        try {
+            catalog.update_catalog_file(max_epoch, max_blob, compacted_files, detached);
+        } catch (std::exception const& ex) {
+            LOG(ERROR) << "failed to update compaction catalog after removing detached pwals: " << ex.what();
+        } catch (...) {
+            LOG(ERROR) << "failed to update compaction catalog after removing detached pwals due to unknown error";
+        }
+    } catch (std::exception const& ex) {
+        LOG(ERROR) << "cleanup_detached_pwals failed: " << ex.what();
+    } catch (...) {
+        LOG(ERROR) << "cleanup_detached_pwals failed due to unknown error";
+    }
 }
 
 

@@ -41,8 +41,11 @@ std::vector<backup_object> backend_shared_impl::generate_backup_objects(const st
         } else if (filename.rfind("pwal_", 0) == 0) {
             backup_objects.emplace_back(filename, backup_object_type::log, filename);
         } else if ((metadata_files.count(filename) > 0)) {
-            if (!is_full_backup && filename != "wal_history") {
-                continue;  // Skip metadata files except wal_history in incremental backup mode
+            // For incremental backups (is_full_backup == false), only 
+            // 'limestone-manifest.json' are included; other metadata files
+            // listed above are skipped.
+            if (!is_full_backup && filename != "limestone-manifest.json") {
+                continue;
             }
             backup_objects.emplace_back(filename, backup_object_type::metadata, filename);
         } else if (filename.rfind("epoch", 0) == 0 && is_full_backup) {
@@ -139,9 +142,13 @@ void backend_shared_impl::set_file_operations(limestone::internal::file_operatio
             if (!range) {
                 return error_status;
             }
-            if (range->end_offset.has_value() && range->end_offset == 0) {
-                continue; // File does not have a copy target
-            }
+            // If end_offset == 0 we previously skipped this object entirely.
+            // That causes the client to receive an object in the begin_backup
+            // list but never get any GetObjectResponse for it, leaving the
+            // client-side transfer state incomplete. Instead, do not skip;
+            // allow send_backup_object_data to be called with a zero-length
+            // range so the server can emit a single empty response and the
+            // client will mark the object as completed.
         }
         auto send_status = send_backup_object_data(*backup_object, writer, range.value());
         if (!send_status.ok()) {
@@ -190,11 +197,11 @@ std::optional<byte_range> backend_shared_impl::prepare_log_object_copy(
             if (!start_offset.has_value() && entry.epoch_id() >= begin_epoch) {
                 start_offset = fpos_before_read_entry;
             }
-            if (!end_offset.has_value() && entry.epoch_id() >= end_epoch) {
+            if (!end_offset.has_value() && entry.epoch_id() > end_epoch) {
                 end_offset = fpos_before_read_entry;
             }
         }
-        if (entry.type() == log_entry::entry_type::normal_with_blob && current_epoch_id >= begin_epoch && current_epoch_id < end_epoch) {
+        if (entry.type() == log_entry::entry_type::normal_with_blob && current_epoch_id >= begin_epoch && current_epoch_id <= end_epoch) {
             auto blob_ids = entry.get_blob_ids();
             required_blobs.insert(blob_ids.begin(), blob_ids.end());
         }
@@ -235,6 +242,30 @@ std::optional<byte_range> backend_shared_impl::prepare_log_object_copy(
         return {::grpc::StatusCode::OUT_OF_RANGE, "end_offset before start_offset"};
     }
     std::streamsize send_size = effective_end - range.start_offset;
+    // stream_offset tracks the offset within this stream (0-based) that is
+    // reported to the client. We keep a separate file read offset for the
+    // underlying file handle.
+    std::streamsize stream_offset = 0;
+    // If there's nothing to send, emit one empty GetObjectResponse so the
+    // client can treat the object as completed. This avoids leaving the
+    // client's transfer state incomplete for objects with a zero-length
+    // range (e.g., no entries match the requested epoch interval).
+    if (send_size == 0) {
+        limestone::grpc::proto::GetObjectResponse resp;
+        auto* obj = resp.mutable_object();
+        obj->set_object_id(object.object_id());
+        obj->set_type(static_cast<limestone::grpc::proto::BackupObjectType>(object.type()));
+        obj->set_path(object.path().string());
+        resp.set_total_size(static_cast<std::uint64_t>(0));
+        resp.set_offset(static_cast<std::uint64_t>(0));
+        resp.set_is_first(true);
+        resp.set_is_last(true);
+        if (!writer->Write(resp)) {
+            return {::grpc::StatusCode::UNKNOWN, "stream write failed"};
+        }
+        return ::grpc::Status::OK;
+    }
+
     file_ops_->ifs_seekg(*ifs, range.start_offset, std::ios::beg);
     if (file_ops_->ifs_fail(*ifs)) {
         int saved_errno = errno;
@@ -268,18 +299,21 @@ std::optional<byte_range> backend_shared_impl::prepare_log_object_copy(
         obj->set_path(object.path().string());
 
         if (is_first) {
-            resp.set_total_size(static_cast<std::uint64_t>(total_size));
+            // Report the total number of bytes that will be sent in this stream.
+            resp.set_total_size(static_cast<std::uint64_t>(send_size));
         }
-        resp.set_offset(static_cast<std::uint64_t>(offset));
+        // Report offset relative to the start of this stream (0-based).
+        resp.set_offset(static_cast<std::uint64_t>(stream_offset));
         resp.set_chunk(buffer.data(), static_cast<size_t>(bytes_read));
         resp.set_is_first(is_first);
-        resp.set_is_last(offset + bytes_read >= effective_end);
+        resp.set_is_last(stream_offset + bytes_read >= send_size);
 
         if (!writer->Write(resp)) {
             return {::grpc::StatusCode::UNKNOWN, "stream write failed"};
         }
-        offset += bytes_read;
-        remaining -= bytes_read;
+    offset += bytes_read;
+    remaining -= bytes_read;
+    stream_offset += bytes_read;
         is_first = false;
     }
     if (offset < range.start_offset + send_size) {
@@ -315,7 +349,8 @@ void backend_shared_impl::reset_file_operations_to_default() noexcept {
 }
 
 ::grpc::Status backend_shared_impl::begin_backup(datastore& datastore_, limestone::grpc::proto::BeginBackupRequest const* request,
-                                                 limestone::grpc::proto::BeginBackupResponse* response, backup_path_list_provider_type const& backup_path_list_provider) noexcept {
+                                                 limestone::grpc::proto::BeginBackupResponse* response, backup_path_list_provider_type const& backup_path_list_provider,
+                                                 std::function<epoch_id_type()> current_epoch_provider) noexcept {
     if (!backup_path_list_provider) {
         return {::grpc::StatusCode::INTERNAL, 
                 "Unexpected error: backup_path_list_provider is not set. This may indicate an issue in the server implementation."};
@@ -385,12 +420,22 @@ void backend_shared_impl::reset_file_operations_to_default() noexcept {
                 return {::grpc::StatusCode::INVALID_ARGUMENT, "begin_epoch must be strictly greater than the epoch id of the last snapshot: begin_epoch=" +
                                                                   std::to_string(begin_epoch) + ", snapshot_epoch_id=" + std::to_string(snapshot_epoch_id)};
             }
-            auto current_epoch_id = datastore_.last_epoch();
+            // Use the provided epoch provider if available; otherwise fall back to datastore_.last_epoch().
+            // TODO: Replace this lambda-based approach with a backend_context/strategy to
+            // centralize environment-specific logic (inproc vs standalone).
+            epoch_id_type current_epoch_id = 0;
+            if (current_epoch_provider) {
+                current_epoch_id = current_epoch_provider();
+            } else {
+                current_epoch_id = datastore_.last_epoch();
+            }
             if (end_epoch > current_epoch_id) {
                 return {::grpc::StatusCode::INVALID_ARGUMENT, "end_epoch must be less than or equal to the current epoch id: end_epoch=" +
                                                                   std::to_string(end_epoch) + ", current_epoch_id=" + std::to_string(current_epoch_id)};
             }
-            auto boot_durable_epoch_id = datastore_.get_impl()->get_boot_durable_epoch_id();
+            epoch_id_type boot_durable_epoch_id = datastore_.get_impl()->get_boot_durable_epoch_id();
+            // Note: we currently always use datastore_.get_impl()->get_boot_durable_epoch_id().
+            // If a different source is required for standalone, consider passing a boot_epoch_provider similarly.
             if (end_epoch < boot_durable_epoch_id) {
                 return {::grpc::StatusCode::INVALID_ARGUMENT, "end_epoch must be strictly greater than the durable epoch id at boot time: end_epoch=" +
                                                                   std::to_string(end_epoch) + ", boot_durable_epoch_id=" + std::to_string(boot_durable_epoch_id)};

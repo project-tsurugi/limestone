@@ -66,13 +66,15 @@ standalone_backend::standalone_backend(const boost::filesystem::path& log_dir)
 
 
 ::grpc::Status standalone_backend::begin_backup(const BeginBackupRequest* request, BeginBackupResponse* response) noexcept {
-    // Temporary lambda to satisfy the path_generator argument
     backup_path_list_provider_type provider = [this]() -> std::vector<boost::filesystem::path> {
         auto set = datastore_.get_impl()->get_files();
         return {set.begin(), set.end()};
-    };\
-
-    return backend_shared_impl_.begin_backup(datastore_, request, response, provider);
+    };
+    auto epoch_provider = [this]() -> epoch_id_type {
+        limestone::internal::dblog_scan scan(log_dir_);
+        return scan.last_durable_epoch_in_dir();
+    };
+    return backend_shared_impl_.begin_backup(datastore_, request, response, provider, epoch_provider);
 }
 
 
