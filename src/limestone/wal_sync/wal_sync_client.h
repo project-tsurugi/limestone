@@ -297,6 +297,18 @@ protected:
         // so it can access the internal compaction catalog via get_impl().
         void cleanup_detached_pwals(limestone::api::datastore& datastore);
 
+    bool write_epoch_marker(
+        const boost::filesystem::path& output_dir,
+        epoch_id_type epoch,
+        std::string& error_message
+    );
+
+    bool write_wal_history_snapshot(
+        const std::vector<branch_epoch>& remote_history,
+        epoch_id_type finish_epoch,
+        const boost::filesystem::path& output_dir,
+        std::string& error_message
+    );
 
     /**
      * @brief Extend the session expiration.
@@ -346,12 +358,6 @@ private:
         std::mutex& rotation_mutex,
         bool& compaction_done,
         std::exception_ptr& compaction_error
-    );
-
-    bool write_epoch_marker(
-        const boost::filesystem::path& output_dir,
-        epoch_id_type epoch,
-        std::string& error_message
     );
 
     boost::filesystem::path log_dir_;

@@ -19,6 +19,8 @@
 #include <array>
 #include <chrono>
 #include <fstream>
+#include <cerrno>
+#include <tuple>
 #include <regex>
 #include <sstream>
 #include <unordered_set>
@@ -30,6 +32,7 @@
 #include <boost/system/error_code.hpp>
 #include <grpcpp/grpcpp.h>
 #include <gtest/gtest.h>
+#include <boost/endian/conversion.hpp>
 
 #include "limestone/grpc/grpc_test_helper.h"
 #include "limestone/grpc/backend_test_fixture.h"
@@ -71,6 +74,38 @@ void expect_epoch_file(const boost::filesystem::path& dir, std::uint64_t expecte
 
     ifs.get();
     EXPECT_TRUE(ifs.eof()) << "epoch file contains unexpected extra data";
+}
+
+std::vector<std::tuple<std::uint64_t, std::uint64_t, std::int64_t>> read_wal_history_records(const boost::filesystem::path& dir) {
+    boost::filesystem::path history_path = dir / "wal_history";
+    std::vector<std::tuple<std::uint64_t, std::uint64_t, std::int64_t>> records;
+    std::ifstream ifs(history_path.string(), std::ios::binary);
+    if (!ifs.is_open()) {
+        return records;
+    }
+    while (true) {
+        std::array<unsigned char, sizeof(std::uint64_t) * 3> buf{};
+        ifs.read(reinterpret_cast<char*>(buf.data()), static_cast<std::streamsize>(buf.size()));
+        std::streamsize read = ifs.gcount();
+        if (read == 0) {
+            break;
+        }
+        if (read != static_cast<std::streamsize>(buf.size())) {
+            ADD_FAILURE() << "partial record read from wal_history";
+            break;
+        }
+        std::uint64_t epoch_be = 0;
+        std::uint64_t identity_be = 0;
+        std::uint64_t timestamp_be = 0;
+        std::memcpy(&epoch_be, buf.data(), sizeof(epoch_be));
+        std::memcpy(&identity_be, buf.data() + sizeof(epoch_be), sizeof(identity_be));
+        std::memcpy(&timestamp_be, buf.data() + sizeof(epoch_be) + sizeof(identity_be), sizeof(timestamp_be));
+        auto epoch = boost::endian::big_to_native(epoch_be);
+        auto identity = boost::endian::big_to_native(identity_be);
+        auto timestamp = static_cast<std::int64_t>(boost::endian::big_to_native(timestamp_be));
+        records.emplace_back(epoch, identity, timestamp);
+    }
+    return records;
 }
 
 class scripted_backup_service final : public limestone::grpc::proto::BackupService::Service {
@@ -148,6 +183,7 @@ public:
     using wal_sync_client::create_rotation_aware_datastore;
     using wal_sync_client::prepare_for_compaction;
     using wal_sync_client::run_compaction_with_rotation;
+    using wal_sync_client::write_wal_history_snapshot;
 };
 
 TEST_F(wal_sync_client_test, init_creates_manifest_when_dir_not_exist_and_allowed) {
@@ -1477,6 +1513,77 @@ TEST_F(wal_sync_client_test, copy_backup_objects_fails_when_rpc_error) {
     }
 }
 
+TEST_F(wal_sync_client_test, write_wal_history_snapshot_success) {
+    wal_sync_client_testable client(locale_dir, helper_.create_channel());
+    std::string error;
+    ASSERT_TRUE(client.init(error, true));
+
+    std::vector<branch_epoch> remote_history{
+        {5, 1001, 1111},
+        {7, 1002, 2222},
+        {9, 1003, 3333}
+    };
+
+    boost::filesystem::path output_dir = locale_dir / "wal_history_snapshot_success";
+    boost::filesystem::remove_all(output_dir);
+
+    std::string write_error;
+    ASSERT_TRUE(client.write_wal_history_snapshot(remote_history, 7, output_dir, write_error))
+        << write_error;
+    EXPECT_TRUE(write_error.empty());
+
+    auto records = read_wal_history_records(output_dir);
+    ASSERT_EQ(records.size(), 2);
+    EXPECT_EQ(std::get<0>(records[0]), 5u);
+    EXPECT_EQ(std::get<1>(records[0]), 1001u);
+    EXPECT_EQ(std::get<2>(records[0]), 1111);
+    EXPECT_EQ(std::get<0>(records[1]), 7u);
+    EXPECT_EQ(std::get<1>(records[1]), 1002u);
+    EXPECT_EQ(std::get<2>(records[1]), 2222);
+}
+
+TEST_F(wal_sync_client_test, write_wal_history_snapshot_fails_on_directory_error) {
+    class create_dir_failure_ops : public real_file_operations {
+    public:
+        void create_directories(const boost::filesystem::path& path, boost::system::error_code& ec) override {
+            (void)path;
+            ec = boost::system::errc::make_error_code(boost::system::errc::permission_denied);
+        }
+    };
+
+    create_dir_failure_ops mock_ops;
+    wal_sync_client_testable client(locale_dir, helper_.create_channel());
+    std::string error;
+    ASSERT_TRUE(client.init(error, true));
+    client.set_file_operations(mock_ops);
+
+    std::vector<branch_epoch> remote_history{{5, 1001, 1111}};
+    boost::filesystem::path output_dir = locale_dir / "wal_history_dir_error";
+    boost::filesystem::remove_all(output_dir);
+
+    std::string write_error;
+    EXPECT_FALSE(client.write_wal_history_snapshot(remote_history, 5, output_dir, write_error));
+    EXPECT_FALSE(write_error.empty());
+    EXPECT_FALSE(boost::filesystem::exists(output_dir / "wal_history"));
+}
+
+TEST_F(wal_sync_client_test, write_wal_history_snapshot_fails_on_file_creation_error) {
+    wal_sync_client_testable client(locale_dir, helper_.create_channel());
+    std::string error;
+    ASSERT_TRUE(client.init(error, true));
+
+    std::vector<branch_epoch> remote_history{{5, 1001, 1111}};
+    boost::filesystem::path output_dir = locale_dir / "wal_history_file_error";
+    boost::filesystem::remove_all(output_dir);
+    ASSERT_TRUE(boost::filesystem::create_directories(output_dir));
+    ASSERT_TRUE(boost::filesystem::create_directory(output_dir / "wal_history.tmp"));
+
+    std::string write_error;
+    EXPECT_FALSE(client.write_wal_history_snapshot(remote_history, 5, output_dir, write_error));
+    EXPECT_FALSE(write_error.empty());
+    EXPECT_FALSE(boost::filesystem::exists(output_dir / "wal_history"));
+}
+
 TEST_F(wal_sync_client_test, begin_backup_failure) {
     wal_sync_client client(locale_dir, helper_.create_channel());
     std::string error;
@@ -1786,6 +1893,12 @@ TEST_F(wal_sync_client_test, wal_sync_full_scenario_copy_backup) {
 
     restore_result = client.restore(begin, end.value(), output_dir);
     EXPECT_TRUE(restore_result);
+
+    // wal_historyの内容が一致することを確認する。
+    auto local_wal_history = read_wal_history_records(locale_dir);
+    auto remote_wal_history = read_wal_history_records(remote_dir);
+    EXPECT_EQ(local_wal_history, remote_wal_history);
+
 
     // Also verify datastore-level equality: last_epoch and snapshot contents must match
     // Create a temporary datastore for the remote (original) and restored output and compare.

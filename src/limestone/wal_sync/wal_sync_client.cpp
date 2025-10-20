@@ -33,6 +33,7 @@
 #include <mutex>
 #include <sstream>
 #include <cstring>
+#include <ctime>
 #include <thread>
 #include <vector>
 
@@ -641,6 +642,18 @@ remote_backup_result wal_sync_client::execute_remote_backup(
 
     bool const is_fullbackup = (begin_epoch == 0 && end_epoch == 0);
     if (!is_fullbackup) {
+        auto remote_history = get_remote_wal_compatibility();
+        if (!remote_history) {
+            result.error_message = "failed to retrieve remote wal_history";
+            (void)end_backup(begin_result.session_token);
+            return result;
+        }
+        std::string history_error;
+        if (!write_wal_history_snapshot(*remote_history, begin_result.finish_epoch, output_dir, history_error)) {
+            result.error_message = std::move(history_error);
+            (void)end_backup(begin_result.session_token);
+            return result;
+        }
         std::string epoch_error;
         if (!write_epoch_marker(output_dir, begin_result.finish_epoch, epoch_error)) {
             result.error_message = std::move(epoch_error);
@@ -847,6 +860,48 @@ bool wal_sync_client::write_epoch_marker(
         oss << "failed to fsync epoch file: " << epoch_path.string()
             << ", errno=" << errno << " (" << std::strerror(errno) << ")";
         error_message = oss.str();
+        return false;
+    }
+
+    return true;
+}
+
+bool wal_sync_client::write_wal_history_snapshot(
+    const std::vector<branch_epoch>& remote_history,
+    epoch_id_type finish_epoch,
+    const boost::filesystem::path& output_dir,
+    std::string& error_message
+) {
+    boost::system::error_code dir_ec;
+    file_ops_->create_directories(output_dir, dir_ec);
+    if (dir_ec) {
+        std::ostringstream oss;
+        oss << "failed to prepare output directory: " << output_dir.string()
+            << ", ec=" << dir_ec.message();
+        error_message = oss.str();
+        return false;
+    }
+
+    std::vector<limestone::internal::wal_history::record> records;
+    records.reserve(remote_history.size());
+    for (const auto& rec : remote_history) {
+        if (rec.epoch <= finish_epoch) {
+            records.emplace_back(limestone::internal::wal_history::record{
+                rec.epoch,
+                rec.identity,
+                static_cast<std::time_t>(rec.timestamp)
+            });
+        }
+    }
+
+    try {
+        limestone::internal::wal_history history(output_dir);
+        history.write_records(records);
+    } catch (const std::exception& ex) {
+        error_message = ex.what();
+        return false;
+    } catch (...) {
+        error_message = "unknown error while writing wal_history";
         return false;
     }
 
