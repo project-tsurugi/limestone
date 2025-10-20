@@ -81,7 +81,7 @@ status check_manifest(const boost::filesystem::path& manifest_path) {
 status validate_manifest_files(const boost::filesystem::path& from_dir, const std::vector<file_set_entry>& entries) {
     int manifest_count = 0;
     for (auto & ent : entries) {
-        if (ent.destination_path().string() != internal::manifest::file_name) {
+        if (ent.destination_path().string() != std::string(internal::manifest::file_name)) {
             continue;
         }
         boost::filesystem::path src{ent.source_path()};
@@ -194,8 +194,8 @@ status datastore::restore(std::string_view from, bool keep_backup, bool purge_de
             try {
                 // If this is the manifest file and we are NOT purging the destination,
                 // skip copying it when destination already contains a manifest.
-                if (p.filename() == boost::filesystem::path(internal::manifest::file_name)) {
-                    boost::filesystem::path dst_manifest = location_ / internal::manifest::file_name;
+                if (p.filename() == boost::filesystem::path(std::string(internal::manifest::file_name))) {
+                    boost::filesystem::path dst_manifest = location_ / std::string(internal::manifest::file_name);
                     try {
                         if (boost::filesystem::exists(dst_manifest)) {
                             VLOG_LP(log_info) << "skip copying manifest since destination already has one: " << dst_manifest.string();
