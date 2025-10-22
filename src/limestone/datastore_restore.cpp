@@ -139,18 +139,24 @@ status copy_backup_files(const boost::filesystem::path& from_dir, const std::vec
         }
         try {
             if (!resolver.is_blob_file(src)) {
-                // overwrite if destination exists
-                boost::filesystem::copy_file(src, location / dst, boost::filesystem::copy_options::overwrite_existing);
+                std::filesystem::copy_file(
+                    std::filesystem::path{src.string()},
+                    std::filesystem::path{(location / dst).string()},
+                    std::filesystem::copy_options::overwrite_existing
+                );
             } else {
                 boost::filesystem::path full_dst = resolver.resolve_path(resolver.extract_blob_id(src));
                 boost::filesystem::path dst_dir = full_dst.parent_path();
                 if (!boost::filesystem::exists(dst_dir)) {
                     boost::filesystem::create_directories(dst_dir);
                 }
-                // overwrite blob file if destination exists
-                boost::filesystem::copy_file(src, full_dst, boost::filesystem::copy_options::overwrite_existing);
+                std::filesystem::copy_file(
+                    std::filesystem::path{src.string()},
+                    std::filesystem::path{full_dst.string()},
+                    std::filesystem::copy_options::overwrite_existing
+                );
             }
-        } catch (boost::filesystem::filesystem_error& ex) {
+        } catch (std::filesystem::filesystem_error& ex) {
             LOG_LP(ERROR) << ex.what() << " file = " << src.string();
             return status::err_permission_error;
         }
@@ -211,6 +217,11 @@ status datastore::restore(std::string_view from, bool keep_backup, bool purge_de
                 if (!resolver.is_blob_file(p)) {
                     // overwrite destination file if exists
                     boost::filesystem::copy_file(p, location_ / p.filename(), boost::filesystem::copy_options::overwrite_existing);
+                    std::filesystem::copy_file(
+                        std::filesystem::path{p.string()},
+                        std::filesystem::path{(location_ / p.filename()).string()},
+                        std::filesystem::copy_options::overwrite_existing
+                    );
                 } else {
                     boost::filesystem::path full_dst = resolver.resolve_path(resolver.extract_blob_id(p));
                     boost::filesystem::path dst_dir = full_dst.parent_path();
@@ -219,8 +230,13 @@ status datastore::restore(std::string_view from, bool keep_backup, bool purge_de
                     }
                     // overwrite blob file if exists
                     boost::filesystem::copy_file(p, full_dst, boost::filesystem::copy_options::overwrite_existing);
+                    std::filesystem::copy_file(
+                        std::filesystem::path{p.string()},
+                        std::filesystem::path{full_dst.string()},
+                        std::filesystem::copy_options::overwrite_existing
+                    );
                 }
-            } catch (boost::filesystem::filesystem_error& ex) {
+            } catch (std::filesystem::filesystem_error& ex) {
                 LOG_LP(ERROR) << ex.what() << " file = " << p.string();
                 return status::err_permission_error;
             }

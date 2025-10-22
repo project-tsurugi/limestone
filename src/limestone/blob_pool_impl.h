@@ -33,6 +33,10 @@ public:
 
     [[nodiscard]] blob_id_type duplicate_data(blob_id_type reference) override;
 
+    [[nodiscard]] blob_reference_tag_type generate_reference_tag(
+        blob_id_type blob_id,
+        std::uint64_t transaction_id) override;
+
 protected:
     // These protected fields and methods include:
     // - Test-specific methods
@@ -94,6 +98,13 @@ protected:
         std::lock_guard<std::mutex> lock(mutex_);
         return blob_ids_;
     }
+
+    /**
+     * @brief Checks HMAC result and throws exception if failed.
+     * @param result HMAC result pointer (nullptr if failed)
+     */
+    void handle_hmac_result(unsigned char const* result);
+
 private:
     /**
      * @brief Generates a unique ID for a BLOB.
