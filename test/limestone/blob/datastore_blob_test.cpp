@@ -547,4 +547,179 @@ TEST_F(datastore_blob_test, switch_available_boundary_version) {
     EXPECT_EQ(boundary_version.get_minor(), 3);
 }
 
+/**
+ * @brief Test recovery when BLOB column is updated from NULL to non-NULL.
+ * 
+ * This test reproduces the bug scenario where the same key has different entry types:
+ * - First write: normal_entry (BLOB column is NULL, no blob_ids)
+ * - Second write: normal_with_blob (BLOB column has data, with blob_ids)
+ * 
+ * The bug was in insert_entry_or_update_to_max() which incorrectly used e.type()
+ * (new entry type) to determine the format of stored value, instead of reading
+ * the actual stored entry type from value[0].
+ * 
+ * Scenario matches the issue:
+ * 1. INSERT with BLOB=NULL → normal_entry
+ * 2. INSERT OR REPLACE with BLOB=<data> → normal_with_blob
+ * 3. Recovery should correctly handle both entry types for the same key
+ */
+TEST_F(datastore_blob_test, update_blob_from_null_to_nonnull) {
+    // Step 1: Write entry with BLOB=NULL (normal_entry)
+    datastore_->switch_epoch(1);
+    lc0_->begin_session();
+    lc0_->add_entry(10, "test_key", "initial_value", {1, 0});
+    lc0_->end_session();
+    datastore_->switch_epoch(2);
+    
+    datastore_->shutdown();
+    datastore_ = nullptr;
+    gen_datastore();
+
+    // Verify first entry
+    {
+        auto cursor = datastore_->get_snapshot()->get_cursor();
+        EXPECT_TRUE(cursor->next());
+        std::string key{};
+        std::string value{};
+        cursor->key(key);
+        cursor->value(value);
+        EXPECT_EQ(key, "test_key");
+        EXPECT_EQ(value, "initial_value");
+        EXPECT_EQ(cursor->storage(), 10);
+        EXPECT_FALSE(cursor->next());
+    }
+
+    // Step 2: Update with BLOB having data (normal_with_blob)
+    datastore_->switch_epoch(3);
+    lc0_->begin_session();
+    lc0_->add_entry(10, "test_key", "updated_value", {3, 0}, {42, 43});
+    lc0_->end_session();
+    datastore_->switch_epoch(4);
+
+    datastore_->shutdown();
+    datastore_ = nullptr;
+    gen_datastore();
+
+    // Verify updated entry (should have the new value)
+    {
+        auto cursor = datastore_->get_snapshot()->get_cursor();
+        EXPECT_TRUE(cursor->next());
+        std::string key{};
+        std::string value{};
+        cursor->key(key);
+        cursor->value(value);
+        EXPECT_EQ(key, "test_key");
+        EXPECT_EQ(value, "updated_value");
+        EXPECT_EQ(cursor->storage(), 10);
+        EXPECT_FALSE(cursor->next());
+    }
+}
+
+/**
+ * @brief Test recovery when BLOB column is updated from non-NULL to NULL.
+ * 
+ * This test covers the opposite direction:
+ * - First write: normal_with_blob (BLOB has data)
+ * - Second write: normal_entry (BLOB is NULL)
+ */
+TEST_F(datastore_blob_test, update_blob_from_nonnull_to_null) {
+    // Step 1: Write entry with BLOB data (normal_with_blob)
+    datastore_->switch_epoch(1);
+    lc0_->begin_session();
+    lc0_->add_entry(20, "test_key_2", "initial_with_blob", {1, 0}, {100, 101, 102});
+    lc0_->end_session();
+    datastore_->switch_epoch(2);
+
+    datastore_->shutdown();
+    datastore_ = nullptr;
+    gen_datastore();
+
+    // Verify first entry
+    {
+        auto cursor = datastore_->get_snapshot()->get_cursor();
+        EXPECT_TRUE(cursor->next());
+        std::string key{};
+        std::string value{};
+        cursor->key(key);
+        cursor->value(value);
+        EXPECT_EQ(key, "test_key_2");
+        EXPECT_EQ(value, "initial_with_blob");
+        EXPECT_EQ(cursor->storage(), 20);
+        EXPECT_FALSE(cursor->next());
+    }
+
+    // Step 2: Update with BLOB=NULL (normal_entry)
+    datastore_->switch_epoch(3);
+    lc0_->begin_session();
+    lc0_->add_entry(20, "test_key_2", "updated_no_blob", {3, 0});
+    lc0_->end_session();
+    datastore_->switch_epoch(4);
+
+    datastore_->shutdown();
+    datastore_ = nullptr;
+    gen_datastore();
+
+    // Verify updated entry (should have the new value without blob)
+    {
+        auto cursor = datastore_->get_snapshot()->get_cursor();
+        EXPECT_TRUE(cursor->next());
+        std::string key{};
+        std::string value{};
+        cursor->key(key);
+        cursor->value(value);
+        EXPECT_EQ(key, "test_key_2");
+        EXPECT_EQ(value, "updated_no_blob");
+        EXPECT_EQ(cursor->storage(), 20);
+        EXPECT_FALSE(cursor->next());
+    }
+}
+
+/**
+ * @brief Test multiple updates alternating between NULL and non-NULL BLOB values.
+ * 
+ * This test exercises the scenario where the same key is updated multiple times
+ * with alternating BLOB states (NULL → non-NULL → NULL → non-NULL).
+ */
+TEST_F(datastore_blob_test, multiple_alternating_blob_updates) {
+    // Write 1: NULL
+    datastore_->switch_epoch(1);
+    lc0_->begin_session();
+    lc0_->add_entry(30, "alternating_key", "v1", {1, 0});
+    lc0_->end_session();
+
+    // Write 2: non-NULL
+    datastore_->switch_epoch(2);
+    lc0_->begin_session();
+    lc0_->add_entry(30, "alternating_key", "v2", {2, 0}, {10});
+    lc0_->end_session();
+
+    // Write 3: NULL
+    datastore_->switch_epoch(3);
+    lc0_->begin_session();
+    lc0_->add_entry(30, "alternating_key", "v3", {3, 0});
+    lc0_->end_session();
+
+    // Write 4: non-NULL (final)
+    datastore_->switch_epoch(4);
+    lc0_->begin_session();
+    lc0_->add_entry(30, "alternating_key", "v4_final", {4, 0}, {20, 21});
+    lc0_->end_session();
+
+    datastore_->switch_epoch(5);
+
+    datastore_->shutdown();
+    datastore_ = nullptr;
+    gen_datastore();
+
+    // Verify final value
+    {
+        auto cursor = datastore_->get_snapshot()->get_cursor();
+        EXPECT_TRUE(cursor->next());
+        std::string value{};
+        cursor->value(value);
+        EXPECT_EQ(value, "v4_final");
+        EXPECT_FALSE(cursor->next());
+    }
+}
+
 } // namespace limestone::testing
