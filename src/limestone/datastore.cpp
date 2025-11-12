@@ -428,6 +428,12 @@ void datastore::add_persistent_callback(std::function<void(epoch_id_type)> callb
     persistent_callback_ = std::move(callback);
 }
 
+void datastore::remove_persistent_callback() noexcept {
+    check_after_ready(static_cast<const char*>(__func__));
+    std::lock_guard<std::mutex> lock(mtx_epoch_persistent_callback_);
+    persistent_callback_ = {};
+}
+
 void datastore::switch_safe_snapshot([[maybe_unused]] write_version_type write_version, [[maybe_unused]] bool inclusive) const noexcept {
     check_after_ready(static_cast<const char*>(__func__));
 }
@@ -964,4 +970,3 @@ void datastore::wait_for_blob_file_garbace_collector_for_tests() const noexcept 
 
 
 } // namespace limestone::api
-

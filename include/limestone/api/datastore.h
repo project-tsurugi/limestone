@@ -53,7 +53,7 @@ class datastore_impl;
 class backup;
 class log_channel;
 
-/**
+/*
  * @brief datastore interface to start/stop the services, store log, create snapshot for recover from log files
  * @details this object is not thread-safe except for create_channel().
  */
@@ -180,6 +180,12 @@ public:
      * @attention this function should be called before the ready() is called.
      */
     void add_persistent_callback(std::function<void(epoch_id_type)> callback) noexcept;
+
+    /**
+     * @brief unregister the registered persistent callback.
+     * @attention this function should be called after the ready() is called.
+     */
+    void remove_persistent_callback() noexcept;
 
     /**
      * @brief notify this of the location of available safe snapshots

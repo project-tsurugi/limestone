@@ -210,6 +210,11 @@
       * 永続化に成功した際のコールバックを登録する
     * note
       * この操作は、 `datastore::ready()` の実行前に行う必要がある
+  * `datastore::remove_persistent_callback()`
+    * overview
+      * 登録済みの永続化コールバックを解除する
+    * note
+      * この操作は、 `datastore::ready()` の実行後に行う必要がある
   * `datastore::switch_safe_snapshot(write_version_type write_version, bool inclusive)`
     * overview
       * 利用可能な safe snapshot の位置をデータストアに通知する

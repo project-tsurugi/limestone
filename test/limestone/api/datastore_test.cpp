@@ -133,6 +133,45 @@ TEST_F(datastore_test, add_persistent_callback_test) { // NOLINT
 
 }
 
+TEST_F(datastore_test, remove_persistent_callback_test) { // NOLINT
+    if (system("rm -rf /tmp/datastore_test") != 0) {
+        std::cerr << "cannot remove directory" << std::endl;
+    }
+    if (system("mkdir -p /tmp/datastore_test/data_location /tmp/datastore_test/metadata_location") != 0) {
+        std::cerr << "cannot make directory" << std::endl;
+    }
+
+    std::vector<boost::filesystem::path> data_locations{};
+    data_locations.emplace_back(data_location);
+    boost::filesystem::path metadata_location_path{metadata_location};
+    limestone::api::configuration conf(data_locations, metadata_location_path);
+
+    datastore_ = std::make_unique<limestone::api::datastore_test>(conf);
+
+    datastore_->add_persistent_callback(set_durable_epoch);
+
+    datastore_->switch_epoch(1);
+    datastore_->ready();
+
+    datastore_->switch_epoch(2);
+    EXPECT_EQ(1U, get_durable_epoch());
+
+    datastore_->switch_epoch(3);
+    EXPECT_EQ(2U, get_durable_epoch());
+
+    datastore_->remove_persistent_callback();
+    auto previous_epoch = get_durable_epoch();
+
+    datastore_->switch_epoch(previous_epoch + 1);
+    // NOTE: add_persistent_callback_test polls because the API contract does not guarantee
+    // switch_epoch() completes after invoking the callback. In this test we must ensure the
+    // callback is not invoked after remove_persistent_callback(), which is difficult to prove
+    // under an asynchronous implementation. Therefore, the expectations below intentionally rely
+    // on the current implementation (and test setup) where switch_epoch() synchronously runs the
+    // callback before returning. If that behavior changes, this test will stop being valid.
+    EXPECT_EQ(previous_epoch, get_durable_epoch());
+}
+
 TEST_F(datastore_test, prevent_double_start_test) { // NOLINT
     if (system("rm -rf /tmp/datastore_test") != 0) {
         std::cerr << "cannot remove directory" << std::endl;
