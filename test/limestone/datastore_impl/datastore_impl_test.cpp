@@ -1,6 +1,6 @@
 #include <gtest/gtest.h>
-#include "datastore_impl.h"
-#include "manifest.h"
+#include <limestone/datastore_impl.h>
+#include <limestone/manifest.h>
 
 namespace limestone::api {
 
@@ -63,6 +63,25 @@ TEST_F(datastore_impl_test, migration_info_multiple_sets) {
     EXPECT_TRUE(datastore.get_migration_info().has_value());
     EXPECT_EQ(datastore.get_migration_info().value().get_old_version(), 7);
     EXPECT_EQ(datastore.get_migration_info().value().get_new_version(), 8);
+}
+
+TEST_F(datastore_impl_test, generate_reference_tag_deterministic_and_unique) {
+    datastore_impl datastore;
+
+    blob_id_type const blob_id1 = 100;
+    blob_id_type const blob_id2 = 200;
+    std::uint64_t const txid1 = 1000;
+    std::uint64_t const txid2 = 2000;
+
+    auto const tag1a = datastore.generate_reference_tag(blob_id1, txid1);
+    auto const tag1b = datastore.generate_reference_tag(blob_id1, txid1);
+    EXPECT_EQ(tag1a, tag1b);
+
+    auto const tag2 = datastore.generate_reference_tag(blob_id2, txid1);
+    EXPECT_NE(tag1a, tag2);
+
+    auto const tag3 = datastore.generate_reference_tag(blob_id1, txid2);
+    EXPECT_NE(tag1a, tag3);
 }
 
 } // namespace limestone::api

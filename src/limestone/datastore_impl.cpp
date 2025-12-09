@@ -13,9 +13,9 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-#include "datastore_impl.h"
-#include "limestone/logging.h"
-#include "logging_helper.h"
+#include <datastore_impl.h>
+#include <limestone/logging.h>
+#include <logging_helper.h>
 #include <cstdlib>
 #include <iostream>
 #include <cstring>
@@ -23,13 +23,14 @@
 #include <openssl/hmac.h>
 #include <openssl/rand.h>
 #include <openssl/evp.h>
+#include <openssl/err.h>
 
-#include "replication/replica_connector.h"
-#include "limestone_exception_helper.h"
-#include "replication/message_session_begin.h"
-#include "replication/message_log_channel_create.h"
-#include "replication/message_group_commit.h"
-#include "manifest.h"
+#include <replication/replica_connector.h>
+#include <limestone_exception_helper.h>
+#include <replication/message_session_begin.h>
+#include <replication/message_log_channel_create.h>
+#include <replication/message_group_commit.h>
+#include <manifest.h>
 
 namespace limestone::api {
 
@@ -244,6 +245,55 @@ void datastore_impl::generate_hmac_secret_key() {
 
 const std::array<std::uint8_t, 16>& datastore_impl::get_hmac_secret_key() const noexcept {
     return hmac_secret_key_;
+}
+
+blob_reference_tag_type datastore_impl::generate_reference_tag(
+        blob_id_type blob_id,
+        std::uint64_t transaction_id) const {
+    std::array<unsigned char, sizeof(blob_id_type) + sizeof(std::uint64_t)> input_bytes{};
+    std::memcpy(input_bytes.data(), &blob_id, sizeof(blob_id_type));
+    std::memcpy(input_bytes.data() + sizeof(blob_id_type),
+            &transaction_id, sizeof(std::uint64_t));
+
+    auto const& secret_key = get_hmac_secret_key();
+
+    ERR_clear_error();
+
+    std::array<unsigned char, EVP_MAX_MD_SIZE> md{};
+    unsigned int md_len = 0;
+
+    unsigned char* result = HMAC(EVP_sha256(),
+            secret_key.data(),
+            static_cast<int>(secret_key.size()),
+            input_bytes.data(),
+            input_bytes.size(),
+            md.data(),
+            &md_len);
+
+    if (! result) {
+        std::string msg = "Failed to calculate reference tag: ";
+        // NOLINTNEXTLINE(google-runtime-int) : OpenSSL API requires unsigned long
+        unsigned long openssl_err = 0;
+        bool has_error = false;
+        while ((openssl_err = ERR_get_error()) != 0) {
+            has_error = true;
+            std::array<char, 256> err_msg_buf{};
+            ERR_error_string_n(openssl_err,
+                    err_msg_buf.data(),
+                    err_msg_buf.size());
+            msg += "[" + std::to_string(openssl_err) + ": "
+                    + err_msg_buf.data() + "] ";
+        }
+        if (! has_error) {
+            msg += "No OpenSSL error code available.";
+        }
+        LOG_AND_THROW_BLOB_EXCEPTION_NO_ERRNO(msg);
+    }
+
+    blob_reference_tag_type tag = 0;
+    std::memcpy(&tag, md.data(), sizeof(blob_reference_tag_type));
+
+    return tag;
 }
 
 }  // namespace limestone::api
