@@ -232,6 +232,12 @@ void datastore::persist_and_propagate_epoch_id(epoch_id_type epoch_id) {
     TRACE_END;
 }
 
+blob_reference_tag_type datastore::generate_reference_tag(
+        blob_id_type blob_id,
+        std::uint64_t transaction_id) {
+    return impl_->generate_reference_tag(blob_id, transaction_id);
+}
+
 void datastore::ready() {
     TRACE_START;
     try {

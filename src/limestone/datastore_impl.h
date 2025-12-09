@@ -108,9 +108,19 @@ public:
 
     /**
      * @brief gets the HMAC secret key for BLOB reference tag generation.
-     * @return reference to the HMAC secret key
+     * @return reference to the HMAC secret key.
      */
     [[nodiscard]] const std::array<std::uint8_t, 16>& get_hmac_secret_key() const noexcept;
+
+    /**
+     * @brief generates a BLOB reference tag for access control.
+     * @param blob_id the BLOB reference.
+     * @param transaction_id the transaction ID.
+     * @return the generated BLOB reference tag.
+     */
+    [[nodiscard]] blob_reference_tag_type generate_reference_tag(
+            blob_id_type blob_id,
+            std::uint64_t transaction_id) const;
 
 private:
     // Atomic counter for tracking active backup operations.
