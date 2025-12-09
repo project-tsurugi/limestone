@@ -130,7 +130,9 @@ int manifest::is_supported_version(const boost::filesystem::path& manifest_path,
         if (1 <= v && v <= manifest::default_persistent_format_version) {
             return v;  // Supported version
         }
-        errmsg = "version mismatch: version " + std::to_string(v) + ", server supports versions 1 through 4";
+        errmsg = "version mismatch: version " + std::to_string(v)
+            + ", server supports versions 1 through "
+            + std::to_string(manifest::default_persistent_format_version);
         return 0;
     } catch (const std::exception& e) {
         errmsg = "invalid manifest file, parse error: ";
