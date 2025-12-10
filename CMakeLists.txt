@@ -77,6 +77,8 @@ if (ENABLE_ALTIMETER)
     find_package(altimeter REQUIRED)
     find_package(fmt REQUIRED)
 endif()
+# rdma_comm is always required because limestone core engine depends on RDMA communication.
+find_package(rdma_comm REQUIRED)
 
 add_subdirectory(third_party) # should be before enable_testing()
 
@@ -175,4 +177,3 @@ install(
     DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/${package_name}
     EXPORT_LINK_INTERFACE_LIBRARIES
 )
-

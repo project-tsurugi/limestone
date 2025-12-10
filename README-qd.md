@@ -9,6 +9,24 @@
 
 初回は Backlog から clone し、`upstream` として GitHub の OSS リポジトリを追加してください（`git remote add upstream git@github.com:project-tsurugi/limestone.git`）。詳細は「リモートとブランチ構成」「OSS 更新取り込みフロー」を参照してください。
 
+## RDMA 共通ライブラリ依存について
+
+このリポジトリで開発される limestone-qd には、RDMA を利用するための共通ライブラリ `rdma_comm` への依存があります。
+
+- `rdma_comm` は RDMA 通信用の共通ライブラリであり、別リポジトリ（`rdma-comm-lib`）として管理されています。
+- ビルド方法やインストール手順は、`rdma-comm-lib` 側の README を参照してください。
+
+ビルド手順は基本的に OSS 版 limestone の README.md に準じますが、`rdma_comm` 依存があるため、次の点が追加で必要になります。
+
+- 事前に `rdma-comm-lib` をビルドし、ライブラリおよびヘッダファイルを任意のプレフィックス（例: `$HOME/opt` や `/opt/rdma_comm`）にインストールしておくこと。
+- CMake で limestone-qd を構成する際、`CMAKE_PREFIX_PATH` に `rdma_comm` をインストールしたディレクトリを含めること。
+  - 例: `-DCMAKE_PREFIX_PATH=$HOME/opt`
+- limestone-qd の CMakeLists.txt では `find_package(rdma_comm REQUIRED)` を行っているため、`rdma_comm` が見つからない環境では CMake の構成に失敗します。
+
+補足（開発者向け）:
+
+- limestone コアライブラリは `rdma_comm` に対して `PRIVATE` リンクを行っており、limestone の公開 API から `rdma_comm` の型や関数を直接露出しない設計としています。
+
 ## リモートとブランチ構成
 
 リモート:
