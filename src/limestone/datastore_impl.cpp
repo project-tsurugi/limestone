@@ -20,6 +20,10 @@
 #include <iostream>
 #include <cstring>
 #include <stdexcept>
+#include <cctype>
+#include <string_view>
+#include <limits>
+#include <cerrno>
 #include <openssl/hmac.h>
 #include <openssl/rand.h>
 #include <openssl/evp.h>
@@ -40,12 +44,14 @@ datastore_impl::datastore_impl()
     , replica_exists_(false)
     , async_session_close_enabled_(std::getenv("REPLICATION_ASYNC_SESSION_CLOSE") != nullptr)
     , async_group_commit_enabled_(std::getenv("REPLICATION_ASYNC_GROUP_COMMIT") != nullptr)
+    , rdma_slot_count_(std::nullopt)
     , migration_info_(std::nullopt)
 {
     LOG_LP(INFO) << "REPLICATION_ASYNC_SESSION_CLOSE: "
                  << (async_session_close_enabled_ ? "enabled" : "disabled");
     LOG_LP(INFO) << "REPLICATION_ASYNC_GROUP_COMMIT: "
                  << (async_group_commit_enabled_ ? "enabled" : "disabled");
+    initialize_rdma_slots();
 
     bool has_replica = replication_endpoint_.is_valid();
     replica_exists_.store(has_replica, std::memory_order_release);
@@ -224,6 +230,71 @@ bool datastore_impl::is_async_session_close_enabled() const noexcept {
 
 bool datastore_impl::is_async_group_commit_enabled() const noexcept {
     return async_group_commit_enabled_;
+}
+
+bool datastore_impl::is_rdma_enabled() const noexcept {
+    return rdma_slot_count_.has_value();
+}
+
+std::optional<std::int32_t> datastore_impl::rdma_slot_count() const noexcept {
+    return rdma_slot_count_;
+}
+
+void datastore_impl::initialize_rdma_slots() {
+    const char* env_val = std::getenv("REPLICATION_RDMA_SLOTS");
+    if (env_val == nullptr) {
+        LOG_LP(INFO) << "REPLICATION_RDMA_SLOTS: not set; RDMA replication disabled";
+        return;
+    }
+
+    bool all_whitespace = true;
+    std::string_view env_view{env_val};
+    for (char ch : env_view) {
+        if (std::isspace(static_cast<unsigned char>(ch)) == 0) {
+            all_whitespace = false;
+            break;
+        }
+    }
+    if (all_whitespace) {
+        LOG_LP(ERROR) << "Invalid REPLICATION_RDMA_SLOTS: whitespace only; RDMA replication disabled";
+        rdma_slot_count_ = std::nullopt;
+        return;
+    }
+
+    char* endptr = nullptr;
+    errno = 0;
+    std::int64_t parsed = std::strtoll(env_val, &endptr, 10);
+    // Check for range errors reported by strtoll
+    if (errno == ERANGE) {
+        LOG_LP(ERROR) << "Invalid REPLICATION_RDMA_SLOTS: out of range; "
+                      << "RDMA replication disabled";
+        rdma_slot_count_ = std::nullopt;
+        return;
+    }
+    // Check if no conversion was performed
+    if (endptr == env_val) {
+        LOG_LP(ERROR) << "Invalid REPLICATION_RDMA_SLOTS: non-numeric value; "
+                      << "RDMA replication disabled";
+        rdma_slot_count_ = std::nullopt;
+        return;
+    }
+    // Check for extra characters after the number
+    if (*endptr != '\0') {
+        LOG_LP(ERROR) << "Invalid REPLICATION_RDMA_SLOTS: trailing characters; "
+                      << "RDMA replication disabled";
+        rdma_slot_count_ = std::nullopt;
+        return;
+    }
+    if (parsed <= 0 || parsed > std::numeric_limits<std::int32_t>::max()) {
+        LOG_LP(ERROR) << "Invalid REPLICATION_RDMA_SLOTS: value must be 1..INT32_MAX; "
+                      << "RDMA replication disabled";
+        rdma_slot_count_ = std::nullopt;
+        return;
+    }
+
+    rdma_slot_count_ = static_cast<std::int32_t>(parsed);
+    LOG_LP(INFO) << "REPLICATION_RDMA_SLOTS: enabled with " << rdma_slot_count_.value()
+                 << " slots (4KB each)";
 }
 
 const std::optional<manifest::migration_info>& datastore_impl::get_migration_info() const noexcept {

@@ -22,6 +22,7 @@
 #include <memory>
 #include <optional>
 #include <array>
+#include <cstdint>
 
 #include "manifest.h"
 #include "replication/replica_connector.h"
@@ -100,6 +101,18 @@ public:
     // Getter for REPLICATION_ASYNC_GROUP_COMMIT environment variable presence
     [[nodiscard]] bool is_async_group_commit_enabled() const noexcept;
 
+    /**
+     * @brief Checks if RDMA is enabled via the REPLICATION_RDMA_SLOTS environment variable.
+     * @return true if RDMA is enabled.
+     */
+    [[nodiscard]] bool is_rdma_enabled() const noexcept;
+
+    /**
+     * @brief Returns the RDMA slot count specified by REPLICATION_RDMA_SLOTS.
+     * @return RDMA slot count if enabled; std::nullopt otherwise.
+     */
+    [[nodiscard]] std::optional<std::int32_t> rdma_slot_count() const noexcept;
+
     // Getter for migration_info_
     [[nodiscard]] const std::optional<manifest::migration_info>& get_migration_info() const noexcept;
 
@@ -139,6 +152,7 @@ private:
     // Environment variable flags
     bool async_session_close_enabled_;
     bool async_group_commit_enabled_;
+    std::optional<std::int32_t> rdma_slot_count_;
   
     // Migration info for the manifest
     std::optional<manifest::migration_info> migration_info_;
@@ -150,6 +164,11 @@ private:
      * @brief generates HMAC secret key for BLOB reference tag generation.
      */
     void generate_hmac_secret_key();
+
+    /**
+     * @brief initializes RDMA slot count from the REPLICATION_RDMA_SLOTS environment variable.
+     */
+    void initialize_rdma_slots();
 };
 
 }  // namespace limestone::api
