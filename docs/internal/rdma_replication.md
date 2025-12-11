@@ -56,4 +56,19 @@ RDMA共通ライブラリをリンクするために、CMakeList.txtを変更し
 * レプリカ側は、バージョンチェックを行い、バージョン不一致時はエラー応答を返す。
 * master側は、`SESSION_BEGIN`応答でバージョン不一致が判明した場合、FATALログを出してプロセスを終了する。
 
-TODO: RDMAの初期化処理の実装
+### RDMA_INIT専用のACKメッセージを追加
+
+- RDMA_INIT完了を通知する専用ACK `RDMA_INIT_ACK` を新設し、`message_type_id` に追加する。
+- ペイロードにレプリカ側が確保した `remote_dma_address`（`uint64`）を載せ、master側が `rdma_sender::initialize()` に渡せるようにする。
+- エラー時は従来通り `COMMON_ERROR`（error_code + message）を使用する。
+- 汎用ACK（`COMMON_ACK`）はそのままにして、RDMA_INIT専用ACKを用いることで既存メッセージへの影響を避ける。
+
+
+### RDMA初期化
+
+* replica側で、`RDMA_INIT`受信時にRDMA初期化を行う。
+  * rdma_receiverクラスの初期化を行う。
+  * rdma_receiverクラスは、replica側の各モジュールでアクセス可能にする。
+* master側は、レプリカの初期化が成功したときに、RDMA送信の初期化を行う。
+  * rdma_senderクラスの初期化を行う。
+  * rdma_senderクラスは、datastore_implクラスのフィールドに置き、log_channelクラスからアクセス可能にする。

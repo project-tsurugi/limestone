@@ -16,6 +16,7 @@
 
 #include <replication/message_rdma_init.h>
 
+#include <replication/message_rdma_init_ack.h>
 #include <replication/socket_io.h>
 
 namespace limestone::replication {
@@ -34,8 +35,12 @@ void message_rdma_init::receive_body(socket_io& io) {
     slot_count_ = io.receive_uint32();
 }
 
-void message_rdma_init::post_receive(handler_resources& /*resources*/) {
-    // TODO: Implement RDMA initialization handling on replica side.
+void message_rdma_init::post_receive(handler_resources& resources) {
+    // TODO: Implement RDMA initialization handling on replica side and obtain remote DMA address.
+    // Placeholder implementation returns 0 as remote DMA address.
+    message_rdma_init_ack ack{0};
+    replication_message::send(resources.get_socket_io(), ack);
+    resources.get_socket_io().flush();
 }
 
 std::unique_ptr<replication_message> message_rdma_init::create() {

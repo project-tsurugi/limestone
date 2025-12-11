@@ -35,6 +35,7 @@ enum class message_type_id : uint8_t {
     GROUP_COMMIT = 0x03,
     GC_BOUNDARY_SWITCH = 0x04,
     RDMA_INIT = 0x30,
+    RDMA_INIT_ACK = 0x31,
 
     // Log‑channel requests
     LOG_CHANNEL_CREATE = 0x10,
