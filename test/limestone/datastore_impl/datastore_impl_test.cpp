@@ -84,4 +84,14 @@ TEST_F(datastore_impl_test, generate_reference_tag_deterministic_and_unique) {
     EXPECT_NE(tag1a, tag3);
 }
 
+TEST_F(datastore_impl_test, initialize_rdma_sender_success_sets_sender) {
+    datastore_impl datastore;
+
+    constexpr uint32_t test_slot_count = 4U;
+    constexpr uint64_t test_dma_address = 0x1234U;
+
+    EXPECT_TRUE(datastore.initialize_rdma_sender(test_slot_count, test_dma_address));
+    EXPECT_NE(datastore.get_rdma_sender(), nullptr);
+}
+
 } // namespace limestone::api

@@ -35,6 +35,9 @@
 #include <replication/message_log_channel_create.h>
 #include <replication/message_group_commit.h>
 #include <replication/message_error.h>
+#include <replication/message_rdma_init.h>
+#include <replication/message_rdma_init_ack.h>
+#include <rdma_comm/rdma_config.h>
 #include <manifest.h>
 
 namespace limestone::api {
@@ -98,40 +101,33 @@ void datastore_impl::disable_replica() noexcept {
     LOG_LP(INFO) << "Replica disabled";
 }
 
-// Method to open the control channel
-bool datastore_impl::open_control_channel() {
-    TRACE_START;
-    // Use replication_endpoint_ to retrieve connection details
+bool datastore_impl::connect_control_channel() {
     if (!replication_endpoint_.is_valid()) {
         LOG_LP(ERROR) << "Invalid replication endpoint.";
-        replica_exists_.store(false, std::memory_order_release);
         return false;
     }
 
-    std::string host = replication_endpoint_.host();  
-    int port = replication_endpoint_.port();          // Get the port
+    std::string host = replication_endpoint_.host();
+    int port = replication_endpoint_.port();
 
-    // Create the control channel connection
     control_channel_ = std::make_shared<replica_connector>();
     if (!control_channel_->connect_to_server(host, port)) {
         LOG_LP(ERROR) << "Failed to connect to control channel at " << host << ":" << port;
-        replica_exists_.store(false, std::memory_order_release);
         return false;
     }
+    return true;
+}
 
+bool datastore_impl::send_session_begin() {
     auto request = message_session_begin::create();
     if (!control_channel_->send_message(*request)) {
         LOG_LP(ERROR) << "Failed to send session begin message.";
-        replica_exists_.store(false, std::memory_order_release);
-        control_channel_->close_session();
         return false;
     }
 
     auto response = control_channel_->receive_message();
     if (response == nullptr) {
         LOG_LP(ERROR) << "Failed to receive session begin acknowledgment.";
-        replica_exists_.store(false, std::memory_order_release);
-        control_channel_->close_session();
         return false;
     }
 
@@ -144,12 +140,85 @@ bool datastore_impl::open_control_channel() {
 
     if (response->get_message_type_id() != message_type_id::SESSION_BEGIN_ACK) {
         LOG_LP(ERROR) << "Failed to receive session begin acknowledgment.";
-        replica_exists_.store(false, std::memory_order_release);
-        control_channel_->close_session();
+        return false;
+    }
+    return true;
+}
+
+bool datastore_impl::maybe_initialize_rdma_sender() {
+    if (!rdma_slot_count_.has_value()) {
+        return true;
+    }
+
+    auto slot_count_signed = static_cast<std::int32_t>(rdma_slot_count_.value());
+    // This branch should be unreachable because slots are validated on load, but kept for defense.
+    if (slot_count_signed <= 0) {
+        LOG_LP(ERROR) << "Invalid RDMA slot count detected in runtime state; RDMA disabled.";
+        return true;
+    }
+
+    auto slot_count = static_cast<uint32_t>(slot_count_signed);
+    message_rdma_init rdma_init{slot_count};
+    if (!control_channel_->send_message(rdma_init)) {
+        LOG_LP(ERROR) << "Failed to send RDMA_INIT message.";
         return false;
     }
 
-    LOG_LP(INFO) << "Control channel successfully opened to " << host << ":" << port;
+    auto rdma_response = control_channel_->receive_message();
+    if (rdma_response == nullptr) {
+        LOG_LP(ERROR) << "Failed to receive RDMA_INIT response.";
+        return false;
+    }
+
+    if (rdma_response->get_message_type_id() == message_type_id::COMMON_ERROR) {
+        auto* err = dynamic_cast<message_error*>(rdma_response.get());
+        if (err != nullptr) {
+            LOG_LP(ERROR) << "RDMA_INIT failed: code=" << err->get_error_code()
+                          << " message=" << err->get_error_message();
+        } else {
+            LOG_LP(ERROR) << "RDMA_INIT failed with unknown error response.";
+        }
+        return false;
+    }
+
+    auto* ack = dynamic_cast<message_rdma_init_ack*>(rdma_response.get());
+    if (ack == nullptr) {
+        LOG_LP(ERROR) << "Unexpected RDMA_INIT response type: "
+                      << static_cast<uint16_t>(rdma_response->get_message_type_id());
+        return false;
+    }
+    if (!initialize_rdma_sender(slot_count, ack->get_remote_dma_address())) {
+        LOG_LP(ERROR) << "RDMA sender initialization failed; RDMA disabled.";
+        return false;
+    }
+    LOG_LP(INFO) << "RDMA sender initialized: slot_count=" << slot_count
+                 << ", remote_dma_address=" << ack->get_remote_dma_address();
+    return true;
+}
+
+// Method to open the control channel
+bool datastore_impl::open_control_channel() {
+    TRACE_START;
+    if (!connect_control_channel()) {
+        replica_exists_.store(false, std::memory_order_release);
+        TRACE_END;
+        return false;
+    }
+
+    if (!send_session_begin()) {
+        replica_exists_.store(false, std::memory_order_release);
+        control_channel_->close_session();
+        TRACE_END;
+        return false;
+    }
+
+    LOG_LP(INFO) << "Control channel successfully opened to " << replication_endpoint_.host()
+                 << ":" << replication_endpoint_.port();
+
+    if (!maybe_initialize_rdma_sender()) {
+        TRACE_END;
+        return false;
+    }
     TRACE_END;
     return true;
 }
@@ -310,6 +379,31 @@ void datastore_impl::initialize_rdma_slots() {
     rdma_slot_count_ = static_cast<std::int32_t>(parsed);
     LOG_LP(INFO) << "REPLICATION_RDMA_SLOTS: enabled with " << rdma_slot_count_.value()
                  << " slots (4KB each)";
+}
+
+bool datastore_impl::initialize_rdma_sender(uint32_t slot_count, uint64_t remote_dma_address) {
+    rdma::communication::rdma_config config{};
+    auto capacity = static_cast<std::size_t>(slot_count);
+    constexpr std::size_t chunk_size = 4096U;
+    config.send_buffer.region_size_bytes = capacity * chunk_size;
+    config.send_buffer.chunk_size_bytes = chunk_size;
+    config.send_buffer.ring_capacity = capacity;
+    config.remote_buffer = config.send_buffer;
+    config.completion_queue_depth = 1024U;
+
+    rdma_sender_ = std::make_unique<rdma::communication::rdma_sender>(config);
+    auto result = rdma_sender_->initialize(remote_dma_address);
+    if (!result.success) {
+        rdma_sender_.reset();
+        LOG_LP(ERROR) << "rdma_sender::initialize() failed.";
+        return false;
+    }
+
+    return true;
+}
+
+rdma::communication::rdma_sender* datastore_impl::get_rdma_sender() const noexcept {
+    return rdma_sender_.get();
 }
 
 const std::optional<manifest::migration_info>& datastore_impl::get_migration_info() const noexcept {

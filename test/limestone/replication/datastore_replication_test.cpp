@@ -23,7 +23,9 @@ constexpr const char* base = "/tmp/datastore_replication_test";
 constexpr const char* master = "/tmp/datastore_replication_test/master";
 constexpr const char* replica = "/tmp/datastore_replication_test/replica";
 
-class datastore_replication_test : public ::testing::Test {
+class datastore_replication_test
+    : public ::testing::Test
+    , public ::testing::WithParamInterface<std::optional<uint32_t>> {
 protected:
     std::unique_ptr<api::datastore_test> datastore_;
 
@@ -31,6 +33,13 @@ protected:
     log_channel* lc1_{};
 
     void SetUp() override {
+        auto rdma_slot_count = GetParam();
+        if (rdma_slot_count.has_value()) {
+            setenv("REPLICATION_RDMA_SLOTS", std::to_string(rdma_slot_count.value()).c_str(), 1);
+        } else {
+            unsetenv("REPLICATION_RDMA_SLOTS");
+        }
+
         // Delete and recreate the test directory
         std::string cmd = "rm -rf " + std::string(base);
         if (std::system(cmd.c_str()) != 0) {
@@ -51,6 +60,7 @@ protected:
     }
 
     void TearDown() override {
+        unsetenv("REPLICATION_RDMA_SLOTS");
         unsetenv("TSURUGI_REPLICATION_ENDPOINT");
         stop_replica_server(); 
         std::string cmd = "rm -rf " + std::string(base);;
@@ -96,19 +106,23 @@ private:
     std::unique_ptr<std::thread> server_thread_;
 };
 
-TEST_F(datastore_replication_test, open_control_channel_success) {
+TEST_P(datastore_replication_test, open_control_channel_success) {
     datastore_impl datastore;
 
-    // Test open control channel
     EXPECT_TRUE(datastore.open_control_channel());
-    EXPECT_TRUE(datastore.has_replica());  
+    EXPECT_TRUE(datastore.has_replica());
 
-    // Verify that the control channel has been initialized correctly
     auto control_channel = datastore.get_control_channel();
     EXPECT_NE(control_channel, nullptr);
+
+    if (GetParam().has_value()) {
+        EXPECT_NE(datastore.get_rdma_sender(), nullptr);
+    } else {
+        EXPECT_EQ(datastore.get_rdma_sender(), nullptr);
+    }
 }
 
-TEST_F(datastore_replication_test, open_control_channel_failure_invalid_endpoint) {
+TEST_P(datastore_replication_test, open_control_channel_failure_invalid_endpoint) {
     // Set an invalid endpoint
     setenv("TSURUGI_REPLICATION_ENDPOINT", "invalid://endpoint", 1);
     
@@ -121,7 +135,7 @@ TEST_F(datastore_replication_test, open_control_channel_failure_invalid_endpoint
     EXPECT_EQ(control_channel, nullptr); 
 }
 
-TEST_F(datastore_replication_test, open_control_channel_with_no_endpoint) {
+TEST_P(datastore_replication_test, open_control_channel_with_no_endpoint) {
     // Ensure no endpoint is set
     unsetenv("TSURUGI_REPLICATION_ENDPOINT");
 
@@ -134,7 +148,7 @@ TEST_F(datastore_replication_test, open_control_channel_with_no_endpoint) {
     EXPECT_EQ(control_channel, nullptr); 
 }
 
-TEST_F(datastore_replication_test, open_control_channel_via_datastore_ready) {
+TEST_P(datastore_replication_test, open_control_channel_via_datastore_ready) {
     gen_datastore();
     EXPECT_EQ(datastore_->get_impl()->get_control_channel(), nullptr);
     datastore_->ready();
@@ -147,7 +161,7 @@ TEST_F(datastore_replication_test, open_control_channel_via_datastore_ready) {
 }
 
 
-TEST_F(datastore_replication_test, not_open_control_channel_via_datastore_ready) {
+TEST_P(datastore_replication_test, not_open_control_channel_via_datastore_ready) {
     unsetenv("TSURUGI_REPLICATION_ENDPOINT");
 
     gen_datastore();
@@ -160,7 +174,7 @@ TEST_F(datastore_replication_test, not_open_control_channel_via_datastore_ready)
     EXPECT_EQ(lc1_->get_impl()->get_replica_connector(), nullptr);
 }
 
-TEST_F(datastore_replication_test, fail_open_control_channel_via_datastore_ready) {
+TEST_P(datastore_replication_test, fail_open_control_channel_via_datastore_ready) {
     // Set an invalid endpoint
     setenv("TSURUGI_REPLICATION_ENDPOINT", "invalid://endpoint", 1);
 
@@ -172,11 +186,16 @@ TEST_F(datastore_replication_test, fail_open_control_channel_via_datastore_ready
 }
 
 
-TEST_F(datastore_replication_test, replica_death_before_create_log_channel) {
+TEST_P(datastore_replication_test, replica_death_before_create_log_channel) {
     stop_replica_server();
     EXPECT_DEATH({
         gen_datastore();
     }, "Failed to create log channel connector.");
 }
+
+INSTANTIATE_TEST_SUITE_P(
+    rdma_toggle,
+    datastore_replication_test,
+    ::testing::Values(std::optional<uint32_t>{}, std::optional<uint32_t>{128}));
 
 }  // namespace limestone::testing

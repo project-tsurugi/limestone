@@ -3,6 +3,10 @@
 このドキュメントは、レプリケーション機能のRDMA対応の作業ログです。
 後から、作業内容を確認することを目的としますが、仕様書ではありません。
 
+## テスト
+
+- RDMA 共通ライブラリ `rdma_comm` のモック版がリンクされているため、RDMA ハードウェアなしで gtest を実行できる。
+
 
 ## CMakeList.txtの変更
 
@@ -77,13 +81,17 @@ RDMA共通ライブラリをリンクするために、CMakeList.txtを変更し
 
 - replica_server に rdma_receiver を process lifetime で保持する方針とし、control_channel_handler_resources 経由でアクセスする。
 - RDMA_INIT の post_receive で replica_server::initialize_rdma_receiver() を呼び出し、成功時に get_rdma_dma_address() を専用 ACK (RDMA_INIT_ACK) に載せる。取得できない場合や初期化失敗時は COMMON_ERROR を返す。
-- 実装は暫定で rdma_config の組み立てと DMA アドレス取得が TODO のまま。今後 rdma_comm の設定値と環境から構築する必要がある。
 - エラーコードは message_error の定数を使用し、マジックナンバーを排除した。control/log channel のバリデーションエラーを新しい定数（10番台/20番台）に置き換え、RDMA INIT 用のエラーも100番台で再定義し直した。
 - rdma_config は当面、send_buffer/remote_buffer を同一設定で使用する。`region_size_bytes = slot_count * 4096`、`chunk_size_bytes = 4096`、`ring_capacity = slot_count`。completion_queue_depth は 1024 を設定し、control_channel はデフォルト（未設定）。
 - TODO: 受信ハンドラ／チャネル登録（ACK用FDなど）は未実装。rdma_receiver::initialize() に渡す receive_handler の実装と、各チャネルの登録・ACK通知経路を設計した上で組み込む必要がある。
 
+### master側のRDMA sender初期化
 
-
+- コントロールチャネル確立直後に `SESSION_BEGIN` を送信し、プロトコル v2 の正常応答を確認したら直ちに `RDMA_INIT` を送る。`slot_count` は datastore 起動時に決めた値をそのまま送り、未設定なら `RDMA_INIT` は送らない。
+- `RDMA_INIT_ACK` 受信時に `rdma_sender` を生成・初期化する。`rdma_config` は receiver と同一設定をベタ書きで使用する（`region_size = slot_count * 4096`、`chunk_size = 4096`、`ring_capacity = slot_count`、`cq_depth = 1024`、remote buffer は ACK の DMA アドレスを使う）。
+- `rdma_sender::initialize(remote_dma_address)` が失敗した場合は RDMA 無効としてログに残し、従来経路で継続する。再初期化用の mutex/フラグは持たない。
+- RDMA 初期化結果は datastore_impl などでフラグ管理し、後続のログ送信パスは `get_rdma_sender()` などで RDMA 利用可否を判定する。
+- テスト観点: ACK 受信で sender 初期化成功、initialize 失敗時は RDMA 無効化で継続、ACK なし/ERROR の場合は RDMA 無効フラグのまま。
 
 
 

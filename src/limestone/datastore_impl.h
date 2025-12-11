@@ -27,6 +27,7 @@
 #include "manifest.h"
 #include "replication/replica_connector.h"
 #include "replication/replication_endpoint.h"
+#include <rdma_comm/rdma_sender.h>
 
 namespace limestone::api {
 
@@ -113,6 +114,12 @@ public:
      */
     [[nodiscard]] std::optional<std::int32_t> rdma_slot_count() const noexcept;
 
+    /**
+     * @brief Get RDMA sender instance if initialized.
+     * @return pointer to RDMA sender or nullptr if not available.
+     */
+    [[nodiscard]] rdma::communication::rdma_sender* get_rdma_sender() const noexcept;
+
     // Getter for migration_info_
     [[nodiscard]] const std::optional<manifest::migration_info>& get_migration_info() const noexcept;
 
@@ -134,6 +141,32 @@ public:
     [[nodiscard]] blob_reference_tag_type generate_reference_tag(
             blob_id_type blob_id,
             std::uint64_t transaction_id) const;
+
+    /**
+     * @brief Initialize RDMA sender using slot count and remote DMA address.
+     * @param slot_count requested RDMA slot count.
+     * @param remote_dma_address DMA address received from replica.
+     * @return true on success; false if RDMA sender initialization fails.
+     */
+    bool initialize_rdma_sender(uint32_t slot_count, uint64_t remote_dma_address);
+
+    /**
+     * @brief Establish control channel connection.
+     * @return true on success.
+     */
+    bool connect_control_channel();
+
+    /**
+     * @brief Send session begin and validate ACK.
+     * @return true on success.
+     */
+    bool send_session_begin();
+
+    /**
+     * @brief Initialize RDMA sender if RDMA is enabled.
+     * @return true on success or skip; false on failure.
+     */
+    bool maybe_initialize_rdma_sender();
 
 private:
     // Atomic counter for tracking active backup operations.
@@ -169,6 +202,9 @@ private:
      * @brief initializes RDMA slot count from the REPLICATION_RDMA_SLOTS environment variable.
      */
     void initialize_rdma_slots();
+
+    // RDMA sender owned by master for RDMA replication path.
+    std::unique_ptr<rdma::communication::rdma_sender> rdma_sender_{};
 };
 
 }  // namespace limestone::api
