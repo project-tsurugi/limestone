@@ -56,7 +56,7 @@ private:
     }(); 
 
     uint8_t connection_type_ = CONNECTION_TYPE_CONTROL_CHANNEL;
-    uint64_t protocol_version_ = 1;  // TODO: プロトコル共通のヘッダファイルに定数値で定義する。
+    uint64_t protocol_version_ = protocol_version;
     std::string configuration_id_{};
     uint64_t epoch_number_{};
 };

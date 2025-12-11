@@ -34,3 +34,21 @@ RDMA共通ライブラリをリンクするために、CMakeList.txtを変更し
 - 不正値や未設定の場合は ERROR/INFO ログを出し、RDMAは無効扱い（レプリケーションは従来経路のみ）。
 - 有効値が指定された場合、指定スロット数（4KB/slot）でRDMAバッファを確保する前提で初期化する。
 - gtest で未設定/有効値/非数/ゼロ/負値/INT32_MAX超過をカバーし、期待通り無効化・有効化されることを確認済み。
+
+## コントロールチャネルでのRDMA初期化ハンドシェイク
+
+### 方針
+
+- master側: `open_control_channel()` でTCP接続後に、RDMA利用有無とスロット数を送信するハンドシェイクメッセージを追加する。
+- replica側: 受信した内容でRDMAを初期化し、成功ならACK、失敗ならエラー応答を返す。
+- master側: ACK受信時のみRDMA初期化を進め、エラー応答時はRDMA無効で継続するか致命扱いにする方針を決める。
+- 必要に応じてメッセージ種別定義やencode/decodeの追加、INFO/ERRORログを実装予定。
+
+### 追加実装（2025-xx-xx）
+
+- プロトコルバージョンを`2`に更新（`replication_message.h`定数）。`SESSION_BEGIN`送受信はこのバージョンを前提にする。
+- RDMA初期化要求メッセージ `RDMA_INIT`（`0x30`）を追加。ペイロードは `uint32 slot_count` のみ。`message_rdma_init` クラスでsend/receive/factory登録を実装。
+- 応答は既存の `COMMON_ACK` / `COMMON_ERROR` を流用（ACKはペイロードなし、ERRORは `error_code + message`）。
+- replica側 `post_receive` はスケルトン（TODO）で、後続で`control_channel_handler_resources`経由の初期化処理を実装する前提。
+
+TODO: プロトコルバージョンチェック、RDMAの初期化処理の実装
