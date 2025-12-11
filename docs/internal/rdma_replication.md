@@ -44,11 +44,16 @@ RDMA共通ライブラリをリンクするために、CMakeList.txtを変更し
 - master側: ACK受信時のみRDMA初期化を進め、エラー応答時はRDMA無効で継続するか致命扱いにする方針を決める。
 - 必要に応じてメッセージ種別定義やencode/decodeの追加、INFO/ERRORログを実装予定。
 
-### 追加実装（2025-xx-xx）
+### メッセージの追加とプロトコルバージョンの更新
 
 - プロトコルバージョンを`2`に更新（`replication_message.h`定数）。`SESSION_BEGIN`送受信はこのバージョンを前提にする。
 - RDMA初期化要求メッセージ `RDMA_INIT`（`0x30`）を追加。ペイロードは `uint32 slot_count` のみ。`message_rdma_init` クラスでsend/receive/factory登録を実装。
 - 応答は既存の `COMMON_ACK` / `COMMON_ERROR` を流用（ACKはペイロードなし、ERRORは `error_code + message`）。
 - replica側 `post_receive` はスケルトン（TODO）で、後続で`control_channel_handler_resources`経由の初期化処理を実装する前提。
 
-TODO: プロトコルバージョンチェック、RDMAの初期化処理の実装
+### レプリカとの接続時のプロトコルバージョンチェック
+
+* レプリカ側は、バージョンチェックを行い、バージョン不一致時はエラー応答を返す。
+* master側は、`SESSION_BEGIN`応答でバージョン不一致が判明した場合、FATALログを出してプロセスを終了する。
+
+TODO: RDMAの初期化処理の実装

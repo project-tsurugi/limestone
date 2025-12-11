@@ -26,7 +26,7 @@ using limestone::replication::socket_io;
 TEST(session_begin_message_test, default_body_serialization) {
     replication::message_session_begin msg;
     EXPECT_EQ(msg.get_connection_type(), replication::CONNECTION_TYPE_CONTROL_CHANNEL);
-    EXPECT_EQ(msg.get_protocol_version(), replication::protocol_version);
+    EXPECT_EQ(msg.get_protocol_version(), replication::replication_protocol_version);
     EXPECT_EQ(msg.get_configuration_id(), "");
     EXPECT_EQ(msg.get_epoch_number(), 0u);
 }
@@ -39,7 +39,7 @@ TEST(session_begin_message_test, set_param_getters) {
     EXPECT_EQ(msg.get_configuration_id(), "config123");
     EXPECT_EQ(msg.get_epoch_number(), 42u);
     EXPECT_EQ(msg.get_connection_type(), replication::CONNECTION_TYPE_CONTROL_CHANNEL);
-    EXPECT_EQ(msg.get_protocol_version(), replication::protocol_version);
+    EXPECT_EQ(msg.get_protocol_version(), replication::replication_protocol_version);
 }
 
 // Test get_message_type_id returns SESSION_BEGIN
@@ -63,7 +63,7 @@ TEST(session_begin_message_test, replication_message_round_trip) {
 
     // Validate internal state using getters
     EXPECT_EQ(received->get_connection_type(), replication::CONNECTION_TYPE_CONTROL_CHANNEL);
-    EXPECT_EQ(received->get_protocol_version(), replication::protocol_version);
+    EXPECT_EQ(received->get_protocol_version(), replication::replication_protocol_version);
     EXPECT_EQ(received->get_configuration_id(), "roundtrip");
     EXPECT_EQ(received->get_epoch_number(), 100u);
 }

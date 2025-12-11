@@ -34,6 +34,7 @@
 #include <replication/message_session_begin.h>
 #include <replication/message_log_channel_create.h>
 #include <replication/message_group_commit.h>
+#include <replication/message_error.h>
 #include <manifest.h>
 
 namespace limestone::api {
@@ -127,7 +128,21 @@ bool datastore_impl::open_control_channel() {
     }
 
     auto response = control_channel_->receive_message();
-    if (response == nullptr || response->get_message_type_id() != message_type_id::SESSION_BEGIN_ACK) {
+    if (response == nullptr) {
+        LOG_LP(ERROR) << "Failed to receive session begin acknowledgment.";
+        replica_exists_.store(false, std::memory_order_release);
+        control_channel_->close_session();
+        return false;
+    }
+
+    if (response->get_message_type_id() == message_type_id::COMMON_ERROR) {
+        auto* err = dynamic_cast<message_error*>(response.get());
+        std::string msg = err ? err->get_error_message()
+                              : "Session begin failed with unknown error response";
+        LOG_LP(FATAL) << msg;
+    }
+
+    if (response->get_message_type_id() != message_type_id::SESSION_BEGIN_ACK) {
         LOG_LP(ERROR) << "Failed to receive session begin acknowledgment.";
         replica_exists_.store(false, std::memory_order_release);
         control_channel_->close_session();

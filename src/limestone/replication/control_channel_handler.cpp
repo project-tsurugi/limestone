@@ -50,7 +50,12 @@ validation_result control_channel_handler::validate_initial(std::unique_ptr<repl
         return validation_result::error(3, "Failed to cast to message_session_begin");
     }
 
-    // TODO: validate fields inside message_session_begin (protocol_version, configuration_id, epoch_number)
+    if (msg->get_protocol_version() != replication_protocol_version) {
+        std::ostringstream oss;
+        oss << "Unsupported protocol version: " << msg->get_protocol_version()
+            << ", expected: " << replication_protocol_version;
+        return validation_result::error(4, oss.str());
+    }
 
     return validation_result::success();
 }

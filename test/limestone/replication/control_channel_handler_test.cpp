@@ -49,11 +49,11 @@ public:
     void call_send_initial_ack(socket_io& io) const { send_initial_ack(); }
     };
  
- TEST_F(control_channel_handler_test, validate_session_begin_success) {
-     replica_server server{};
-     socket_io io("");
-     testable_control_handler handler(reinterpret_cast<replica_server&>(server), io);
- 
+TEST_F(control_channel_handler_test, validate_session_begin_success) {
+    replica_server server{};
+    socket_io io("");
+    testable_control_handler handler(reinterpret_cast<replica_server&>(server), io);
+
      auto msg = std::make_unique<message_session_begin>();
      msg->set_param("conf", 1);
  
@@ -88,6 +88,21 @@ TEST_F(control_channel_handler_test, validate_succeeds_after_assign) {
     auto result = handler.call_validate(std::move(msg));
 
     EXPECT_TRUE(result.ok());
+}
+
+TEST_F(control_channel_handler_test, validate_fails_on_protocol_version_mismatch) {
+    replica_server server{};
+    socket_io io("");
+    testable_control_handler handler(reinterpret_cast<replica_server&>(server), io);
+
+    auto msg = std::make_unique<message_session_begin>();
+    msg->set_param("conf", 1);
+    msg->set_protocol_version(replication::replication_protocol_version + 1U);
+
+    auto result = handler.call_validate(std::move(msg));
+    EXPECT_FALSE(result.ok());
+    EXPECT_EQ(result.error_code(), 4);
+    EXPECT_NE(result.error_message().find("Unsupported protocol version"), std::string::npos);
 }
 
  
