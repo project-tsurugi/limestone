@@ -29,45 +29,46 @@ namespace limestone::replication {
 class message_rdma_init_ack : public replication_message {
 public:
     /**
-     * @brief Constructs a message_rdma_init_ack with the specified remote DMA address.
-
-    [[nodiscard]] message_type_id get_message_type_id() const override;
-    void send_body(socket_io& io) const override;
-
-
-    /**
-
-    [[nodiscard]] uint64_t get_remote_dma_address() const { return remote_dma_address_; }
-    /**
-     * @brief Sets the remote DMA address.
-     * @param remote_dma_address The remote DMA address to set.
-     */
-     * @brief Returns the remote DMA address carried by this message.
-     * @return The remote DMA address as a 64-bit unsigned integer.
-     */
-     * @return std::unique_ptr<replication_message> The created message instance.
-     */
-     * @brief Receives the body of the RDMA init ACK message from the given socket.
-     * @param io The socket I/O object to receive data from.
-     */
-    /**
-     * @brief Sends the body of the RDMA init ACK message via the given socket.
-     * @param io The socket_io object used to send the message body.
-     */
-     * @brief Returns the message type identifier for this message.
-     * @return The message type identifier.
-     */
+     * @brief Construct ACK with remote DMA address.
+     * @param remote_dma_address remote DMA address to include in the ACK.
      */
     explicit message_rdma_init_ack(uint64_t remote_dma_address = 0) noexcept
         : remote_dma_address_(remote_dma_address) {}
 
+    /**
+     * @brief Get the message type identifier.
+     * @return RDMA_INIT_ACK type id.
+     */
     [[nodiscard]] message_type_id get_message_type_id() const override;
+
+    /**
+     * @brief Serialize body.
+     * @param io socket I/O.
+     */
     void send_body(socket_io& io) const override;
+
+    /**
+     * @brief Deserialize body.
+     * @param io socket I/O.
+     */
     void receive_body(socket_io& io) override;
 
+    /**
+     * @brief Factory function.
+     * @return message instance.
+     */
     [[nodiscard]] static std::unique_ptr<replication_message> create();
 
+    /**
+     * @brief Get remote DMA address.
+     * @return remote DMA address.
+     */
     [[nodiscard]] uint64_t get_remote_dma_address() const { return remote_dma_address_; }
+
+    /**
+     * @brief Set remote DMA address.
+     * @param remote_dma_address value to set.
+     */
     void set_remote_dma_address(uint64_t remote_dma_address) {
         remote_dma_address_ = remote_dma_address;
     }
@@ -84,4 +85,3 @@ private:
 };
 
 }  // namespace limestone::replication
-

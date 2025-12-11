@@ -81,7 +81,7 @@ TEST_F(log_channel_handler_test, authorize_succeeds_then_fails_at_limit_boundary
     // Second call: should fail because it exceeds the maximum allowed count
     auto result2 = handler.authorize();
     EXPECT_FALSE(result2.ok());
-    EXPECT_EQ(result2.error_code(), 1);
+    EXPECT_EQ(result2.error_code(), message_error::log_channel_error_too_many_channels);
     EXPECT_EQ(result2.error_message(), "Too many log channels: cannot assign more");
 }
 
@@ -93,7 +93,7 @@ TEST_F(log_channel_handler_test, authorize_fails_when_exceeded) {
     handler.set_log_channel_id_counter_for_test(log_channel_handler::MAX_LOG_CHANNEL_COUNT);
     auto result = handler.authorize();
     EXPECT_FALSE(result.ok());
-    EXPECT_EQ(result.error_code(), 1);
+    EXPECT_EQ(result.error_code(), message_error::log_channel_error_too_many_channels);
 }
 
 TEST_F(log_channel_handler_test, validate_fails_on_wrong_type) {
@@ -104,7 +104,7 @@ TEST_F(log_channel_handler_test, validate_fails_on_wrong_type) {
     auto wrong = std::make_unique<message_ack>();
     auto result = handler.validate_initial(std::move(wrong));
     EXPECT_FALSE(result.ok());
-    EXPECT_EQ(result.error_code(), 2);
+    EXPECT_EQ(result.error_code(), message_error::log_channel_error_invalid_type);
 }
 
 TEST_F(log_channel_handler_test, validate_fails_on_failed_cast) {
@@ -124,7 +124,7 @@ TEST_F(log_channel_handler_test, validate_fails_on_failed_cast) {
     auto msg = std::make_unique<bad_message>();
     auto result = handler.validate_initial(std::move(msg));
     EXPECT_FALSE(result.ok());
-    EXPECT_EQ(result.error_code(), 3);
+    EXPECT_EQ(result.error_code(), message_error::log_channel_error_bad_cast);
 }
 
 TEST_F(log_channel_handler_test, send_initial_ack_sends_ack_message) {

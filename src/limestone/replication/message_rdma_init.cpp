@@ -16,8 +16,10 @@
 
 #include <replication/message_rdma_init.h>
 
+#include <replication/message_error.h>
 #include <replication/message_rdma_init_ack.h>
 #include <replication/socket_io.h>
+#include "control_channel_handler_resources.h"
 
 namespace limestone::replication {
 
@@ -36,9 +38,46 @@ void message_rdma_init::receive_body(socket_io& io) {
 }
 
 void message_rdma_init::post_receive(handler_resources& resources) {
-    // TODO: Implement RDMA initialization handling on replica side and obtain remote DMA address.
-    // Placeholder implementation returns 0 as remote DMA address.
-    message_rdma_init_ack ack{0};
+    auto* control_resources = dynamic_cast<control_channel_handler_resources*>(&resources);
+    if (control_resources == nullptr) {
+        message_error err;
+        err.set_error(message_error::rdma_init_error_invalid_resources,
+            "Invalid handler resources for RDMA_INIT");
+        replication_message::send(resources.get_socket_io(), err);
+        resources.get_socket_io().flush();
+        return;
+    }
+
+    auto& server = control_resources->get_server();
+    auto init_result = server.initialize_rdma_receiver(slot_count_);
+    if (init_result == replica_server::rdma_init_result::already_initialized) {
+        message_error err;
+        err.set_error(message_error::rdma_init_error_already_initialized,
+            "RDMA receiver already initialized");
+        replication_message::send(resources.get_socket_io(), err);
+        resources.get_socket_io().flush();
+        return;
+    }
+    if (init_result == replica_server::rdma_init_result::failed) {
+        message_error err;
+        err.set_error(message_error::rdma_init_error_init_failed,
+            "Failed to initialize RDMA receiver");
+        replication_message::send(resources.get_socket_io(), err);
+        resources.get_socket_io().flush();
+        return;
+    }
+
+    auto remote_dma_address = server.get_rdma_dma_address();
+    if (! remote_dma_address.has_value()) {
+        message_error err;
+        err.set_error(message_error::rdma_init_error_no_dma_address,
+            "RDMA receiver did not expose DMA address");
+        replication_message::send(resources.get_socket_io(), err);
+        resources.get_socket_io().flush();
+        return;
+    }
+
+    message_rdma_init_ack ack{remote_dma_address.value()};
     replication_message::send(resources.get_socket_io(), ack);
     resources.get_socket_io().flush();
 }

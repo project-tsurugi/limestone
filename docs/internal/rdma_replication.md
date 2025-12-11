@@ -68,7 +68,25 @@ RDMA共通ライブラリをリンクするために、CMakeList.txtを変更し
 
 * replica側で、`RDMA_INIT`受信時にRDMA初期化を行う。
   * rdma_receiverクラスの初期化を行う。
-  * rdma_receiverクラスは、replica側の各モジュールでアクセス可能にする。
+  * rdma_receiverクラスは、replica_serverのフィールドに置く。
 * master側は、レプリカの初期化が成功したときに、RDMA送信の初期化を行う。
   * rdma_senderクラスの初期化を行う。
   * rdma_senderクラスは、datastore_implクラスのフィールドに置き、log_channelクラスからアクセス可能にする。
+
+#### rdma_receiverの初期化
+
+- replica_server に rdma_receiver を process lifetime で保持する方針とし、control_channel_handler_resources 経由でアクセスする。
+- RDMA_INIT の post_receive で replica_server::initialize_rdma_receiver() を呼び出し、成功時に get_rdma_dma_address() を専用 ACK (RDMA_INIT_ACK) に載せる。取得できない場合や初期化失敗時は COMMON_ERROR を返す。
+- 実装は暫定で rdma_config の組み立てと DMA アドレス取得が TODO のまま。今後 rdma_comm の設定値と環境から構築する必要がある。
+- エラーコードは message_error の定数を使用し、マジックナンバーを排除した。control/log channel のバリデーションエラーを新しい定数（10番台/20番台）に置き換え、RDMA INIT 用のエラーも100番台で再定義し直した。
+- rdma_config は当面、send_buffer/remote_buffer を同一設定で使用する。`region_size_bytes = slot_count * 4096`、`chunk_size_bytes = 4096`、`ring_capacity = slot_count`。completion_queue_depth は 1024 を設定し、control_channel はデフォルト（未設定）。
+- TODO: 受信ハンドラ／チャネル登録（ACK用FDなど）は未実装。rdma_receiver::initialize() に渡す receive_handler の実装と、各チャネルの登録・ACK通知経路を設計した上で組み込む必要がある。
+
+
+
+
+
+
+## TODO
+
+* rdma_configに設定不要なフィールドや、設定可能でも原則デフォルト値を仕様すべきフィールドがある。整理が必要、別プロジェクトの問題なので、ここではTODOに記述するに留める。

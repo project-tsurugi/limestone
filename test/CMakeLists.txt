@@ -15,6 +15,7 @@ target_link_libraries(${test_target}
         PRIVATE Boost::filesystem
         PRIVATE glog::glog
         PRIVATE gflags::gflags
+        PRIVATE rdma_comm
         )
 
 function (add_test_executable source_file)

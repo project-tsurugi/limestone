@@ -19,6 +19,7 @@
 #include "limestone_exception_helper.h"
 #include "logging_helper.h"
 #include "control_channel_handler_resources.h"
+#include "message_error.h"
 
 namespace limestone::replication {
 
@@ -30,7 +31,9 @@ validation_result control_channel_handler::authorize() {
     // TODO その他の認証を実装する
     if (!get_server().mark_control_channel_created()) {
         LOG_LP(ERROR) << "Control channel already created";
-        return validation_result::error(1, "Control channel already created");
+        return validation_result::error(
+            message_error::control_channel_error_already_created,
+            "Control channel already created");
     }
     pthread_setname_np(pthread_self(), "limestone-ctrl");
     TRACE_END << "Thread name set to limestone-ctrl";
@@ -42,19 +45,23 @@ validation_result control_channel_handler::validate_initial(std::unique_ptr<repl
         std::ostringstream msg;
         msg << "Invalid message type: " << static_cast<int>(request->get_message_type_id())
             << ", expected SESSION_BEGIN";
-        return validation_result::error(2, msg.str());
+        return validation_result::error(
+            message_error::control_channel_error_invalid_type, msg.str());
     }
 
     auto* msg = dynamic_cast<message_session_begin*>(request.get());
     if (!msg) {
-        return validation_result::error(3, "Failed to cast to message_session_begin");
+        return validation_result::error(
+            message_error::control_channel_error_bad_cast,
+            "Failed to cast to message_session_begin");
     }
 
     if (msg->get_protocol_version() != replication_protocol_version) {
         std::ostringstream oss;
         oss << "Unsupported protocol version: " << msg->get_protocol_version()
             << ", expected: " << replication_protocol_version;
-        return validation_result::error(4, oss.str());
+        return validation_result::error(
+            message_error::control_channel_error_unsupported_version, oss.str());
     }
 
     return validation_result::success();
@@ -71,9 +78,10 @@ validation_result control_channel_handler::validate_initial(std::unique_ptr<repl
     message.post_receive(resources);
  }
 
- std::unique_ptr<handler_resources> control_channel_handler::create_handler_resources() {
-    return std::make_unique<control_channel_handler_resources>(get_socket_io(), server_.get_datastore());
+std::unique_ptr<handler_resources> control_channel_handler::create_handler_resources() {
+    return std::make_unique<control_channel_handler_resources>(
+        get_socket_io(), server_, server_.get_datastore());
 }
 
- }  // namespace limestone::replication
- 
+}  // namespace limestone::replication
+

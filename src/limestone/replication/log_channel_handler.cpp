@@ -34,12 +34,15 @@ validation_result log_channel_handler::validate_initial(std::unique_ptr<replicat
     if (request->get_message_type_id() != message_type_id::LOG_CHANNEL_CREATE) {
         std::ostringstream msg;
         msg << "Invalid message type: " << static_cast<int>(request->get_message_type_id()) << ", expected LOG_CHANNEL_CREATE";
-        return validation_result::error(2, msg.str());
+        return validation_result::error(
+            message_error::log_channel_error_invalid_type, msg.str());
     }
 
     auto *msg = dynamic_cast<message_log_channel_create*>(request.get());
     if (!msg) {
-        return validation_result::error(3, "Failed to cast to message_log_channel_create");
+        return validation_result::error(
+            message_error::log_channel_error_bad_cast,
+            "Failed to cast to message_log_channel_create");
     }
 
     // TODO その他のバリデーション処理を入れる
@@ -65,7 +68,9 @@ validation_result log_channel_handler::authorize() {
     int id = log_channel_id_counter.fetch_add(1, std::memory_order_seq_cst);
     if (id >= MAX_LOG_CHANNEL_COUNT) {
         LOG(ERROR) << "Exceeded maximum number of log channels: " << MAX_LOG_CHANNEL_COUNT;
-        return validation_result::error(1, "Too many log channels: cannot assign more");
+        return validation_result::error(
+            message_error::log_channel_error_too_many_channels,
+            "Too many log channels: cannot assign more");
     }
 
     std::ostringstream oss;

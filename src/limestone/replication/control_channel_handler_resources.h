@@ -18,6 +18,7 @@
 
 #include "handler_resources.h"
 #include "limestone/api/datastore.h"
+#include "replication/replica_server.h"
 
 namespace limestone::replication {
 
@@ -25,15 +26,19 @@ using namespace limestone::api;
     
 class control_channel_handler_resources : public handler_resources {
 public:
-control_channel_handler_resources(
+    control_channel_handler_resources(
         socket_io& io,
+        replica_server& server,
         datastore& ds)
         : handler_resources(io)
+        , server_(server)
         , datastore_(ds) {}
 
     [[nodiscard]] datastore& get_datastore() const { return datastore_; }
+    [[nodiscard]] replica_server& get_server() const { return server_; }
 
 private:
+    replica_server& server_;
     datastore& datastore_;
 };
 

@@ -18,7 +18,11 @@
 
 #include <gtest/gtest.h>
 
+#include <replication/control_channel_handler_resources.h>
 #include <replication/handler_resources.h>
+#include <replication/message_error.h>
+#include <replication/message_rdma_init_ack.h>
+#include <replication/replica_server.h>
 #include <replication/socket_io.h>
 
 namespace limestone::testing {
@@ -49,12 +53,55 @@ TEST(message_rdma_init_test, replication_message_round_trip) {
     EXPECT_EQ(received->get_slot_count(), 256u);
 }
 
-TEST(message_rdma_init_test, post_receive_is_noop) {
+TEST(message_rdma_init_test, post_receive_with_invalid_resources_returns_error) {
     replication::message_rdma_init msg(1u);
     socket_io io("");
     handler_resources resources{io};
+
     msg.post_receive(resources);
-    SUCCEED();
+
+    socket_io reader(io.get_out_string());
+    auto response = replication::replication_message::receive(reader);
+    auto* err = dynamic_cast<replication::message_error*>(response.get());
+    ASSERT_NE(err, nullptr);
+    EXPECT_EQ(err->get_error_code(), replication::message_error::rdma_init_error_invalid_resources);
+}
+
+TEST(message_rdma_init_test, post_receive_returns_ack_then_error_on_second_init) {
+    boost::filesystem::path base_location = "/tmp/message_rdma_init_test";
+    boost::filesystem::remove_all(base_location);
+    boost::filesystem::create_directories(base_location);
+
+    replication::replica_server server{};
+    server.initialize(base_location);
+
+    {
+        socket_io io("");
+        replication::control_channel_handler_resources resources(io, server, server.get_datastore());
+        replication::message_rdma_init msg(4u);
+        msg.post_receive(resources);
+
+        socket_io reader(io.get_out_string());
+        auto response = replication::replication_message::receive(reader);
+        auto* ack = dynamic_cast<replication::message_rdma_init_ack*>(response.get());
+        ASSERT_NE(ack, nullptr);
+        EXPECT_EQ(response->get_message_type_id(), replication::message_type_id::RDMA_INIT_ACK);
+    }
+
+    {
+        socket_io io("");
+        replication::control_channel_handler_resources resources(io, server, server.get_datastore());
+        replication::message_rdma_init msg(4u);
+        msg.post_receive(resources);
+
+        socket_io reader(io.get_out_string());
+        auto response = replication::replication_message::receive(reader);
+        auto* err = dynamic_cast<replication::message_error*>(response.get());
+        ASSERT_NE(err, nullptr);
+        EXPECT_EQ(err->get_error_code(), replication::message_error::rdma_init_error_already_initialized);
+    }
+
+    boost::filesystem::remove_all(base_location);
 }
 
 }  // namespace limestone::testing

@@ -30,6 +30,7 @@
 #include "limestone_exception_helper.h"
 #include "blob_socket_io.h"
 #include "datastore_impl.h"
+#include <rdma_comm/rdma_config.h>
 
 namespace limestone::replication {
 
@@ -259,7 +260,7 @@ void replica_server::handle_client(int client_fd) {
         } else {
             LOG_LP(ERROR) << "Unexpected message type: " << static_cast<uint16_t>(type);
             auto error = std::make_unique<message_error>();
-            error->set_error(1, "Unexpected message type");
+            error->set_error(message_error::error_unexpected_message_type, "Unexpected message type");
             replication_message::send(io, *error);
             io.flush();
         }
@@ -325,6 +326,44 @@ bool replica_server::mark_control_channel_created() noexcept {
     bool expected = false;
     bool ret = control_channel_created_.compare_exchange_strong(expected, true);
     return ret;
+}
+
+replica_server::rdma_init_result replica_server::initialize_rdma_receiver(uint32_t slot_count) {
+    std::lock_guard<std::mutex> lock(rdma_init_mutex_);
+    if (rdma_receiver_) {
+        return rdma_init_result::already_initialized;
+    }
+
+    rdma::communication::rdma_config config{};
+    auto capacity = static_cast<std::size_t>(slot_count);
+    constexpr std::size_t chunk_size = 4096U;
+    config.send_buffer.region_size_bytes = capacity * chunk_size;
+    config.send_buffer.chunk_size_bytes = chunk_size;
+    config.send_buffer.ring_capacity = capacity;
+    config.remote_buffer = config.send_buffer;
+    config.completion_queue_depth = 1024U;
+
+    rdma_receiver_ = std::make_unique<rdma::communication::rdma_receiver>(config);
+    auto result = rdma_receiver_->initialize([](const rdma::communication::rdma_receive_event&) {});
+    if (! result.success) {
+        rdma_receiver_.reset();
+        return rdma_init_result::failed;
+    }
+
+    auto dma_address = rdma_receiver_->get_dma_address();
+    if (! dma_address.has_value()) {
+        rdma_receiver_.reset();
+        return rdma_init_result::failed;
+    }
+
+    return rdma_init_result::success;
+}
+
+std::optional<rdma::communication::dma_address_type> replica_server::get_rdma_dma_address() const noexcept {
+    if (! rdma_receiver_) {
+        return std::nullopt;
+    }
+    return rdma_receiver_->get_dma_address();
 }
 
 } // namespace limestone::replication

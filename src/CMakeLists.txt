@@ -69,6 +69,7 @@ target_link_libraries(limestone-impl
         INTERFACE nlohmann_json::nlohmann_json
         INTERFACE OpenSSL::SSL
         INTERFACE OpenSSL::Crypto
+        INTERFACE rdma_comm
 )
 
 # utils

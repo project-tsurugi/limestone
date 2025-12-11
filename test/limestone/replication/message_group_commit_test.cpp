@@ -51,7 +51,8 @@ TEST_F(message_group_commit_test, post_receive) {
     EXPECT_EQ(datastore_->epoch_id_switched(), 1);
     message_group_commit msg(999);
     socket_io io("");
-    control_channel_handler_resources resources(io, *datastore_);
+    replica_server dummy_server{};
+    control_channel_handler_resources resources(io, dummy_server, *datastore_);
     msg.post_receive(resources);
     EXPECT_EQ(get_epoch(base_location), 999);
 }

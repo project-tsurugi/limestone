@@ -23,6 +23,7 @@
 #include "replication_message.h"
 #include <limestone/api/datastore.h>
 #include "limestone_exception_helper.h"
+#include <rdma_comm/rdma_receiver.h>
 
 
 namespace limestone::replication {
@@ -89,6 +90,24 @@ public:
      * @return true if the flag was not set and is now set successfully, false if it was already set.
      */
     [[nodiscard]] bool mark_control_channel_created() noexcept;
+
+    /**
+     * @brief Initialize RDMA receiver for replica side.
+     * @param slot_count requested RDMA slot count.
+     * @return initialization result.
+     */
+    enum class rdma_init_result {
+        success,
+        already_initialized,
+        failed,
+    };
+    [[nodiscard]] rdma_init_result initialize_rdma_receiver(uint32_t slot_count);
+
+    /**
+     * @brief Get remote DMA address exposed by receiver.
+     * @return optional DMA address if available.
+     */
+    [[nodiscard]] std::optional<rdma::communication::dma_address_type> get_rdma_dma_address() const noexcept;
 private:
     boost::filesystem::path location_;                      ///< filesystem path for datastore
     std::unordered_map<message_type_id, std::function<std::shared_ptr<channel_handler_base>(socket_io&)>> handler_factories_;
@@ -98,6 +117,8 @@ private:
     int event_fd_{-1};                                      ///< eventfd used to unblock poll()
     int sockfd_{-1};                                        ///< listening socket file descriptor
     std::atomic<bool> control_channel_created_{false};      ///< flag to indicate if control channel is created
+    std::unique_ptr<rdma::communication::rdma_receiver> rdma_receiver_; ///< RDMA receiver owned for process lifetime
+    std::mutex rdma_init_mutex_{};                                      ///< Protect RDMA receiver initialization
     
     std::vector<std::future<void>> client_futures_;         ///< futures for client handling threads
     std::mutex futures_mutex_;                              ///< mutex for thread-safe access to client_futures_

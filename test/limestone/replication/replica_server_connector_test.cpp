@@ -182,7 +182,7 @@ TEST_F(replica_server_connector_test, control_handler_rejects_second_session_beg
     EXPECT_EQ(second_response->get_message_type_id(), replication::message_type_id::COMMON_ERROR);
 
     auto* err = static_cast<limestone::replication::message_error*>(second_response.get());
-    EXPECT_EQ(err->get_error_code(), 1);
+    EXPECT_EQ(err->get_error_code(), message_error::control_channel_error_already_created);
     // error_message contains “already received”
     EXPECT_NE(err->get_error_message().find("Control channel already created"), std::string::npos);
     

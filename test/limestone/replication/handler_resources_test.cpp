@@ -44,11 +44,10 @@ TEST_F(handler_resources_test, returns_correct_datastore) {
     auto& ds = server.get_datastore();
 
     socket_io io("dummy");
-    control_channel_handler_resources resources(io, ds);
+    control_channel_handler_resources resources(io, server, ds);
 
     EXPECT_EQ(&resources.get_datastore(), &ds);
 }
 
 
 }  // namespace limestone::testing
-
