@@ -168,6 +168,12 @@ public:
      */
     bool maybe_initialize_rdma_sender();
 
+    /**
+     * @brief Shut down RDMA sender if initialized.
+     * @return true on success or when sender is absent; false if shutdown fails.
+     */
+    bool shutdown_rdma_sender() noexcept;
+
 private:
     // Atomic counter for tracking active backup operations.
     std::atomic<int> backup_counter_;

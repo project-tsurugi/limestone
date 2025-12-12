@@ -94,4 +94,25 @@ TEST_F(datastore_impl_test, initialize_rdma_sender_success_sets_sender) {
     EXPECT_NE(datastore.get_rdma_sender(), nullptr);
 }
 
+TEST_F(datastore_impl_test, shutdown_rdma_sender_after_initialize_clears_sender) {
+    datastore_impl datastore;
+
+    constexpr uint32_t test_slot_count = 4U;
+    constexpr uint64_t test_dma_address = 0x1234U;
+
+    ASSERT_TRUE(datastore.initialize_rdma_sender(test_slot_count, test_dma_address));
+    ASSERT_NE(datastore.get_rdma_sender(), nullptr);
+
+    EXPECT_TRUE(datastore.shutdown_rdma_sender());
+    EXPECT_EQ(datastore.get_rdma_sender(), nullptr);
+}
+
+TEST_F(datastore_impl_test, shutdown_rdma_sender_without_initialize_is_noop) {
+    datastore_impl datastore;
+
+    EXPECT_EQ(datastore.get_rdma_sender(), nullptr);
+    EXPECT_TRUE(datastore.shutdown_rdma_sender());
+    EXPECT_EQ(datastore.get_rdma_sender(), nullptr);
+}
+
 } // namespace limestone::api

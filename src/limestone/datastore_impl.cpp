@@ -406,6 +406,21 @@ rdma::communication::rdma_sender* datastore_impl::get_rdma_sender() const noexce
     return rdma_sender_.get();
 }
 
+bool datastore_impl::shutdown_rdma_sender() noexcept {
+    if (! rdma_sender_) {
+        return true;
+    }
+
+    auto result = rdma_sender_->shutdown();
+    if (! result.success) {
+        LOG_LP(ERROR) << "rdma_sender::shutdown() failed: " << result.error_message;
+        return false;
+    }
+
+    rdma_sender_.reset();
+    return true;
+}
+
 const std::optional<manifest::migration_info>& datastore_impl::get_migration_info() const noexcept {
     return migration_info_;
 }

@@ -469,6 +469,8 @@ std::future<void> datastore::shutdown() noexcept {
         }
     }
 
+    impl_->shutdown_rdma_sender();
+
     if (blob_file_garbage_collector_) {
         blob_file_garbage_collector_->shutdown();
     }

@@ -93,6 +93,21 @@ RDMA共通ライブラリをリンクするために、CMakeList.txtを変更し
 - RDMA 初期化結果は datastore_impl などでフラグ管理し、後続のログ送信パスは `get_rdma_sender()` などで RDMA 利用可否を判定する。
 - テスト観点: ACK 受信で sender 初期化成功、initialize 失敗時は RDMA 無効化で継続、ACK なし/ERROR の場合は RDMA 無効フラグのまま。
 
+### datastoreにrdma_senderのシャットダウン処理を追加
+
+- master側で `datastore::shutdown()` 時に RDMA sender を明示終了する経路を追加。`datastore_impl::shutdown_rdma_sender()` を呼び、成功時のみ `rdma_sender_` を破棄し、失敗時はログを残してポインタを保持する。
+- レプリカ側はプロセス終了手段が未整備のため、現時点では shutdown 呼び出しを追加していない。
+- テスト: `datastore_impl_test` に RDMA sender 初期化後の shutdown でポインタがクリアされるケースと、未初期化での no-op を検証する2件を追加。
+
+
+## この後の方針、設計上の注意点
+
+* RDMAが有効の場合ログチャネルを作ったら、rdma_sender, rdma_receiverに登録する。
+* RDMAが有効の場合、ログチャネルのソケットの書き込みの代わりに、RDMAに書き込みをする。その書き込みが、どのログチャネルの書き込みかの情報も書き込む必要がある。これは、rdma_senderの機能に含まれるかもしれないので確認する。
+* レプリカ側のコールバック関数を作成する。やることは、コールバックが呼ばれたら、ログチャネルに対する書き込みか判断し、当該ログチャネルへのWALを書き込む、syncするなどの操作をする。ログチャネルを特定したあとの操作は、既存のtcp/ipベースの場合と同じはず。rdma_receiverがそれを簡略化するためのヘルパー関数を提供しているかもしれないので、確認する。
+* 全部できたらテストする。既存テストをRDMA無効と、RDMA有効と切り替えて2回テストできるようにする。
+
+
 
 
 ## TODO
