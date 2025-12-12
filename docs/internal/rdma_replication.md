@@ -85,6 +85,12 @@ RDMA共通ライブラリをリンクするために、CMakeList.txtを変更し
 - rdma_config は当面、send_buffer/remote_buffer を同一設定で使用する。`region_size_bytes = slot_count * 4096`、`chunk_size_bytes = 4096`、`ring_capacity = slot_count`。completion_queue_depth は 1024 を設定し、control_channel はデフォルト（未設定）。
 - TODO: 受信ハンドラ／チャネル登録（ACK用FDなど）は未実装。rdma_receiver::initialize() に渡す receive_handler の実装と、各チャネルの登録・ACK通知経路を設計した上で組み込む必要がある。
 
+### datastoreにrdma_senderのシャットダウン処理を追加
+
+- master側で `datastore::shutdown()` 時に RDMA sender を明示終了する経路を追加。`datastore_impl::shutdown_rdma_sender()` を呼び、成功時のみ `rdma_sender_` を破棄し、失敗時はログを残してポインタを保持する。
+- レプリカ側はプロセス終了手段が未整備のため、現時点では shutdown 呼び出しを追加していない。
+- テスト: `datastore_impl_test` に RDMA sender 初期化後の shutdown でポインタがクリアされるケースと、未初期化での no-op を検証する2件を追加。
+
 ### master側のRDMA sender初期化
 
 - コントロールチャネル確立直後に `SESSION_BEGIN` を送信し、プロトコル v2 の正常応答を確認したら直ちに `RDMA_INIT` を送る。`slot_count` は datastore 起動時に決めた値をそのまま送り、未設定なら `RDMA_INIT` は送らない。
@@ -93,11 +99,8 @@ RDMA共通ライブラリをリンクするために、CMakeList.txtを変更し
 - RDMA 初期化結果は datastore_impl などでフラグ管理し、後続のログ送信パスは `get_rdma_sender()` などで RDMA 利用可否を判定する。
 - テスト観点: ACK 受信で sender 初期化成功、initialize 失敗時は RDMA 無効化で継続、ACK なし/ERROR の場合は RDMA 無効フラグのまま。
 
-### datastoreにrdma_senderのシャットダウン処理を追加
-
-- master側で `datastore::shutdown()` 時に RDMA sender を明示終了する経路を追加。`datastore_impl::shutdown_rdma_sender()` を呼び、成功時のみ `rdma_sender_` を破棄し、失敗時はログを残してポインタを保持する。
-- レプリカ側はプロセス終了手段が未整備のため、現時点では shutdown 呼び出しを追加していない。
-- テスト: `datastore_impl_test` に RDMA sender 初期化後の shutdown でポインタがクリアされるケースと、未初期化での no-op を検証する2件を追加。
+#### socket_fdを取り出せるようにする。
+- rdma_sender/rdma_receiver の初期化時に socket_fd を渡す必要があるため、control_channel_handler_resources に socket_fd 取得用のメソッドを追加。
 
 
 ## この後の方針、設計上の注意点
@@ -113,3 +116,5 @@ RDMA共通ライブラリをリンクするために、CMakeList.txtを変更し
 ## TODO
 
 * rdma_configに設定不要なフィールドや、設定可能でも原則デフォルト値を仕様すべきフィールドがある。整理が必要、別プロジェクトの問題なので、ここではTODOに記述するに留める。
+* log_channel の ACK 用 FD について、socket_io が保持する FD をそのまま RDMA ACK に使う方針（dup しない）で問題ないか、所有権とクローズタイミングをコードベースで再確認する。
+* 既存 ACK と RDMA ACK のフォーマット差異がないかを確認し、異なる場合はどちらに合わせるかを決定して対応する。

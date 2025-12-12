@@ -253,4 +253,8 @@ bool socket_io::eof() {
     return in_stream_->eof();
 }
 
+int socket_io::get_socket_fd() const noexcept {
+    return socket_fd_;
+}
+
 }  // namespace limestone::replication

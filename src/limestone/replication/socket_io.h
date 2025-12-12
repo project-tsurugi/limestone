@@ -91,6 +91,12 @@ public:
     // Check if the end of the input stream has been reached.
     [[nodiscard]] bool eof();
 
+    /**
+     * @brief Retrieve the underlying socket file descriptor.
+     * @return socket file descriptor in real socket mode; -1 in string mode.
+     */
+    [[nodiscard]] int get_socket_fd() const noexcept;
+
 protected:
     [[nodiscard]] std::ostream& get_out_stream(); 
     [[nodiscard]] std::istream& get_in_stream();

@@ -516,4 +516,18 @@ TEST(socket_io_test, eof_after_close_socket_mode) {
     EXPECT_TRUE(io.eof()) << "Expected EOF after stream close in socket mode, but it was not EOF.";
 }
 
+TEST(socket_io_test, get_socket_fd_real_and_string_mode) {
+    int fds[2]{-1, -1};
+    ASSERT_EQ(::socketpair(AF_UNIX, SOCK_STREAM, 0, fds), 0);
+
+    {
+        socket_io io_real(fds[0]);
+        EXPECT_EQ(io_real.get_socket_fd(), fds[0]);
+    }
+    ::close(fds[1]);
+
+    socket_io io_string("");
+    EXPECT_EQ(io_string.get_socket_fd(), -1);
+}
+
 }  // namespace limestone::testing
