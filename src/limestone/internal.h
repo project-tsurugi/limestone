@@ -18,6 +18,7 @@
 
 #include <limestone/api/datastore.h>
 
+#include <chrono>
 #include <boost/filesystem.hpp>
 #include <optional>
 
@@ -29,6 +30,11 @@
 
 namespace limestone::internal {
 using namespace limestone::api;
+
+inline std::uint64_t now_nsec() {
+    auto now = std::chrono::steady_clock::now();
+    return std::chrono::duration_cast<std::chrono::nanoseconds>(now.time_since_epoch()).count();
+}
 
 // moved from datastore.h
 /**
