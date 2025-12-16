@@ -106,6 +106,10 @@ RDMA共通ライブラリをリンクするために、CMakeList.txtを変更し
 
 datastore::create_channel() に RDMA sender 登録を追加し、ストリーム取得と FATAL ハンドリングを実装（log_channel_impl に保持スロット追加）。
 
+#### 送信処理
+
+送信経路を RDMA/TCP で分岐し、RDMA有効時は send_bytes + flush に切り替え（ACK待機を wait_for_replica_ack から外す）。
+
 
 
 ## この後の方針、設計上の注意点
@@ -125,9 +129,7 @@ datastore::create_channel() に RDMA sender 登録を追加し、ストリーム
 * 既存 ACK と RDMA ACK のフォーマット差異がないかを確認し、異なる場合はどちらに合わせるかを決定して対応する。
 * RDMA 経路での ACK 待機は `rdma_send_stream::flush()` で行う方針にする（flush が pending ACK を待つ実装であることを確認済み）。RDMA 有効時は TCP の `wait_for_replica_ack()` を使わない設計に統一する。
 * datastore::maybe_register_rdma_streamのテストカバレッジが不足しているので、あとでテストを追加できないか検討する。
+* RDMA送信経路でのコピー削減を検討（socket_io文字列バッファ→vectorコピー、および rdma_send_stream 内部のリングバッファコピーが多重に発生するため）。直接バイト列へシリアライズするヘルパーや send_bytes API 拡張でのコピー回数低減を検討する。
+* log_channel::end_session の RDMA flush/ファイル終端並列実行や TCP/ACK 待機挙動についてはフェイク/モック整備が必要でテスト未整備。後続でテスト可能な形にリファクタ後、カバレッジ追加を検討する。
+* RDMA flush のタイムアウト(現在 5000ms をハードコード)は定数化し、設定変更しやすい形にする。
 
-
-ステップを分けて進めるほうがリスク低く確認しやすいと思います。以下の順で進めてよいでしょうか？
-
-送信経路を RDMA/TCP で分岐し、RDMA有効時は send_bytes + flush に切り替え（ACK待機を wait_for_replica_ack から外す）。
-必要なテストのスケルトン/調整（RDMA登録成功/失敗のdeath testなど）を追加。

@@ -270,7 +270,7 @@ TEST_F(rdma_registration_test, rdma_stream_registration_success) {
     EXPECT_TRUE(factory_called);
     auto& channels = datastore_->log_channels();
     ASSERT_FALSE(channels.empty());
-    EXPECT_TRUE(channels.front()->get_impl()->has_rdma_send_stream_for_test());
+    EXPECT_TRUE(channels.front()->get_impl()->has_rdma_send_stream());
 }
 
 TEST_F(rdma_registration_test, rdma_stream_registration_failure_fatal) {

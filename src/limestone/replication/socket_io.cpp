@@ -222,10 +222,24 @@ bool socket_io::flush() {
 }
 
 std::string socket_io::get_out_string() const {
+    if (! out_stream_) {
+        return std::string{};
+    }
     return out_stream_->str();
 }
 
+void socket_io::reset_output_buffer() {
+    if (! out_stream_) {
+        return;
+    }
+    out_stream_->str(std::string{});
+    out_stream_->clear();
+}
+
 void socket_io::close() {
+    if (! out_stream_) {
+        return;
+    }
     flush();
     if (!is_string_mode_) {
         if (socket_fd_ != -1) {

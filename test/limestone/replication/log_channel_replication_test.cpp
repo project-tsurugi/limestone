@@ -29,6 +29,7 @@
 #include "replication_test_helper.h"
 #include "test_root.h"
 #include "log_channel_impl.h"
+#include "replication/socket_io.h"
 
 namespace limestone::testing {
 
@@ -123,12 +124,16 @@ protected:
     
 
     void stop_replica_server() {
-        auto connector = log_channel_->get_impl()->get_replica_connector();
-        if (connector) {
-            connector->close_session();
-        }   
-        datastore_->shutdown();
-        datastore_ = nullptr;
+        if (log_channel_ != nullptr) {
+            auto connector = log_channel_->get_impl()->get_replica_connector();
+            if (connector) {
+                connector->close_session();
+            }
+        }
+        if (datastore_ != nullptr) {
+            datastore_->shutdown();
+            datastore_ = nullptr;
+        }
         if (server_thread_ && server_thread_->joinable()) {
             server_.shutdown();
             server_thread_->join();
@@ -159,6 +164,29 @@ protected:
 private:
     replication::replica_server server_;
     std::unique_ptr<std::thread> server_thread_;
+};
+
+class fake_rdma_send_stream : public rdma::communication::rdma_send_stream {
+public:
+    [[nodiscard]] send_result send_bytes(std::vector<std::uint8_t> const& payload, std::size_t offset, std::size_t length) noexcept override {
+        send_count_++;
+        if (offset > payload.size() || offset + length > payload.size()) {
+            ADD_FAILURE() << "invalid offset/length for send_bytes: offset=" << offset
+                          << " length=" << length << " payload.size=" << payload.size();
+            return { false, "invalid offset/length", 0U };
+        }
+        last_payload_size_ = length;
+        return { true, "", length };
+    }
+
+    [[nodiscard]] flush_result flush(std::chrono::milliseconds) noexcept override {
+        flush_count_++;
+        return { true, "" };
+    }
+
+    std::size_t send_count_{};
+    std::size_t flush_count_{};
+    std::size_t last_payload_size_{};
 };
 
 TEST_F(log_channel_replication_test, replica_connector_setter_getter) {
@@ -193,8 +221,8 @@ TEST_F(log_channel_replication_test, log_channel_begin_session)
     auto connector = begin_session_and_get_connector();
 }
 
-// TODO end_ssssion時にACKを待つようにした結果、テストが通らない。
-// 簡単に修正できないので、DISABLEDにしておく。
+// TODO: As a result of waiting for ACK at end_session, the test does not pass.
+// Since it cannot be easily fixed, it is marked as DISABLED.
 TEST_F(log_channel_replication_test, DISABLED_log_channel_end_session) {
     auto connector = begin_session_and_get_connector();
     log_channel_->end_session();
@@ -284,6 +312,43 @@ TEST_F(log_channel_replication_test, log_channel_remove_entry) {
     EXPECT_EQ(log_entry->has_session_begin_flag(), false);
     EXPECT_EQ(log_entry->has_session_end_flag(), false);
     EXPECT_EQ(log_entry->has_flush_flag(), false);
+}
+
+TEST_F(log_channel_replication_test, rdma_send_reuses_serializer_and_flushes) {
+    auto connector = begin_session_and_get_connector();
+    auto* impl = log_channel_->get_impl();
+
+    auto rdma_stream = std::make_unique<fake_rdma_send_stream>();
+    auto* rdma_stream_ptr = rdma_stream.get();
+    impl->set_rdma_send_stream(std::move(rdma_stream));
+    EXPECT_TRUE(impl->has_rdma_send_stream());
+
+    impl->send_replica_message(111, [&](replication::message_log_entries& msg) {
+        msg.set_session_begin_flag(true);
+    });
+    impl->send_replica_message(111, [&](replication::message_log_entries& msg) {
+        msg.set_flush_flag(true);
+    });
+
+    EXPECT_EQ(rdma_stream_ptr->send_count_, 2U);
+    EXPECT_GT(rdma_stream_ptr->last_payload_size_, 0U);
+
+    impl->flush_rdma_stream();
+    EXPECT_EQ(rdma_stream_ptr->flush_count_, 1U);
+}
+
+TEST_F(log_channel_replication_test, rdma_flush_async_executes) {
+    api::log_channel_impl impl;
+
+    auto rdma_stream = std::make_unique<fake_rdma_send_stream>();
+    auto* rdma_stream_ptr = rdma_stream.get();
+    impl.set_rdma_send_stream(std::move(rdma_stream));
+    EXPECT_TRUE(impl.has_rdma_send_stream());
+
+    auto fut = impl.flush_rdma_stream_async();
+    fut.get();
+
+    EXPECT_EQ(rdma_stream_ptr->flush_count_, 1U);
 }
 
 TEST_F(log_channel_replication_test, log_channel_add_storage) {

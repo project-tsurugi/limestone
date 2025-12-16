@@ -112,6 +112,24 @@ void log_channel::finalize_session_file() {
 void log_channel::end_session() {
     try {
         TRACE_START << "current_epoch_id_=" << current_epoch_id_.load();
+        if (impl_->has_rdma_send_stream()) {
+            if (envelope_.impl_->is_async_session_close_enabled()) {
+                std::future<void> wait_future;
+                try {
+                    wait_future = impl_->flush_rdma_stream_async();
+                } catch (...) {
+                    finalize_session_file();
+                    throw;
+                }
+                finalize_session_file();
+                wait_future.get();
+            } else {
+                finalize_session_file();
+                impl_->flush_rdma_stream();
+            }
+            TRACE_END;
+            return;
+        }
         if (envelope_.impl_->is_async_session_close_enabled()) {
             bool sent = impl_->send_replica_message(finished_epoch_id_.load(), [&](replication::message_log_entries &msg) {
                 msg.set_session_end_flag(true);

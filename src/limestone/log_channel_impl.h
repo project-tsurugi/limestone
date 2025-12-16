@@ -19,6 +19,8 @@
 #include <mutex>
 #include <string_view>
 #include <vector>
+#include <boost/asio.hpp>
+#include <future>
 #include <rdma_comm/rdma_sender.h>
 #include <boost/filesystem.hpp>
 
@@ -27,6 +29,7 @@
 #include "limestone/api/write_version_type.h"
 #include "limestone/status.h"
 #include "replication/replica_connector.h"
+#include "replication/socket_io.h"
 #include "replication/message_log_entries.h"
 
 namespace limestone::api {
@@ -92,19 +95,33 @@ public:
     void wait_for_replica_ack();
 
     /**
+     * @brief Flush pending RDMA sends and wait for acknowledgements.
+     */
+    void flush_rdma_stream();
+
+    /**
      * @brief Sets RDMA send stream for replication.
      * @param stream RDMA stream instance to take ownership of.
      */
     void set_rdma_send_stream(std::unique_ptr<rdma::communication::rdma_send_stream> stream) noexcept;
 
     /**
-     * @brief Test helper to check RDMA stream presence.
+     * @brief Checks whether RDMA send stream is available.
      * @return true if RDMA stream is set.
      */
-    [[nodiscard]] bool has_rdma_send_stream_for_test() const noexcept;
+    [[nodiscard]] bool has_rdma_send_stream() const noexcept;
+
+    /**
+     * @brief Flush RDMA stream asynchronously using channel-local thread pool.
+     * @return future representing completion of flush.
+     */
+    std::future<void> flush_rdma_stream_async();
 private:
     std::unique_ptr<replication::replica_connector> replica_connector_;
     std::unique_ptr<rdma::communication::rdma_send_stream> rdma_send_stream_;
+    replication::socket_io rdma_serializer_io_;
+    std::unique_ptr<boost::asio::thread_pool> ack_thread_pool_;
+    std::once_flag ack_thread_pool_once_;
     mutable std::mutex mtx_replica_connector_;
 };
 

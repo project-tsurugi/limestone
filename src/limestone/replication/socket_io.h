@@ -97,6 +97,11 @@ public:
      */
     [[nodiscard]] int get_socket_fd() const noexcept;
 
+    /**
+     * @brief Reset output buffer while retaining allocated capacity.
+     */
+    void reset_output_buffer();
+
 protected:
     [[nodiscard]] std::ostream& get_out_stream(); 
     [[nodiscard]] std::istream& get_in_stream();
