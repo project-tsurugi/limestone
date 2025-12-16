@@ -89,7 +89,7 @@ public:
      */
     [[nodiscard]] bool is_replication_configured() const noexcept;
 
-    [[nodiscard]] std::unique_ptr<replication::replica_connector> create_log_channel_connector(datastore &ds);
+    [[nodiscard]] std::unique_ptr<replication::replica_connector> create_log_channel_connector(datastore &ds, std::uint64_t channel_id);
 
     // Getter for the datastore role (master or replica)
     [[nodiscard]] bool is_master() const noexcept;

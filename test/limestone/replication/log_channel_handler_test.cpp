@@ -45,7 +45,7 @@ TEST_F(log_channel_handler_test, validate_initial_and_dispatch_succeeds) {
     socket_io out("");
     testable_log_handler handler(reinterpret_cast<replica_server&>(server), out);
 
-    auto msg = std::make_unique<message_log_channel_create>();
+    auto msg = std::make_unique<message_log_channel_create>(1234U);
     auto result = handler.validate_initial(std::move(msg));
     EXPECT_TRUE(result.ok());
 

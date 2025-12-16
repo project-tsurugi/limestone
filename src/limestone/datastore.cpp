@@ -305,7 +305,7 @@ log_channel& datastore::create_channel(const boost::filesystem::path& location) 
     auto* channel = log_channels_.back().get();
     
     if (impl_->has_replica() && impl_->is_master()) {
-        auto connector = impl_->create_log_channel_connector(*this);
+        auto connector = impl_->create_log_channel_connector(*this, id);
         if (connector) {
             channel->get_impl()->set_replica_connector(std::move(connector));
             maybe_register_rdma_stream(*channel, id);

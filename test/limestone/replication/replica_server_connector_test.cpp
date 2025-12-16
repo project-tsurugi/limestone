@@ -140,7 +140,7 @@ TEST_F(replica_server_connector_test, log_handler_initial_ack) {
     replication::replica_connector client;
     ASSERT_TRUE(client.connect_to_server("127.0.0.1", port));
 
-    auto request = replication::message_log_channel_create::create();
+    auto request = std::make_unique<replication::message_log_channel_create>(1U);
     EXPECT_TRUE(client.send_message(*request));
 
     auto response = client.receive_message();
@@ -220,7 +220,7 @@ TEST_F(replica_server_connector_test, control_and_multiple_log_channels_simultan
     for (int i = 0; i < 5; ++i) {
         clients.emplace_back();
         ASSERT_TRUE(clients.back().connect_to_server("127.0.0.1", port));
-        auto request = message_log_channel_create::create();
+        auto request = std::make_unique<message_log_channel_create>(1U);
         EXPECT_TRUE(clients.back().send_message(*request));
         auto response = clients.back().receive_message();
         ASSERT_NE(response, nullptr);

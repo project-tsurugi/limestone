@@ -264,7 +264,7 @@ std::shared_ptr<replica_connector> datastore_impl::get_control_channel() const n
     return control_channel_;
 }
 
-std::unique_ptr<replication::replica_connector> datastore_impl::create_log_channel_connector(datastore& ds) {
+std::unique_ptr<replication::replica_connector> datastore_impl::create_log_channel_connector(datastore& ds, std::uint64_t channel_id) {
     TRACE_START;
     if (!replica_exists_.load(std::memory_order_acquire)) {
         TRACE_END << "No replica exists, cannot create log channel connector.";
@@ -283,7 +283,7 @@ std::unique_ptr<replication::replica_connector> datastore_impl::create_log_chann
         return nullptr;
     }
 
-    auto request = message_log_channel_create::create();
+    auto request = std::make_unique<message_log_channel_create>(channel_id);
     if (!connector->send_message(*request)) {
         LOG_LP(ERROR) << "Failed to send log channel create message.";
         replica_exists_.store(false, std::memory_order_release);
