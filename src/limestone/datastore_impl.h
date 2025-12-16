@@ -23,6 +23,7 @@
 #include <optional>
 #include <array>
 #include <cstdint>
+#include <functional>
 
 #include "manifest.h"
 #include "replication/replica_connector.h"
@@ -174,6 +175,44 @@ public:
      */
     bool shutdown_rdma_sender() noexcept;
 
+    /**
+     * @brief Test hook to inject RDMA sender instance.
+     * @param sender RDMA sender ownership to set for testing.
+     * @note Test-only; do not use in production code.
+     */
+    void set_rdma_sender_for_test(std::unique_ptr<rdma::communication::rdma_sender> sender) noexcept;
+
+    /**
+     * @brief Test hook to override replica connector factory for log channels.
+     * @param factory factory function to create replica_connector for testing.
+     * @note Test-only; do not use in production code.
+     */
+    void set_log_channel_connector_factory_for_test(
+        std::function<std::unique_ptr<replication::replica_connector>()> factory) noexcept;
+
+    /**
+     * @brief Test hook to override RDMA send stream acquisition.
+     * @param factory factory returning RDMA send stream acquire result.
+     * @note Test-only; do not use in production code.
+     */
+    void set_rdma_stream_factory_for_test(
+        std::function<rdma::communication::rdma_sender::stream_acquire_result(
+            rdma::communication::channel_id_type, rdma::communication::unique_fd)> factory) noexcept;
+
+    [[nodiscard]] std::function<rdma::communication::rdma_sender::stream_acquire_result(
+        rdma::communication::channel_id_type, rdma::communication::unique_fd)> const*
+    get_rdma_stream_factory_for_test() const noexcept;
+
+    /**
+     * @brief Test hook to override acknowledgement fd for RDMA stream registration.
+     * @param fd file descriptor to use; negative value triggers fatal in registration.
+     * @note Test-only; do not use in production code.
+     */
+    void set_rdma_ack_fd_for_test(int fd) noexcept;
+
+    [[nodiscard]] bool has_rdma_stream_factory_for_test() const noexcept;
+    [[nodiscard]] std::optional<int> rdma_ack_fd_for_test() const noexcept;
+
 private:
     // Atomic counter for tracking active backup operations.
     std::atomic<int> backup_counter_;
@@ -211,6 +250,16 @@ private:
 
     // RDMA sender owned by master for RDMA replication path.
     std::unique_ptr<rdma::communication::rdma_sender> rdma_sender_{};
+
+    // Test hook: factory to override log channel connector creation.
+    std::function<std::unique_ptr<replication::replica_connector>()> log_channel_connector_factory_for_test_{};
+
+    // Test hook: factory to override RDMA stream acquisition.
+    std::function<rdma::communication::rdma_sender::stream_acquire_result(
+        rdma::communication::channel_id_type, rdma::communication::unique_fd)> rdma_stream_factory_for_test_{};
+
+    // Test hook: override ack fd used for RDMA registration.
+    std::optional<int> rdma_ack_fd_for_test_{};
 };
 
 }  // namespace limestone::api

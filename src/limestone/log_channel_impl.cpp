@@ -50,7 +50,15 @@ void log_channel_impl::wait_for_replica_ack() {
     }
 }
 
+void log_channel_impl::set_rdma_send_stream(std::unique_ptr<rdma::communication::rdma_send_stream> stream) noexcept {
+    std::lock_guard<std::mutex> lock(mtx_replica_connector_);
+    rdma_send_stream_ = std::move(stream);
+}
 
+bool log_channel_impl::has_rdma_send_stream_for_test() const noexcept {
+    std::lock_guard<std::mutex> lock(mtx_replica_connector_);
+    return rdma_send_stream_ != nullptr;
+}
 
 void log_channel_impl::set_replica_connector(std::unique_ptr<replication::replica_connector> connector) {
     std::lock_guard<std::mutex> lock(mtx_replica_connector_);

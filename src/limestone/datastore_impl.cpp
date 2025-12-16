@@ -24,6 +24,7 @@
 #include <string_view>
 #include <limits>
 #include <cerrno>
+#include <functional>
 #include <openssl/hmac.h>
 #include <openssl/rand.h>
 #include <openssl/evp.h>
@@ -269,6 +270,9 @@ std::unique_ptr<replication::replica_connector> datastore_impl::create_log_chann
         TRACE_END << "No replica exists, cannot create log channel connector.";
         return nullptr;
     }
+    if (log_channel_connector_factory_for_test_) {
+        return log_channel_connector_factory_for_test_();
+    }
     auto connector = std::make_unique<replica_connector>();
 
     std::string host = replication_endpoint_.host();  
@@ -419,6 +423,42 @@ bool datastore_impl::shutdown_rdma_sender() noexcept {
 
     rdma_sender_.reset();
     return true;
+}
+
+void datastore_impl::set_rdma_sender_for_test(std::unique_ptr<rdma::communication::rdma_sender> sender) noexcept {
+    rdma_sender_ = std::move(sender);
+}
+
+void datastore_impl::set_log_channel_connector_factory_for_test(
+    std::function<std::unique_ptr<replication::replica_connector>()> factory) noexcept {
+    log_channel_connector_factory_for_test_ = std::move(factory);
+}
+
+void datastore_impl::set_rdma_stream_factory_for_test(
+    std::function<rdma::communication::rdma_sender::stream_acquire_result(
+        rdma::communication::channel_id_type, rdma::communication::unique_fd)> factory) noexcept {
+    rdma_stream_factory_for_test_ = std::move(factory);
+}
+
+std::function<rdma::communication::rdma_sender::stream_acquire_result(
+    rdma::communication::channel_id_type, rdma::communication::unique_fd)> const*
+datastore_impl::get_rdma_stream_factory_for_test() const noexcept {
+    if (rdma_stream_factory_for_test_) {
+        return &rdma_stream_factory_for_test_;
+    }
+    return nullptr;
+}
+
+void datastore_impl::set_rdma_ack_fd_for_test(int fd) noexcept {
+    rdma_ack_fd_for_test_ = fd;
+}
+
+bool datastore_impl::has_rdma_stream_factory_for_test() const noexcept {
+    return static_cast<bool>(rdma_stream_factory_for_test_);
+}
+
+std::optional<int> datastore_impl::rdma_ack_fd_for_test() const noexcept {
+    return rdma_ack_fd_for_test_;
 }
 
 const std::optional<manifest::migration_info>& datastore_impl::get_migration_info() const noexcept {

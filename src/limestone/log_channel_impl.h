@@ -16,8 +16,10 @@
 #pragma once
 
 #include <memory>
-#include <vector>
+#include <mutex>
 #include <string_view>
+#include <vector>
+#include <rdma_comm/rdma_sender.h>
 #include <boost/filesystem.hpp>
 
 #include "limestone/api/blob_id_type.h"
@@ -88,9 +90,22 @@ public:
      *       Consider using a timeout mechanism if appropriate.
      */
     void wait_for_replica_ack();
+
+    /**
+     * @brief Sets RDMA send stream for replication.
+     * @param stream RDMA stream instance to take ownership of.
+     */
+    void set_rdma_send_stream(std::unique_ptr<rdma::communication::rdma_send_stream> stream) noexcept;
+
+    /**
+     * @brief Test helper to check RDMA stream presence.
+     * @return true if RDMA stream is set.
+     */
+    [[nodiscard]] bool has_rdma_send_stream_for_test() const noexcept;
 private:
     std::unique_ptr<replication::replica_connector> replica_connector_;
-    std::mutex mtx_replica_connector_;
+    std::unique_ptr<rdma::communication::rdma_send_stream> rdma_send_stream_;
+    mutable std::mutex mtx_replica_connector_;
 };
 
 }  // namespace limestone::api
