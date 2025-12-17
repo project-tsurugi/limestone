@@ -4,13 +4,20 @@
 
 #include "gtest/gtest.h"
 #include "replication/channel_handler_base.h"
-#include "replication/message_ack.h"
 #include "replication/message_error.h"
 #include "replication/message_log_channel_create.h"
+#include "replication/message_log_entries.h"
 #include "replication/replica_server.h"
 #include "replication/socket_io.h"
 #include "replication/validation_result.h"
+#include <cerrno>
+#include <memory>
+#include <string>
+#include <rdma_comm/ack_message.h>
+#include <rdma_comm/rdma_frame_header.h>
 #include "test_message.h"
+#include <fcntl.h>
+#include <unistd.h>
 namespace limestone::testing {
 
 using namespace limestone::replication;
@@ -38,6 +45,55 @@ public:
     using log_channel_handler::authorize;
     using log_channel_handler::process_loop;
 };
+
+namespace {
+
+struct rdma_test_context {
+    int read_fd{-1};
+    int write_fd{-1};
+    std::unique_ptr<replica_server> server;
+    std::unique_ptr<socket_io> io;
+    std::unique_ptr<testable_log_handler> handler;
+};
+
+rdma_test_context make_rdma_handler_with_channel(std::string const& location) {
+    rdma_test_context ctx{};
+    int pipefd[2];
+    if (::pipe(pipefd) != 0) {
+        return ctx;
+    }
+    ctx.read_fd = pipefd[0];
+    ctx.write_fd = pipefd[1];
+
+    ctx.server = std::make_unique<replica_server>();
+    ctx.server->initialize(location);
+    ctx.io = std::make_unique<socket_io>(ctx.write_fd);
+    auto handler = std::make_unique<testable_log_handler>(*ctx.server, *ctx.io);
+
+    auto create_msg = std::make_unique<message_log_channel_create>(1U);
+    auto init = handler->validate_initial(std::move(create_msg));
+    ctx.handler = std::move(handler);
+    return ctx;
+}
+
+rdma::communication::rdma_receive_data_event make_rdma_event_from_message(
+    replication_message& message,
+    std::uint16_t sequence_number) {
+    socket_io out_io(std::string{});
+    replication_message::send(out_io, message);
+    std::string payload = out_io.get_out_string();
+
+    rdma::communication::rdma_receive_data_event ev{};
+    ev.header.version = rdma::communication::rdma_frame_protocol_version;
+    ev.header.flags = 0U;
+    ev.header.sequence_number = sequence_number;
+    ev.header.channel_id = 1U;
+    ev.header.payload_size = static_cast<std::uint32_t>(payload.size());
+    ev.payload.assign(payload.begin(), payload.end());
+    return ev;
+}
+
+}  // namespace
 
 TEST_F(log_channel_handler_test, validate_initial_and_dispatch_succeeds) {
     replica_server server{};
@@ -76,7 +132,7 @@ TEST_F(log_channel_handler_test, authorize_succeeds_then_fails_at_limit_boundary
 
     char name[16];
     pthread_getname_np(pthread_self(), name, sizeof(name));
-    EXPECT_STREQ(name, "logch99999");  // last valid thread name
+    EXPECT_STREQ(name, "logch09999");  // last valid thread name
 
     // Second call: should fail because it exceeds the maximum allowed count
     auto result2 = handler.authorize();
@@ -138,6 +194,82 @@ TEST_F(log_channel_handler_test, send_initial_ack_sends_ack_message) {
     auto msg = replication_message::receive(reader);
     auto* ack = dynamic_cast<message_ack*>(msg.get());
     ASSERT_NE(ack, nullptr);
+}
+
+TEST_F(log_channel_handler_test, handle_rdma_data_event_sends_ack) {
+    auto ctx = make_rdma_handler_with_channel(base_location);
+    ASSERT_NE(ctx.handler, nullptr);
+    ASSERT_GE(ctx.read_fd, 0);
+    ASSERT_GE(ctx.write_fd, 0);
+
+    message_log_entries entries(epoch_id_type{0});
+    entries.set_session_begin_flag(true);
+    entries.add_normal_entry(1U, "k", "v", write_version_type{epoch_id_type{0}, 0U});
+    auto ev = make_rdma_event_from_message(entries, 0U);
+
+    ctx.handler->handle_rdma_data_event(ev);
+
+    rdma::communication::ack_message_bytes buf{};
+    ssize_t n = ::read(ctx.read_fd, buf.data(), buf.size());
+    ASSERT_EQ(n, static_cast<ssize_t>(buf.size()));
+    auto ack = rdma::communication::decode_ack_message(buf);
+    EXPECT_EQ(ack.version, rdma::communication::ack_protocol_version);
+    EXPECT_EQ(ack.flags, 0U);
+    EXPECT_EQ(ack.sequence_number, 0U);
+
+    ::close(ctx.read_fd);
+    ::close(ctx.write_fd);
+}
+
+TEST_F(log_channel_handler_test, handle_rdma_data_event_sequence_mismatch_no_ack) {
+    auto ctx = make_rdma_handler_with_channel(base_location);
+    ASSERT_NE(ctx.handler, nullptr);
+    ASSERT_GE(ctx.read_fd, 0);
+    ASSERT_GE(ctx.write_fd, 0);
+
+    int flags = ::fcntl(ctx.read_fd, F_GETFL, 0);
+    ASSERT_NE(flags, -1);
+    ASSERT_EQ(::fcntl(ctx.read_fd, F_SETFL, flags | O_NONBLOCK), 0);
+
+    message_log_entries entries(epoch_id_type{0});
+    entries.add_normal_entry(1U, "k", "v", write_version_type{epoch_id_type{0}, 0U});
+    auto ev = make_rdma_event_from_message(entries, 1U);
+
+    ctx.handler->handle_rdma_data_event(ev);
+
+    rdma::communication::ack_message_bytes buf{};
+    ssize_t n = ::read(ctx.read_fd, buf.data(), buf.size());
+    EXPECT_LT(n, 0);
+    EXPECT_EQ(errno, EAGAIN);
+
+    ::close(ctx.read_fd);
+    ::close(ctx.write_fd);
+}
+
+TEST_F(log_channel_handler_test, handle_rdma_data_event_payload_size_mismatch_no_ack) {
+    auto ctx = make_rdma_handler_with_channel(base_location);
+    ASSERT_NE(ctx.handler, nullptr);
+    ASSERT_GE(ctx.read_fd, 0);
+    ASSERT_GE(ctx.write_fd, 0);
+
+    int flags = ::fcntl(ctx.read_fd, F_GETFL, 0);
+    ASSERT_NE(flags, -1);
+    ASSERT_EQ(::fcntl(ctx.read_fd, F_SETFL, flags | O_NONBLOCK), 0);
+
+    message_log_entries entries(epoch_id_type{0});
+    entries.add_normal_entry(1U, "k", "v", write_version_type{epoch_id_type{0}, 0U});
+    auto ev = make_rdma_event_from_message(entries, 0U);
+    ev.header.payload_size += 1U;  // mismatch
+
+    ctx.handler->handle_rdma_data_event(ev);
+
+    rdma::communication::ack_message_bytes buf{};
+    ssize_t n = ::read(ctx.read_fd, buf.data(), buf.size());
+    EXPECT_LT(n, 0);
+    EXPECT_EQ(errno, EAGAIN);
+
+    ::close(ctx.read_fd);
+    ::close(ctx.write_fd);
 }
 
 }  // namespace limestone::testing

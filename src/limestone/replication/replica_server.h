@@ -125,6 +125,25 @@ public:
      */
     [[nodiscard]] std::shared_ptr<class log_channel_handler> get_log_channel_handler(
         std::uint64_t id) const noexcept;
+
+    /**
+     * @brief Test hook to set a log channel handler into a slot.
+     * @note Intended for testing only.
+     */
+    void set_log_channel_handler_for_test(
+        std::uint64_t id, std::shared_ptr<class log_channel_handler> handler);
+
+    /**
+     * @brief RDMA receive handler entry point.
+     * @param event RDMA receive event.
+     */
+    void on_rdma_receive(rdma::communication::rdma_receive_event const& event);
+
+    /**
+     * @brief RDMA data event handler (exposed for testing).
+     * @param event RDMA data event.
+     */
+    void handle_rdma_data_event(rdma::communication::rdma_receive_data_event const& event);
 private:
     boost::filesystem::path location_;                      ///< filesystem path for datastore
     std::unordered_map<message_type_id, std::function<std::shared_ptr<channel_handler_base>(socket_io&)>> handler_factories_;

@@ -19,6 +19,8 @@
 #include <limestone/api/log_channel.h>
 
 #include <atomic>
+#include <cstdint>
+#include <rdma_comm/rdma_receiver.h>
 
 #include "channel_handler_base.h"
 #include "log_channel_limits.h"
@@ -52,6 +54,12 @@ public:
      */
     [[nodiscard]] log_channel& get_log_channel();
 
+    /**
+     * @brief Handle RDMA data event (payload for this log channel).
+     * @param event RDMA data event to process.
+     */
+    virtual void handle_rdma_data_event(rdma::communication::rdma_receive_data_event const& event);
+
 protected:
     // Assign a log channel and set the thread name.
     validation_result authorize() override; 
@@ -71,6 +79,7 @@ protected:
 private:
     std::atomic<int> log_channel_id_counter{0};
     log_channel* log_channel_{nullptr}; 
+    std::uint16_t next_sequence_number_{0};  ///< Expected next sequence number (wraps at 16 bits).
 };
 
 } // namespace limestone::replication

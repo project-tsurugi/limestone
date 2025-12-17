@@ -16,11 +16,15 @@
 
 #include "replica_server.h"
 
-#include <glog/logging.h>
-#include <limestone/logging.h>
 #include <netinet/tcp.h>
 #include <poll.h>
 #include <sys/eventfd.h>
+#include <type_traits>
+#include <variant>
+
+#include <glog/logging.h>
+#include <limestone/logging.h>
+#include <rdma_comm/rdma_config.h>
 
 #include "channel_handler_base.h"
 #include "control_channel_handler.h"
@@ -31,7 +35,6 @@
 #include "blob_socket_io.h"
 #include "datastore_impl.h"
 #include "message_log_channel_create.h"
-#include <rdma_comm/rdma_config.h>
 
 namespace limestone::replication {
 
@@ -353,8 +356,51 @@ std::shared_ptr<log_channel_handler> replica_server::get_log_channel_handler(
     if (id >= max_log_channel_slots) {
         return {};
     }
-    std::lock_guard<std::mutex> lock(log_channel_slot_mutexes_[id]);
-    return log_channel_handlers_[id];
+    std::lock_guard<std::mutex> lock(log_channel_slot_mutexes_.at(id));
+    return log_channel_handlers_.at(id);
+}
+
+void replica_server::set_log_channel_handler_for_test(
+    std::uint64_t id, std::shared_ptr<log_channel_handler> handler) {
+    if (id >= max_log_channel_slots) {
+        return;
+    }
+    std::lock_guard<std::mutex> lock(log_channel_slot_mutexes_.at(id));
+    log_channel_handlers_.at(id) = std::move(handler);
+}
+
+void replica_server::on_rdma_receive(rdma::communication::rdma_receive_event const& event) {
+    if (auto const* err = std::get_if<rdma::communication::rdma_receive_error_event>(&event)) {
+        LOG_LP(ERROR) << "RDMA receive error: " << err->error_message;
+        return;
+    }
+    if (auto const* data = std::get_if<rdma::communication::rdma_receive_data_event>(&event)) {
+        handle_rdma_data_event(*data);
+        return;
+    }
+}
+
+void replica_server::handle_rdma_data_event(rdma::communication::rdma_receive_data_event const& event) {
+    auto channel_id = event.header.channel_id;
+    if (channel_id >= max_log_channel_slots) {
+        LOG_LP(ERROR) << "RDMA channel id out of range: id=" << channel_id
+                      << " max=" << max_log_channel_slots
+                      << " (TODO: return protocol error instead of fatal).";
+        return;
+    }
+    auto channel_idx = static_cast<std::size_t>(channel_id);
+
+    std::shared_ptr<log_channel_handler> handler;
+    {
+        std::lock_guard<std::mutex> lock(log_channel_slot_mutexes_.at(channel_idx));
+        handler = log_channel_handlers_.at(channel_idx);
+    }
+    if (! handler) {
+        LOG_LP(ERROR) << "RDMA handler missing for channel id: " << channel_id;
+        return;
+    }
+
+    handler->handle_rdma_data_event(event);
 }
 
 bool replica_server::mark_control_channel_created() noexcept {

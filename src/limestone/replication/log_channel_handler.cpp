@@ -17,13 +17,16 @@
 #include "log_channel_handler.h"
 
 #include "replication_message.h"
-#include "message_ack.h"
 #include "message_error.h"
 #include "message_log_channel_create.h"
+#include "message_log_entries.h"
 #include "validation_result.h"
 #include "socket_io.h"
 #include "logging_helper.h"
 #include <glog/logging.h>
+#include <rdma_comm/rdma_receiver.h>
+#include <rdma_comm/rdma_frame_header.h>
+#include <rdma_comm/ack_message.h>
 
 namespace limestone::replication {
 
@@ -58,6 +61,74 @@ validation_result log_channel_handler::validate_initial(std::unique_ptr<replicat
 
 void log_channel_handler::send_initial_ack() const {
     send_ack();
+}
+
+void log_channel_handler::handle_rdma_data_event(
+    rdma::communication::rdma_receive_data_event const& event) {
+    auto const& header = event.header;
+    if (header.version != rdma::communication::rdma_frame_protocol_version) {
+        LOG_LP(ERROR) << "RDMA frame version mismatch: expected "
+                      << static_cast<int>(rdma::communication::rdma_frame_protocol_version)
+                      << " got " << static_cast<int>(header.version);
+        return;
+    }
+
+    if (header.payload_size != event.payload.size()) {
+        LOG_LP(ERROR) << "RDMA payload size mismatch: header=" << header.payload_size
+                      << " actual=" << event.payload.size();
+        return;
+    }
+
+    if (header.sequence_number != next_sequence_number_) {
+        LOG_LP(ERROR) << "RDMA sequence mismatch: expected=" << next_sequence_number_
+                      << " received=" << header.sequence_number;
+        // TODO: recover or request retransmission instead of simple drop.
+        next_sequence_number_ = static_cast<std::uint16_t>(header.sequence_number + 1);
+        return;
+    }
+    next_sequence_number_ = static_cast<std::uint16_t>(next_sequence_number_ + 1);
+
+    // TODO: avoid extra copy by feeding payload directly without socket_io.
+    std::string payload_string(event.payload.begin(), event.payload.end());
+    socket_io io(payload_string);
+    auto message = replication_message::receive(io);
+    if (! message) {
+        LOG_LP(ERROR) << "RDMA failed to deserialize replication_message.";
+        return;
+    }
+    if (message->get_message_type_id() != message_type_id::LOG_ENTRY) {
+        LOG_LP(ERROR) << "RDMA unexpected message type: "
+                      << static_cast<int>(message->get_message_type_id());
+        return;
+    }
+
+    auto* log_entries = dynamic_cast<message_log_entries*>(message.get());
+    if (! log_entries) {
+        LOG_LP(ERROR) << "RDMA LOG_ENTRY cast failed.";
+        return;
+    }
+    log_entries->set_session_end_flag(false);
+    log_entries->set_flush_flag(false);
+
+    // Apply entries but skip TCP ACK because this is the RDMA path.
+    auto resources = create_handler_resources();
+    log_entries->post_receive(*resources);
+
+    auto& ack_io = resources->get_socket_io();
+    int ack_fd = ack_io.get_socket_fd();
+    if (ack_fd < 0) {
+        LOG_LP(ERROR) << "RDMA ACK socket fd is invalid.";
+        return;
+    }
+
+    rdma::communication::ack_message ack{};
+    ack.version = rdma::communication::ack_protocol_version;
+    ack.flags = 0U;
+    ack.sequence_number = header.sequence_number;
+    auto ack_result = rdma::communication::write_ack_message_to_fd(ack, ack_fd);
+    if (! ack_result.success) {
+        LOG_LP(ERROR) << "Failed to write RDMA ACK: " << ack_result.error_message;
+    }
 }
 
 void log_channel_handler::dispatch(replication_message& message, handler_resources& resources) {

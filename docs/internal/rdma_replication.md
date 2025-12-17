@@ -117,19 +117,17 @@ datastore::create_channel() に RDMA sender 登録を追加し、ストリーム
 
 - 現状の実装では、repilca側で、ログチャネルのIDを採番している。サーバ側でも同じロジックで採番しているので、基本的に同じ値に鳴るはずだが、その保証が弱い。
    - tcp/ip版ではログチャネルのIDはWALファイルのファイル名の決定のためにつかっているので、サーバ側とずれても問題ないが、RDMA版では、ackを返すソケットのチャネルになるのｄ，厳密性が求められる。
-   - LOG_CHANNEL_CREATEメッセージに、ログチャネルIDを含めるようにして、サーバ側で採番したIDをレプリカ側で使うようにする。
+- LOG_CHANNEL_CREATEメッセージに、ログチャネルIDを含めるようにして、サーバ側で採番したIDをレプリカ側で使うようにする。
 
 - まず、master側の処理を変更、UTまで完了。
 - replica側にログチャネルIDとそのhandlerを紐付ける配列を作成
 
-- その後
-　　- ログチャネルのIDとsocket_fdの対応づけのマップを作る。
-    - 受信側コールバックを実装し、RDMA受信時にログチャネルIDを特定し、対応する
-      - 既存のTCP/IP版のログチャネルへのWAL書き込み処理を呼び出せばよいはずだが、要確認
-      - 既存のACK送信処理は四ではいけない。RDMA版では、RDMA版専用のACKメッセージをTCP/IP版と同じソケットに返す。
+- ログチャネルIDと handler を保持する構造は std::array＋スロット単位の mutex で固定長管理（MAX_LOG_CHANNEL_COUNT=10,000）。FD は handler_resources 経由で取得。
+- RDMA受信コールバックを実装済み。ヘッダ検証（version/payload_size/sequence）後、channel_id で該当ハンドラを取得し、payload を replication_message::receive でデシリアライズして既存の post_receive を呼ぶ。message_log_entries の session_end_flag/flush_flag はクリアして ACK 送信を抑止。
+- ACK 送信は TCP ソケット経由で rdma_comm の ack_message を使用。version=ack_protocol_version, flags=0, sequence_number=受信ヘッダのseq を組み立て、write_ack_message_to_fd で送信。ACK 失敗や FD 無効はエラーログ。
 
 
-## この後の方針、設計上の注意点
+## 次の実装
 
 * RDMAが有効の場合ログチャネルを作ったら、rdma_sender, rdma_receiverに登録する。＝> Sender側完了、Reciver側未実装。
 * RDMAが有効の場合、ログチャネルのソケットの書き込みの代わりに、RDMAに書き込みをする。その書き込みが、どのログチャネルの書き込みかの情報も書き込む必要がある。これは、rdma_senderの機能に含まれるかもしれないので確認する。
@@ -137,7 +135,13 @@ datastore::create_channel() に RDMA sender 登録を追加し、ストリーム
 * レプリカ側のコールバック関数を作成する。やることは、コールバックが呼ばれたら、ログチャネルに対する書き込みか判断し、当該ログチャネルへのWALを書き込む、syncするなどの操作をする。ログチャネルを特定したあとの操作は、既存のtcp/ipベースの場合と同じはず。rdma_receiverがそれを簡略化するためのヘルパー関数を提供しているかもしれないので、確認する。
 * 全部できたらテストする。既存テストをRDMA無効と、RDMA有効と切り替えて2回テストできるようにする。
 
+## TODO
 
+* ペイロードを socket_io に載せる際の余分なコピーをなくす。
+* シーケンス不一致時の復旧方針（再送要求など）を実装する。
+* RDMAパスでの適用後ACK送信は実装済みだが、必要ならフラグ処理（end_of_stream 等）も検討。
+* 送信側でflushを呼んだときの処理が未実装
+* 64KBを超えるエントリの処理がどうなるか確認する。
 
 
 ## TODO
@@ -150,4 +154,33 @@ datastore::create_channel() に RDMA sender 登録を追加し、ストリーム
 * RDMA送信経路でのコピー削減を検討（socket_io文字列バッファ→vectorコピー、および rdma_send_stream 内部のリングバッファコピーが多重に発生するため）。直接バイト列へシリアライズするヘルパーや send_bytes API 拡張でのコピー回数低減を検討する。
 * log_channel::end_session の RDMA flush/ファイル終端並列実行や TCP/ACK 待機挙動についてはフェイク/モック整備が必要でテスト未整備。後続でテスト可能な形にリファクタ後、カバレッジ追加を検討する。
 * RDMA flush のタイムアウト(現在 5000ms をハードコード)は定数化し、設定変更しやすい形にする。
+* RDMA受信側でEOFフラグ(end_of_stream)を受け取った際の扱い（flush/closeなど）の実装が未着手。TODO: log_channel_handler::handle_rdma_data_eventで適切に処理する。
 
+
+
+以下の流れで設計するのが良さそうです。
+
+イベント種別の分岐
+
+std::visit で rdma_receive_event を分解し、rdma_receive_data_event と rdma_receive_error_event を処理分け。
+channel_id の抽出とバリデーション
+
+rdma_receive_data_event の header から channel_id を取得。
+範囲外（>= max_log_channel_slots）ならエラーログ／TODO: プロトコルエラー返信方針を明記。
+ハンドラの取得と存在チェック
+
+スロットの mutex をロックして log_channel_handler を取り出す。
+見つからなければエラーログ（TODO: 将来的なエラーハンドリング方針をコメント）で終了。
+データイベントの処理
+
+ハンドラに委譲する API を用意（例: log_channel_handler::handle_rdma_frame(header, payload) または handle_rdma_event(rdma_receive_data_event const&)）。
+シリアライズ/デシリアライズや WAL 追記、ACK 送信はハンドラ側で実装。
+必要に応じて、ACK 送信は RDMA レシーバ側の API に委譲（ここでは設計だけにとどめる）。
+エラーイベントの処理
+
+可能なら header から channel_id を抽出してハンドラに通知、なければ全般エラーとしてログ。
+こちらも TODO: プロトコルエラー返信の方針をコメントで残す。
+スレッド安全とライフサイクル
+
+受信側コールバックは複数スレッドで走る前提なので、スロット単位ロックでハンドラ取得のみを保護し、実処理はハンドラ内部で必要に応じてシリアライズ。
+ハンドラが見つからない場合やエラーの場合はフェイルファストで抜ける。
