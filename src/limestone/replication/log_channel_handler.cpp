@@ -27,6 +27,7 @@
 #include <rdma_comm/rdma_receiver.h>
 #include <rdma_comm/rdma_frame_header.h>
 #include <rdma_comm/ack_message.h>
+#include <vector>
 
 namespace limestone::replication {
 
@@ -70,12 +71,14 @@ void log_channel_handler::handle_rdma_data_event(
         LOG_LP(ERROR) << "RDMA frame version mismatch: expected "
                       << static_cast<int>(rdma::communication::rdma_frame_protocol_version)
                       << " got " << static_cast<int>(header.version);
+        pending_rdma_frames_.clear();
         return;
     }
 
     if (header.payload_size != event.payload.size()) {
         LOG_LP(ERROR) << "RDMA payload size mismatch: header=" << header.payload_size
                       << " actual=" << event.payload.size();
+        pending_rdma_frames_.clear();
         return;
     }
 
@@ -84,12 +87,32 @@ void log_channel_handler::handle_rdma_data_event(
                       << " received=" << header.sequence_number;
         // TODO: recover or request retransmission instead of simple drop.
         next_sequence_number_ = static_cast<std::uint16_t>(header.sequence_number + 1);
+        pending_rdma_frames_.clear();
         return;
     }
+    pending_rdma_frames_.push_back(event);
     next_sequence_number_ = static_cast<std::uint16_t>(next_sequence_number_ + 1);
 
+    bool const is_partial =
+        (header.flags & rdma::communication::rdma_frame_flag_partial_payload) != 0;
+    if (is_partial) {
+        return;
+    }
+
+    std::size_t total_size = 0;
+    for (auto const& frame : pending_rdma_frames_) {
+        total_size += frame.payload.size();
+    }
+
+    std::vector<std::uint8_t> aggregated;
+    aggregated.reserve(total_size);
+    for (auto const& frame : pending_rdma_frames_) {
+        aggregated.insert(aggregated.end(), frame.payload.begin(), frame.payload.end());
+    }
+    pending_rdma_frames_.clear();
+
     // TODO: avoid extra copy by feeding payload directly without socket_io.
-    std::string payload_string(event.payload.begin(), event.payload.end());
+    std::string payload_string(aggregated.begin(), aggregated.end());
     socket_io io(payload_string);
     auto message = replication_message::receive(io);
     if (! message) {

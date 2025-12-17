@@ -13,6 +13,7 @@
 #include <cerrno>
 #include <memory>
 #include <string>
+#include <utility>
 #include <rdma_comm/ack_message.h>
 #include <rdma_comm/rdma_frame_header.h>
 #include "test_message.h"
@@ -91,6 +92,34 @@ rdma::communication::rdma_receive_data_event make_rdma_event_from_message(
     ev.header.payload_size = static_cast<std::uint32_t>(payload.size());
     ev.payload.assign(payload.begin(), payload.end());
     return ev;
+}
+
+std::pair<rdma::communication::rdma_receive_data_event,
+          rdma::communication::rdma_receive_data_event>
+make_split_events(replication_message& message, std::uint16_t sequence_start) {
+    socket_io out_io(std::string{});
+    replication_message::send(out_io, message);
+    std::string payload = out_io.get_out_string();
+    std::size_t mid = payload.size() / 2;
+
+    rdma::communication::rdma_receive_data_event first{};
+    first.header.version = rdma::communication::rdma_frame_protocol_version;
+    first.header.flags = rdma::communication::rdma_frame_flag_partial_payload;
+    first.header.sequence_number = sequence_start;
+    first.header.channel_id = 1U;
+    first.header.payload_size = static_cast<std::uint32_t>(mid);
+    first.payload.assign(payload.begin(), std::next(payload.begin(),
+        static_cast<std::string::difference_type>(mid)));
+
+    rdma::communication::rdma_receive_data_event second{};
+    second.header.version = rdma::communication::rdma_frame_protocol_version;
+    second.header.flags = 0U;
+    second.header.sequence_number = static_cast<std::uint16_t>(sequence_start + 1U);
+    second.header.channel_id = 1U;
+    second.header.payload_size = static_cast<std::uint32_t>(payload.size() - mid);
+    second.payload.assign(std::next(payload.begin(),
+        static_cast<std::string::difference_type>(mid)), payload.end());
+    return {std::move(first), std::move(second)};
 }
 
 }  // namespace
@@ -227,6 +256,8 @@ TEST_F(log_channel_handler_test, handle_rdma_data_event_sequence_mismatch_no_ack
     ASSERT_GE(ctx.read_fd, 0);
     ASSERT_GE(ctx.write_fd, 0);
 
+    ctx.handler->get_log_channel().begin_session();
+
     int flags = ::fcntl(ctx.read_fd, F_GETFL, 0);
     ASSERT_NE(flags, -1);
     ASSERT_EQ(::fcntl(ctx.read_fd, F_SETFL, flags | O_NONBLOCK), 0);
@@ -252,6 +283,8 @@ TEST_F(log_channel_handler_test, handle_rdma_data_event_payload_size_mismatch_no
     ASSERT_GE(ctx.read_fd, 0);
     ASSERT_GE(ctx.write_fd, 0);
 
+    ctx.handler->get_log_channel().begin_session();
+
     int flags = ::fcntl(ctx.read_fd, F_GETFL, 0);
     ASSERT_NE(flags, -1);
     ASSERT_EQ(::fcntl(ctx.read_fd, F_SETFL, flags | O_NONBLOCK), 0);
@@ -262,6 +295,65 @@ TEST_F(log_channel_handler_test, handle_rdma_data_event_payload_size_mismatch_no
     ev.header.payload_size += 1U;  // mismatch
 
     ctx.handler->handle_rdma_data_event(ev);
+
+    rdma::communication::ack_message_bytes buf{};
+    ssize_t n = ::read(ctx.read_fd, buf.data(), buf.size());
+    EXPECT_LT(n, 0);
+    EXPECT_EQ(errno, EAGAIN);
+
+    ::close(ctx.read_fd);
+    ::close(ctx.write_fd);
+}
+
+TEST_F(log_channel_handler_test, handle_rdma_data_event_partial_then_complete_ack_once) {
+    auto ctx = make_rdma_handler_with_channel(base_location);
+    ASSERT_NE(ctx.handler, nullptr);
+    ASSERT_GE(ctx.read_fd, 0);
+    ASSERT_GE(ctx.write_fd, 0);
+
+    int flags = ::fcntl(ctx.read_fd, F_GETFL, 0);
+    ASSERT_NE(flags, -1);
+    ASSERT_EQ(::fcntl(ctx.read_fd, F_SETFL, flags | O_NONBLOCK), 0);
+
+    message_log_entries entries(epoch_id_type{0});
+    entries.set_session_begin_flag(true);
+    auto events = make_split_events(entries, 0U);
+
+    ctx.handler->handle_rdma_data_event(events.first);
+    rdma::communication::ack_message_bytes buf{};
+    ssize_t n = ::read(ctx.read_fd, buf.data(), buf.size());
+    EXPECT_LT(n, 0);
+    EXPECT_EQ(errno, EAGAIN);
+
+    ctx.handler->handle_rdma_data_event(events.second);
+    n = ::read(ctx.read_fd, buf.data(), buf.size());
+    ASSERT_EQ(n, static_cast<ssize_t>(buf.size()));
+    auto ack = rdma::communication::decode_ack_message(buf);
+    EXPECT_EQ(ack.sequence_number, events.second.header.sequence_number);
+
+    ::close(ctx.read_fd);
+    ::close(ctx.write_fd);
+}
+
+TEST_F(log_channel_handler_test, handle_rdma_data_event_partial_clears_on_version_mismatch) {
+    auto ctx = make_rdma_handler_with_channel(base_location);
+    ASSERT_NE(ctx.handler, nullptr);
+    ASSERT_GE(ctx.read_fd, 0);
+    ASSERT_GE(ctx.write_fd, 0);
+
+    int flags = ::fcntl(ctx.read_fd, F_GETFL, 0);
+    ASSERT_NE(flags, -1);
+    ASSERT_EQ(::fcntl(ctx.read_fd, F_SETFL, flags | O_NONBLOCK), 0);
+
+    message_log_entries entries(epoch_id_type{0});
+    entries.set_session_begin_flag(true);
+    auto events = make_split_events(entries, 0U);
+
+    ctx.handler->handle_rdma_data_event(events.first);
+
+    auto bad = events.second;
+    bad.header.version = static_cast<std::uint8_t>(events.second.header.version + 1U);
+    ctx.handler->handle_rdma_data_event(bad);
 
     rdma::communication::ack_message_bytes buf{};
     ssize_t n = ::read(ctx.read_fd, buf.data(), buf.size());

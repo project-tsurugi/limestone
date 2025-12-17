@@ -21,6 +21,7 @@
 #include <atomic>
 #include <cstdint>
 #include <rdma_comm/rdma_receiver.h>
+#include <vector>
 
 #include "channel_handler_base.h"
 #include "log_channel_limits.h"
@@ -80,6 +81,7 @@ private:
     std::atomic<int> log_channel_id_counter{0};
     log_channel* log_channel_{nullptr}; 
     std::uint16_t next_sequence_number_{0};  ///< Expected next sequence number (wraps at 16 bits).
+    std::vector<rdma::communication::rdma_receive_data_event> pending_rdma_frames_;
 };
 
 } // namespace limestone::replication

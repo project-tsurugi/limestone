@@ -44,9 +44,13 @@ bool log_channel_impl::send_replica_message(
         auto payload = rdma_serializer_io_.get_out_string();
 
         std::vector<std::uint8_t> bytes(payload.begin(), payload.end());
-        auto result = rdma_send_stream_->send_bytes(bytes);
-        if (! result.success) {
-            LOG_LP(FATAL) << "RDMA send_bytes failed: " << result.error_message;
+        std::size_t offset = 0;
+        while (offset < bytes.size()) {
+            auto result = rdma_send_stream_->send_bytes(bytes, offset, bytes.size() - offset);
+            if (! result.success) {
+                LOG_LP(FATAL) << "RDMA send_bytes failed: " << result.error_message;
+            }
+            offset += result.bytes_written;
         }
         return true;
     }
