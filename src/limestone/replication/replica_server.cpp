@@ -30,6 +30,7 @@
 #include "limestone_exception_helper.h"
 #include "blob_socket_io.h"
 #include "datastore_impl.h"
+#include "message_log_channel_create.h"
 #include <rdma_comm/rdma_config.h>
 
 namespace limestone::replication {
@@ -245,7 +246,7 @@ void replica_server::handle_client(int client_fd) {
     try {
         auto msg = replication_message::receive(io);
         message_type_id type = msg->get_message_type_id();
-        
+
         std::shared_ptr<channel_handler_base> handler;
         {
             std::lock_guard<std::mutex> lock(state_mutex_);
@@ -256,6 +257,31 @@ void replica_server::handle_client(int client_fd) {
             }
         }
         if (handler) {
+            if (type == message_type_id::LOG_CHANNEL_CREATE) {
+                // TODO: handle protocol errors below without fatal termination (return proper error).
+                auto* create_msg = dynamic_cast<message_log_channel_create*>(msg.get());
+                if (create_msg == nullptr) {
+                    LOG_LP(FATAL) << "LOG_CHANNEL_CREATE message cast failed.";
+                }
+                auto channel_id = create_msg->get_channel_id();
+                if (channel_id >= max_log_channel_slots) {
+                    LOG_LP(FATAL) << "Log channel id exceeds maximum slots: id=" << channel_id
+                                  << " max=" << max_log_channel_slots;
+                }
+                auto log_handler = std::dynamic_pointer_cast<log_channel_handler>(handler);
+                if (! log_handler) {
+                    LOG_LP(FATAL) << "LOG_CHANNEL_CREATE handler is not log_channel_handler.";
+                }
+                {
+                    auto channel_idx = static_cast<std::size_t>(channel_id);
+                    std::lock_guard<std::mutex> lock(log_channel_slot_mutexes_.at(channel_idx));
+                    if (log_channel_handlers_.at(channel_idx)) {
+                        LOG_LP(FATAL)
+                            << "Duplicate log channel id registration: id=" << channel_id;
+                    }
+                    log_channel_handlers_.at(channel_idx) = std::move(log_handler);
+                }
+            }
             handler->run(std::move(msg));
         } else {
             LOG_LP(ERROR) << "Unexpected message type: " << static_cast<uint16_t>(type);
@@ -320,6 +346,15 @@ boost::filesystem::path replica_server::get_location() const noexcept {
     // Ensure memory visibility across threads
     atomic_thread_fence(std::memory_order_acquire);
     return location_;
+}
+
+std::shared_ptr<log_channel_handler> replica_server::get_log_channel_handler(
+    std::uint64_t id) const noexcept {
+    if (id >= max_log_channel_slots) {
+        return {};
+    }
+    std::lock_guard<std::mutex> lock(log_channel_slot_mutexes_[id]);
+    return log_channel_handlers_[id];
 }
 
 bool replica_server::mark_control_channel_created() noexcept {

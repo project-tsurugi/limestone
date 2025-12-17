@@ -120,6 +120,7 @@ datastore::create_channel() に RDMA sender 登録を追加し、ストリーム
    - LOG_CHANNEL_CREATEメッセージに、ログチャネルIDを含めるようにして、サーバ側で採番したIDをレプリカ側で使うようにする。
 
 - まず、master側の処理を変更、UTまで完了。
+- replica側にログチャネルIDとそのhandlerを紐付ける配列を作成
 
 - その後
 　　- ログチャネルのIDとsocket_fdの対応づけのマップを作る。

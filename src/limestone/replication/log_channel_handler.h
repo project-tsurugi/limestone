@@ -21,6 +21,7 @@
 #include <atomic>
 
 #include "channel_handler_base.h"
+#include "log_channel_limits.h"
 #include "log_channel_handler_resources.h"
 
 namespace limestone::replication {
@@ -28,7 +29,8 @@ namespace limestone::replication {
 using limestone::api::log_channel;
 class log_channel_handler : public channel_handler_base {
 public:
-    static constexpr int MAX_LOG_CHANNEL_COUNT = 100000;
+    static constexpr int MAX_LOG_CHANNEL_COUNT =
+        static_cast<int>(log_channel_slots_limit);
 
     explicit log_channel_handler(replica_server &server, socket_io& io) noexcept;
     ~log_channel_handler() override = default;

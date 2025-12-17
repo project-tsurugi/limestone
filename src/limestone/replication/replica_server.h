@@ -15,6 +15,7 @@
  */
 #pragma once
 
+#include <array>
 #include <functional>
 #include <memory>
 #include <unordered_map>
@@ -24,15 +25,25 @@
 #include <limestone/api/datastore.h>
 #include "limestone_exception_helper.h"
 #include <rdma_comm/rdma_receiver.h>
+#include "log_channel_limits.h"
 
 
 namespace limestone::replication {
 
 class channel_handler_base;
+class log_channel_handler;
 
 class replica_server {
 public:
     using handler_fn = std::function<void(int, std::unique_ptr<replication_message>)>;
+    static constexpr std::size_t max_log_channel_slots = log_channel_slots_limit;
+
+    ~replica_server() = default;
+    replica_server() = default;
+    replica_server(replica_server const&) = delete;
+    replica_server& operator=(replica_server const&) = delete;
+    replica_server(replica_server&&) = delete;
+    replica_server& operator=(replica_server&&) = delete;
 
     /**
      * Initialize internal datastore and metadata from the given filesystem path.
@@ -108,6 +119,12 @@ public:
      * @return optional DMA address if available.
      */
     [[nodiscard]] std::optional<rdma::communication::dma_address_type> get_rdma_dma_address() const noexcept;
+
+    /**
+     * @brief Accessor for log channel handler lookup.
+     */
+    [[nodiscard]] std::shared_ptr<class log_channel_handler> get_log_channel_handler(
+        std::uint64_t id) const noexcept;
 private:
     boost::filesystem::path location_;                      ///< filesystem path for datastore
     std::unordered_map<message_type_id, std::function<std::shared_ptr<channel_handler_base>(socket_io&)>> handler_factories_;
@@ -133,6 +150,11 @@ private:
     void handle_shutdown_event();
     void accept_new_client();
     void cleanup_completed_futures();
+
+    // Use fixed-size arrays to avoid reallocations and allow lock-per-slot access.
+    std::array<std::shared_ptr<class log_channel_handler>, max_log_channel_slots>
+        log_channel_handlers_{};
+    mutable std::array<std::mutex, max_log_channel_slots> log_channel_slot_mutexes_{};
 };
 
 } // namespace limestone::replication
