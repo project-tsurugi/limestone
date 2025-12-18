@@ -12,6 +12,8 @@
 #include <thread>
 
 #include "gtest/gtest.h"
+#include <datastore_impl.h>
+#include <log_channel_impl.h>
 #include "internal.h"
 #include "replication/replica_server.h"
 #include "replication/replication_endpoint.h"
@@ -288,6 +290,11 @@ TEST_P(scenario_test, minimal_test) {
         unsetenv("REPLICATION_RDMA_SLOTS");
     }
     gen_datastore(master_location);
+    if (GetParam().rdma_slots.has_value()) {
+        EXPECT_TRUE(ds->get_impl()->is_rdma_enabled());
+        EXPECT_NE(ds->get_impl()->get_rdma_sender(), nullptr);
+        EXPECT_TRUE(lc0_->get_impl()->has_rdma_send_stream());
+    }
 
     // Verify the snapshot
     {

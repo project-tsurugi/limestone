@@ -133,6 +133,10 @@ protected:
         datastore_ = nullptr;
     }
 
+    replication::replica_server& server_for_test() {
+        return server_;
+    }
+
 private:
     replication::replica_server server_;
     std::unique_ptr<std::thread> server_thread_;
@@ -178,6 +182,7 @@ TEST_P(datastore_replication_test, open_control_channel_success) {
 
     if (GetParam().rdma_slots.has_value()) {
         EXPECT_NE(datastore.get_rdma_sender(), nullptr);
+        EXPECT_TRUE(server_for_test().get_rdma_dma_address().has_value());
     } else {
         EXPECT_EQ(datastore.get_rdma_sender(), nullptr);
     }
