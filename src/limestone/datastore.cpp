@@ -318,7 +318,6 @@ log_channel& datastore::create_channel(const boost::filesystem::path& location) 
         auto connector = impl_->create_log_channel_connector(*this, id);
         if (connector) {
             channel->get_impl()->set_replica_connector(std::move(connector));
-            maybe_register_rdma_stream(*channel, id);
         } else {
             LOG_LP(FATAL) << "Failed to create log channel connector.";
         }

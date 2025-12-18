@@ -142,6 +142,7 @@ datastore::create_channel() に RDMA sender 登録を追加し、ストリーム
 
 * scenario_test.cpp 
 * log_channel_replication_test.cpp
+   * このテストは、sokcetに書き出したパケットを、読んでテストしているので、RDMA版だと動作しない。一旦RDMA版を無効にする。
 * datastore_replication_test.cp
 ## TODO
 
