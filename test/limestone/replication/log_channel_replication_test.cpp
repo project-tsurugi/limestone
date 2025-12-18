@@ -30,6 +30,7 @@
 #include "test_root.h"
 #include "log_channel_impl.h"
 #include "replication/socket_io.h"
+#include <optional>
 
 namespace limestone::testing {
 
@@ -39,6 +40,15 @@ using namespace limestone::api;
 constexpr const char* base = "/tmp/log_channel_replication_test";
 constexpr const char* master = "/tmp/log_channel_replication_test/master";
 constexpr const char* replica = "/tmp/log_channel_replication_test/replica";
+
+struct rdma_param {
+    std::string name;
+    std::optional<uint32_t> rdma_slots;
+};
+
+inline std::ostream& operator<<(std::ostream& os, rdma_param const& param) {
+    return os << param.name;
+}
 
 
 class test_echo_log_channel_handler : public log_channel_handler {
@@ -53,7 +63,9 @@ protected:
     }
 };
 
-class log_channel_replication_test : public ::testing::Test {
+class log_channel_replication_test
+    : public ::testing::Test
+    , public ::testing::WithParamInterface<rdma_param> {
 protected:
     std::unique_ptr<api::datastore_test> datastore_;
 
@@ -74,6 +86,13 @@ protected:
             std::cerr << "Cannot create directory" << std::endl;
         }
 
+        auto param = GetParam();
+        if (param.rdma_slots.has_value()) {
+            setenv("REPLICATION_RDMA_SLOTS", std::to_string(param.rdma_slots.value()).c_str(), 1);
+        } else {
+            unsetenv("REPLICATION_RDMA_SLOTS");
+        }
+
         uint16_t port = get_free_port();
         start_replica_server(port);
         setenv("TSURUGI_REPLICATION_ENDPOINT", ("tcp://127.0.0.1:" + std::to_string(port)).c_str(), 1);
@@ -81,6 +100,7 @@ protected:
 
     void TearDown() override {
         unsetenv("TSURUGI_REPLICATION_ENDPOINT");
+        unsetenv("REPLICATION_RDMA_SLOTS");
         stop_replica_server();
         std::string cmd = "rm -rf " + std::string(base);
         ;
@@ -189,7 +209,7 @@ public:
     std::size_t last_payload_size_{};
 };
 
-TEST_F(log_channel_replication_test, replica_connector_setter_getter) {
+TEST_P(log_channel_replication_test, replica_connector_setter_getter) {
     unsetenv("TSURUGI_REPLICATION_ENDPOINT");
     gen_datastore();
     limestone::api::log_channel& channel = datastore_->create_channel(boost::filesystem::path(master));
@@ -202,7 +222,7 @@ TEST_F(log_channel_replication_test, replica_connector_setter_getter) {
     EXPECT_NE(channel.get_impl()->get_replica_connector(), nullptr);
 }
 
-TEST_F(log_channel_replication_test, replica_connector_disable) {
+TEST_P(log_channel_replication_test, replica_connector_disable) {
     unsetenv("TSURUGI_REPLICATION_ENDPOINT");
     gen_datastore();
     limestone::api::log_channel& channel = datastore_->create_channel(boost::filesystem::path(master));
@@ -216,14 +236,14 @@ TEST_F(log_channel_replication_test, replica_connector_disable) {
 }
 
 
-TEST_F(log_channel_replication_test, log_channel_begin_session)
+TEST_P(log_channel_replication_test, log_channel_begin_session)
 {
     auto connector = begin_session_and_get_connector();
 }
 
 // TODO: As a result of waiting for ACK at end_session, the test does not pass.
 // Since it cannot be easily fixed, it is marked as DISABLED.
-TEST_F(log_channel_replication_test, DISABLED_log_channel_end_session) {
+TEST_P(log_channel_replication_test, DISABLED_log_channel_end_session) {
     auto connector = begin_session_and_get_connector();
     log_channel_->end_session();
     auto msg = connector->receive_message();
@@ -236,7 +256,7 @@ TEST_F(log_channel_replication_test, DISABLED_log_channel_end_session) {
     EXPECT_EQ(log_entry->has_flush_flag(), true);
 }
 
-TEST_F(log_channel_replication_test, log_channel_add_entry) {
+TEST_P(log_channel_replication_test, log_channel_add_entry) {
     auto connector = begin_session_and_get_connector();
     storage_id_type storage_id = 123;
     std::string_view key = "test_key";
@@ -258,7 +278,7 @@ TEST_F(log_channel_replication_test, log_channel_add_entry) {
     EXPECT_EQ(log_entry->has_flush_flag(), false);
 }
 
-TEST_F(log_channel_replication_test, log_channel_add_entry_with_large_objects) {
+TEST_P(log_channel_replication_test, log_channel_add_entry_with_large_objects) {
     auto connector = begin_session_and_get_connector();
     storage_id_type storage_id = 123;
     std::string_view key = "test_key";
@@ -294,7 +314,7 @@ TEST_F(log_channel_replication_test, log_channel_add_entry_with_large_objects) {
     EXPECT_EQ(log_entry->get_entries()[0].blob_ids[1], 789);
 }
 
-TEST_F(log_channel_replication_test, log_channel_remove_entry) {
+TEST_P(log_channel_replication_test, log_channel_remove_entry) {
     auto connector = begin_session_and_get_connector();
     storage_id_type storage_id = 123;
     std::string_view key = "test_key";
@@ -314,7 +334,7 @@ TEST_F(log_channel_replication_test, log_channel_remove_entry) {
     EXPECT_EQ(log_entry->has_flush_flag(), false);
 }
 
-TEST_F(log_channel_replication_test, rdma_send_reuses_serializer_and_flushes) {
+TEST_P(log_channel_replication_test, rdma_send_reuses_serializer_and_flushes) {
     auto connector = begin_session_and_get_connector();
     auto* impl = log_channel_->get_impl();
 
@@ -337,7 +357,7 @@ TEST_F(log_channel_replication_test, rdma_send_reuses_serializer_and_flushes) {
     EXPECT_EQ(rdma_stream_ptr->flush_count_, 1U);
 }
 
-TEST_F(log_channel_replication_test, rdma_flush_async_executes) {
+TEST_P(log_channel_replication_test, rdma_flush_async_executes) {
     api::log_channel_impl impl;
 
     auto rdma_stream = std::make_unique<fake_rdma_send_stream>();
@@ -351,7 +371,7 @@ TEST_F(log_channel_replication_test, rdma_flush_async_executes) {
     EXPECT_EQ(rdma_stream_ptr->flush_count_, 1U);
 }
 
-TEST_F(log_channel_replication_test, log_channel_add_storage) {
+TEST_P(log_channel_replication_test, log_channel_add_storage) {
     auto connector = begin_session_and_get_connector();
     storage_id_type storage_id = 123;
     write_version_type write_version(111, 1);  // Example version
@@ -369,7 +389,7 @@ TEST_F(log_channel_replication_test, log_channel_add_storage) {
     EXPECT_EQ(log_entry->has_flush_flag(), false);
 }
 
-TEST_F(log_channel_replication_test, log_channel_remove_storage) {
+TEST_P(log_channel_replication_test, log_channel_remove_storage) {
     auto connector = begin_session_and_get_connector();
     storage_id_type storage_id = 123;
     write_version_type write_version(111, 1);  // Example version
@@ -387,7 +407,7 @@ TEST_F(log_channel_replication_test, log_channel_remove_storage) {
     EXPECT_EQ(log_entry->has_flush_flag(), false);
 }
 
-TEST_F(log_channel_replication_test, log_channel_truncate_storage) {
+TEST_P(log_channel_replication_test, log_channel_truncate_storage) {
     auto connector = begin_session_and_get_connector();
     storage_id_type storage_id = 123;
     write_version_type write_version(111, 1);  // Example version
@@ -405,5 +425,13 @@ TEST_F(log_channel_replication_test, log_channel_truncate_storage) {
     EXPECT_EQ(log_entry->has_flush_flag(), false);
 }
 
+
+INSTANTIATE_TEST_SUITE_P(
+    rdma_toggle,
+    log_channel_replication_test,
+    ::testing::Values(rdma_param{"tcp", std::nullopt}, rdma_param{"rdma_1", 1U}),
+    [](const ::testing::TestParamInfo<rdma_param>& info) {
+        return info.param.name;
+    });
 
 } // namespace limestone::testing

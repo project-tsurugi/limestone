@@ -136,7 +136,13 @@ datastore::create_channel() に RDMA sender 登録を追加し、ストリーム
 * 全部できたらテストする。既存テストをRDMA無効と、RDMA有効と切り替えて2回テストできるようにする。
 
 
+## シナリオテスト的なUTを、TCP/IP版とRDMA版で両方動作するようにする。
 
+以下の3つのテストで実現
+
+* scenario_test.cpp 
+* log_channel_replication_test.cpp
+* datastore_replication_test.cp
 ## TODO
 
 * rdma_configに設定不要なフィールドや、設定可能でも原則デフォルト値を仕様すべきフィールドがある。整理が必要、別プロジェクトの問題なので、ここではTODOに記述するに留める。

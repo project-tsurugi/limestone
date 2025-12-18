@@ -71,12 +71,20 @@ void log_channel_handler::handle_rdma_data_event(
     rdma::communication::rdma_receive_data_event const& event) {
     std::lock_guard<std::mutex> lock(rdma_mutex_);
     auto const& header = event.header;
+    TRACE_START << "seq=" << header.sequence_number
+                << " size=" << header.payload_size
+                << " partial=" << ((header.flags
+                                    & rdma::communication::rdma_frame_flag_partial_payload) != 0)
+                << " pending=" << pending_rdma_frames_.size()
+                << " future=" << future_rdma_frames_.size()
+                << " next_expected=" << next_sequence_number_;
     if (header.version != rdma::communication::rdma_frame_protocol_version) {
         LOG_LP(ERROR) << "RDMA frame version mismatch: expected "
                       << static_cast<int>(rdma::communication::rdma_frame_protocol_version)
                       << " got " << static_cast<int>(header.version);
         pending_rdma_frames_.clear();
         future_rdma_frames_.clear();
+        TRACE_ABORT << "version mismatch";
         return;
     }
 
@@ -85,12 +93,14 @@ void log_channel_handler::handle_rdma_data_event(
                       << " actual=" << event.payload.size();
         pending_rdma_frames_.clear();
         future_rdma_frames_.clear();
+        TRACE_ABORT << "payload size mismatch";
         return;
     }
 
     if (header.sequence_number < next_sequence_number_) {
         LOG_LP(INFO) << "RDMA duplicate or stale frame: expected="
                      << next_sequence_number_ << " received=" << header.sequence_number;
+        TRACE_ABORT << "stale frame";
         return;
     }
 
@@ -98,6 +108,7 @@ void log_channel_handler::handle_rdma_data_event(
         LOG_LP(INFO) << "RDMA sequence gap: expected=" << next_sequence_number_
                      << " received=" << header.sequence_number;
         future_rdma_frames_[header.sequence_number] = event;
+        TRACE_ABORT << "sequence gap, stored for future";
         return;
     }
     pending_rdma_frames_.push_back(event);
@@ -157,23 +168,28 @@ void log_channel_handler::process_pending_rdma_messages_locked() {
 void log_channel_handler::process_rdma_message_locked(
     std::vector<std::uint8_t> const& payload,
     rdma::communication::rdma_frame_header const& last_header) {
+    TRACE_START << "frames_for_ack_seq=" << last_header.sequence_number
+                << " payload_size=" << payload.size();
     // TODO: avoid extra copy by feeding payload directly without socket_io.
     std::string payload_string(payload.begin(), payload.end());
     socket_io io(payload_string);
     auto message = replication_message::receive(io);
     if (! message) {
         LOG_LP(ERROR) << "RDMA failed to deserialize replication_message.";
+        TRACE_ABORT << "deserialize failed";
         return;
     }
     if (message->get_message_type_id() != message_type_id::LOG_ENTRY) {
         LOG_LP(ERROR) << "RDMA unexpected message type: "
                       << static_cast<int>(message->get_message_type_id());
+        TRACE_ABORT << "unexpected message type id=" << static_cast<int>(message->get_message_type_id());
         return;
     }
 
     auto* log_entries = dynamic_cast<message_log_entries*>(message.get());
     if (! log_entries) {
         LOG_LP(ERROR) << "RDMA LOG_ENTRY cast failed.";
+        TRACE_ABORT << "cast failed";
         return;
     }
     log_entries->set_session_end_flag(false);
@@ -187,6 +203,7 @@ void log_channel_handler::process_rdma_message_locked(
     int ack_fd = ack_io.get_socket_fd();
     if (ack_fd < 0) {
         LOG_LP(ERROR) << "RDMA ACK socket fd is invalid.";
+        TRACE_ABORT << "invalid ack fd";
         return;
     }
 
@@ -197,7 +214,9 @@ void log_channel_handler::process_rdma_message_locked(
     auto ack_result = rdma::communication::write_ack_message_to_fd(ack, ack_fd);
     if (! ack_result.success) {
         LOG_LP(ERROR) << "Failed to write RDMA ACK: " << ack_result.error_message;
+        TRACE_ABORT << "failed to write ACK";
     }
+    TRACE_END;
 }
 
 void log_channel_handler::push_pending_frame_for_test(

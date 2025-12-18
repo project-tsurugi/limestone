@@ -9,6 +9,7 @@
 #include "replication/socket_io.h"
 #include "limestone/api/datastore.h"
 #include "limestone/logging.h"
+#include "logging_helper.h"
 
 namespace limestone::api {
 
@@ -28,9 +29,11 @@ bool log_channel_impl::send_replica_message(
         uint64_t epoch_id,
         const std::function<void(replication::message_log_entries&)>& modifier) {
     std::lock_guard<std::mutex> lock(mtx_replica_connector_);
+    TRACE_START << "epoch=" << epoch_id;
 
     // If replica_connector_ is invalid, exit the function
     if (!replica_connector_) {
+        TRACE_ABORT << "replica_connector_ is null";
         return false;
     }
     // Create and modify the message
@@ -42,6 +45,7 @@ bool log_channel_impl::send_replica_message(
         rdma_serializer_io_.reset_output_buffer();
         replication::replication_message::send(rdma_serializer_io_, message);
         auto payload = rdma_serializer_io_.get_out_string();
+        TRACE << "RDMA path payload_size=" << payload.size();
 
         std::vector<std::uint8_t> bytes(payload.begin(), payload.end());
         std::size_t offset = 0;
@@ -52,15 +56,18 @@ bool log_channel_impl::send_replica_message(
             }
             offset += result.bytes_written;
         }
+        TRACE_END << "path=rdma payload_size=" << payload.size();
         return true;
     }
 
+    TRACE << "TCP path";
     // Send the message
     if (!replica_connector_->send_message(message)) {
         LOG_LP(FATAL) << "Failed to send message to replica";
         replica_connector_.reset();
         return false;
     }
+    TRACE_END << "path=tcp";
     return true;
 }
 

@@ -8,6 +8,7 @@
 #include <iostream>
 #include <iterator>
 #include <mutex>
+#include <optional>
 #include <thread>
 
 #include "gtest/gtest.h"
@@ -33,6 +34,15 @@ static constexpr const char* base_location = "/tmp/scenario_test";
 static constexpr const char* master_location = "/tmp/scenario_test/master";
 static constexpr const char* replica_location = "/tmp/scenario_test/replica";
 
+struct rdma_param {
+    std::string name;
+    std::optional<uint32_t> rdma_slots;
+};
+
+inline std::ostream& operator<<(std::ostream& os, rdma_param const& param) {
+    return os << param.name;
+}
+
 
 struct snapshot_entry {
     std::string key;
@@ -41,7 +51,7 @@ struct snapshot_entry {
 };
 
 
-class scenario_test : public ::testing::Test {
+class scenario_test : public ::testing::Test, public ::testing::WithParamInterface<rdma_param> {
 protected:
     void SetUp() override {
         pthread_setname_np(pthread_self(), "master_main");
@@ -50,6 +60,13 @@ protected:
         boost::filesystem::remove_all(base_location);
         boost::filesystem::create_directories(master_location);
         boost::filesystem::create_directories(replica_location);
+
+        auto param = GetParam();
+        if (param.rdma_slots.has_value()) {
+            setenv("REPLICATION_RDMA_SLOTS", std::to_string(param.rdma_slots.value()).c_str(), 1);
+        } else {
+            unsetenv("REPLICATION_RDMA_SLOTS");
+        }
 
         // start replica server
         uint16_t port = get_free_port();
@@ -65,6 +82,7 @@ protected:
     void TearDown() override {
         // cleanup environment variable
         unsetenv("TSURUGI_REPLICATION_ENDPOINT");
+        unsetenv("REPLICATION_RDMA_SLOTS");
         // stop replica server
         stop_replica();
 
@@ -205,7 +223,7 @@ protected:
     log_channel* lc1_{};
 };
 
-TEST_F(scenario_test, minimal_test) {
+TEST_P(scenario_test, minimal_test) {
     // Replica is already initialized in SetUp
     // Start the master
     gen_datastore(master_location);
@@ -266,6 +284,9 @@ TEST_F(scenario_test, minimal_test) {
 
     // Start the master without a replica
     unsetenv("TSURUGI_REPLICATION_ENDPOINT");
+    if (GetParam().rdma_slots.has_value()) {
+        unsetenv("REPLICATION_RDMA_SLOTS");
+    }
     gen_datastore(master_location);
 
     // Verify the snapshot
@@ -295,5 +316,13 @@ TEST_F(scenario_test, minimal_test) {
         EXPECT_EQ(snapshot_entries[1].storage_id, 1);
     }
 }
+
+INSTANTIATE_TEST_SUITE_P(
+    rdma_toggle,
+    scenario_test,
+    ::testing::Values(rdma_param{"tcp", std::nullopt}, rdma_param{"rdma_1", 1U}),
+    [](const ::testing::TestParamInfo<rdma_param>& info) {
+        return info.param.name;
+    });
 
 }  // namespace limestone::testing

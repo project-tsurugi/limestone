@@ -6,6 +6,7 @@
 #include <string>
 #include <vector>
 #include <unistd.h>
+#include <optional>
 
 #include <boost/filesystem.hpp>
 #include <gtest/gtest.h>
@@ -32,6 +33,15 @@ constexpr const char* replica = "/tmp/datastore_replication_test/replica";
 
 namespace {
 
+struct rdma_param {
+    std::string name;
+    std::optional<uint32_t> rdma_slots;
+};
+
+inline std::ostream& operator<<(std::ostream& os, rdma_param const& param) {
+    return os << param.name;
+}
+
 class fake_rdma_send_stream : public rdma::communication::rdma_send_stream {
 public:
     [[nodiscard]] send_result send_bytes(std::vector<std::uint8_t> const&, std::size_t, std::size_t) noexcept override {
@@ -47,7 +57,7 @@ public:
 
 class datastore_replication_test
     : public ::testing::Test
-    , public ::testing::WithParamInterface<std::optional<uint32_t>> {
+    , public ::testing::WithParamInterface<rdma_param> {
 protected:
     std::unique_ptr<api::datastore_test> datastore_;
 
@@ -55,9 +65,9 @@ protected:
     log_channel* lc1_{};
 
     void SetUp() override {
-        auto rdma_slot_count = GetParam();
-        if (rdma_slot_count.has_value()) {
-            setenv("REPLICATION_RDMA_SLOTS", std::to_string(rdma_slot_count.value()).c_str(), 1);
+        auto param = GetParam();
+        if (param.rdma_slots.has_value()) {
+            setenv("REPLICATION_RDMA_SLOTS", std::to_string(param.rdma_slots.value()).c_str(), 1);
         } else {
             unsetenv("REPLICATION_RDMA_SLOTS");
         }
@@ -166,7 +176,7 @@ TEST_P(datastore_replication_test, open_control_channel_success) {
     auto control_channel = datastore.get_control_channel();
     EXPECT_NE(control_channel, nullptr);
 
-    if (GetParam().has_value()) {
+    if (GetParam().rdma_slots.has_value()) {
         EXPECT_NE(datastore.get_rdma_sender(), nullptr);
     } else {
         EXPECT_EQ(datastore.get_rdma_sender(), nullptr);
@@ -316,6 +326,9 @@ TEST_F(rdma_registration_test, rdma_stream_registration_invalid_ack_fd_fatal) {
 INSTANTIATE_TEST_SUITE_P(
     rdma_toggle,
     datastore_replication_test,
-    ::testing::Values(std::optional<uint32_t>{}, std::optional<uint32_t>{128}));
+    ::testing::Values(rdma_param{"tcp", std::nullopt}, rdma_param{"rdma_128", 128U}),
+    [](const ::testing::TestParamInfo<rdma_param>& info) {
+        return info.param.name;
+    });
 
 }  // namespace limestone::testing
