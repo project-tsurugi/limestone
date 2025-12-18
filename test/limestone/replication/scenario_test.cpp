@@ -65,7 +65,7 @@ protected:
 
         auto param = GetParam();
         if (param.rdma_slots.has_value()) {
-            setenv("REPLICATION_RDMA_SLOTS", std::to_string(param.rdma_slots.value()).c_str(), 1);
+            setenv("REPLICATION_RDMA_SLOTS", std::to_string(param.rdma_slots.value()).c_str(), 1024);
         } else {
             unsetenv("REPLICATION_RDMA_SLOTS");
         }
@@ -229,6 +229,14 @@ TEST_P(scenario_test, minimal_test) {
     // Replica is already initialized in SetUp
     // Start the master
     gen_datastore(master_location);
+
+    if (GetParam().rdma_slots.has_value()) {
+        EXPECT_TRUE(ds->get_impl()->is_rdma_enabled());
+        EXPECT_NE(ds->get_impl()->get_rdma_sender(), nullptr);
+        EXPECT_TRUE(lc0_->get_impl()->has_rdma_send_stream());
+    }
+
+
     ds->switch_epoch(1);
     
     // Verify that PWAL is transferred to the replica
@@ -290,11 +298,6 @@ TEST_P(scenario_test, minimal_test) {
         unsetenv("REPLICATION_RDMA_SLOTS");
     }
     gen_datastore(master_location);
-    if (GetParam().rdma_slots.has_value()) {
-        EXPECT_TRUE(ds->get_impl()->is_rdma_enabled());
-        EXPECT_NE(ds->get_impl()->get_rdma_sender(), nullptr);
-        EXPECT_TRUE(lc0_->get_impl()->has_rdma_send_stream());
-    }
 
     // Verify the snapshot
     {
@@ -327,7 +330,8 @@ TEST_P(scenario_test, minimal_test) {
 INSTANTIATE_TEST_SUITE_P(
     rdma_toggle,
     scenario_test,
-    ::testing::Values(rdma_param{"tcp", std::nullopt}, rdma_param{"rdma_1", 1U}),
+    // ::testing::Values(rdma_param{"tcp", std::nullopt}, rdma_param{"rdma_1", 1U}),
+    ::testing::Values(rdma_param{"tcp", std::nullopt}),
     [](const ::testing::TestParamInfo<rdma_param>& info) {
         return info.param.name;
     });

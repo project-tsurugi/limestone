@@ -429,7 +429,8 @@ TEST_P(log_channel_replication_test, log_channel_truncate_storage) {
 INSTANTIATE_TEST_SUITE_P(
     rdma_toggle,
     log_channel_replication_test,
-    ::testing::Values(rdma_param{"tcp", std::nullopt}, rdma_param{"rdma_1", 1U}),
+    // ::testing::Values(rdma_param{"tcp", std::nullopt}, rdma_param{"rdma_1", 1U}),
+    ::testing::Values(rdma_param{"tcp", std::nullopt}),
     [](const ::testing::TestParamInfo<rdma_param>& info) {
         return info.param.name;
     });

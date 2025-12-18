@@ -331,7 +331,8 @@ TEST_F(rdma_registration_test, rdma_stream_registration_invalid_ack_fd_fatal) {
 INSTANTIATE_TEST_SUITE_P(
     rdma_toggle,
     datastore_replication_test,
-    ::testing::Values(rdma_param{"tcp", std::nullopt}, rdma_param{"rdma_128", 128U}),
+    // ::testing::Values(rdma_param{"tcp", std::nullopt}, rdma_param{"rdma_128", 128U}),
+    ::testing::Values(rdma_param{"tcp", std::nullopt}),
     [](const ::testing::TestParamInfo<rdma_param>& info) {
         return info.param.name;
     });

@@ -274,6 +274,16 @@ void datastore::ready() {
         if (impl_ ->is_replication_configured() && impl_->is_master()) {
             if (impl_->open_control_channel()) {
                 LOG_LP(INFO) << "Replication control channel opened successfully.";
+                
+                // Register RDMA send streams for existing log channels
+                // (RDMA sender is now initialized after open_control_channel)
+                std::lock_guard<std::mutex> lock(mtx_channel_);
+                for (std::size_t id = 0; id < log_channels_.size(); ++id) {
+                    auto* channel = log_channels_[id].get();
+                    if (channel != nullptr && channel->get_impl()->get_replica_connector() != nullptr) {
+                        maybe_register_rdma_stream(*channel, id);
+                    }
+                }
             } else {
                 LOG_LP(FATAL) << "Failed to open replication control channel.";
             }
