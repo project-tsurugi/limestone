@@ -20,6 +20,8 @@
 
 #include <atomic>
 #include <cstdint>
+#include <map>
+#include <mutex>
 #include <rdma_comm/rdma_receiver.h>
 #include <vector>
 
@@ -77,10 +79,35 @@ protected:
     // Get the handler resources.
     std::unique_ptr<handler_resources> create_handler_resources() override;
     
+    /**
+     * @brief Process pending RDMA frames while the mutex is held.
+     *
+     * This assumes the caller already holds rdma_mutex_.
+     */
+    void process_pending_rdma_messages_locked();
+    /**
+     * @brief Process a single RDMA message assembled from contiguous frames.
+     * @param payload Aggregated payload bytes.
+     * @param last_header Header of the last frame in the message (for ACK).
+     *
+     * This assumes the caller already holds rdma_mutex_.
+     */
+    void process_rdma_message_locked(
+        std::vector<std::uint8_t> const& payload,
+        rdma::communication::rdma_frame_header const& last_header);
+
+    /**
+     * @brief Test helper to enqueue a pending RDMA frame.
+     * @param event RDMA frame to enqueue.
+     */
+    void push_pending_frame_for_test(rdma::communication::rdma_receive_data_event const& event);
+
 private:
     std::atomic<int> log_channel_id_counter{0};
     log_channel* log_channel_{nullptr}; 
     std::uint16_t next_sequence_number_{0};  ///< Expected next sequence number (wraps at 16 bits).
+    std::mutex rdma_mutex_;
+    std::map<std::uint16_t, rdma::communication::rdma_receive_data_event> future_rdma_frames_;
     std::vector<rdma::communication::rdma_receive_data_event> pending_rdma_frames_;
 };
 

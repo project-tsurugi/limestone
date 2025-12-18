@@ -135,16 +135,6 @@ datastore::create_channel() に RDMA sender 登録を追加し、ストリーム
 * レプリカ側のコールバック関数を作成する。やることは、コールバックが呼ばれたら、ログチャネルに対する書き込みか判断し、当該ログチャネルへのWALを書き込む、syncするなどの操作をする。ログチャネルを特定したあとの操作は、既存のtcp/ipベースの場合と同じはず。rdma_receiverがそれを簡略化するためのヘルパー関数を提供しているかもしれないので、確認する。
 * 全部できたらテストする。既存テストをRDMA無効と、RDMA有効と切り替えて2回テストできるようにする。
 
-## TODO
-
-* 送信側でflushを呼んだときの処理が未実装 => flush()は送信済みのすべてのメッセージのACKをまつだけなので、受信側で処理不要なので対応不要。
-
-* ペイロードを socket_io に載せる際の余分なコピーをなくす。
-* シーケンス不一致時の復旧方針（再送要求など）を実装する。
-* RDMAパスでの適用後ACK送信は実装済みだが、必要ならフラグ処理（end_of_stream 等）も検討。
-* 64KBを超えるエントリの処理がどうなるか確認する。
-  * BLOBは、特殊処理が入っているので、そのままではNG
-  * 64KBを超えるエントリは送信側で複数チャンクに分割して、受信側でくみたてる必要がある。
 
 
 ## TODO
@@ -157,33 +147,6 @@ datastore::create_channel() に RDMA sender 登録を追加し、ストリーム
 * RDMA送信経路でのコピー削減を検討（socket_io文字列バッファ→vectorコピー、および rdma_send_stream 内部のリングバッファコピーが多重に発生するため）。直接バイト列へシリアライズするヘルパーや send_bytes API 拡張でのコピー回数低減を検討する。
 * log_channel::end_session の RDMA flush/ファイル終端並列実行や TCP/ACK 待機挙動についてはフェイク/モック整備が必要でテスト未整備。後続でテスト可能な形にリファクタ後、カバレッジ追加を検討する。
 * RDMA flush のタイムアウト(現在 5000ms をハードコード)は定数化し、設定変更しやすい形にする。
-* RDMA受信側でEOFフラグ(end_of_stream)を受け取った際の扱い（flush/closeなど）の実装が未着手。TODO: log_channel_handler::handle_rdma_data_eventで適切に処理する。
+* RDMA受信側でEOFフラグ(end_of_stream)を受け取った際の扱い（flush/closeなど）が未実装。RDMAにかぎらずセッションクローズ系の処理全体が未実装なので、その実装時に合わせて実装する。
 
 
-
-以下の流れで設計するのが良さそうです。
-
-イベント種別の分岐
-
-std::visit で rdma_receive_event を分解し、rdma_receive_data_event と rdma_receive_error_event を処理分け。
-channel_id の抽出とバリデーション
-
-rdma_receive_data_event の header から channel_id を取得。
-範囲外（>= max_log_channel_slots）ならエラーログ／TODO: プロトコルエラー返信方針を明記。
-ハンドラの取得と存在チェック
-
-スロットの mutex をロックして log_channel_handler を取り出す。
-見つからなければエラーログ（TODO: 将来的なエラーハンドリング方針をコメント）で終了。
-データイベントの処理
-
-ハンドラに委譲する API を用意（例: log_channel_handler::handle_rdma_frame(header, payload) または handle_rdma_event(rdma_receive_data_event const&)）。
-シリアライズ/デシリアライズや WAL 追記、ACK 送信はハンドラ側で実装。
-必要に応じて、ACK 送信は RDMA レシーバ側の API に委譲（ここでは設計だけにとどめる）。
-エラーイベントの処理
-
-可能なら header から channel_id を抽出してハンドラに通知、なければ全般エラーとしてログ。
-こちらも TODO: プロトコルエラー返信の方針をコメントで残す。
-スレッド安全とライフサイクル
-
-受信側コールバックは複数スレッドで走る前提なので、スロット単位ロックでハンドラ取得のみを保護し、実処理はハンドラ内部で必要に応じてシリアライズ。
-ハンドラが見つからない場合やエラーの場合はフェイルファストで抜ける。

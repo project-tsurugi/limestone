@@ -16,6 +16,14 @@
 
 #include "log_channel_handler.h"
 
+#include <string>
+#include <vector>
+
+#include <glog/logging.h>
+#include <rdma_comm/rdma_receiver.h>
+#include <rdma_comm/rdma_frame_header.h>
+#include <rdma_comm/ack_message.h>
+
 #include "replication_message.h"
 #include "message_error.h"
 #include "message_log_channel_create.h"
@@ -23,11 +31,6 @@
 #include "validation_result.h"
 #include "socket_io.h"
 #include "logging_helper.h"
-#include <glog/logging.h>
-#include <rdma_comm/rdma_receiver.h>
-#include <rdma_comm/rdma_frame_header.h>
-#include <rdma_comm/ack_message.h>
-#include <vector>
 
 namespace limestone::replication {
 
@@ -66,12 +69,14 @@ void log_channel_handler::send_initial_ack() const {
 
 void log_channel_handler::handle_rdma_data_event(
     rdma::communication::rdma_receive_data_event const& event) {
+    std::lock_guard<std::mutex> lock(rdma_mutex_);
     auto const& header = event.header;
     if (header.version != rdma::communication::rdma_frame_protocol_version) {
         LOG_LP(ERROR) << "RDMA frame version mismatch: expected "
                       << static_cast<int>(rdma::communication::rdma_frame_protocol_version)
                       << " got " << static_cast<int>(header.version);
         pending_rdma_frames_.clear();
+        future_rdma_frames_.clear();
         return;
     }
 
@@ -79,40 +84,81 @@ void log_channel_handler::handle_rdma_data_event(
         LOG_LP(ERROR) << "RDMA payload size mismatch: header=" << header.payload_size
                       << " actual=" << event.payload.size();
         pending_rdma_frames_.clear();
+        future_rdma_frames_.clear();
         return;
     }
 
-    if (header.sequence_number != next_sequence_number_) {
-        LOG_LP(ERROR) << "RDMA sequence mismatch: expected=" << next_sequence_number_
-                      << " received=" << header.sequence_number;
-        // TODO: recover or request retransmission instead of simple drop.
-        next_sequence_number_ = static_cast<std::uint16_t>(header.sequence_number + 1);
-        pending_rdma_frames_.clear();
+    if (header.sequence_number < next_sequence_number_) {
+        LOG_LP(INFO) << "RDMA duplicate or stale frame: expected="
+                     << next_sequence_number_ << " received=" << header.sequence_number;
+        return;
+    }
+
+    if (header.sequence_number > next_sequence_number_) {
+        LOG_LP(INFO) << "RDMA sequence gap: expected=" << next_sequence_number_
+                     << " received=" << header.sequence_number;
+        future_rdma_frames_[header.sequence_number] = event;
         return;
     }
     pending_rdma_frames_.push_back(event);
     next_sequence_number_ = static_cast<std::uint16_t>(next_sequence_number_ + 1);
 
-    bool const is_partial =
-        (header.flags & rdma::communication::rdma_frame_flag_partial_payload) != 0;
-    if (is_partial) {
-        return;
+    auto it = future_rdma_frames_.find(next_sequence_number_);
+    while (it != future_rdma_frames_.end()) {
+        pending_rdma_frames_.push_back(it->second);
+        future_rdma_frames_.erase(it);
+        next_sequence_number_ =
+            static_cast<std::uint16_t>(next_sequence_number_ + 1);
+        it = future_rdma_frames_.find(next_sequence_number_);
     }
+    process_pending_rdma_messages_locked();
+}
 
-    std::size_t total_size = 0;
-    for (auto const& frame : pending_rdma_frames_) {
-        total_size += frame.payload.size();
+void log_channel_handler::process_pending_rdma_messages_locked() {
+    while (true) {
+        if (pending_rdma_frames_.empty()) {
+            return;
+        }
+
+        std::size_t message_end_index = pending_rdma_frames_.size();
+        std::size_t total_size = 0;
+        for (std::size_t idx = 0; idx < pending_rdma_frames_.size(); ++idx) {
+            auto const& frame = pending_rdma_frames_[idx];
+            total_size += frame.payload.size();
+            bool const is_partial =
+                (frame.header.flags &
+                 rdma::communication::rdma_frame_flag_partial_payload) != 0;
+            if (! is_partial) {
+                message_end_index = idx;
+                break;
+            }
+        }
+        if (message_end_index == pending_rdma_frames_.size()) {
+            // No complete message yet (all frames are partial so far).
+            return;
+        }
+
+        std::vector<std::uint8_t> aggregated;
+        aggregated.reserve(total_size);
+        for (std::size_t idx = 0; idx <= message_end_index; ++idx) {
+            auto const& frame = pending_rdma_frames_[idx];
+            aggregated.insert(aggregated.end(), frame.payload.begin(), frame.payload.end());
+        }
+        auto last_header = pending_rdma_frames_[message_end_index].header;
+        pending_rdma_frames_.erase(
+            pending_rdma_frames_.begin(),
+            pending_rdma_frames_.begin()
+                + static_cast<std::ptrdiff_t>(message_end_index + 1));
+
+        process_rdma_message_locked(aggregated, last_header);
     }
+}
 
-    std::vector<std::uint8_t> aggregated;
-    aggregated.reserve(total_size);
-    for (auto const& frame : pending_rdma_frames_) {
-        aggregated.insert(aggregated.end(), frame.payload.begin(), frame.payload.end());
-    }
-    pending_rdma_frames_.clear();
-
+void log_channel_handler::process_rdma_message_locked(
+    std::vector<std::uint8_t> const& payload,
+    rdma::communication::rdma_frame_header const& last_header) {
     // TODO: avoid extra copy by feeding payload directly without socket_io.
-    std::string payload_string(aggregated.begin(), aggregated.end());
+    std::string payload_string(payload.begin(), payload.end());
     socket_io io(payload_string);
     auto message = replication_message::receive(io);
     if (! message) {
@@ -147,11 +193,17 @@ void log_channel_handler::handle_rdma_data_event(
     rdma::communication::ack_message ack{};
     ack.version = rdma::communication::ack_protocol_version;
     ack.flags = 0U;
-    ack.sequence_number = header.sequence_number;
+    ack.sequence_number = last_header.sequence_number;
     auto ack_result = rdma::communication::write_ack_message_to_fd(ack, ack_fd);
     if (! ack_result.success) {
         LOG_LP(ERROR) << "Failed to write RDMA ACK: " << ack_result.error_message;
     }
+}
+
+void log_channel_handler::push_pending_frame_for_test(
+    rdma::communication::rdma_receive_data_event const& event) {
+    std::lock_guard<std::mutex> lock(rdma_mutex_);
+    pending_rdma_frames_.push_back(event);
 }
 
 void log_channel_handler::dispatch(replication_message& message, handler_resources& resources) {

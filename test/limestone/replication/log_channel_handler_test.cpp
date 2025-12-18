@@ -45,6 +45,9 @@ public:
     using log_channel_handler::set_log_channel_id_counter_for_test;
     using log_channel_handler::authorize;
     using log_channel_handler::process_loop;
+    using log_channel_handler::process_pending_rdma_messages_locked;
+    using log_channel_handler::process_rdma_message_locked;
+    using log_channel_handler::push_pending_frame_for_test;
 };
 
 namespace {
@@ -357,6 +360,199 @@ TEST_F(log_channel_handler_test, handle_rdma_data_event_partial_clears_on_versio
 
     rdma::communication::ack_message_bytes buf{};
     ssize_t n = ::read(ctx.read_fd, buf.data(), buf.size());
+    EXPECT_LT(n, 0);
+    EXPECT_EQ(errno, EAGAIN);
+
+    ::close(ctx.read_fd);
+    ::close(ctx.write_fd);
+}
+
+TEST_F(log_channel_handler_test, process_pending_rdma_messages_locked_waits_for_completion) {
+    auto ctx = make_rdma_handler_with_channel(base_location);
+    ASSERT_NE(ctx.handler, nullptr);
+    ASSERT_GE(ctx.read_fd, 0);
+    ASSERT_GE(ctx.write_fd, 0);
+
+    int flags = ::fcntl(ctx.read_fd, F_GETFL, 0);
+    ASSERT_NE(flags, -1);
+    ASSERT_EQ(::fcntl(ctx.read_fd, F_SETFL, flags | O_NONBLOCK), 0);
+
+    message_log_entries entries(epoch_id_type{0});
+    auto events = make_split_events(entries, 0U);
+
+    ctx.handler->handle_rdma_data_event(events.first);
+    // Already invoked inside handle, but ensure explicit call does not process partial.
+    ctx.handler->process_pending_rdma_messages_locked();
+
+    rdma::communication::ack_message_bytes buf{};
+    ssize_t n = ::read(ctx.read_fd, buf.data(), buf.size());
+    EXPECT_LT(n, 0);
+    EXPECT_EQ(errno, EAGAIN);
+
+    ::close(ctx.read_fd);
+    ::close(ctx.write_fd);
+}
+
+TEST_F(log_channel_handler_test, process_rdma_message_locked_processes_single_message) {
+    auto ctx = make_rdma_handler_with_channel(base_location);
+    ASSERT_NE(ctx.handler, nullptr);
+    ASSERT_GE(ctx.read_fd, 0);
+    ASSERT_GE(ctx.write_fd, 0);
+
+    message_log_entries entries(epoch_id_type{0});
+    entries.set_session_begin_flag(true);
+    entries.add_normal_entry(1U, "k", "v", write_version_type{epoch_id_type{0}, 0U});
+
+    socket_io out_io(std::string{});
+    replication_message::send(out_io, entries);
+    std::string payload = out_io.get_out_string();
+    std::vector<std::uint8_t> aggregated(payload.begin(), payload.end());
+
+    rdma::communication::rdma_frame_header header{};
+    header.version = rdma::communication::rdma_frame_protocol_version;
+    header.flags = 0U;
+    header.sequence_number = 7U;
+    header.channel_id = 1U;
+    header.payload_size = static_cast<std::uint32_t>(aggregated.size());
+
+    ctx.handler->process_rdma_message_locked(aggregated, header);
+
+    rdma::communication::ack_message_bytes buf{};
+    ssize_t n = ::read(ctx.read_fd, buf.data(), buf.size());
+    ASSERT_EQ(n, static_cast<ssize_t>(buf.size()));
+    auto ack = rdma::communication::decode_ack_message(buf);
+    EXPECT_EQ(ack.sequence_number, header.sequence_number);
+
+    ::close(ctx.read_fd);
+    ::close(ctx.write_fd);
+}
+
+TEST_F(log_channel_handler_test, process_pending_rdma_messages_locked_processes_multiple_messages) {
+    auto ctx = make_rdma_handler_with_channel(base_location);
+    ASSERT_NE(ctx.handler, nullptr);
+    ASSERT_GE(ctx.read_fd, 0);
+    ASSERT_GE(ctx.write_fd, 0);
+
+    int flags = ::fcntl(ctx.read_fd, F_GETFL, 0);
+    ASSERT_NE(flags, -1);
+    ASSERT_EQ(::fcntl(ctx.read_fd, F_SETFL, flags | O_NONBLOCK), 0);
+
+    message_log_entries first(epoch_id_type{0});
+    first.set_session_begin_flag(true);
+    first.add_normal_entry(1U, "k1", "v1", write_version_type{epoch_id_type{0}, 0U});
+    message_log_entries second(epoch_id_type{1});
+    second.add_normal_entry(2U, "k2", "v2", write_version_type{epoch_id_type{1}, 0U});
+
+    auto ev1 = make_rdma_event_from_message(first, 0U);
+    auto ev2 = make_rdma_event_from_message(second, 1U);
+
+    ctx.handler->push_pending_frame_for_test(ev1);
+    ctx.handler->push_pending_frame_for_test(ev2);
+
+    ctx.handler->process_pending_rdma_messages_locked();
+
+    rdma::communication::ack_message_bytes buf{};
+    ssize_t n = ::read(ctx.read_fd, buf.data(), buf.size());
+    ASSERT_EQ(n, static_cast<ssize_t>(buf.size()));
+    auto ack1 = rdma::communication::decode_ack_message(buf);
+    EXPECT_EQ(ack1.sequence_number, ev1.header.sequence_number);
+
+    n = ::read(ctx.read_fd, buf.data(), buf.size());
+    ASSERT_EQ(n, static_cast<ssize_t>(buf.size()));
+    auto ack2 = rdma::communication::decode_ack_message(buf);
+    EXPECT_EQ(ack2.sequence_number, ev2.header.sequence_number);
+
+    n = ::read(ctx.read_fd, buf.data(), buf.size());
+    EXPECT_LT(n, 0);
+    EXPECT_EQ(errno, EAGAIN);
+
+    ::close(ctx.read_fd);
+    ::close(ctx.write_fd);
+}
+
+TEST_F(log_channel_handler_test,
+       handle_rdma_data_event_with_sequential_messages_sends_acks_in_order) {
+    auto ctx = make_rdma_handler_with_channel(base_location);
+    ASSERT_GE(ctx.read_fd, 0);
+    ASSERT_GE(ctx.write_fd, 0);
+
+    int flags = ::fcntl(ctx.read_fd, F_GETFL, 0);
+    ASSERT_NE(flags, -1);
+    ASSERT_EQ(::fcntl(ctx.read_fd, F_SETFL, flags | O_NONBLOCK), 0);
+
+    message_log_entries first(epoch_id_type{0});
+    first.set_session_begin_flag(true);
+    first.add_normal_entry(1U, "k1", "v1", write_version_type{epoch_id_type{0}, 0U});
+    message_log_entries second(epoch_id_type{1});
+    second.add_normal_entry(2U, "k2", "v2", write_version_type{epoch_id_type{1}, 0U});
+
+    auto ev1 = make_rdma_event_from_message(first, 0U);
+    auto ev2 = make_rdma_event_from_message(second, 1U);
+
+    ctx.handler->handle_rdma_data_event(ev1);
+    ctx.handler->handle_rdma_data_event(ev2);
+
+    rdma::communication::ack_message_bytes buf{};
+    ssize_t n = ::read(ctx.read_fd, buf.data(), buf.size());
+    ASSERT_EQ(n, static_cast<ssize_t>(buf.size()));
+    auto ack1 = rdma::communication::decode_ack_message(buf);
+    EXPECT_EQ(ack1.sequence_number, ev1.header.sequence_number);
+
+    n = ::read(ctx.read_fd, buf.data(), buf.size());
+    ASSERT_EQ(n, static_cast<ssize_t>(buf.size()));
+    auto ack2 = rdma::communication::decode_ack_message(buf);
+    EXPECT_EQ(ack2.sequence_number, ev2.header.sequence_number);
+
+    n = ::read(ctx.read_fd, buf.data(), buf.size());
+    EXPECT_LT(n, 0);
+    EXPECT_EQ(errno, EAGAIN);
+
+    ::close(ctx.read_fd);
+    ::close(ctx.write_fd);
+}
+
+TEST_F(log_channel_handler_test,
+       handle_rdma_data_event_out_of_order_partial_frames_processes_in_order) {
+    auto ctx = make_rdma_handler_with_channel(base_location);
+    ASSERT_NE(ctx.handler, nullptr);
+    ASSERT_GE(ctx.read_fd, 0);
+    ASSERT_GE(ctx.write_fd, 0);
+
+    int flags = ::fcntl(ctx.read_fd, F_GETFL, 0);
+    ASSERT_NE(flags, -1);
+    ASSERT_EQ(::fcntl(ctx.read_fd, F_SETFL, flags | O_NONBLOCK), 0);
+
+    message_log_entries first(epoch_id_type{0});
+    first.set_session_begin_flag(true);
+    first.add_normal_entry(1U, "k1", "v1", write_version_type{epoch_id_type{0}, 0U});
+    message_log_entries second(epoch_id_type{1});
+    second.add_normal_entry(2U, "k2", "v2", write_version_type{epoch_id_type{1}, 0U});
+
+    auto second_events = make_split_events(second, 2U);  // seq 2 (partial), 3 (final)
+    auto first_events = make_split_events(first, 0U);    // seq 0 (partial), 1 (final)
+
+    ctx.handler->handle_rdma_data_event(second_events.first);
+    ctx.handler->handle_rdma_data_event(second_events.second);
+    ctx.handler->handle_rdma_data_event(first_events.first);
+
+    rdma::communication::ack_message_bytes buf{};
+    ssize_t n = ::read(ctx.read_fd, buf.data(), buf.size());
+    EXPECT_LT(n, 0);
+    EXPECT_EQ(errno, EAGAIN);
+
+    ctx.handler->handle_rdma_data_event(first_events.second);
+
+    n = ::read(ctx.read_fd, buf.data(), buf.size());
+    ASSERT_EQ(n, static_cast<ssize_t>(buf.size()));
+    auto ack1 = rdma::communication::decode_ack_message(buf);
+    EXPECT_EQ(ack1.sequence_number, first_events.second.header.sequence_number);
+
+    n = ::read(ctx.read_fd, buf.data(), buf.size());
+    ASSERT_EQ(n, static_cast<ssize_t>(buf.size()));
+    auto ack2 = rdma::communication::decode_ack_message(buf);
+    EXPECT_EQ(ack2.sequence_number, second_events.second.header.sequence_number);
+
+    n = ::read(ctx.read_fd, buf.data(), buf.size());
     EXPECT_LT(n, 0);
     EXPECT_EQ(errno, EAGAIN);
 
