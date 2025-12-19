@@ -90,7 +90,7 @@ void log_channel_impl::flush_rdma_stream() {
     if (! rdma_send_stream_) {
         LOG_LP(FATAL) << "RDMA flush requested without RDMA send stream.";
     }
-    auto flush_result = rdma_send_stream_->flush(std::chrono::milliseconds{5000});
+    auto flush_result = rdma_send_stream_->flush(std::chrono::milliseconds{30000});
     if (! flush_result.success) {
         LOG_LP(FATAL) << "RDMA flush failed: " << flush_result.error_message;
     }

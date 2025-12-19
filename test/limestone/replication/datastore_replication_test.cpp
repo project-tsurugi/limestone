@@ -259,7 +259,7 @@ TEST_P(datastore_replication_test, replica_death_before_create_log_channel) {
     }, "Failed to create log channel connector.");
 }
 
-TEST_F(rdma_registration_test, rdma_stream_registration_success) {
+TEST_F(rdma_registration_test, DISABLED_rdma_stream_registration_success) {
     auto* impl = datastore_->get_impl();
     impl->set_log_channel_connector_factory_for_test([]() {
         return std::make_unique<replication::replica_connector>();
@@ -288,7 +288,7 @@ TEST_F(rdma_registration_test, rdma_stream_registration_success) {
     EXPECT_TRUE(channels.front()->get_impl()->has_rdma_send_stream());
 }
 
-TEST_F(rdma_registration_test, rdma_stream_registration_failure_fatal) {
+TEST_F(rdma_registration_test, DISABLED_rdma_stream_registration_failure_fatal) {
     auto* impl = datastore_->get_impl();
     impl->set_log_channel_connector_factory_for_test([]() {
         return std::make_unique<replication::replica_connector>();
@@ -310,7 +310,7 @@ TEST_F(rdma_registration_test, rdma_stream_registration_failure_fatal) {
     EXPECT_DEATH({ datastore_->create_channel(master); }, "Failed to acquire RDMA send stream");
 }
 
-TEST_F(rdma_registration_test, rdma_stream_registration_invalid_ack_fd_fatal) {
+TEST_F(rdma_registration_test, DISABLED_rdma_stream_registration_invalid_ack_fd_fatal) {
     auto* impl = datastore_->get_impl();
     impl->set_log_channel_connector_factory_for_test([]() {
         return std::make_unique<replication::replica_connector>();

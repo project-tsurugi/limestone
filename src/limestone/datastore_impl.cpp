@@ -394,6 +394,7 @@ bool datastore_impl::initialize_rdma_sender(uint32_t slot_count, uint64_t remote
     config.send_buffer.ring_capacity = capacity;
     config.remote_buffer = config.send_buffer;
     config.completion_queue_depth = 1024U;
+    config.write_log_mode = rdma::communication::rdma_write_log_mode::full;
 
     rdma_sender_ = std::make_unique<rdma::communication::rdma_sender>(config);
     auto result = rdma_sender_->initialize(remote_dma_address);

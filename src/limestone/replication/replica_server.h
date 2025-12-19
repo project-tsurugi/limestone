@@ -20,6 +20,7 @@
 #include <memory>
 #include <unordered_map>
 #include <mutex>
+#include <vector>
 #include <boost/filesystem.hpp>
 #include "replication_message.h"
 #include <limestone/api/datastore.h>
@@ -158,6 +159,10 @@ private:
     
     std::vector<std::future<void>> client_futures_;         ///< futures for client handling threads
     std::mutex futures_mutex_;                              ///< mutex for thread-safe access to client_futures_
+
+    // Pending RDMA registrations until rdma_receiver_ is initialized.
+    std::mutex pending_rdma_channels_mutex_{};
+    std::vector<std::pair<std::uint64_t, int>> pending_rdma_channels_;  ///< store raw fds; converted to unique_fd on registration
 
     enum class poll_result {
         shutdown_event,

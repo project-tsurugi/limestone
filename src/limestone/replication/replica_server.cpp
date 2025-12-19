@@ -21,10 +21,12 @@
 #include <sys/eventfd.h>
 #include <type_traits>
 #include <variant>
+#include <unistd.h>
 
 #include <glog/logging.h>
 #include <limestone/logging.h>
 #include <rdma_comm/rdma_config.h>
+#include <rdma_comm/unique_fd.h>
 
 #include "channel_handler_base.h"
 #include "control_channel_handler.h"
@@ -275,6 +277,23 @@ void replica_server::handle_client(int client_fd) {
                 if (! log_handler) {
                     LOG_LP(FATAL) << "LOG_CHANNEL_CREATE handler is not log_channel_handler.";
                 }
+
+                // Register RDMA ACK channel so receiver can validate and reply to RDMA frames.
+                if (rdma_receiver_) {
+                    auto reg_result = rdma_receiver_->register_channel(
+                        static_cast<rdma::communication::channel_id_type>(channel_id),
+                        rdma::communication::unique_fd{client_fd});
+                    if (! reg_result.success) {
+                        LOG_LP(FATAL) << "RDMA register_channel failed for id=" << channel_id
+                                      << " error=" << reg_result.error_message;
+                    }
+                } else {
+                    // RDMA receiver not ready yet; store for deferred registration.
+                    {
+                        std::lock_guard<std::mutex> lock(pending_rdma_channels_mutex_);
+                        pending_rdma_channels_.emplace_back(channel_id, client_fd);
+                    }
+                }
                 {
                     auto channel_idx = static_cast<std::size_t>(channel_id);
                     std::lock_guard<std::mutex> lock(log_channel_slot_mutexes_.at(channel_idx));
@@ -336,6 +355,12 @@ void replica_server::shutdown() {
         ::shutdown(sockfd_, SHUT_RDWR);
         ::close(sockfd_);
         sockfd_ = -1;
+    }
+
+    // Release datastore resources (including manifest lock) when running in-process.
+    if (datastore_) {
+        datastore_->shutdown();
+        datastore_.reset();
     }
 }
 
@@ -425,7 +450,8 @@ replica_server::rdma_init_result replica_server::initialize_rdma_receiver(uint32
     config.completion_queue_depth = 1024U;
 
     rdma_receiver_ = std::make_unique<rdma::communication::rdma_receiver>(config);
-    auto result = rdma_receiver_->initialize([](const rdma::communication::rdma_receive_event&) {});
+    auto result = rdma_receiver_->initialize(
+        [this](const rdma::communication::rdma_receive_event& event) { this->on_rdma_receive(event); });
     if (! result.success) {
         rdma_receiver_.reset();
         return rdma_init_result::failed;
@@ -435,6 +461,22 @@ replica_server::rdma_init_result replica_server::initialize_rdma_receiver(uint32
     if (! dma_address.has_value()) {
         rdma_receiver_.reset();
         return rdma_init_result::failed;
+    }
+
+    // Drain any pending channel registrations queued before RDMA receiver was ready.
+    {
+        std::lock_guard<std::mutex> lock(pending_rdma_channels_mutex_);
+        for (auto& entry : pending_rdma_channels_) {
+            auto fd = entry.second;
+            auto reg_result = rdma_receiver_->register_channel(
+                static_cast<rdma::communication::channel_id_type>(entry.first),
+                rdma::communication::unique_fd{fd});
+            if (! reg_result.success) {
+                LOG_LP(FATAL) << "RDMA deferred register_channel failed for id=" << entry.first
+                              << " error=" << reg_result.error_message;
+            }
+        }
+        pending_rdma_channels_.clear();
     }
 
     return rdma_init_result::success;

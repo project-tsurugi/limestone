@@ -29,8 +29,9 @@ public:
     control_channel_handler_resources(
         socket_io& io,
         replica_server& server,
-        datastore& ds)
-        : handler_resources(io)
+        datastore& ds,
+        bool ack_enabled = true)
+        : handler_resources(io, ack_enabled)
         , server_(server)
         , datastore_(ds) {}
 

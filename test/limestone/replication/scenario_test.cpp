@@ -30,7 +30,7 @@ using limestone::internal::epoch_file_name;
 using limestone::internal::last_durable_epoch;
 using limestone::api::storage_id_type;
 
-static constexpr const bool server_execute_as_thread = false;
+static constexpr const bool server_execute_as_thread = true;
 
 static constexpr const char* base_location = "/tmp/scenario_test";
 static constexpr const char* master_location = "/tmp/scenario_test/master";
@@ -330,8 +330,8 @@ TEST_P(scenario_test, minimal_test) {
 INSTANTIATE_TEST_SUITE_P(
     rdma_toggle,
     scenario_test,
-    // ::testing::Values(rdma_param{"tcp", std::nullopt}, rdma_param{"rdma_1", 1U}),
-    ::testing::Values(rdma_param{"tcp", std::nullopt}),
+    ::testing::Values(rdma_param{"tcp", std::nullopt}, rdma_param{"rdma_1", 1024U}),
+    // ::testing::Values(rdma_param{"tcp", std::nullopt}),
     [](const ::testing::TestParamInfo<rdma_param>& info) {
         return info.param.name;
     });

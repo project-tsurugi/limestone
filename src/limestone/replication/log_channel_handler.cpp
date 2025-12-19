@@ -192,30 +192,11 @@ void log_channel_handler::process_rdma_message_locked(
         TRACE_ABORT << "cast failed";
         return;
     }
-    log_entries->set_session_end_flag(false);
-    log_entries->set_flush_flag(false);
 
     // Apply entries but skip TCP ACK because this is the RDMA path.
-    auto resources = create_handler_resources();
+    auto resources = std::make_unique<log_channel_handler_resources>(get_socket_io(), *log_channel_, false);
     log_entries->post_receive(*resources);
 
-    auto& ack_io = resources->get_socket_io();
-    int ack_fd = ack_io.get_socket_fd();
-    if (ack_fd < 0) {
-        LOG_LP(ERROR) << "RDMA ACK socket fd is invalid.";
-        TRACE_ABORT << "invalid ack fd";
-        return;
-    }
-
-    rdma::communication::ack_message ack{};
-    ack.version = rdma::communication::ack_protocol_version;
-    ack.flags = 0U;
-    ack.sequence_number = last_header.sequence_number;
-    auto ack_result = rdma::communication::write_ack_message_to_fd(ack, ack_fd);
-    if (! ack_result.success) {
-        LOG_LP(ERROR) << "Failed to write RDMA ACK: " << ack_result.error_message;
-        TRACE_ABORT << "failed to write ACK";
-    }
     TRACE_END;
 }
 
@@ -254,7 +235,7 @@ log_channel& log_channel_handler::get_log_channel() {
 }
 
 std::unique_ptr<handler_resources> log_channel_handler::create_handler_resources() {
-    return std::make_unique<log_channel_handler_resources>(get_socket_io(), *log_channel_);
+    return std::make_unique<log_channel_handler_resources>(get_socket_io(), *log_channel_, true);
 }
 
 } // namespace limestone::replication

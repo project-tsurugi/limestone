@@ -80,8 +80,7 @@ validation_result control_channel_handler::validate_initial(std::unique_ptr<repl
 
 std::unique_ptr<handler_resources> control_channel_handler::create_handler_resources() {
     return std::make_unique<control_channel_handler_resources>(
-        get_socket_io(), server_, server_.get_datastore());
+        get_socket_io(), server_, server_.get_datastore(), true);
 }
 
 }  // namespace limestone::replication
-
