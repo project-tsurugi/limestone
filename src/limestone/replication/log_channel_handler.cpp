@@ -194,7 +194,7 @@ void log_channel_handler::process_rdma_message_locked(
     }
 
     // Apply entries but skip TCP ACK because this is the RDMA path.
-    auto resources = std::make_unique<log_channel_handler_resources>(get_socket_io(), *log_channel_, true);
+    auto resources = std::make_unique<log_channel_handler_resources>(get_socket_io(), *log_channel_, false);
     log_entries->post_receive(*resources);
 
     TRACE_END;
