@@ -230,12 +230,12 @@ void message_log_entries::post_receive(handler_resources& resources) {
     }
     if (has_session_end_flag() || has_flush_flag()) {
         log_channel.end_session();
-    }
-    if (lch_resources.ack_enabled()) {
-        message_ack ack;
-        socket_io& io = lch_resources.get_socket_io();
-        replication_message::send(io, ack);
-        io.flush();
+        if (lch_resources.ack_enabled()) {
+            message_ack ack;
+            socket_io& io = lch_resources.get_socket_io();
+            replication_message::send(io, ack);
+            io.flush();
+        }
     }
 }
 
