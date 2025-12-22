@@ -1,6 +1,7 @@
 #include "log_channel_impl.h"
 #include <chrono>
 #include <string>
+#include <thread>
 #include <vector>
 
 #include "replication/replica_connector.h"
@@ -49,10 +50,16 @@ bool log_channel_impl::send_replica_message(
 
         std::vector<std::uint8_t> bytes(payload.begin(), payload.end());
         std::size_t offset = 0;
+        std::size_t consecutive_failures = 0;
         while (offset < bytes.size()) {
             auto result = rdma_send_stream_->send_bytes(bytes, offset, bytes.size() - offset);
             if (! result.success) {
-                LOG_LP(FATAL) << "RDMA send_bytes failed: " << result.error_message;
+                ++consecutive_failures;
+                LOG_LP(WARNING) << "RDMA send_bytes failed (consecutive failures="
+                                << consecutive_failures << "): " << result.error_message;
+                std::this_thread::sleep_for(std::chrono::seconds{1});
+            } else {
+                consecutive_failures = 0;
             }
             offset += result.bytes_written;
         }
