@@ -69,6 +69,9 @@ protected:
         } else {
             unsetenv("REPLICATION_RDMA_SLOTS");
         }
+        setenv("GLOG_vmodule", "rdma_sender_detail=50,send_buffer_pool=50,log_channel=50", 1);
+        setenv("GLOG_logtostderr", "1", 1);
+        setenv("GLOG_logbufsecs", "0", 1);
 
         // start replica server
         uint16_t port = get_free_port();
@@ -85,6 +88,9 @@ protected:
         // cleanup environment variable
         unsetenv("TSURUGI_REPLICATION_ENDPOINT");
         unsetenv("REPLICATION_RDMA_SLOTS");
+        unsetenv("GLOG_vmodule");
+        unsetenv("GLOG_logtostderr");
+        unsetenv("GLOG_logbufsecs");
         // stop replica server
         stop_replica();
 
