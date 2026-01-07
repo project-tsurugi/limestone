@@ -288,6 +288,27 @@ std::shared_ptr<snapshot> datastore::shared_snapshot() const {
     return std::shared_ptr<snapshot>(new snapshot(location_, clear_storage));
 }
 
+log_channel& datastore::create_channel() {
+    TRACE_START;
+    check_before_ready(static_cast<const char*>(__func__));
+    
+    std::lock_guard<std::mutex> lock(mtx_channel_);
+    
+    auto id = log_channel_id_.fetch_add(1);
+    log_channels_.emplace_back(std::unique_ptr<log_channel>(new log_channel(location_, id, *this)));  // constructor of log_channel is private
+    
+    if (impl_->has_replica() && impl_->is_master()) {
+        auto connector = impl_->create_log_channel_connector(*this);
+        if (connector) {
+            log_channels_.back()->get_impl()->set_replica_connector(std::move(connector));
+        } else {
+            LOG_LP(FATAL) << "Failed to create log channel connector.";
+        }
+    }
+    TRACE_END << "id=" << id;
+    return *log_channels_.back();
+}
+
 log_channel& datastore::create_channel(const boost::filesystem::path& location) {
     TRACE_START;
     check_before_ready(static_cast<const char*>(__func__));
@@ -306,7 +327,7 @@ log_channel& datastore::create_channel(const boost::filesystem::path& location) 
         }
     }
     TRACE_END << "id=" << id;
-    return *log_channels_.at(id);
+    return *log_channels_.back();
 }
 
 epoch_id_type datastore::last_epoch() const noexcept { return static_cast<epoch_id_type>(epoch_id_informed_.load()); }
