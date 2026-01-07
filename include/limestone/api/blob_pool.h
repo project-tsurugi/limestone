@@ -91,21 +91,6 @@ public:
      */
     [[nodiscard]] virtual blob_id_type duplicate_data(blob_id_type reference) = 0;
 
-    /**
-     * @brief generates a BLOB reference tag for access control.
-     * @param blob_id the BLOB reference
-     * @param transaction_id the transaction ID
-     * @return the generated BLOB reference tag
-     * @throws limestone_blob_exception if an internal error occurs during tag generation.
-     *         Possible reasons include:
-     *         - Environment issues (e.g., cryptographic library not initialized or misconfigured)
-     *         - Resource exhaustion (e.g., out of memory)
-     *         - Other unexpected internal errors
-     * @note No validation is performed for blob_id or transaction_id values; any value is accepted.
-     */
-    [[nodiscard]] virtual blob_reference_tag_type generate_reference_tag(
-            blob_id_type blob_id,
-            std::uint64_t transaction_id) = 0;
 };
 
 } // namespace limestone::api
