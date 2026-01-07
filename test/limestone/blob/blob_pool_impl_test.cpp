@@ -73,10 +73,8 @@ protected:
             std::cerr << "Cannot create directory: " << dev_shm_test_directory_ << std::endl;
         }
 
-        std::vector<boost::filesystem::path> data_locations{};
-        data_locations.emplace_back(base_directory);
-        boost::filesystem::path metadata_location_path{metadata_location};
-        limestone::api::configuration conf(data_locations, metadata_location_path);
+        limestone::api::configuration conf{};
+        conf.set_data_location(base_directory);
 
         datastore_ = std::make_unique<limestone::api::datastore>(conf);
 

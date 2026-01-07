@@ -84,7 +84,7 @@ using namespace limestone::internal;
 datastore::datastore() noexcept: impl_(std::make_unique<datastore_impl>()) {}
 
 
-datastore::datastore(configuration const& conf) : location_(conf.data_locations_.at(0)), impl_(std::make_unique<datastore_impl>()) { // NOLINT(readability-function-cognitive-complexity)
+datastore::datastore(configuration const& conf) : location_(conf.data_location_), impl_(std::make_unique<datastore_impl>()) { // NOLINT(readability-function-cognitive-complexity)
     try {
         LOG(INFO) << "/:limestone:config:datastore setting log location = " << location_.string();
         boost::system::error_code error;
@@ -296,27 +296,6 @@ log_channel& datastore::create_channel() {
     
     auto id = log_channel_id_.fetch_add(1);
     log_channels_.emplace_back(std::unique_ptr<log_channel>(new log_channel(location_, id, *this)));  // constructor of log_channel is private
-    
-    if (impl_->has_replica() && impl_->is_master()) {
-        auto connector = impl_->create_log_channel_connector(*this);
-        if (connector) {
-            log_channels_.back()->get_impl()->set_replica_connector(std::move(connector));
-        } else {
-            LOG_LP(FATAL) << "Failed to create log channel connector.";
-        }
-    }
-    TRACE_END << "id=" << id;
-    return *log_channels_.back();
-}
-
-log_channel& datastore::create_channel(const boost::filesystem::path& location) {
-    TRACE_START;
-    check_before_ready(static_cast<const char*>(__func__));
-    
-    std::lock_guard<std::mutex> lock(mtx_channel_);
-    
-    auto id = log_channel_id_.fetch_add(1);
-    log_channels_.emplace_back(std::unique_ptr<log_channel>(new log_channel(location, id, *this)));  // constructor of log_channel is private
     
     if (impl_->has_replica() && impl_->is_master()) {
         auto connector = impl_->create_log_channel_connector(*this);

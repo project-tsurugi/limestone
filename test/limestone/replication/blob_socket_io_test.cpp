@@ -26,10 +26,8 @@ protected:
         [[maybe_unused]] int rm_result = system(("rm -rf " + std::string(base_directory)).c_str());
         [[maybe_unused]] int mkdir_result = system(("mkdir -p " + std::string(base_directory)).c_str());
 
-        std::vector<boost::filesystem::path> data_locations{};
-        data_locations.emplace_back(base_directory);
-        boost::filesystem::path metadata_location_path{base_directory};
-        limestone::api::configuration conf(data_locations, metadata_location_path);
+        limestone::api::configuration conf{};
+        conf.set_data_location(base_directory);
 
         datastore_ = std::make_unique<limestone::api::datastore_test>(conf);        
     }

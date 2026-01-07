@@ -39,10 +39,8 @@ void replica_server::initialize(const boost::filesystem::path& location) {
         LOG_LP(FATAL) << "Error: Invalid location for replica server";
         throw limestone_exception(exception_type::initialization_failure, "Invalid location for replica server");
     }
-    std::vector<boost::filesystem::path> data_locations{};
-    data_locations.emplace_back(location);
-    const boost::filesystem::path& metadata_location = location;
-    limestone::api::configuration conf(data_locations, metadata_location);
+    limestone::api::configuration conf{};
+    conf.set_data_location(location);
     datastore_ = std::make_unique<limestone::api::datastore>(conf);
     datastore_->get_impl()->set_replica_role();
 

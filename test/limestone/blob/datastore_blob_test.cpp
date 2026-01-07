@@ -15,7 +15,6 @@ using limestone::api::blob_id_type;
 using limestone::api::write_version_type;
 
 constexpr const char* data_location = "/tmp/datastore_blob_test/data_location";
-constexpr const char* metadata_location = "/tmp/datastore_blob_test/metadata_location";
 
 class datastore_blob_test : public ::testing::Test {
 protected:
@@ -33,7 +32,7 @@ protected:
         if (system("rm -rf /tmp/datastore_blob_test") != 0) {
             std::cerr << "cannot remove directory" << std::endl;
         }
-        if (system("mkdir -p /tmp/datastore_blob_test/data_location /tmp/datastore_blob_test/metadata_location") != 0) {
+        if (system("mkdir -p /tmp/datastore_blob_test/data_location") != 0) {
             std::cerr << "cannot make directory" << std::endl;
         }
 
@@ -48,16 +47,14 @@ protected:
     }
 
     void gen_datastore() {
-        std::vector<boost::filesystem::path> data_locations{};
-        data_locations.emplace_back(data_location);
-        boost::filesystem::path metadata_location_path{metadata_location};
-        limestone::api::configuration conf(data_locations, metadata_location_path);
+        limestone::api::configuration conf{};
+        conf.set_data_location(data_location);
 
         datastore_ = std::make_unique<limestone::api::datastore_test>(conf);
 
-        lc0_ = &datastore_->create_channel(data_location);
-        lc1_ = &datastore_->create_channel(data_location);
-        lc2_ = &datastore_->create_channel(data_location);
+        lc0_ = &datastore_->create_channel();
+        lc1_ = &datastore_->create_channel();
+        lc2_ = &datastore_->create_channel();
 
         datastore_->ready();
     }

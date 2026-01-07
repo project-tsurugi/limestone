@@ -9,7 +9,6 @@
 namespace limestone::testing {
 
 constexpr const char* data_location = "/tmp/callback_test/data_location";
-constexpr const char* metadata_location = "/tmp/callback_test/metadata_location";
 
 class callback_test : public ::testing::Test {
 protected:
@@ -17,14 +16,12 @@ protected:
         if (system("rm -rf /tmp/callback_test") != 0) {
             std::cerr << "cannot remove directory" << std::endl;
         }
-        if (system("mkdir -p /tmp/callback_test/data_location /tmp/callback_test/metadata_location") != 0) {
+        if (system("mkdir -p /tmp/callback_test/data_location") != 0) {
             std::cerr << "cannot make directory" << std::endl;
         }
 
-        std::vector<boost::filesystem::path> data_locations{};
-        data_locations.emplace_back(data_location);
-        boost::filesystem::path metadata_location_path{metadata_location};
-        limestone::api::configuration conf(data_locations, metadata_location_path);
+        limestone::api::configuration conf{};
+        conf.set_data_location(data_location);
 
         datastore_ = std::make_unique<limestone::api::datastore_test>(conf);
     }
@@ -49,7 +46,7 @@ void callback(limestone::api::epoch_id_type e) {
 
 
 TEST_F(callback_test, one_log_channel) {
-    limestone::api::log_channel& channel = datastore_->create_channel(boost::filesystem::path(data_location));
+    limestone::api::log_channel& channel = datastore_->create_channel();
     
     datastore_->add_persistent_callback(callback);
     datastore_->ready();
@@ -89,8 +86,8 @@ TEST_F(callback_test, one_log_channel) {
 }
 
 TEST_F(callback_test, log_channels) {
-    limestone::api::log_channel& channel1 = datastore_->create_channel(boost::filesystem::path(data_location));
-    limestone::api::log_channel& channel2 = datastore_->create_channel(boost::filesystem::path(data_location));
+    limestone::api::log_channel& channel1 = datastore_->create_channel();
+    limestone::api::log_channel& channel2 = datastore_->create_channel();
     
     datastore_->add_persistent_callback(callback);
     datastore_->ready();

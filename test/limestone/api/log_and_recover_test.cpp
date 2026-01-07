@@ -9,7 +9,6 @@
 namespace limestone::testing {
 
 constexpr const char* data_location = "/tmp/log_and_recover_test/data_location";
-constexpr const char* metadata_location = "/tmp/log_and_recover_test/metadata_location";
 
 class log_and_recover_test : public ::testing::Test {
 protected:
@@ -17,18 +16,16 @@ protected:
         if (system("rm -rf /tmp/log_and_recover_test") != 0) {
             std::cerr << "cannot remove directory" << std::endl;
         }
-        if (system("mkdir -p /tmp/log_and_recover_test/data_location /tmp/log_and_recover_test/metadata_location") != 0) {
+        if (system("mkdir -p /tmp/log_and_recover_test/data_location") != 0) {
             std::cerr << "cannot make directory" << std::endl;
         }
 
-        std::vector<boost::filesystem::path> data_locations{};
-        data_locations.emplace_back(data_location);
-        boost::filesystem::path metadata_location_path{metadata_location};
-        limestone::api::configuration conf(data_locations, metadata_location_path);
+        limestone::api::configuration conf{};
+        conf.set_data_location(data_location);
 
         datastore_ = std::make_unique<limestone::api::datastore_test>(conf);
 
-        limestone::api::log_channel& channel = datastore_->create_channel(boost::filesystem::path(data_location));
+        limestone::api::log_channel& channel = datastore_->create_channel();
 
         // prepare durable epoch
         std::atomic<std::size_t> durable_epoch{0};
@@ -74,7 +71,7 @@ protected:
         datastore_->recover();
         datastore_->ready();
         datastore_->switch_epoch(3); // trigger of flush log record which belongs to epoch 2.
-        limestone::api::log_channel& channel2 = datastore_->create_channel(boost::filesystem::path(data_location));
+        limestone::api::log_channel& channel2 = datastore_->create_channel();
         channel2.begin_session();
         channel2.add_entry(st, "k", "v2", {2, 0}); // epoch 2 log record
         channel2.end_session(); // (*1)
@@ -125,10 +122,8 @@ TEST_F(log_and_recover_test, recovery) {
 
 TEST_F(log_and_recover_test, recovery_interrupt_datastore_object_reallocation) { // NOLINT
     LOG(INFO);
-    std::vector<boost::filesystem::path> data_locations{};
-    data_locations.emplace_back(data_location);
-    boost::filesystem::path metadata_location_path{metadata_location};
-    limestone::api::configuration conf(data_locations, metadata_location_path);
+    limestone::api::configuration conf{};
+    conf.set_data_location(data_location);
 
     datastore_ = std::make_unique<limestone::api::datastore_test>(conf);
 

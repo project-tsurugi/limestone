@@ -36,7 +36,6 @@ int invoke(const std::string& command, std::string& out) {
 class dblogutil_test : public ::testing::Test {
 public:
 static constexpr const char* location = "/tmp/dblogutil_test";
-static constexpr const char* metadata_location = "/tmp/dblogutil_test/metadata";
 
     void SetUp() {
         boost::filesystem::remove_all(location);
@@ -580,10 +579,8 @@ TEST_F(dblogutil_test, execution_fails_while_active_datastore) {
     EXPECT_NE(out.find("\n" "status: OK"), out.npos);
 
     // Activate datastore
-    std::vector<boost::filesystem::path> data_locations{};
-    data_locations.emplace_back(location);
-    boost::filesystem::path metadata_location_path{metadata_location};
-    limestone::api::configuration conf(data_locations, metadata_location_path);
+    limestone::api::configuration conf{};
+    conf.set_data_location(location);
     auto ds1 = std::make_unique<limestone::api::datastore_test>(conf);
     ds1->ready();
 

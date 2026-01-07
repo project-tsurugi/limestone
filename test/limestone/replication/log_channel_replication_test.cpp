@@ -89,14 +89,12 @@ protected:
     }
 
     void gen_datastore() {
-        std::vector<boost::filesystem::path> data_locations{};
-        data_locations.emplace_back(master);
-        boost::filesystem::path metadata_location_path{master};
-        limestone::api::configuration conf(data_locations, metadata_location_path);
+        limestone::api::configuration conf{};
+        conf.set_data_location(master);
 
         datastore_ = std::make_unique<limestone::api::datastore_test>(conf);
 
-        log_channel_ = &datastore_->create_channel(master);
+        log_channel_ = &datastore_->create_channel();
     }
 
     void start_replica_server(uint16_t port) {
@@ -164,7 +162,7 @@ private:
 TEST_F(log_channel_replication_test, replica_connector_setter_getter) {
     unsetenv("TSURUGI_REPLICATION_ENDPOINT");
     gen_datastore();
-    limestone::api::log_channel& channel = datastore_->create_channel(boost::filesystem::path(master));
+    limestone::api::log_channel& channel = datastore_->create_channel();
 
     EXPECT_EQ(channel.get_impl()->get_replica_connector(), nullptr);
 
@@ -177,7 +175,7 @@ TEST_F(log_channel_replication_test, replica_connector_setter_getter) {
 TEST_F(log_channel_replication_test, replica_connector_disable) {
     unsetenv("TSURUGI_REPLICATION_ENDPOINT");
     gen_datastore();
-    limestone::api::log_channel& channel = datastore_->create_channel(boost::filesystem::path(master));
+    limestone::api::log_channel& channel = datastore_->create_channel();
 
     auto connector = std::make_unique<limestone::replication::replica_connector>();
     channel.get_impl()->set_replica_connector(std::move(connector));

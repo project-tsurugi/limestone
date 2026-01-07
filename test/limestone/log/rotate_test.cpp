@@ -43,10 +43,8 @@ public:
     }
 
     void regen_datastore() {
-        std::vector<boost::filesystem::path> data_locations{};
-        data_locations.emplace_back(location);
-        boost::filesystem::path metadata_location{location};
-        limestone::api::configuration conf(data_locations, metadata_location);
+        limestone::api::configuration conf{};
+        conf.set_data_location(location);
         datastore_= nullptr;
         datastore_ = std::make_unique<limestone::api::datastore_test>(conf);
     }
@@ -106,8 +104,8 @@ extern std::string data_manifest(int persistent_format_version = 1);
 TEST_F(rotate_test, rotate_fails_with_io_error) {
     using namespace limestone::api;
     
-    log_channel& channel = datastore_->create_channel(boost::filesystem::path(location));
-    log_channel& unused_channel = datastore_->create_channel(boost::filesystem::path(location));
+    log_channel& channel = datastore_->create_channel();
+    log_channel& unused_channel = datastore_->create_channel();
     datastore_->switch_epoch(42);
     channel.begin_session();
     channel.add_entry(42, "k1", "v1", {100, 4});
@@ -144,8 +142,8 @@ TEST_F(rotate_test, log_is_rotated) { // NOLINT
     using namespace limestone::api;
     datastore_->ready();
 
-    log_channel& channel = datastore_->create_channel(boost::filesystem::path(location));
-    log_channel& unused_channel = datastore_->create_channel(boost::filesystem::path(location));
+    log_channel& channel = datastore_->create_channel();
+    log_channel& unused_channel = datastore_->create_channel();
 
     datastore_->switch_epoch(42);
     channel.begin_session();
@@ -255,9 +253,9 @@ TEST_F(rotate_test, inactive_files_are_also_backed_up) { // NOLINT
     //    DATA LOST if step f. is wrong
 
     {
-        log_channel& channel1_0 = datastore_->create_channel(boost::filesystem::path(location));  // pwal_0000
-        log_channel& channel1_1 = datastore_->create_channel(boost::filesystem::path(location));  // pwal_0001
-        log_channel& unused_1_2 = datastore_->create_channel(boost::filesystem::path(location));  // pwal_0002 unused
+        log_channel& channel1_0 = datastore_->create_channel();  // pwal_0000
+        log_channel& channel1_1 = datastore_->create_channel();  // pwal_0001
+        log_channel& unused_1_2 = datastore_->create_channel();  // pwal_0002 unused
         datastore_->ready();
         datastore_->switch_epoch(42);
         channel1_0.begin_session();
@@ -271,9 +269,9 @@ TEST_F(rotate_test, inactive_files_are_also_backed_up) { // NOLINT
     }
     regen_datastore();
     {
-        log_channel& channel2_0 = datastore_->create_channel(boost::filesystem::path(location));  // pwal_0000
-        log_channel& unused_2_1 = datastore_->create_channel(boost::filesystem::path(location));  // pwal_0001 unused
-        log_channel& unused_2_2 = datastore_->create_channel(boost::filesystem::path(location));  // pwal_0002 unused
+        log_channel& channel2_0 = datastore_->create_channel();  // pwal_0000
+        log_channel& unused_2_1 = datastore_->create_channel();  // pwal_0001 unused
+        log_channel& unused_2_2 = datastore_->create_channel();  // pwal_0002 unused
         datastore_->ready();
         datastore_->switch_epoch(44);
         channel2_0.begin_session();
@@ -446,8 +444,8 @@ TEST_F(rotate_test, get_snapshot_works) { // NOLINT
     using namespace limestone::api;
 
     datastore_->ready();
-    log_channel& channel = datastore_->create_channel(boost::filesystem::path(location));
-    log_channel& unused_channel = datastore_->create_channel(boost::filesystem::path(location));
+    log_channel& channel = datastore_->create_channel();
+    log_channel& unused_channel = datastore_->create_channel();
     datastore_->switch_epoch(42);
     channel.begin_session();
     channel.add_entry(3, "k1", "v1", {100, 4});
@@ -571,9 +569,9 @@ TEST_F(rotate_test, restore_file_set_entries_with_blob) {
 
     // Step 1: Setup log channels, write log entries, and register a BLOB file.
     {
-        log_channel& channel1_0 = datastore_->create_channel(boost::filesystem::path(location));  // pwal_0000
-        log_channel& channel1_1 = datastore_->create_channel(boost::filesystem::path(location));  // pwal_0001
-        log_channel& unused_1_2 = datastore_->create_channel(boost::filesystem::path(location));   // pwal_0002 unused
+        log_channel& channel1_0 = datastore_->create_channel();  // pwal_0000
+        log_channel& channel1_1 = datastore_->create_channel();  // pwal_0001
+        log_channel& unused_1_2 = datastore_->create_channel();   // pwal_0002 unused
 
         datastore_->ready();
         datastore_->switch_epoch(42);
@@ -599,9 +597,9 @@ TEST_F(rotate_test, restore_file_set_entries_with_blob) {
     // Step 2: Simulate server restart with fewer channels.
     regen_datastore();
     {
-        log_channel& channel2_0 = datastore_->create_channel(boost::filesystem::path(location));  // pwal_0000
-        log_channel& unused_2_1 = datastore_->create_channel(boost::filesystem::path(location));  // pwal_0001 unused
-        log_channel& unused_2_2 = datastore_->create_channel(boost::filesystem::path(location));  // pwal_0002 unused
+        log_channel& channel2_0 = datastore_->create_channel();  // pwal_0000
+        log_channel& unused_2_1 = datastore_->create_channel();  // pwal_0001 unused
+        log_channel& unused_2_2 = datastore_->create_channel();  // pwal_0002 unused
 
         datastore_->ready();
         datastore_->switch_epoch(44);
@@ -703,9 +701,9 @@ TEST_F(rotate_test, restore_from_directory_with_blob) {
 
     // Step 1: Setup log channels, write log entries, and register a BLOB file.
     {
-        log_channel& channel1_0 = datastore_->create_channel(boost::filesystem::path(location)); // pwal_0000
-        log_channel& channel1_1 = datastore_->create_channel(boost::filesystem::path(location)); // pwal_0001
-        log_channel& unused_1_2 = datastore_->create_channel(boost::filesystem::path(location));  // pwal_0002 (unused)
+        log_channel& channel1_0 = datastore_->create_channel(); // pwal_0000
+        log_channel& channel1_1 = datastore_->create_channel(); // pwal_0001
+        log_channel& unused_1_2 = datastore_->create_channel();  // pwal_0002 (unused)
 
         datastore_->ready();
         datastore_->switch_epoch(42);
@@ -734,9 +732,9 @@ TEST_F(rotate_test, restore_from_directory_with_blob) {
     // Step 2: Simulate server restart with fewer channels.
     regen_datastore();
     {
-        log_channel& channel2_0 = datastore_->create_channel(boost::filesystem::path(location)); // pwal_0000
-        log_channel& unused_2_1 = datastore_->create_channel(boost::filesystem::path(location)); // pwal_0001 (unused)
-        log_channel& unused_2_2 = datastore_->create_channel(boost::filesystem::path(location)); // pwal_0002 (unused)
+        log_channel& channel2_0 = datastore_->create_channel(); // pwal_0000
+        log_channel& unused_2_1 = datastore_->create_channel(); // pwal_0001 (unused)
+        log_channel& unused_2_2 = datastore_->create_channel(); // pwal_0002 (unused)
 
         datastore_->ready();
         datastore_->switch_epoch(44);

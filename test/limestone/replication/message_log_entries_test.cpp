@@ -32,10 +32,8 @@ protected:
         boost::filesystem::remove_all(base_location);
         boost::filesystem::create_directories(base_location);
         
-        std::vector<boost::filesystem::path> data_locations{};
-        data_locations.emplace_back(replica);
-        boost::filesystem::path metadata_location_path{replica};
-        limestone::api::configuration conf(data_locations, metadata_location_path);
+        limestone::api::configuration conf{};
+        conf.set_data_location(replica);
 
         datastore_ = std::make_unique<limestone::api::datastore_test>(conf);        
     }
@@ -340,7 +338,7 @@ TEST_F(message_log_entries_test, receiving_blob_entry_with_socket_io_should_fail
 }
 
 TEST_F(message_log_entries_test, post_receive) {
-    auto& lc = datastore_->create_channel(replica);
+    auto& lc = datastore_->create_channel();
     datastore_->ready();
     socket_io io("");
     log_channel_handler_resources resources(io, lc);
@@ -376,10 +374,8 @@ TEST_F(message_log_entries_test, post_receive) {
 
 TEST_F(message_log_entries_test, write_all_entry_type_to_pwal_via_replication_channel) {
     // Setup datastore for master(client)
-    std::vector<boost::filesystem::path> data_locations{};
-    data_locations.emplace_back(master);
-    boost::filesystem::path metadata_location_path{master};
-    limestone::api::configuration conf(data_locations, metadata_location_path);
+    limestone::api::configuration conf{};
+    conf.set_data_location(master);
     auto ds = std::make_unique<limestone::api::datastore_test>(conf);
 
     // Stop the datastore_ created in SetUp because it conflicts with the replica server

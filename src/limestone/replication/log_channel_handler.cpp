@@ -42,11 +42,10 @@ validation_result log_channel_handler::validate_initial(std::unique_ptr<replicat
         return validation_result::error(3, "Failed to cast to message_log_channel_create");
     }
 
-    // TODO その他のバリデーション処理を入れる
+    // TODO Add other validation processes
 
-    auto& server = get_server();
     auto& ds = get_server().get_datastore();    
-    log_channel_ = &ds.create_channel(server.get_location());
+    log_channel_ = &ds.create_channel();
     
 
     // Perform additional validation as needed

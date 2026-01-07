@@ -10,7 +10,6 @@
 namespace limestone::testing {
 
 constexpr const char* data_location = "/tmp/multiple_recover_test/data_location";
-constexpr const char* metadata_location = "/tmp/multiple_recover_test/metadata_location";
 
 class multiple_recover_test : public ::testing::Test {
 protected:
@@ -27,19 +26,17 @@ TEST_F(multiple_recover_test, two_recovery) {
     if (system("rm -rf /tmp/multiple_recover_test") != 0) {
         std::cerr << "cannot remove directory" << std::endl;
     }
-    if (system("mkdir -p /tmp/multiple_recover_test/data_location /tmp/multiple_recover_test/metadata_location") != 0) {
+    if (system("mkdir -p /tmp/multiple_recover_test/data_location") != 0) {
         std::cerr << "cannot make directory" << std::endl;
     }
 
     std::unique_ptr<limestone::api::datastore_test> datastore{};
-    std::vector<boost::filesystem::path> data_locations{};
-    data_locations.emplace_back(data_location);
-    boost::filesystem::path metadata_location_path{metadata_location};
-    limestone::api::configuration conf(data_locations, metadata_location_path);
+    limestone::api::configuration conf{};
+    conf.set_data_location(data_location);
 
     datastore = std::make_unique<limestone::api::datastore_test>(conf);
 
-    limestone::api::log_channel& channel = datastore->create_channel(boost::filesystem::path(data_location));
+    limestone::api::log_channel& channel = datastore->create_channel();
 
     // prepare durable epoch
     std::atomic<std::size_t> durable_epoch{0};

@@ -255,14 +255,12 @@ public:
     }
 
     void gen_datastore() {
-        std::vector<boost::filesystem::path> data_locations{};
-        data_locations.emplace_back(location);
-        boost::filesystem::path metadata_location{location};
-        limestone::api::configuration conf(data_locations, metadata_location);
+        limestone::api::configuration conf{};
+        conf.set_data_location(location);
 
         datastore_ = std::make_unique<my_datastore>(conf);
-        lc0_ = &datastore_->create_channel(location);
-        lc1_ = &datastore_->create_channel(location);
+        lc0_ = &datastore_->create_channel();
+        lc1_ = &datastore_->create_channel();
     }
 
     void TearDown() {
@@ -439,5 +437,4 @@ TEST_F(race_detection_test, race_detection_behavior_test) {
 
 
 } // namespace limestone::testing
-
 

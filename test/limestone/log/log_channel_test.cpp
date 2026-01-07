@@ -37,10 +37,8 @@ public:
             std::cerr << "cannot make directory" << std::endl;
         }
 
-        std::vector<boost::filesystem::path> data_locations{};
-        data_locations.emplace_back(location);
-        boost::filesystem::path metadata_location{location};
-        limestone::api::configuration conf(data_locations, metadata_location);
+        limestone::api::configuration conf{};
+        conf.set_data_location(location);
 
         datastore_ = std::make_unique<limestone::api::datastore_test>(conf);
     }
@@ -57,15 +55,15 @@ protected:
 };
 
 TEST_F(log_channel_test, name) {
-    limestone::api::log_channel& channel = datastore_->create_channel(boost::filesystem::path(location));
+    limestone::api::log_channel& channel = datastore_->create_channel();
     EXPECT_EQ(channel.file_path().string(), std::string(location) + "/pwal_0000");
 }
 
 TEST_F(log_channel_test, number_and_backup) {
-    limestone::api::log_channel& channel1 = datastore_->create_channel(boost::filesystem::path(location));
-    limestone::api::log_channel& channel2 = datastore_->create_channel(boost::filesystem::path(location));
-    limestone::api::log_channel& channel3 = datastore_->create_channel(boost::filesystem::path(location));
-    limestone::api::log_channel& channel4 = datastore_->create_channel(boost::filesystem::path(location));
+    limestone::api::log_channel& channel1 = datastore_->create_channel();
+    limestone::api::log_channel& channel2 = datastore_->create_channel();
+    limestone::api::log_channel& channel3 = datastore_->create_channel();
+    limestone::api::log_channel& channel4 = datastore_->create_channel();
 
     channel1.begin_session();
     channel2.begin_session();
@@ -119,7 +117,7 @@ static std::map<std::string, std::string> read_all_from_cursor(limestone::api::c
 }
 
 TEST_F(log_channel_test, remove) {
-    limestone::api::log_channel& channel = datastore_->create_channel(boost::filesystem::path(location));
+    limestone::api::log_channel& channel = datastore_->create_channel();
 
     channel.begin_session();
     channel.add_entry(42, "k1", "v1", {100, 4});
@@ -145,7 +143,7 @@ TEST_F(log_channel_test, remove) {
 TEST_F(log_channel_test, skip_storage_add_remove) {
     // write log entry but not use at the moment...
     // (purpose of this test: check not to abort as unimplemented)
-    limestone::api::log_channel& channel = datastore_->create_channel(boost::filesystem::path(location));
+    limestone::api::log_channel& channel = datastore_->create_channel();
 
     channel.begin_session();
     channel.add_storage(42, {90, 4});
@@ -172,7 +170,7 @@ TEST_F(log_channel_test, skip_storage_add_remove) {
 }
 
 TEST_F(log_channel_test, remove_storage) {
-    limestone::api::log_channel& channel = datastore_->create_channel(boost::filesystem::path(location));
+    limestone::api::log_channel& channel = datastore_->create_channel();
 
     channel.begin_session();
     channel.add_storage(42, {90, 4});
@@ -194,7 +192,7 @@ TEST_F(log_channel_test, remove_storage) {
 }
 
 TEST_F(log_channel_test, truncate_storage) {
-    limestone::api::log_channel& channel = datastore_->create_channel(boost::filesystem::path(location));
+    limestone::api::log_channel& channel = datastore_->create_channel();
 
     channel.begin_session();
     channel.add_storage(42, {90, 4});
@@ -231,7 +229,7 @@ TEST_F(log_channel_test, write_blob_entry) {
     const std::vector<limestone::api::blob_id_type> large_objects = {314, 1592, 65358};
 
 
-    limestone::api::log_channel& channel = datastore_->create_channel(boost::filesystem::path(location));
+    limestone::api::log_channel& channel = datastore_->create_channel();
 
     channel.begin_session();
     channel.add_entry(storage_id, key, value, write_version, large_objects);
@@ -265,7 +263,7 @@ TEST_F(log_channel_test, write_blob_entry_empty_large_objects) {
     const limestone::api::write_version_type write_version = limestone::api::write_version_type(67898, 76543);
     const std::vector<limestone::api::blob_id_type> large_objects = {};  // Empty large_objects
 
-    limestone::api::log_channel& channel = datastore_->create_channel(boost::filesystem::path(location));
+    limestone::api::log_channel& channel = datastore_->create_channel();
 
     channel.begin_session();
     channel.add_entry(storage_id, key, value, write_version, large_objects);
