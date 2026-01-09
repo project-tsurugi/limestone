@@ -15,6 +15,9 @@
  */
 #pragma once
 
+#include <filesystem>
+
+
 #include <boost/filesystem.hpp>
 
 namespace limestone::api {
@@ -40,7 +43,7 @@ public:
      * @brief set a single data location
      * @param data_location the data location
      */
-    void set_data_location(boost::filesystem::path data_location) noexcept;
+    void set_data_location(std::filesystem::path data_location) noexcept;
 
 
     /**

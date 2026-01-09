@@ -19,12 +19,11 @@ namespace limestone::api {
 
 configuration::configuration() noexcept = default;
 
-void configuration::set_data_location(boost::filesystem::path data_location) noexcept {
-    data_location_ = std::move(data_location);
-}
-
 void configuration::set_recover_max_parallelism(int recover_max_parallelism) noexcept {
     recover_max_parallelism_ = recover_max_parallelism;
 }
 
+void configuration::set_data_location(std::filesystem::path data_location) noexcept {
+    data_location_ = boost::filesystem::path(data_location.native());
+}
 } // namespace limestone::api
