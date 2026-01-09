@@ -37,7 +37,7 @@ configuration::configuration(
     }
 }
 
-void configuration::set_data_location(std::filesystem::path data_location) noexcept {
+void configuration::set_data_location(const std::filesystem::path& data_location) noexcept {
     boost::filesystem::path boost_location(data_location.native());
     data_locations_.clear();
     data_locations_.emplace_back(std::move(boost_location));
