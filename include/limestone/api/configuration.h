@@ -15,6 +15,7 @@
  */
 #pragma once
 
+#include <filesystem>
 #include <vector>
 
 #include <boost/filesystem.hpp>
@@ -65,7 +66,7 @@ public:
      * @brief clear existing data locations and set a single data location
      * @param data_location the data location
      */
-    void set_data_location(boost::filesystem::path data_location) noexcept;
+    void set_data_location(std::filesystem::path data_location) noexcept;
 
 
     /**
