@@ -341,40 +341,4 @@ blob_id_type blob_pool_impl::register_data(std::string_view data) {
     return id;
 }
 
-blob_reference_tag_type blob_pool_impl::generate_reference_tag(
-    blob_id_type blob_id,
-    std::uint64_t transaction_id) {
-    
-    // Prepare input data: concatenate blob_id and transaction_id using portable approach
-    std::array<unsigned char, sizeof(blob_id_type) + sizeof(std::uint64_t)> input_bytes{};
-    std::memcpy(input_bytes.data(), &blob_id, sizeof(blob_id_type));
-    std::memcpy(input_bytes.data() + sizeof(blob_id_type), &transaction_id, sizeof(std::uint64_t));
-
-    // Get the secret key from datastore_impl
-    const auto& secret_key = datastore_.get_impl()->get_hmac_secret_key();
-
-    // Clear OpenSSL error queue to avoid noise from previous API calls
-    ERR_clear_error();
-
-    // Calculate HMAC-SHA256
-    std::array<unsigned char, EVP_MAX_MD_SIZE> md{};
-    unsigned int md_len = 0;
-
-    unsigned char* result = HMAC(EVP_sha256(), 
-                                secret_key.data(), 
-                                static_cast<int>(secret_key.size()),
-                                input_bytes.data(),
-                                input_bytes.size(),
-                                md.data(), 
-                                &md_len);
-
-    this->handle_hmac_result(result);
-
-    // Use the first 8 bytes of the HMAC result as the tag
-    blob_reference_tag_type tag = 0;
-    std::memcpy(&tag, md.data(), sizeof(blob_reference_tag_type));
-    
-    return tag;
-}
-
 } // namespace limestone::internal

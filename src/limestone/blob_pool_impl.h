@@ -33,9 +33,6 @@ public:
 
     [[nodiscard]] blob_id_type duplicate_data(blob_id_type reference) override;
 
-    [[nodiscard]] blob_reference_tag_type generate_reference_tag(
-        blob_id_type blob_id,
-        std::uint64_t transaction_id) override;
 
 protected:
     // These protected fields and methods include:
