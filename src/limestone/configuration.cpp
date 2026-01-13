@@ -43,4 +43,8 @@ void configuration::set_data_location(const std::filesystem::path& data_location
     data_locations_.emplace_back(std::move(boost_location));
 }
 
+void configuration::set_instance_id(std::string_view instance_id) noexcept {
+    instance_id_ = instance_id;
+}
+
 } // namespace limestone::api

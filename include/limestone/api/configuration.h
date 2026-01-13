@@ -16,6 +16,8 @@
 #pragma once
 
 #include <filesystem>
+#include <string>
+#include <string_view>
 #include <vector>
 
 #include <boost/filesystem.hpp>
@@ -68,6 +70,11 @@ public:
      */
     void set_data_location(const std::filesystem::path& data_location) noexcept;
 
+    /**
+     * @brief setter for instance_id
+     * @param instance_id the instance id
+     */
+    void set_instance_id(std::string_view instance_id) noexcept;
 
     /**
      * @brief setter for recover_max_parallelism
@@ -81,6 +88,8 @@ private:
     std::vector<boost::filesystem::path> data_locations_{};
 
     boost::filesystem::path metadata_location_{};
+
+    std::string instance_id_{};
 
     int recover_max_parallelism_{default_recover_max_parallelism};
 
