@@ -47,7 +47,7 @@ available options:
 * `-DRECOVERY_SORTER_KVSLIB=<library>` - select the eKVS library using at recovery process. (`LEVELDB` or `ROCKSDB` (default), case-insensitive)
 * `-DRECOVERY_SORTER_PUT_ONLY=OFF` - don't use (faster) put-only method at recovery process
 * `-DBUILD_REPLICATION_TESTS=ON` - (temporary) enable experimental replication tests (excluded by default)
-
+* `-DENABLE_ALTIMETER=ON` - turn on the `altimeter logging`
 * for debugging only
   * `-DENABLE_SANITIZER=OFF` - disable sanitizers (requires `-DCMAKE_BUILD_TYPE=Debug`)
   * `-DENABLE_UB_SANITIZER=ON` - enable undefined behavior sanitizer (requires `-DENABLE_SANITIZER=ON`)
