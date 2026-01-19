@@ -77,6 +77,12 @@ public:
     void set_instance_id(std::string_view instance_id) noexcept;
 
     /**
+     * @brief setter for db_name
+     * @param db_name the database name
+     */
+    void set_db_name(std::string_view db_name) noexcept;
+
+    /**
      * @brief setter for recover_max_parallelism
      * @param recover_max_parallelism  the number of recover_max_parallelism
      */
@@ -90,6 +96,7 @@ private:
     boost::filesystem::path metadata_location_{};
 
     std::string instance_id_{};
+    std::string db_name_{};
 
     int recover_max_parallelism_{default_recover_max_parallelism};
 
