@@ -105,5 +105,5 @@ Altimeterの仕様上、`wal_stored / wal_shipped / wal_received / wal_started` 
 - `type`: イベントごとに固定値を設定(wal_stored, wal_shipped, wal_received, wal_started)
 - `level`: `altimeter::event::level::log_data_store`
 - `wal_version`: epopch_id
-- `master_instance_id`: 今回は、wal_recievedの対応を見送る、対応時に検討する。
+- `master_instance_id`: 今回は、wal_receivedの対応を見送る、対応時に検討する。
 - `result`: 成否判定のルールをイベントごとに決定
