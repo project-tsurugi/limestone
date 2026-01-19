@@ -14,6 +14,7 @@
  * limitations under the License.
  */
 #include <thread>
+#include <unistd.h>
 #include <chrono>
 #include <iomanip>
 #include <stdexcept>
@@ -81,11 +82,16 @@ void write_epoch_to_file_internal(const std::string& file_path, epoch_id_type ep
 namespace limestone::api {
 using namespace limestone::internal;
 
-datastore::datastore() noexcept: impl_(std::make_unique<datastore_impl>()) {}
+datastore::datastore() noexcept: impl_(std::make_unique<datastore_impl>()) {
+    impl_->set_pid(::getpid());
+}
 
 
 datastore::datastore(configuration const& conf) : location_(conf.data_locations_.at(0)), impl_(std::make_unique<datastore_impl>()) { // NOLINT(readability-function-cognitive-complexity)
     try {
+        impl_->set_instance_id(conf.instance_id_);
+        impl_->set_db_name(conf.db_name_);
+        impl_->set_pid(::getpid());
         LOG(INFO) << "/:limestone:config:datastore setting log location = " << location_.string();
         boost::system::error_code error;
         const bool result_check = boost::filesystem::exists(location_, error);

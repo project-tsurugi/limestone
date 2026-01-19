@@ -6,6 +6,7 @@
 #include <xmmintrin.h>
 #include "test_root.h"
 #include "internal.h"
+#include "datastore_impl.h"
 
 namespace limestone::testing {
 
@@ -199,6 +200,30 @@ TEST_F(datastore_test, prevent_double_start_test) { // NOLINT
     auto ds3 = std::make_unique<limestone::api::datastore_test>(conf);
     ds3->ready();
     ds3->shutdown();
+}
+
+TEST_F(datastore_test, datastore_impl_identity_fields_are_set) { // NOLINT
+    if (system("rm -rf /tmp/datastore_test") != 0) {
+        std::cerr << "cannot remove directory" << std::endl;
+    }
+    if (system("mkdir -p /tmp/datastore_test/data_location /tmp/datastore_test/metadata_location") != 0) {
+        std::cerr << "cannot make directory" << std::endl;
+    }
+
+    std::vector<boost::filesystem::path> data_locations{};
+    data_locations.emplace_back(data_location);
+    boost::filesystem::path metadata_location_path{metadata_location};
+    limestone::api::configuration conf(data_locations, metadata_location_path);
+    conf.set_instance_id("instance-001");
+    conf.set_db_name("db-alpha");
+
+    datastore_ = std::make_unique<limestone::api::datastore_test>(conf);
+    auto* impl = datastore_->get_impl();
+
+    ASSERT_NE(impl, nullptr);
+    EXPECT_EQ(impl->instance_id(), "instance-001");
+    EXPECT_EQ(impl->db_name(), "db-alpha");
+    EXPECT_EQ(impl->pid(), ::getpid());
 }
 
 }  // namespace limestone::testing

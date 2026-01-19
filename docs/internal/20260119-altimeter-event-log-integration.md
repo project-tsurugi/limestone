@@ -109,12 +109,12 @@ Altimeterの仕様上、`wal_stored / wal_shipped / wal_received / wal_started` 
 ### 初期化時に保持してアクセッサで取得
 - `instance_id`
 - `pid`
+- `dbname`
 
 ### それ以外（方針/要検討）
 - `time`: altimeter の `log_item` 生成時に自動付与
 - `type`: イベントごとに固定値を設定(wal_stored, wal_shipped, wal_received, wal_started)
 - `level`: `altimeter::event::level::log_data_store`
-- `dbname`: 上位層からの伝播 or 定数化を検討
-- `wal_version`: 取得元の定義が必要
-- `master_instance_id`: レプリケーション設定から取得する設計が必要（`wal_received` のみ）
+- `wal_version`: epopch_id
+- `master_instance_id`: 今回は、wal_recievedの対応を見送る、対応時に検討する。
 - `result`: 成否判定のルールをイベントごとに決定

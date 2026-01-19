@@ -226,6 +226,30 @@ bool datastore_impl::is_async_group_commit_enabled() const noexcept {
     return async_group_commit_enabled_;
 }
 
+void datastore_impl::set_instance_id(std::string_view instance_id) {
+    instance_id_ = instance_id;
+}
+
+const std::string& datastore_impl::instance_id() const noexcept {
+    return instance_id_;
+}
+
+void datastore_impl::set_db_name(std::string_view db_name) {
+    db_name_ = db_name;
+}
+
+const std::string& datastore_impl::db_name() const noexcept {
+    return db_name_;
+}
+
+void datastore_impl::set_pid(pid_t pid) noexcept {
+    pid_ = pid;
+}
+
+pid_t datastore_impl::pid() const noexcept {
+    return pid_;
+}
+
 const std::optional<manifest::migration_info>& datastore_impl::get_migration_info() const noexcept {
     return migration_info_;
 }
