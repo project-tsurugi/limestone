@@ -20,10 +20,16 @@
 #include <iostream>
 #include <cstring>
 #include <stdexcept>
+#include <string>
 #include <openssl/hmac.h>
 #include <openssl/rand.h>
 #include <openssl/evp.h>
 #include <openssl/err.h>
+#ifdef ENABLE_ALTIMETER
+#include <altimeter/event/constants.h>
+#include <altimeter/log_item.h>
+#include <altimeter/logger.h>
+#endif
 
 #include <replication/replica_connector.h>
 #include <limestone_exception_helper.h>
@@ -139,13 +145,57 @@ bool datastore_impl::propagate_group_commit(uint64_t epoch_id) {
     }
     if (replica_exists_.load(std::memory_order_acquire)) {
         TRACE_START << "epoch_id=" << epoch_id;
-        message_group_commit message{epoch_id};
-        if (!control_channel_->send_message(message)) {
+        bool sent = false;
+        if (group_commit_sender_for_tests_) {
+            sent = group_commit_sender_for_tests_(epoch_id);
+        } else {
+            if (!control_channel_) {
+                LOG_LP(ERROR) << "Control channel is not initialized.";
+                TRACE_END << "Failed to send group commit message.";
+                sent = false;
+            } else {
+                message_group_commit message{epoch_id};
+                sent = control_channel_->send_message(message);
+            }
+        }
+        if (!sent) {
             LOG_LP(ERROR) << "Failed to send group commit message to replica.";
             TRACE_END << "Failed to send group commit message.";
+#ifdef ENABLE_ALTIMETER
+            if (::altimeter::logger::is_log_on(::altimeter::event::category,
+                                               ::altimeter::event::level::log_data_store)) {
+                ::altimeter::log_item log_item;
+                log_item.category(::altimeter::event::category);
+                log_item.type(::altimeter::event::type::wal_shipped);
+                log_item.level(::altimeter::event::level::log_data_store);
+                log_item.add(::altimeter::event::item::instance_id, instance_id_);
+                log_item.add(::altimeter::event::item::dbname, db_name_);
+                log_item.add(::altimeter::event::item::pid, static_cast<std::int64_t>(pid_));
+                std::string wal_version = std::to_string(epoch_id);
+                log_item.add(::altimeter::event::item::wal_version, wal_version);
+                log_item.add(::altimeter::event::item::result, ::altimeter::event::result::failure);
+                ::altimeter::logger::log(log_item);
+            }
+#endif
             return false;
         }
         TRACE_END;
+#ifdef ENABLE_ALTIMETER
+        if (::altimeter::logger::is_log_on(::altimeter::event::category,
+                                           ::altimeter::event::level::log_data_store)) {
+            ::altimeter::log_item log_item;
+            log_item.category(::altimeter::event::category);
+            log_item.type(::altimeter::event::type::wal_shipped);
+            log_item.level(::altimeter::event::level::log_data_store);
+            log_item.add(::altimeter::event::item::instance_id, instance_id_);
+            log_item.add(::altimeter::event::item::dbname, db_name_);
+            log_item.add(::altimeter::event::item::pid, static_cast<std::int64_t>(pid_));
+            std::string wal_version = std::to_string(epoch_id);
+            log_item.add(::altimeter::event::item::wal_version, wal_version);
+            log_item.add(::altimeter::event::item::result, ::altimeter::event::result::success);
+            ::altimeter::logger::log(log_item);
+        }
+#endif
         return true;
     }
     return false;
@@ -224,6 +274,34 @@ bool datastore_impl::is_async_session_close_enabled() const noexcept {
 
 bool datastore_impl::is_async_group_commit_enabled() const noexcept {
     return async_group_commit_enabled_;
+}
+
+void datastore_impl::set_group_commit_sender_for_tests(std::function<bool(uint64_t)> const& sender) {
+    group_commit_sender_for_tests_ = sender;
+}
+
+void datastore_impl::set_instance_id(std::string_view instance_id) {
+    instance_id_ = instance_id;
+}
+
+const std::string& datastore_impl::instance_id() const noexcept {
+    return instance_id_;
+}
+
+void datastore_impl::set_db_name(std::string_view db_name) {
+    db_name_ = db_name;
+}
+
+const std::string& datastore_impl::db_name() const noexcept {
+    return db_name_;
+}
+
+void datastore_impl::set_pid(pid_t pid) noexcept {
+    pid_ = pid;
+}
+
+pid_t datastore_impl::pid() const noexcept {
+    return pid_;
 }
 
 const std::optional<manifest::migration_info>& datastore_impl::get_migration_info() const noexcept {

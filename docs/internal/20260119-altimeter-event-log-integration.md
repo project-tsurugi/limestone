@@ -1,0 +1,109 @@
+# 2026-01-19 Altimeterイベントログ組み込み作業メモ
+
+## 作業ブランチ
+
+feat/add-log-instance-id
+
+## Altimeterの組み込み方法
+
+`CMAKE_PREFIX_PATH` で有効化）。
+- `altimeter` は `~/opt` にインストールし、`CMAKE_PREFIX_PATH=/home/umegane/opt` を使うことに決定。
+- tsurugidb サブプロジェクトの例として、`altimeter` ターゲットのリンクと `ENABLE_ALTIMETER` ガードの使い方を確認。
+- `.vscode/tasks.json` の configure タスクに `-DENABLE_ALTIMETER=ON` を追加。
+
+
+altimeterのインストール -> altimeterのプロジェクトで以下を実行
+
+```
+cd logger/
+mkdir -p build
+cd build
+cmake -G Ninja -DCMAKE_BUILD_TYPE=Debug -DCMAKE_INSTALL_PREFIX=~/opt ..
+cmake --build . --target install
+```
+
+## LimestoneがAltimeterで出力すべきログ
+
+### 出力対象
+
+https://github.com/project-tsurugi/altimeter/blob/feature/multi_nodes/docs/ja/altimeter_user_guide_basic.md#%E3%82%A4%E3%83%99%E3%83%B3%E3%83%88%E3%83%AD%E3%82%B0%E3%81%AE%E3%83%AD%E3%82%B0%E7%A8%AE%E9%A1%9E
+
+
+上記URLのドキュメントのうち以下のログを出力する
+
+- wal_stored
+- wal_shipped
+- wal_received
+- wal_started
+
+
+### 出力位置
+
+- wal_stored
+    - `datastore::persist_epoch_id` 内（成功/失敗の両方で出力）
+- wal_shipped
+    - `datastore_impl::propagate_group_commit` 内（成功/失敗の両方で出力）
+- wal_received
+    - 未実装（`message_group_commit::post_receive` に追加予定）
+- wal_started
+    - `datastore::create_snapshot_and_get_max_blob_id_with_wal_started_log` 内（成功/失敗の両方で出力）
+            ```
+
+## ログ出力項目と取得方法（wal_*）
+
+Altimeterの仕様上、`wal_stored / wal_shipped / wal_received / wal_started` の各イベントは
+共通で以下の項目が必要。
+
+- `time`: Altimeter 側で自動付与（`log_item` が生成時刻を設定）
+- `type`: `altimeter::event::type::wal_stored` など、イベント種別で固定
+- `level`: `altimeter::event::level::log_data_store`（数値 30）
+- `instance_id`: `configuration::instance_id_` 由来（datastore に引き渡す必要あり）
+- `dbname`: **現状 limestone に保持なし**。上位層からの伝播 or 定数化を検討
+- `pid`: `getpid()` で取得
+- `wal_version`: **現状取得元なし**。WAL フォーマット識別子の定義が必要
+- `result`: 成功/失敗（Altimeter 定義: success=1, failure=2）
+- `master_instance_id`: `wal_received` のみ必須。**現状取得元なし**。レプリケーション設定から取得する設計が必要
+
+### イベント別メモ
+
+- `wal_stored`
+  - 位置: `datastore::persist_epoch_id`
+  - `result`: `persist_epoch_id` の処理が例外なく完了したら成功
+
+- `wal_shipped`
+  - 位置: `datastore_impl::propagate_group_commit`
+  - `result`: `propagate_group_commit` の戻り値で判断
+
+- `wal_received`
+  - 位置: `message_group_commit::post_receive`（未実装）
+  - `result`: 受信処理が例外なく完了したら成功（予定）
+
+- `wal_started`
+  - 位置: `datastore::create_snapshot_and_get_max_blob_id_with_wal_started_log`
+  - `result`: `create_snapshot_and_get_max_blob_id` が例外なく完了したら成功
+
+
+### 出力項目
+
+
+- `wal_stored`
+- `wal_shipped`
+- `wal_started`
+    - time, type, instance_id, level, dbname, pid, wal_version, result
+- `wal_received`
+    - time, type, instance_id, level, dbname, pid, wal_version, master_instance_id, result
+
+## 出力項目の取得方法
+
+### 初期化時に保持してアクセッサで取得
+- `instance_id`
+- `pid`
+- `dbname`
+
+### それ以外（方針/要検討）
+- `time`: altimeter の `log_item` 生成時に自動付与
+- `type`: イベントごとに固定値を設定(wal_stored, wal_shipped, wal_received, wal_started)
+- `level`: `altimeter::event::level::log_data_store`
+- `wal_version`: epopch_id
+- `master_instance_id`: 今回は、wal_receivedの対応を見送る、対応時に検討する。
+- `result`: 成否判定のルールをイベントごとに決定

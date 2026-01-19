@@ -443,6 +443,17 @@ protected:  // for tests
 
 private:
     void persist_epoch_id(epoch_id_type epoch_id);
+    /**
+     * @brief Log that the write-ahead log (WAL) has been started.
+     * @param wal_version the WAL version (epoch) associated with the start event.
+     * @param success whether starting the WAL succeeded (true) or failed (false).
+     */
+    void log_wal_started(epoch_id_type wal_version, bool success) const;
+    /**
+     * @brief Create a snapshot and record WAL started log, then return the maximum blob ID.
+     * @return The maximum blob ID observed while creating the snapshot.
+     */
+    blob_id_type create_snapshot_and_get_max_blob_id_with_wal_started_log();
 
     std::function<void(epoch_id_type)> write_epoch_callback_{
         [this](epoch_id_type epoch) { this->persist_and_propagate_epoch_id(epoch); }

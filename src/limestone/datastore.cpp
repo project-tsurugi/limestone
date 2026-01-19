@@ -14,6 +14,7 @@
  * limitations under the License.
  */
 #include <thread>
+#include <unistd.h>
 #include <chrono>
 #include <iomanip>
 #include <stdexcept>
@@ -23,6 +24,11 @@
 
 #include <glog/logging.h>
 #include <limestone/logging.h>
+#ifdef ENABLE_ALTIMETER
+#include <altimeter/event/constants.h>
+#include <altimeter/log_item.h>
+#include <altimeter/logger.h>
+#endif
 #include "logging_helper.h"
 #include "limestone_exception_helper.h"
 
@@ -81,11 +87,16 @@ void write_epoch_to_file_internal(const std::string& file_path, epoch_id_type ep
 namespace limestone::api {
 using namespace limestone::internal;
 
-datastore::datastore() noexcept: impl_(std::make_unique<datastore_impl>()) {}
+datastore::datastore() noexcept: impl_(std::make_unique<datastore_impl>()) {
+    impl_->set_pid(::getpid());
+}
 
 
 datastore::datastore(configuration const& conf) : location_(conf.data_locations_.at(0)), impl_(std::make_unique<datastore_impl>()) { // NOLINT(readability-function-cognitive-complexity)
     try {
+        impl_->set_instance_id(conf.instance_id_);
+        impl_->set_db_name(conf.db_name_);
+        impl_->set_pid(::getpid());
         LOG(INFO) << "/:limestone:config:datastore setting log location = " << location_.string();
         boost::system::error_code error;
         const bool result_check = boost::filesystem::exists(location_, error);
@@ -194,24 +205,97 @@ void datastore::recover() const noexcept {
 
 void datastore::persist_epoch_id(epoch_id_type epoch_id) {
     TRACE_START << "epoch_id=" << epoch_id;
-    if (++epoch_write_counter >= max_entries_in_epoch_file) {
-        write_epoch_to_file_internal(tmp_epoch_file_path_.string(), epoch_id, file_write_mode::overwrite);
+    try {
+        if (++epoch_write_counter >= max_entries_in_epoch_file) {
+            write_epoch_to_file_internal(tmp_epoch_file_path_.string(), epoch_id, file_write_mode::overwrite);
 
-        boost::system::error_code ec;
-        if (::rename(tmp_epoch_file_path_.c_str(), epoch_file_path_.c_str()) != 0) {
-            TRACE_ABORT;
-            LOG_AND_THROW_IO_EXCEPTION("Failed to rename temp file: " + tmp_epoch_file_path_.string() + " to " + epoch_file_path_.string(), errno);
+            boost::system::error_code ec;
+            if (::rename(tmp_epoch_file_path_.c_str(), epoch_file_path_.c_str()) != 0) {
+                TRACE_ABORT;
+                LOG_AND_THROW_IO_EXCEPTION("Failed to rename temp file: " + tmp_epoch_file_path_.string() + " to " + epoch_file_path_.string(), errno);
+            }
+            boost::filesystem::remove(tmp_epoch_file_path_, ec);
+            if (ec) {
+                TRACE_ABORT;
+                LOG_AND_THROW_IO_EXCEPTION("Failed to remove temp file: " + tmp_epoch_file_path_.string(), ec);
+            }
+            epoch_write_counter = 0;
+        } else {
+            write_epoch_to_file_internal(epoch_file_path_.string(), epoch_id, file_write_mode::append);
         }
-        boost::filesystem::remove(tmp_epoch_file_path_, ec);
-        if (ec) {
-            TRACE_ABORT;
-            LOG_AND_THROW_IO_EXCEPTION("Failed to remove temp file: " + tmp_epoch_file_path_.string(), ec);
+#ifdef ENABLE_ALTIMETER
+        if (::altimeter::logger::is_log_on(::altimeter::event::category,
+                                           ::altimeter::event::level::log_data_store)) {
+            ::altimeter::log_item log_item;
+            log_item.category(::altimeter::event::category);
+            log_item.type(::altimeter::event::type::wal_stored);
+            log_item.level(::altimeter::event::level::log_data_store);
+            log_item.add(::altimeter::event::item::instance_id, impl_->instance_id());
+            log_item.add(::altimeter::event::item::dbname, impl_->db_name());
+            log_item.add(::altimeter::event::item::pid, static_cast<std::int64_t>(impl_->pid()));
+            std::string wal_version = std::to_string(epoch_id);
+            log_item.add(::altimeter::event::item::wal_version, wal_version);
+            log_item.add(::altimeter::event::item::result, ::altimeter::event::result::success);
+            ::altimeter::logger::log(log_item);
         }
-        epoch_write_counter = 0;
-    } else {
-        write_epoch_to_file_internal(epoch_file_path_.string(), epoch_id, file_write_mode::append);
+#endif
+    } catch (...) {
+#ifdef ENABLE_ALTIMETER
+        if (::altimeter::logger::is_log_on(::altimeter::event::category,
+                                           ::altimeter::event::level::log_data_store)) {
+            ::altimeter::log_item log_item;
+            log_item.category(::altimeter::event::category);
+            log_item.type(::altimeter::event::type::wal_stored);
+            log_item.level(::altimeter::event::level::log_data_store);
+            log_item.add(::altimeter::event::item::instance_id, impl_->instance_id());
+            log_item.add(::altimeter::event::item::dbname, impl_->db_name());
+            log_item.add(::altimeter::event::item::pid, static_cast<std::int64_t>(impl_->pid()));
+            std::string wal_version = std::to_string(epoch_id);
+            log_item.add(::altimeter::event::item::wal_version, wal_version);
+            log_item.add(::altimeter::event::item::result, ::altimeter::event::result::failure);
+            ::altimeter::logger::log(log_item);
+        }
+#endif
+        throw;
     }
     TRACE_END;
+}
+
+void datastore::log_wal_started(epoch_id_type wal_version, bool success) const {
+#ifdef ENABLE_ALTIMETER
+    if (!::altimeter::logger::is_log_on(::altimeter::event::category,
+                                        ::altimeter::event::level::log_data_store)) {
+        return;
+    }
+    ::altimeter::log_item log_item;
+    log_item.category(::altimeter::event::category);
+    log_item.type(::altimeter::event::type::wal_started);
+    log_item.level(::altimeter::event::level::log_data_store);
+    log_item.add(::altimeter::event::item::instance_id, impl_->instance_id());
+    log_item.add(::altimeter::event::item::dbname, impl_->db_name());
+    log_item.add(::altimeter::event::item::pid, static_cast<std::int64_t>(impl_->pid()));
+    std::string wal_version_str = std::to_string(wal_version);
+    log_item.add(::altimeter::event::item::wal_version, wal_version_str);
+    log_item.add(::altimeter::event::item::result,
+                 success ? ::altimeter::event::result::success : ::altimeter::event::result::failure);
+    ::altimeter::logger::log(log_item);
+#else
+    (void)wal_version;
+    (void)success;
+#endif
+}
+
+blob_id_type datastore::create_snapshot_and_get_max_blob_id_with_wal_started_log() {
+    try {
+        auto max_blob_id = create_snapshot_and_get_max_blob_id();
+        log_wal_started(static_cast<epoch_id_type>(epoch_id_informed_.load()), true);
+        return max_blob_id;
+    } catch (...) {
+        // NOTE: This path may not appear in coverage because death tests run in a separate process,
+        // and their coverage data is not merged into the parent process report.
+        log_wal_started(static_cast<epoch_id_type>(epoch_id_informed_.load()), false);
+        throw;
+    }
 }
 
 void datastore::persist_and_propagate_epoch_id(epoch_id_type epoch_id) {
@@ -241,7 +325,8 @@ blob_reference_tag_type datastore::generate_reference_tag(
 void datastore::ready() {
     TRACE_START;
     try {
-        blob_id_type max_blob_id = std::max(create_snapshot_and_get_max_blob_id(), compaction_catalog_->get_max_blob_id());
+        blob_id_type max_blob_id =
+            std::max(create_snapshot_and_get_max_blob_id_with_wal_started_log(), compaction_catalog_->get_max_blob_id());
         blob_file_garbage_collector_ = std::make_unique<blob_file_garbage_collector>(*blob_file_resolver_);
         blob_file_garbage_collector_->scan_blob_files(max_blob_id);
 
