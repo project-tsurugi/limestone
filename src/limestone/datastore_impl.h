@@ -22,6 +22,7 @@
 #include <array>
 #include <memory>
 #include <optional>
+#include <functional>
 #include <string>
 #include <sys/types.h>
 
@@ -160,6 +161,13 @@ public:
      */
     [[nodiscard]] pid_t pid() const noexcept;
 
+    /**
+     * @brief Sets a custom group commit sender for tests.
+     * @param sender The sender function(epoch_id) used to simulate group commit sending.
+     *               The function must return true on success and false on failure.
+     */
+    void set_group_commit_sender_for_tests(std::function<bool(uint64_t)> const& sender);
+
 private:
     // Atomic counter for tracking active backup operations.
     std::atomic<int> backup_counter_;
@@ -187,6 +195,7 @@ private:
     std::string instance_id_{"instance_id_not_set"};
     std::string db_name_{"db_name_not_set"};
     pid_t pid_{0};
+    std::function<bool(uint64_t)> group_commit_sender_for_tests_{};
 
     /**
      * @brief generates HMAC secret key for BLOB reference tag generation.

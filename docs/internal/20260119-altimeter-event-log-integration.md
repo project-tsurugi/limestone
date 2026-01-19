@@ -40,24 +40,13 @@ https://github.com/project-tsurugi/altimeter/blob/feature/multi_nodes/docs/ja/al
 ### 出力位置
 
 - wal_stored
-    - `datastore::update_min_epoch_id` 関数内の次の行の直後に追加する
-            ```cpp
-            TRACE_FINE << "epoch_id_record_finished_ updated to " << to_be_epoch;
-            ```
+    - `datastore::persist_epoch_id` 内（成功/失敗の両方で出力）
 - wal_shipped
-    - `datastore::persist_and_propagate_epoch_id` 関数内の次の行の直後に追加する。2箇所存在する。
-            ```cpp
-            bool sent = impl_->propagate_group_commit(epoch_id);
-            ```
+    - `datastore_impl::propagate_group_commit` 内（成功/失敗の両方で出力）
 - wal_received
-    - `message_group_commit::post_receive` 関数内の次の行の直後に追加する
-            ```cpp
-                TRACE_START << "epoch_number: " << epoch_number_;
-            ```
+    - 未実装（`message_group_commit::post_receive` に追加予定）
 - wal_started
-    - `datastore::ready() ` 関数内の次の行の直後に追加する
-            ```cpp
-            blob_id_type max_blob_id = std::max(create_snapshot_and_get_max_blob_id(), compaction_catalog_->get_max_blob_id());
+    - `datastore::create_snapshot_and_get_max_blob_id_with_wal_started_log` 内（成功/失敗の両方で出力）
             ```
 
 ## ログ出力項目と取得方法（wal_*）
@@ -78,20 +67,20 @@ Altimeterの仕様上、`wal_stored / wal_shipped / wal_received / wal_started` 
 ### イベント別メモ
 
 - `wal_stored`
-  - 位置: `datastore::update_min_epoch_id`
-  - `result`: `write_epoch_callback_` が例外なく完了したら成功
+  - 位置: `datastore::persist_epoch_id`
+  - `result`: `persist_epoch_id` の処理が例外なく完了したら成功
 
 - `wal_shipped`
-  - 位置: `datastore::persist_and_propagate_epoch_id`
-  - `result`: `impl_->propagate_group_commit(epoch_id)` の戻り値で判断
+  - 位置: `datastore_impl::propagate_group_commit`
+  - `result`: `propagate_group_commit` の戻り値で判断
 
 - `wal_received`
-  - 位置: `message_group_commit::post_receive`
-  - `result`: 受信処理が例外なく完了したら成功
+  - 位置: `message_group_commit::post_receive`（未実装）
+  - `result`: 受信処理が例外なく完了したら成功（予定）
 
 - `wal_started`
-  - 位置: `datastore::ready`
-  - `result`: 初期化処理が例外なく完了したら成功
+  - 位置: `datastore::create_snapshot_and_get_max_blob_id_with_wal_started_log`
+  - `result`: `create_snapshot_and_get_max_blob_id` が例外なく完了したら成功
 
 
 ### 出力項目
