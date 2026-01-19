@@ -47,4 +47,8 @@ void configuration::set_instance_id(std::string_view instance_id) noexcept {
     instance_id_ = instance_id;
 }
 
+void configuration::set_db_name(std::string_view db_name) noexcept {
+    db_name_ = db_name;
+}
+
 } // namespace limestone::api
