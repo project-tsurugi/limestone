@@ -39,6 +39,7 @@ file(GLOB SRCS
         "limestone/blob/*.cpp"
         "limestone/compaction/*.cpp"
         "limestone/datastore_impl/*.cpp"
+        "limestone/dist-tx/*.cpp"
         "limestone/epoch/*.cpp"
         "limestone/log/*.cpp"
         "limestone/replication/*.cpp"

@@ -19,6 +19,8 @@
 #include <future>
 #include <atomic>
 #include <chrono>
+#include <cstdint>
+#include <string>
 #include <vector>
 #include <set>
 #include <mutex>
@@ -153,6 +155,14 @@ public:
      * @attention this function should be called before the ready() is called.
      */
     log_channel& create_channel();
+
+    /**
+     * @brief registers a TP monitor ID for the transaction ID
+     * @param tx_id the transaction ID
+     * @param tpm_id the TP monitor ID
+     * @attention this function is thread-safe.
+     */
+    void register_transaction_tpm_id(std::string_view tx_id, std::uint64_t tpm_id);
 
     /**
      * @brief create a log_channel to write logs to a file
@@ -383,6 +393,8 @@ protected:  // for tests
     auto epoch_id_switched_for_tests() const noexcept { return epoch_id_switched_.load(); }
     auto next_blob_id_for_tests() const noexcept { return next_blob_id_.load(); }
     auto& files_for_tests() const noexcept { return files_; }
+    auto& txid_to_tpmid_for_tests() const noexcept { return txid_to_tpmid_; }
+    auto& epoch_to_txids_for_tests() const noexcept { return epoch_to_txids_; }
     void rotate_epoch_file_for_tests() { rotate_epoch_file(); }
     void set_next_blob_id_for_tests(blob_id_type next_blob_id) noexcept { next_blob_id_.store(next_blob_id); }
     std::set<blob_id_type> get_persistent_blob_ids_for_tests() noexcept {
@@ -507,6 +519,14 @@ private:
 
     std::mutex mtx_files_{};
 
+    std::mutex mtx_txid_tpmid_{};
+
+    std::map<std::string, std::uint64_t> txid_to_tpmid_{};
+
+    std::mutex mtx_epoch_txids_{};
+
+    std::map<epoch_id_type, std::vector<std::string>> epoch_to_txids_{};
+
     int recover_max_parallelism_{};
 
     std::mutex mtx_epoch_file_{};
@@ -516,6 +536,10 @@ private:
     state state_{};
 
     void add_file(const boost::filesystem::path& file) noexcept;
+
+    void register_transaction_for_epoch(std::string_view tx_id, epoch_id_type epoch_id);
+
+    bool get_tpm_id_for_transaction(std::string_view tx_id, std::uint64_t& tpm_id);
 
     // opposite of add_file
     void subtract_file(const boost::filesystem::path& file);

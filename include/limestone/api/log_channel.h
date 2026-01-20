@@ -18,6 +18,7 @@
 #include <cstdio>
 #include <string>
 #include <string_view>
+#include <optional>
 #include <cstdint>
 #include <atomic>
 #include <set>
@@ -57,6 +58,21 @@ public:
      * but it is indeterminate which one will take precedence.
      */
     void begin_session();
+
+    /**
+     * @brief join a persistence session for the current epoch in this channel
+     * @param tx_id the transaction ID (nullopt or empty means no transaction ID)
+     * @attention this function is not thread-safe.
+     * @exception limestone_exception if I/O error occurs
+     * @note Currently, this function does not throw an exception but logs the error and aborts the process.
+     *       However, throwing an exception is the intended behavior, and this will be restored in future versions.
+     *       Therefore, callers of this API must handle the exception properly as per the original design.
+     * @note the current epoch is the last epoch specified by datastore::switch_epoch()
+     * @note datastore::switch_epoch() and this function can be called simultaneously.
+     * If these functions are invoked at the same time, the result will be as if one of them was called first,
+     * but it is indeterminate which one will take precedence.
+     */
+    void begin_session(std::optional<std::string_view> tx_id);
 
     /**
      * @brief notifies the completion of an operation in this channel for the current persistent session the channel is participating in

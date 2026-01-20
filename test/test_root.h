@@ -36,6 +36,8 @@ public:
     auto epoch_id_switched() const noexcept { return epoch_id_switched_for_tests(); }
     auto next_blob_id() const noexcept { return next_blob_id_for_tests(); }
     auto& files() const noexcept { return files_for_tests(); }
+    auto& txid_to_tpmid() const noexcept { return txid_to_tpmid_for_tests(); }
+    auto& epoch_to_txids() const noexcept { return epoch_to_txids_for_tests(); }
     void rotate_epoch_file() { rotate_epoch_file_for_tests(); }
     void set_next_blob_id(blob_id_type next_blob_id) noexcept { set_next_blob_id_for_tests(next_blob_id); }
     std::set<blob_id_type> get_persistent_blob_ids() noexcept { return get_persistent_blob_ids_for_tests(); }

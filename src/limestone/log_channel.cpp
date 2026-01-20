@@ -89,6 +89,17 @@ void log_channel::begin_session() {
     }
 }
 
+void log_channel::begin_session(std::optional<std::string_view> tx_id) {
+    TRACE_START << "tx_id=" << (tx_id ? std::string(*tx_id) : "(none)");
+    if (tx_id && ! tx_id->empty()) {
+        envelope_.register_transaction_for_epoch(
+                *tx_id,
+                static_cast<epoch_id_type>(envelope_.epoch_id_switched_.load()));
+    }
+    begin_session();
+    TRACE_END;
+}
+
 void log_channel::finalize_session_file() {
     uint64_t epoch_id = current_epoch_id_.load();
     log_entry::end_session(strm_, static_cast<epoch_id_type>(epoch_id));

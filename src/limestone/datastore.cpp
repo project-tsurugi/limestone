@@ -415,6 +415,13 @@ log_channel& datastore::create_channel(const boost::filesystem::path& location) 
     return *log_channels_.back();
 }
 
+void datastore::register_transaction_tpm_id(std::string_view tx_id, std::uint64_t tpm_id) {
+    TRACE_START << "tx_id=" << std::string(tx_id) << ", tpm_id=" << tpm_id;
+    std::lock_guard<std::mutex> lock(mtx_txid_tpmid_);
+    txid_to_tpmid_[std::string(tx_id)] = tpm_id;
+    TRACE_END;
+}
+
 epoch_id_type datastore::last_epoch() const noexcept { return static_cast<epoch_id_type>(epoch_id_informed_.load()); }
 
 void datastore::switch_epoch(epoch_id_type new_epoch_id) {
@@ -784,6 +791,26 @@ void datastore::rotate_epoch_file() {
         LOG_AND_THROW_IO_EXCEPTION("does not have write permission for the log_location directory, path: " + location_.string(), errno);
     }
     strm.close();
+}
+
+void datastore::register_transaction_for_epoch(std::string_view tx_id, epoch_id_type epoch_id) {
+    std::uint64_t tpm_id = 0;
+    if (! get_tpm_id_for_transaction(tx_id, tpm_id)) {
+        LOG_LP(WARNING) << "tx_id is not registered for tpm_id, tx_id="
+                        << std::string(tx_id);
+    }
+    std::lock_guard<std::mutex> lock(mtx_epoch_txids_);
+    epoch_to_txids_[epoch_id].emplace_back(tx_id);
+}
+
+bool datastore::get_tpm_id_for_transaction(std::string_view tx_id, std::uint64_t& tpm_id) {
+    std::lock_guard<std::mutex> lock(mtx_txid_tpmid_);
+    auto iter = txid_to_tpmid_.find(std::string(tx_id));
+    if (iter == txid_to_tpmid_.end()) {
+        return false;
+    }
+    tpm_id = iter->second;
+    return true;
 }
 
 void datastore::add_file(const boost::filesystem::path& file) noexcept {
