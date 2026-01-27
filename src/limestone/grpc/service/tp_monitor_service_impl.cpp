@@ -40,7 +40,7 @@ tp_monitor_service_impl::~tp_monitor_service_impl() = default;
                                                CreateResponse* response) {
     auto result = create_monitor(request->txid(), request->tsid());
     if (! result.ok) {
-        return ::grpc::Status(::grpc::StatusCode::INVALID_ARGUMENT, "create failed");
+        return {::grpc::StatusCode::INVALID_ARGUMENT, "create failed"};
     }
     response->set_tpmid(result.tpm_id);
     return ::grpc::Status::OK;
@@ -62,7 +62,7 @@ tp_monitor_service_impl::~tp_monitor_service_impl() = default;
                                           request->txid2(),
                                           request->tsid2());
     if (! result.ok) {
-        return ::grpc::Status(::grpc::StatusCode::INVALID_ARGUMENT, "create_and_join failed");
+        return {::grpc::StatusCode::INVALID_ARGUMENT, "create_and_join failed"};
     }
     response->set_tpmid(result.tpm_id);
     return ::grpc::Status::OK;
@@ -113,7 +113,7 @@ tp_monitor_service_impl::create_result tp_monitor_service_impl::create_monitor(
         std::lock_guard<std::mutex> lock(mtx_);
         monitors_.emplace(tpm_id, state);
     }
-    return create_result{true, tpm_id};
+    return {true, tpm_id};
 }
 
 tp_monitor_service_impl::create_result tp_monitor_service_impl::create_and_join_monitor(
@@ -129,7 +129,7 @@ tp_monitor_service_impl::create_result tp_monitor_service_impl::create_and_join_
     }
     if (ts_id1 == ts_id2) {
         LOG_LP(WARNING) << "duplicate ts_id detected. ignored. ts_id=" << ts_id1;
-        return create_result{false, 0U};
+        return {false, 0U};
     }
     std::uint64_t tpm_id = next_tpm_id_.fetch_add(1U);
     if (tpm_id == 0U) {
@@ -150,7 +150,7 @@ tp_monitor_service_impl::create_result tp_monitor_service_impl::create_and_join_
         std::lock_guard<std::mutex> lock(mtx_);
         monitors_.emplace(tpm_id, state);
     }
-    return create_result{true, tpm_id};
+    return {true, tpm_id};
 }
 
 tp_monitor_service_impl::result tp_monitor_service_impl::join_monitor(
@@ -163,24 +163,24 @@ tp_monitor_service_impl::result tp_monitor_service_impl::join_monitor(
     auto state = find_state(tpm_id);
     if (! state) {
         LOG_LP(WARNING) << "tpm_id not found. ignored. tpm_id=" << tpm_id;
-        return result{false};
+        return {false};
     }
 
     std::lock_guard<std::mutex> lock(state->mtx);
     if (state->destroyed) {
         LOG_LP(WARNING) << "tpm_id is destroyed. ignored. tpm_id=" << tpm_id;
-        return result{false};
+        return {false};
     }
     if (state->participants.size() >= state->participant_count) {
         LOG_LP(WARNING) << "participants already full. ignored. tpm_id=" << tpm_id;
-        return result{false};
+        return {false};
     }
     auto [_, inserted] = state->participants.emplace(ts_id, std::string(tx_id));
     if (!inserted) {
         LOG_LP(WARNING) << "duplicate ts_id detected. ignored. ts_id=" << ts_id;
-        return result{false};
+        return {false};
     }
-    return result{true};
+    return {true};
 }
 
 tp_monitor_service_impl::result tp_monitor_service_impl::barrier_notify_monitor(
@@ -189,23 +189,23 @@ tp_monitor_service_impl::result tp_monitor_service_impl::barrier_notify_monitor(
     auto state = find_state(tpm_id);
     if (! state) {
         LOG_LP(WARNING) << "tpm_id not found. ignored. tpm_id=" << tpm_id;
-        return result{false};
+        return {false};
     }
 
     std::unique_lock<std::mutex> lock(state->mtx);
     if (state->destroyed) {
         LOG_LP(WARNING) << "tpm_id is destroyed. ignored. tpm_id=" << tpm_id;
-        return result{false};
+        return {false};
     }
     if (state->participants.find(ts_id) == state->participants.end()) {
         LOG_LP(WARNING) << "ts_id not registered. ignored. ts_id=" << ts_id;
-        return result{false};
+        return {false};
     }
 
     state->arrived.insert(ts_id);
     if (state->arrived.size() >= state->participant_count) {
         state->cv.notify_all();
-        return result{true};
+        return {true};
     }
 
     state->cv.wait(lock, [&state]() {
@@ -214,17 +214,17 @@ tp_monitor_service_impl::result tp_monitor_service_impl::barrier_notify_monitor(
 
     if (state->destroyed) {
         LOG_LP(WARNING) << "tpm_id is destroyed while waiting. ignored. tpm_id=" << tpm_id;
-        return result{false};
+        return {false};
     }
 
-    return result{true};
+    return {true};
 }
 
 tp_monitor_service_impl::result tp_monitor_service_impl::destroy_monitor(std::uint64_t tpm_id) {
     auto state = find_state(tpm_id);
     if (! state) {
         LOG_LP(WARNING) << "tpm_id not found. ignored. tpm_id=" << tpm_id;
-        return result{false};
+        return {false};
     }
 
     {
@@ -238,7 +238,7 @@ tp_monitor_service_impl::result tp_monitor_service_impl::destroy_monitor(std::ui
         monitors_.erase(tpm_id);
     }
 
-    return result{true};
+    return {true};
 }
 
 } // namespace limestone::grpc::service
