@@ -97,7 +97,9 @@ std::shared_ptr<tp_monitor_service_impl::monitor_state> tp_monitor_service_impl:
 tp_monitor_service_impl::create_result tp_monitor_service_impl::create_monitor(
         std::string_view tx_id,
         std::uint64_t ts_id) {
-    static_cast<void>(tx_id);
+    if (tx_id.empty()) {
+        LOG_LP(WARNING) << "tx_id is empty. continuing with empty tx_id.";
+    }
     std::uint64_t tpm_id = next_tpm_id_.fetch_add(1U);
     if (tpm_id == 0U) {
         LOG_LP(FATAL) << "tpm_id overflow";
@@ -106,7 +108,7 @@ tp_monitor_service_impl::create_result tp_monitor_service_impl::create_monitor(
     auto state = std::make_shared<monitor_state>();
     state->tpm_id = tpm_id;
     state->participant_count = default_participant_count;
-    state->participants.insert(ts_id);
+    state->participants.emplace(ts_id, std::string(tx_id));
     {
         std::lock_guard<std::mutex> lock(mtx_);
         monitors_.emplace(tpm_id, state);
@@ -119,8 +121,16 @@ tp_monitor_service_impl::create_result tp_monitor_service_impl::create_and_join_
         std::uint64_t ts_id1,
         std::string_view tx_id2,
         std::uint64_t ts_id2) {
-    static_cast<void>(tx_id1);
-    static_cast<void>(tx_id2);
+    if (tx_id1.empty()) {
+        LOG_LP(WARNING) << "tx_id1 is empty. continuing with empty tx_id1.";
+    }
+    if (tx_id2.empty()) {
+        LOG_LP(WARNING) << "tx_id2 is empty. continuing with empty tx_id2.";
+    }
+    if (ts_id1 == ts_id2) {
+        LOG_LP(WARNING) << "duplicate ts_id detected. ignored. ts_id=" << ts_id1;
+        return create_result{false, 0U};
+    }
     std::uint64_t tpm_id = next_tpm_id_.fetch_add(1U);
     if (tpm_id == 0U) {
         LOG_LP(FATAL) << "tpm_id overflow";
@@ -132,8 +142,8 @@ tp_monitor_service_impl::create_result tp_monitor_service_impl::create_and_join_
     state->participant_count = default_participant_count;
     {
         std::lock_guard<std::mutex> lock(state->mtx);
-        state->participants.insert(ts_id1);
-        state->participants.insert(ts_id2);
+        state->participants.emplace(ts_id1, std::string(tx_id1));
+        state->participants.emplace(ts_id2, std::string(tx_id2));
     }
 
     {
@@ -147,7 +157,9 @@ tp_monitor_service_impl::result tp_monitor_service_impl::join_monitor(
         std::uint64_t tpm_id,
         std::string_view tx_id,
         std::uint64_t ts_id) {
-    static_cast<void>(tx_id);
+    if (tx_id.empty()) {
+        LOG_LP(WARNING) << "tx_id is empty. continuing with empty tx_id.";
+    }
     auto state = find_state(tpm_id);
     if (! state) {
         LOG_LP(WARNING) << "tpm_id not found. ignored. tpm_id=" << tpm_id;
@@ -163,7 +175,7 @@ tp_monitor_service_impl::result tp_monitor_service_impl::join_monitor(
         LOG_LP(WARNING) << "participants already full. ignored. tpm_id=" << tpm_id;
         return result{false};
     }
-    auto [_, inserted] = state->participants.insert(ts_id);
+    auto [_, inserted] = state->participants.emplace(ts_id, std::string(tx_id));
     if (!inserted) {
         LOG_LP(WARNING) << "duplicate ts_id detected. ignored. ts_id=" << ts_id;
         return result{false};

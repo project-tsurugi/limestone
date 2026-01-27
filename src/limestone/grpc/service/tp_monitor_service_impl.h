@@ -11,7 +11,6 @@
 #include <string_view>
 
 #include <grpcpp/grpcpp.h>
-
 #include <tp_monitor.grpc.pb.h>
 
 namespace limestone::grpc::service {
@@ -28,7 +27,7 @@ using disttx::grpc::proto::DestroyResponse;
 using disttx::grpc::proto::BarrierRequest;
 using disttx::grpc::proto::BarrierResponse;
 
-class tp_monitor_service_impl final : public TpMonitorService::Service {
+class tp_monitor_service_impl : public TpMonitorService::Service {
 public:
     tp_monitor_service_impl();
     ~tp_monitor_service_impl() override;
@@ -71,7 +70,7 @@ private:
     struct monitor_state {
         std::uint64_t tpm_id{};
         std::uint32_t participant_count{};
-        std::set<std::uint64_t> participants{};
+        std::map<std::uint64_t, std::string> participants{};
         std::set<std::uint64_t> arrived{};
         std::mutex mtx{};
         std::condition_variable cv{};
@@ -83,10 +82,13 @@ private:
                                           std::uint64_t ts_id1,
                                           std::string_view tx_id2,
                                           std::uint64_t ts_id2);
+
+protected:
     result join_monitor(std::uint64_t tpm_id, std::string_view tx_id, std::uint64_t ts_id);
     result barrier_notify_monitor(std::uint64_t tpm_id, std::uint64_t ts_id);
     result destroy_monitor(std::uint64_t tpm_id);
 
+private:
     std::shared_ptr<monitor_state> find_state(std::uint64_t tpm_id);
 
     std::atomic_uint64_t next_tpm_id_{1};
