@@ -15,9 +15,6 @@
  */
 #include <grpc/service/tp_monitor_service_impl.h>
 
-#include <string>
-#include <vector>
-
 namespace limestone::grpc::service {
 
 tp_monitor_service_impl::tp_monitor_service_impl(tp_monitor_backend& backend)
@@ -28,53 +25,43 @@ tp_monitor_service_impl::~tp_monitor_service_impl() = default;
 ::grpc::Status tp_monitor_service_impl::Create(::grpc::ServerContext*,
                                                const CreateRequest* request,
                                                CreateResponse* response) {
-    auto result = backend_.create(request->participant_count());
-    response->set_ok(result.ok);
-    response->set_tpm_id(result.tpm_id);
-    response->set_message(result.message);
+    auto result = backend_.create(request->txid(), request->tsid());
+    response->set_tpmid(result.tpm_id);
     return ::grpc::Status::OK;
 }
 
 ::grpc::Status tp_monitor_service_impl::Join(::grpc::ServerContext*,
                                              const JoinRequest* request,
                                              JoinResponse* response) {
-    const auto& participant = request->participant();
-    auto result = backend_.join(request->tpm_id(), participant.ts_id());
-    response->set_ok(result.ok);
-    response->set_message(result.message);
+    auto result = backend_.join(request->tpmid(), request->txid(), request->tsid());
+    response->set_success(result.ok);
     return ::grpc::Status::OK;
 }
 
 ::grpc::Status tp_monitor_service_impl::CreateAndJoin(::grpc::ServerContext*,
                                                       const CreateAndJoinRequest* request,
                                                       CreateAndJoinResponse* response) {
-    std::vector<std::string> participants{};
-    participants.reserve(static_cast<std::size_t>(request->participants_size()));
-    for (const auto& participant : request->participants()) {
-        participants.emplace_back(participant.ts_id());
-    }
-    auto result = backend_.create_and_join(request->participant_count(), participants);
-    response->set_ok(result.ok);
-    response->set_tpm_id(result.tpm_id);
-    response->set_message(result.message);
+    auto result = backend_.create_and_join(request->txid1(),
+                                           request->tsid1(),
+                                           request->txid2(),
+                                           request->tsid2());
+    response->set_tpmid(result.tpm_id);
     return ::grpc::Status::OK;
 }
 
 ::grpc::Status tp_monitor_service_impl::Destroy(::grpc::ServerContext*,
                                                 const DestroyRequest* request,
                                                 DestroyResponse* response) {
-    auto result = backend_.destroy(request->tpm_id());
-    response->set_ok(result.ok);
-    response->set_message(result.message);
+    auto result = backend_.destroy(request->tpmid());
+    response->set_success(result.ok);
     return ::grpc::Status::OK;
 }
 
-::grpc::Status tp_monitor_service_impl::BarrierNotify(::grpc::ServerContext*,
-                                                      const BarrierNotifyRequest* request,
-                                                      BarrierNotifyResponse* response) {
-    auto result = backend_.barrier_notify(request->tpm_id(), request->ts_id());
-    response->set_ok(result.ok);
-    response->set_message(result.message);
+::grpc::Status tp_monitor_service_impl::Barrier(::grpc::ServerContext*,
+                                                const BarrierRequest* request,
+                                                BarrierResponse* response) {
+    auto result = backend_.barrier_notify(request->tpmid(), request->tsid());
+    response->set_success(result.ok);
     return ::grpc::Status::OK;
 }
 

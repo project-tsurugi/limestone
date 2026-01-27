@@ -16,7 +16,6 @@
 #include <grpc/backend/tp_monitor_backend.h>
 
 #include <cstdlib>
-#include <string_view>
 
 #include <glog/logging.h>
 
@@ -26,6 +25,9 @@
 namespace limestone::grpc::backend {
 
 namespace {
+
+// Minimum implementation assumes AP1/AP2 only; changing this affects create/join flow and tests.
+constexpr std::uint32_t default_participant_count = 2U;
 
 tp_monitor_backend::result make_result(bool ok, std::string_view message) {
     return tp_monitor_backend::result{ok, std::string(message)};
@@ -50,11 +52,9 @@ std::shared_ptr<tp_monitor_backend::monitor_state> tp_monitor_backend::find_stat
     return iter->second;
 }
 
-tp_monitor_backend::create_result tp_monitor_backend::create(std::uint32_t participant_count) {
-    if (participant_count < 1U) {
-        LOG_LP(WARNING) << "participant_count must be >= 1";
-        return make_create_result(false, 0U, "participant_count must be >= 1");
-    }
+tp_monitor_backend::create_result tp_monitor_backend::create(std::string_view tx_id,
+                                                             std::uint64_t ts_id) {
+    static_cast<void>(tx_id);
     std::uint64_t tpm_id = next_tpm_id_.fetch_add(1U);
     if (tpm_id == 0U) {
         LOG_LP(FATAL) << "tpm_id overflow";
@@ -62,7 +62,8 @@ tp_monitor_backend::create_result tp_monitor_backend::create(std::uint32_t parti
     }
     auto state = std::make_shared<monitor_state>();
     state->tpm_id = tpm_id;
-    state->participant_count = participant_count;
+    state->participant_count = default_participant_count;
+    state->participants.insert(ts_id);
     {
         std::lock_guard<std::mutex> lock(mtx_);
         monitors_.emplace(tpm_id, state);
@@ -71,18 +72,12 @@ tp_monitor_backend::create_result tp_monitor_backend::create(std::uint32_t parti
 }
 
 tp_monitor_backend::create_result tp_monitor_backend::create_and_join(
-        std::uint32_t participant_count,
-        const std::vector<std::string>& participants) {
-    if (participant_count < 1U) {
-        LOG_LP(WARNING) << "participant_count must be >= 1";
-        return make_create_result(false, 0U, "participant_count must be >= 1");
-    }
-    std::uint32_t normalized_count = participant_count;
-    if (participants.size() > normalized_count) {
-        LOG_LP(WARNING) << "participants.size() > participant_count. using participants.size().";
-        normalized_count = static_cast<std::uint32_t>(participants.size());
-    }
-
+        std::string_view tx_id1,
+        std::uint64_t ts_id1,
+        std::string_view tx_id2,
+        std::uint64_t ts_id2) {
+    static_cast<void>(tx_id1);
+    static_cast<void>(tx_id2);
     std::uint64_t tpm_id = next_tpm_id_.fetch_add(1U);
     if (tpm_id == 0U) {
         LOG_LP(FATAL) << "tpm_id overflow";
@@ -91,23 +86,11 @@ tp_monitor_backend::create_result tp_monitor_backend::create_and_join(
 
     auto state = std::make_shared<monitor_state>();
     state->tpm_id = tpm_id;
-    state->participant_count = normalized_count;
+    state->participant_count = default_participant_count;
     {
         std::lock_guard<std::mutex> lock(state->mtx);
-        for (auto const& ts_id : participants) {
-            if (ts_id.empty()) {
-                LOG_LP(WARNING) << "ts_id is empty. ignored.";
-                continue;
-            }
-            if (state->participants.size() >= state->participant_count) {
-                LOG_LP(WARNING) << "participants exceed participant_count. ignored.";
-                break;
-            }
-            auto [_, inserted] = state->participants.insert(ts_id);
-            if (!inserted) {
-                LOG_LP(WARNING) << "duplicate ts_id detected. ignored. ts_id=" << ts_id;
-            }
-        }
+        state->participants.insert(ts_id1);
+        state->participants.insert(ts_id2);
     }
 
     {
@@ -117,11 +100,10 @@ tp_monitor_backend::create_result tp_monitor_backend::create_and_join(
     return make_create_result(true, tpm_id, "");
 }
 
-tp_monitor_backend::result tp_monitor_backend::join(std::uint64_t tpm_id, std::string_view ts_id) {
-    if (ts_id.empty()) {
-        LOG_LP(WARNING) << "ts_id is empty. ignored.";
-        return make_result(false, "ts_id is empty");
-    }
+tp_monitor_backend::result tp_monitor_backend::join(std::uint64_t tpm_id,
+                                                    std::string_view tx_id,
+                                                    std::uint64_t ts_id) {
+    static_cast<void>(tx_id);
     auto state = find_state(tpm_id);
     if (!state) {
         LOG_LP(WARNING) << "tpm_id not found. ignored. tpm_id=" << tpm_id;
@@ -137,9 +119,9 @@ tp_monitor_backend::result tp_monitor_backend::join(std::uint64_t tpm_id, std::s
         LOG_LP(WARNING) << "participants already full. ignored. tpm_id=" << tpm_id;
         return make_result(false, "participants already full");
     }
-    auto [_, inserted] = state->participants.insert(std::string(ts_id));
+    auto [_, inserted] = state->participants.insert(ts_id);
     if (!inserted) {
-        LOG_LP(WARNING) << "duplicate ts_id detected. ignored. ts_id=" << std::string(ts_id);
+        LOG_LP(WARNING) << "duplicate ts_id detected. ignored. ts_id=" << ts_id;
         return make_result(false, "duplicate ts_id");
     }
     return make_result(true, "");
@@ -147,11 +129,7 @@ tp_monitor_backend::result tp_monitor_backend::join(std::uint64_t tpm_id, std::s
 
 tp_monitor_backend::result tp_monitor_backend::barrier_notify(
         std::uint64_t tpm_id,
-        std::string_view ts_id) {
-    if (ts_id.empty()) {
-        LOG_LP(WARNING) << "ts_id is empty. ignored.";
-        return make_result(false, "ts_id is empty");
-    }
+        std::uint64_t ts_id) {
     auto state = find_state(tpm_id);
     if (!state) {
         LOG_LP(WARNING) << "tpm_id not found. ignored. tpm_id=" << tpm_id;
@@ -163,12 +141,12 @@ tp_monitor_backend::result tp_monitor_backend::barrier_notify(
         LOG_LP(WARNING) << "tpm_id is destroyed. ignored. tpm_id=" << tpm_id;
         return make_result(false, "tpm_id is destroyed");
     }
-    if (state->participants.find(std::string(ts_id)) == state->participants.end()) {
-        LOG_LP(WARNING) << "ts_id not registered. ignored. ts_id=" << std::string(ts_id);
+    if (state->participants.find(ts_id) == state->participants.end()) {
+        LOG_LP(WARNING) << "ts_id not registered. ignored. ts_id=" << ts_id;
         return make_result(false, "ts_id not registered");
     }
 
-    state->arrived.insert(std::string(ts_id));
+    state->arrived.insert(ts_id);
     if (state->arrived.size() >= state->participant_count) {
         state->cv.notify_all();
         return make_result(true, "");

@@ -14,6 +14,7 @@
  * limitations under the License.
  */
 
+#include <future>
 #include <string>
 
 #include <grpc/backend/tp_monitor_backend.h>
@@ -23,38 +24,39 @@ namespace limestone::testing {
 
 class tp_monitor_backend_test : public ::testing::Test {};
 
-TEST_F(tp_monitor_backend_test, create_with_zero_participant_count) { // NOLINT
+TEST_F(tp_monitor_backend_test, create_returns_tpm_id) { // NOLINT
     limestone::grpc::backend::tp_monitor_backend backend{};
-    auto result = backend.create(0);
-    EXPECT_TRUE(! result.ok);
-    EXPECT_EQ(result.tpm_id, 0U);
+    auto result = backend.create("tx-1", 1U);
+    EXPECT_TRUE(result.ok);
+    EXPECT_TRUE(result.tpm_id != 0U);
 }
 
 TEST_F(tp_monitor_backend_test, join_duplicate_ts_id_is_ignored) { // NOLINT
     limestone::grpc::backend::tp_monitor_backend backend{};
-    auto create_result = backend.create(1);
+    auto create_result = backend.create("tx-1", 1U);
     ASSERT_TRUE(create_result.ok);
 
-    auto join_result = backend.join(create_result.tpm_id, "ts-1");
-    EXPECT_TRUE(join_result.ok);
-
-    auto duplicate_result = backend.join(create_result.tpm_id, "ts-1");
+    auto duplicate_result = backend.join(create_result.tpm_id, "tx-1", 1U);
     EXPECT_TRUE(! duplicate_result.ok);
 }
 
 TEST_F(tp_monitor_backend_test, barrier_notify_requires_join) { // NOLINT
     limestone::grpc::backend::tp_monitor_backend backend{};
-    auto create_result = backend.create(1);
+    auto create_result = backend.create("tx-1", 1U);
     ASSERT_TRUE(create_result.ok);
 
-    auto pre_notify = backend.barrier_notify(create_result.tpm_id, "ts-1");
+    auto pre_notify = backend.barrier_notify(create_result.tpm_id, 2U);
     EXPECT_TRUE(! pre_notify.ok);
 
-    auto join_result = backend.join(create_result.tpm_id, "ts-1");
+    auto join_result = backend.join(create_result.tpm_id, "tx-2", 2U);
     ASSERT_TRUE(join_result.ok);
 
-    auto notify_result = backend.barrier_notify(create_result.tpm_id, "ts-1");
+    auto first_notify_future = std::async(std::launch::async, [&backend, &create_result]() {
+        return backend.barrier_notify(create_result.tpm_id, 1U);
+    });
+    auto notify_result = backend.barrier_notify(create_result.tpm_id, 2U);
     EXPECT_TRUE(notify_result.ok);
+    EXPECT_TRUE(first_notify_future.get().ok);
 }
 
 } // namespace limestone::testing

@@ -4,8 +4,6 @@
 #include <memory>
 #include <string>
 #include <string_view>
-#include <vector>
-
 #include <grpcpp/grpcpp.h>
 
 #include <tp_monitor.grpc.pb.h>
@@ -33,15 +31,17 @@ public:
     tp_monitor_client(tp_monitor_client&&) = delete;
     tp_monitor_client& operator=(tp_monitor_client&&) = delete;
 
-    create_result create(std::uint32_t participant_count);
-    create_result create_and_join(std::uint32_t participant_count,
-                                  const std::vector<std::string>& ts_ids);
-    result join(std::uint64_t tpm_id, std::string_view ts_id);
+    create_result create(std::string_view tx_id, std::uint64_t ts_id);
+    create_result create_and_join(std::string_view tx_id1,
+                                  std::uint64_t ts_id1,
+                                  std::string_view tx_id2,
+                                  std::uint64_t ts_id2);
+    result join(std::uint64_t tpm_id, std::string_view tx_id, std::uint64_t ts_id);
     result destroy(std::uint64_t tpm_id);
-    result barrier_notify(std::uint64_t tpm_id, std::string_view ts_id);
+    result barrier_notify(std::uint64_t tpm_id, std::uint64_t ts_id);
 
 private:
-    std::unique_ptr<limestone::tpmonitor::TpMonitorService::Stub> stub_{};
+    std::unique_ptr<disttx::grpc::proto::TpMonitorService::Stub> stub_{};
 };
 
 } // namespace limestone::grpc::client

@@ -34,19 +34,21 @@ public:
     tp_monitor_backend(tp_monitor_backend&&) = delete;
     tp_monitor_backend& operator=(tp_monitor_backend&&) = delete;
 
-    create_result create(std::uint32_t participant_count);
-    create_result create_and_join(std::uint32_t participant_count,
-                                  const std::vector<std::string>& participants);
-    result join(std::uint64_t tpm_id, std::string_view ts_id);
-    result barrier_notify(std::uint64_t tpm_id, std::string_view ts_id);
+    create_result create(std::string_view tx_id, std::uint64_t ts_id);
+    create_result create_and_join(std::string_view tx_id1,
+                                  std::uint64_t ts_id1,
+                                  std::string_view tx_id2,
+                                  std::uint64_t ts_id2);
+    result join(std::uint64_t tpm_id, std::string_view tx_id, std::uint64_t ts_id);
+    result barrier_notify(std::uint64_t tpm_id, std::uint64_t ts_id);
     result destroy(std::uint64_t tpm_id);
 
 private:
     struct monitor_state {
         std::uint64_t tpm_id{};
         std::uint32_t participant_count{};
-        std::set<std::string> participants{};
-        std::set<std::string> arrived{};
+        std::set<std::uint64_t> participants{};
+        std::set<std::uint64_t> arrived{};
         std::mutex mtx{};
         std::condition_variable cv{};
         bool destroyed{};

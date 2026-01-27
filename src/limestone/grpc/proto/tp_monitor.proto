@@ -1,69 +1,78 @@
 syntax = "proto3";
 
-package limestone.tpmonitor;
+package disttx.grpc.proto;
 
-option java_multiple_files = true;
-option java_package = "com.tsurugidb.limestone.tpmonitor";
-option java_outer_classname = "TpMonitorProto";
-
-message Participant {
-  string ts_id = 1;
-}
-
-message CreateRequest {
-  uint32 participant_count = 1;
-}
-
-message CreateResponse {
-  bool ok = 1;
-  uint64 tpm_id = 2;
-  string message = 3;
-}
-
-message JoinRequest {
-  uint64 tpm_id = 1;
-  Participant participant = 2;
-}
-
-message JoinResponse {
-  bool ok = 1;
-  string message = 2;
-}
-
-message CreateAndJoinRequest {
-  uint32 participant_count = 1;
-  repeated Participant participants = 2;
-}
-
-message CreateAndJoinResponse {
-  bool ok = 1;
-  uint64 tpm_id = 2;
-  string message = 3;
-}
-
-message DestroyRequest {
-  uint64 tpm_id = 1;
-}
-
-message DestroyResponse {
-  bool ok = 1;
-  string message = 2;
-}
-
-message BarrierNotifyRequest {
-  uint64 tpm_id = 1;
-  string ts_id = 2;
-}
-
-message BarrierNotifyResponse {
-  bool ok = 1;
-  string message = 2;
-}
-
+// TP Monitor gRPC service for distributed transaction coordination
 service TpMonitorService {
-  rpc Create(CreateRequest) returns (CreateResponse);
-  rpc Join(JoinRequest) returns (JoinResponse);
-  rpc CreateAndJoin(CreateAndJoinRequest) returns (CreateAndJoinResponse);
-  rpc Destroy(DestroyRequest) returns (DestroyResponse);
-  rpc BarrierNotify(BarrierNotifyRequest) returns (BarrierNotifyResponse);
+    // Create a new TP monitor instance
+    rpc Create(CreateRequest) returns (CreateResponse);
+
+    // Join an existing TP monitor as a participant
+    rpc Join(JoinRequest) returns (JoinResponse);
+
+    // Create and join two participants at once (minimum implementation)
+    rpc CreateAndJoin(CreateAndJoinRequest) returns (CreateAndJoinResponse);
+
+    // Destroy a TP monitor instance (optional, for cleanup)
+    rpc Destroy(DestroyRequest) returns (DestroyResponse);
+
+    // Notify barrier arrival (blocks until all participants arrive)
+    rpc Barrier(BarrierRequest) returns (BarrierResponse);
+}
+
+// Request to create a TP monitor
+message CreateRequest {
+    string txId = 1;   // Transaction ID (string)
+    uint64 tsId = 2;   // Tsurugi Server ID
+}
+
+// Response for create
+message CreateResponse {
+    uint64 tpmId = 1;  // TP monitor ID
+}
+
+// Request to join a TP monitor
+message JoinRequest {
+    uint64 tpmId = 1;  // TP monitor ID
+    string txId = 2;   // Transaction ID
+    uint64 tsId = 3;   // Tsurugi Server ID
+}
+
+// Response for join
+message JoinResponse {
+    bool success = 1;
+}
+
+// Request to create and join two participants at once
+message CreateAndJoinRequest {
+    string txId1 = 1;
+    uint64 tsId1 = 2;
+    string txId2 = 3;
+    uint64 tsId2 = 4;
+}
+
+// Response for create and join
+message CreateAndJoinResponse {
+    uint64 tpmId = 1;
+}
+
+// Request to destroy a TP monitor
+message DestroyRequest {
+    uint64 tpmId = 1;
+}
+
+// Response for destroy
+message DestroyResponse {
+    bool success = 1;
+}
+
+// Request to notify barrier arrival
+message BarrierRequest {
+    uint64 tpmId = 1;
+    uint64 tsId = 2;
+}
+
+// Response for barrier
+message BarrierResponse {
+    bool success = 1;
 }

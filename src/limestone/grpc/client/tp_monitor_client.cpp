@@ -22,58 +22,64 @@ namespace limestone::grpc::client {
 
 namespace {
 
-tp_monitor_client::result make_result(const limestone::tpmonitor::JoinResponse& response) {
-    return tp_monitor_client::result{response.ok(), response.message()};
+tp_monitor_client::result make_result(const disttx::grpc::proto::JoinResponse& response) {
+    return tp_monitor_client::result{response.success(), ""};
 }
 
-tp_monitor_client::result make_result(const limestone::tpmonitor::DestroyResponse& response) {
-    return tp_monitor_client::result{response.ok(), response.message()};
+tp_monitor_client::result make_result(const disttx::grpc::proto::DestroyResponse& response) {
+    return tp_monitor_client::result{response.success(), ""};
 }
 
-tp_monitor_client::result make_result(const limestone::tpmonitor::BarrierNotifyResponse& response) {
-    return tp_monitor_client::result{response.ok(), response.message()};
+tp_monitor_client::result make_result(const disttx::grpc::proto::BarrierResponse& response) {
+    return tp_monitor_client::result{response.success(), ""};
 }
 
 } // namespace
 
 tp_monitor_client::tp_monitor_client(std::shared_ptr<::grpc::Channel> channel)
-    : stub_(limestone::tpmonitor::TpMonitorService::NewStub(std::move(channel))) {}
+    : stub_(disttx::grpc::proto::TpMonitorService::NewStub(std::move(channel))) {}
 
-tp_monitor_client::create_result tp_monitor_client::create(std::uint32_t participant_count) {
-    limestone::tpmonitor::CreateRequest request;
-    request.set_participant_count(participant_count);
-    limestone::tpmonitor::CreateResponse response;
+tp_monitor_client::create_result tp_monitor_client::create(std::string_view tx_id,
+                                                           std::uint64_t ts_id) {
+    disttx::grpc::proto::CreateRequest request;
+    request.set_txid(std::string(tx_id));
+    request.set_tsid(ts_id);
+    disttx::grpc::proto::CreateResponse response;
     ::grpc::ClientContext context;
     auto status = stub_->Create(&context, request, &response);
     if (!status.ok()) {
         return create_result{false, 0U, status.error_message()};
     }
-    return create_result{response.ok(), response.tpm_id(), response.message()};
+    return create_result{true, response.tpmid(), ""};
 }
 
 tp_monitor_client::create_result tp_monitor_client::create_and_join(
-        std::uint32_t participant_count,
-        const std::vector<std::string>& ts_ids) {
-    limestone::tpmonitor::CreateAndJoinRequest request;
-    request.set_participant_count(participant_count);
-    for (auto const& ts_id : ts_ids) {
-        auto* participant = request.add_participants();
-        participant->set_ts_id(ts_id);
-    }
-    limestone::tpmonitor::CreateAndJoinResponse response;
+        std::string_view tx_id1,
+        std::uint64_t ts_id1,
+        std::string_view tx_id2,
+        std::uint64_t ts_id2) {
+    disttx::grpc::proto::CreateAndJoinRequest request;
+    request.set_txid1(std::string(tx_id1));
+    request.set_tsid1(ts_id1);
+    request.set_txid2(std::string(tx_id2));
+    request.set_tsid2(ts_id2);
+    disttx::grpc::proto::CreateAndJoinResponse response;
     ::grpc::ClientContext context;
     auto status = stub_->CreateAndJoin(&context, request, &response);
     if (!status.ok()) {
         return create_result{false, 0U, status.error_message()};
     }
-    return create_result{response.ok(), response.tpm_id(), response.message()};
+    return create_result{true, response.tpmid(), ""};
 }
 
-tp_monitor_client::result tp_monitor_client::join(std::uint64_t tpm_id, std::string_view ts_id) {
-    limestone::tpmonitor::JoinRequest request;
-    request.set_tpm_id(tpm_id);
-    request.mutable_participant()->set_ts_id(std::string(ts_id));
-    limestone::tpmonitor::JoinResponse response;
+tp_monitor_client::result tp_monitor_client::join(std::uint64_t tpm_id,
+                                                  std::string_view tx_id,
+                                                  std::uint64_t ts_id) {
+    disttx::grpc::proto::JoinRequest request;
+    request.set_tpmid(tpm_id);
+    request.set_txid(std::string(tx_id));
+    request.set_tsid(ts_id);
+    disttx::grpc::proto::JoinResponse response;
     ::grpc::ClientContext context;
     auto status = stub_->Join(&context, request, &response);
     if (!status.ok()) {
@@ -83,9 +89,9 @@ tp_monitor_client::result tp_monitor_client::join(std::uint64_t tpm_id, std::str
 }
 
 tp_monitor_client::result tp_monitor_client::destroy(std::uint64_t tpm_id) {
-    limestone::tpmonitor::DestroyRequest request;
-    request.set_tpm_id(tpm_id);
-    limestone::tpmonitor::DestroyResponse response;
+    disttx::grpc::proto::DestroyRequest request;
+    request.set_tpmid(tpm_id);
+    disttx::grpc::proto::DestroyResponse response;
     ::grpc::ClientContext context;
     auto status = stub_->Destroy(&context, request, &response);
     if (!status.ok()) {
@@ -96,13 +102,13 @@ tp_monitor_client::result tp_monitor_client::destroy(std::uint64_t tpm_id) {
 
 tp_monitor_client::result tp_monitor_client::barrier_notify(
         std::uint64_t tpm_id,
-        std::string_view ts_id) {
-    limestone::tpmonitor::BarrierNotifyRequest request;
-    request.set_tpm_id(tpm_id);
-    request.set_ts_id(std::string(ts_id));
-    limestone::tpmonitor::BarrierNotifyResponse response;
+        std::uint64_t ts_id) {
+    disttx::grpc::proto::BarrierRequest request;
+    request.set_tpmid(tpm_id);
+    request.set_tsid(ts_id);
+    disttx::grpc::proto::BarrierResponse response;
     ::grpc::ClientContext context;
-    auto status = stub_->BarrierNotify(&context, request, &response);
+    auto status = stub_->Barrier(&context, request, &response);
     if (!status.ok()) {
         return result{false, status.error_message()};
     }

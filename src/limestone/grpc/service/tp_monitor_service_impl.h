@@ -8,17 +8,17 @@
 namespace limestone::grpc::service {
 
 using limestone::grpc::backend::tp_monitor_backend;
-using limestone::tpmonitor::TpMonitorService;
-using limestone::tpmonitor::CreateRequest;
-using limestone::tpmonitor::CreateResponse;
-using limestone::tpmonitor::JoinRequest;
-using limestone::tpmonitor::JoinResponse;
-using limestone::tpmonitor::CreateAndJoinRequest;
-using limestone::tpmonitor::CreateAndJoinResponse;
-using limestone::tpmonitor::DestroyRequest;
-using limestone::tpmonitor::DestroyResponse;
-using limestone::tpmonitor::BarrierNotifyRequest;
-using limestone::tpmonitor::BarrierNotifyResponse;
+using disttx::grpc::proto::TpMonitorService;
+using disttx::grpc::proto::CreateRequest;
+using disttx::grpc::proto::CreateResponse;
+using disttx::grpc::proto::JoinRequest;
+using disttx::grpc::proto::JoinResponse;
+using disttx::grpc::proto::CreateAndJoinRequest;
+using disttx::grpc::proto::CreateAndJoinResponse;
+using disttx::grpc::proto::DestroyRequest;
+using disttx::grpc::proto::DestroyResponse;
+using disttx::grpc::proto::BarrierRequest;
+using disttx::grpc::proto::BarrierResponse;
 
 class tp_monitor_service_impl final : public TpMonitorService::Service {
 public:
@@ -46,9 +46,9 @@ public:
                            const DestroyRequest* request,
                            DestroyResponse* response) override;
 
-    ::grpc::Status BarrierNotify(::grpc::ServerContext* context,
-                                 const BarrierNotifyRequest* request,
-                                 BarrierNotifyResponse* response) override;
+    ::grpc::Status Barrier(::grpc::ServerContext* context,
+                           const BarrierRequest* request,
+                           BarrierResponse* response) override;
 
 private:
     tp_monitor_backend& backend_;
