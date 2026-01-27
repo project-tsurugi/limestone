@@ -1,0 +1,78 @@
+syntax = "proto3";
+
+package disttx.grpc.proto;
+
+// TP Monitor gRPC service for distributed transaction coordination
+service TpMonitorService {
+    // Create a new TP monitor instance
+    rpc Create(CreateRequest) returns (CreateResponse);
+
+    // Join an existing TP monitor as a participant
+    rpc Join(JoinRequest) returns (JoinResponse);
+
+    // Create and join two participants at once (minimum implementation)
+    rpc CreateAndJoin(CreateAndJoinRequest) returns (CreateAndJoinResponse);
+
+    // Destroy a TP monitor instance (optional, for cleanup)
+    rpc Destroy(DestroyRequest) returns (DestroyResponse);
+
+    // Notify barrier arrival (blocks until all participants arrive)
+    rpc Barrier(BarrierRequest) returns (BarrierResponse);
+}
+
+// Request to create a TP monitor
+message CreateRequest {
+    string txId = 1;   // Transaction ID (string)
+    uint64 tsId = 2;   // Tsurugi Server ID
+}
+
+// Response for create
+message CreateResponse {
+    uint64 tpmId = 1;  // TP monitor ID
+}
+
+// Request to join a TP monitor
+message JoinRequest {
+    uint64 tpmId = 1;  // TP monitor ID
+    string txId = 2;   // Transaction ID
+    uint64 tsId = 3;   // Tsurugi Server ID
+}
+
+// Response for join
+message JoinResponse {
+    bool success = 1;
+}
+
+// Request to create and join two participants at once
+message CreateAndJoinRequest {
+    string txId1 = 1;
+    uint64 tsId1 = 2;
+    string txId2 = 3;
+    uint64 tsId2 = 4;
+}
+
+// Response for create and join
+message CreateAndJoinResponse {
+    uint64 tpmId = 1;
+}
+
+// Request to destroy a TP monitor
+message DestroyRequest {
+    uint64 tpmId = 1;
+}
+
+// Response for destroy
+message DestroyResponse {
+    bool success = 1;
+}
+
+// Request to notify barrier arrival
+message BarrierRequest {
+    uint64 tpmId = 1;
+    uint64 tsId = 2;
+}
+
+// Response for barrier
+message BarrierResponse {
+    bool success = 1;
+}

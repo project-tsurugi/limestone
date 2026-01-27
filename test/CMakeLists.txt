@@ -7,6 +7,7 @@ add_executable(${test_target}
 target_include_directories(${test_target}
         PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}
         PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../src/limestone
+        PRIVATE ${CMAKE_BINARY_DIR}/src
         )
 
 target_link_libraries(${test_target}
@@ -41,6 +42,7 @@ file(GLOB SRCS
         "limestone/datastore_impl/*.cpp"
         "limestone/dist-tx/*.cpp"
         "limestone/epoch/*.cpp"
+        "limestone/grpc/*.cpp"
         "limestone/log/*.cpp"
         "limestone/replication/*.cpp"
         "limestone/snapshot/*.cpp"
