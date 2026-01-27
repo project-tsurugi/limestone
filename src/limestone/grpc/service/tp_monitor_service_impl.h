@@ -1,13 +1,21 @@
 #pragma once
 
+#include <atomic>
+#include <condition_variable>
+#include <cstdint>
+#include <map>
+#include <memory>
+#include <mutex>
+#include <set>
+#include <string>
+#include <string_view>
+
 #include <grpcpp/grpcpp.h>
 
 #include <tp_monitor.grpc.pb.h>
-#include <grpc/backend/tp_monitor_backend.h>
 
 namespace limestone::grpc::service {
 
-using limestone::grpc::backend::tp_monitor_backend;
 using disttx::grpc::proto::TpMonitorService;
 using disttx::grpc::proto::CreateRequest;
 using disttx::grpc::proto::CreateResponse;
@@ -22,7 +30,7 @@ using disttx::grpc::proto::BarrierResponse;
 
 class tp_monitor_service_impl final : public TpMonitorService::Service {
 public:
-    explicit tp_monitor_service_impl(tp_monitor_backend& backend);
+    tp_monitor_service_impl();
     ~tp_monitor_service_impl() override;
 
     tp_monitor_service_impl(const tp_monitor_service_impl&) = delete;
@@ -51,7 +59,39 @@ public:
                            BarrierResponse* response) override;
 
 private:
-    tp_monitor_backend& backend_;
+    struct create_result {
+        bool ok{};
+        std::uint64_t tpm_id{};
+    };
+
+    struct result {
+        bool ok{};
+    };
+
+    struct monitor_state {
+        std::uint64_t tpm_id{};
+        std::uint32_t participant_count{};
+        std::set<std::uint64_t> participants{};
+        std::set<std::uint64_t> arrived{};
+        std::mutex mtx{};
+        std::condition_variable cv{};
+        bool destroyed{};
+    };
+
+    create_result create_monitor(std::string_view tx_id, std::uint64_t ts_id);
+    create_result create_and_join_monitor(std::string_view tx_id1,
+                                          std::uint64_t ts_id1,
+                                          std::string_view tx_id2,
+                                          std::uint64_t ts_id2);
+    result join_monitor(std::uint64_t tpm_id, std::string_view tx_id, std::uint64_t ts_id);
+    result barrier_notify_monitor(std::uint64_t tpm_id, std::uint64_t ts_id);
+    result destroy_monitor(std::uint64_t tpm_id);
+
+    std::shared_ptr<monitor_state> find_state(std::uint64_t tpm_id);
+
+    std::atomic_uint64_t next_tpm_id_{1};
+    std::mutex mtx_{};
+    std::map<std::uint64_t, std::shared_ptr<monitor_state>> monitors_{};
 };
 
 } // namespace limestone::grpc::service

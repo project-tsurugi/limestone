@@ -25,7 +25,6 @@
 #include <gflags/gflags.h>
 #include <grpcpp/grpcpp.h>
 
-#include <grpc/backend/tp_monitor_backend.h>
 #include <grpc/service/tp_monitor_service_impl.h>
 
 // NOLINTBEGIN(performance-avoid-endl)
@@ -63,8 +62,7 @@ void initialize_and_run_grpc_server(const std::string& host, int port) {
         std::exit(1);
     }
 
-    limestone::grpc::backend::tp_monitor_backend backend{};
-    limestone::grpc::service::tp_monitor_service_impl tp_monitor_service(backend);
+    limestone::grpc::service::tp_monitor_service_impl tp_monitor_service{};
 
     std::string server_address = host + ":" + std::to_string(port);
 
