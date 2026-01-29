@@ -39,11 +39,8 @@ tp_monitor_client::result make_result(const disttx::grpc::proto::BarrierResponse
 tp_monitor_client::tp_monitor_client(std::shared_ptr<::grpc::Channel> channel)
     : stub_(disttx::grpc::proto::TpMonitorService::NewStub(std::move(channel))) {}
 
-tp_monitor_client::create_result tp_monitor_client::create(std::string_view tx_id,
-                                                           std::uint64_t ts_id) {
+tp_monitor_client::create_result tp_monitor_client::create() {
     disttx::grpc::proto::CreateRequest request;
-    request.set_txid(std::string(tx_id));
-    request.set_tsid(ts_id);
     disttx::grpc::proto::CreateResponse response;
     ::grpc::ClientContext context;
     auto status = stub_->Create(&context, request, &response);
@@ -102,10 +99,10 @@ tp_monitor_client::result tp_monitor_client::destroy(std::uint64_t tpm_id) {
 
 tp_monitor_client::result tp_monitor_client::barrier_notify(
         std::uint64_t tpm_id,
-        std::uint64_t ts_id) {
+        std::string_view tx_id) {
     disttx::grpc::proto::BarrierRequest request;
     request.set_tpmid(tpm_id);
-    request.set_tsid(ts_id);
+    request.set_txid(std::string(tx_id));
     disttx::grpc::proto::BarrierResponse response;
     ::grpc::ClientContext context;
     auto status = stub_->Barrier(&context, request, &response);

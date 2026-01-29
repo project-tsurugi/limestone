@@ -150,17 +150,19 @@ TEST_F(tp_monitor_client_integration_test, client_talks_to_external_server) { //
     auto channel = ::grpc::CreateChannel(server_address, ::grpc::InsecureChannelCredentials());
     limestone::grpc::client::tp_monitor_client client(channel);
 
-    auto create_result = client.create("tx-1", 1U);
+    auto create_result = client.create();
     ASSERT_TRUE(create_result.ok);
     ASSERT_TRUE(create_result.tpm_id != 0U);
 
-    auto join_result = client.join(create_result.tpm_id, "tx-2", 2U);
-    ASSERT_TRUE(join_result.ok);
+    auto join_result1 = client.join(create_result.tpm_id, "tx-1", 1U);
+    ASSERT_TRUE(join_result1.ok);
+    auto join_result2 = client.join(create_result.tpm_id, "tx-2", 2U);
+    ASSERT_TRUE(join_result2.ok);
 
     auto first_notify = std::async(std::launch::async, [&client, &create_result]() {
-        return client.barrier_notify(create_result.tpm_id, 1U);
+        return client.barrier_notify(create_result.tpm_id, "tx-1");
     });
-    auto notify_result = client.barrier_notify(create_result.tpm_id, 2U);
+    auto notify_result = client.barrier_notify(create_result.tpm_id, "tx-2");
     EXPECT_TRUE(notify_result.ok);
     EXPECT_TRUE(first_notify.get().ok);
 

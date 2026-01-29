@@ -70,14 +70,14 @@ private:
     struct monitor_state {
         std::uint64_t tpm_id{};
         std::uint32_t participant_count{};
-        std::map<std::uint64_t, std::string> participants{};
-        std::set<std::uint64_t> arrived{};
+        std::map<std::string, std::uint64_t> participants{};
+        std::set<std::string> arrived{};
         std::mutex mtx{};
         std::condition_variable cv{};
         bool destroyed{};
     };
 
-    create_result create_monitor(std::string_view tx_id, std::uint64_t ts_id);
+    create_result create_monitor();
     create_result create_and_join_monitor(std::string_view tx_id1,
                                           std::uint64_t ts_id1,
                                           std::string_view tx_id2,
@@ -85,7 +85,7 @@ private:
 
 protected:
     result join_monitor(std::uint64_t tpm_id, std::string_view tx_id, std::uint64_t ts_id);
-    result barrier_notify_monitor(std::uint64_t tpm_id, std::uint64_t ts_id);
+    result barrier_notify_monitor(std::uint64_t tpm_id, std::string_view tx_id);
     result destroy_monitor(std::uint64_t tpm_id);
 
 private:

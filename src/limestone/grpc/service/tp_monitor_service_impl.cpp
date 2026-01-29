@@ -36,9 +36,9 @@ tp_monitor_service_impl::tp_monitor_service_impl() = default;
 tp_monitor_service_impl::~tp_monitor_service_impl() = default;
 
 ::grpc::Status tp_monitor_service_impl::Create(::grpc::ServerContext*,
-                                               const CreateRequest* request,
+                                               const CreateRequest* /*request*/,
                                                CreateResponse* response) {
-    auto result = create_monitor(request->txid(), request->tsid());
+    auto result = create_monitor();
     if (! result.ok) {
         return {::grpc::StatusCode::INVALID_ARGUMENT, "create failed"};
     }
@@ -79,7 +79,7 @@ tp_monitor_service_impl::~tp_monitor_service_impl() = default;
 ::grpc::Status tp_monitor_service_impl::Barrier(::grpc::ServerContext*,
                                                 const BarrierRequest* request,
                                                 BarrierResponse* response) {
-    auto result = barrier_notify_monitor(request->tpmid(), request->tsid());
+    auto result = barrier_notify_monitor(request->tpmid(), request->txid());
     response->set_success(result.ok);
     return ::grpc::Status::OK;
 }
@@ -94,12 +94,7 @@ std::shared_ptr<tp_monitor_service_impl::monitor_state> tp_monitor_service_impl:
     return iter->second;
 }
 
-tp_monitor_service_impl::create_result tp_monitor_service_impl::create_monitor(
-        std::string_view tx_id,
-        std::uint64_t ts_id) {
-    if (tx_id.empty()) {
-        LOG_LP(WARNING) << "tx_id is empty. continuing with empty tx_id.";
-    }
+tp_monitor_service_impl::create_result tp_monitor_service_impl::create_monitor() {
     std::uint64_t tpm_id = next_tpm_id_.fetch_add(1U);
     if (tpm_id == 0U) {
         LOG_LP(FATAL) << "tpm_id overflow";
@@ -108,7 +103,6 @@ tp_monitor_service_impl::create_result tp_monitor_service_impl::create_monitor(
     auto state = std::make_shared<monitor_state>();
     state->tpm_id = tpm_id;
     state->participant_count = default_participant_count;
-    state->participants.emplace(ts_id, std::string(tx_id));
     {
         std::lock_guard<std::mutex> lock(mtx_);
         monitors_.emplace(tpm_id, state);
@@ -127,8 +121,8 @@ tp_monitor_service_impl::create_result tp_monitor_service_impl::create_and_join_
     if (tx_id2.empty()) {
         LOG_LP(WARNING) << "tx_id2 is empty. continuing with empty tx_id2.";
     }
-    if (ts_id1 == ts_id2) {
-        LOG_LP(WARNING) << "duplicate ts_id detected. ignored. ts_id=" << ts_id1;
+    if (tx_id1 == tx_id2) {
+        LOG_LP(WARNING) << "duplicate tx_id detected. ignored. tx_id=" << tx_id1;
         return {false, 0U};
     }
     std::uint64_t tpm_id = next_tpm_id_.fetch_add(1U);
@@ -142,8 +136,8 @@ tp_monitor_service_impl::create_result tp_monitor_service_impl::create_and_join_
     state->participant_count = default_participant_count;
     {
         std::lock_guard<std::mutex> lock(state->mtx);
-        state->participants.emplace(ts_id1, std::string(tx_id1));
-        state->participants.emplace(ts_id2, std::string(tx_id2));
+        state->participants.emplace(std::string(tx_id1), ts_id1);
+        state->participants.emplace(std::string(tx_id2), ts_id2);
     }
 
     {
@@ -175,9 +169,9 @@ tp_monitor_service_impl::result tp_monitor_service_impl::join_monitor(
         LOG_LP(WARNING) << "participants already full. ignored. tpm_id=" << tpm_id;
         return {false};
     }
-    auto [_, inserted] = state->participants.emplace(ts_id, std::string(tx_id));
+    auto [_, inserted] = state->participants.emplace(std::string(tx_id), ts_id);
     if (!inserted) {
-        LOG_LP(WARNING) << "duplicate ts_id detected. ignored. ts_id=" << ts_id;
+        LOG_LP(WARNING) << "duplicate tx_id detected. ignored. tx_id=" << tx_id;
         return {false};
     }
     return {true};
@@ -185,7 +179,7 @@ tp_monitor_service_impl::result tp_monitor_service_impl::join_monitor(
 
 tp_monitor_service_impl::result tp_monitor_service_impl::barrier_notify_monitor(
         std::uint64_t tpm_id,
-        std::uint64_t ts_id) {
+        std::string_view tx_id) {
     auto state = find_state(tpm_id);
     if (! state) {
         LOG_LP(WARNING) << "tpm_id not found. ignored. tpm_id=" << tpm_id;
@@ -197,12 +191,13 @@ tp_monitor_service_impl::result tp_monitor_service_impl::barrier_notify_monitor(
         LOG_LP(WARNING) << "tpm_id is destroyed. ignored. tpm_id=" << tpm_id;
         return {false};
     }
-    if (state->participants.find(ts_id) == state->participants.end()) {
-        LOG_LP(WARNING) << "ts_id not registered. ignored. ts_id=" << ts_id;
+    auto tx_id_key = std::string(tx_id);
+    if (state->participants.find(tx_id_key) == state->participants.end()) {
+        LOG_LP(WARNING) << "tx_id not registered. ignored. tx_id=" << tx_id;
         return {false};
     }
 
-    state->arrived.insert(ts_id);
+    state->arrived.insert(std::move(tx_id_key));
     if (state->arrived.size() >= state->participant_count) {
         state->cv.notify_all();
         return {true};

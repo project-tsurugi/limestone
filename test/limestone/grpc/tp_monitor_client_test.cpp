@@ -45,17 +45,20 @@ protected:
 };
 
 TEST_F(tp_monitor_client_test, create_join_barrier_destroy_flow) { // NOLINT
-    auto create_result = client_->create("tx-1", 1U);
+    auto create_result = client_->create();
     ASSERT_TRUE(create_result.ok);
     ASSERT_TRUE(create_result.tpm_id != 0U);
 
-    auto join_result = client_->join(create_result.tpm_id, "tx-2", 2U);
-    ASSERT_TRUE(join_result.ok);
+    // create() no longer registers participants; both tx-1 and tx-2 must join.
+    auto join_result1 = client_->join(create_result.tpm_id, "tx-1", 1U);
+    ASSERT_TRUE(join_result1.ok);
+    auto join_result2 = client_->join(create_result.tpm_id, "tx-2", 2U);
+    ASSERT_TRUE(join_result2.ok);
 
     auto first_notify_future = std::async(std::launch::async, [this, &create_result]() {
-        return client_->barrier_notify(create_result.tpm_id, 1U);
+        return client_->barrier_notify(create_result.tpm_id, "tx-1");
     });
-    auto notify_result = client_->barrier_notify(create_result.tpm_id, 2U);
+    auto notify_result = client_->barrier_notify(create_result.tpm_id, "tx-2");
     EXPECT_TRUE(notify_result.ok);
     EXPECT_TRUE(first_notify_future.get().ok);
 
@@ -69,9 +72,9 @@ TEST_F(tp_monitor_client_test, create_and_join_flow) { // NOLINT
     ASSERT_TRUE(create_result.tpm_id != 0U);
 
     auto first_notify_future = std::async(std::launch::async, [this, &create_result]() {
-        return client_->barrier_notify(create_result.tpm_id, 1U);
+        return client_->barrier_notify(create_result.tpm_id, "tx-1");
     });
-    auto notify_result = client_->barrier_notify(create_result.tpm_id, 2U);
+    auto notify_result = client_->barrier_notify(create_result.tpm_id, "tx-2");
     EXPECT_TRUE(notify_result.ok);
     EXPECT_TRUE(first_notify_future.get().ok);
 

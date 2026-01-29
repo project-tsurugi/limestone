@@ -31,14 +31,14 @@ public:
     tp_monitor_client(tp_monitor_client&&) = delete;
     tp_monitor_client& operator=(tp_monitor_client&&) = delete;
 
-    create_result create(std::string_view tx_id, std::uint64_t ts_id);
+    create_result create();
     create_result create_and_join(std::string_view tx_id1,
                                   std::uint64_t ts_id1,
                                   std::string_view tx_id2,
                                   std::uint64_t ts_id2);
     result join(std::uint64_t tpm_id, std::string_view tx_id, std::uint64_t ts_id);
     result destroy(std::uint64_t tpm_id);
-    result barrier_notify(std::uint64_t tpm_id, std::uint64_t ts_id);
+    result barrier_notify(std::uint64_t tpm_id, std::string_view tx_id);
 
 private:
     std::unique_ptr<disttx::grpc::proto::TpMonitorService::Stub> stub_{};
