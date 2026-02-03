@@ -24,21 +24,18 @@
 
 namespace limestone::grpc::service {
 
-namespace {
-
-// Minimum implementation assumes AP1/AP2 only; changing this affects create/join flow and tests.
-constexpr std::uint32_t default_participant_count = 2U;
-
-} // namespace
-
 tp_monitor_service_impl::tp_monitor_service_impl() = default;
 
 tp_monitor_service_impl::~tp_monitor_service_impl() = default;
 
 ::grpc::Status tp_monitor_service_impl::Create(::grpc::ServerContext*,
-                                               const CreateRequest* /*request*/,
+                                               const CreateRequest* request,
                                                CreateResponse* response) {
-    auto result = create_monitor();
+    std::uint32_t participant_count = request->participantcount();
+    if (participant_count == 0U) {
+        return {::grpc::StatusCode::INVALID_ARGUMENT, "participant_count must be >= 1"};
+    }
+    auto result = create_monitor(participant_count);
     if (! result.ok) {
         return {::grpc::StatusCode::INVALID_ARGUMENT, "create failed"};
     }
@@ -51,20 +48,6 @@ tp_monitor_service_impl::~tp_monitor_service_impl() = default;
                                              JoinResponse* response) {
     auto result = join_monitor(request->tpmid(), request->txid(), request->tsid());
     response->set_success(result.ok);
-    return ::grpc::Status::OK;
-}
-
-::grpc::Status tp_monitor_service_impl::CreateAndJoin(::grpc::ServerContext*,
-                                                      const CreateAndJoinRequest* request,
-                                                      CreateAndJoinResponse* response) {
-    auto result = create_and_join_monitor(request->txid1(),
-                                          request->tsid1(),
-                                          request->txid2(),
-                                          request->tsid2());
-    if (! result.ok) {
-        return {::grpc::StatusCode::INVALID_ARGUMENT, "create_and_join failed"};
-    }
-    response->set_tpmid(result.tpm_id);
     return ::grpc::Status::OK;
 }
 
@@ -94,35 +77,10 @@ std::shared_ptr<tp_monitor_service_impl::monitor_state> tp_monitor_service_impl:
     return iter->second;
 }
 
-tp_monitor_service_impl::create_result tp_monitor_service_impl::create_monitor() {
-    std::uint64_t tpm_id = next_tpm_id_.fetch_add(1U);
-    if (tpm_id == 0U) {
-        LOG_LP(FATAL) << "tpm_id overflow";
-        std::abort();
-    }
-    auto state = std::make_shared<monitor_state>();
-    state->tpm_id = tpm_id;
-    state->participant_count = default_participant_count;
-    {
-        std::lock_guard<std::mutex> lock(mtx_);
-        monitors_.emplace(tpm_id, state);
-    }
-    return {true, tpm_id};
-}
-
-tp_monitor_service_impl::create_result tp_monitor_service_impl::create_and_join_monitor(
-        std::string_view tx_id1,
-        std::uint64_t ts_id1,
-        std::string_view tx_id2,
-        std::uint64_t ts_id2) {
-    if (tx_id1.empty()) {
-        LOG_LP(WARNING) << "tx_id1 is empty. continuing with empty tx_id1.";
-    }
-    if (tx_id2.empty()) {
-        LOG_LP(WARNING) << "tx_id2 is empty. continuing with empty tx_id2.";
-    }
-    if (tx_id1 == tx_id2) {
-        LOG_LP(WARNING) << "duplicate tx_id detected. ignored. tx_id=" << tx_id1;
+tp_monitor_service_impl::create_result tp_monitor_service_impl::create_monitor(
+        std::uint32_t participant_count) {
+    if (participant_count == 0U) {
+        LOG_LP(WARNING) << "participant_count must be >= 1";
         return {false, 0U};
     }
     std::uint64_t tpm_id = next_tpm_id_.fetch_add(1U);
@@ -130,16 +88,9 @@ tp_monitor_service_impl::create_result tp_monitor_service_impl::create_and_join_
         LOG_LP(FATAL) << "tpm_id overflow";
         std::abort();
     }
-
     auto state = std::make_shared<monitor_state>();
     state->tpm_id = tpm_id;
-    state->participant_count = default_participant_count;
-    {
-        std::lock_guard<std::mutex> lock(state->mtx);
-        state->participants.emplace(std::string(tx_id1), ts_id1);
-        state->participants.emplace(std::string(tx_id2), ts_id2);
-    }
-
+    state->participant_count = participant_count;
     {
         std::lock_guard<std::mutex> lock(mtx_);
         monitors_.emplace(tpm_id, state);

@@ -20,8 +20,6 @@ using disttx::grpc::proto::CreateRequest;
 using disttx::grpc::proto::CreateResponse;
 using disttx::grpc::proto::JoinRequest;
 using disttx::grpc::proto::JoinResponse;
-using disttx::grpc::proto::CreateAndJoinRequest;
-using disttx::grpc::proto::CreateAndJoinResponse;
 using disttx::grpc::proto::DestroyRequest;
 using disttx::grpc::proto::DestroyResponse;
 using disttx::grpc::proto::BarrierRequest;
@@ -44,10 +42,6 @@ public:
     ::grpc::Status Join(::grpc::ServerContext* context,
                         const JoinRequest* request,
                         JoinResponse* response) override;
-
-    ::grpc::Status CreateAndJoin(::grpc::ServerContext* context,
-                                 const CreateAndJoinRequest* request,
-                                 CreateAndJoinResponse* response) override;
 
     ::grpc::Status Destroy(::grpc::ServerContext* context,
                            const DestroyRequest* request,
@@ -77,11 +71,7 @@ private:
         bool destroyed{};
     };
 
-    create_result create_monitor();
-    create_result create_and_join_monitor(std::string_view tx_id1,
-                                          std::uint64_t ts_id1,
-                                          std::string_view tx_id2,
-                                          std::uint64_t ts_id2);
+    create_result create_monitor(std::uint32_t participant_count);
 
 protected:
     result join_monitor(std::uint64_t tpm_id, std::string_view tx_id, std::uint64_t ts_id);

@@ -150,7 +150,7 @@ TEST_F(tp_monitor_client_integration_test, client_talks_to_external_server) { //
     auto channel = ::grpc::CreateChannel(server_address, ::grpc::InsecureChannelCredentials());
     limestone::grpc::client::tp_monitor_client client(channel);
 
-    auto create_result = client.create();
+    auto create_result = client.create(2U);
     ASSERT_TRUE(create_result.ok);
     ASSERT_TRUE(create_result.tpm_id != 0U);
 

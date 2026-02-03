@@ -36,6 +36,7 @@ TEST_F(tp_monitor_service_impl_test, create_returns_tpm_id) { // NOLINT
     disttx::grpc::proto::CreateRequest request{};
     disttx::grpc::proto::CreateResponse response{};
     ::grpc::ServerContext context{};
+    request.set_participantcount(2U);
     auto status = service.Create(&context, &request, &response);
     EXPECT_TRUE(status.ok());
     EXPECT_TRUE(response.tpmid() != 0U);
@@ -46,6 +47,7 @@ TEST_F(tp_monitor_service_impl_test, join_duplicate_tx_id_is_ignored) { // NOLIN
     disttx::grpc::proto::CreateRequest create_request{};
     disttx::grpc::proto::CreateResponse create_response{};
     ::grpc::ServerContext create_context{};
+    create_request.set_participantcount(2U);
     auto create_status = service.Create(&create_context, &create_request, &create_response);
     ASSERT_TRUE(create_status.ok());
 
@@ -75,6 +77,7 @@ TEST_F(tp_monitor_service_impl_test, barrier_notify_requires_join) { // NOLINT
     disttx::grpc::proto::CreateRequest create_request{};
     disttx::grpc::proto::CreateResponse create_response{};
     ::grpc::ServerContext create_context{};
+    create_request.set_participantcount(2U);
     auto create_status = service.Create(&create_context, &create_request, &create_response);
     ASSERT_TRUE(create_status.ok());
 
@@ -127,41 +130,69 @@ TEST_F(tp_monitor_service_impl_test, barrier_notify_requires_join) { // NOLINT
     EXPECT_TRUE(first_notify_future.get().success());
 }
 
-TEST_F(tp_monitor_service_impl_test, create_and_join_registers_participants) { // NOLINT
+TEST_F(tp_monitor_service_impl_test, create_respects_participant_count) { // NOLINT
     limestone::grpc::service::tp_monitor_service_impl service{};
-    disttx::grpc::proto::CreateAndJoinRequest request{};
-    disttx::grpc::proto::CreateAndJoinResponse response{};
-    ::grpc::ServerContext context{};
-    request.set_txid1("tx-1");
-    request.set_tsid1(1U);
-    request.set_txid2("tx-2");
-    request.set_tsid2(2U);
-    auto status = service.CreateAndJoin(&context, &request, &response);
-    EXPECT_TRUE(status.ok());
-    ASSERT_TRUE(response.tpmid() != 0U);
+    disttx::grpc::proto::CreateRequest create_request{};
+    disttx::grpc::proto::CreateResponse create_response{};
+    ::grpc::ServerContext create_context{};
+    create_request.set_participantcount(3U);
+    auto create_status = service.Create(&create_context, &create_request, &create_response);
+    ASSERT_TRUE(create_status.ok());
 
-    auto first_notify_future = std::async(std::launch::async, [&service, &response]() {
-        disttx::grpc::proto::BarrierRequest barrier_request{};
-        disttx::grpc::proto::BarrierResponse barrier_response{};
-        ::grpc::ServerContext barrier_context{};
-        barrier_request.set_tpmid(response.tpmid());
-        barrier_request.set_txid("tx-1");
-        auto barrier_status = service.Barrier(&barrier_context,
-                                              &barrier_request,
-                                              &barrier_response);
-        EXPECT_TRUE(barrier_status.ok());
-        return barrier_response;
+    disttx::grpc::proto::JoinRequest join_request{};
+    disttx::grpc::proto::JoinResponse join_response{};
+    ::grpc::ServerContext join_context{};
+    join_request.set_tpmid(create_response.tpmid());
+    join_request.set_txid("tx-1");
+    join_request.set_tsid(1U);
+    auto join_status = service.Join(&join_context, &join_request, &join_response);
+    ASSERT_TRUE(join_status.ok());
+    ASSERT_TRUE(join_response.success());
+
+    join_request.set_txid("tx-2");
+    join_request.set_tsid(2U);
+    join_status = service.Join(&join_context, &join_request, &join_response);
+    ASSERT_TRUE(join_status.ok());
+    ASSERT_TRUE(join_response.success());
+
+    join_request.set_txid("tx-3");
+    join_request.set_tsid(3U);
+    join_status = service.Join(&join_context, &join_request, &join_response);
+    ASSERT_TRUE(join_status.ok());
+    ASSERT_TRUE(join_response.success());
+
+    auto first_notify_future = std::async(std::launch::async, [&service, &create_response]() {
+        disttx::grpc::proto::BarrierRequest request{};
+        disttx::grpc::proto::BarrierResponse response{};
+        ::grpc::ServerContext context{};
+        request.set_tpmid(create_response.tpmid());
+        request.set_txid("tx-1");
+        auto status = service.Barrier(&context, &request, &response);
+        EXPECT_TRUE(status.ok());
+        return response;
+    });
+
+    auto second_notify_future = std::async(std::launch::async, [&service, &create_response]() {
+        disttx::grpc::proto::BarrierRequest request{};
+        disttx::grpc::proto::BarrierResponse response{};
+        ::grpc::ServerContext context{};
+        request.set_tpmid(create_response.tpmid());
+        request.set_txid("tx-2");
+        auto status = service.Barrier(&context, &request, &response);
+        EXPECT_TRUE(status.ok());
+        return response;
     });
 
     disttx::grpc::proto::BarrierRequest notify_request{};
     disttx::grpc::proto::BarrierResponse notify_response{};
     ::grpc::ServerContext notify_context{};
-    notify_request.set_tpmid(response.tpmid());
-    notify_request.set_txid("tx-2");
+    notify_request.set_tpmid(create_response.tpmid());
+    notify_request.set_txid("tx-3");
     auto notify_status = service.Barrier(&notify_context, &notify_request, &notify_response);
     EXPECT_TRUE(notify_status.ok());
     EXPECT_TRUE(notify_response.success());
     EXPECT_TRUE(first_notify_future.get().success());
+    EXPECT_TRUE(second_notify_future.get().success());
 }
 
 TEST_F(tp_monitor_service_impl_test, destroy_removes_monitor_state) { // NOLINT
@@ -169,6 +200,7 @@ TEST_F(tp_monitor_service_impl_test, destroy_removes_monitor_state) { // NOLINT
     disttx::grpc::proto::CreateRequest create_request{};
     disttx::grpc::proto::CreateResponse create_response{};
     ::grpc::ServerContext create_context{};
+    create_request.set_participantcount(2U);
     auto create_status = service.Create(&create_context, &create_request, &create_response);
     ASSERT_TRUE(create_status.ok());
 
@@ -202,6 +234,7 @@ TEST_F(tp_monitor_service_impl_test, barrier_notify_monitor_requires_join) { // 
     disttx::grpc::proto::CreateRequest create_request{};
     disttx::grpc::proto::CreateResponse create_response{};
     ::grpc::ServerContext create_context{};
+    create_request.set_participantcount(2U);
     auto create_status = service.Create(&create_context, &create_request, &create_response);
     ASSERT_TRUE(create_status.ok());
 
@@ -226,6 +259,7 @@ TEST_F(tp_monitor_service_impl_test, destroy_monitor_removes_state) { // NOLINT
     disttx::grpc::proto::CreateRequest create_request{};
     disttx::grpc::proto::CreateResponse create_response{};
     ::grpc::ServerContext create_context{};
+    create_request.set_participantcount(2U);
     auto create_status = service.Create(&create_context, &create_request, &create_response);
     ASSERT_TRUE(create_status.ok());
 

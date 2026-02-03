@@ -13,9 +13,6 @@ service TpMonitorService {
     // Join an existing TP monitor as a participant
     rpc Join(JoinRequest) returns (JoinResponse);
 
-    // Create and join two participants at once (minimum implementation)
-    rpc CreateAndJoin(CreateAndJoinRequest) returns (CreateAndJoinResponse);
-
     // Destroy a TP monitor instance (optional, for cleanup)
     rpc Destroy(DestroyRequest) returns (DestroyResponse);
 
@@ -25,7 +22,7 @@ service TpMonitorService {
 
 // Request to create a TP monitor
 message CreateRequest {
-    // No parameters (participants fixed to 2 in current implementation)
+    uint32 participantCount = 1;
 }
 
 // Response for create
@@ -43,19 +40,6 @@ message JoinRequest {
 // Response for join
 message JoinResponse {
     bool success = 1;
-}
-
-// Request to create and join two participants at once
-message CreateAndJoinRequest {
-    string txId1 = 1;
-    uint64 tsId1 = 2;
-    string txId2 = 3;
-    uint64 tsId2 = 4;
-}
-
-// Response for create and join
-message CreateAndJoinResponse {
-    uint64 tpmId = 1;
 }
 
 // Request to destroy a TP monitor
