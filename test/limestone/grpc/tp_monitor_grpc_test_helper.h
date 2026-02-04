@@ -31,6 +31,10 @@ namespace limestone::grpc::testing {
 class tp_monitor_grpc_test_helper {
 public:
     /**
+     * @brief Destroys the helper and tears down the test server.
+     */
+    ~tp_monitor_grpc_test_helper() { tear_down(); }
+    /**
      * @brief Registers a service factory to be hosted by the test server.
      * @param factory Factory function returning a grpc::Service instance.
      */

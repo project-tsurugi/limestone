@@ -26,6 +26,8 @@
 #include <string>
 #include <sys/types.h>
 
+#include <grpcpp/grpcpp.h>
+
 #include "manifest.h"
 #include "replication/replica_connector.h"
 #include "replication/replication_endpoint.h"
@@ -107,6 +109,11 @@ public:
      */
     [[nodiscard]] int tp_monitor_port() const noexcept;
 
+    /**
+     * @brief Returns the cached TP monitor channel (may be null if disabled).
+     */
+    [[nodiscard]] std::shared_ptr<::grpc::Channel> tp_monitor_channel() const noexcept;
+
     [[nodiscard]] std::unique_ptr<replication::replica_connector> create_log_channel_connector(datastore &ds);
 
     // Getter for the datastore role (master or replica)
@@ -128,12 +135,18 @@ public:
     void set_migration_info(const manifest::migration_info& info) noexcept;
 
     /**
-     * @brief Enables or disables TP monitor for tests.
+     * @brief Enables or disables TP monitor for tests (does not modify cached channel/client state).
      * @param enabled True to enable, false to disable.
      * @param host TP monitor host to use when enabling (default: "127.0.0.1", ignored when disabling).
      * @param port TP monitor port to use when enabling (default: 0, ignored when disabling).
      */
     void set_tp_monitor_enabled_for_tests(bool enabled, std::string_view host = "127.0.0.1", int port = 0);
+
+    /**
+     * @brief Sets the TP monitor channel for tests (does not change enabled flag or endpoint values).
+     * @param channel Channel instance to use (may be null).
+     */
+    void set_tp_monitor_channel_for_tests(std::shared_ptr<::grpc::Channel> channel);
 
     /**
      * @brief gets the HMAC secret key for BLOB reference tag generation.
@@ -212,6 +225,7 @@ private:
     bool tp_monitor_enabled_{false};
     std::string tp_monitor_host_{};
     int tp_monitor_port_{0};
+    std::shared_ptr<::grpc::Channel> tp_monitor_channel_{};
 
     // Environment variable flags
     bool async_session_close_enabled_;

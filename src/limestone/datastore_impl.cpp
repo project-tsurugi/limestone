@@ -59,6 +59,10 @@ datastore_impl::datastore_impl()
         tp_monitor_enabled_ = true;
         tp_monitor_host_ = tp_monitor_endpoint.host();
         tp_monitor_port_ = tp_monitor_endpoint.port();
+        if (!tp_monitor_host_.empty() && tp_monitor_port_ > 0) {
+            std::string address = tp_monitor_host_ + ":" + std::to_string(tp_monitor_port_);
+            tp_monitor_channel_ = ::grpc::CreateChannel(address, ::grpc::InsecureChannelCredentials());
+        }
     } else {
         tp_monitor_enabled_ = false;
     }
@@ -242,6 +246,10 @@ int datastore_impl::tp_monitor_port() const noexcept {
     return tp_monitor_port_;
 }
 
+std::shared_ptr<::grpc::Channel> datastore_impl::tp_monitor_channel() const noexcept {
+    return tp_monitor_channel_;
+}
+
 // Getter for control_channel_
 std::shared_ptr<replica_connector> datastore_impl::get_control_channel() const noexcept {
     return control_channel_;
@@ -345,6 +353,10 @@ void datastore_impl::set_tp_monitor_enabled_for_tests(bool enabled, std::string_
         tp_monitor_host_.clear();
         tp_monitor_port_ = 0;
     }
+}
+
+void datastore_impl::set_tp_monitor_channel_for_tests(std::shared_ptr<::grpc::Channel> channel) {
+    tp_monitor_channel_ = std::move(channel);
 }
 
 void datastore_impl::generate_hmac_secret_key() {

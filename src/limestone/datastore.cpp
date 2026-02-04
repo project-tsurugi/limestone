@@ -47,6 +47,7 @@
 #include "manifest.h"
 #include "log_channel_impl.h"
 #include "dblog_scan.h"
+#include <grpc/client/tp_monitor_client.h>
 
 namespace {
 
@@ -494,6 +495,7 @@ void datastore::update_min_epoch_id(bool from_switch_epoch) {  // NOLINT(readabi
             if (to_be_epoch < epoch_id_to_be_recorded_.load()) {
                 break;
             }           
+            notify_tp_monitor_for_epoch(static_cast<epoch_id_type>(to_be_epoch));
             write_epoch_callback_(static_cast<epoch_id_type>(to_be_epoch));
             epoch_id_record_finished_.store(to_be_epoch);
             TRACE_FINE << "epoch_id_record_finished_ updated to " << to_be_epoch;
@@ -815,6 +817,54 @@ bool datastore::get_tpm_id_for_transaction(std::string_view tx_id, std::uint64_t
     }
     tpm_id = iter->second;
     return true;
+}
+
+void datastore::notify_tp_monitor_for_epoch(epoch_id_type epoch_id) {
+    if (!impl_->is_tp_monitor_enabled()) {
+        return;
+    }
+
+    std::vector<std::string> tx_ids{};
+    {
+        std::lock_guard<std::mutex> lock(mtx_epoch_txids_);
+        auto iter = epoch_to_txids_.find(epoch_id);
+        if (iter == epoch_to_txids_.end()) {
+            return;
+        }
+        // Move and erase are done under the same lock to avoid concurrent access issues.
+        tx_ids = std::move(iter->second);
+        epoch_to_txids_.erase(iter);
+    }
+
+    if (tx_ids.empty()) {
+        return;
+    }
+    // NOTE: This path is for the current validation scope: only one tx_id per epoch is supported.
+    // If multiple tx_ids are found, skip notification and only log a warning.
+    if (tx_ids.size() != 1U) {
+        LOG_LP(WARNING) << "TP monitor notify skipped: multiple tx_ids for epoch_id="
+                        << epoch_id << " count=" << tx_ids.size();
+        return;
+    }
+    const auto& tx_id = tx_ids.front();
+    std::uint64_t tpm_id = 0;
+    if (!get_tpm_id_for_transaction(tx_id, tpm_id)) {
+        LOG_LP(WARNING) << "tpm_id not found for tx_id=" << tx_id;
+        return;
+    }
+
+    auto channel = impl_->tp_monitor_channel();
+    if (!channel) {
+        LOG_LP(WARNING) << "TP monitor enabled but channel is not initialized; host="
+                        << impl_->tp_monitor_host() << " port=" << impl_->tp_monitor_port();
+        return;
+    }
+    limestone::grpc::client::tp_monitor_client client(channel);
+    auto result = client.barrier_notify(tpm_id, tx_id);
+    if (!result.ok) {
+        LOG_LP(WARNING) << "TP monitor barrier_notify failed: tpm_id=" << tpm_id
+                        << " tx_id=" << tx_id << " message=" << result.message;
+    }
 }
 
 void datastore::add_file(const boost::filesystem::path& file) noexcept {

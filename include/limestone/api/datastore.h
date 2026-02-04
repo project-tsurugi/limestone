@@ -541,6 +541,12 @@ private:
 
     bool get_tpm_id_for_transaction(std::string_view tx_id, std::uint64_t& tpm_id);
 
+    /**
+     * @brief Notifies the TP monitor about the specified epoch.
+     * @param epoch_id epoch identifier to notify the TP monitor about.
+     */
+    void notify_tp_monitor_for_epoch(epoch_id_type epoch_id);
+
     // opposite of add_file
     void subtract_file(const boost::filesystem::path& file);
 
