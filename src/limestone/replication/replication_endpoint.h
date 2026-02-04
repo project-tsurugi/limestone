@@ -27,7 +27,7 @@
      TCP,
  };
  
- /// Class to parse and manage the TSURUGI_REPLICATION_ENDPOINT environment variable.
+/// Class to parse and manage the replication endpoint environment variable.
  /// 
  /// This class supports endpoints specified either as a hostname or an IP address (IPv4 only),
  /// and pre-generates the resolved IP address and sockaddr_in structure in the constructor.
@@ -37,11 +37,15 @@
  /// Note: This implementation is IPv4-only. IPv6 addresses are not supported.
  class replication_endpoint {
  public:
-     /// Constructor: Retrieves, parses, and resolves the TSURUGI_REPLICATION_ENDPOINT environment variable.
+    /// Constructor: Retrieves, parses, and resolves the TSURUGI_REPLICATION_ENDPOINT environment variable.
      /// If the variable is defined and both parsing and name resolution succeed,
      /// the resolved IP and sockaddr_in are generated.
      /// Otherwise, default dummy values ("0.0.0.0" and port 0) remain.
-     replication_endpoint();
+    replication_endpoint();
+
+    /// Constructor: Retrieves, parses, and resolves the specified environment variable.
+    /// @param env_name Environment variable name to read. Must be non-null and non-empty.
+    explicit replication_endpoint(const char* env_name);
 
      /// Returns true if the environment variable is defined.
      [[nodiscard]] bool env_defined() const;
@@ -81,7 +85,13 @@
      /// 
      /// Note: Name resolution is performed using getaddrinfo(), which accepts both hostnames
      /// and numeric IPv4 addresses. This class does not support IPv6.
-     bool parse_endpoint(const std::string& endpoint_str);
+    bool parse_endpoint(const std::string& endpoint_str);
+
+    /**
+     * @brief Loads and parses an endpoint from the specified environment variable.
+     * @param env_name The environment variable name to read.
+     */
+    void load_from_env(const char* env_name);
  };
 
  }  // namespace limestone::replication

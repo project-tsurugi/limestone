@@ -24,14 +24,21 @@
 namespace limestone::replication {
 
 replication_endpoint::replication_endpoint() {
+    load_from_env("TSURUGI_REPLICATION_ENDPOINT");
+}
+
+replication_endpoint::replication_endpoint(const char* env_name) {
+    load_from_env(env_name);
+}
+
+void replication_endpoint::load_from_env(const char* env_name) {
     // Prepare default dummy sockaddr_in.
     std::memset(&sockaddr_, 0, sizeof(sockaddr_));
     sockaddr_.sin_family = AF_INET;
     sockaddr_.sin_port = 0;
     sockaddr_.sin_addr.s_addr = inet_addr("0.0.0.0");
 
-    // Retrieve the TSURUGI_REPLICATION_ENDPOINT environment variable.
-    const char* env_val = std::getenv("TSURUGI_REPLICATION_ENDPOINT");
+    const char* env_val = std::getenv(env_name);
     if (env_val) {
         env_defined_ = true;
         endpoint_is_valid_ = parse_endpoint(std::string(env_val));
@@ -94,8 +101,6 @@ bool replication_endpoint::parse_endpoint(const std::string &endpoint_str) {
     // so this branch should never be reached. However, we include it as a defensive
     // check to ensure that any unexpected invalid IP string is caught.
     return inet_pton(AF_INET, resolved_ip_.c_str(), &sockaddr_.sin_addr) == 1;
-
-    return true;
 }
 
 std::string replication_endpoint::get_ip_address() const {

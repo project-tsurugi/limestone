@@ -89,6 +89,24 @@ public:
      */
     [[nodiscard]] bool is_replication_configured() const noexcept;
 
+    /**
+     * @brief Checks if the TP monitor endpoint is configured and valid.
+     * @return true if TP monitor is enabled, false otherwise.
+     */
+    [[nodiscard]] bool is_tp_monitor_enabled() const noexcept;
+
+    /**
+     * @brief Returns TP monitor host.
+     * @return Host string; empty if TP monitor is disabled.
+     */
+    [[nodiscard]] const std::string& tp_monitor_host() const noexcept;
+
+    /**
+     * @brief Returns TP monitor port.
+     * @return Port number; 0 if TP monitor is disabled.
+     */
+    [[nodiscard]] int tp_monitor_port() const noexcept;
+
     [[nodiscard]] std::unique_ptr<replication::replica_connector> create_log_channel_connector(datastore &ds);
 
     // Getter for the datastore role (master or replica)
@@ -181,6 +199,11 @@ private:
 
     // Replication endpoint to retrieve connection info
     replication::replication_endpoint replication_endpoint_;
+
+    // TP monitor connection info (configured via TP_MONITOR_ENDPOINT)
+    bool tp_monitor_enabled_{false};
+    std::string tp_monitor_host_{};
+    int tp_monitor_port_{0};
 
     // Environment variable flags
     bool async_session_close_enabled_;

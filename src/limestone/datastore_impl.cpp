@@ -53,6 +53,18 @@ datastore_impl::datastore_impl()
     LOG_LP(INFO) << "REPLICATION_ASYNC_GROUP_COMMIT: "
                  << (async_group_commit_enabled_ ? "enabled" : "disabled");
 
+    // NOTE: TP_MONITOR_ENDPOINT uses the same format as replication_endpoint.
+    replication::replication_endpoint tp_monitor_endpoint{"TP_MONITOR_ENDPOINT"};
+    if (tp_monitor_endpoint.is_valid()) {
+        tp_monitor_enabled_ = true;
+        tp_monitor_host_ = tp_monitor_endpoint.host();
+        tp_monitor_port_ = tp_monitor_endpoint.port();
+    } else {
+        tp_monitor_enabled_ = false;
+    }
+    LOG_LP(INFO) << "TP_MONITOR_ENDPOINT: "
+                 << (tp_monitor_enabled_ ? "enabled" : "disabled");
+
     bool has_replica = replication_endpoint_.is_valid();
     replica_exists_.store(has_replica, std::memory_order_release);
     LOG_LP(INFO) << "Replica " << (has_replica ? "enabled" : "disabled")
@@ -216,6 +228,18 @@ void datastore_impl::wait_for_propagated_group_commit_ack() {
 
 bool datastore_impl::is_replication_configured() const noexcept {
     return replication_endpoint_.env_defined();
+}
+
+bool datastore_impl::is_tp_monitor_enabled() const noexcept {
+    return tp_monitor_enabled_;
+}
+
+const std::string& datastore_impl::tp_monitor_host() const noexcept {
+    return tp_monitor_host_;
+}
+
+int datastore_impl::tp_monitor_port() const noexcept {
+    return tp_monitor_port_;
 }
 
 // Getter for control_channel_

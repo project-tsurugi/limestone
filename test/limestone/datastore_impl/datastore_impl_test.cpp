@@ -21,6 +21,7 @@ protected:
     ~datastore_impl_test() override = default;
     void TearDown() override
     {
+        unsetenv("TP_MONITOR_ENDPOINT");
         unsetenv("TSURUGI_REPLICATION_ENDPOINT");
     }
 };
@@ -168,6 +169,36 @@ TEST_F(datastore_impl_test, propagate_group_commit_uses_sender_and_master_flag) 
     EXPECT_FALSE(datastore.propagate_group_commit(3));
 
     unsetenv("TSURUGI_REPLICATION_ENDPOINT");
+}
+
+TEST_F(datastore_impl_test, tp_monitor_endpoint_unset_disables_tp_monitor) {
+    unsetenv("TP_MONITOR_ENDPOINT");
+
+    datastore_impl datastore;
+
+    EXPECT_FALSE(datastore.is_tp_monitor_enabled());
+    EXPECT_TRUE(datastore.tp_monitor_host().empty());
+    EXPECT_EQ(datastore.tp_monitor_port(), 0);
+}
+
+TEST_F(datastore_impl_test, tp_monitor_endpoint_parsed) {
+    setenv("TP_MONITOR_ENDPOINT", "tcp://127.0.0.1:50051", 1);
+
+    datastore_impl datastore;
+
+    EXPECT_TRUE(datastore.is_tp_monitor_enabled());
+    EXPECT_EQ(datastore.tp_monitor_host(), "127.0.0.1");
+    EXPECT_EQ(datastore.tp_monitor_port(), 50051);
+}
+
+TEST_F(datastore_impl_test, tp_monitor_endpoint_invalid_disables_tp_monitor) {
+    setenv("TP_MONITOR_ENDPOINT", "invalid-endpoint", 1);
+
+    datastore_impl datastore;
+
+    EXPECT_FALSE(datastore.is_tp_monitor_enabled());
+    EXPECT_TRUE(datastore.tp_monitor_host().empty());
+    EXPECT_EQ(datastore.tp_monitor_port(), 0);
 }
 
 #ifdef ENABLE_ALTIMETER
