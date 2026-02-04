@@ -39,7 +39,16 @@ namespace limestone::testing {
 
 namespace {
 
-constexpr int tp_monitor_server_port = 39515;
+// Macro usage:
+// - USE_EXTERNAL_TP_MONITOR_SERVER: set to 1 to use an external gRPC server (no spawn/teardown in test).
+// - TP_MONITOR_SERVER_PORT: port number for the server (address is fixed to 127.0.0.1).
+#ifndef USE_EXTERNAL_TP_MONITOR_SERVER
+#define USE_EXTERNAL_TP_MONITOR_SERVER 0
+#endif
+#ifndef TP_MONITOR_SERVER_PORT
+#define TP_MONITOR_SERVER_PORT 50051
+#endif
+
 constexpr std::chrono::milliseconds server_ready_timeout{5000};
 
 std::string build_server_path() {
@@ -56,7 +65,7 @@ std::string build_server_path() {
 }
 
 std::string build_server_address() {
-    return "127.0.0.1:" + std::to_string(tp_monitor_server_port);
+    return "127.0.0.1:" + std::to_string(TP_MONITOR_SERVER_PORT);
 }
 
 bool wait_for_server_ready(const std::string& address) {
@@ -80,7 +89,7 @@ public:
         if (server_path.empty()) {
             return false;
         }
-        std::string port_arg = std::to_string(tp_monitor_server_port);
+        std::string port_arg = std::to_string(TP_MONITOR_SERVER_PORT);
         log_path_ = std::filesystem::temp_directory_path() / "tp_monitor_server_test.log";
         pid_ = ::fork();
         if (pid_ == 0) {
@@ -138,12 +147,16 @@ private:
 class tp_monitor_client_integration_test : public ::testing::Test {};
 
 TEST_F(tp_monitor_client_integration_test, client_talks_to_external_server) { // NOLINT
+#if !USE_EXTERNAL_TP_MONITOR_SERVER
     tp_monitor_server_process server{};
     ASSERT_TRUE(server.start());
+#endif
 
     auto server_address = build_server_address();
     if (!wait_for_server_ready(server_address)) {
+#if !USE_EXTERNAL_TP_MONITOR_SERVER
         server.dump_log();
+#endif
         FAIL() << "Server not ready";
     }
 
