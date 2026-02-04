@@ -22,6 +22,7 @@
 
 #include <boost/filesystem.hpp>
 
+#include <limestone/datastore_impl.h>
 #include <test_root.h>
 
 namespace limestone::testing {
@@ -56,6 +57,7 @@ protected:
         boost::filesystem::path metadata_location_path{metadata_location};
         limestone::api::configuration conf(data_locations, metadata_location_path);
         datastore_ = std::make_unique<limestone::api::datastore_test>(conf);
+        datastore_->get_impl()->set_tp_monitor_enabled_for_tests(true);
     }
 
     std::unique_ptr<limestone::api::datastore_test> datastore_{};

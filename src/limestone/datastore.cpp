@@ -417,6 +417,10 @@ log_channel& datastore::create_channel(const boost::filesystem::path& location) 
 
 void datastore::register_transaction_tpm_id(std::string_view tx_id, std::uint64_t tpm_id) {
     TRACE_START << "tx_id=" << std::string(tx_id) << ", tpm_id=" << tpm_id;
+    if (!impl_->is_tp_monitor_enabled()) {
+        TRACE_END << "tp_monitor disabled";
+        return;
+    }
     std::lock_guard<std::mutex> lock(mtx_txid_tpmid_);
     txid_to_tpmid_[std::string(tx_id)] = tpm_id;
     TRACE_END;

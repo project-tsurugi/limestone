@@ -91,7 +91,7 @@ void log_channel::begin_session() {
 
 void log_channel::begin_session(std::optional<std::string_view> tx_id) {
     TRACE_START << "tx_id=" << (tx_id ? std::string(*tx_id) : "(none)");
-    if (tx_id && ! tx_id->empty()) {
+    if (tx_id && ! tx_id->empty() && envelope_.get_impl()->is_tp_monitor_enabled()) {
         envelope_.register_transaction_for_epoch(
                 *tx_id,
                 static_cast<epoch_id_type>(envelope_.epoch_id_switched_.load()));

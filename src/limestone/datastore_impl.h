@@ -128,6 +128,14 @@ public:
     void set_migration_info(const manifest::migration_info& info) noexcept;
 
     /**
+     * @brief Enables or disables TP monitor for tests.
+     * @param enabled True to enable, false to disable.
+     * @param host TP monitor host to use when enabling (default: "127.0.0.1", ignored when disabling).
+     * @param port TP monitor port to use when enabling (default: 0, ignored when disabling).
+     */
+    void set_tp_monitor_enabled_for_tests(bool enabled, std::string_view host = "127.0.0.1", int port = 0);
+
+    /**
      * @brief gets the HMAC secret key for BLOB reference tag generation.
      * @return reference to the HMAC secret key.
      */

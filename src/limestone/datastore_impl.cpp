@@ -336,6 +336,17 @@ void datastore_impl::set_migration_info(const manifest::migration_info& info) no
     migration_info_ = info;
 }
 
+void datastore_impl::set_tp_monitor_enabled_for_tests(bool enabled, std::string_view host, int port) {
+    tp_monitor_enabled_ = enabled;
+    if (enabled) {
+        tp_monitor_host_ = host;
+        tp_monitor_port_ = port;
+    } else {
+        tp_monitor_host_.clear();
+        tp_monitor_port_ = 0;
+    }
+}
+
 void datastore_impl::generate_hmac_secret_key() {
     // Generate 16 random bytes using OpenSSL RAND_bytes()
     // TODO: Future improvement - throw exception instead of abort when public API allows it
