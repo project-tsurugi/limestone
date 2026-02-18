@@ -301,17 +301,54 @@ blob_id_type datastore::create_snapshot_and_get_max_blob_id_with_wal_started_log
 
 void datastore::persist_and_propagate_epoch_id(epoch_id_type epoch_id) {
     TRACE_START << "epoch_id=" << epoch_id;
-    if (impl_->is_async_group_commit_enabled()) {
-        bool sent = impl_->propagate_group_commit(epoch_id);
-        persist_epoch_id(epoch_id);
-        if (sent) {
-            impl_->wait_for_propagated_group_commit_ack();
+    auto do_group_commit = [this, epoch_id]() {
+        if (impl_->is_async_group_commit_enabled()) {
+            bool sent = impl_->propagate_group_commit(epoch_id);
+            persist_epoch_id(epoch_id);
+            if (sent) {
+                impl_->wait_for_propagated_group_commit_ack();
+            }
+        } else {
+            persist_epoch_id(epoch_id);
+            bool sent = impl_->propagate_group_commit(epoch_id);
+            if (sent) {
+                impl_->wait_for_propagated_group_commit_ack();
+            }
         }
-    } else {
-        persist_epoch_id(epoch_id);
-        bool sent = impl_->propagate_group_commit(epoch_id);
-        if (sent) {
-            impl_->wait_for_propagated_group_commit_ack();
+    };
+
+    switch (impl_->get_tp_monitor_notify_timing()) {
+        case tp_monitor_notify_timing::before:
+            notify_tp_monitor_for_epoch(epoch_id);
+            do_group_commit();
+            LOG_LP(INFO) << "Group commit completed for epoch_id=" << epoch_id;
+            break;
+        case tp_monitor_notify_timing::after:
+            do_group_commit();
+            LOG_LP(INFO) << "Group commit completed for epoch_id=" << epoch_id;
+            notify_tp_monitor_for_epoch(epoch_id);
+            break;
+        case tp_monitor_notify_timing::parallel: {
+            std::promise<void> notify_done;
+            auto notify_future = notify_done.get_future();
+            impl_->post_tp_monitor_task([this, epoch_id, p = std::move(notify_done)]() mutable {
+                try {
+                    notify_tp_monitor_for_epoch(epoch_id);
+                    p.set_value();
+                } catch (const std::exception& e) {
+                    LOG_LP(ERROR) << "TP monitor notify failed in parallel mode for epoch_id=" << epoch_id
+                                  << " error=" << e.what();
+                    p.set_exception(std::current_exception());
+                } catch (...) {
+                    LOG_LP(ERROR) << "TP monitor notify failed in parallel mode for epoch_id=" << epoch_id
+                                  << " error=unknown exception";
+                    p.set_exception(std::current_exception());
+                }
+            });
+            do_group_commit();
+            LOG_LP(INFO) << "Group commit completed for epoch_id=" << epoch_id;
+            notify_future.get();
+            break;
         }
     }
     TRACE_END;
@@ -495,7 +532,6 @@ void datastore::update_min_epoch_id(bool from_switch_epoch) {  // NOLINT(readabi
             if (to_be_epoch < epoch_id_to_be_recorded_.load()) {
                 break;
             }           
-            notify_tp_monitor_for_epoch(static_cast<epoch_id_type>(to_be_epoch));
             write_epoch_callback_(static_cast<epoch_id_type>(to_be_epoch));
             epoch_id_record_finished_.store(to_be_epoch);
             TRACE_FINE << "epoch_id_record_finished_ updated to " << to_be_epoch;

@@ -19,11 +19,14 @@
 #include <optional>
 #include <string>
 #include <vector>
+#include <thread>
+#include <chrono>
 
 #include <boost/filesystem.hpp>
 
 #include <limestone/datastore_impl.h>
 #include <test_root.h>
+#include "internal.h"
 #include <limestone/grpc/tp_monitor_grpc_test_helper.h>
 #include <tp_monitor.grpc.pb.h>
 
@@ -90,6 +93,47 @@ public:
 private:
     std::shared_ptr<std::atomic<int>> count_{};
 };
+
+/**
+ * @brief Test implementation that captures durable epoch at Barrier call time.
+ */
+class tp_monitor_epoch_recording_service : public disttx::grpc::proto::TpMonitorService::Service {
+public:
+    tp_monitor_epoch_recording_service(std::shared_ptr<std::atomic<int>> count,
+                                       std::shared_ptr<std::atomic<long long>> epoch_at_notify,
+                                       boost::filesystem::path epoch_file_path)
+        : count_(std::move(count))
+        , epoch_at_notify_(std::move(epoch_at_notify))
+        , epoch_file_path_(std::move(epoch_file_path)) {}
+
+    ::grpc::Status Barrier(::grpc::ServerContext*,
+                           const disttx::grpc::proto::BarrierRequest*,
+                           disttx::grpc::proto::BarrierResponse* response) override {
+        auto epoch = limestone::internal::last_durable_epoch(epoch_file_path_);
+        long long value = epoch.has_value() ? static_cast<long long>(epoch.value()) : -1;
+        epoch_at_notify_->store(value, std::memory_order_release);
+        count_->fetch_add(1, std::memory_order_acq_rel);
+        response->set_success(true);
+        return ::grpc::Status::OK;
+    }
+
+private:
+    std::shared_ptr<std::atomic<int>> count_{};
+    std::shared_ptr<std::atomic<long long>> epoch_at_notify_{};
+    boost::filesystem::path epoch_file_path_{};
+};
+
+bool wait_for_notify_count(const std::atomic<int>& count, int expected,
+                           std::chrono::milliseconds timeout = std::chrono::milliseconds(3000)) {
+    auto start = std::chrono::steady_clock::now();
+    while (std::chrono::steady_clock::now() - start < timeout) {
+        if (count.load(std::memory_order_acquire) >= expected) {
+            return true;
+        }
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
+    return false;
+}
 } // namespace
 
 TEST_F(tp_monitor_test, register_transaction_tpm_id_stores_mapping) { // NOLINT
@@ -167,6 +211,106 @@ TEST_F(tp_monitor_test, notify_tp_monitor_on_epoch_commit) { // NOLINT
     datastore_->switch_epoch(2);
 
     EXPECT_EQ(notify_count->load(std::memory_order_acquire), 1);
+}
+
+TEST_F(tp_monitor_test, notify_timing_before_uses_pre_commit_epoch) { // NOLINT
+    setenv("TP_MONITOR_NOTIFY_TIMING", "before", 1);
+    limestone::grpc::testing::tp_monitor_grpc_test_helper helper{};
+    auto notify_count = std::make_shared<std::atomic<int>>(0);
+    auto epoch_at_notify = std::make_shared<std::atomic<long long>>(-1);
+    boost::filesystem::path epoch_file =
+        boost::filesystem::path(data_location) / std::string(limestone::internal::epoch_file_name);
+    helper.add_service_factory([notify_count, epoch_at_notify, epoch_file]() {
+        return std::make_unique<tp_monitor_epoch_recording_service>(
+            notify_count, epoch_at_notify, epoch_file);
+    });
+    helper.start_server();
+
+    prepare_datastore();
+    auto* impl = datastore_->get_impl();
+    impl->set_tp_monitor_enabled_for_tests(true);
+    impl->set_tp_monitor_channel_for_tests(helper.create_channel());
+
+    auto& channel = datastore_->create_channel();
+    datastore_->ready();
+    datastore_->switch_epoch(1);
+
+    std::string tx_id = "tx-1";
+    datastore_->register_transaction_tpm_id(tx_id, 11);
+    channel.begin_session(std::optional<std::string_view>(tx_id));
+    channel.end_session();
+    datastore_->switch_epoch(2);
+
+    EXPECT_TRUE(wait_for_notify_count(*notify_count, 1));
+    EXPECT_LT(epoch_at_notify->load(std::memory_order_acquire), 1);
+    unsetenv("TP_MONITOR_NOTIFY_TIMING");
+}
+
+TEST_F(tp_monitor_test, notify_timing_after_uses_post_commit_epoch) { // NOLINT
+    setenv("TP_MONITOR_NOTIFY_TIMING", "after", 1);
+    limestone::grpc::testing::tp_monitor_grpc_test_helper helper{};
+    auto notify_count = std::make_shared<std::atomic<int>>(0);
+    auto epoch_at_notify = std::make_shared<std::atomic<long long>>(-1);
+    boost::filesystem::path epoch_file =
+        boost::filesystem::path(data_location) / std::string(limestone::internal::epoch_file_name);
+    helper.add_service_factory([notify_count, epoch_at_notify, epoch_file]() {
+        return std::make_unique<tp_monitor_epoch_recording_service>(
+            notify_count, epoch_at_notify, epoch_file);
+    });
+    helper.start_server();
+
+    prepare_datastore();
+    auto* impl = datastore_->get_impl();
+    impl->set_tp_monitor_enabled_for_tests(true);
+    impl->set_tp_monitor_channel_for_tests(helper.create_channel());
+
+    auto& channel = datastore_->create_channel();
+    datastore_->ready();
+    datastore_->switch_epoch(1);
+
+    std::string tx_id = "tx-1";
+    datastore_->register_transaction_tpm_id(tx_id, 11);
+    channel.begin_session(std::optional<std::string_view>(tx_id));
+    channel.end_session();
+    datastore_->switch_epoch(2);
+
+    EXPECT_TRUE(wait_for_notify_count(*notify_count, 1));
+    EXPECT_EQ(epoch_at_notify->load(std::memory_order_acquire), 1);
+    unsetenv("TP_MONITOR_NOTIFY_TIMING");
+}
+
+TEST_F(tp_monitor_test, notify_timing_parallel_allows_either_order) { // NOLINT
+    setenv("TP_MONITOR_NOTIFY_TIMING", "parallel", 1);
+    limestone::grpc::testing::tp_monitor_grpc_test_helper helper{};
+    auto notify_count = std::make_shared<std::atomic<int>>(0);
+    auto epoch_at_notify = std::make_shared<std::atomic<long long>>(-1);
+    boost::filesystem::path epoch_file =
+        boost::filesystem::path(data_location) / std::string(limestone::internal::epoch_file_name);
+    helper.add_service_factory([notify_count, epoch_at_notify, epoch_file]() {
+        return std::make_unique<tp_monitor_epoch_recording_service>(
+            notify_count, epoch_at_notify, epoch_file);
+    });
+    helper.start_server();
+
+    prepare_datastore();
+    auto* impl = datastore_->get_impl();
+    impl->set_tp_monitor_enabled_for_tests(true);
+    impl->set_tp_monitor_channel_for_tests(helper.create_channel());
+
+    auto& channel = datastore_->create_channel();
+    datastore_->ready();
+    datastore_->switch_epoch(1);
+
+    std::string tx_id = "tx-1";
+    datastore_->register_transaction_tpm_id(tx_id, 11);
+    channel.begin_session(std::optional<std::string_view>(tx_id));
+    channel.end_session();
+    datastore_->switch_epoch(2);
+
+    EXPECT_TRUE(wait_for_notify_count(*notify_count, 1));
+    auto value = epoch_at_notify->load(std::memory_order_acquire);
+    EXPECT_TRUE(value == 0 || value == 1 || value == -1);
+    unsetenv("TP_MONITOR_NOTIFY_TIMING");
 }
 
 } // namespace limestone::testing

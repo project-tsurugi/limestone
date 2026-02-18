@@ -13,7 +13,7 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-#include <datastore_impl.h>
+#include "datastore_impl.h"
 #include <limestone/logging.h>
 #include <logging_helper.h>
 #include <cstdlib>
@@ -21,6 +21,8 @@
 #include <cstring>
 #include <stdexcept>
 #include <string>
+#include <algorithm>
+#include <cctype>
 #include <openssl/hmac.h>
 #include <openssl/rand.h>
 #include <openssl/evp.h>
@@ -37,8 +39,32 @@
 #include <replication/message_log_channel_create.h>
 #include <replication/message_group_commit.h>
 #include <manifest.h>
+#include <boost/asio/post.hpp>
 
 namespace limestone::api {
+
+namespace {
+
+std::string to_lower_copy(std::string input) {
+    std::transform(input.begin(), input.end(), input.begin(),
+        [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+    return input;
+}
+
+const char* tp_monitor_notify_timing_to_string(tp_monitor_notify_timing timing) {
+    switch (timing) {
+        case tp_monitor_notify_timing::before:
+            return "before";
+        case tp_monitor_notify_timing::after:
+            return "after";
+        case tp_monitor_notify_timing::parallel:
+            return "parallel";
+        default:
+            return "before";
+    }
+}
+
+}  // namespace
 
 // Default constructor initializes the backup counter to zero.
 datastore_impl::datastore_impl()
@@ -52,6 +78,26 @@ datastore_impl::datastore_impl()
                  << (async_session_close_enabled_ ? "enabled" : "disabled");
     LOG_LP(INFO) << "REPLICATION_ASYNC_GROUP_COMMIT: "
                  << (async_group_commit_enabled_ ? "enabled" : "disabled");
+
+    const char* tp_notify_env_name = "TP_MONITOR_NOTIFY_TIMING";
+    const char* tp_notify_env = std::getenv(tp_notify_env_name);
+    if (tp_notify_env != nullptr) {
+        std::string value = to_lower_copy(tp_notify_env);
+        if (value == "before") {
+            tp_monitor_notify_timing_ = tp_monitor_notify_timing::before;
+        } else if (value == "after") {
+            tp_monitor_notify_timing_ = tp_monitor_notify_timing::after;
+        } else if (value == "parallel") {
+            tp_monitor_notify_timing_ = tp_monitor_notify_timing::parallel;
+        } else {
+            LOG_LP(WARNING) << tp_notify_env_name << ": invalid value '" << tp_notify_env
+                            << "', fallback to 'before'";
+        }
+        LOG_LP(INFO) << tp_notify_env_name << ": " << tp_monitor_notify_timing_to_string(tp_monitor_notify_timing_);
+    } else {
+        LOG_LP(INFO) << tp_notify_env_name << ": " << tp_monitor_notify_timing_to_string(tp_monitor_notify_timing_)
+                     << " (env not set)";
+    }
 
     // NOTE: TP_MONITOR_ENDPOINT uses the same format as replication_endpoint.
     replication::replication_endpoint tp_monitor_endpoint{"TP_MONITOR_ENDPOINT"};
@@ -306,6 +352,10 @@ bool datastore_impl::is_async_session_close_enabled() const noexcept {
 
 bool datastore_impl::is_async_group_commit_enabled() const noexcept {
     return async_group_commit_enabled_;
+}
+
+tp_monitor_notify_timing datastore_impl::get_tp_monitor_notify_timing() const noexcept {
+    return tp_monitor_notify_timing_;
 }
 
 void datastore_impl::set_group_commit_sender_for_tests(std::function<bool(uint64_t)> const& sender) {

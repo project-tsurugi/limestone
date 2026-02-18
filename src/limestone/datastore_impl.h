@@ -25,8 +25,11 @@
 #include <functional>
 #include <string>
 #include <sys/types.h>
+#include <utility>
 
 #include <grpcpp/grpcpp.h>
+#include <boost/asio/thread_pool.hpp>
+#include <boost/asio/post.hpp>
 
 #include "manifest.h"
 #include "replication/replica_connector.h"
@@ -36,6 +39,12 @@ namespace limestone::api {
 
 using limestone::internal::manifest;
 using namespace limestone::replication;    
+
+enum class tp_monitor_notify_timing {
+    before,
+    after,
+    parallel
+};
 
 // Internal implementation class for datastore (Pimpl idiom).
 // This header is for internal use only.
@@ -127,6 +136,15 @@ public:
 
     // Getter for REPLICATION_ASYNC_GROUP_COMMIT environment variable presence
     [[nodiscard]] bool is_async_group_commit_enabled() const noexcept;
+
+    // Getter for TP_MONITOR_NOTIFY_TIMING
+    [[nodiscard]] tp_monitor_notify_timing get_tp_monitor_notify_timing() const noexcept;
+
+    // Posts a task to the TP monitor thread pool.
+    template <class F>
+    void post_tp_monitor_task(F&& task) {
+        boost::asio::post(tp_monitor_thread_pool_, std::forward<F>(task));
+    }
 
     // Getter for migration_info_
     [[nodiscard]] const std::optional<manifest::migration_info>& get_migration_info() const noexcept;
@@ -230,6 +248,10 @@ private:
     // Environment variable flags
     bool async_session_close_enabled_;
     bool async_group_commit_enabled_;
+    tp_monitor_notify_timing tp_monitor_notify_timing_{tp_monitor_notify_timing::before};
+
+    // Thread pool for TP monitor notifications
+    boost::asio::thread_pool tp_monitor_thread_pool_{1};
   
     // Migration info for the manifest
     std::optional<manifest::migration_info> migration_info_;
