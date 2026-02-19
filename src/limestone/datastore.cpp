@@ -20,6 +20,7 @@
 #include <iomanip>
 #include <stdexcept>
 #include <future>
+#include <utility>
 
 #include <boost/filesystem/fstream.hpp>
 
@@ -59,6 +60,29 @@ enum class file_write_mode {
     append,
     overwrite
 };
+
+const char* tp_monitor_notify_result_to_string(tp_monitor_notify_result result) {
+    switch (result) {
+        case tp_monitor_notify_result::disabled:
+            return "disabled";
+        case tp_monitor_notify_result::no_epoch_entry:
+            return "no_epoch_entry";
+        case tp_monitor_notify_result::no_tx_ids:
+            return "no_tx_ids";
+        case tp_monitor_notify_result::multiple_tx_ids:
+            return "multiple_tx_ids";
+        case tp_monitor_notify_result::tpm_id_not_found:
+            return "tpm_id_not_found";
+        case tp_monitor_notify_result::channel_not_initialized:
+            return "channel_not_initialized";
+        case tp_monitor_notify_result::rpc_failed:
+            return "rpc_failed";
+        case tp_monitor_notify_result::success:
+            return "success";
+        default:
+            return "unknown";
+    }
+}
 
 void write_epoch_to_file_internal(const std::string& file_path, epoch_id_type epoch_id, file_write_mode mode) {
     const char* fopen_mode = (mode == file_write_mode::append) ? "a" : "w";
@@ -306,6 +330,7 @@ void datastore::persist_and_propagate_epoch_id(epoch_id_type epoch_id) {
     std::int64_t group_commit_us = -1;
     std::int64_t tp_notify_us = -1;
     const char* tp_notify_timing = "before";
+    tp_monitor_notify_result tp_notify_result = tp_monitor_notify_result::disabled;
 
     auto do_group_commit = [this, epoch_id]() {
         if (impl_->is_async_group_commit_enabled()) {
@@ -327,7 +352,7 @@ void datastore::persist_and_propagate_epoch_id(epoch_id_type epoch_id) {
         case tp_monitor_notify_timing::before: {
             tp_notify_timing = "before";
             auto notify_begin = clock_type::now();
-            notify_tp_monitor_for_epoch(epoch_id);
+            tp_notify_result = notify_tp_monitor_for_epoch(epoch_id);
             tp_notify_us = std::chrono::duration_cast<std::chrono::microseconds>(
                                clock_type::now() - notify_begin)
                                .count();
@@ -346,7 +371,7 @@ void datastore::persist_and_propagate_epoch_id(epoch_id_type epoch_id) {
                                   clock_type::now() - group_commit_begin)
                                   .count();
             auto notify_begin = clock_type::now();
-            notify_tp_monitor_for_epoch(epoch_id);
+            tp_notify_result = notify_tp_monitor_for_epoch(epoch_id);
             tp_notify_us = std::chrono::duration_cast<std::chrono::microseconds>(
                                clock_type::now() - notify_begin)
                                .count();
@@ -354,16 +379,16 @@ void datastore::persist_and_propagate_epoch_id(epoch_id_type epoch_id) {
         }
         case tp_monitor_notify_timing::parallel: {
             tp_notify_timing = "parallel";
-            std::promise<std::int64_t> notify_done;
+            std::promise<std::pair<std::int64_t, tp_monitor_notify_result>> notify_done;
             auto notify_future = notify_done.get_future();
             impl_->post_tp_monitor_task([this, epoch_id, p = std::move(notify_done)]() mutable {
                 try {
                     auto notify_begin = clock_type::now();
-                    notify_tp_monitor_for_epoch(epoch_id);
+                    auto notify_result = notify_tp_monitor_for_epoch(epoch_id);
                     auto elapsed_us = std::chrono::duration_cast<std::chrono::microseconds>(
                                           clock_type::now() - notify_begin)
                                           .count();
-                    p.set_value(elapsed_us);
+                    p.set_value({elapsed_us, notify_result});
                 } catch (const std::exception& e) {
                     LOG_LP(ERROR) << "TP monitor notify failed in parallel mode for epoch_id=" << epoch_id
                                   << " error=" << e.what();
@@ -379,14 +404,17 @@ void datastore::persist_and_propagate_epoch_id(epoch_id_type epoch_id) {
             group_commit_us = std::chrono::duration_cast<std::chrono::microseconds>(
                                   clock_type::now() - group_commit_begin)
                                   .count();
-            tp_notify_us = notify_future.get();
+            auto notify_metrics = notify_future.get();
+            tp_notify_us = notify_metrics.first;
+            tp_notify_result = notify_metrics.second;
             break;
         }
     }
     LOG_LP(INFO) << "Group commit completed for epoch_id=" << epoch_id
                  << " tp_notify_timing=" << tp_notify_timing
                  << " group_commit_us=" << group_commit_us
-                 << " tp_notify_us=" << tp_notify_us;
+                 << " tp_notify_us=" << tp_notify_us
+                 << " tp_notify_result=" << tp_monitor_notify_result_to_string(tp_notify_result);
     TRACE_END;
 }
 
@@ -891,9 +919,9 @@ bool datastore::get_tpm_id_for_transaction(std::string_view tx_id, std::uint64_t
     return true;
 }
 
-void datastore::notify_tp_monitor_for_epoch(epoch_id_type epoch_id) {
+tp_monitor_notify_result datastore::notify_tp_monitor_for_epoch(epoch_id_type epoch_id) {
     if (!impl_->is_tp_monitor_enabled()) {
-        return;
+        return tp_monitor_notify_result::disabled;
     }
 
     std::vector<std::string> tx_ids{};
@@ -901,7 +929,7 @@ void datastore::notify_tp_monitor_for_epoch(epoch_id_type epoch_id) {
         std::lock_guard<std::mutex> lock(mtx_epoch_txids_);
         auto iter = epoch_to_txids_.find(epoch_id);
         if (iter == epoch_to_txids_.end()) {
-            return;
+            return tp_monitor_notify_result::no_epoch_entry;
         }
         // Move and erase are done under the same lock to avoid concurrent access issues.
         tx_ids = std::move(iter->second);
@@ -909,34 +937,36 @@ void datastore::notify_tp_monitor_for_epoch(epoch_id_type epoch_id) {
     }
 
     if (tx_ids.empty()) {
-        return;
+        return tp_monitor_notify_result::no_tx_ids;
     }
     // NOTE: This path is for the current validation scope: only one tx_id per epoch is supported.
     // If multiple tx_ids are found, skip notification and only log a warning.
     if (tx_ids.size() != 1U) {
         LOG_LP(WARNING) << "TP monitor notify skipped: multiple tx_ids for epoch_id="
                         << epoch_id << " count=" << tx_ids.size();
-        return;
+        return tp_monitor_notify_result::multiple_tx_ids;
     }
     const auto& tx_id = tx_ids.front();
     std::uint64_t tpm_id = 0;
     if (!get_tpm_id_for_transaction(tx_id, tpm_id)) {
         LOG_LP(WARNING) << "tpm_id not found for tx_id=" << tx_id;
-        return;
+        return tp_monitor_notify_result::tpm_id_not_found;
     }
 
     auto channel = impl_->tp_monitor_channel();
     if (!channel) {
         LOG_LP(WARNING) << "TP monitor enabled but channel is not initialized; host="
                         << impl_->tp_monitor_host() << " port=" << impl_->tp_monitor_port();
-        return;
+        return tp_monitor_notify_result::channel_not_initialized;
     }
     limestone::grpc::client::tp_monitor_client client(channel);
     auto result = client.barrier_notify(tpm_id, tx_id);
     if (!result.ok) {
         LOG_LP(WARNING) << "TP monitor barrier_notify failed: tpm_id=" << tpm_id
                         << " tx_id=" << tx_id << " message=" << result.message;
+        return tp_monitor_notify_result::rpc_failed;
     }
+    return tp_monitor_notify_result::success;
 }
 
 void datastore::add_file(const boost::filesystem::path& file) noexcept {

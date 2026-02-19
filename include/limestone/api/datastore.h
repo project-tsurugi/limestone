@@ -55,6 +55,17 @@ class datastore_impl;
 class backup;
 class log_channel;
 
+enum class tp_monitor_notify_result {
+    disabled,
+    no_epoch_entry,
+    no_tx_ids,
+    multiple_tx_ids,
+    tpm_id_not_found,
+    channel_not_initialized,
+    rpc_failed,
+    success
+};
+
 /*
  * @brief datastore interface to start/stop the services, store log, create snapshot for recover from log files
  * @details this object is not thread-safe except for create_channel().
@@ -545,7 +556,7 @@ private:
      * @brief Notifies the TP monitor about the specified epoch.
      * @param epoch_id epoch identifier to notify the TP monitor about.
      */
-    void notify_tp_monitor_for_epoch(epoch_id_type epoch_id);
+    tp_monitor_notify_result notify_tp_monitor_for_epoch(epoch_id_type epoch_id);
 
     // opposite of add_file
     void subtract_file(const boost::filesystem::path& file);
