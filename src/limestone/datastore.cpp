@@ -20,6 +20,7 @@
 #include <iomanip>
 #include <stdexcept>
 #include <future>
+#include <iterator>
 #include <utility>
 
 #include <boost/filesystem/fstream.hpp>
@@ -925,13 +926,21 @@ tp_monitor_notify_result datastore::notify_tp_monitor_for_epoch(epoch_id_type ep
     std::vector<std::string> tx_ids{};
     {
         std::lock_guard<std::mutex> lock(mtx_epoch_txids_);
-        auto iter = epoch_to_txids_.find(epoch_id);
-        if (iter == epoch_to_txids_.end()) {
+        // Collect all epochs <= epoch_id as notification targets:
+        // [begin(), upper_bound(epoch_id)) covers every key not greater than epoch_id.
+        auto end = epoch_to_txids_.upper_bound(epoch_id);
+        if (end == epoch_to_txids_.begin()) {
             return tp_monitor_notify_result::no_epoch_entry;
         }
         // Move and erase are done under the same lock to avoid concurrent access issues.
-        tx_ids = std::move(iter->second);
-        epoch_to_txids_.erase(iter);
+        for (auto iter = epoch_to_txids_.begin(); iter != end; ++iter) {
+            auto& epoch_tx_ids = iter->second;
+            tx_ids.insert(
+                tx_ids.end(),
+                std::make_move_iterator(epoch_tx_ids.begin()),
+                std::make_move_iterator(epoch_tx_ids.end()));
+        }
+        epoch_to_txids_.erase(epoch_to_txids_.begin(), end);
     }
 
     if (tx_ids.empty()) {

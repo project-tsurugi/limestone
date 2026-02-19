@@ -244,6 +244,27 @@ TEST_F(tp_monitor_test, notify_tp_monitor_on_epoch_commit_multiple_tx_ids) { // 
     EXPECT_EQ(notify_count->load(std::memory_order_acquire), 2);
 }
 
+TEST_F(tp_monitor_test, notify_tp_monitor_on_higher_epoch_commit_drains_lower_epoch_entries) { // NOLINT
+    prepare_datastore();
+    auto* impl = datastore_->get_impl();
+    impl->set_tp_monitor_enabled_for_tests(true);
+    impl->set_tp_monitor_channel_for_tests({});
+
+    std::string tx_id1 = "tx-1";
+    std::string tx_id2 = "tx-2";
+    datastore_->register_transaction_tpm_id(tx_id1, 11);
+    datastore_->register_transaction_tpm_id(tx_id2, 12);
+    auto& epoch_to_txids = const_cast<std::map<limestone::api::epoch_id_type, std::vector<std::string>>&>(
+        datastore_->epoch_to_txids());
+    epoch_to_txids[1].emplace_back(tx_id1);
+    epoch_to_txids[2].emplace_back(tx_id2);
+
+    datastore_->persist_and_propagate_epoch_id(3);
+
+    // Even when notify channel is unavailable, <= epoch entries should be drained.
+    EXPECT_TRUE(datastore_->epoch_to_txids().empty());
+}
+
 TEST_F(tp_monitor_test, notify_timing_before_uses_pre_commit_epoch) { // NOLINT
     setenv("TP_MONITOR_NOTIFY_TIMING", "before", 1);
     limestone::grpc::testing::tp_monitor_grpc_test_helper helper{};
