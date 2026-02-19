@@ -59,7 +59,6 @@ enum class tp_monitor_notify_result {
     disabled,
     no_epoch_entry,
     no_tx_ids,
-    multiple_tx_ids,
     tpm_id_not_found,
     channel_not_initialized,
     rpc_failed,

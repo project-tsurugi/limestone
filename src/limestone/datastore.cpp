@@ -69,8 +69,6 @@ const char* tp_monitor_notify_result_to_string(tp_monitor_notify_result result) 
             return "no_epoch_entry";
         case tp_monitor_notify_result::no_tx_ids:
             return "no_tx_ids";
-        case tp_monitor_notify_result::multiple_tx_ids:
-            return "multiple_tx_ids";
         case tp_monitor_notify_result::tpm_id_not_found:
             return "tpm_id_not_found";
         case tp_monitor_notify_result::channel_not_initialized:
@@ -939,31 +937,50 @@ tp_monitor_notify_result datastore::notify_tp_monitor_for_epoch(epoch_id_type ep
     if (tx_ids.empty()) {
         return tp_monitor_notify_result::no_tx_ids;
     }
-    // NOTE: This path is for the current validation scope: only one tx_id per epoch is supported.
-    // If multiple tx_ids are found, skip notification and only log a warning.
-    if (tx_ids.size() != 1U) {
-        LOG_LP(WARNING) << "TP monitor notify skipped: multiple tx_ids for epoch_id="
-                        << epoch_id << " count=" << tx_ids.size();
-        return tp_monitor_notify_result::multiple_tx_ids;
-    }
-    const auto& tx_id = tx_ids.front();
-    std::uint64_t tpm_id = 0;
-    if (!get_tpm_id_for_transaction(tx_id, tpm_id)) {
-        LOG_LP(WARNING) << "tpm_id not found for tx_id=" << tx_id;
-        return tp_monitor_notify_result::tpm_id_not_found;
-    }
-
     auto channel = impl_->tp_monitor_channel();
     if (!channel) {
         LOG_LP(WARNING) << "TP monitor enabled but channel is not initialized; host="
                         << impl_->tp_monitor_host() << " port=" << impl_->tp_monitor_port();
         return tp_monitor_notify_result::channel_not_initialized;
     }
+
+    if (tx_ids.size() > 1U) {
+        LOG_LP(INFO) << "TP monitor notify processing multiple tx_ids for epoch_id="
+                     << epoch_id << " count=" << tx_ids.size();
+    }
+
     limestone::grpc::client::tp_monitor_client client(channel);
-    auto result = client.barrier_notify(tpm_id, tx_id);
-    if (!result.ok) {
-        LOG_LP(WARNING) << "TP monitor barrier_notify failed: tpm_id=" << tpm_id
-                        << " tx_id=" << tx_id << " message=" << result.message;
+    std::size_t success_count = 0;
+    std::size_t failed_count = 0;
+    std::size_t missing_tpm_id_count = 0;
+    std::size_t rpc_failed_count = 0;
+    for (const auto& tx_id : tx_ids) {
+        std::uint64_t tpm_id = 0;
+        if (!get_tpm_id_for_transaction(tx_id, tpm_id)) {
+            LOG_LP(WARNING) << "tpm_id not found for tx_id=" << tx_id;
+            ++failed_count;
+            ++missing_tpm_id_count;
+            continue;
+        }
+        auto result = client.barrier_notify(tpm_id, tx_id);
+        if (!result.ok) {
+            LOG_LP(WARNING) << "TP monitor barrier_notify failed: tpm_id=" << tpm_id
+                            << " tx_id=" << tx_id << " message=" << result.message;
+            ++failed_count;
+            ++rpc_failed_count;
+            continue;
+        }
+        ++success_count;
+    }
+    if (failed_count > 0) {
+        LOG_LP(WARNING) << "TP monitor notify completed with failures: epoch_id=" << epoch_id
+                        << " success_count=" << success_count
+                        << " failed_count=" << failed_count
+                        << " missing_tpm_id_count=" << missing_tpm_id_count
+                        << " rpc_failed_count=" << rpc_failed_count;
+        if (success_count == 0 && missing_tpm_id_count == failed_count) {
+            return tp_monitor_notify_result::tpm_id_not_found;
+        }
         return tp_monitor_notify_result::rpc_failed;
     }
     return tp_monitor_notify_result::success;

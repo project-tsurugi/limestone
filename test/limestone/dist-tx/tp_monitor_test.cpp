@@ -213,6 +213,37 @@ TEST_F(tp_monitor_test, notify_tp_monitor_on_epoch_commit) { // NOLINT
     EXPECT_EQ(notify_count->load(std::memory_order_acquire), 1);
 }
 
+TEST_F(tp_monitor_test, notify_tp_monitor_on_epoch_commit_multiple_tx_ids) { // NOLINT
+    limestone::grpc::testing::tp_monitor_grpc_test_helper helper{};
+    auto notify_count = std::make_shared<std::atomic<int>>(0);
+    helper.add_service_factory([notify_count]() {
+        return std::make_unique<tp_monitor_counting_service>(notify_count);
+    });
+    helper.start_server();
+
+    prepare_datastore();
+    auto* impl = datastore_->get_impl();
+    impl->set_tp_monitor_enabled_for_tests(true);
+    impl->set_tp_monitor_channel_for_tests(helper.create_channel());
+
+    auto& channel = datastore_->create_channel();
+    datastore_->ready();
+    datastore_->switch_epoch(1);
+
+    std::string tx_id1 = "tx-1";
+    std::string tx_id2 = "tx-2";
+    datastore_->register_transaction_tpm_id(tx_id1, 11);
+    datastore_->register_transaction_tpm_id(tx_id2, 12);
+
+    channel.begin_session(std::optional<std::string_view>(tx_id1));
+    channel.end_session();
+    channel.begin_session(std::optional<std::string_view>(tx_id2));
+    channel.end_session();
+    datastore_->switch_epoch(2);
+
+    EXPECT_EQ(notify_count->load(std::memory_order_acquire), 2);
+}
+
 TEST_F(tp_monitor_test, notify_timing_before_uses_pre_commit_epoch) { // NOLINT
     setenv("TP_MONITOR_NOTIFY_TIMING", "before", 1);
     limestone::grpc::testing::tp_monitor_grpc_test_helper helper{};
