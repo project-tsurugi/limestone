@@ -48,8 +48,16 @@ public:
         return { true, "", 0U };
     }
 
+    [[nodiscard]] send_result send_all_bytes(std::vector<std::uint8_t> const&, std::size_t, std::size_t) noexcept override {
+        return { true, "", 0U };
+    }
+
     [[nodiscard]] flush_result flush(std::chrono::milliseconds) noexcept override {
         return { true, "" };
+    }
+
+    [[nodiscard]] std::optional<rdma::communication::ack_body> take_ack_body() noexcept override {
+        return std::nullopt;
     }
 };
 

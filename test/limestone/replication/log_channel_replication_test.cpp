@@ -199,9 +199,17 @@ public:
         return { true, "", length };
     }
 
+    [[nodiscard]] send_result send_all_bytes(std::vector<std::uint8_t> const& payload, std::size_t offset, std::size_t length) noexcept override {
+        return send_bytes(payload, offset, length);
+    }
+
     [[nodiscard]] flush_result flush(std::chrono::milliseconds) noexcept override {
         flush_count_++;
         return { true, "" };
+    }
+
+    [[nodiscard]] std::optional<rdma::communication::ack_body> take_ack_body() noexcept override {
+        return std::nullopt;
     }
 
     std::size_t send_count_{};
