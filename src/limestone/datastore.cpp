@@ -898,11 +898,8 @@ void datastore::rotate_epoch_file() {
 }
 
 void datastore::register_transaction_for_epoch(std::string_view tx_id, epoch_id_type epoch_id) {
-    std::uint64_t tpm_id = 0;
-    if (! get_tpm_id_for_transaction(tx_id, tpm_id)) {
-        LOG_LP(WARNING) << "tx_id is not registered for tpm_id, tx_id="
-                        << std::string(tx_id);
-    }
+    LOG_LP(INFO) << "register_transaction_for_epoch called: tx_id=" << std::string(tx_id)
+                 << " epoch_id=" << epoch_id;
     std::lock_guard<std::mutex> lock(mtx_epoch_txids_);
     epoch_to_txids_[epoch_id].emplace_back(tx_id);
 }
