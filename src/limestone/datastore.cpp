@@ -16,6 +16,7 @@
 #include <thread>
 #include <unistd.h>
 #include <chrono>
+#include <cstdint>
 #include <iomanip>
 #include <stdexcept>
 #include <future>
@@ -301,6 +302,11 @@ blob_id_type datastore::create_snapshot_and_get_max_blob_id_with_wal_started_log
 
 void datastore::persist_and_propagate_epoch_id(epoch_id_type epoch_id) {
     TRACE_START << "epoch_id=" << epoch_id;
+    using clock_type = std::chrono::steady_clock;
+    std::int64_t group_commit_us = -1;
+    std::int64_t tp_notify_us = -1;
+    const char* tp_notify_timing = "before";
+
     auto do_group_commit = [this, epoch_id]() {
         if (impl_->is_async_group_commit_enabled()) {
             bool sent = impl_->propagate_group_commit(epoch_id);
@@ -318,23 +324,46 @@ void datastore::persist_and_propagate_epoch_id(epoch_id_type epoch_id) {
     };
 
     switch (impl_->get_tp_monitor_notify_timing()) {
-        case tp_monitor_notify_timing::before:
+        case tp_monitor_notify_timing::before: {
+            tp_notify_timing = "before";
+            auto notify_begin = clock_type::now();
             notify_tp_monitor_for_epoch(epoch_id);
+            tp_notify_us = std::chrono::duration_cast<std::chrono::microseconds>(
+                               clock_type::now() - notify_begin)
+                               .count();
+            auto group_commit_begin = clock_type::now();
             do_group_commit();
-            LOG_LP(INFO) << "Group commit completed for epoch_id=" << epoch_id;
+            group_commit_us = std::chrono::duration_cast<std::chrono::microseconds>(
+                                  clock_type::now() - group_commit_begin)
+                                  .count();
             break;
-        case tp_monitor_notify_timing::after:
+        }
+        case tp_monitor_notify_timing::after: {
+            tp_notify_timing = "after";
+            auto group_commit_begin = clock_type::now();
             do_group_commit();
-            LOG_LP(INFO) << "Group commit completed for epoch_id=" << epoch_id;
+            group_commit_us = std::chrono::duration_cast<std::chrono::microseconds>(
+                                  clock_type::now() - group_commit_begin)
+                                  .count();
+            auto notify_begin = clock_type::now();
             notify_tp_monitor_for_epoch(epoch_id);
+            tp_notify_us = std::chrono::duration_cast<std::chrono::microseconds>(
+                               clock_type::now() - notify_begin)
+                               .count();
             break;
+        }
         case tp_monitor_notify_timing::parallel: {
-            std::promise<void> notify_done;
+            tp_notify_timing = "parallel";
+            std::promise<std::int64_t> notify_done;
             auto notify_future = notify_done.get_future();
             impl_->post_tp_monitor_task([this, epoch_id, p = std::move(notify_done)]() mutable {
                 try {
+                    auto notify_begin = clock_type::now();
                     notify_tp_monitor_for_epoch(epoch_id);
-                    p.set_value();
+                    auto elapsed_us = std::chrono::duration_cast<std::chrono::microseconds>(
+                                          clock_type::now() - notify_begin)
+                                          .count();
+                    p.set_value(elapsed_us);
                 } catch (const std::exception& e) {
                     LOG_LP(ERROR) << "TP monitor notify failed in parallel mode for epoch_id=" << epoch_id
                                   << " error=" << e.what();
@@ -345,12 +374,19 @@ void datastore::persist_and_propagate_epoch_id(epoch_id_type epoch_id) {
                     p.set_exception(std::current_exception());
                 }
             });
+            auto group_commit_begin = clock_type::now();
             do_group_commit();
-            LOG_LP(INFO) << "Group commit completed for epoch_id=" << epoch_id;
-            notify_future.get();
+            group_commit_us = std::chrono::duration_cast<std::chrono::microseconds>(
+                                  clock_type::now() - group_commit_begin)
+                                  .count();
+            tp_notify_us = notify_future.get();
             break;
         }
     }
+    LOG_LP(INFO) << "Group commit completed for epoch_id=" << epoch_id
+                 << " tp_notify_timing=" << tp_notify_timing
+                 << " group_commit_us=" << group_commit_us
+                 << " tp_notify_us=" << tp_notify_us;
     TRACE_END;
 }
 
