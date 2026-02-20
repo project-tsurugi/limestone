@@ -518,15 +518,23 @@ log_channel& datastore::create_channel(const boost::filesystem::path& location) 
 
 void datastore::register_transaction_tpm_id(std::string_view tx_id, std::uint64_t tpm_id) {
     TRACE_START << "tx_id=" << std::string(tx_id) << ", tpm_id=" << tpm_id;
-    LOG_LP(INFO) << "register_transaction_tpm_id called: tx_id=" << std::string(tx_id)
-                 << " tpm_id=" << tpm_id
-                 << " epoch_id_informed=" << epoch_id_informed_.load();
     if (!impl_->is_tp_monitor_enabled()) {
+        LOG_LP(INFO) << "register_transaction_tpm_id called: tx_id=" << std::string(tx_id)
+                     << " tpm_id=" << tpm_id
+                     << " tp_monitor=disabled";
         TRACE_END << "tp_monitor disabled";
         return;
     }
-    std::lock_guard<std::mutex> lock(mtx_txid_tpmid_);
-    txid_to_tpmid_[std::string(tx_id)] = tpm_id;
+    const auto start_time = std::chrono::steady_clock::now();
+    {
+        std::lock_guard<std::mutex> lock(mtx_txid_tpmid_);
+        txid_to_tpmid_[std::string(tx_id)] = tpm_id;
+    }
+    const auto elapsed_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+            std::chrono::steady_clock::now() - start_time).count();
+    LOG_LP(INFO) << "register_transaction_tpm_id called: tx_id=" << std::string(tx_id)
+                 << " tpm_id=" << tpm_id
+                 << " elapsed_ms=" << elapsed_ms;
     TRACE_END;
 }
 
@@ -902,10 +910,16 @@ void datastore::rotate_epoch_file() {
 }
 
 void datastore::register_transaction_for_epoch(std::string_view tx_id, epoch_id_type epoch_id) {
+    const auto start_time = std::chrono::steady_clock::now();
+    {
+        std::lock_guard<std::mutex> lock(mtx_epoch_txids_);
+        epoch_to_txids_[epoch_id].emplace_back(tx_id);
+    }
+    const auto elapsed_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+            std::chrono::steady_clock::now() - start_time).count();
     LOG_LP(INFO) << "register_transaction_for_epoch called: tx_id=" << std::string(tx_id)
-                 << " epoch_id=" << epoch_id;
-    std::lock_guard<std::mutex> lock(mtx_epoch_txids_);
-    epoch_to_txids_[epoch_id].emplace_back(tx_id);
+                 << " epoch_id=" << epoch_id
+                 << " elapsed_ms=" << elapsed_ms;
 }
 
 bool datastore::get_tpm_id_for_transaction(std::string_view tx_id, std::uint64_t& tpm_id) {
