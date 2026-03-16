@@ -64,10 +64,6 @@ find_package(Doxygen)
 find_package(glog REQUIRED)
 find_package(gflags REQUIRED)
 find_package(Threads REQUIRED)
-find_package(Boost
-        COMPONENTS filesystem
-        REQUIRED
-        )
 if(${RECOVERY_SORTER_KVSLIB_UPPERCASE} STREQUAL "ROCKSDB")
     find_package(RocksDB REQUIRED)
 elseif(${RECOVERY_SORTER_KVSLIB_UPPERCASE} STREQUAL "LEVELDB")
@@ -77,10 +73,13 @@ else()
 endif()
 find_package(nlohmann_json 3.7.0 REQUIRED)
 find_package(OpenSSL REQUIRED)
+set(boost_components filesystem)
 if (ENABLE_ALTIMETER)
     find_package(altimeter REQUIRED)
     find_package(fmt REQUIRED)
+    list(APPEND boost_components container)
 endif()
+find_package(Boost COMPONENTS ${boost_components} REQUIRED)
 
 add_subdirectory(third_party) # should be before enable_testing()
 
