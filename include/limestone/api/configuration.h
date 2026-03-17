@@ -41,31 +41,8 @@ public:
      */
     configuration() noexcept;
 
-    // TODO: When removing the deprecated constructors, drop metadata_location_ and
-    // replace data_locations_ with a single boost::filesystem::path field.
-    // TODO: Update direct data_locations_ accesses and migrate tests off the deprecated constructors.
     /**
-     * @brief create a object
-     * @param data_locations the list of data locations
-     * @param metadata_location the location of the metadata
-     * @deprecated use set_data_location() instead
-     */
-    configuration(
-        const std::vector<boost::filesystem::path>& data_locations,
-        boost::filesystem::path metadata_location) noexcept;
-
-    /**
-     * @brief create a object
-     * @param data_locations the list of data locations
-     * @param metadata_location the location of the metadata
-     * @deprecated use set_data_location() instead
-     */
-    configuration(
-        const std::vector<boost::filesystem::path>&& data_locations,
-        boost::filesystem::path metadata_location) noexcept;
-
-    /**
-     * @brief clear existing data locations and set a single data location
+     * @brief set a single data location
      * @param data_location the data location
      */
     void set_data_location(const std::filesystem::path& data_location) noexcept;
@@ -86,14 +63,10 @@ public:
      * @brief setter for recover_max_parallelism
      * @param recover_max_parallelism  the number of recover_max_parallelism
      */
-    void set_recover_max_parallelism(int recover_max_parallelism) noexcept{
-        recover_max_parallelism_ = recover_max_parallelism;
-    }
+    void set_recover_max_parallelism(int recover_max_parallelism) noexcept;
 
 private:
-    std::vector<boost::filesystem::path> data_locations_{};
-
-    boost::filesystem::path metadata_location_{};
+    boost::filesystem::path data_location_{};
 
     std::string instance_id_{};
     std::string db_name_{};

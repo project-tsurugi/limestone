@@ -112,13 +112,11 @@ protected:
     }
 
     void gen_datastore() {
-        std::vector<boost::filesystem::path> data_locations{};
-        data_locations.emplace_back(location);
-        boost::filesystem::path metadata_location{location};
-        limestone::api::configuration conf(data_locations, metadata_location);
+        limestone::api::configuration conf{};
+        conf.set_data_location(location);
 
         datastore_ = std::make_unique<limestone::api::datastore_test>(conf);
-        lc0_ = &datastore_->create_channel(location);
+        lc0_ = &datastore_->create_channel();
 
         datastore_->ready();
     }

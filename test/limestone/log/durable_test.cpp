@@ -27,10 +27,8 @@ static constexpr const char* location = "/tmp/durable_test";
     }
 
     void regen_datastore() {
-        std::vector<boost::filesystem::path> data_locations{};
-        data_locations.emplace_back(location);
-        boost::filesystem::path metadata_location{location};
-        limestone::api::configuration conf(data_locations, metadata_location);
+        limestone::api::configuration conf{};
+        conf.set_data_location(location);
 
         datastore_ = std::make_unique<limestone::api::datastore_test>(conf);
     }
@@ -50,8 +48,8 @@ TEST_F(durable_test, last_record_will_ignored) {
     using namespace limestone::api;
 
     datastore_->ready();
-    log_channel& channel = datastore_->create_channel(boost::filesystem::path(location));
-    log_channel& channel2 = datastore_->create_channel(boost::filesystem::path(location));
+    log_channel& channel = datastore_->create_channel();
+    log_channel& channel2 = datastore_->create_channel();
     datastore_->switch_epoch(42);
     channel.begin_session();
     channel.add_entry(3, "k1", "v1", {42, 4});
@@ -85,7 +83,7 @@ TEST_F(durable_test, invalidated_entries_are_never_reused) {
     using namespace limestone::api;
 
     datastore_->ready();
-    log_channel& channel = datastore_->create_channel(boost::filesystem::path(location));
+    log_channel& channel = datastore_->create_channel();
     datastore_->switch_epoch(42);
     channel.begin_session();
     channel.add_entry(3, "k1", "v1", {42, 4});
@@ -118,7 +116,7 @@ TEST_F(durable_test, invalidated_entries_are_never_reused) {
     EXPECT_EQ(m["k1"], "v1");
     EXPECT_EQ(m["k2"], "v2");
 
-    log_channel& channel2 = datastore_->create_channel(boost::filesystem::path(location));
+    log_channel& channel2 = datastore_->create_channel();
     datastore_->switch_epoch(46);
     channel2.begin_session();
     channel2.add_entry(3, "k5", "v5", {46, 4});

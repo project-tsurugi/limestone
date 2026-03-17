@@ -19,28 +19,12 @@ namespace limestone::api {
 
 configuration::configuration() noexcept = default;
 
-configuration::configuration(
-    const std::vector<boost::filesystem::path>& data_locations,
-    boost::filesystem::path metadata_location) noexcept
-    : metadata_location_(std::move(metadata_location)) {
-    for (auto&& e : data_locations) {
-        data_locations_.emplace_back(e);
-    }
-}
-
-configuration::configuration(
-    const std::vector<boost::filesystem::path>&& data_locations,
-    boost::filesystem::path metadata_location) noexcept
-    : metadata_location_(std::move(metadata_location)) {
-    for (auto&& e : data_locations) {
-        data_locations_.emplace_back(e);
-    }
+void configuration::set_recover_max_parallelism(int recover_max_parallelism) noexcept {
+    recover_max_parallelism_ = recover_max_parallelism;
 }
 
 void configuration::set_data_location(const std::filesystem::path& data_location) noexcept {
-    boost::filesystem::path boost_location(data_location.native());
-    data_locations_.clear();
-    data_locations_.emplace_back(std::move(boost_location));
+    data_location_ = boost::filesystem::path(data_location.native());
 }
 
 void configuration::set_instance_id(std::string_view instance_id) noexcept {

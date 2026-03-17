@@ -18,10 +18,8 @@ protected:
     void SetUp() override {
         boost::filesystem::remove_all(base_location);
         boost::filesystem::create_directories(base_location);
-        std::vector<boost::filesystem::path> data_locations{};
-        data_locations.emplace_back(base_location);
-        boost::filesystem::path metadata_location_path{base_location};
-        limestone::api::configuration conf(data_locations, metadata_location_path);
+        limestone::api::configuration conf{};
+        conf.set_data_location(base_location);
         datastore_ = std::make_unique<limestone::api::datastore_test>(conf);
     }
 

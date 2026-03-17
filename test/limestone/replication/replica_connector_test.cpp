@@ -173,10 +173,8 @@ TEST_F(replica_connector_test, connect_to_server_with_blob_support) {
         // No need to close listen_fd here, as it's shared and managed by the server thread
     });
 
-    std::vector<boost::filesystem::path> data_locations{};
-    data_locations.emplace_back(base_directory);
-    boost::filesystem::path metadata_location_path{base_directory};
-    limestone::api::configuration conf(data_locations, metadata_location_path);
+    limestone::api::configuration conf{};
+    conf.set_data_location(base_directory);
     auto ds = std::make_unique<limestone::api::datastore_test>(conf);
 
 

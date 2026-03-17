@@ -9,7 +9,6 @@
 namespace limestone::testing {
 
 constexpr const char* data_location = "/tmp/with_log_channel_test/data_location";
-constexpr const char* metadata_location = "/tmp/with_log_channel_test/metadata_location";
 
 class with_log_channel_test : public ::testing::Test {
 protected:
@@ -17,14 +16,12 @@ protected:
         if (system("rm -rf /tmp/with_log_channel_test") != 0) {
             std::cerr << "cannot remove directory" << std::endl;
         }
-        if (system("mkdir -p /tmp/with_log_channel_test/data_location /tmp/with_log_channel_test/metadata_location") != 0) {
+        if (system("mkdir -p /tmp/with_log_channel_test/data_location") != 0) {
             std::cerr << "cannot make directory" << std::endl;
         }
 
-        std::vector<boost::filesystem::path> data_locations{};
-        data_locations.emplace_back(data_location);
-        boost::filesystem::path metadata_location_path{metadata_location};
-        limestone::api::configuration conf(data_locations, metadata_location_path);
+        limestone::api::configuration conf{};
+        conf.set_data_location(data_location);
 
         datastore_ = std::make_unique<limestone::api::datastore_test>(conf);
     }
@@ -40,7 +37,7 @@ protected:
 };
 
 TEST_F(with_log_channel_test, one_log_channel) {
-    limestone::api::log_channel& channel = datastore_->create_channel(boost::filesystem::path(data_location));
+    limestone::api::log_channel& channel = datastore_->create_channel();
     
     datastore_->ready();
 
@@ -69,8 +66,8 @@ TEST_F(with_log_channel_test, one_log_channel) {
 }
 
 TEST_F(with_log_channel_test, log_channels) {
-    limestone::api::log_channel& channel1 = datastore_->create_channel(boost::filesystem::path(data_location));
-    limestone::api::log_channel& channel2 = datastore_->create_channel(boost::filesystem::path(data_location));
+    limestone::api::log_channel& channel1 = datastore_->create_channel();
+    limestone::api::log_channel& channel2 = datastore_->create_channel();
     
     datastore_->ready();
 

@@ -22,7 +22,7 @@ TEST_F(handler_resources_test, returns_correct_server_and_channel) {
     replica_server server{};
     server.initialize(base_location);
     auto& ds = server.get_datastore();
-    auto& channel = ds.create_channel(base_location);
+    auto& channel = ds.create_channel();
     socket_io io("");
 
     log_channel_handler_resources resources{io, channel};

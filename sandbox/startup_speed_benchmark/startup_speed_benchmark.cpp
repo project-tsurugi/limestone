@@ -1,3 +1,4 @@
+#include <filesystem>
 #include <iostream>
 #include <vector>
 #include <thread>
@@ -24,8 +25,8 @@ namespace {
     };
 
     BenchmarkResult measure_standard_cursor(const boost::filesystem::path& loc) {
-        std::vector<boost::filesystem::path> data_locations{loc};
-        limestone::api::configuration conf(data_locations, loc);
+        limestone::api::configuration conf{};
+        conf.set_data_location(std::filesystem::path(loc.native()));
 
         std::unique_ptr<limestone::api::datastore> ds = std::make_unique<limestone::api::datastore>(conf);
         ds->ready();
@@ -46,8 +47,8 @@ namespace {
     }
 
     BenchmarkResult measure_partitioned_cursor(const boost::filesystem::path& loc, std::size_t partition_count) {
-        std::vector<boost::filesystem::path> data_locations{loc};
-        limestone::api::configuration conf(data_locations, loc);
+        limestone::api::configuration conf{};
+        conf.set_data_location(std::filesystem::path(loc.native()));
 
         std::unique_ptr<limestone::api::datastore> ds = std::make_unique<limestone::api::datastore>(conf);
         ds->ready();

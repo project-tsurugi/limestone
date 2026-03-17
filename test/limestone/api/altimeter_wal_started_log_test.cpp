@@ -75,15 +75,12 @@ TEST(altimeter_wal_started_log_test, altimeter_wal_started_log_written) {
         std::cerr << "cannot remove directory" << std::endl;
     }
     if (system("mkdir -p /tmp/altimeter_wal_started_log_test/data_location "
-               "/tmp/altimeter_wal_started_log_test/metadata_location "
                "/tmp/altimeter_wal_started_log_test/altimeter_log") != 0) {
         std::cerr << "cannot make directory" << std::endl;
     }
 
-    std::vector<boost::filesystem::path> data_locations{};
-    data_locations.emplace_back("/tmp/altimeter_wal_started_log_test/data_location");
-    boost::filesystem::path metadata_location_path{"/tmp/altimeter_wal_started_log_test/metadata_location"};
-    limestone::api::configuration conf(data_locations, metadata_location_path);
+    limestone::api::configuration conf{};
+    conf.set_data_location("/tmp/altimeter_wal_started_log_test/data_location");
 
     {
         altimeter_test_logger logger("/tmp/altimeter_wal_started_log_test/altimeter_log");
@@ -107,15 +104,12 @@ TEST(altimeter_wal_started_log_test, altimeter_wal_started_log_failure_written) 
         std::cerr << "cannot remove directory" << std::endl;
     }
     if (system("mkdir -p /tmp/altimeter_wal_started_log_failure_test/data_location "
-               "/tmp/altimeter_wal_started_log_failure_test/metadata_location "
                "/tmp/altimeter_wal_started_log_failure_test/altimeter_log") != 0) {
         std::cerr << "cannot make directory" << std::endl;
     }
 
-    std::vector<boost::filesystem::path> data_locations{};
-    data_locations.emplace_back("/tmp/altimeter_wal_started_log_failure_test/data_location");
-    boost::filesystem::path metadata_location_path{"/tmp/altimeter_wal_started_log_failure_test/metadata_location"};
-    limestone::api::configuration conf(data_locations, metadata_location_path);
+    limestone::api::configuration conf{};
+    conf.set_data_location("/tmp/altimeter_wal_started_log_failure_test/data_location");
 
     ASSERT_DEATH(
         {

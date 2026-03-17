@@ -148,21 +148,13 @@ public:
 
     /**
      * @brief provide a log channel instance based on datastore state
-     * @details logs are written to separate files created for each channel
+     * @details logs are written to separate files created for each channel under the datastore's configured data location
+     *          (see configuration::set_data_location()).
      * @return the reference of the log_channel
      * @attention this function should be called before the ready() is called.
      */
     log_channel& create_channel();
 
-    /**
-     * @brief create a log_channel to write logs to a file
-     * @details logs are written to separate files created for each channel
-     * @param location specifies the directory of the log files
-     * @return the reference of the log_channel
-     * @attention this function should be called before the ready() is called.
-     * @deprecated use create_channel() instead
-     */
-    log_channel& create_channel(const boost::filesystem::path& location);
 
     /**
      * @brief provide the largest epoch ID
