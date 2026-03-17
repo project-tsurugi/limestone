@@ -26,4 +26,13 @@ void configuration::set_recover_max_parallelism(int recover_max_parallelism) noe
 void configuration::set_data_location(const std::filesystem::path& data_location) noexcept {
     data_location_ = boost::filesystem::path(data_location.native());
 }
+
+void configuration::set_instance_id(std::string_view instance_id) noexcept {
+    instance_id_ = instance_id;
+}
+
+void configuration::set_db_name(std::string_view db_name) noexcept {
+    db_name_ = db_name;
+}
+
 } // namespace limestone::api

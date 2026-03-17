@@ -3,6 +3,7 @@
 #include <limestone/api/blob_file.h>
 #include <limestone/api/log_channel.h>
 #include <limits>
+#include <algorithm>
 #include <string>
 #include <memory>
 #include <boost/filesystem.hpp>

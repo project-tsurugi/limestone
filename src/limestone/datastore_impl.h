@@ -19,9 +19,12 @@
 #include <limestone/api/blob_pool.h>
 
 #include <atomic>
+#include <array>
 #include <memory>
 #include <optional>
-#include <array>
+#include <functional>
+#include <string>
+#include <sys/types.h>
 
 #include "manifest.h"
 #include "replication/replica_connector.h"
@@ -122,6 +125,49 @@ public:
             blob_id_type blob_id,
             std::uint64_t transaction_id) const;
 
+    // Setter/getter for instance_id
+    /**
+     * @brief Sets the instance ID for this datastore.
+     * @param instance_id The instance ID to store.
+     */
+    void set_instance_id(std::string_view instance_id);
+    /**
+     * @brief Returns the instance ID for this datastore.
+     * @return The stored instance ID.
+     */
+    [[nodiscard]] const std::string& instance_id() const noexcept;
+
+    // Setter/getter for db_name
+    /**
+     * @brief Sets the database name for this datastore.
+     * @param db_name The database name to store.
+     */
+    void set_db_name(std::string_view db_name);
+    /**
+     * @brief Returns the database name for this datastore.
+     * @return The stored database name.
+     */
+    [[nodiscard]] const std::string& db_name() const noexcept;
+
+    // Setter/getter for pid
+    /**
+     * @brief Sets the process ID for this datastore.
+     * @param pid The process ID to store.
+     */
+    void set_pid(pid_t pid) noexcept;
+    /**
+     * @brief Returns the process ID for this datastore.
+     * @return The stored process ID.
+     */
+    [[nodiscard]] pid_t pid() const noexcept;
+
+    /**
+     * @brief Sets a custom group commit sender for tests.
+     * @param sender The sender function(epoch_id) used to simulate group commit sending.
+     *               The function must return true on success and false on failure.
+     */
+    void set_group_commit_sender_for_tests(std::function<bool(uint64_t)> const& sender);
+
 private:
     // Atomic counter for tracking active backup operations.
     std::atomic<int> backup_counter_;
@@ -145,6 +191,11 @@ private:
 
     // HMAC secret key for BLOB reference tag generation (16 bytes)
     std::array<std::uint8_t, 16> hmac_secret_key_{};
+
+    std::string instance_id_{"instance_id_not_set"};
+    std::string db_name_{"db_name_not_set"};
+    pid_t pid_{0};
+    std::function<bool(uint64_t)> group_commit_sender_for_tests_{};
 
     /**
      * @brief generates HMAC secret key for BLOB reference tag generation.

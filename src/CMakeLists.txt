@@ -31,8 +31,6 @@ target_link_libraries(${package_name}
         PUBLIC limestone-api
         PRIVATE Boost::boost
         PRIVATE Boost::filesystem
-        PRIVATE Boost::thread
-        PRIVATE Boost::container
         PRIVATE glog::glog
         PRIVATE ${sort_lib}
         PRIVATE nlohmann_json::nlohmann_json
@@ -61,8 +59,6 @@ target_link_libraries(limestone-impl
         INTERFACE ${package_name}
         INTERFACE Boost::boost
         INTERFACE Boost::filesystem
-        INTERFACE Boost::thread
-        INTERFACE Boost::container
         INTERFACE glog::glog
         INTERFACE ${sort_lib}
         INTERFACE nlohmann_json::nlohmann_json

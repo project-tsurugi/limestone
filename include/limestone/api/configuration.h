@@ -16,7 +16,9 @@
 #pragma once
 
 #include <filesystem>
-
+#include <string>
+#include <string_view>
+#include <vector>
 
 #include <boost/filesystem.hpp>
 
@@ -45,6 +47,17 @@ public:
      */
     void set_data_location(const std::filesystem::path& data_location) noexcept;
 
+    /**
+     * @brief setter for instance_id
+     * @param instance_id the instance id
+     */
+    void set_instance_id(std::string_view instance_id) noexcept;
+
+    /**
+     * @brief setter for db_name
+     * @param db_name the database name
+     */
+    void set_db_name(std::string_view db_name) noexcept;
 
     /**
      * @brief setter for recover_max_parallelism
@@ -54,6 +67,9 @@ public:
 
 private:
     boost::filesystem::path data_location_{};
+
+    std::string instance_id_{};
+    std::string db_name_{};
 
     int recover_max_parallelism_{default_recover_max_parallelism};
 

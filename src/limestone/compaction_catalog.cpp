@@ -91,7 +91,7 @@ void compaction_catalog::restore_from_backup() {
 void compaction_catalog::load_catalog_file(const boost::filesystem::path& path) {
     auto strm = file_ops_->open_ifstream(path.string());
     int error_num = errno;
-    if (!file_ops_->is_open(*strm)) {
+    if (!strm || !file_ops_->is_open(*strm)) {
         LOG_AND_THROW_IO_EXCEPTION("Failed to open compaction catalog file: " + path.string(), error_num);
     }
 

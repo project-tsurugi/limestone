@@ -17,6 +17,12 @@ target_link_libraries(${test_target}
         PRIVATE gflags::gflags
         )
 
+if (ENABLE_ALTIMETER)
+    target_link_libraries(${test_target}
+        PRIVATE altimeter
+    )
+endif()
+
 function (add_test_executable source_file)
     get_filename_component(test_name "${source_file}" NAME_WE)
     target_sources(${test_target}

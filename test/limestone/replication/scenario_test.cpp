@@ -1,12 +1,18 @@
 #include <limestone/api/log_channel.h>
 #include <pthread.h>
 #include <signal.h>
+#include <sys/wait.h>
 #include <unistd.h>
 
 #include <boost/filesystem.hpp>
-#include <boost/process.hpp>
+#include <chrono>
+#include <cstdio>
+#include <cstdlib>
+#include <cstring>
+#include <future>
 #include <iostream>
 #include <iterator>
+#include <memory>
 #include <mutex>
 #include <thread>
 
@@ -33,13 +39,11 @@ static constexpr const char* base_location = "/tmp/scenario_test";
 static constexpr const char* master_location = "/tmp/scenario_test/master";
 static constexpr const char* replica_location = "/tmp/scenario_test/replica";
 
-
 struct snapshot_entry {
     std::string key;
     std::string value;
     storage_id_type storage_id;
 };
-
 
 class scenario_test : public ::testing::Test {
 protected:
@@ -76,24 +80,65 @@ protected:
     }
 
     void start_replica_as_process() {
-        out_stream_ = std::make_unique<boost::process::ipstream>();
-        err_stream_ = std::make_unique<boost::process::ipstream>();
-    
-        process_ = std::make_unique<boost::process::child>(
-            "../src/tgreplica",
-            replica_location,
-            boost::process::std_out > *out_stream_,
-            boost::process::std_err > *err_stream_);
-    
+        int out_pipe[2]{-1, -1};
+        int err_pipe[2]{-1, -1};
+        if (pipe(out_pipe) != 0) {
+            FAIL() << "Failed to create stdout pipe";
+        }
+        if (pipe(err_pipe) != 0) {
+            ::close(out_pipe[0]);
+            ::close(out_pipe[1]);
+            FAIL() << "Failed to create stderr pipe";
+        }
+
+        process_pid_ = fork();
+        ASSERT_NE(process_pid_, -1) << "Failed to fork replica process";
+
+        if (process_pid_ == 0) {
+            ::close(out_pipe[0]);
+            ::close(err_pipe[0]);
+            ::dup2(out_pipe[1], STDOUT_FILENO);
+            ::dup2(err_pipe[1], STDERR_FILENO);
+            ::close(out_pipe[1]);
+            ::close(err_pipe[1]);
+
+            execl("../src/tgreplica", "../src/tgreplica", replica_location, static_cast<char*>(nullptr));
+            std::perror("execl");
+            _exit(127);
+        }
+
+        ::close(out_pipe[1]);
+        ::close(err_pipe[1]);
+        out_stream_ = fdopen(out_pipe[0], "r");
+        if (out_stream_ == nullptr) {
+            ::close(out_pipe[0]);
+            ::close(err_pipe[0]);
+            FAIL() << "Failed to open stdout stream";
+        }
+        err_stream_ = fdopen(err_pipe[0], "r");
+        if (err_stream_ == nullptr) {
+            fclose(out_stream_);
+            out_stream_ = nullptr;
+            ::close(err_pipe[0]);
+            FAIL() << "Failed to open stderr stream";
+        }
+        // The thread only uses this promise while start_replica_as_process() is blocked
+        // on wait_initialized.wait_for(), so the reference does not outlive this scope.
         std::promise<void> initialized;
         std::future<void> wait_initialized = initialized.get_future();
-    
-        std::thread out_thread([&]() {
+
+        out_thread_ = std::thread([&initialized, this]() {
             pthread_setname_np(pthread_self(), "out_thread");
             std::string out_line;
-            while (std::getline(*out_stream_, out_line)) {
+            char* line = nullptr;
+            size_t capacity = 0;
+            while (::getline(&line, &capacity, out_stream_) != -1) {
+                out_line.assign(line);
+                if (!out_line.empty() && out_line.back() == '\n') {
+                    out_line.pop_back();
+                }
                 std::cout << "tgreplica> " << out_line << std::endl;
-    
+
                 if (out_line.find("initialized and listening") != std::string::npos) {
                     try {
                         initialized.set_value();
@@ -101,36 +146,40 @@ protected:
                     }
                 }
             }
+            free(line);
         });
-    
-        std::thread err_thread([&]() {
+
+        err_thread_ = std::thread([this]() {
             pthread_setname_np(pthread_self(), "err_thread");
             std::string err_line;
-            while (std::getline(*err_stream_, err_line)) {
+            char* line = nullptr;
+            size_t capacity = 0;
+            while (::getline(&line, &capacity, err_stream_) != -1) {
+                err_line.assign(line);
+                if (!err_line.empty() && err_line.back() == '\n') {
+                    err_line.pop_back();
+                }
                 std::cerr << "tgreplica> " << err_line << std::endl;
             }
+            free(line);
         });
-    
-        out_thread.detach();
-        err_thread.detach();
-    
+
         if (wait_initialized.wait_for(std::chrono::seconds(10)) != std::future_status::ready) {
             FAIL() << "Timed out waiting for replica initialization";
         }
     }
-    
 
     int start_replica_as_thread() {
         boost::filesystem::path log_dir_path(replica_location);
         limestone::replication::replication_endpoint endpoint{};
-        
+
         server.initialize(log_dir_path);
-            if (!server.start_listener(endpoint.get_sockaddr())) {
+        if (!server.start_listener(endpoint.get_sockaddr())) {
             return 1;
         }
         replica_thread_ = std::thread([this]() {
             pthread_setname_np(pthread_self(), "replica_main");
-            server.accept_loop(); 
+            server.accept_loop();
         });
         return 0;
     }
@@ -138,13 +187,32 @@ protected:
     void stop_replica() {
         if (server_execute_as_thread) {
             if (replica_thread_.joinable()) {
-                server.shutdown(); 
-                replica_thread_.join(); 
+                server.shutdown();
+                replica_thread_.join();
             }
         } else {
-            if (process_ && process_->running()) {
-                kill(process_->id(), SIGTERM);
-                process_->wait();  
+            if (process_pid_ > 0) {
+                if (kill(process_pid_, SIGTERM) != 0 && errno != ESRCH) {
+                    int error_num = errno;
+                    FAIL() << "Failed to terminate replica process: "
+                           << std::strerror(error_num) << " (errno=" << error_num << ")";
+                }
+                waitpid(process_pid_, nullptr, 0);
+                process_pid_ = -1;
+            }
+            if (out_thread_.joinable()) {
+                out_thread_.join();
+            }
+            if (err_thread_.joinable()) {
+                err_thread_.join();
+            }
+            if (out_stream_ != nullptr) {
+                fclose(out_stream_);
+                out_stream_ = nullptr;
+            }
+            if (err_stream_ != nullptr) {
+                fclose(err_stream_);
+                err_stream_ = nullptr;
             }
         }
     }
@@ -178,8 +246,9 @@ protected:
     auto read_master_pwal01() { return read_log_file(master_location, "pwal_0001"); }
     auto read_replica_pwal00() { return read_log_file(replica_location, "pwal_0000"); }
     auto read_replica_pwal01() { return read_log_file(replica_location, "pwal_0001"); }
-    auto get_master_epoch() {return get_epoch(master_location);}
-    auto get_replica_epoch() {return get_epoch(replica_location);}
+    auto get_master_epoch() { return get_epoch(master_location); }
+    auto get_replica_epoch() { return get_epoch(replica_location); }
+
 private:
     epoch_id_type get_epoch(boost::filesystem::path location) {
         auto epoch = last_durable_epoch(location / std::string(epoch_file_name));
@@ -190,12 +259,14 @@ private:
     }
 
 protected:
-    // fore replica server
-    std::unique_ptr<boost::process::child> process_; 
-    std::unique_ptr<boost::process::ipstream> out_stream_; 
-    std::unique_ptr<boost::process::ipstream> err_stream_; 
+    // for replica server
+    pid_t process_pid_{-1};
+    FILE* out_stream_{nullptr};
+    FILE* err_stream_{nullptr};
     replica_server server{};
-    std::thread replica_thread_;  
+    std::thread replica_thread_;
+    std::thread out_thread_;
+    std::thread err_thread_;
 
     // for master
     std::unique_ptr<api::datastore_test> ds;
@@ -208,7 +279,7 @@ TEST_F(scenario_test, minimal_test) {
     // Start the master
     gen_datastore(master_location);
     ds->switch_epoch(1);
-    
+
     // Verify that PWAL is transferred to the replica
     lc0_->begin_session();
     lc0_->add_entry(1, "k1", "v1", {1, 0});
@@ -258,7 +329,7 @@ TEST_F(scenario_test, minimal_test) {
 
     // Stop the master
     ds.reset();
-    
+
     // Stop the replica
     stop_replica();
 
