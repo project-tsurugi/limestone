@@ -6,6 +6,7 @@
 
 #include <boost/filesystem.hpp>
 #include <fstream>
+#include <algorithm>
 
 #include "blob_file_resolver.h"
 #include "file_operations.h"
