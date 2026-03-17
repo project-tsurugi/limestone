@@ -16,6 +16,7 @@
 
 #include "replica_server.h"
 
+#include <filesystem>
 #include <glog/logging.h>
 #include <limestone/logging.h>
 #include <netinet/tcp.h>
