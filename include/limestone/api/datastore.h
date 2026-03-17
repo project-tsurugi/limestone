@@ -148,7 +148,8 @@ public:
 
     /**
      * @brief provide a log channel instance based on datastore state
-     * @details logs are written to separate files created for each channel
+     * @details logs are written to separate files created for each channel under the datastore's configured data location
+     *          (see configuration::set_data_location()).
      * @return the reference of the log_channel
      * @attention this function should be called before the ready() is called.
      */
