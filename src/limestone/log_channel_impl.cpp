@@ -43,27 +43,18 @@ bool log_channel_impl::send_replica_message(
 
     if (rdma_send_stream_) {
         // Serialize message into in-memory buffer via string-mode socket_io for RDMA path.
-        rdma_serializer_io_.reset_output_buffer();
+        // Do NOT reset the buffer here; messages are accumulated across calls and flushed
+        // only when the buffer reaches rdma_send_buffer_threshold.
         replication::replication_message::send(rdma_serializer_io_, message);
-        auto payload = rdma_serializer_io_.get_out_string();
-        TRACE << "RDMA path payload_size=" << payload.size();
+        std::size_t buffered = rdma_serializer_io_.get_out_size();
+        TRACE << "RDMA path buffered_size=" << buffered;
 
-        std::vector<std::uint8_t> bytes(payload.begin(), payload.end());
-        std::size_t offset = 0;
-        std::size_t consecutive_failures = 0;
-        while (offset < bytes.size()) {
-            auto result = rdma_send_stream_->send_bytes(bytes, offset, bytes.size() - offset);
-            if (! result.success) {
-                ++consecutive_failures;
-                LOG_LP(WARNING) << "RDMA send_bytes failed (consecutive failures="
-                                << consecutive_failures << "): " << result.error_message;
-                std::this_thread::sleep_for(std::chrono::seconds{1});
-            } else {
-                consecutive_failures = 0;
-            }
-            offset += result.bytes_written;
+        if (buffered >= rdma_send_buffer_threshold) {
+            flush_rdma_serializer_io_locked();
+            TRACE_END << "path=rdma flushed";
+        } else {
+            TRACE_END << "path=rdma buffered";
         }
-        TRACE_END << "path=rdma payload_size=" << payload.size();
         return true;
     }
 
@@ -97,9 +88,39 @@ void log_channel_impl::flush_rdma_stream() {
     if (! rdma_send_stream_) {
         LOG_LP(FATAL) << "RDMA flush requested without RDMA send stream.";
     }
+    // Drain any data remaining in the serialization buffer before issuing the RDMA flush.
+    flush_rdma_serializer_io_locked();
     auto flush_result = rdma_send_stream_->flush(std::chrono::milliseconds{30000});
     if (! flush_result.success) {
         LOG_LP(FATAL) << "RDMA flush failed: " << flush_result.error_message;
+    }
+}
+
+void log_channel_impl::flush_rdma_serializer_io_locked() {
+    std::size_t buffered = rdma_serializer_io_.get_out_size();
+    if (buffered == 0) {
+        return;
+    }
+    auto payload = rdma_serializer_io_.get_out_string();
+    send_rdma_bytes_locked(payload);
+    rdma_serializer_io_.reset_output_buffer();
+}
+
+void log_channel_impl::send_rdma_bytes_locked(std::string const& payload) {
+    std::vector<std::uint8_t> bytes(payload.begin(), payload.end());
+    std::size_t offset = 0;
+    std::size_t consecutive_failures = 0;
+    while (offset < bytes.size()) {
+        auto result = rdma_send_stream_->send_bytes(bytes, offset, bytes.size() - offset);
+        if (! result.success) {
+            ++consecutive_failures;
+            LOG_LP(WARNING) << "RDMA send_bytes failed (consecutive failures="
+                            << consecutive_failures << "): " << result.error_message;
+            std::this_thread::sleep_for(std::chrono::seconds{1});
+        } else {
+            consecutive_failures = 0;
+        }
+        offset += result.bytes_written;
     }
 }
 

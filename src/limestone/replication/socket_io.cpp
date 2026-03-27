@@ -228,6 +228,20 @@ std::string socket_io::get_out_string() const {
     return out_stream_->str();
 }
 
+std::size_t socket_io::get_out_size() const {
+    if (! out_stream_) {
+        return 0;
+    }
+    return static_cast<std::size_t>(out_stream_->tellp());
+}
+
+bool socket_io::has_unread_data() const {
+    if (! in_stream_) {
+        return false;
+    }
+    return in_stream_->peek() != std::char_traits<char>::eof();
+}
+
 void socket_io::reset_output_buffer() {
     if (! out_stream_) {
         return;

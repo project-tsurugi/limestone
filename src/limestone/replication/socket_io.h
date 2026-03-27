@@ -85,11 +85,25 @@ public:
     // Getters for the output buffer contents
     [[nodiscard]] std::string get_out_string() const;
 
+    /**
+     * @brief Returns the current byte size of the output buffer without copying its contents.
+     * @return Number of bytes currently accumulated in the output buffer.
+     */
+    [[nodiscard]] std::size_t get_out_size() const;
+
     // Close the socket file descriptor (real mode) or clear the input and output streams (string mode).
     void close();
 
     // Check if the end of the input stream has been reached.
     [[nodiscard]] bool eof();
+
+    /**
+     * @brief Returns true if there is at least one more byte available to read
+     *        in the input stream (string mode only; always false in socket mode).
+     *        Use this to loop over multiple messages packed in a single RDMA payload.
+     * @return true if more data can be read without blocking.
+     */
+    [[nodiscard]] bool has_unread_data() const;
 
     /**
      * @brief Retrieve the underlying socket file descriptor.

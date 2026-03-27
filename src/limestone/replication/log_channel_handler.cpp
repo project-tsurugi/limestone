@@ -173,29 +173,34 @@ void log_channel_handler::process_rdma_message_locked(
     // TODO: avoid extra copy by feeding payload directly without socket_io.
     std::string payload_string(payload.begin(), payload.end());
     socket_io io(payload_string);
-    auto message = replication_message::receive(io);
-    if (! message) {
-        LOG_LP(ERROR) << "RDMA failed to deserialize replication_message.";
-        TRACE_ABORT << "deserialize failed";
-        return;
-    }
-    if (message->get_message_type_id() != message_type_id::LOG_ENTRY) {
-        LOG_LP(ERROR) << "RDMA unexpected message type: "
-                      << static_cast<int>(message->get_message_type_id());
-        TRACE_ABORT << "unexpected message type id=" << static_cast<int>(message->get_message_type_id());
-        return;
-    }
 
-    auto* log_entries = dynamic_cast<message_log_entries*>(message.get());
-    if (! log_entries) {
-        LOG_LP(ERROR) << "RDMA LOG_ENTRY cast failed.";
-        TRACE_ABORT << "cast failed";
-        return;
-    }
+    // A single RDMA frame may carry multiple serialized messages (batched for efficiency).
+    // Loop until all messages in the payload have been processed.
+    while (io.has_unread_data()) {
+        auto message = replication_message::receive(io);
+        if (! message) {
+            LOG_LP(ERROR) << "RDMA failed to deserialize replication_message.";
+            TRACE_ABORT << "deserialize failed";
+            return;
+        }
+        if (message->get_message_type_id() != message_type_id::LOG_ENTRY) {
+            LOG_LP(ERROR) << "RDMA unexpected message type: "
+                          << static_cast<int>(message->get_message_type_id());
+            TRACE_ABORT << "unexpected message type id=" << static_cast<int>(message->get_message_type_id());
+            return;
+        }
 
-    // Apply entries but skip TCP ACK because this is the RDMA path.
-    auto resources = std::make_unique<log_channel_handler_resources>(get_socket_io(), *log_channel_, false);
-    log_entries->post_receive(*resources);
+        auto* log_entries = dynamic_cast<message_log_entries*>(message.get());
+        if (! log_entries) {
+            LOG_LP(ERROR) << "RDMA LOG_ENTRY cast failed.";
+            TRACE_ABORT << "cast failed";
+            return;
+        }
+
+        // Apply entries but skip TCP ACK because this is the RDMA path.
+        auto resources = std::make_unique<log_channel_handler_resources>(get_socket_io(), *log_channel_, false);
+        log_entries->post_receive(*resources);
+    }
 
     TRACE_END;
 }

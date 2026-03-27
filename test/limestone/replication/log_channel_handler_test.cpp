@@ -19,6 +19,7 @@
 #include <rdma_comm/ack_message.h>
 #include <rdma_comm/rdma_frame_header.h>
 #include "test_message.h"
+#include "replication_test_helper.h"
 #include <fcntl.h>
 #include <unistd.h>
 namespace limestone::testing {
@@ -538,6 +539,49 @@ TEST_F(log_channel_handler_test,
     EXPECT_EQ(errno, EAGAIN);
 
     EXPECT_EQ(channel.current_epoch_id(), first.get_epoch_id());
+
+    ::close(ctx.read_fd);
+    ::close(ctx.write_fd);
+}
+
+// Verify that process_rdma_message_locked processes all messages packed in one payload.
+// This exercises the batched-send path where multiple message_log_entries are accumulated
+// in rdma_serializer_io_ and sent as a single RDMA write.
+TEST_F(log_channel_handler_test,
+       process_rdma_message_locked_processes_multiple_messages_in_single_payload) {
+    auto ctx = make_rdma_handler_with_channel(base_location);
+    ASSERT_NE(ctx.handler, nullptr);
+
+    // Build two messages and concatenate them into one payload (simulating RDMA batch flush).
+    // The first message carries session_begin_flag so that the channel opens the WAL file.
+    message_log_entries first(epoch_id_type{1});
+    first.set_session_begin_flag(true);
+    first.add_normal_entry(1U, "k1", "v1", write_version_type{epoch_id_type{1}, 0U});
+    message_log_entries second(epoch_id_type{1});
+    second.add_normal_entry(2U, "k2", "v2", write_version_type{epoch_id_type{1}, 0U});
+    second.set_session_end_flag(true);
+
+    socket_io out(std::string{});
+    replication_message::send(out, first);
+    replication_message::send(out, second);
+    std::string combined = out.get_out_string();
+    std::vector<std::uint8_t> aggregated(combined.begin(), combined.end());
+
+    rdma::communication::rdma_frame_header header{};
+    header.version = rdma::communication::rdma_frame_protocol_version;
+    header.flags = 0U;
+    header.sequence_number = 0U;
+    header.payload_size = static_cast<std::uint32_t>(aggregated.size());
+
+    ctx.handler->process_rdma_message_locked(aggregated, header);
+
+    // Verify both entries were written to the WAL file.
+    auto log_entries = read_log_file(base_location, "pwal_0000");
+    ASSERT_EQ(log_entries.size(), 2U);
+    EXPECT_TRUE(AssertLogEntry(log_entries[0], 1U, "k1", "v1", 1U, 0U, {},
+                               log_entry::entry_type::normal_entry));
+    EXPECT_TRUE(AssertLogEntry(log_entries[1], 2U, "k2", "v2", 1U, 0U, {},
+                               log_entry::entry_type::normal_entry));
 
     ::close(ctx.read_fd);
     ::close(ctx.write_fd);

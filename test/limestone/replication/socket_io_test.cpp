@@ -574,4 +574,42 @@ TEST(socket_io_test, reset_output_buffer_socket_mode_is_noop) {
     ::close(fds[0]);
 }
 
+TEST(socket_io_test, get_out_size_empty) {
+    socket_io io(std::string{});
+    EXPECT_EQ(io.get_out_size(), 0U);
+}
+
+TEST(socket_io_test, get_out_size_after_write) {
+    socket_io io(std::string{});
+    io.send_uint32(0x12345678U);
+    EXPECT_EQ(io.get_out_size(), sizeof(uint32_t));
+}
+
+TEST(socket_io_test, get_out_size_after_reset) {
+    socket_io io(std::string{});
+    io.send_uint32(0xDEADBEEFU);
+    ASSERT_GT(io.get_out_size(), 0U);
+    io.reset_output_buffer();
+    EXPECT_EQ(io.get_out_size(), 0U);
+}
+
+TEST(socket_io_test, has_unread_data_empty_stream) {
+    socket_io io(std::string{});
+    EXPECT_FALSE(io.has_unread_data());
+}
+
+TEST(socket_io_test, has_unread_data_with_data) {
+    socket_io io(std::string{"ABC"});
+    EXPECT_TRUE(io.has_unread_data());
+}
+
+TEST(socket_io_test, has_unread_data_after_consume) {
+    socket_io io_src(std::string{});
+    io_src.send_uint8(0xABU);
+    socket_io io(io_src.get_out_string());
+    EXPECT_TRUE(io.has_unread_data());
+    [[maybe_unused]] auto _ = io.receive_uint8();
+    EXPECT_FALSE(io.has_unread_data());
+}
+
 }  // namespace limestone::testing

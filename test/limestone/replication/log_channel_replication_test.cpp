@@ -358,10 +358,14 @@ TEST_P(log_channel_replication_test, rdma_send_reuses_serializer_and_flushes) {
         msg.set_flush_flag(true);
     });
 
-    EXPECT_EQ(rdma_stream_ptr->send_count_, 2U);
-    EXPECT_GT(rdma_stream_ptr->last_payload_size_, 0U);
+    // Small messages are accumulated in the buffer and not yet sent via send_bytes.
+    EXPECT_EQ(rdma_stream_ptr->send_count_, 0U);
 
     impl->flush_rdma_stream();
+
+    // After flush, accumulated messages are sent in a single send_bytes call, then rdma flush.
+    EXPECT_EQ(rdma_stream_ptr->send_count_, 1U);
+    EXPECT_GT(rdma_stream_ptr->last_payload_size_, 0U);
     EXPECT_EQ(rdma_stream_ptr->flush_count_, 1U);
 }
 
@@ -377,6 +381,57 @@ TEST_P(log_channel_replication_test, rdma_flush_async_executes) {
     fut.get();
 
     EXPECT_EQ(rdma_stream_ptr->flush_count_, 1U);
+}
+
+TEST_P(log_channel_replication_test, rdma_send_triggers_flush_when_threshold_exceeded) {
+    auto connector = begin_session_and_get_connector();
+    auto* impl = log_channel_->get_impl();
+
+    auto rdma_stream = std::make_unique<fake_rdma_send_stream>();
+    auto* ptr = rdma_stream.get();
+    impl->set_rdma_send_stream(std::move(rdma_stream));
+    EXPECT_TRUE(impl->has_rdma_send_stream());
+
+    // Accumulate messages until the threshold is exceeded and send_bytes is triggered.
+    // Each message carries ~4KB value to reach the 56KB threshold within a reasonable loop count.
+    const std::string large_value(4000, 'x');
+    int iterations = 0;
+    while (ptr->send_count_ == 0) {
+        impl->send_replica_message(111, [&](replication::message_log_entries& msg) {
+            msg.add_normal_entry(1U, "k", large_value,
+                                 write_version_type{api::epoch_id_type{111}, 0U});
+        });
+        ++iterations;
+        ASSERT_LT(iterations, 100) << "threshold was never reached";
+    }
+    EXPECT_EQ(ptr->send_count_, 1U);
+    EXPECT_GE(ptr->last_payload_size_, api::log_channel_impl::rdma_send_buffer_threshold);
+}
+
+TEST_P(log_channel_replication_test, rdma_send_buffer_resets_after_threshold_flush) {
+    auto connector = begin_session_and_get_connector();
+    auto* impl = log_channel_->get_impl();
+
+    auto rdma_stream = std::make_unique<fake_rdma_send_stream>();
+    auto* ptr = rdma_stream.get();
+    impl->set_rdma_send_stream(std::move(rdma_stream));
+
+    // Reach the threshold to trigger a flush.
+    const std::string large_value(4000, 'x');
+    while (ptr->send_count_ == 0) {
+        impl->send_replica_message(111, [&](replication::message_log_entries& msg) {
+            msg.add_normal_entry(1U, "k", large_value,
+                                 write_version_type{api::epoch_id_type{111}, 0U});
+        });
+    }
+    std::size_t count_after_first_flush = ptr->send_count_;
+
+    // A small message after flush must NOT trigger another send_bytes call.
+    impl->send_replica_message(111, [&](replication::message_log_entries& msg) {
+        msg.add_normal_entry(1U, "k2", "v2",
+                             write_version_type{api::epoch_id_type{111}, 0U});
+    });
+    EXPECT_EQ(ptr->send_count_, count_after_first_flush);
 }
 
 TEST_P(log_channel_replication_test, log_channel_add_storage) {

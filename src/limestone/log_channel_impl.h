@@ -116,6 +116,13 @@ public:
      * @return future representing completion of flush.
      */
     std::future<void> flush_rdma_stream_async();
+
+    /// @brief Threshold in bytes for flushing the RDMA serialization buffer.
+    /// When the accumulated buffer size reaches this value, send_bytes is invoked.
+    /// Set to 56KB (8KB below the 64KB RDMA single-write limit) to ensure that
+    /// the buffer including the last appended message stays within one RDMA write.
+    static constexpr std::size_t rdma_send_buffer_threshold = 56UL * 1024; // 56KB
+
 private:
     std::unique_ptr<replication::replica_connector> replica_connector_;
     std::unique_ptr<rdma::communication::rdma_send_stream> rdma_send_stream_;
@@ -123,6 +130,20 @@ private:
     std::unique_ptr<boost::asio::thread_pool> ack_thread_pool_;
     std::once_flag ack_thread_pool_once_;
     mutable std::mutex mtx_replica_connector_;
+
+    /**
+     * @brief Send all bytes currently accumulated in rdma_serializer_io_ via rdma_send_stream_.
+     *        Resets the buffer on completion.
+     *        Caller must hold mtx_replica_connector_.
+     */
+    void flush_rdma_serializer_io_locked();
+
+    /**
+     * @brief Send the given payload string via rdma_send_stream_ with retry on failure.
+     *        Caller must hold mtx_replica_connector_.
+     * @param payload Serialized byte payload to transmit.
+     */
+    void send_rdma_bytes_locked(std::string const& payload);
 };
 
 }  // namespace limestone::api

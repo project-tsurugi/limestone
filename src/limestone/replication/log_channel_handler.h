@@ -86,9 +86,16 @@ protected:
      */
     void process_pending_rdma_messages_locked();
     /**
-     * @brief Process a single RDMA message assembled from contiguous frames.
-     * @param payload Aggregated payload bytes.
-     * @param last_header Header of the last frame in the message (for ACK).
+     * @brief Deserialize and process all replication messages packed in a single RDMA payload.
+     *
+     * A single RDMA payload may contain multiple serialized @c message_log_entries objects
+     * because the sender accumulates messages in a buffer and flushes them in batch once the
+     * buffer reaches the threshold (see @c rdma_send_buffer_threshold).
+     * This function loops over the payload until all messages have been consumed.
+     *
+     * @param payload Aggregated payload bytes assembled from one or more contiguous RDMA frames.
+     * @param last_header Header of the last frame in the sequence (carries the sequence number
+     *                    used to send the RDMA ACK).
      *
      * This assumes the caller already holds rdma_mutex_.
      */
