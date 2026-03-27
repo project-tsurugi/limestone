@@ -612,4 +612,16 @@ TEST(socket_io_test, has_unread_data_after_consume) {
     EXPECT_FALSE(io.has_unread_data());
 }
 
+// send_blob and receive_blob on the base socket_io must FATAL immediately
+// because blob handling requires a blob-capable subclass.
+TEST(socket_io_death_test, send_blob_on_base_class_is_fatal) {
+    socket_io io(std::string{});
+    EXPECT_DEATH(io.send_blob(0U), "");
+}
+
+TEST(socket_io_death_test, receive_blob_on_base_class_is_fatal) {
+    socket_io io(std::string{});
+    EXPECT_DEATH(io.receive_blob(), "");
+}
+
 }  // namespace limestone::testing

@@ -15,6 +15,8 @@
  */
 #include <unistd.h>
 
+#include <algorithm>
+#include <fstream>
 #include <map>
 
 #include "datastore_impl.h"
@@ -215,6 +217,48 @@ public:
     std::size_t send_count_{};
     std::size_t flush_count_{};
     std::size_t last_payload_size_{};
+};
+
+/**
+ * @brief An rdma_send_stream that records every call to send_bytes / send_all_bytes
+ *        with the transmitted data, enabling order and content verification in tests.
+ */
+class capturing_rdma_send_stream : public rdma::communication::rdma_send_stream {
+public:
+    struct call_record {
+        std::string type;  // "send_bytes" or "send_all_bytes"
+        std::vector<std::uint8_t> data;
+    };
+
+    [[nodiscard]] send_result send_bytes(
+            std::vector<std::uint8_t> const& payload,
+            std::size_t offset, std::size_t length) noexcept override {
+        calls_.push_back({"send_bytes",
+            std::vector<std::uint8_t>(
+                payload.begin() + static_cast<std::ptrdiff_t>(offset),
+                payload.begin() + static_cast<std::ptrdiff_t>(offset + length))});
+        return {true, "", length};
+    }
+
+    [[nodiscard]] send_result send_all_bytes(
+            std::vector<std::uint8_t> const& payload,
+            std::size_t offset, std::size_t length) noexcept override {
+        calls_.push_back({"send_all_bytes",
+            std::vector<std::uint8_t>(
+                payload.begin() + static_cast<std::ptrdiff_t>(offset),
+                payload.begin() + static_cast<std::ptrdiff_t>(offset + length))});
+        return {true, "", length};
+    }
+
+    [[nodiscard]] flush_result flush(std::chrono::milliseconds) noexcept override {
+        return {true, ""};
+    }
+
+    [[nodiscard]] std::optional<rdma::communication::ack_body> take_ack_body() noexcept override {
+        return std::nullopt;
+    }
+
+    std::vector<call_record> calls_;
 };
 
 TEST_P(log_channel_replication_test, replica_connector_setter_getter) {
@@ -488,6 +532,106 @@ TEST_P(log_channel_replication_test, log_channel_truncate_storage) {
     EXPECT_EQ(log_entry->has_flush_flag(), false);
 }
 
+
+// Verify that when a BLOB message is sent via RDMA, any non-BLOB data accumulated
+// in rdma_serializer_io_ is flushed (via send_bytes) BEFORE the BLOB data is
+// sent (via send_all_bytes), preserving message ordering.
+TEST_P(log_channel_replication_test, rdma_send_blob_flushes_pending_buffer_first) {
+    auto connector = begin_session_and_get_connector();
+    auto* impl = log_channel_->get_impl();
+
+    auto rdma_stream = std::make_unique<capturing_rdma_send_stream>();
+    auto* ptr = rdma_stream.get();
+    impl->set_rdma_send_stream(std::move(rdma_stream));
+
+    // Accumulate a small non-blob message in rdma_serializer_io_ (below threshold).
+    impl->send_replica_message(111, [](replication::message_log_entries& msg) {
+        msg.add_normal_entry(1U, "k", "v", write_version_type{epoch_id_type{111}, 0U});
+    });
+    EXPECT_TRUE(ptr->calls_.empty()) << "No RDMA call expected before threshold is reached";
+
+    // Create BLOB file.
+    blob_id_type blob_id = 42U;
+    auto blob_path = datastore_->get_blob_file(blob_id).path();
+    boost::filesystem::create_directories(blob_path.parent_path());
+    {
+        std::ofstream ofs(blob_path.string(), std::ios::binary);
+        ofs << "blob_ordering_test";
+    }
+
+    // Sending a BLOB message must first flush the buffered non-blob data.
+    impl->send_replica_message(111, [blob_id](replication::message_log_entries& msg) {
+        msg.add_normal_with_blob(1U, "bk", "bv",
+            write_version_type{epoch_id_type{111}, 0U}, {blob_id});
+    });
+
+    // First call must be send_bytes (flushing the non-blob buffer).
+    ASSERT_GE(ptr->calls_.size(), 2U);
+    EXPECT_EQ(ptr->calls_[0].type, "send_bytes");
+    // At least one send_all_bytes call must follow (blob header + data).
+    bool found_send_all = std::any_of(
+        std::next(ptr->calls_.begin()), ptr->calls_.end(),
+        [](capturing_rdma_send_stream::call_record const& c) {
+            return c.type == "send_all_bytes";
+        });
+    EXPECT_TRUE(found_send_all) << "No send_all_bytes found after non-blob flush";
+
+    // Verify that the RDMA stream actually contains the BLOB file content.
+    // Use std::search on raw bytes to handle binary data correctly.
+    std::vector<std::uint8_t> all_rdma_blob_bytes;
+    for (auto const& call : ptr->calls_) {
+        if (call.type == "send_all_bytes") {
+            all_rdma_blob_bytes.insert(
+                all_rdma_blob_bytes.end(), call.data.begin(), call.data.end());
+        }
+    }
+    std::string const expected_ordering = "blob_ordering_test";
+    auto it = std::search(
+        all_rdma_blob_bytes.begin(), all_rdma_blob_bytes.end(),
+        expected_ordering.begin(), expected_ordering.end());
+    EXPECT_NE(it, all_rdma_blob_bytes.end())
+        << "BLOB content not found in RDMA-transmitted bytes for ordering test";
+}
+
+// Verify that the blob file content is correctly transmitted via RDMA.  The
+// raw bytes received by the send stream must contain the verbatim blob data.
+TEST_P(log_channel_replication_test, rdma_send_blob_data_content_is_transmitted) {
+    auto connector = begin_session_and_get_connector();
+    auto* impl = log_channel_->get_impl();
+
+    auto rdma_stream = std::make_unique<capturing_rdma_send_stream>();
+    auto* ptr = rdma_stream.get();
+    impl->set_rdma_send_stream(std::move(rdma_stream));
+
+    // Create BLOB file with known content.
+    blob_id_type blob_id = 77U;
+    std::string const blob_content = "rdma_blob_test_content_12345";
+    auto blob_path = datastore_->get_blob_file(blob_id).path();
+    boost::filesystem::create_directories(blob_path.parent_path());
+    {
+        std::ofstream ofs(blob_path.string(), std::ios::binary);
+        ofs << blob_content;
+    }
+
+    impl->send_replica_message(111, [blob_id](replication::message_log_entries& msg) {
+        msg.add_normal_with_blob(1U, "k", "v",
+            write_version_type{epoch_id_type{111}, 0U}, {blob_id});
+    });
+
+    // The blob data is transmitted via send_all_bytes.
+    // Collect all bytes from those calls and use std::search for binary-safe content check.
+    std::vector<std::uint8_t> all_rdma_bytes;
+    for (auto const& call : ptr->calls_) {
+        if (call.type == "send_all_bytes") {
+            all_rdma_bytes.insert(all_rdma_bytes.end(), call.data.begin(), call.data.end());
+        }
+    }
+    auto it = std::search(
+        all_rdma_bytes.begin(), all_rdma_bytes.end(),
+        blob_content.begin(), blob_content.end());
+    EXPECT_NE(it, all_rdma_bytes.end())
+        << "BLOB content not found in RDMA-transmitted bytes";
+}
 
 INSTANTIATE_TEST_SUITE_P(
     rdma_toggle,

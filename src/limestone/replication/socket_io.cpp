@@ -285,4 +285,12 @@ int socket_io::get_socket_fd() const noexcept {
     return socket_fd_;
 }
 
+void socket_io::send_blob(blob_id_type /*blob_id*/) {
+    LOG_LP(FATAL) << "send_blob called on base socket_io: blob-capable IO class required";
+}
+
+blob_id_type socket_io::receive_blob() {
+    LOG_LP(FATAL) << "receive_blob called on base socket_io: blob-capable IO class required";
+}
+
 }  // namespace limestone::replication

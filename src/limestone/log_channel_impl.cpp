@@ -8,6 +8,7 @@
 #include "replication/message_log_entries.h"
 #include "replication/replication_message.h"
 #include "replication/socket_io.h"
+#include "replication/rdma_socket_io.h"
 #include "limestone/api/datastore.h"
 #include "limestone/logging.h"
 #include "logging_helper.h"
@@ -42,18 +43,34 @@ bool log_channel_impl::send_replica_message(
     modifier(message);
 
     if (rdma_send_stream_) {
-        // Serialize message into in-memory buffer via string-mode socket_io for RDMA path.
-        // Do NOT reset the buffer here; messages are accumulated across calls and flushed
-        // only when the buffer reaches rdma_send_buffer_threshold.
-        replication::replication_message::send(rdma_serializer_io_, message);
-        std::size_t buffered = rdma_serializer_io_.get_out_size();
-        TRACE << "RDMA path buffered_size=" << buffered;
-
-        if (buffered >= rdma_send_buffer_threshold) {
+        if (message.has_any_blobs()) {
+            // BLOBs must be sent directly via RDMA without in-memory buffering.
+            // First flush any accumulated non-blob data, then send the blob message
+            // using rdma_socket_io which streams blob file data chunk-by-chunk.
+            if (! datastore_) {
+                LOG_LP(FATAL) << "datastore not set; cannot send blob via RDMA";
+            }
             flush_rdma_serializer_io_locked();
-            TRACE_END << "path=rdma flushed";
+            replication::rdma_socket_io rdma_io(*rdma_send_stream_, *datastore_);
+            replication::replication_message::send(rdma_io, message);
+            // Flush any remaining non-blob serialized data left in the rdma_io buffer.
+            auto remaining = rdma_io.get_out_string();
+            if (! remaining.empty()) {
+                send_rdma_bytes_locked(remaining);
+            }
+            TRACE_END << "path=rdma blob";
         } else {
-            TRACE_END << "path=rdma buffered";
+            // Accumulate non-blob messages in rdma_serializer_io_ and flush only when
+            // the buffer reaches rdma_send_buffer_threshold (batching optimization).
+            replication::replication_message::send(rdma_serializer_io_, message);
+            std::size_t buffered = rdma_serializer_io_.get_out_size();
+            TRACE << "RDMA path buffered_size=" << buffered;
+            if (buffered >= rdma_send_buffer_threshold) {
+                flush_rdma_serializer_io_locked();
+                TRACE_END << "path=rdma flushed";
+            } else {
+                TRACE_END << "path=rdma buffered";
+            }
         }
         return true;
     }
@@ -164,6 +181,10 @@ void log_channel_impl::disable_replica_connector() {
 replication::replica_connector* log_channel_impl::get_replica_connector() {
     std::lock_guard<std::mutex> lock(mtx_replica_connector_);
     return replica_connector_.get();
+}
+
+void log_channel_impl::set_datastore(datastore& ds) noexcept {
+    datastore_ = &ds;
 }
 
 }  // namespace limestone::api

@@ -31,8 +31,11 @@
 #include <streambuf>
 
 #include "socket_streambuf.h"
+#include <limestone/api/blob_id_type.h>
 
 namespace limestone::replication {
+
+using limestone::api::blob_id_type;
 
 class socket_io {
 public:
@@ -115,6 +118,18 @@ public:
      * @brief Reset output buffer while retaining allocated capacity.
      */
     void reset_output_buffer();
+
+    /**
+     * @brief Send a blob file over the channel.
+     * @param blob_id ID of the blob to send.
+     */
+    virtual void send_blob(blob_id_type blob_id);
+
+    /**
+     * @brief Receive a blob from the channel and write it to the datastore.
+     * @return The blob ID of the received blob.
+     */
+    virtual blob_id_type receive_blob();
 
 protected:
     [[nodiscard]] std::ostream& get_out_stream(); 

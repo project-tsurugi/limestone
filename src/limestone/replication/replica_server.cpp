@@ -263,46 +263,7 @@ void replica_server::handle_client(int client_fd) {
         }
         if (handler) {
             if (type == message_type_id::LOG_CHANNEL_CREATE) {
-                // TODO: handle protocol errors below without fatal termination (return proper error).
-                auto* create_msg = dynamic_cast<message_log_channel_create*>(msg.get());
-                if (create_msg == nullptr) {
-                    LOG_LP(FATAL) << "LOG_CHANNEL_CREATE message cast failed.";
-                }
-                auto channel_id = create_msg->get_channel_id();
-                if (channel_id >= max_log_channel_slots) {
-                    LOG_LP(FATAL) << "Log channel id exceeds maximum slots: id=" << channel_id
-                                  << " max=" << max_log_channel_slots;
-                }
-                auto log_handler = std::dynamic_pointer_cast<log_channel_handler>(handler);
-                if (! log_handler) {
-                    LOG_LP(FATAL) << "LOG_CHANNEL_CREATE handler is not log_channel_handler.";
-                }
-
-                // Register RDMA ACK channel so receiver can validate and reply to RDMA frames.
-                if (rdma_receiver_) {
-                    auto reg_result = rdma_receiver_->register_channel(
-                        static_cast<rdma::communication::channel_id_type>(channel_id),
-                        rdma::communication::unique_fd{client_fd});
-                    if (! reg_result.success) {
-                        LOG_LP(FATAL) << "RDMA register_channel failed for id=" << channel_id
-                                      << " error=" << reg_result.error_message;
-                    }
-                } else {
-                    // RDMA receiver not ready yet; store for deferred registration.
-                    {
-                        std::lock_guard<std::mutex> lock(pending_rdma_channels_mutex_);
-                        pending_rdma_channels_.emplace_back(channel_id, client_fd);
-                    }
-                }
-                {
-                    auto channel_idx = static_cast<std::size_t>(channel_id);
-                    std::lock_guard<std::mutex> lock(log_channel_slot_mutexes_.at(channel_idx));
-                    if (log_channel_handlers_.at(channel_idx)) {
-                        LOG_LP(FATAL)
-                            << "Duplicate log channel id registration: id=" << channel_id;
-                    }
-                    log_channel_handlers_.at(channel_idx) = std::move(log_handler);
-                }
+                setup_log_channel_handler(*msg, handler, client_fd);
             }
             handler->run(std::move(msg));
         } else {
@@ -323,6 +284,49 @@ void replica_server::handle_client(int client_fd) {
 
     ::close(client_fd);
     TRACE_END;
+}
+
+void replica_server::setup_log_channel_handler(
+        replication_message& msg,
+        std::shared_ptr<channel_handler_base> const& handler,
+        int client_fd) {
+    // TODO: handle protocol errors below without fatal termination (return proper error).
+    auto* create_msg = dynamic_cast<message_log_channel_create*>(&msg);
+    if (create_msg == nullptr) {
+        LOG_LP(FATAL) << "LOG_CHANNEL_CREATE message cast failed.";
+    }
+    auto channel_id = create_msg->get_channel_id();
+    if (channel_id >= max_log_channel_slots) {
+        LOG_LP(FATAL) << "Log channel id exceeds maximum slots: id=" << channel_id
+                      << " max=" << max_log_channel_slots;
+    }
+    auto log_handler = std::dynamic_pointer_cast<log_channel_handler>(handler);
+    if (! log_handler) {
+        LOG_LP(FATAL) << "LOG_CHANNEL_CREATE handler is not log_channel_handler.";
+    }
+
+    // Register RDMA ACK channel so receiver can validate and reply to RDMA frames.
+    if (rdma_receiver_) {
+        auto reg_result = rdma_receiver_->register_channel(
+            static_cast<rdma::communication::channel_id_type>(channel_id),
+            rdma::communication::unique_fd{client_fd});
+        if (! reg_result.success) {
+            LOG_LP(FATAL) << "RDMA register_channel failed for id=" << channel_id
+                          << " error=" << reg_result.error_message;
+        }
+    } else {
+        // RDMA receiver not ready yet; store for deferred registration.
+        std::lock_guard<std::mutex> lock(pending_rdma_channels_mutex_);
+        pending_rdma_channels_.emplace_back(channel_id, client_fd);
+    }
+    {
+        auto channel_idx = static_cast<std::size_t>(channel_id);
+        std::lock_guard<std::mutex> lock(log_channel_slot_mutexes_.at(channel_idx));
+        if (log_channel_handlers_.at(channel_idx)) {
+            LOG_LP(FATAL) << "Duplicate log channel id registration: id=" << channel_id;
+        }
+        log_channel_handlers_.at(channel_idx) = std::move(log_handler);
+    }
 }
 
 void replica_server::shutdown() {

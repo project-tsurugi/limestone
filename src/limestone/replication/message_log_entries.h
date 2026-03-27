@@ -63,6 +63,11 @@ public:
     [[nodiscard]] bool has_session_end_flag() const;
     [[nodiscard]] bool has_flush_flag() const;
 
+    /**
+     * @brief Returns true if any entry in this message contains at least one blob ID.
+     */
+    [[nodiscard]] bool has_any_blobs() const noexcept;
+
     // Override method to receive message body from socket
     void receive_body(socket_io& io) override;
 

@@ -30,6 +30,7 @@
 #include "message_log_entries.h"
 #include "validation_result.h"
 #include "socket_io.h"
+#include "blob_socket_io.h"
 #include "logging_helper.h"
 
 namespace limestone::replication {
@@ -171,8 +172,10 @@ void log_channel_handler::process_rdma_message_locked(
     TRACE_START << "frames_for_ack_seq=" << last_header.sequence_number
                 << " payload_size=" << payload.size();
     // TODO: avoid extra copy by feeding payload directly without socket_io.
+    // TODO: large BLOBs cause full in-memory expansion of the aggregated buffer here.
+    //       Resolve by streaming the RDMA payload without full aggregation.
     std::string payload_string(payload.begin(), payload.end());
-    socket_io io(payload_string);
+    blob_socket_io io(payload_string, get_server().get_datastore());
 
     // A single RDMA frame may carry multiple serialized messages (batched for efficiency).
     // Loop until all messages in the payload have been processed.

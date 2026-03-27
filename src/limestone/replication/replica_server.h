@@ -175,6 +175,21 @@ private:
     void accept_new_client();
     void cleanup_completed_futures();
 
+    /**
+     * @brief Perform LOG_CHANNEL_CREATE specific setup for the newly created handler.
+     *
+     * Validates the channel id, registers the RDMA ACK channel (or defers it),
+     * and stores the handler in the log_channel_handlers_ slot.
+     *
+     * @param msg  The received LOG_CHANNEL_CREATE message.
+     * @param handler The handler created by the factory for this connection.
+     * @param client_fd The accepted client file descriptor.
+     */
+    void setup_log_channel_handler(
+        replication_message& msg,
+        std::shared_ptr<channel_handler_base> const& handler,
+        int client_fd);
+
     // Use fixed-size arrays to avoid reallocations and allow lock-per-slot access.
     std::array<std::shared_ptr<class log_channel_handler>, max_log_channel_slots>
         log_channel_handlers_{};

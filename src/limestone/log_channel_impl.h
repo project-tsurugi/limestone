@@ -30,6 +30,7 @@
 #include "limestone/status.h"
 #include "replication/replica_connector.h"
 #include "replication/socket_io.h"
+#include "replication/rdma_socket_io.h"
 #include "replication/message_log_entries.h"
 
 namespace limestone::api {
@@ -106,6 +107,12 @@ public:
     void set_rdma_send_stream(std::unique_ptr<rdma::communication::rdma_send_stream> stream) noexcept;
 
     /**
+     * @brief Sets the datastore reference used for BLOB operations on the RDMA path.
+     * @param ds Reference to the owning datastore.
+     */
+    void set_datastore(datastore& ds) noexcept;
+
+    /**
      * @brief Checks whether RDMA send stream is available.
      * @return true if RDMA stream is set.
      */
@@ -127,6 +134,7 @@ private:
     std::unique_ptr<replication::replica_connector> replica_connector_;
     std::unique_ptr<rdma::communication::rdma_send_stream> rdma_send_stream_;
     replication::socket_io rdma_serializer_io_;
+    datastore* datastore_{nullptr};
     std::unique_ptr<boost::asio::thread_pool> ack_thread_pool_;
     std::once_flag ack_thread_pool_once_;
     mutable std::mutex mtx_replica_connector_;

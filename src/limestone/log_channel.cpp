@@ -41,6 +41,7 @@ log_channel::log_channel(boost::filesystem::path location, std::size_t id, datas
     ss << limestone::internal::log_channel_prefix << std::setw(4) << std::setfill('0') << std::dec << id_;
     file_ = ss.str();
     impl_ = std::make_unique<log_channel_impl>();
+    impl_->set_datastore(envelope);
 }
 
 void log_channel::begin_session() {

@@ -9,9 +9,11 @@
 #include "replication/message_log_entries.h"
 #include "replication/replica_server.h"
 #include "replication/socket_io.h"
+#include "replication/blob_socket_io.h"
 #include "replication/validation_result.h"
 #include <boost/filesystem.hpp>
 #include <cerrno>
+#include <fstream>
 #include <limits>
 #include <memory>
 #include <string>
@@ -20,6 +22,7 @@
 #include <rdma_comm/rdma_frame_header.h>
 #include "test_message.h"
 #include "replication_test_helper.h"
+#include "test_root.h"
 #include <fcntl.h>
 #include <unistd.h>
 namespace limestone::testing {
@@ -582,6 +585,69 @@ TEST_F(log_channel_handler_test,
                                log_entry::entry_type::normal_entry));
     EXPECT_TRUE(AssertLogEntry(log_entries[1], 2U, "k2", "v2", 1U, 0U, {},
                                log_entry::entry_type::normal_entry));
+
+    ::close(ctx.read_fd);
+    ::close(ctx.write_fd);
+}
+
+// Verify that a BLOB entry received over RDMA is correctly deserialised and
+// written as a blob file in the replica datastore.
+TEST_F(log_channel_handler_test, handle_rdma_data_event_with_blob_entry_writes_blob_file) {
+    auto ctx = make_rdma_handler_with_channel(base_location);
+    ASSERT_NE(ctx.handler, nullptr);
+    ASSERT_GE(ctx.read_fd, 0);
+    ASSERT_GE(ctx.write_fd, 0);
+    set_non_blocking(ctx.read_fd);
+
+    // Build a sender-side datastore in a separate directory to create the blob file.
+    constexpr const char* sender_dir = "/tmp/replica_server_test_sender";
+    boost::filesystem::remove_all(sender_dir);
+    boost::filesystem::create_directories(sender_dir);
+    std::vector<boost::filesystem::path> sender_locations{sender_dir};
+    limestone::api::configuration sender_conf(sender_locations,
+        boost::filesystem::path{sender_dir});
+    auto sender_ds = std::make_unique<limestone::api::datastore_test>(sender_conf);
+
+    blob_id_type blob_id = 55U;
+    std::string const blob_content = "handler_rdma_blob_test_data";
+    auto blob_path = sender_ds->get_blob_file(blob_id).path();
+    boost::filesystem::create_directories(blob_path.parent_path());
+    {
+        std::ofstream ofs(blob_path.string(), std::ios::binary);
+        ofs << blob_content;
+    }
+
+    // Serialise the message including the blob data using blob_socket_io (string mode).
+    replication::blob_socket_io sender_io(std::string{}, *sender_ds);
+    message_log_entries entries(epoch_id_type{5});
+    entries.set_session_begin_flag(true);
+    entries.add_normal_with_blob(1U, "bk", "bv",
+        write_version_type{epoch_id_type{5}, 0U}, {blob_id});
+    replication_message::send(sender_io, entries);
+    std::string payload_str = sender_io.get_out_string();
+
+    sender_ds.reset();
+    boost::filesystem::remove_all(sender_dir);
+
+    // Build an RDMA aggregated payload and pass it to the handler.
+    std::vector<std::uint8_t> aggregated(payload_str.begin(), payload_str.end());
+    rdma::communication::rdma_frame_header header{};
+    header.version = rdma::communication::rdma_frame_protocol_version;
+    header.flags = 0U;
+    header.sequence_number = 0U;
+    header.payload_size = static_cast<std::uint32_t>(aggregated.size());
+
+    ctx.handler->process_rdma_message_locked(aggregated, header);
+
+    // Verify the blob file was written to the server's replica datastore.
+    auto& server_ds = ctx.server->get_datastore();
+    auto received_path = server_ds.get_blob_file(blob_id).path();
+    ASSERT_TRUE(boost::filesystem::exists(received_path))
+        << "Blob file not created at: " << received_path;
+    std::ifstream ifs(received_path.string(), std::ios::binary);
+    std::ostringstream oss;
+    oss << ifs.rdbuf();
+    EXPECT_EQ(oss.str(), blob_content);
 
     ::close(ctx.read_fd);
     ::close(ctx.write_fd);
