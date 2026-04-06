@@ -59,6 +59,12 @@ public:
     // Close the TCP session.
     void close_session();
 
+    /**
+     * @brief Retrieve underlying socket file descriptor.
+     * @return socket file descriptor; -1 if unavailable.
+     */
+    [[nodiscard]] int get_socket_fd() const noexcept;
+
 private:
     [[nodiscard]] bool connect_to_server_common(const std::string &host, uint16_t port, struct ::addrinfo **res, int &socket_fd);
     std::unique_ptr<socket_io> socket_io_{};

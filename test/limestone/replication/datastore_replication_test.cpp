@@ -1,18 +1,26 @@
-#include <gtest/gtest.h>
-#include <boost/filesystem.hpp>
+#include <chrono>
+#include <cstdlib>
 #include <fstream>
-#include <sstream>
 #include <iomanip>
-#include <cstdlib> 
-#include "test_root.h"
-#include "log_entry.h"
+#include <sstream>
+#include <string>
+#include <vector>
+#include <unistd.h>
+#include <optional>
+
+#include <boost/filesystem.hpp>
+#include <gtest/gtest.h>
+#include <rdma_comm/rdma_sender.h>
+
 #include "blob_file_garbage_collector.h"
-#include "limestone/logging.h"
 #include "blob_file_resolver.h"
-#include "replication_test_helper.h"
-#include "replication/replica_server.h"
 #include "datastore_impl.h"
 #include "log_channel_impl.h"
+#include "log_entry.h"
+#include "limestone/logging.h"
+#include "replication/replica_server.h"
+#include "replication_test_helper.h"
+#include "test_root.h"
 
 namespace limestone::testing {
 
@@ -23,7 +31,41 @@ constexpr const char* base = "/tmp/datastore_replication_test";
 constexpr const char* master = "/tmp/datastore_replication_test/master";
 constexpr const char* replica = "/tmp/datastore_replication_test/replica";
 
-class datastore_replication_test : public ::testing::Test {
+namespace {
+
+struct rdma_param {
+    std::string name;
+    std::optional<uint32_t> rdma_slots;
+};
+
+inline std::ostream& operator<<(std::ostream& os, rdma_param const& param) {
+    return os << param.name;
+}
+
+class fake_rdma_send_stream : public rdma::communication::rdma_send_stream {
+public:
+    [[nodiscard]] send_result send_bytes(std::vector<std::uint8_t> const&, std::size_t, std::size_t) noexcept override {
+        return { true, "", 0U };
+    }
+
+    [[nodiscard]] send_result send_all_bytes(std::vector<std::uint8_t> const&, std::size_t, std::size_t) noexcept override {
+        return { true, "", 0U };
+    }
+
+    [[nodiscard]] flush_result flush(std::chrono::milliseconds) noexcept override {
+        return { true, "" };
+    }
+
+    [[nodiscard]] std::optional<rdma::communication::ack_body> take_ack_body() noexcept override {
+        return std::nullopt;
+    }
+};
+
+}  // namespace
+
+class datastore_replication_test
+    : public ::testing::Test
+    , public ::testing::WithParamInterface<rdma_param> {
 protected:
     std::unique_ptr<api::datastore_test> datastore_;
 
@@ -31,6 +73,13 @@ protected:
     log_channel* lc1_{};
 
     void SetUp() override {
+        auto param = GetParam();
+        if (param.rdma_slots.has_value()) {
+            setenv("REPLICATION_RDMA_SLOTS", std::to_string(param.rdma_slots.value()).c_str(), 1);
+        } else {
+            unsetenv("REPLICATION_RDMA_SLOTS");
+        }
+
         // Delete and recreate the test directory
         std::string cmd = "rm -rf " + std::string(base);
         if (std::system(cmd.c_str()) != 0) {
@@ -51,6 +100,7 @@ protected:
     }
 
     void TearDown() override {
+        unsetenv("REPLICATION_RDMA_SLOTS");
         unsetenv("TSURUGI_REPLICATION_ENDPOINT");
         stop_replica_server(); 
         std::string cmd = "rm -rf " + std::string(base);;
@@ -89,24 +139,62 @@ protected:
         datastore_ = nullptr;
     }
 
+    replication::replica_server& server_for_test() {
+        return server_;
+    }
+
 private:
     replication::replica_server server_;
     std::unique_ptr<std::thread> server_thread_;
 };
 
-TEST_F(datastore_replication_test, open_control_channel_success) {
+class rdma_registration_test : public ::testing::Test {
+protected:
+    void SetUp() override {
+        setenv("TSURUGI_REPLICATION_ENDPOINT", "tcp://127.0.0.1:12345", 1);
+        setenv("REPLICATION_RDMA_SLOTS", "1", 1);
+
+        std::string cmd = "rm -rf " + std::string(base);
+        ASSERT_EQ(std::system(cmd.c_str()), 0);
+        cmd = "mkdir -p " + std::string(master);
+        ASSERT_EQ(std::system(cmd.c_str()), 0);
+
+        std::vector<boost::filesystem::path> data_locations{};
+        data_locations.emplace_back(master);
+        boost::filesystem::path metadata_location_path{master};
+        configuration conf(data_locations, metadata_location_path);
+        datastore_ = std::make_unique<datastore_test>(conf);
+    }
+
+    void TearDown() override {
+        unsetenv("TSURUGI_REPLICATION_ENDPOINT");
+        unsetenv("REPLICATION_RDMA_SLOTS");
+        datastore_.reset();
+        std::string cmd = "rm -rf " + std::string(base);
+        ASSERT_EQ(std::system(cmd.c_str()), 0);
+    }
+
+    std::unique_ptr<datastore_test> datastore_{};
+};
+
+TEST_P(datastore_replication_test, open_control_channel_success) {
     datastore_impl datastore;
 
-    // Test open control channel
     EXPECT_TRUE(datastore.open_control_channel());
-    EXPECT_TRUE(datastore.has_replica());  
+    EXPECT_TRUE(datastore.has_replica());
 
-    // Verify that the control channel has been initialized correctly
     auto control_channel = datastore.get_control_channel();
     EXPECT_NE(control_channel, nullptr);
+
+    if (GetParam().rdma_slots.has_value()) {
+        EXPECT_NE(datastore.get_rdma_sender(), nullptr);
+        EXPECT_TRUE(server_for_test().get_rdma_dma_address().has_value());
+    } else {
+        EXPECT_EQ(datastore.get_rdma_sender(), nullptr);
+    }
 }
 
-TEST_F(datastore_replication_test, open_control_channel_failure_invalid_endpoint) {
+TEST_P(datastore_replication_test, open_control_channel_failure_invalid_endpoint) {
     // Set an invalid endpoint
     setenv("TSURUGI_REPLICATION_ENDPOINT", "invalid://endpoint", 1);
     
@@ -119,7 +207,7 @@ TEST_F(datastore_replication_test, open_control_channel_failure_invalid_endpoint
     EXPECT_EQ(control_channel, nullptr); 
 }
 
-TEST_F(datastore_replication_test, open_control_channel_with_no_endpoint) {
+TEST_P(datastore_replication_test, open_control_channel_with_no_endpoint) {
     // Ensure no endpoint is set
     unsetenv("TSURUGI_REPLICATION_ENDPOINT");
 
@@ -132,7 +220,7 @@ TEST_F(datastore_replication_test, open_control_channel_with_no_endpoint) {
     EXPECT_EQ(control_channel, nullptr); 
 }
 
-TEST_F(datastore_replication_test, open_control_channel_via_datastore_ready) {
+TEST_P(datastore_replication_test, open_control_channel_via_datastore_ready) {
     gen_datastore();
     EXPECT_EQ(datastore_->get_impl()->get_control_channel(), nullptr);
     datastore_->ready();
@@ -145,7 +233,7 @@ TEST_F(datastore_replication_test, open_control_channel_via_datastore_ready) {
 }
 
 
-TEST_F(datastore_replication_test, not_open_control_channel_via_datastore_ready) {
+TEST_P(datastore_replication_test, not_open_control_channel_via_datastore_ready) {
     unsetenv("TSURUGI_REPLICATION_ENDPOINT");
 
     gen_datastore();
@@ -158,7 +246,7 @@ TEST_F(datastore_replication_test, not_open_control_channel_via_datastore_ready)
     EXPECT_EQ(lc1_->get_impl()->get_replica_connector(), nullptr);
 }
 
-TEST_F(datastore_replication_test, fail_open_control_channel_via_datastore_ready) {
+TEST_P(datastore_replication_test, fail_open_control_channel_via_datastore_ready) {
     // Set an invalid endpoint
     setenv("TSURUGI_REPLICATION_ENDPOINT", "invalid://endpoint", 1);
 
@@ -170,11 +258,89 @@ TEST_F(datastore_replication_test, fail_open_control_channel_via_datastore_ready
 }
 
 
-TEST_F(datastore_replication_test, replica_death_before_create_log_channel) {
+TEST_P(datastore_replication_test, replica_death_before_create_log_channel) {
     stop_replica_server();
     EXPECT_DEATH({
         gen_datastore();
     }, "Failed to create log channel connector.");
 }
+
+TEST_F(rdma_registration_test, DISABLED_rdma_stream_registration_success) {
+    auto* impl = datastore_->get_impl();
+    impl->set_log_channel_connector_factory_for_test([]() {
+        return std::make_unique<replication::replica_connector>();
+    });
+
+    int fds[2]{};
+    ASSERT_EQ(::pipe(fds), 0);
+    ::close(fds[1]);
+    impl->set_rdma_ack_fd_for_test(fds[0]);
+
+    bool factory_called = false;
+    impl->set_rdma_stream_factory_for_test(
+        [&factory_called](rdma::communication::channel_id_type, rdma::communication::unique_fd fd) {
+            factory_called = true;
+            EXPECT_TRUE(fd.is_valid());
+            rdma::communication::rdma_sender::stream_acquire_result result{};
+            result.status.success = true;
+            result.stream = std::make_unique<fake_rdma_send_stream>();
+            return result;
+        });
+
+    datastore_->create_channel(master);
+    EXPECT_TRUE(factory_called);
+    auto& channels = datastore_->log_channels();
+    ASSERT_FALSE(channels.empty());
+    EXPECT_TRUE(channels.front()->get_impl()->has_rdma_send_stream());
+}
+
+TEST_F(rdma_registration_test, DISABLED_rdma_stream_registration_failure_fatal) {
+    auto* impl = datastore_->get_impl();
+    impl->set_log_channel_connector_factory_for_test([]() {
+        return std::make_unique<replication::replica_connector>();
+    });
+
+    int fds[2]{};
+    ASSERT_EQ(::pipe(fds), 0);
+    ::close(fds[1]);
+    impl->set_rdma_ack_fd_for_test(fds[0]);
+
+    impl->set_rdma_stream_factory_for_test(
+        [](rdma::communication::channel_id_type, rdma::communication::unique_fd) {
+            rdma::communication::rdma_sender::stream_acquire_result result{};
+            result.status.success = false;
+            result.status.error_message = "failure";
+            return result;
+        });
+
+    EXPECT_DEATH({ datastore_->create_channel(master); }, "Failed to acquire RDMA send stream");
+}
+
+TEST_F(rdma_registration_test, DISABLED_rdma_stream_registration_invalid_ack_fd_fatal) {
+    auto* impl = datastore_->get_impl();
+    impl->set_log_channel_connector_factory_for_test([]() {
+        return std::make_unique<replication::replica_connector>();
+    });
+    impl->set_rdma_ack_fd_for_test(-1);
+
+    impl->set_rdma_stream_factory_for_test(
+        [](rdma::communication::channel_id_type, rdma::communication::unique_fd) {
+            rdma::communication::rdma_sender::stream_acquire_result result{};
+            result.status.success = true;
+            result.stream = std::make_unique<fake_rdma_send_stream>();
+            return result;
+        });
+
+    EXPECT_DEATH({ datastore_->create_channel(master); }, "Failed to obtain socket fd for RDMA acknowledgements.");
+}
+
+INSTANTIATE_TEST_SUITE_P(
+    rdma_toggle,
+    datastore_replication_test,
+    ::testing::Values(rdma_param{"tcp", std::nullopt}, rdma_param{"rdma_128", 128U}),
+    // ::testing::Values(rdma_param{"tcp", std::nullopt}),
+    [](const ::testing::TestParamInfo<rdma_param>& info) {
+        return info.param.name;
+    });
 
 }  // namespace limestone::testing

@@ -33,8 +33,8 @@ public:
     blob_socket_io(const std::string& initial, datastore& ds);
 
     // Send/receive blob methods
-    void send_blob(blob_id_type blob_id);
-    blob_id_type receive_blob();
+    void send_blob(blob_id_type blob_id) override;
+    blob_id_type receive_blob() override;
 private:
     void safe_close(FILE *fp);
     datastore& datastore_;

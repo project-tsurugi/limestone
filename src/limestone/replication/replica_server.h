@@ -15,23 +15,36 @@
  */
 #pragma once
 
+#include <array>
 #include <functional>
 #include <memory>
 #include <unordered_map>
 #include <mutex>
+#include <vector>
 #include <boost/filesystem.hpp>
 #include "replication_message.h"
 #include <limestone/api/datastore.h>
 #include "limestone_exception_helper.h"
+#include <rdma_comm/rdma_receiver.h>
+#include "log_channel_limits.h"
 
 
 namespace limestone::replication {
 
 class channel_handler_base;
+class log_channel_handler;
 
 class replica_server {
 public:
     using handler_fn = std::function<void(int, std::unique_ptr<replication_message>)>;
+    static constexpr std::size_t max_log_channel_slots = log_channel_slots_limit;
+
+    ~replica_server() = default;
+    replica_server() = default;
+    replica_server(replica_server const&) = delete;
+    replica_server& operator=(replica_server const&) = delete;
+    replica_server(replica_server&&) = delete;
+    replica_server& operator=(replica_server&&) = delete;
 
     /**
      * Initialize internal datastore and metadata from the given filesystem path.
@@ -89,6 +102,49 @@ public:
      * @return true if the flag was not set and is now set successfully, false if it was already set.
      */
     [[nodiscard]] bool mark_control_channel_created() noexcept;
+
+    /**
+     * @brief Initialize RDMA receiver for replica side.
+     * @param slot_count requested RDMA slot count.
+     * @return initialization result.
+     */
+    enum class rdma_init_result {
+        success,
+        already_initialized,
+        failed,
+    };
+    [[nodiscard]] rdma_init_result initialize_rdma_receiver(uint32_t slot_count);
+
+    /**
+     * @brief Get remote DMA address exposed by receiver.
+     * @return optional DMA address if available.
+     */
+    [[nodiscard]] std::optional<rdma::communication::dma_address_type> get_rdma_dma_address() const noexcept;
+
+    /**
+     * @brief Accessor for log channel handler lookup.
+     */
+    [[nodiscard]] std::shared_ptr<class log_channel_handler> get_log_channel_handler(
+        std::uint64_t id) const noexcept;
+
+    /**
+     * @brief Test hook to set a log channel handler into a slot.
+     * @note Intended for testing only.
+     */
+    void set_log_channel_handler_for_test(
+        std::uint64_t id, std::shared_ptr<class log_channel_handler> handler);
+
+    /**
+     * @brief RDMA receive handler entry point.
+     * @param event RDMA receive event.
+     */
+    void on_rdma_receive(rdma::communication::rdma_receive_event const& event);
+
+    /**
+     * @brief RDMA data event handler (exposed for testing).
+     * @param event RDMA data event.
+     */
+    void handle_rdma_data_event(rdma::communication::rdma_receive_data_event const& event);
 private:
     boost::filesystem::path location_;                      ///< filesystem path for datastore
     std::unordered_map<message_type_id, std::function<std::shared_ptr<channel_handler_base>(socket_io&)>> handler_factories_;
@@ -98,9 +154,15 @@ private:
     int event_fd_{-1};                                      ///< eventfd used to unblock poll()
     int sockfd_{-1};                                        ///< listening socket file descriptor
     std::atomic<bool> control_channel_created_{false};      ///< flag to indicate if control channel is created
+    std::unique_ptr<rdma::communication::rdma_receiver> rdma_receiver_; ///< RDMA receiver owned for process lifetime
+    std::mutex rdma_init_mutex_{};                                      ///< Protect RDMA receiver initialization
     
     std::vector<std::future<void>> client_futures_;         ///< futures for client handling threads
     std::mutex futures_mutex_;                              ///< mutex for thread-safe access to client_futures_
+
+    // Pending RDMA registrations until rdma_receiver_ is initialized.
+    std::mutex pending_rdma_channels_mutex_{};
+    std::vector<std::pair<std::uint64_t, int>> pending_rdma_channels_;  ///< store raw fds; converted to unique_fd on registration
 
     enum class poll_result {
         shutdown_event,
@@ -112,6 +174,26 @@ private:
     void handle_shutdown_event();
     void accept_new_client();
     void cleanup_completed_futures();
+
+    /**
+     * @brief Perform LOG_CHANNEL_CREATE specific setup for the newly created handler.
+     *
+     * Validates the channel id, registers the RDMA ACK channel (or defers it),
+     * and stores the handler in the log_channel_handlers_ slot.
+     *
+     * @param msg  The received LOG_CHANNEL_CREATE message.
+     * @param handler The handler created by the factory for this connection.
+     * @param client_fd The accepted client file descriptor.
+     */
+    void setup_log_channel_handler(
+        replication_message& msg,
+        std::shared_ptr<channel_handler_base> const& handler,
+        int client_fd);
+
+    // Use fixed-size arrays to avoid reallocations and allow lock-per-slot access.
+    std::array<std::shared_ptr<class log_channel_handler>, max_log_channel_slots>
+        log_channel_handlers_{};
+    mutable std::array<std::mutex, max_log_channel_slots> log_channel_slot_mutexes_{};
 };
 
 } // namespace limestone::replication

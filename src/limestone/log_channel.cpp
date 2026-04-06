@@ -41,6 +41,7 @@ log_channel::log_channel(boost::filesystem::path location, std::size_t id, datas
     ss << limestone::internal::log_channel_prefix << std::setw(4) << std::setfill('0') << std::dec << id_;
     file_ = ss.str();
     impl_ = std::make_unique<log_channel_impl>();
+    impl_->set_datastore(envelope);
 }
 
 void log_channel::begin_session() {
@@ -119,7 +120,11 @@ void log_channel::end_session() {
             });
             finalize_session_file();
             if (sent) {
-                impl_->wait_for_replica_ack();
+                if (impl_->has_rdma_send_stream()) {
+                    impl_->flush_rdma_stream();
+                } else {
+                    impl_->wait_for_replica_ack();
+                }
             }
         } else {
             finalize_session_file();
@@ -128,7 +133,11 @@ void log_channel::end_session() {
                 msg.set_flush_flag(true);
             });
             if (sent) {
-                impl_->wait_for_replica_ack();
+                if (impl_->has_rdma_send_stream()) {
+                    impl_->flush_rdma_stream();
+                } else {
+                    impl_->wait_for_replica_ack();
+                }
             }
         }
         TRACE_END;

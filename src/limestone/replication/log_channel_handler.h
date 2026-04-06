@@ -19,8 +19,14 @@
 #include <limestone/api/log_channel.h>
 
 #include <atomic>
+#include <cstdint>
+#include <map>
+#include <mutex>
+#include <rdma_comm/rdma_receiver.h>
+#include <vector>
 
 #include "channel_handler_base.h"
+#include "log_channel_limits.h"
 #include "log_channel_handler_resources.h"
 
 namespace limestone::replication {
@@ -28,7 +34,8 @@ namespace limestone::replication {
 using limestone::api::log_channel;
 class log_channel_handler : public channel_handler_base {
 public:
-    static constexpr int MAX_LOG_CHANNEL_COUNT = 100000;
+    static constexpr int MAX_LOG_CHANNEL_COUNT =
+        static_cast<int>(log_channel_slots_limit);
 
     explicit log_channel_handler(replica_server &server, socket_io& io) noexcept;
     ~log_channel_handler() override = default;
@@ -50,6 +57,12 @@ public:
      */
     [[nodiscard]] log_channel& get_log_channel();
 
+    /**
+     * @brief Handle RDMA data event (payload for this log channel).
+     * @param event RDMA data event to process.
+     */
+    virtual void handle_rdma_data_event(rdma::communication::rdma_receive_data_event const& event);
+
 protected:
     // Assign a log channel and set the thread name.
     validation_result authorize() override; 
@@ -66,9 +79,43 @@ protected:
     // Get the handler resources.
     std::unique_ptr<handler_resources> create_handler_resources() override;
     
+    /**
+     * @brief Process pending RDMA frames while the mutex is held.
+     *
+     * This assumes the caller already holds rdma_mutex_.
+     */
+    void process_pending_rdma_messages_locked();
+    /**
+     * @brief Deserialize and process all replication messages packed in a single RDMA payload.
+     *
+     * A single RDMA payload may contain multiple serialized @c message_log_entries objects
+     * because the sender accumulates messages in a buffer and flushes them in batch once the
+     * buffer reaches the threshold (see @c rdma_send_buffer_threshold).
+     * This function loops over the payload until all messages have been consumed.
+     *
+     * @param payload Aggregated payload bytes assembled from one or more contiguous RDMA frames.
+     * @param last_header Header of the last frame in the sequence (carries the sequence number
+     *                    used to send the RDMA ACK).
+     *
+     * This assumes the caller already holds rdma_mutex_.
+     */
+    void process_rdma_message_locked(
+        std::vector<std::uint8_t> const& payload,
+        rdma::communication::rdma_frame_header const& last_header);
+
+    /**
+     * @brief Test helper to enqueue a pending RDMA frame.
+     * @param event RDMA frame to enqueue.
+     */
+    void push_pending_frame_for_test(rdma::communication::rdma_receive_data_event const& event);
+
 private:
     std::atomic<int> log_channel_id_counter{0};
     log_channel* log_channel_{nullptr}; 
+    std::uint16_t next_sequence_number_{0};  ///< Expected next sequence number (wraps at 16 bits).
+    std::mutex rdma_mutex_;
+    std::map<std::uint16_t, rdma::communication::rdma_receive_data_event> future_rdma_frames_;
+    std::vector<rdma::communication::rdma_receive_data_event> pending_rdma_frames_;
 };
 
 } // namespace limestone::replication

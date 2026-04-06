@@ -13,29 +13,28 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-#pragma once
 
-#include <limestone/api/log_channel.h>
-#include "handler_resources.h"
-#include "replica_server.h"
+#include <replication/message_rdma_init_ack.h>
+
+#include <replication/socket_io.h>
 
 namespace limestone::replication {
 
-using namespace limestone::api;
-    
-class log_channel_handler_resources : public handler_resources {
-public:
-    log_channel_handler_resources(
-        socket_io& io,
-        log_channel& channel,
-        bool ack_enabled = true)
-        : handler_resources(io, ack_enabled)
-        , channel_(channel) {}
+message_type_id message_rdma_init_ack::get_message_type_id() const {
+    return message_type_id::RDMA_INIT_ACK;
+}
 
-    [[nodiscard]] log_channel& get_log_channel() const { return channel_; }
+void message_rdma_init_ack::send_body(socket_io& io) const {
+    io.send_uint64(remote_dma_address_);
+}
 
-private:
-    log_channel& channel_;
-};
+void message_rdma_init_ack::receive_body(socket_io& io) {
+    remote_dma_address_ = io.receive_uint64();
+}
+
+std::unique_ptr<replication_message> message_rdma_init_ack::create() {
+    return std::make_unique<message_rdma_init_ack>();
+}
 
 }  // namespace limestone::replication
+

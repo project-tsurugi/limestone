@@ -13,29 +13,13 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
+
 #pragma once
 
-#include <limestone/api/log_channel.h>
-#include "handler_resources.h"
-#include "replica_server.h"
+#include <cstddef>
 
 namespace limestone::replication {
 
-using namespace limestone::api;
-    
-class log_channel_handler_resources : public handler_resources {
-public:
-    log_channel_handler_resources(
-        socket_io& io,
-        log_channel& channel,
-        bool ack_enabled = true)
-        : handler_resources(io, ack_enabled)
-        , channel_(channel) {}
-
-    [[nodiscard]] log_channel& get_log_channel() const { return channel_; }
-
-private:
-    log_channel& channel_;
-};
+constexpr std::size_t log_channel_slots_limit = 10000;
 
 }  // namespace limestone::replication

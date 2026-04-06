@@ -34,6 +34,21 @@ public:
     [[nodiscard]] uint16_t get_error_code() const { return error_code_; }
     [[nodiscard]] const std::string& get_error_message() const { return error_message_; }
 
+    static constexpr uint16_t error_unexpected_message_type = 1;
+    static constexpr uint16_t control_channel_error_already_created = 10;
+    static constexpr uint16_t control_channel_error_invalid_type = 11;
+    static constexpr uint16_t control_channel_error_bad_cast = 12;
+    static constexpr uint16_t control_channel_error_unsupported_version = 13;
+    static constexpr uint16_t log_channel_error_too_many_channels = 20;
+    static constexpr uint16_t log_channel_error_invalid_type = 21;
+    static constexpr uint16_t log_channel_error_bad_cast = 22;
+
+    // RDMA init error codes
+    static constexpr uint16_t rdma_init_error_invalid_resources = 100;
+    static constexpr uint16_t rdma_init_error_init_failed = 101;
+    static constexpr uint16_t rdma_init_error_no_dma_address = 102;
+    static constexpr uint16_t rdma_init_error_already_initialized = 103;
+
 private:
     // Register COMMON_ERROR in replication_message factory map.
     // The static initialization here is intentional. If an exception occurs,

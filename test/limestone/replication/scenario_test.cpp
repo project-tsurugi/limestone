@@ -14,9 +14,12 @@
 #include <iterator>
 #include <memory>
 #include <mutex>
+#include <optional>
 #include <thread>
 
 #include "gtest/gtest.h"
+#include <datastore_impl.h>
+#include <log_channel_impl.h>
 #include "internal.h"
 #include "replication/replica_server.h"
 #include "replication/replication_endpoint.h"
@@ -33,11 +36,21 @@ using limestone::internal::epoch_file_name;
 using limestone::internal::last_durable_epoch;
 using limestone::api::storage_id_type;
 
-static constexpr const bool server_execute_as_thread = false;
+static constexpr const bool server_execute_as_thread = true;
 
 static constexpr const char* base_location = "/tmp/scenario_test";
 static constexpr const char* master_location = "/tmp/scenario_test/master";
 static constexpr const char* replica_location = "/tmp/scenario_test/replica";
+
+struct rdma_param {
+    std::string name;
+    std::optional<uint32_t> rdma_slots;
+};
+
+inline std::ostream& operator<<(std::ostream& os, rdma_param const& param) {
+    return os << param.name;
+}
+
 
 struct snapshot_entry {
     std::string key;
@@ -45,7 +58,8 @@ struct snapshot_entry {
     storage_id_type storage_id;
 };
 
-class scenario_test : public ::testing::Test {
+
+class scenario_test : public ::testing::Test, public ::testing::WithParamInterface<rdma_param> {
 protected:
     void SetUp() override {
         pthread_setname_np(pthread_self(), "master_main");
@@ -54,6 +68,16 @@ protected:
         boost::filesystem::remove_all(base_location);
         boost::filesystem::create_directories(master_location);
         boost::filesystem::create_directories(replica_location);
+
+        auto param = GetParam();
+        if (param.rdma_slots.has_value()) {
+            setenv("REPLICATION_RDMA_SLOTS", std::to_string(param.rdma_slots.value()).c_str(), 1024);
+        } else {
+            unsetenv("REPLICATION_RDMA_SLOTS");
+        }
+        setenv("GLOG_vmodule", "rdma_sender_detail=50,send_buffer_pool=50,log_channel=50", 1);
+        setenv("GLOG_logtostderr", "1", 1);
+        setenv("GLOG_logbufsecs", "0", 1);
 
         // start replica server
         uint16_t port = get_free_port();
@@ -69,6 +93,10 @@ protected:
     void TearDown() override {
         // cleanup environment variable
         unsetenv("TSURUGI_REPLICATION_ENDPOINT");
+        unsetenv("REPLICATION_RDMA_SLOTS");
+        unsetenv("GLOG_vmodule");
+        unsetenv("GLOG_logtostderr");
+        unsetenv("GLOG_logbufsecs");
         // stop replica server
         stop_replica();
 
@@ -274,10 +302,18 @@ protected:
     log_channel* lc1_{};
 };
 
-TEST_F(scenario_test, minimal_test) {
+TEST_P(scenario_test, minimal_test) {
     // Replica is already initialized in SetUp
     // Start the master
     gen_datastore(master_location);
+
+    if (GetParam().rdma_slots.has_value()) {
+        EXPECT_TRUE(ds->get_impl()->is_rdma_enabled());
+        EXPECT_NE(ds->get_impl()->get_rdma_sender(), nullptr);
+        EXPECT_TRUE(lc0_->get_impl()->has_rdma_send_stream());
+    }
+
+
     ds->switch_epoch(1);
 
     // Verify that PWAL is transferred to the replica
@@ -335,6 +371,9 @@ TEST_F(scenario_test, minimal_test) {
 
     // Start the master without a replica
     unsetenv("TSURUGI_REPLICATION_ENDPOINT");
+    if (GetParam().rdma_slots.has_value()) {
+        unsetenv("REPLICATION_RDMA_SLOTS");
+    }
     gen_datastore(master_location);
 
     // Verify the snapshot
@@ -364,5 +403,14 @@ TEST_F(scenario_test, minimal_test) {
         EXPECT_EQ(snapshot_entries[1].storage_id, 1);
     }
 }
+
+INSTANTIATE_TEST_SUITE_P(
+    rdma_toggle,
+    scenario_test,
+    ::testing::Values(rdma_param{"tcp", std::nullopt}, rdma_param{"rdma_1", 1024U}),
+    // ::testing::Values(rdma_param{"tcp", std::nullopt}),
+    [](const ::testing::TestParamInfo<rdma_param>& info) {
+        return info.param.name;
+    });
 
 }  // namespace limestone::testing

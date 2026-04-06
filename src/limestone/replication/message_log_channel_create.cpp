@@ -20,30 +20,32 @@
  
  namespace limestone::replication {
  
- void message_log_channel_create::set_secret(std::string secret) {
-     secret_ = std::move(secret);
- }
+void message_log_channel_create::set_secret(std::string secret) {
+    secret_ = std::move(secret);
+}
+
+message_type_id message_log_channel_create::get_message_type_id() const {
+    return message_type_id::LOG_CHANNEL_CREATE;
+}
+
+void message_log_channel_create::send_body(socket_io& io) const {
+    io.send_uint8(connection_type_);
+    io.send_uint64(channel_id_);
+    io.send_string(secret_);
+}
+
+void message_log_channel_create::receive_body(socket_io& io) {
+    connection_type_ = io.receive_uint8();
+    channel_id_ = io.receive_uint64();
+    if (connection_type_ != CONNECTION_TYPE_LOG_CHANNEL) {
+        LOG_AND_THROW_EXCEPTION("Invalid connection_type for message_log_channel_create");
+    }
+    secret_ = io.receive_string();
+}
  
- message_type_id message_log_channel_create::get_message_type_id() const {
-     return message_type_id::LOG_CHANNEL_CREATE;
- }
- 
- void message_log_channel_create::send_body(socket_io& io) const {
-     io.send_uint8(connection_type_);
-     io.send_string(secret_);
- }
- 
- void message_log_channel_create::receive_body(socket_io& io) {
-     connection_type_ = io.receive_uint8();
-     if (connection_type_ != CONNECTION_TYPE_LOG_CHANNEL) {
-         LOG_AND_THROW_EXCEPTION("Invalid connection_type for message_log_channel_create");
-     }
-     secret_ = io.receive_string();
- }
- 
- std::unique_ptr<replication_message> message_log_channel_create::create() {
-     return std::make_unique<message_log_channel_create>();
- }
+std::unique_ptr<replication_message> message_log_channel_create::create_placeholder() {
+    return std::make_unique<message_log_channel_create>(0);
+}
  
  }  // namespace limestone::replication
  

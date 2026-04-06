@@ -22,13 +22,16 @@
 #include <array>
 #include <memory>
 #include <optional>
-#include <functional>
 #include <string>
 #include <sys/types.h>
+#include <array>
+#include <cstdint>
+#include <functional>
 
 #include "manifest.h"
 #include "replication/replica_connector.h"
 #include "replication/replication_endpoint.h"
+#include <rdma_comm/rdma_sender.h>
 
 namespace limestone::api {
 
@@ -89,7 +92,7 @@ public:
      */
     [[nodiscard]] bool is_replication_configured() const noexcept;
 
-    [[nodiscard]] std::unique_ptr<replication::replica_connector> create_log_channel_connector(datastore &ds);
+    [[nodiscard]] std::unique_ptr<replication::replica_connector> create_log_channel_connector(datastore &ds, std::uint64_t channel_id);
 
     // Getter for the datastore role (master or replica)
     [[nodiscard]] bool is_master() const noexcept;
@@ -102,6 +105,24 @@ public:
 
     // Getter for REPLICATION_ASYNC_GROUP_COMMIT environment variable presence
     [[nodiscard]] bool is_async_group_commit_enabled() const noexcept;
+
+    /**
+     * @brief Checks if RDMA is enabled via the REPLICATION_RDMA_SLOTS environment variable.
+     * @return true if RDMA is enabled.
+     */
+    [[nodiscard]] bool is_rdma_enabled() const noexcept;
+
+    /**
+     * @brief Returns the RDMA slot count specified by REPLICATION_RDMA_SLOTS.
+     * @return RDMA slot count if enabled; std::nullopt otherwise.
+     */
+    [[nodiscard]] std::optional<std::int32_t> rdma_slot_count() const noexcept;
+
+    /**
+     * @brief Get RDMA sender instance if initialized.
+     * @return pointer to RDMA sender or nullptr if not available.
+     */
+    [[nodiscard]] rdma::communication::rdma_sender* get_rdma_sender() const noexcept;
 
     // Getter for migration_info_
     [[nodiscard]] const std::optional<manifest::migration_info>& get_migration_info() const noexcept;
@@ -167,6 +188,75 @@ public:
      *               The function must return true on success and false on failure.
      */
     void set_group_commit_sender_for_tests(std::function<bool(uint64_t)> const& sender);
+    /**
+     * @brief Initialize RDMA sender using slot count and remote DMA address.
+     * @param slot_count requested RDMA slot count.
+     * @param remote_dma_address DMA address received from replica.
+     * @return true on success; false if RDMA sender initialization fails.
+     */
+    bool initialize_rdma_sender(uint32_t slot_count, uint64_t remote_dma_address);
+
+    /**
+     * @brief Establish control channel connection.
+     * @return true on success.
+     */
+    bool connect_control_channel();
+
+    /**
+     * @brief Send session begin and validate ACK.
+     * @return true on success.
+     */
+    bool send_session_begin();
+
+    /**
+     * @brief Initialize RDMA sender if RDMA is enabled.
+     * @return true on success or skip; false on failure.
+     */
+    bool maybe_initialize_rdma_sender();
+
+    /**
+     * @brief Shut down RDMA sender if initialized.
+     * @return true on success or when sender is absent; false if shutdown fails.
+     */
+    bool shutdown_rdma_sender() noexcept;
+
+    /**
+     * @brief Test hook to inject RDMA sender instance.
+     * @param sender RDMA sender ownership to set for testing.
+     * @note Test-only; do not use in production code.
+     */
+    void set_rdma_sender_for_test(std::unique_ptr<rdma::communication::rdma_sender> sender) noexcept;
+
+    /**
+     * @brief Test hook to override replica connector factory for log channels.
+     * @param factory factory function to create replica_connector for testing.
+     * @note Test-only; do not use in production code.
+     */
+    void set_log_channel_connector_factory_for_test(
+        std::function<std::unique_ptr<replication::replica_connector>()> factory) noexcept;
+
+    /**
+     * @brief Test hook to override RDMA send stream acquisition.
+     * @param factory factory returning RDMA send stream acquire result.
+     * @note Test-only; do not use in production code.
+     */
+    void set_rdma_stream_factory_for_test(
+        std::function<rdma::communication::rdma_sender::stream_acquire_result(
+            rdma::communication::channel_id_type, rdma::communication::unique_fd)> factory) noexcept;
+
+    [[nodiscard]] std::function<rdma::communication::rdma_sender::stream_acquire_result(
+        rdma::communication::channel_id_type, rdma::communication::unique_fd)> const*
+    get_rdma_stream_factory_for_test() const noexcept;
+
+    /**
+     * @brief Test hook to override acknowledgement fd for RDMA stream registration.
+     * @param fd file descriptor to use; negative value triggers fatal in registration.
+     * @note Test-only; do not use in production code.
+     */
+    void set_rdma_ack_fd_for_test(int fd) noexcept;
+
+    [[nodiscard]] bool has_rdma_stream_factory_for_test() const noexcept;
+    [[nodiscard]] std::optional<int> rdma_ack_fd_for_test() const noexcept;
 
 private:
     // Atomic counter for tracking active backup operations.
@@ -185,6 +275,7 @@ private:
     // Environment variable flags
     bool async_session_close_enabled_;
     bool async_group_commit_enabled_;
+    std::optional<std::int32_t> rdma_slot_count_;
   
     // Migration info for the manifest
     std::optional<manifest::migration_info> migration_info_;
@@ -201,6 +292,24 @@ private:
      * @brief generates HMAC secret key for BLOB reference tag generation.
      */
     void generate_hmac_secret_key();
+
+    /**
+     * @brief initializes RDMA slot count from the REPLICATION_RDMA_SLOTS environment variable.
+     */
+    void initialize_rdma_slots();
+
+    // RDMA sender owned by master for RDMA replication path.
+    std::unique_ptr<rdma::communication::rdma_sender> rdma_sender_{};
+
+    // Test hook: factory to override log channel connector creation.
+    std::function<std::unique_ptr<replication::replica_connector>()> log_channel_connector_factory_for_test_{};
+
+    // Test hook: factory to override RDMA stream acquisition.
+    std::function<rdma::communication::rdma_sender::stream_acquire_result(
+        rdma::communication::channel_id_type, rdma::communication::unique_fd)> rdma_stream_factory_for_test_{};
+
+    // Test hook: override ack fd used for RDMA registration.
+    std::optional<int> rdma_ack_fd_for_test_{};
 };
 
 }  // namespace limestone::api

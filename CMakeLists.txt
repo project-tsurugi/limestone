@@ -42,8 +42,8 @@ option(ENABLE_GOOGLE_PERFTOOLS "Enable Google Perftools" OFF)
 option(PERFORMANCE_TOOLS "Enable tooling to measure engine performance" OFF)
 option(TRACY_ENABLE "enable tracy profiler" OFF)
 option(ENABLE_ALTIMETER "enable altimeter logging" OFF)
-option(INSTALL_EXPERIMENTAL_TOOLS "Install experimental tools like tgreplica" OFF)
-option(BUILD_REPLICATION_TESTS "Build replication tests" OFF)
+option(INSTALL_EXPERIMENTAL_TOOLS "Install experimental tools like tgreplica" ON)
+option(BUILD_REPLICATION_TESTS "Build replication tests" ON)
 option(BUILD_SANDBOX_TOOLS "build sandbox (temporary) tools" OFF)
 
 if (FORCE_INSTALL_RPATH)
@@ -80,6 +80,8 @@ if (ENABLE_ALTIMETER)
     list(APPEND boost_components container)
 endif()
 find_package(Boost COMPONENTS ${boost_components} REQUIRED)
+# rdma_comm is always required because limestone core engine depends on RDMA communication.
+find_package(rdma_comm REQUIRED)
 
 add_subdirectory(third_party) # should be before enable_testing()
 
@@ -178,4 +180,3 @@ install(
     DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/${package_name}
     EXPORT_LINK_INTERFACE_LIBRARIES
 )
-

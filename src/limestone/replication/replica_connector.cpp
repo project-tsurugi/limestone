@@ -129,4 +129,11 @@ void replica_connector::close_session() {
     }
 }
 
+int replica_connector::get_socket_fd() const noexcept {
+    if (! socket_io_) {
+        return -1;
+    }
+    return socket_io_->get_socket_fd();
+}
+
 }  // namespace limestone::replication
