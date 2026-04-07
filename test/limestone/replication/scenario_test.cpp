@@ -71,7 +71,7 @@ protected:
 
         auto param = GetParam();
         if (param.rdma_slots.has_value()) {
-            setenv("REPLICATION_RDMA_SLOTS", std::to_string(param.rdma_slots.value()).c_str(), 1024);
+            setenv("REPLICATION_RDMA_SLOTS", std::to_string(param.rdma_slots.value()).c_str(), 1);
         } else {
             unsetenv("REPLICATION_RDMA_SLOTS");
         }

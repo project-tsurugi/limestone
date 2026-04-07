@@ -257,8 +257,9 @@ TEST_F(log_channel_handler_test, handle_rdma_data_event_sends_ack) {
 
     rdma::communication::ack_message_bytes buf{};
     ssize_t n = ::read(ctx.read_fd, buf.data(), buf.size());
+    int saved_errno = errno;
     EXPECT_LT(n, 0);
-    EXPECT_EQ(errno, EAGAIN);
+    EXPECT_EQ(saved_errno, EAGAIN);
 
     auto& channel = ctx.handler->get_log_channel();
     EXPECT_EQ(channel.current_epoch_id(), entries.get_epoch_id());
@@ -285,8 +286,9 @@ TEST_F(log_channel_handler_test, handle_rdma_data_event_sequence_mismatch_no_ack
 
     rdma::communication::ack_message_bytes buf{};
     ssize_t n = ::read(ctx.read_fd, buf.data(), buf.size());
+    int saved_errno = errno;
     EXPECT_LT(n, 0);
-    EXPECT_EQ(errno, EAGAIN);
+    EXPECT_EQ(saved_errno, EAGAIN);
 
     ::close(ctx.read_fd);
     ::close(ctx.write_fd);
@@ -311,8 +313,9 @@ TEST_F(log_channel_handler_test, handle_rdma_data_event_payload_size_mismatch_no
 
     rdma::communication::ack_message_bytes buf{};
     ssize_t n = ::read(ctx.read_fd, buf.data(), buf.size());
+    int saved_errno = errno;
     EXPECT_LT(n, 0);
-    EXPECT_EQ(errno, EAGAIN);
+    EXPECT_EQ(saved_errno, EAGAIN);
 
     ::close(ctx.read_fd);
     ::close(ctx.write_fd);
@@ -335,13 +338,15 @@ TEST_F(log_channel_handler_test, handle_rdma_data_event_partial_then_complete_ac
     ctx.handler->handle_rdma_data_event(events.first);
     rdma::communication::ack_message_bytes buf{};
     ssize_t n = ::read(ctx.read_fd, buf.data(), buf.size());
+    int saved_errno = errno;
     EXPECT_LT(n, 0);
-    EXPECT_EQ(errno, EAGAIN);
+    EXPECT_EQ(saved_errno, EAGAIN);
 
     ctx.handler->handle_rdma_data_event(events.second);
     n = ::read(ctx.read_fd, buf.data(), buf.size());
+    saved_errno = errno;
     EXPECT_LT(n, 0);
-    EXPECT_EQ(errno, EAGAIN);
+    EXPECT_EQ(saved_errno, EAGAIN);
 
     EXPECT_EQ(channel.current_epoch_id(), entries.get_epoch_id());
 
@@ -371,8 +376,9 @@ TEST_F(log_channel_handler_test, handle_rdma_data_event_partial_clears_on_versio
 
     rdma::communication::ack_message_bytes buf{};
     ssize_t n = ::read(ctx.read_fd, buf.data(), buf.size());
+    int saved_errno = errno;
     EXPECT_LT(n, 0);
-    EXPECT_EQ(errno, EAGAIN);
+    EXPECT_EQ(saved_errno, EAGAIN);
 
     ::close(ctx.read_fd);
     ::close(ctx.write_fd);
@@ -395,8 +401,9 @@ TEST_F(log_channel_handler_test, process_pending_rdma_messages_locked_waits_for_
 
     rdma::communication::ack_message_bytes buf{};
     ssize_t n = ::read(ctx.read_fd, buf.data(), buf.size());
+    int saved_errno = errno;
     EXPECT_LT(n, 0);
-    EXPECT_EQ(errno, EAGAIN);
+    EXPECT_EQ(saved_errno, EAGAIN);
 
     ::close(ctx.read_fd);
     ::close(ctx.write_fd);
@@ -430,8 +437,9 @@ TEST_F(log_channel_handler_test, process_rdma_message_locked_processes_single_me
 
     rdma::communication::ack_message_bytes buf{};
     ssize_t n = ::read(ctx.read_fd, buf.data(), buf.size());
+    int saved_errno = errno;
     EXPECT_LT(n, 0);
-    EXPECT_EQ(errno, EAGAIN);
+    EXPECT_EQ(saved_errno, EAGAIN);
 
     auto& channel = ctx.handler->get_log_channel();
     EXPECT_EQ(channel.current_epoch_id(), entries.get_epoch_id());
@@ -464,8 +472,9 @@ TEST_F(log_channel_handler_test, process_pending_rdma_messages_locked_processes_
 
     rdma::communication::ack_message_bytes buf{};
     ssize_t n = ::read(ctx.read_fd, buf.data(), buf.size());
+    int saved_errno = errno;
     EXPECT_LT(n, 0);
-    EXPECT_EQ(errno, EAGAIN);
+    EXPECT_EQ(saved_errno, EAGAIN);
 
     auto& channel = ctx.handler->get_log_channel();
     EXPECT_EQ(channel.current_epoch_id(), first.get_epoch_id());
@@ -496,8 +505,9 @@ TEST_F(log_channel_handler_test,
 
     rdma::communication::ack_message_bytes buf{};
     ssize_t n = ::read(ctx.read_fd, buf.data(), buf.size());
+    int saved_errno = errno;
     EXPECT_LT(n, 0);
-    EXPECT_EQ(errno, EAGAIN);
+    EXPECT_EQ(saved_errno, EAGAIN);
 
     auto& channel = ctx.handler->get_log_channel();
     EXPECT_EQ(channel.current_epoch_id(), first.get_epoch_id());
@@ -532,14 +542,16 @@ TEST_F(log_channel_handler_test,
 
     rdma::communication::ack_message_bytes buf{};
     ssize_t n = ::read(ctx.read_fd, buf.data(), buf.size());
+    int saved_errno = errno;
     EXPECT_LT(n, 0);
-    EXPECT_EQ(errno, EAGAIN);
+    EXPECT_EQ(saved_errno, EAGAIN);
 
     ctx.handler->handle_rdma_data_event(first_events.second);
 
     n = ::read(ctx.read_fd, buf.data(), buf.size());
+    saved_errno = errno;
     EXPECT_LT(n, 0);
-    EXPECT_EQ(errno, EAGAIN);
+    EXPECT_EQ(saved_errno, EAGAIN);
 
     EXPECT_EQ(channel.current_epoch_id(), first.get_epoch_id());
 
@@ -603,9 +615,8 @@ TEST_F(log_channel_handler_test, handle_rdma_data_event_with_blob_entry_writes_b
     constexpr const char* sender_dir = "/tmp/replica_server_test_sender";
     boost::filesystem::remove_all(sender_dir);
     boost::filesystem::create_directories(sender_dir);
-    std::vector<boost::filesystem::path> sender_locations{sender_dir};
-    limestone::api::configuration sender_conf(sender_locations,
-        boost::filesystem::path{sender_dir});
+    limestone::api::configuration sender_conf{};
+    sender_conf.set_data_location(sender_dir);
     auto sender_ds = std::make_unique<limestone::api::datastore_test>(sender_conf);
 
     blob_id_type blob_id = 55U;

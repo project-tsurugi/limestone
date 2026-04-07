@@ -15,6 +15,12 @@
 
 namespace limestone::api {
 
+namespace {
+
+constexpr auto rdma_flush_timeout = std::chrono::milliseconds{30000};
+
+} // namespace
+
 using limestone::replication::message_type_id;
 
 log_channel_impl::log_channel_impl()
@@ -107,7 +113,7 @@ void log_channel_impl::flush_rdma_stream() {
     }
     // Drain any data remaining in the serialization buffer before issuing the RDMA flush.
     flush_rdma_serializer_io_locked();
-    auto flush_result = rdma_send_stream_->flush(std::chrono::milliseconds{30000});
+    auto flush_result = rdma_send_stream_->flush(rdma_flush_timeout);
     if (! flush_result.success) {
         LOG_LP(FATAL) << "RDMA flush failed: " << flush_result.error_message;
     }

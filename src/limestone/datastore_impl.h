@@ -24,7 +24,6 @@
 #include <optional>
 #include <string>
 #include <sys/types.h>
-#include <array>
 #include <cstdint>
 #include <functional>
 

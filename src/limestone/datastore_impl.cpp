@@ -396,6 +396,8 @@ void datastore_impl::set_pid(pid_t pid) noexcept {
 
 pid_t datastore_impl::pid() const noexcept {
     return pid_;
+}
+
 bool datastore_impl::is_rdma_enabled() const noexcept {
     return rdma_slot_count_.has_value();
 }
@@ -449,6 +451,8 @@ void datastore_impl::initialize_rdma_slots() {
         rdma_slot_count_ = std::nullopt;
         return;
     }
+    // ERANGE only covers values outside strtoll's range; the RDMA slot count
+    // must also fit in the 32-bit protocol/configuration field.
     if (parsed <= 0 || parsed > std::numeric_limits<std::int32_t>::max()) {
         LOG_LP(ERROR) << "Invalid REPLICATION_RDMA_SLOTS: value must be 1..INT32_MAX; "
                       << "RDMA replication disabled";

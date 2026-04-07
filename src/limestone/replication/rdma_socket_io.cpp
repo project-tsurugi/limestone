@@ -81,8 +81,8 @@ FILE* rdma_socket_io::open_blob_file(boost::filesystem::path const& path, uint32
         LOG_AND_THROW_IO_EXCEPTION("Failed to seek blob file: " + path.string(), ec);
     }
     // std::ftell returns long; use auto to match the return type exactly.
-    // Note: although ftell/long may support larger files, this implementation intentionally
-    // rejects blob files larger than uint32_t::max to keep the size within 32-bit limits.
+    // Note: this implementation intentionally limits blob file size to uint32_t::max
+    // (4 GiB - 1) so the transferred size always fits in the 32-bit protocol field.
     auto pos = std::ftell(fp);
     if (pos == -1) {
         int ec = errno;

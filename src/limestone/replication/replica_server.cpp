@@ -26,8 +26,6 @@
 #include <variant>
 #include <unistd.h>
 
-#include <glog/logging.h>
-#include <limestone/logging.h>
 #include <rdma_comm/rdma_config.h>
 #include <rdma_comm/unique_fd.h>
 

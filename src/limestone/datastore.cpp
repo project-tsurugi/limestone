@@ -24,7 +24,6 @@
 #include <rdma_comm/channel_id_type.h>
 #include <rdma_comm/rdma_sender.h>
 #include <rdma_comm/unique_fd.h>
-#include <unistd.h>
 
 #include <boost/filesystem/fstream.hpp>
 
@@ -396,7 +395,7 @@ log_channel& datastore::create_channel() {
     std::lock_guard<std::mutex> lock(mtx_channel_);
     
     auto id = log_channel_id_.fetch_add(1);
-    log_channels_.emplace_back(std::unique_ptr<log_channel>(new log_channel(location, id, *this)));  // constructor of log_channel is private
+    log_channels_.emplace_back(std::unique_ptr<log_channel>(new log_channel(location_, id, *this)));  // constructor of log_channel is private
     auto* channel = log_channels_.back().get();
     
     if (impl_->has_replica() && impl_->is_master()) {

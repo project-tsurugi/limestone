@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cassert>
+#include <limits>
 
 #include "limestone_exception_helper.h"
 #include "socket_io.h"
@@ -14,10 +15,12 @@ using limestone::api::epoch_id_type;
 
 void message_log_entries::send_body(socket_io& io) const {
     TRACE_START << "epcoh id =" << epoch_id_ << ", entries size = " << entries_.size();
-    auto size = entries_.size();
+    if (entries_.size() > std::numeric_limits<std::uint32_t>::max()) {
+        LOG_AND_THROW_EXCEPTION("Too many log entries in replication message");
+    }
     io.send_uint64(static_cast<uint64_t>(epoch_id_)); 
-    auto entry_count = static_cast<uint32_t>(size);
-    io.send_uint32(entry_count); // TODO: overflow check needed
+    auto entry_count = static_cast<uint32_t>(entries_.size());
+    io.send_uint32(entry_count);
 
     // Send each entry
     for (const auto& entry : entries_) {
@@ -29,7 +32,10 @@ void message_log_entries::send_body(socket_io& io) const {
         io.send_uint64(entry.write_version.get_minor());
         
         // Send the blob list
-        io.send_uint32(static_cast<uint32_t>(entry.blob_ids.size())); // TODO: overflow check needed
+        if (entry.blob_ids.size() > std::numeric_limits<std::uint32_t>::max()) {
+            LOG_AND_THROW_EXCEPTION("Too many blob IDs in replication message entry");
+        }
+        io.send_uint32(static_cast<uint32_t>(entry.blob_ids.size()));
         for (const auto& blob_id : entry.blob_ids) {
             io.send_blob(blob_id);
         }
