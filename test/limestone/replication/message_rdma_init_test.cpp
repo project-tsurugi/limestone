@@ -67,6 +67,7 @@ TEST(message_rdma_init_test, post_receive_with_invalid_resources_returns_error) 
     EXPECT_EQ(err->get_error_code(), replication::message_error::rdma_init_error_invalid_resources);
 }
 
+#ifdef LIMESTONE_ENABLE_RDMA
 TEST(message_rdma_init_test, post_receive_returns_ack_then_error_on_second_init) {
     boost::filesystem::path base_location = "/tmp/message_rdma_init_test";
     boost::filesystem::remove_all(base_location);
@@ -103,5 +104,6 @@ TEST(message_rdma_init_test, post_receive_returns_ack_then_error_on_second_init)
 
     boost::filesystem::remove_all(base_location);
 }
+#endif // LIMESTONE_ENABLE_RDMA
 
 }  // namespace limestone::testing

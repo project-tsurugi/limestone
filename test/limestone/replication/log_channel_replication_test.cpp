@@ -32,6 +32,7 @@
 #include "test_root.h"
 #include "log_channel_impl.h"
 #include "replication/socket_io.h"
+#include "rdma/rdma_send_stream_base.h"
 #include <optional>
 
 namespace limestone::testing {
@@ -186,7 +187,7 @@ private:
     std::unique_ptr<std::thread> server_thread_;
 };
 
-class fake_rdma_send_stream : public rdma::communication::rdma_send_stream {
+class fake_rdma_send_stream : public limestone::replication::rdma_send_stream_base {
 public:
     [[nodiscard]] send_result send_bytes(std::vector<std::uint8_t> const& payload, std::size_t offset, std::size_t length) noexcept override {
         send_count_++;
@@ -208,10 +209,6 @@ public:
         return { true, "" };
     }
 
-    [[nodiscard]] std::optional<rdma::communication::ack_body> take_ack_body() noexcept override {
-        return std::nullopt;
-    }
-
     std::size_t send_count_{};
     std::size_t flush_count_{};
     std::size_t last_payload_size_{};
@@ -221,7 +218,7 @@ public:
  * @brief An rdma_send_stream that records every call to send_bytes / send_all_bytes
  *        with the transmitted data, enabling order and content verification in tests.
  */
-class capturing_rdma_send_stream : public rdma::communication::rdma_send_stream {
+class capturing_rdma_send_stream : public limestone::replication::rdma_send_stream_base {
 public:
     struct call_record {
         std::string type;  // "send_bytes" or "send_all_bytes"
@@ -250,10 +247,6 @@ public:
 
     [[nodiscard]] flush_result flush(std::chrono::milliseconds) noexcept override {
         return {true, ""};
-    }
-
-    [[nodiscard]] std::optional<rdma::communication::ack_body> take_ack_body() noexcept override {
-        return std::nullopt;
     }
 
     std::vector<call_record> calls_;

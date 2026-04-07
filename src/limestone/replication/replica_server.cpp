@@ -26,8 +26,7 @@
 #include <variant>
 #include <unistd.h>
 
-#include <rdma_comm/rdma_config.h>
-#include <rdma_comm/unique_fd.h>
+#include <rdma/rdma_factory.h>
 
 #include "channel_handler_base.h"
 #include "control_channel_handler.h"
@@ -307,8 +306,8 @@ void replica_server::setup_log_channel_handler(
     // Register RDMA ACK channel so receiver can validate and reply to RDMA frames.
     if (rdma_receiver_) {
         auto reg_result = rdma_receiver_->register_channel(
-            static_cast<rdma::communication::channel_id_type>(channel_id),
-            rdma::communication::unique_fd{client_fd});
+            static_cast<std::uint16_t>(channel_id),
+            client_fd);
         if (! reg_result.success) {
             LOG_LP(FATAL) << "RDMA register_channel failed for id=" << channel_id
                           << " error=" << reg_result.error_message;
@@ -397,18 +396,18 @@ void replica_server::set_log_channel_handler_for_test(
     log_channel_handlers_.at(id) = std::move(handler);
 }
 
-void replica_server::on_rdma_receive(rdma::communication::rdma_receive_event const& event) {
-    if (auto const* err = std::get_if<rdma::communication::rdma_receive_error_event>(&event)) {
+void replica_server::on_rdma_receive(rdma_receive_event const& event) {
+    if (auto const* err = std::get_if<rdma_error_event>(&event)) {
         LOG_LP(ERROR) << "RDMA receive error: " << err->error_message;
         return;
     }
-    if (auto const* data = std::get_if<rdma::communication::rdma_receive_data_event>(&event)) {
+    if (auto const* data = std::get_if<rdma_data_event>(&event)) {
         handle_rdma_data_event(*data);
         return;
     }
 }
 
-void replica_server::handle_rdma_data_event(rdma::communication::rdma_receive_data_event const& event) {
+void replica_server::handle_rdma_data_event(rdma_data_event const& event) {
     auto channel_id = event.header.channel_id;
     if (channel_id >= max_log_channel_slots) {
         LOG_LP(ERROR) << "RDMA channel id out of range: id=" << channel_id
@@ -443,18 +442,9 @@ replica_server::rdma_init_result replica_server::initialize_rdma_receiver(uint32
         return rdma_init_result::already_initialized;
     }
 
-    rdma::communication::rdma_config config{};
-    auto capacity = static_cast<std::size_t>(slot_count);
-    constexpr std::size_t chunk_size = 4096U;
-    config.send_buffer.region_size_bytes = capacity * chunk_size;
-    config.send_buffer.chunk_size_bytes = chunk_size;
-    config.send_buffer.ring_capacity = capacity;
-    config.remote_buffer = config.send_buffer;
-    config.completion_queue_depth = 1024U;
-
-    rdma_receiver_ = std::make_unique<rdma::communication::rdma_receiver>(config);
+    rdma_receiver_ = make_rdma_receiver(slot_count);
     auto result = rdma_receiver_->initialize(
-        [this](const rdma::communication::rdma_receive_event& event) { this->on_rdma_receive(event); });
+        [this](rdma_receive_event const& event) { this->on_rdma_receive(event); });
     if (! result.success) {
         rdma_receiver_.reset();
         return rdma_init_result::failed;
@@ -468,12 +458,11 @@ replica_server::rdma_init_result replica_server::initialize_rdma_receiver(uint32
 
     // Drain any pending channel registrations queued before RDMA receiver was ready.
     {
-        std::lock_guard<std::mutex> lock(pending_rdma_channels_mutex_);
+        std::lock_guard<std::mutex> pending_lock(pending_rdma_channels_mutex_);
         for (auto& entry : pending_rdma_channels_) {
-            auto fd = entry.second;
             auto reg_result = rdma_receiver_->register_channel(
-                static_cast<rdma::communication::channel_id_type>(entry.first),
-                rdma::communication::unique_fd{fd});
+                static_cast<std::uint16_t>(entry.first),
+                entry.second);
             if (! reg_result.success) {
                 LOG_LP(FATAL) << "RDMA deferred register_channel failed for id=" << entry.first
                               << " error=" << reg_result.error_message;
@@ -485,7 +474,7 @@ replica_server::rdma_init_result replica_server::initialize_rdma_receiver(uint32
     return rdma_init_result::success;
 }
 
-std::optional<rdma::communication::dma_address_type> replica_server::get_rdma_dma_address() const noexcept {
+std::optional<std::uint64_t> replica_server::get_rdma_dma_address() const noexcept {
     if (! rdma_receiver_) {
         return std::nullopt;
     }

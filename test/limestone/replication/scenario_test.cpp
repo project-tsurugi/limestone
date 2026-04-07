@@ -404,13 +404,22 @@ TEST_P(scenario_test, minimal_test) {
     }
 }
 
+#ifdef LIMESTONE_ENABLE_RDMA
 INSTANTIATE_TEST_SUITE_P(
     rdma_toggle,
     scenario_test,
     ::testing::Values(rdma_param{"tcp", std::nullopt}, rdma_param{"rdma_1", 1024U}),
-    // ::testing::Values(rdma_param{"tcp", std::nullopt}),
     [](const ::testing::TestParamInfo<rdma_param>& info) {
         return info.param.name;
     });
+#else
+INSTANTIATE_TEST_SUITE_P(
+    rdma_toggle,
+    scenario_test,
+    ::testing::Values(rdma_param{"tcp", std::nullopt}),
+    [](const ::testing::TestParamInfo<rdma_param>& info) {
+        return info.param.name;
+    });
+#endif // LIMESTONE_ENABLE_RDMA
 
 }  // namespace limestone::testing

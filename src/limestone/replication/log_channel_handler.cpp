@@ -20,9 +20,6 @@
 #include <vector>
 
 #include <glog/logging.h>
-#include <rdma_comm/rdma_receiver.h>
-#include <rdma_comm/rdma_frame_header.h>
-#include <rdma_comm/ack_message.h>
 
 #include "replication_message.h"
 #include "message_error.h"
@@ -68,19 +65,19 @@ void log_channel_handler::send_initial_ack() const {
 }
 
 void log_channel_handler::handle_rdma_data_event(
-    rdma::communication::rdma_receive_data_event const& event) {
+    rdma_data_event const& event) {
     std::lock_guard<std::mutex> lock(rdma_mutex_);
     auto const& header = event.header;
     TRACE_START << "seq=" << header.sequence_number
                 << " size=" << header.payload_size
                 << " partial=" << ((header.flags
-                                    & rdma::communication::rdma_frame_flag_partial_payload) != 0)
+                                    & rdma_frame_flag_partial_payload) != 0)
                 << " pending=" << pending_rdma_frames_.size()
                 << " future=" << future_rdma_frames_.size()
                 << " next_expected=" << next_sequence_number_;
-    if (header.version != rdma::communication::rdma_frame_protocol_version) {
+    if (header.version != rdma_frame_current_version) {
         LOG_LP(ERROR) << "RDMA frame version mismatch: expected "
-                      << static_cast<int>(rdma::communication::rdma_frame_protocol_version)
+                      << static_cast<int>(rdma_frame_current_version)
                       << " got " << static_cast<int>(header.version);
         pending_rdma_frames_.clear();
         future_rdma_frames_.clear();
@@ -138,7 +135,7 @@ void log_channel_handler::process_pending_rdma_messages_locked() {
             total_size += frame.payload.size();
             bool const is_partial =
                 (frame.header.flags &
-                 rdma::communication::rdma_frame_flag_partial_payload) != 0;
+                 rdma_frame_flag_partial_payload) != 0;
             if (! is_partial) {
                 message_end_index = idx;
                 break;
@@ -167,7 +164,7 @@ void log_channel_handler::process_pending_rdma_messages_locked() {
 
 void log_channel_handler::process_rdma_message_locked(
     std::vector<std::uint8_t> const& payload,
-    rdma::communication::rdma_frame_header const& last_header) {
+    rdma_frame_header const& last_header) {
     TRACE_START << "frames_for_ack_seq=" << last_header.sequence_number
                 << " payload_size=" << payload.size();
     // TODO: avoid extra copy by feeding payload directly without socket_io.
@@ -208,7 +205,7 @@ void log_channel_handler::process_rdma_message_locked(
 }
 
 void log_channel_handler::push_pending_frame_for_test(
-    rdma::communication::rdma_receive_data_event const& event) {
+    rdma_data_event const& event) {
     std::lock_guard<std::mutex> lock(rdma_mutex_);
     pending_rdma_frames_.push_back(event);
 }

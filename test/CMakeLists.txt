@@ -15,8 +15,12 @@ target_link_libraries(${test_target}
         PRIVATE Boost::filesystem
         PRIVATE glog::glog
         PRIVATE gflags::gflags
-        PRIVATE rdma_comm
         )
+
+if(ENABLE_RDMA)
+    target_compile_definitions(${test_target} PRIVATE LIMESTONE_ENABLE_RDMA)
+    target_link_libraries(${test_target} PRIVATE rdma_comm)
+endif()
 
 if (ENABLE_ALTIMETER)
     target_link_libraries(${test_target}

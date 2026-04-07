@@ -21,7 +21,7 @@
 #include <vector>
 #include <boost/asio.hpp>
 #include <future>
-#include <rdma_comm/rdma_sender.h>
+#include <rdma/rdma_send_stream_base.h>
 #include <boost/filesystem.hpp>
 
 #include "limestone/api/blob_id_type.h"
@@ -30,7 +30,6 @@
 #include "limestone/status.h"
 #include "replication/replica_connector.h"
 #include "replication/socket_io.h"
-#include "replication/rdma_socket_io.h"
 #include "replication/message_log_entries.h"
 
 namespace limestone::api {
@@ -104,7 +103,7 @@ public:
      * @brief Sets RDMA send stream for replication.
      * @param stream RDMA stream instance to take ownership of.
      */
-    void set_rdma_send_stream(std::unique_ptr<rdma::communication::rdma_send_stream> stream) noexcept;
+    void set_rdma_send_stream(std::unique_ptr<replication::rdma_send_stream_base> stream) noexcept;
 
     /**
      * @brief Sets the datastore reference used for BLOB operations on the RDMA path.
@@ -132,7 +131,7 @@ public:
 
 private:
     std::unique_ptr<replication::replica_connector> replica_connector_;
-    std::unique_ptr<rdma::communication::rdma_send_stream> rdma_send_stream_;
+    std::unique_ptr<replication::rdma_send_stream_base> rdma_send_stream_;
     replication::socket_io rdma_serializer_io_;
     datastore* datastore_{nullptr};
     std::unique_ptr<boost::asio::thread_pool> ack_thread_pool_;

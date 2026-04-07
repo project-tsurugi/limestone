@@ -80,7 +80,7 @@ public:
         : log_channel_handler(server, io),
           invoked_(invoked) {}
 
-    void handle_rdma_data_event(rdma::communication::rdma_receive_data_event const& /*event*/) override {
+    void handle_rdma_data_event(rdma_data_event const& /*event*/) override {
         invoked_ = true;
     }
 
@@ -295,6 +295,7 @@ TEST_F(replica_server_test, mark_control_channel_created_sets_flag) {
     EXPECT_TRUE(server.mark_control_channel_created());
 }
 
+#ifdef LIMESTONE_ENABLE_RDMA
 TEST_F(replica_server_test, initialize_rdma_receiver_success_then_already_initialized) {
     replication::replica_server server;
     server.initialize(location1);
@@ -305,6 +306,7 @@ TEST_F(replica_server_test, initialize_rdma_receiver_success_then_already_initia
     auto second = server.initialize_rdma_receiver(4);
     EXPECT_EQ(second, replication::replica_server::rdma_init_result::already_initialized);
 }
+#endif // LIMESTONE_ENABLE_RDMA
 
 TEST_F(replica_server_test, on_rdma_receive_invokes_handler_for_data_event) {
     replica_server server;
@@ -317,14 +319,14 @@ TEST_F(replica_server_test, on_rdma_receive_invokes_handler_for_data_event) {
     auto handler = std::make_shared<fake_log_channel_handler>(server, io, invoked);
     server.set_log_channel_handler_for_test(1U, handler);
 
-    rdma::communication::rdma_receive_data_event ev{};
-    ev.header.version = rdma::communication::rdma_frame_protocol_version;
+    rdma_data_event ev{};
+    ev.header.version = rdma_frame_current_version;
     ev.header.channel_id = 1U;
     ev.header.sequence_number = 0U;
     ev.header.payload_size = 0U;
     ev.payload = {};
 
-    server.on_rdma_receive(rdma::communication::rdma_receive_event{ev});
+    server.on_rdma_receive(rdma_receive_event{ev});
     EXPECT_TRUE(invoked);
 
     ::close(pipefd[0]);
@@ -342,10 +344,10 @@ TEST_F(replica_server_test, on_rdma_receive_error_event_does_not_invoke_handler)
     auto handler = std::make_shared<fake_log_channel_handler>(server, io, invoked);
     server.set_log_channel_handler_for_test(1U, handler);
 
-    rdma::communication::rdma_receive_error_event err{};
+    rdma_error_event err{};
     err.error_message = "test-error";
 
-    server.on_rdma_receive(rdma::communication::rdma_receive_event{err});
+    server.on_rdma_receive(rdma_receive_event{err});
     EXPECT_FALSE(invoked);
 
     ::close(pipefd[0]);

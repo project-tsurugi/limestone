@@ -10,7 +10,6 @@
 
 #include <boost/filesystem.hpp>
 #include <gtest/gtest.h>
-#include <rdma_comm/rdma_sender.h>
 
 #include "blob_file_garbage_collector.h"
 #include "blob_file_resolver.h"
@@ -21,6 +20,7 @@
 #include "replication/replica_server.h"
 #include "replication_test_helper.h"
 #include "test_root.h"
+#include "rdma/rdma_send_stream_base.h"
 
 namespace limestone::testing {
 
@@ -42,22 +42,18 @@ inline std::ostream& operator<<(std::ostream& os, rdma_param const& param) {
     return os << param.name;
 }
 
-class fake_rdma_send_stream : public rdma::communication::rdma_send_stream {
+class fake_rdma_send_stream : public limestone::replication::rdma_send_stream_base {
 public:
-    [[nodiscard]] send_result send_bytes(std::vector<std::uint8_t> const&, std::size_t, std::size_t) noexcept override {
-        return { true, "", 0U };
+    [[nodiscard]] send_result send_bytes(std::vector<std::uint8_t> const&, std::size_t, std::size_t length) noexcept override {
+        return { true, "", length };
     }
 
-    [[nodiscard]] send_result send_all_bytes(std::vector<std::uint8_t> const&, std::size_t, std::size_t) noexcept override {
-        return { true, "", 0U };
+    [[nodiscard]] send_result send_all_bytes(std::vector<std::uint8_t> const&, std::size_t, std::size_t length) noexcept override {
+        return { true, "", length };
     }
 
     [[nodiscard]] flush_result flush(std::chrono::milliseconds) noexcept override {
         return { true, "" };
-    }
-
-    [[nodiscard]] std::optional<rdma::communication::ack_body> take_ack_body() noexcept override {
-        return std::nullopt;
     }
 };
 
@@ -236,13 +232,22 @@ TEST_P(datastore_replication_test, replica_death_before_create_log_channel) {
     }, "Failed to create log channel connector.");
 }
 
+#ifdef LIMESTONE_ENABLE_RDMA
 INSTANTIATE_TEST_SUITE_P(
     rdma_toggle,
     datastore_replication_test,
     ::testing::Values(rdma_param{"tcp", std::nullopt}, rdma_param{"rdma_128", 128U}),
-    // ::testing::Values(rdma_param{"tcp", std::nullopt}),
     [](const ::testing::TestParamInfo<rdma_param>& info) {
         return info.param.name;
     });
+#else
+INSTANTIATE_TEST_SUITE_P(
+    rdma_toggle,
+    datastore_replication_test,
+    ::testing::Values(rdma_param{"tcp", std::nullopt}),
+    [](const ::testing::TestParamInfo<rdma_param>& info) {
+        return info.param.name;
+    });
+#endif // LIMESTONE_ENABLE_RDMA
 
 }  // namespace limestone::testing

@@ -22,8 +22,9 @@
 #include <cstdint>
 #include <map>
 #include <mutex>
-#include <rdma_comm/rdma_receiver.h>
 #include <vector>
+
+#include <rdma/rdma_receive_event.h>
 
 #include "channel_handler_base.h"
 #include "log_channel_limits.h"
@@ -61,7 +62,7 @@ public:
      * @brief Handle RDMA data event (payload for this log channel).
      * @param event RDMA data event to process.
      */
-    virtual void handle_rdma_data_event(rdma::communication::rdma_receive_data_event const& event);
+    virtual void handle_rdma_data_event(rdma_data_event const& event);
 
 protected:
     // Assign a log channel and set the thread name.
@@ -101,21 +102,21 @@ protected:
      */
     void process_rdma_message_locked(
         std::vector<std::uint8_t> const& payload,
-        rdma::communication::rdma_frame_header const& last_header);
+        rdma_frame_header const& last_header);
 
     /**
      * @brief Test helper to enqueue a pending RDMA frame.
      * @param event RDMA frame to enqueue.
      */
-    void push_pending_frame_for_test(rdma::communication::rdma_receive_data_event const& event);
+    void push_pending_frame_for_test(rdma_data_event const& event);
 
 private:
     std::atomic<int> log_channel_id_counter{0};
     log_channel* log_channel_{nullptr}; 
     std::uint16_t next_sequence_number_{0};  ///< Expected next sequence number (wraps at 16 bits).
     std::mutex rdma_mutex_;
-    std::map<std::uint16_t, rdma::communication::rdma_receive_data_event> future_rdma_frames_;
-    std::vector<rdma::communication::rdma_receive_data_event> pending_rdma_frames_;
+    std::map<std::uint16_t, rdma_data_event> future_rdma_frames_;
+    std::vector<rdma_data_event> pending_rdma_frames_;
 };
 
 } // namespace limestone::replication

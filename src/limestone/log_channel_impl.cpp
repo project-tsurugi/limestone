@@ -8,12 +8,14 @@
 #include "replication/message_log_entries.h"
 #include "replication/replication_message.h"
 #include "replication/socket_io.h"
-#include "replication/rdma_socket_io.h"
+#include "rdma/rdma_socket_io.h"
 #include "limestone/api/datastore.h"
 #include "limestone/logging.h"
 #include "logging_helper.h"
 
 namespace limestone::api {
+
+using limestone::replication::rdma_send_stream_base;
 
 namespace {
 
@@ -164,7 +166,7 @@ std::future<void> log_channel_impl::flush_rdma_stream_async() {
     return fut;
 }
 
-void log_channel_impl::set_rdma_send_stream(std::unique_ptr<rdma::communication::rdma_send_stream> stream) noexcept {
+void log_channel_impl::set_rdma_send_stream(std::unique_ptr<rdma_send_stream_base> stream) noexcept {
     std::lock_guard<std::mutex> lock(mtx_replica_connector_);
     rdma_send_stream_ = std::move(stream);
 }

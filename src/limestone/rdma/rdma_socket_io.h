@@ -20,9 +20,9 @@
 #include <vector>
 
 #include <boost/filesystem.hpp>
-#include <rdma_comm/rdma_sender.h>
 
-#include "socket_io.h"
+#include <rdma/rdma_send_stream_base.h>
+#include <replication/socket_io.h>
 #include <limestone/api/blob_id_type.h>
 #include <limestone/api/datastore.h>
 
@@ -36,7 +36,7 @@ using limestone::api::blob_id_type;
  *
  * Inherits all serialization methods from socket_io (used for non-blob data).
  * Overrides send_blob() to read the blob file in chunks and transmit each chunk
- * directly via rdma_send_stream::send_all_bytes(), avoiding full in-memory buffering.
+ * directly via rdma_send_stream_base::send_all_bytes(), avoiding full in-memory buffering.
  *
  * receive_blob() is not supported on this class (FATAL if called); RDMA receive
  * uses blob_socket_io in string mode instead.
@@ -62,14 +62,14 @@ public:
      * @param rdma_stream RDMA send stream used to transmit data.
      * @param ds Datastore used to resolve blob file paths.
      */
-    rdma_socket_io(rdma::communication::rdma_send_stream& rdma_stream, datastore& ds);
+    rdma_socket_io(rdma_send_stream_base& rdma_stream, datastore& ds);
 
     /**
      * @brief Send a blob file via RDMA.
      *
      * First flushes any accumulated non-blob data from the inherited output buffer,
      * then reads the blob file in blob_buffer_size chunks and sends each chunk via
-     * rdma_send_stream::send_all_bytes().  The wire format is identical to
+     * rdma_send_stream_base::send_all_bytes().  The wire format is identical to
      * blob_socket_io::send_blob(): [blob_id: 8B][size: 4B][data: size bytes].
      *
      * @param blob_id ID of the blob to send.
@@ -96,7 +96,7 @@ private:
      */
     void send_blob_data(FILE* fp, boost::filesystem::path const& path, uint32_t remaining);
 
-    rdma::communication::rdma_send_stream& rdma_stream_;
+    rdma_send_stream_base& rdma_stream_;
     datastore& datastore_;
 };
 

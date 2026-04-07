@@ -30,7 +30,7 @@
 #include "manifest.h"
 #include "replication/replica_connector.h"
 #include "replication/replication_endpoint.h"
-#include <rdma_comm/rdma_sender.h>
+#include <rdma/rdma_sender_base.h>
 
 namespace limestone::api {
 
@@ -121,7 +121,7 @@ public:
      * @brief Get RDMA sender instance if initialized.
      * @return pointer to RDMA sender or nullptr if not available.
      */
-    [[nodiscard]] rdma::communication::rdma_sender* get_rdma_sender() const noexcept;
+    [[nodiscard]] rdma_sender_base* get_rdma_sender() const noexcept;
 
     // Getter for migration_info_
     [[nodiscard]] const std::optional<manifest::migration_info>& get_migration_info() const noexcept;
@@ -224,7 +224,7 @@ public:
      * @param sender RDMA sender ownership to set for testing.
      * @note Test-only; do not use in production code.
      */
-    void set_rdma_sender_for_test(std::unique_ptr<rdma::communication::rdma_sender> sender) noexcept;
+    void set_rdma_sender_for_test(std::unique_ptr<rdma_sender_base> sender) noexcept;
 
     /**
      * @brief Test hook to override replica connector factory for log channels.
@@ -240,11 +240,9 @@ public:
      * @note Test-only; do not use in production code.
      */
     void set_rdma_stream_factory_for_test(
-        std::function<rdma::communication::rdma_sender::stream_acquire_result(
-            rdma::communication::channel_id_type, rdma::communication::unique_fd)> factory) noexcept;
+        std::function<rdma_sender_base::stream_acquire_result(std::uint16_t, int)> factory) noexcept;
 
-    [[nodiscard]] std::function<rdma::communication::rdma_sender::stream_acquire_result(
-        rdma::communication::channel_id_type, rdma::communication::unique_fd)> const*
+    [[nodiscard]] std::function<rdma_sender_base::stream_acquire_result(std::uint16_t, int)> const*
     get_rdma_stream_factory_for_test() const noexcept;
 
     /**
@@ -298,14 +296,13 @@ private:
     void initialize_rdma_slots();
 
     // RDMA sender owned by master for RDMA replication path.
-    std::unique_ptr<rdma::communication::rdma_sender> rdma_sender_{};
+    std::unique_ptr<rdma_sender_base> rdma_sender_{};
 
     // Test hook: factory to override log channel connector creation.
     std::function<std::unique_ptr<replication::replica_connector>()> log_channel_connector_factory_for_test_{};
 
     // Test hook: factory to override RDMA stream acquisition.
-    std::function<rdma::communication::rdma_sender::stream_acquire_result(
-        rdma::communication::channel_id_type, rdma::communication::unique_fd)> rdma_stream_factory_for_test_{};
+    std::function<rdma_sender_base::stream_acquire_result(std::uint16_t, int)> rdma_stream_factory_for_test_{};
 
     // Test hook: override ack fd used for RDMA registration.
     std::optional<int> rdma_ack_fd_for_test_{};

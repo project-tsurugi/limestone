@@ -234,6 +234,7 @@ TEST_F(datastore_impl_test, altimeter_wal_shipped_log_failure_written) {
     unsetenv("TSURUGI_REPLICATION_ENDPOINT");
 }
 #endif
+#ifdef LIMESTONE_ENABLE_RDMA
 TEST_F(datastore_impl_test, initialize_rdma_sender_success_sets_sender) {
     datastore_impl datastore;
 
@@ -264,5 +265,6 @@ TEST_F(datastore_impl_test, shutdown_rdma_sender_without_initialize_is_noop) {
     EXPECT_TRUE(datastore.shutdown_rdma_sender());
     EXPECT_EQ(datastore.get_rdma_sender(), nullptr);
 }
+#endif // LIMESTONE_ENABLE_RDMA
 
 } // namespace limestone::api

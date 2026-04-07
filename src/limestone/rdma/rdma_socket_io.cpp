@@ -14,7 +14,7 @@
  * limitations under the License.
  */
 
-#include <replication/rdma_socket_io.h>
+#include <rdma/rdma_socket_io.h>
 
 #include <algorithm>
 #include <cstdio>
@@ -26,7 +26,7 @@
 
 namespace limestone::replication {
 
-rdma_socket_io::rdma_socket_io(rdma::communication::rdma_send_stream& rdma_stream, datastore& ds)
+rdma_socket_io::rdma_socket_io(rdma_send_stream_base& rdma_stream, datastore& ds)
     : socket_io(std::string{})
     , rdma_stream_(rdma_stream)
     , datastore_(ds)

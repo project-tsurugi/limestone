@@ -20,10 +20,8 @@
 #include <stdexcept>
 #include <future>
 #include <cerrno>
+#include <cstdint>
 #include <limits>
-#include <rdma_comm/channel_id_type.h>
-#include <rdma_comm/rdma_sender.h>
-#include <rdma_comm/unique_fd.h>
 
 #include <boost/filesystem/fstream.hpp>
 
@@ -1082,9 +1080,7 @@ void datastore::maybe_register_rdma_stream(log_channel& channel, std::size_t id)
         if (socket_fd < 0) {
             LOG_LP(FATAL) << "Failed to obtain socket fd for RDMA acknowledgements.";
         }
-        rdma::communication::unique_fd ack_fd{socket_fd};
-        auto stream_result = acquire_fn(
-            static_cast<rdma::communication::channel_id_type>(id), std::move(ack_fd));
+        auto stream_result = acquire_fn(static_cast<std::uint16_t>(id), socket_fd);
         if (! stream_result.status.success || stream_result.stream == nullptr) {
             LOG_LP(FATAL) << "Failed to acquire RDMA send stream: "
                           << stream_result.status.error_message;
@@ -1093,7 +1089,7 @@ void datastore::maybe_register_rdma_stream(log_channel& channel, std::size_t id)
     };
 
     if (impl_->has_rdma_stream_factory_for_test()) {
-        auto factory = impl_->get_rdma_stream_factory_for_test();
+        auto const* factory = impl_->get_rdma_stream_factory_for_test();
         if (factory == nullptr) {
             LOG_LP(FATAL) << "RDMA stream factory test hook missing.";
         }
@@ -1107,7 +1103,7 @@ void datastore::maybe_register_rdma_stream(log_channel& channel, std::size_t id)
     if (rdma_sender == nullptr || ! impl_->is_rdma_enabled()) {
         return;
     }
-    if (id > std::numeric_limits<rdma::communication::channel_id_type>::max()) {
+    if (id > std::numeric_limits<std::uint16_t>::max()) {
         LOG_LP(FATAL) << "RDMA channel_id overflow: id=" << id;
     }
     auto* replica_connector = channel.get_impl()->get_replica_connector();
@@ -1115,11 +1111,9 @@ void datastore::maybe_register_rdma_stream(log_channel& channel, std::size_t id)
         LOG_LP(FATAL) << "replica_connector missing during RDMA stream registration.";
     }
     auto socket_fd = impl_->rdma_ack_fd_for_test().value_or(replica_connector->get_socket_fd());
-    acquire_stream(
-        [rdma_sender](rdma::communication::channel_id_type cid, rdma::communication::unique_fd fd) {
-            return rdma_sender->get_send_stream(cid, std::move(fd));
-        },
-        socket_fd);
+    acquire_stream([rdma_sender](std::uint16_t cid, int fd) {
+        return rdma_sender->get_send_stream(cid, fd);
+    }, socket_fd);
 }
 
 } // namespace limestone::api

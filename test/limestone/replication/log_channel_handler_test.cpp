@@ -18,8 +18,6 @@
 #include <memory>
 #include <string>
 #include <utility>
-#include <rdma_comm/ack_message.h>
-#include <rdma_comm/rdma_frame_header.h>
 #include "test_message.h"
 #include "replication_test_helper.h"
 #include "test_root.h"
@@ -86,15 +84,15 @@ rdma_test_context make_rdma_handler_with_channel(std::string const& location) {
     return ctx;
 }
 
-rdma::communication::rdma_receive_data_event make_rdma_event_from_message(
+rdma_data_event make_rdma_event_from_message(
     replication_message& message,
     std::uint16_t sequence_number) {
     socket_io out_io(std::string{});
     replication_message::send(out_io, message);
     std::string payload = out_io.get_out_string();
 
-    rdma::communication::rdma_receive_data_event ev{};
-    ev.header.version = rdma::communication::rdma_frame_protocol_version;
+    rdma_data_event ev{};
+    ev.header.version = rdma_frame_current_version;
     ev.header.flags = 0U;
     ev.header.sequence_number = sequence_number;
     ev.header.channel_id = 1U;
@@ -103,25 +101,24 @@ rdma::communication::rdma_receive_data_event make_rdma_event_from_message(
     return ev;
 }
 
-std::pair<rdma::communication::rdma_receive_data_event,
-          rdma::communication::rdma_receive_data_event>
+std::pair<rdma_data_event, rdma_data_event>
 make_split_events(replication_message& message, std::uint16_t sequence_start) {
     socket_io out_io(std::string{});
     replication_message::send(out_io, message);
     std::string payload = out_io.get_out_string();
     std::size_t mid = payload.size() / 2;
 
-    rdma::communication::rdma_receive_data_event first{};
-    first.header.version = rdma::communication::rdma_frame_protocol_version;
-    first.header.flags = rdma::communication::rdma_frame_flag_partial_payload;
+    rdma_data_event first{};
+    first.header.version = rdma_frame_current_version;
+    first.header.flags = rdma_frame_flag_partial_payload;
     first.header.sequence_number = sequence_start;
     first.header.channel_id = 1U;
     first.header.payload_size = static_cast<std::uint32_t>(mid);
     first.payload.assign(payload.begin(), std::next(payload.begin(),
         static_cast<std::string::difference_type>(mid)));
 
-    rdma::communication::rdma_receive_data_event second{};
-    second.header.version = rdma::communication::rdma_frame_protocol_version;
+    rdma_data_event second{};
+    second.header.version = rdma_frame_current_version;
     second.header.flags = 0U;
     second.header.sequence_number = static_cast<std::uint16_t>(sequence_start + 1U);
     second.header.channel_id = 1U;
@@ -255,7 +252,7 @@ TEST_F(log_channel_handler_test, handle_rdma_data_event_sends_ack) {
 
     ctx.handler->handle_rdma_data_event(ev);
 
-    rdma::communication::ack_message_bytes buf{};
+    std::array<std::uint8_t, 4> buf{};
     ssize_t n = ::read(ctx.read_fd, buf.data(), buf.size());
     int saved_errno = errno;
     EXPECT_LT(n, 0);
@@ -284,7 +281,7 @@ TEST_F(log_channel_handler_test, handle_rdma_data_event_sequence_mismatch_no_ack
 
     ctx.handler->handle_rdma_data_event(ev);
 
-    rdma::communication::ack_message_bytes buf{};
+    std::array<std::uint8_t, 4> buf{};
     ssize_t n = ::read(ctx.read_fd, buf.data(), buf.size());
     int saved_errno = errno;
     EXPECT_LT(n, 0);
@@ -311,7 +308,7 @@ TEST_F(log_channel_handler_test, handle_rdma_data_event_payload_size_mismatch_no
 
     ctx.handler->handle_rdma_data_event(ev);
 
-    rdma::communication::ack_message_bytes buf{};
+    std::array<std::uint8_t, 4> buf{};
     ssize_t n = ::read(ctx.read_fd, buf.data(), buf.size());
     int saved_errno = errno;
     EXPECT_LT(n, 0);
@@ -336,7 +333,7 @@ TEST_F(log_channel_handler_test, handle_rdma_data_event_partial_then_complete_ac
     auto& channel = ctx.handler->get_log_channel();
 
     ctx.handler->handle_rdma_data_event(events.first);
-    rdma::communication::ack_message_bytes buf{};
+    std::array<std::uint8_t, 4> buf{};
     ssize_t n = ::read(ctx.read_fd, buf.data(), buf.size());
     int saved_errno = errno;
     EXPECT_LT(n, 0);
@@ -374,7 +371,7 @@ TEST_F(log_channel_handler_test, handle_rdma_data_event_partial_clears_on_versio
     bad.header.version = static_cast<std::uint8_t>(events.second.header.version + 1U);
     ctx.handler->handle_rdma_data_event(bad);
 
-    rdma::communication::ack_message_bytes buf{};
+    std::array<std::uint8_t, 4> buf{};
     ssize_t n = ::read(ctx.read_fd, buf.data(), buf.size());
     int saved_errno = errno;
     EXPECT_LT(n, 0);
@@ -399,7 +396,7 @@ TEST_F(log_channel_handler_test, process_pending_rdma_messages_locked_waits_for_
     // Already invoked inside handle, but ensure explicit call does not process partial.
     ctx.handler->process_pending_rdma_messages_locked();
 
-    rdma::communication::ack_message_bytes buf{};
+    std::array<std::uint8_t, 4> buf{};
     ssize_t n = ::read(ctx.read_fd, buf.data(), buf.size());
     int saved_errno = errno;
     EXPECT_LT(n, 0);
@@ -426,8 +423,8 @@ TEST_F(log_channel_handler_test, process_rdma_message_locked_processes_single_me
     std::string payload = out_io.get_out_string();
     std::vector<std::uint8_t> aggregated(payload.begin(), payload.end());
 
-    rdma::communication::rdma_frame_header header{};
-    header.version = rdma::communication::rdma_frame_protocol_version;
+    rdma_frame_header header{};
+    header.version = rdma_frame_current_version;
     header.flags = 0U;
     header.sequence_number = 7U;
     header.channel_id = 1U;
@@ -435,7 +432,7 @@ TEST_F(log_channel_handler_test, process_rdma_message_locked_processes_single_me
 
     ctx.handler->process_rdma_message_locked(aggregated, header);
 
-    rdma::communication::ack_message_bytes buf{};
+    std::array<std::uint8_t, 4> buf{};
     ssize_t n = ::read(ctx.read_fd, buf.data(), buf.size());
     int saved_errno = errno;
     EXPECT_LT(n, 0);
@@ -470,7 +467,7 @@ TEST_F(log_channel_handler_test, process_pending_rdma_messages_locked_processes_
 
     ctx.handler->process_pending_rdma_messages_locked();
 
-    rdma::communication::ack_message_bytes buf{};
+    std::array<std::uint8_t, 4> buf{};
     ssize_t n = ::read(ctx.read_fd, buf.data(), buf.size());
     int saved_errno = errno;
     EXPECT_LT(n, 0);
@@ -503,7 +500,7 @@ TEST_F(log_channel_handler_test,
     ctx.handler->handle_rdma_data_event(ev1);
     ctx.handler->handle_rdma_data_event(ev2);
 
-    rdma::communication::ack_message_bytes buf{};
+    std::array<std::uint8_t, 4> buf{};
     ssize_t n = ::read(ctx.read_fd, buf.data(), buf.size());
     int saved_errno = errno;
     EXPECT_LT(n, 0);
@@ -540,7 +537,7 @@ TEST_F(log_channel_handler_test,
     ctx.handler->handle_rdma_data_event(second_events.second);
     ctx.handler->handle_rdma_data_event(first_events.first);
 
-    rdma::communication::ack_message_bytes buf{};
+    std::array<std::uint8_t, 4> buf{};
     ssize_t n = ::read(ctx.read_fd, buf.data(), buf.size());
     int saved_errno = errno;
     EXPECT_LT(n, 0);
@@ -582,8 +579,8 @@ TEST_F(log_channel_handler_test,
     std::string combined = out.get_out_string();
     std::vector<std::uint8_t> aggregated(combined.begin(), combined.end());
 
-    rdma::communication::rdma_frame_header header{};
-    header.version = rdma::communication::rdma_frame_protocol_version;
+    rdma_frame_header header{};
+    header.version = rdma_frame_current_version;
     header.flags = 0U;
     header.sequence_number = 0U;
     header.payload_size = static_cast<std::uint32_t>(aggregated.size());
@@ -642,8 +639,8 @@ TEST_F(log_channel_handler_test, handle_rdma_data_event_with_blob_entry_writes_b
 
     // Build an RDMA aggregated payload and pass it to the handler.
     std::vector<std::uint8_t> aggregated(payload_str.begin(), payload_str.end());
-    rdma::communication::rdma_frame_header header{};
-    header.version = rdma::communication::rdma_frame_protocol_version;
+    rdma_frame_header header{};
+    header.version = rdma_frame_current_version;
     header.flags = 0U;
     header.sequence_number = 0U;
     header.payload_size = static_cast<std::uint32_t>(aggregated.size());

@@ -44,7 +44,7 @@
 #include <replication/message_error.h>
 #include <replication/message_rdma_init.h>
 #include <replication/message_rdma_init_ack.h>
-#include <rdma_comm/rdma_config.h>
+#include <rdma/rdma_factory.h>
 #include <manifest.h>
 
 namespace limestone::api {
@@ -466,28 +466,17 @@ void datastore_impl::initialize_rdma_slots() {
 }
 
 bool datastore_impl::initialize_rdma_sender(uint32_t slot_count, uint64_t remote_dma_address) {
-    rdma::communication::rdma_config config{};
-    auto capacity = static_cast<std::size_t>(slot_count);
-    constexpr std::size_t chunk_size = 4096U;
-    config.send_buffer.region_size_bytes = capacity * chunk_size;
-    config.send_buffer.chunk_size_bytes = chunk_size;
-    config.send_buffer.ring_capacity = capacity;
-    config.remote_buffer = config.send_buffer;
-    config.completion_queue_depth = 1024U;
-    config.write_log_mode = rdma::communication::rdma_write_log_mode::full;
-
-    rdma_sender_ = std::make_unique<rdma::communication::rdma_sender>(config);
+    rdma_sender_ = make_rdma_sender(slot_count);
     auto result = rdma_sender_->initialize(remote_dma_address);
-    if (!result.success) {
+    if (! result.success) {
         rdma_sender_.reset();
-        LOG_LP(ERROR) << "rdma_sender::initialize() failed.";
+        LOG_LP(ERROR) << "rdma_sender::initialize() failed: " << result.error_message;
         return false;
     }
-
     return true;
 }
 
-rdma::communication::rdma_sender* datastore_impl::get_rdma_sender() const noexcept {
+rdma_sender_base* datastore_impl::get_rdma_sender() const noexcept {
     return rdma_sender_.get();
 }
 
@@ -506,7 +495,7 @@ bool datastore_impl::shutdown_rdma_sender() noexcept {
     return true;
 }
 
-void datastore_impl::set_rdma_sender_for_test(std::unique_ptr<rdma::communication::rdma_sender> sender) noexcept {
+void datastore_impl::set_rdma_sender_for_test(std::unique_ptr<rdma_sender_base> sender) noexcept {
     rdma_sender_ = std::move(sender);
 }
 
@@ -516,13 +505,11 @@ void datastore_impl::set_log_channel_connector_factory_for_test(
 }
 
 void datastore_impl::set_rdma_stream_factory_for_test(
-    std::function<rdma::communication::rdma_sender::stream_acquire_result(
-        rdma::communication::channel_id_type, rdma::communication::unique_fd)> factory) noexcept {
+        std::function<rdma_sender_base::stream_acquire_result(std::uint16_t, int)> factory) noexcept {
     rdma_stream_factory_for_test_ = std::move(factory);
 }
 
-std::function<rdma::communication::rdma_sender::stream_acquire_result(
-    rdma::communication::channel_id_type, rdma::communication::unique_fd)> const*
+std::function<rdma_sender_base::stream_acquire_result(std::uint16_t, int)> const*
 datastore_impl::get_rdma_stream_factory_for_test() const noexcept {
     if (rdma_stream_factory_for_test_) {
         return &rdma_stream_factory_for_test_;

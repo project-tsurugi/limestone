@@ -25,7 +25,8 @@
 #include "replication_message.h"
 #include <limestone/api/datastore.h>
 #include "limestone_exception_helper.h"
-#include <rdma_comm/rdma_receiver.h>
+#include <rdma/rdma_receiver_base.h>
+#include <rdma/rdma_receive_event.h>
 #include "log_channel_limits.h"
 
 
@@ -119,7 +120,7 @@ public:
      * @brief Get remote DMA address exposed by receiver.
      * @return optional DMA address if available.
      */
-    [[nodiscard]] std::optional<rdma::communication::dma_address_type> get_rdma_dma_address() const noexcept;
+    [[nodiscard]] std::optional<std::uint64_t> get_rdma_dma_address() const noexcept;
 
     /**
      * @brief Accessor for log channel handler lookup.
@@ -138,13 +139,13 @@ public:
      * @brief RDMA receive handler entry point.
      * @param event RDMA receive event.
      */
-    void on_rdma_receive(rdma::communication::rdma_receive_event const& event);
+    void on_rdma_receive(rdma_receive_event const& event);
 
     /**
      * @brief RDMA data event handler (exposed for testing).
      * @param event RDMA data event.
      */
-    void handle_rdma_data_event(rdma::communication::rdma_receive_data_event const& event);
+    void handle_rdma_data_event(rdma_data_event const& event);
 private:
     boost::filesystem::path location_;                      ///< filesystem path for datastore
     std::unordered_map<message_type_id, std::function<std::shared_ptr<channel_handler_base>(socket_io&)>> handler_factories_;
@@ -154,7 +155,7 @@ private:
     int event_fd_{-1};                                      ///< eventfd used to unblock poll()
     int sockfd_{-1};                                        ///< listening socket file descriptor
     std::atomic<bool> control_channel_created_{false};      ///< flag to indicate if control channel is created
-    std::unique_ptr<rdma::communication::rdma_receiver> rdma_receiver_; ///< RDMA receiver owned for process lifetime
+    std::unique_ptr<rdma_receiver_base> rdma_receiver_; ///< RDMA receiver owned for process lifetime
     std::mutex rdma_init_mutex_{};                                      ///< Protect RDMA receiver initialization
     
     std::vector<std::future<void>> client_futures_;         ///< futures for client handling threads

@@ -80,8 +80,14 @@ if (ENABLE_ALTIMETER)
     list(APPEND boost_components container)
 endif()
 find_package(Boost COMPONENTS ${boost_components} REQUIRED)
-# rdma_comm is always required because limestone core engine depends on RDMA communication.
-find_package(rdma_comm REQUIRED)
+
+option(ENABLE_RDMA "Enable RDMA transport backend (requires rdma_comm library)" OFF)
+if(ENABLE_RDMA)
+    find_package(rdma_comm REQUIRED)
+    message(STATUS "RDMA transport backend: enabled")
+else()
+    message(STATUS "RDMA transport backend: disabled (ENABLE_RDMA=OFF)")
+endif()
 
 add_subdirectory(third_party) # should be before enable_testing()
 
