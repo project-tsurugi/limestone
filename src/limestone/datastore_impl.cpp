@@ -223,6 +223,8 @@ bool datastore_impl::open_control_channel() {
                  << ":" << replication_endpoint_.port();
 
     if (!maybe_initialize_rdma_sender()) {
+        replica_exists_.store(false, std::memory_order_release);
+        control_channel_->close_session();
         TRACE_END;
         return false;
     }
