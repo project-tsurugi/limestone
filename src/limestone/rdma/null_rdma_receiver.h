@@ -22,8 +22,9 @@ namespace limestone::replication {
 /**
  * @brief Null implementation of rdma_receiver_base.
  *
- * All operations succeed immediately without performing any RDMA operations.
- * Used when RDMA is disabled at build time.
+ * initialize() returns a failure result and get_dma_address() returns std::nullopt
+ * because RDMA is not available in this build configuration.
+ * register_channel() and shutdown() succeed without performing any RDMA operations.
  */
 class null_rdma_receiver : public rdma_receiver_base {
 public:

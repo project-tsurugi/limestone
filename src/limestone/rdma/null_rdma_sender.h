@@ -22,9 +22,9 @@ namespace limestone::replication {
 /**
  * @brief Null implementation of rdma_sender_base.
  *
- * initialize() and shutdown() succeed without performing any RDMA operations.
- * get_send_stream() always returns a failure result because RDMA is not available
- * in this build configuration.
+ * initialize() and get_send_stream() return failure results because RDMA is not
+ * available in this build configuration.
+ * shutdown() succeeds without performing any RDMA operations.
  */
 class null_rdma_sender : public rdma_sender_base {
 public:
