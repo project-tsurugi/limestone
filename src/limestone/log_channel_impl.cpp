@@ -138,6 +138,11 @@ void log_channel_impl::send_rdma_bytes_locked(std::string const& payload) {
     while (offset < bytes.size()) {
         auto result = rdma_send_stream_->send_bytes(bytes, offset, bytes.size() - offset);
         if (! result.success) {
+            // send_bytes() is non-blocking and can fail with zero bytes written when the
+            // RDMA send buffer is temporarily full. Keep retrying because buffer space is
+            // expected to be released by ACK handling or by flush progress in another thread.
+            // This layer has no safe recovery action for a persistent send failure; warning
+            // logs let operators detect a stuck channel.
             ++consecutive_failures;
             LOG_LP(WARNING) << "RDMA send_bytes failed (consecutive failures="
                             << consecutive_failures << "): " << result.error_message;
