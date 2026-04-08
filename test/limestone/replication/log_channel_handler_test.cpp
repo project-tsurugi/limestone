@@ -515,7 +515,7 @@ TEST_F(log_channel_handler_test,
 }
 
 TEST_F(log_channel_handler_test,
-       handle_rdma_data_event_out_of_order_partial_frames_processes_in_order) {
+       handle_rdma_data_event_drops_future_frames_and_processes_contiguous_frames) {
     auto ctx = make_rdma_handler_with_channel(base_location);
     ASSERT_NE(ctx.handler, nullptr);
     ASSERT_GE(ctx.read_fd, 0);

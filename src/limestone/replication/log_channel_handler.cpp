@@ -73,14 +73,12 @@ void log_channel_handler::handle_rdma_data_event(
                 << " partial=" << ((header.flags
                                     & rdma_frame_flag_partial_payload) != 0)
                 << " pending=" << pending_rdma_frames_.size()
-                << " future=" << future_rdma_frames_.size()
                 << " next_expected=" << next_sequence_number_;
     if (header.version != rdma_frame_current_version) {
         LOG_LP(ERROR) << "RDMA frame version mismatch: expected "
                       << static_cast<int>(rdma_frame_current_version)
                       << " got " << static_cast<int>(header.version);
         pending_rdma_frames_.clear();
-        future_rdma_frames_.clear();
         TRACE_ABORT << "version mismatch";
         return;
     }
@@ -89,7 +87,6 @@ void log_channel_handler::handle_rdma_data_event(
         LOG_LP(ERROR) << "RDMA payload size mismatch: header=" << header.payload_size
                       << " actual=" << event.payload.size();
         pending_rdma_frames_.clear();
-        future_rdma_frames_.clear();
         TRACE_ABORT << "payload size mismatch";
         return;
     }
@@ -104,21 +101,11 @@ void log_channel_handler::handle_rdma_data_event(
     if (header.sequence_number > next_sequence_number_) {
         LOG_LP(INFO) << "RDMA sequence gap: expected=" << next_sequence_number_
                      << " received=" << header.sequence_number;
-        future_rdma_frames_[header.sequence_number] = event;
-        TRACE_ABORT << "sequence gap, stored for future";
+        TRACE_ABORT << "sequence gap, dropped";
         return;
     }
     pending_rdma_frames_.push_back(event);
     next_sequence_number_ = static_cast<std::uint16_t>(next_sequence_number_ + 1);
-
-    auto it = future_rdma_frames_.find(next_sequence_number_);
-    while (it != future_rdma_frames_.end()) {
-        pending_rdma_frames_.push_back(it->second);
-        future_rdma_frames_.erase(it);
-        next_sequence_number_ =
-            static_cast<std::uint16_t>(next_sequence_number_ + 1);
-        it = future_rdma_frames_.find(next_sequence_number_);
-    }
     process_pending_rdma_messages_locked();
 }
 

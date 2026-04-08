@@ -20,7 +20,6 @@
 
 #include <atomic>
 #include <cstdint>
-#include <map>
 #include <mutex>
 #include <vector>
 
@@ -115,7 +114,6 @@ private:
     log_channel* log_channel_{nullptr}; 
     std::uint16_t next_sequence_number_{0};  ///< Expected next sequence number (wraps at 16 bits).
     std::mutex rdma_mutex_;
-    std::map<std::uint16_t, rdma_data_event> future_rdma_frames_;
     std::vector<rdma_data_event> pending_rdma_frames_;
 };
 
