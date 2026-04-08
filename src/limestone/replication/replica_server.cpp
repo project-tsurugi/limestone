@@ -280,7 +280,6 @@ void replica_server::handle_client(int client_fd) {
         LOG_LP(ERROR) << "handle_client error: " << ex.what();
     }
 
-    ::close(client_fd);
     TRACE_END;
 }
 
