@@ -66,7 +66,8 @@ public:
     /**
      * @brief Acquire a send stream for the given logical channel.
      * @param channel_id Logical channel identifier.
-     * @param ack_fd     File descriptor used to receive acknowledgements.
+     * @param ack_fd     Borrowed file descriptor used to receive acknowledgements.
+     *                   Implementations must duplicate it before taking ownership.
      * @return stream_acquire_result; stream is non-null on success.
      */
     [[nodiscard]] virtual stream_acquire_result get_send_stream(

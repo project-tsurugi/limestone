@@ -16,6 +16,11 @@
 #include <rdma/rdma_comm_sender.h>
 #include <rdma/rdma_comm_send_stream.h>
 
+#include <cerrno>
+#include <cstring>
+#include <string>
+#include <unistd.h>
+
 #include <rdma_comm/unique_fd.h>
 
 namespace limestone::replication {
@@ -33,9 +38,14 @@ rdma_sender_base::operation_result rdma_comm_sender::initialize(
 rdma_sender_base::stream_acquire_result rdma_comm_sender::get_send_stream(
         std::uint16_t channel_id,
         int           ack_fd) noexcept {
+    int owned_ack_fd = ::dup(ack_fd);
+    if (owned_ack_fd < 0) {
+        return {{false, std::string{"dup() failed for RDMA ACK fd: "} + std::strerror(errno)}, nullptr};
+    }
+
     auto r = sender_.get_send_stream(
         channel_id,
-        rdma::communication::unique_fd{ack_fd});
+        rdma::communication::unique_fd{owned_ack_fd});
     if (! r.status.success || ! r.stream) {
         return {{false, r.status.error_message}, nullptr};
     }
