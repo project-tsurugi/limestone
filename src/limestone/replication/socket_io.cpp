@@ -236,6 +236,9 @@ std::size_t socket_io::get_out_size() const {
 }
 
 bool socket_io::has_unread_data() const {
+    if (!is_string_mode_) {
+        return false;
+    }
     if (! in_stream_) {
         return false;
     }
