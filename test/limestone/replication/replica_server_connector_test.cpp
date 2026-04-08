@@ -140,7 +140,7 @@ TEST_F(replica_server_connector_test, log_handler_initial_ack) {
     replication::replica_connector client;
     ASSERT_TRUE(client.connect_to_server("127.0.0.1", port));
 
-    auto request = replication::message_log_channel_create::create();
+    auto request = std::make_unique<replication::message_log_channel_create>(1U);
     EXPECT_TRUE(client.send_message(*request));
 
     auto response = client.receive_message();
@@ -182,7 +182,7 @@ TEST_F(replica_server_connector_test, control_handler_rejects_second_session_beg
     EXPECT_EQ(second_response->get_message_type_id(), replication::message_type_id::COMMON_ERROR);
 
     auto* err = static_cast<limestone::replication::message_error*>(second_response.get());
-    EXPECT_EQ(err->get_error_code(), 1);
+    EXPECT_EQ(err->get_error_code(), message_error::control_channel_error_already_created);
     // error_message contains “already received”
     EXPECT_NE(err->get_error_message().find("Control channel already created"), std::string::npos);
     
@@ -220,7 +220,7 @@ TEST_F(replica_server_connector_test, control_and_multiple_log_channels_simultan
     for (int i = 0; i < 5; ++i) {
         clients.emplace_back();
         ASSERT_TRUE(clients.back().connect_to_server("127.0.0.1", port));
-        auto request = message_log_channel_create::create();
+        auto request = std::make_unique<message_log_channel_create>(static_cast<std::uint64_t>(i + 1));
         EXPECT_TRUE(clients.back().send_message(*request));
         auto response = clients.back().receive_message();
         ASSERT_NE(response, nullptr);
@@ -234,6 +234,102 @@ TEST_F(replica_server_connector_test, control_and_multiple_log_channels_simultan
 
     server.shutdown();
     server_thread.join();
+}
+
+TEST_F(replica_server_connector_test, log_handler_registered_in_slot) {
+    replica_server server;
+    server.initialize(location_);
+
+    uint16_t port = get_free_port();
+    auto addr = make_listen_addr(port);
+    ASSERT_TRUE(server.start_listener(addr));
+
+    std::thread server_thread([&server]() { server.accept_loop(); });
+
+    replication::replica_connector client;
+    ASSERT_TRUE(client.connect_to_server("127.0.0.1", port));
+
+    constexpr std::uint64_t channel_id = 7;
+    auto request = std::make_unique<replication::message_log_channel_create>(channel_id);
+    EXPECT_TRUE(client.send_message(*request));
+
+    auto response = client.receive_message();
+    ASSERT_NE(response, nullptr);
+    EXPECT_EQ(response->get_message_type_id(), replication::message_type_id::COMMON_ACK);
+
+    auto handler = server.get_log_channel_handler(channel_id);
+    EXPECT_NE(handler, nullptr);
+
+    try { client.close_session(); } catch(...) {}
+    server.shutdown();
+    server_thread.join();
+}
+
+TEST_F(replica_server_connector_test, duplicate_log_channel_id_fatal) {
+    ASSERT_DEATH(
+        []() {
+            replica_server server;
+            boost::filesystem::path location{"/tmp/replica_server_connector_test_death1"};
+            boost::filesystem::remove_all(location);
+            boost::filesystem::create_directories(location);
+            server.initialize(location);
+
+            uint16_t port = get_free_port();
+            auto addr = make_listen_addr(port);
+            ASSERT_TRUE(server.start_listener(addr));
+
+            std::thread server_thread([&server]() { server.accept_loop(); });
+
+            replication::replica_connector client1;
+            ASSERT_TRUE(client1.connect_to_server("127.0.0.1", port));
+            auto request1 = std::make_unique<replication::message_log_channel_create>(1U);
+            EXPECT_TRUE(client1.send_message(*request1));
+            auto response1 = client1.receive_message();
+            ASSERT_NE(response1, nullptr);
+            EXPECT_EQ(response1->get_message_type_id(), replication::message_type_id::COMMON_ACK);
+
+            replication::replica_connector client2;
+            ASSERT_TRUE(client2.connect_to_server("127.0.0.1", port));
+            auto request2 = std::make_unique<replication::message_log_channel_create>(1U);
+            // FATAL expected here
+            EXPECT_TRUE(client2.send_message(*request2));
+            auto response2 = client2.receive_message();
+            (void)response2;
+
+            server.shutdown();
+            server_thread.join();
+        }(),
+        "Duplicate log channel id registration");
+}
+
+TEST_F(replica_server_connector_test, log_channel_id_overflow_fatal) {
+    ASSERT_DEATH(
+        []() {
+            replica_server server;
+            boost::filesystem::path location{"/tmp/replica_server_connector_test_death2"};
+            boost::filesystem::remove_all(location);
+            boost::filesystem::create_directories(location);
+            server.initialize(location);
+
+            uint16_t port = get_free_port();
+            auto addr = make_listen_addr(port);
+            ASSERT_TRUE(server.start_listener(addr));
+
+            std::thread server_thread([&server]() { server.accept_loop(); });
+
+            replication::replica_connector client;
+            ASSERT_TRUE(client.connect_to_server("127.0.0.1", port));
+            auto request = std::make_unique<replication::message_log_channel_create>(
+                static_cast<std::uint64_t>(replica_server::max_log_channel_slots));
+            // FATAL expected here
+            EXPECT_TRUE(client.send_message(*request));
+            auto response = client.receive_message();
+            (void)response;
+
+            server.shutdown();
+            server_thread.join();
+        }(),
+        "Log channel id exceeds maximum slots");
 }
 
 

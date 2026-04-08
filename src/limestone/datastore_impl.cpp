@@ -21,6 +21,11 @@
 #include <cstring>
 #include <stdexcept>
 #include <string>
+#include <cctype>
+#include <string_view>
+#include <limits>
+#include <cerrno>
+#include <functional>
 #include <openssl/hmac.h>
 #include <openssl/rand.h>
 #include <openssl/evp.h>
@@ -36,6 +41,10 @@
 #include <replication/message_session_begin.h>
 #include <replication/message_log_channel_create.h>
 #include <replication/message_group_commit.h>
+#include <replication/message_error.h>
+#include <replication/message_rdma_init.h>
+#include <replication/message_rdma_init_ack.h>
+#include <rdma/rdma_factory.h>
 #include <manifest.h>
 
 namespace limestone::api {
@@ -46,12 +55,14 @@ datastore_impl::datastore_impl()
     , replica_exists_(false)
     , async_session_close_enabled_(std::getenv("REPLICATION_ASYNC_SESSION_CLOSE") != nullptr)
     , async_group_commit_enabled_(std::getenv("REPLICATION_ASYNC_GROUP_COMMIT") != nullptr)
+    , rdma_slot_count_(std::nullopt)
     , migration_info_(std::nullopt)
 {
     LOG_LP(INFO) << "REPLICATION_ASYNC_SESSION_CLOSE: "
                  << (async_session_close_enabled_ ? "enabled" : "disabled");
     LOG_LP(INFO) << "REPLICATION_ASYNC_GROUP_COMMIT: "
                  << (async_group_commit_enabled_ ? "enabled" : "disabled");
+    initialize_rdma_slots();
 
     bool has_replica = replication_endpoint_.is_valid();
     replica_exists_.store(has_replica, std::memory_order_release);
@@ -97,44 +108,126 @@ void datastore_impl::disable_replica() noexcept {
     LOG_LP(INFO) << "Replica disabled";
 }
 
-// Method to open the control channel
-bool datastore_impl::open_control_channel() {
-    TRACE_START;
-    // Use replication_endpoint_ to retrieve connection details
+bool datastore_impl::connect_control_channel() {
     if (!replication_endpoint_.is_valid()) {
         LOG_LP(ERROR) << "Invalid replication endpoint.";
-        replica_exists_.store(false, std::memory_order_release);
         return false;
     }
 
-    std::string host = replication_endpoint_.host();  
-    int port = replication_endpoint_.port();          // Get the port
+    std::string host = replication_endpoint_.host();
+    int port = replication_endpoint_.port();
 
-    // Create the control channel connection
     control_channel_ = std::make_shared<replica_connector>();
     if (!control_channel_->connect_to_server(host, port)) {
         LOG_LP(ERROR) << "Failed to connect to control channel at " << host << ":" << port;
-        replica_exists_.store(false, std::memory_order_release);
         return false;
     }
+    return true;
+}
 
+bool datastore_impl::send_session_begin() {
     auto request = message_session_begin::create();
     if (!control_channel_->send_message(*request)) {
         LOG_LP(ERROR) << "Failed to send session begin message.";
-        replica_exists_.store(false, std::memory_order_release);
-        control_channel_->close_session();
         return false;
     }
 
     auto response = control_channel_->receive_message();
-    if (response == nullptr || response->get_message_type_id() != message_type_id::SESSION_BEGIN_ACK) {
+    if (response == nullptr) {
         LOG_LP(ERROR) << "Failed to receive session begin acknowledgment.";
-        replica_exists_.store(false, std::memory_order_release);
-        control_channel_->close_session();
         return false;
     }
 
-    LOG_LP(INFO) << "Control channel successfully opened to " << host << ":" << port;
+    if (response->get_message_type_id() == message_type_id::COMMON_ERROR) {
+        auto* err = dynamic_cast<message_error*>(response.get());
+        std::string msg = err ? err->get_error_message()
+                              : "Session begin failed with unknown error response";
+        LOG_LP(FATAL) << msg;
+    }
+
+    if (response->get_message_type_id() != message_type_id::SESSION_BEGIN_ACK) {
+        LOG_LP(ERROR) << "Failed to receive session begin acknowledgment.";
+        return false;
+    }
+    return true;
+}
+
+bool datastore_impl::maybe_initialize_rdma_sender() {
+    if (!rdma_slot_count_.has_value()) {
+        return true;
+    }
+
+    auto slot_count_signed = static_cast<std::int32_t>(rdma_slot_count_.value());
+    // This branch should be unreachable because slots are validated on load, but kept for defense.
+    if (slot_count_signed <= 0) {
+        LOG_LP(ERROR) << "Invalid RDMA slot count detected in runtime state; RDMA disabled.";
+        return true;
+    }
+
+    auto slot_count = static_cast<uint32_t>(slot_count_signed);
+    message_rdma_init rdma_init{slot_count};
+    if (!control_channel_->send_message(rdma_init)) {
+        LOG_LP(ERROR) << "Failed to send RDMA_INIT message.";
+        return false;
+    }
+
+    auto rdma_response = control_channel_->receive_message();
+    if (rdma_response == nullptr) {
+        LOG_LP(ERROR) << "Failed to receive RDMA_INIT response.";
+        return false;
+    }
+
+    if (rdma_response->get_message_type_id() == message_type_id::COMMON_ERROR) {
+        auto* err = dynamic_cast<message_error*>(rdma_response.get());
+        if (err != nullptr) {
+            LOG_LP(ERROR) << "RDMA_INIT failed: code=" << err->get_error_code()
+                          << " message=" << err->get_error_message();
+        } else {
+            LOG_LP(ERROR) << "RDMA_INIT failed with unknown error response.";
+        }
+        return false;
+    }
+
+    auto* ack = dynamic_cast<message_rdma_init_ack*>(rdma_response.get());
+    if (ack == nullptr) {
+        LOG_LP(ERROR) << "Unexpected RDMA_INIT response type: "
+                      << static_cast<uint16_t>(rdma_response->get_message_type_id());
+        return false;
+    }
+    if (!initialize_rdma_sender(slot_count, ack->get_remote_dma_address())) {
+        LOG_LP(ERROR) << "RDMA sender initialization failed; RDMA disabled.";
+        return false;
+    }
+    LOG_LP(INFO) << "RDMA sender initialized: slot_count=" << slot_count
+                 << ", remote_dma_address=" << ack->get_remote_dma_address();
+    return true;
+}
+
+// Method to open the control channel
+bool datastore_impl::open_control_channel() {
+    TRACE_START;
+    if (!connect_control_channel()) {
+        replica_exists_.store(false, std::memory_order_release);
+        TRACE_END;
+        return false;
+    }
+
+    if (!send_session_begin()) {
+        replica_exists_.store(false, std::memory_order_release);
+        control_channel_->close_session();
+        TRACE_END;
+        return false;
+    }
+
+    LOG_LP(INFO) << "Control channel successfully opened to " << replication_endpoint_.host()
+                 << ":" << replication_endpoint_.port();
+
+    if (!maybe_initialize_rdma_sender()) {
+        replica_exists_.store(false, std::memory_order_release);
+        control_channel_->close_session();
+        TRACE_END;
+        return false;
+    }
     TRACE_END;
     return true;
 }
@@ -223,11 +316,14 @@ std::shared_ptr<replica_connector> datastore_impl::get_control_channel() const n
     return control_channel_;
 }
 
-std::unique_ptr<replication::replica_connector> datastore_impl::create_log_channel_connector(datastore& ds) {
+std::unique_ptr<replication::replica_connector> datastore_impl::create_log_channel_connector(datastore& ds, std::uint64_t channel_id) {
     TRACE_START;
     if (!replica_exists_.load(std::memory_order_acquire)) {
         TRACE_END << "No replica exists, cannot create log channel connector.";
         return nullptr;
+    }
+    if (log_channel_connector_factory_for_test_) {
+        return log_channel_connector_factory_for_test_();
     }
     auto connector = std::make_unique<replica_connector>();
 
@@ -239,7 +335,7 @@ std::unique_ptr<replication::replica_connector> datastore_impl::create_log_chann
         return nullptr;
     }
 
-    auto request = message_log_channel_create::create();
+    auto request = std::make_unique<message_log_channel_create>(channel_id);
     if (!connector->send_message(*request)) {
         LOG_LP(ERROR) << "Failed to send log channel create message.";
         replica_exists_.store(false, std::memory_order_release);
@@ -302,6 +398,137 @@ void datastore_impl::set_pid(pid_t pid) noexcept {
 
 pid_t datastore_impl::pid() const noexcept {
     return pid_;
+}
+
+bool datastore_impl::is_rdma_enabled() const noexcept {
+    return rdma_slot_count_.has_value();
+}
+
+std::optional<std::int32_t> datastore_impl::rdma_slot_count() const noexcept {
+    return rdma_slot_count_;
+}
+
+void datastore_impl::initialize_rdma_slots() {
+    const char* env_val = std::getenv("REPLICATION_RDMA_SLOTS");
+    if (env_val == nullptr) {
+        LOG_LP(INFO) << "REPLICATION_RDMA_SLOTS: not set; RDMA replication disabled";
+        return;
+    }
+
+    bool all_whitespace = true;
+    std::string_view env_view{env_val};
+    for (char ch : env_view) {
+        if (std::isspace(static_cast<unsigned char>(ch)) == 0) {
+            all_whitespace = false;
+            break;
+        }
+    }
+    if (all_whitespace) {
+        LOG_LP(ERROR) << "Invalid REPLICATION_RDMA_SLOTS: whitespace only; RDMA replication disabled";
+        rdma_slot_count_ = std::nullopt;
+        return;
+    }
+
+    char* endptr = nullptr;
+    errno = 0;
+    std::int64_t parsed = std::strtoll(env_val, &endptr, 10);
+    // Check for range errors reported by strtoll
+    if (errno == ERANGE) {
+        LOG_LP(ERROR) << "Invalid REPLICATION_RDMA_SLOTS: out of range; "
+                      << "RDMA replication disabled";
+        rdma_slot_count_ = std::nullopt;
+        return;
+    }
+    // Check if no conversion was performed
+    if (endptr == env_val) {
+        LOG_LP(ERROR) << "Invalid REPLICATION_RDMA_SLOTS: non-numeric value; "
+                      << "RDMA replication disabled";
+        rdma_slot_count_ = std::nullopt;
+        return;
+    }
+    // Check for extra characters after the number
+    if (*endptr != '\0') {
+        LOG_LP(ERROR) << "Invalid REPLICATION_RDMA_SLOTS: trailing characters; "
+                      << "RDMA replication disabled";
+        rdma_slot_count_ = std::nullopt;
+        return;
+    }
+    // ERANGE only covers values outside strtoll's range; the RDMA slot count
+    // must also fit in the 32-bit protocol/configuration field.
+    if (parsed <= 0 || parsed > std::numeric_limits<std::int32_t>::max()) {
+        LOG_LP(ERROR) << "Invalid REPLICATION_RDMA_SLOTS: value must be 1..INT32_MAX; "
+                      << "RDMA replication disabled";
+        rdma_slot_count_ = std::nullopt;
+        return;
+    }
+
+    rdma_slot_count_ = static_cast<std::int32_t>(parsed);
+    LOG_LP(INFO) << "REPLICATION_RDMA_SLOTS: enabled with " << rdma_slot_count_.value()
+                 << " slots (4KB each)";
+}
+
+bool datastore_impl::initialize_rdma_sender(uint32_t slot_count, uint64_t remote_dma_address) {
+    rdma_sender_ = make_rdma_sender(slot_count);
+    auto result = rdma_sender_->initialize(remote_dma_address);
+    if (! result.success) {
+        rdma_sender_.reset();
+        LOG_LP(ERROR) << "rdma_sender::initialize() failed: " << result.error_message;
+        return false;
+    }
+    return true;
+}
+
+rdma_sender_base* datastore_impl::get_rdma_sender() const noexcept {
+    return rdma_sender_.get();
+}
+
+bool datastore_impl::shutdown_rdma_sender() noexcept {
+    if (! rdma_sender_) {
+        return true;
+    }
+
+    auto result = rdma_sender_->shutdown();
+    if (! result.success) {
+        LOG_LP(ERROR) << "rdma_sender::shutdown() failed: " << result.error_message;
+        return false;
+    }
+
+    rdma_sender_.reset();
+    return true;
+}
+
+void datastore_impl::set_rdma_sender_for_test(std::unique_ptr<rdma_sender_base> sender) noexcept {
+    rdma_sender_ = std::move(sender);
+}
+
+void datastore_impl::set_log_channel_connector_factory_for_test(
+    std::function<std::unique_ptr<replication::replica_connector>()> factory) noexcept {
+    log_channel_connector_factory_for_test_ = std::move(factory);
+}
+
+void datastore_impl::set_rdma_stream_factory_for_test(
+        std::function<rdma_sender_base::stream_acquire_result(std::uint16_t, int)> factory) noexcept {
+    rdma_stream_factory_for_test_ = std::move(factory);
+}
+
+std::function<rdma_sender_base::stream_acquire_result(std::uint16_t, int)> const*
+datastore_impl::get_rdma_stream_factory_for_test() const noexcept {
+    if (rdma_stream_factory_for_test_) {
+        return &rdma_stream_factory_for_test_;
+    }
+    return nullptr;
+}
+
+void datastore_impl::set_rdma_ack_fd_for_test(int fd) noexcept {
+    rdma_ack_fd_for_test_ = fd;
+}
+
+bool datastore_impl::has_rdma_stream_factory_for_test() const noexcept {
+    return static_cast<bool>(rdma_stream_factory_for_test_);
+}
+
+std::optional<int> datastore_impl::rdma_ack_fd_for_test() const noexcept {
+    return rdma_ack_fd_for_test_;
 }
 
 const std::optional<manifest::migration_info>& datastore_impl::get_migration_info() const noexcept {

@@ -16,8 +16,12 @@
 #pragma once
 
 #include <memory>
-#include <vector>
+#include <mutex>
 #include <string_view>
+#include <vector>
+#include <boost/asio.hpp>
+#include <future>
+#include <rdma/rdma_send_stream_base.h>
 #include <boost/filesystem.hpp>
 
 #include "limestone/api/blob_id_type.h"
@@ -25,6 +29,7 @@
 #include "limestone/api/write_version_type.h"
 #include "limestone/status.h"
 #include "replication/replica_connector.h"
+#include "replication/socket_io.h"
 #include "replication/message_log_entries.h"
 
 namespace limestone::api {
@@ -88,9 +93,64 @@ public:
      *       Consider using a timeout mechanism if appropriate.
      */
     void wait_for_replica_ack();
+
+    /**
+     * @brief Flush pending RDMA sends and wait for acknowledgements.
+     */
+    void flush_rdma_stream();
+
+    /**
+     * @brief Sets RDMA send stream for replication.
+     * @param stream RDMA stream instance to take ownership of.
+     */
+    void set_rdma_send_stream(std::unique_ptr<replication::rdma_send_stream_base> stream) noexcept;
+
+    /**
+     * @brief Sets the datastore reference used for BLOB operations on the RDMA path.
+     * @param ds Reference to the owning datastore.
+     */
+    void set_datastore(datastore& ds) noexcept;
+
+    /**
+     * @brief Checks whether RDMA send stream is available.
+     * @return true if RDMA stream is set.
+     */
+    [[nodiscard]] bool has_rdma_send_stream() const noexcept;
+
+    /**
+     * @brief Flush RDMA stream asynchronously using channel-local thread pool.
+     * @return future representing completion of flush.
+     */
+    std::future<void> flush_rdma_stream_async();
+
+    /// @brief Threshold in bytes for flushing the RDMA serialization buffer.
+    /// When the accumulated buffer size reaches this value, send_bytes is invoked.
+    /// Set to 56KB (8KB below the 64KB RDMA single-write limit) to ensure that
+    /// the buffer including the last appended message stays within one RDMA write.
+    static constexpr std::size_t rdma_send_buffer_threshold = 56UL * 1024; // 56KB
+
 private:
     std::unique_ptr<replication::replica_connector> replica_connector_;
-    std::mutex mtx_replica_connector_;
+    std::unique_ptr<replication::rdma_send_stream_base> rdma_send_stream_;
+    replication::socket_io rdma_serializer_io_;
+    datastore* datastore_{nullptr};
+    std::unique_ptr<boost::asio::thread_pool> ack_thread_pool_;
+    std::once_flag ack_thread_pool_once_;
+    mutable std::mutex mtx_replica_connector_;
+
+    /**
+     * @brief Send all bytes currently accumulated in rdma_serializer_io_ via rdma_send_stream_.
+     *        Resets the buffer on completion.
+     *        Caller must hold mtx_replica_connector_.
+     */
+    void flush_rdma_serializer_io_locked();
+
+    /**
+     * @brief Send the given payload string via rdma_send_stream_ with retry on failure.
+     *        Caller must hold mtx_replica_connector_.
+     * @param payload Serialized byte payload to transmit.
+     */
+    void send_rdma_bytes_locked(std::string const& payload);
 };
 
 }  // namespace limestone::api

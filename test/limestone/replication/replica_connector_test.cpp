@@ -198,5 +198,31 @@ TEST_F(replica_connector_test, connect_to_server_with_blob_support) {
     server_thread.join();
 }
 
+TEST_F(replica_connector_test, get_socket_fd_exposes_underlying_fd) {
+    uint16_t port = get_free_port();
+
+    int listen_fd = start_test_server(port, true);
+    std::thread server_thread([listen_fd]() {
+        int client_fd = ::accept(listen_fd, nullptr, nullptr);
+        ::close(client_fd);
+        ::close(listen_fd);
+    });
+
+    replication::replica_connector connector;
+    ASSERT_TRUE(connector.connect_to_server("127.0.0.1", port));
+    int fd = connector.get_socket_fd();
+    EXPECT_GE(fd, 0);
+
+    connector.close_session();
+    EXPECT_EQ(connector.get_socket_fd(), -1);
+
+    server_thread.join();
+}
+
+TEST_F(replica_connector_test, get_socket_fd_returns_minus_one_when_disconnected) {
+    replication::replica_connector connector;
+    EXPECT_EQ(connector.get_socket_fd(), -1);
+}
+
 
 }  // namespace limestone::testing

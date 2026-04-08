@@ -1,8 +1,9 @@
 #include "message_log_entries.h"
 
+#include <algorithm>
 #include <cassert>
+#include <limits>
 
-#include "blob_socket_io.h"
 #include "limestone_exception_helper.h"
 #include "socket_io.h"
 #include "log_channel_handler_resources.h"
@@ -14,10 +15,12 @@ using limestone::api::epoch_id_type;
 
 void message_log_entries::send_body(socket_io& io) const {
     TRACE_START << "epcoh id =" << epoch_id_ << ", entries size = " << entries_.size();
-    auto size = entries_.size();
+    if (entries_.size() > std::numeric_limits<std::uint32_t>::max()) {
+        LOG_AND_THROW_EXCEPTION("Too many log entries in replication message");
+    }
     io.send_uint64(static_cast<uint64_t>(epoch_id_)); 
-    auto entry_count = static_cast<uint32_t>(size);
-    io.send_uint32(entry_count); // TODO: オーバーフローのチェックが必要
+    auto entry_count = static_cast<uint32_t>(entries_.size());
+    io.send_uint32(entry_count);
 
     // Send each entry
     for (const auto& entry : entries_) {
@@ -29,15 +32,12 @@ void message_log_entries::send_body(socket_io& io) const {
         io.send_uint64(entry.write_version.get_minor());
         
         // Send the blob list
-        io.send_uint32(static_cast<uint32_t>(entry.blob_ids.size())); // TODO: オーバーフローのチェックが必要
-        if (!entry.blob_ids.empty()) {
-            auto* blob_io = dynamic_cast<blob_socket_io*>(&io);
-            if (!blob_io) {
-                LOG_LP(FATAL) << "Cannot process blob entries without blob_socket_io";
-            }
-            for (const auto& blob_id : entry.blob_ids) {
-                blob_io->send_blob(blob_id);
-            }
+        if (entry.blob_ids.size() > std::numeric_limits<std::uint32_t>::max()) {
+            LOG_AND_THROW_EXCEPTION("Too many blob IDs in replication message entry");
+        }
+        io.send_uint32(static_cast<uint32_t>(entry.blob_ids.size()));
+        for (const auto& blob_id : entry.blob_ids) {
+            io.send_blob(blob_id);
         }
     }
 
@@ -69,15 +69,9 @@ void message_log_entries::receive_body(socket_io& io) {
 
         // Receive blob list
         uint32_t blob_count = io.receive_uint32();
-        if (blob_count > 0) {
-            auto* blob_io = dynamic_cast<blob_socket_io*>(&io);
-            if (!blob_io) {
-                LOG_LP(FATAL) << "Cannot process blob entries without blob_socket_io";
-            }
-            new_entry.blob_ids.resize(blob_count);
-            for (uint32_t j = 0; j < blob_count; ++j) {
-                new_entry.blob_ids[j] = blob_io->receive_blob();
-            }
+        new_entry.blob_ids.resize(blob_count);
+        for (uint32_t j = 0; j < blob_count; ++j) {
+            new_entry.blob_ids[j] = io.receive_blob();
         }
 
         // Add the entry to the vector
@@ -86,6 +80,11 @@ void message_log_entries::receive_body(socket_io& io) {
 
     // Receive the operation flags (session begin, end, flush)
     operation_flags_ = io.receive_uint8();
+}
+
+bool message_log_entries::has_any_blobs() const noexcept {
+    return std::any_of(entries_.begin(), entries_.end(),
+        [](entry const& e) { return ! e.blob_ids.empty(); });
 }
 
 epoch_id_type message_log_entries::get_epoch_id() const {
@@ -230,10 +229,12 @@ void message_log_entries::post_receive(handler_resources& resources) {
     }
     if (has_session_end_flag() || has_flush_flag()) {
         log_channel.end_session();
-        message_ack ack;
-        socket_io& io = lch_resources.get_socket_io();
-        replication_message::send(io, ack);
-        io.flush();
+        if (lch_resources.ack_enabled()) {
+            message_ack ack;
+            socket_io& io = lch_resources.get_socket_io();
+            replication_message::send(io, ack);
+            io.flush();
+        }
     }
 }
 

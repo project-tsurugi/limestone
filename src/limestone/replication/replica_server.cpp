@@ -22,6 +22,11 @@
 #include <netinet/tcp.h>
 #include <poll.h>
 #include <sys/eventfd.h>
+#include <type_traits>
+#include <variant>
+#include <unistd.h>
+
+#include <rdma/rdma_factory.h>
 
 #include "channel_handler_base.h"
 #include "control_channel_handler.h"
@@ -31,6 +36,7 @@
 #include "limestone_exception_helper.h"
 #include "blob_socket_io.h"
 #include "datastore_impl.h"
+#include "message_log_channel_create.h"
 
 namespace limestone::replication {
 
@@ -243,7 +249,7 @@ void replica_server::handle_client(int client_fd) {
     try {
         auto msg = replication_message::receive(io);
         message_type_id type = msg->get_message_type_id();
-        
+
         std::shared_ptr<channel_handler_base> handler;
         {
             std::lock_guard<std::mutex> lock(state_mutex_);
@@ -254,11 +260,14 @@ void replica_server::handle_client(int client_fd) {
             }
         }
         if (handler) {
+            if (type == message_type_id::LOG_CHANNEL_CREATE) {
+                setup_log_channel_handler(*msg, handler, client_fd);
+            }
             handler->run(std::move(msg));
         } else {
             LOG_LP(ERROR) << "Unexpected message type: " << static_cast<uint16_t>(type);
             auto error = std::make_unique<message_error>();
-            error->set_error(1, "Unexpected message type");
+            error->set_error(message_error::error_unexpected_message_type, "Unexpected message type");
             replication_message::send(io, *error);
             io.flush();
         }
@@ -271,8 +280,50 @@ void replica_server::handle_client(int client_fd) {
         LOG_LP(ERROR) << "handle_client error: " << ex.what();
     }
 
-    ::close(client_fd);
     TRACE_END;
+}
+
+void replica_server::setup_log_channel_handler(
+        replication_message& msg,
+        std::shared_ptr<channel_handler_base> const& handler,
+        int client_fd) {
+    // TODO: handle protocol errors below without fatal termination (return proper error).
+    auto* create_msg = dynamic_cast<message_log_channel_create*>(&msg);
+    if (create_msg == nullptr) {
+        LOG_LP(FATAL) << "LOG_CHANNEL_CREATE message cast failed.";
+    }
+    auto channel_id = create_msg->get_channel_id();
+    if (channel_id >= max_log_channel_slots) {
+        LOG_LP(FATAL) << "Log channel id exceeds maximum slots: id=" << channel_id
+                      << " max=" << max_log_channel_slots;
+    }
+    auto log_handler = std::dynamic_pointer_cast<log_channel_handler>(handler);
+    if (! log_handler) {
+        LOG_LP(FATAL) << "LOG_CHANNEL_CREATE handler is not log_channel_handler.";
+    }
+
+    // Register RDMA ACK channel so receiver can validate and reply to RDMA frames.
+    if (rdma_receiver_) {
+        auto reg_result = rdma_receiver_->register_channel(
+            static_cast<std::uint16_t>(channel_id),
+            client_fd);
+        if (! reg_result.success) {
+            LOG_LP(FATAL) << "RDMA register_channel failed for id=" << channel_id
+                          << " error=" << reg_result.error_message;
+        }
+    } else {
+        // RDMA receiver not ready yet; store for deferred registration.
+        std::lock_guard<std::mutex> lock(pending_rdma_channels_mutex_);
+        pending_rdma_channels_.emplace_back(channel_id, client_fd);
+    }
+    {
+        auto channel_idx = static_cast<std::size_t>(channel_id);
+        std::lock_guard<std::mutex> lock(log_channel_slot_mutexes_.at(channel_idx));
+        if (log_channel_handlers_.at(channel_idx)) {
+            LOG_LP(FATAL) << "Duplicate log channel id registration: id=" << channel_id;
+        }
+        log_channel_handlers_.at(channel_idx) = std::move(log_handler);
+    }
 }
 
 void replica_server::shutdown() {
@@ -306,6 +357,12 @@ void replica_server::shutdown() {
         ::close(sockfd_);
         sockfd_ = -1;
     }
+
+    // Release datastore resources (including manifest lock) when running in-process.
+    if (datastore_) {
+        datastore_->shutdown();
+        datastore_.reset();
+    }
 }
 
 limestone::api::datastore& replica_server::get_datastore() {
@@ -320,10 +377,107 @@ boost::filesystem::path replica_server::get_location() const noexcept {
     return location_;
 }
 
+std::shared_ptr<log_channel_handler> replica_server::get_log_channel_handler(
+    std::uint64_t id) const noexcept {
+    if (id >= max_log_channel_slots) {
+        return {};
+    }
+    std::lock_guard<std::mutex> lock(log_channel_slot_mutexes_.at(id));
+    return log_channel_handlers_.at(id);
+}
+
+void replica_server::set_log_channel_handler_for_test(
+    std::uint64_t id, std::shared_ptr<log_channel_handler> handler) {
+    if (id >= max_log_channel_slots) {
+        return;
+    }
+    std::lock_guard<std::mutex> lock(log_channel_slot_mutexes_.at(id));
+    log_channel_handlers_.at(id) = std::move(handler);
+}
+
+void replica_server::on_rdma_receive(rdma_receive_event const& event) {
+    if (auto const* err = std::get_if<rdma_error_event>(&event)) {
+        LOG_LP(ERROR) << "RDMA receive error: " << err->error_message;
+        return;
+    }
+    if (auto const* data = std::get_if<rdma_data_event>(&event)) {
+        handle_rdma_data_event(*data);
+        return;
+    }
+}
+
+void replica_server::handle_rdma_data_event(rdma_data_event const& event) {
+    auto channel_id = event.header.channel_id;
+    if (channel_id >= max_log_channel_slots) {
+        LOG_LP(ERROR) << "RDMA channel id out of range: id=" << channel_id
+                      << " max=" << max_log_channel_slots
+                      << " (TODO: return protocol error instead of fatal).";
+        return;
+    }
+    auto channel_idx = static_cast<std::size_t>(channel_id);
+
+    std::shared_ptr<log_channel_handler> handler;
+    {
+        std::lock_guard<std::mutex> lock(log_channel_slot_mutexes_.at(channel_idx));
+        handler = log_channel_handlers_.at(channel_idx);
+    }
+    if (! handler) {
+        LOG_LP(ERROR) << "RDMA handler missing for channel id: " << channel_id;
+        return;
+    }
+
+    handler->handle_rdma_data_event(event);
+}
+
 bool replica_server::mark_control_channel_created() noexcept {
     bool expected = false;
     bool ret = control_channel_created_.compare_exchange_strong(expected, true);
     return ret;
+}
+
+replica_server::rdma_init_result replica_server::initialize_rdma_receiver(uint32_t slot_count) {
+    std::lock_guard<std::mutex> lock(rdma_init_mutex_);
+    if (rdma_receiver_) {
+        return rdma_init_result::already_initialized;
+    }
+
+    rdma_receiver_ = make_rdma_receiver(slot_count);
+    auto result = rdma_receiver_->initialize(
+        [this](rdma_receive_event const& event) { this->on_rdma_receive(event); });
+    if (! result.success) {
+        rdma_receiver_.reset();
+        return rdma_init_result::failed;
+    }
+
+    auto dma_address = rdma_receiver_->get_dma_address();
+    if (! dma_address.has_value()) {
+        rdma_receiver_.reset();
+        return rdma_init_result::failed;
+    }
+
+    // Drain any pending channel registrations queued before RDMA receiver was ready.
+    {
+        std::lock_guard<std::mutex> pending_lock(pending_rdma_channels_mutex_);
+        for (auto& entry : pending_rdma_channels_) {
+            auto reg_result = rdma_receiver_->register_channel(
+                static_cast<std::uint16_t>(entry.first),
+                entry.second);
+            if (! reg_result.success) {
+                LOG_LP(FATAL) << "RDMA deferred register_channel failed for id=" << entry.first
+                              << " error=" << reg_result.error_message;
+            }
+        }
+        pending_rdma_channels_.clear();
+    }
+
+    return rdma_init_result::success;
+}
+
+std::optional<std::uint64_t> replica_server::get_rdma_dma_address() const noexcept {
+    if (! rdma_receiver_) {
+        return std::nullopt;
+    }
+    return rdma_receiver_->get_dma_address();
 }
 
 } // namespace limestone::replication

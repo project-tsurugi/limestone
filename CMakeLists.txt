@@ -81,6 +81,14 @@ if (ENABLE_ALTIMETER)
 endif()
 find_package(Boost COMPONENTS ${boost_components} REQUIRED)
 
+option(ENABLE_RDMA "Enable RDMA transport backend (requires rdma_comm library)" OFF)
+if(ENABLE_RDMA)
+    find_package(rdma_comm REQUIRED)
+    message(STATUS "RDMA transport backend: enabled")
+else()
+    message(STATUS "RDMA transport backend: disabled (ENABLE_RDMA=OFF)")
+endif()
+
 add_subdirectory(third_party) # should be before enable_testing()
 
 include(GNUInstallDirs)
@@ -178,4 +186,3 @@ install(
     DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/${package_name}
     EXPORT_LINK_INTERFACE_LIBRARIES
 )
-

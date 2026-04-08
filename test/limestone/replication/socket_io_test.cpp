@@ -516,4 +516,112 @@ TEST(socket_io_test, eof_after_close_socket_mode) {
     EXPECT_TRUE(io.eof()) << "Expected EOF after stream close in socket mode, but it was not EOF.";
 }
 
+TEST(socket_io_test, get_socket_fd_real_and_string_mode) {
+    int fds[2]{-1, -1};
+    ASSERT_EQ(::socketpair(AF_UNIX, SOCK_STREAM, 0, fds), 0);
+
+    {
+        socket_io io_real(fds[0]);
+        EXPECT_EQ(io_real.get_socket_fd(), fds[0]);
+    }
+    ::close(fds[1]);
+
+    socket_io io_string("");
+    EXPECT_EQ(io_string.get_socket_fd(), -1);
+}
+
+TEST(socket_io_test, reset_output_buffer_clears_content_and_reuse) {
+    socket_io io(std::string{});
+
+    io.send_uint32(0x12345678U);
+    auto before = io.get_out_string();
+    ASSERT_FALSE(before.empty());
+
+    io.reset_output_buffer();
+    auto after = io.get_out_string();
+    EXPECT_TRUE(after.empty());
+
+    io.send_uint8(0xAB);
+    auto reused = io.get_out_string();
+    ASSERT_EQ(reused.size(), 1U);
+    EXPECT_EQ(static_cast<unsigned char>(reused[0]), 0xAB);
+}
+
+TEST(socket_io_test, reset_output_buffer_handles_moved_from_object) {
+    socket_io io(std::string{});
+    socket_io moved{std::move(io)};
+
+    // moved-from object should safely ignore reset
+    ASSERT_NO_THROW(io.reset_output_buffer());
+    EXPECT_TRUE(io.get_out_string().empty());
+
+    // moved object should remain functional
+    moved.send_uint8(0x7F);
+    auto payload = moved.get_out_string();
+    ASSERT_EQ(payload.size(), 1U);
+    EXPECT_EQ(static_cast<unsigned char>(payload[0]), 0x7F);
+}
+
+TEST(socket_io_test, reset_output_buffer_socket_mode_is_noop) {
+    int fds[2]{-1, -1};
+    ASSERT_EQ(::socketpair(AF_UNIX, SOCK_STREAM, 0, fds), 0);
+
+    socket_io io_real(fds[0]);
+    // In socket mode, reset_output_buffer should be a no-op without throwing.
+    ASSERT_NO_THROW(io_real.reset_output_buffer());
+
+    ::close(fds[1]);
+    ::close(fds[0]);
+}
+
+TEST(socket_io_test, get_out_size_empty) {
+    socket_io io(std::string{});
+    EXPECT_EQ(io.get_out_size(), 0U);
+}
+
+TEST(socket_io_test, get_out_size_after_write) {
+    socket_io io(std::string{});
+    io.send_uint32(0x12345678U);
+    EXPECT_EQ(io.get_out_size(), sizeof(uint32_t));
+}
+
+TEST(socket_io_test, get_out_size_after_reset) {
+    socket_io io(std::string{});
+    io.send_uint32(0xDEADBEEFU);
+    ASSERT_GT(io.get_out_size(), 0U);
+    io.reset_output_buffer();
+    EXPECT_EQ(io.get_out_size(), 0U);
+}
+
+TEST(socket_io_test, has_unread_data_empty_stream) {
+    socket_io io(std::string{});
+    EXPECT_FALSE(io.has_unread_data());
+}
+
+TEST(socket_io_test, has_unread_data_with_data) {
+    socket_io io(std::string{"ABC"});
+    EXPECT_TRUE(io.has_unread_data());
+}
+
+TEST(socket_io_test, has_unread_data_after_consume) {
+    socket_io io_src(std::string{});
+    io_src.send_uint8(0xABU);
+    socket_io io(io_src.get_out_string());
+    EXPECT_TRUE(io.has_unread_data());
+    [[maybe_unused]] auto _ = io.receive_uint8();
+    EXPECT_FALSE(io.has_unread_data());
+}
+
+// send_blob and receive_blob on the base socket_io must FATAL immediately
+// because blob handling requires a blob-capable subclass.
+TEST(socket_io_death_test, send_blob_on_base_class_is_fatal) {
+    socket_io io(std::string{});
+    EXPECT_DEATH(io.send_blob(0U), "");
+}
+
+TEST(socket_io_death_test, receive_blob_on_base_class_is_fatal) {
+    socket_io io(std::string{});
+    EXPECT_DEATH(io.receive_blob(), "");
+}
+
 }  // namespace limestone::testing

@@ -22,33 +22,43 @@
  namespace limestone::testing {
  using namespace limestone::replication;
  
- TEST(message_log_channel_create_test, default_values) {
-     message_log_channel_create msg;
-     EXPECT_EQ(msg.get_connection_type(), CONNECTION_TYPE_LOG_CHANNEL);
-     EXPECT_EQ(msg.get_secret(), "");
- }
- 
- TEST(message_log_channel_create_test, set_param_and_getters) {
-     message_log_channel_create msg;
-     msg.set_secret("config_secret");
-     EXPECT_EQ(msg.get_connection_type(), CONNECTION_TYPE_LOG_CHANNEL);
-     EXPECT_EQ(msg.get_secret(), "config_secret");
- }
- 
- TEST(message_log_channel_create_test, replication_message_round_trip) {
-     message_log_channel_create original;
-     original.set_secret("roundtrip_secret");
- 
-     socket_io out("");
-     replication_message::send(out, original);
- 
-     socket_io in(out.get_out_string());
-     auto received_base = replication_message::receive(in);
-     auto *received = dynamic_cast<message_log_channel_create*>(received_base.get());
-     ASSERT_NE(received, nullptr);
-     EXPECT_EQ(received->get_connection_type(), CONNECTION_TYPE_LOG_CHANNEL);
-     EXPECT_EQ(received->get_secret(), "roundtrip_secret");
- }
+TEST(message_log_channel_create_test, default_values) {
+    message_log_channel_create msg(1U);
+    EXPECT_EQ(msg.get_connection_type(), CONNECTION_TYPE_LOG_CHANNEL);
+    EXPECT_EQ(msg.get_secret(), "");
+}
+
+TEST(message_log_channel_create_test, set_param_and_getters) {
+    message_log_channel_create msg(2U);
+    msg.set_secret("config_secret");
+    EXPECT_EQ(msg.get_connection_type(), CONNECTION_TYPE_LOG_CHANNEL);
+    EXPECT_EQ(msg.get_secret(), "config_secret");
+    EXPECT_EQ(msg.get_channel_id(), 2U);
+}
+
+TEST(message_log_channel_create_test, channel_id_retains_assigned_value) {
+    message_log_channel_create msg_a(42U);
+    EXPECT_EQ(msg_a.get_channel_id(), 42U);
+
+    message_log_channel_create msg_b(9999U);
+    EXPECT_EQ(msg_b.get_channel_id(), 9999U);
+}
+
+TEST(message_log_channel_create_test, replication_message_round_trip) {
+    message_log_channel_create original(3U);
+    original.set_secret("roundtrip_secret");
+
+    socket_io out("");
+    replication_message::send(out, original);
+
+    socket_io in(out.get_out_string());
+    auto received_base = replication_message::receive(in);
+    auto *received = dynamic_cast<message_log_channel_create*>(received_base.get());
+    ASSERT_NE(received, nullptr);
+    EXPECT_EQ(received->get_connection_type(), CONNECTION_TYPE_LOG_CHANNEL);
+    EXPECT_EQ(received->get_secret(), "roundtrip_secret");
+    EXPECT_EQ(received->get_channel_id(), 3U);
+}
  
  TEST(message_log_channel_create_test, invalid_connection_type_throws) {
      socket_io out("");
@@ -60,11 +70,11 @@
      EXPECT_THROW(replication_message::receive(in), std::runtime_error);
  }
  
- TEST(message_log_channel_create_test, post_receive_throws) {
-    message_log_channel_create msg;
-    socket_io io("");
-    handler_resources resources{io};
-    EXPECT_THROW(msg.post_receive(resources), std::logic_error);
+TEST(message_log_channel_create_test, post_receive_throws) {
+   message_log_channel_create msg(4U);
+   socket_io io("");
+   handler_resources resources{io};
+   EXPECT_THROW(msg.post_receive(resources), std::logic_error);
 }
 
 

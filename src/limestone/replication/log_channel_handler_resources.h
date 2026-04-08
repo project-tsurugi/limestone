@@ -27,8 +27,9 @@ class log_channel_handler_resources : public handler_resources {
 public:
     log_channel_handler_resources(
         socket_io& io,
-        log_channel& channel)
-        : handler_resources(io)
+        log_channel& channel,
+        bool ack_enabled = true)
+        : handler_resources(io, ack_enabled)
         , channel_(channel) {}
 
     [[nodiscard]] log_channel& get_log_channel() const { return channel_; }

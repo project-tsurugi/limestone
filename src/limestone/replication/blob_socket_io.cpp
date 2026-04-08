@@ -18,6 +18,8 @@ blob_socket_io::blob_socket_io(int fd, datastore &ds)
 blob_socket_io::blob_socket_io(const std::string &initial, datastore &ds)
     : socket_io(initial), datastore_(ds) {}
 
+// TODO: The blob file open/size-check/chunk-read logic below is duplicated in
+//       rdma_socket_io::send_blob. Consider extracting a shared helper.
 void blob_socket_io::send_blob(const blob_id_type blob_id) {
     auto blob_file = datastore_.get_blob_file(blob_id);
     auto path = blob_file.path();
@@ -67,15 +69,16 @@ void blob_socket_io::send_blob(const blob_id_type blob_id) {
         while (total_read < chunk) {
             std::size_t r = std::fread(&*std::next(buffer.begin(), static_cast<std::vector<char>::difference_type>(total_read)), 1, chunk - total_read, fp);
             if (r == 0) {
-                if (std::feof(fp) != 0) {
-                    safe_close(fp);
-                    LOG_AND_THROW_IO_EXCEPTION("Unexpected EOF reading blob: " + path.string(), errno);
-                }
-                if (std::ferror(fp) != 0 && errno == EINTR) {
+                // Capture errno immediately after fread before any other call may clobber it.
+                int ec = errno;
+                if (ec == EINTR) {
                     std::clearerr(fp);
                     continue;
                 }
-                int ec = errno;
+                if (std::feof(fp) != 0) {
+                    safe_close(fp);
+                    LOG_AND_THROW_IO_EXCEPTION("Unexpected EOF reading blob: " + path.string(), ec);
+                }
                 safe_close(fp);
                 LOG_AND_THROW_IO_EXCEPTION("Failed to read blob chunk: " + path.string(), ec);
             }

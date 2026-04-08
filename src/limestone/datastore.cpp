@@ -19,6 +19,9 @@
 #include <iomanip>
 #include <stdexcept>
 #include <future>
+#include <cerrno>
+#include <cstdint>
+#include <limits>
 
 #include <boost/filesystem/fstream.hpp>
 
@@ -353,6 +356,16 @@ void datastore::ready() {
         if (impl_ ->is_replication_configured() && impl_->is_master()) {
             if (impl_->open_control_channel()) {
                 LOG_LP(INFO) << "Replication control channel opened successfully.";
+                
+                // Register RDMA send streams for existing log channels
+                // (RDMA sender is now initialized after open_control_channel)
+                std::lock_guard<std::mutex> lock(mtx_channel_);
+                for (std::size_t id = 0; id < log_channels_.size(); ++id) {
+                    auto* channel = log_channels_[id].get();
+                    if (channel != nullptr && channel->get_impl()->get_replica_connector() != nullptr) {
+                        maybe_register_rdma_stream(*channel, id);
+                    }
+                }
             } else {
                 LOG_LP(FATAL) << "Failed to open replication control channel.";
             }
@@ -381,11 +394,12 @@ log_channel& datastore::create_channel() {
     
     auto id = log_channel_id_.fetch_add(1);
     log_channels_.emplace_back(std::unique_ptr<log_channel>(new log_channel(location_, id, *this)));  // constructor of log_channel is private
+    auto* channel = log_channels_.back().get();
     
     if (impl_->has_replica() && impl_->is_master()) {
-        auto connector = impl_->create_log_channel_connector(*this);
+        auto connector = impl_->create_log_channel_connector(*this, id);
         if (connector) {
-            log_channels_.back()->get_impl()->set_replica_connector(std::move(connector));
+            channel->get_impl()->set_replica_connector(std::move(connector));
         } else {
             LOG_LP(FATAL) << "Failed to create log channel connector.";
         }
@@ -553,6 +567,8 @@ std::future<void> datastore::shutdown() noexcept {
             replica_connector->close_session();
         }
     }
+
+    impl_->shutdown_rdma_sender();
 
     if (blob_file_garbage_collector_) {
         blob_file_garbage_collector_->shutdown();
@@ -1059,5 +1075,45 @@ void datastore::wait_for_blob_file_garbace_collector_for_tests() const noexcept 
 }
 
 
+void datastore::maybe_register_rdma_stream(log_channel& channel, std::size_t id) {
+    auto acquire_stream = [&](auto&& acquire_fn, int socket_fd) {
+        if (socket_fd < 0) {
+            LOG_LP(FATAL) << "Failed to obtain socket fd for RDMA acknowledgements.";
+        }
+        auto stream_result = acquire_fn(static_cast<std::uint16_t>(id), socket_fd);
+        if (! stream_result.status.success || stream_result.stream == nullptr) {
+            LOG_LP(FATAL) << "Failed to acquire RDMA send stream: "
+                          << stream_result.status.error_message;
+        }
+        channel.get_impl()->set_rdma_send_stream(std::move(stream_result.stream));
+    };
+
+    if (impl_->has_rdma_stream_factory_for_test()) {
+        auto const* factory = impl_->get_rdma_stream_factory_for_test();
+        if (factory == nullptr) {
+            LOG_LP(FATAL) << "RDMA stream factory test hook missing.";
+        }
+        auto socket_fd = impl_->rdma_ack_fd_for_test().value_or(
+            channel.get_impl()->get_replica_connector()->get_socket_fd());
+        acquire_stream(*factory, socket_fd);
+        return;
+    }
+
+    auto* rdma_sender = impl_->get_rdma_sender();
+    if (rdma_sender == nullptr || ! impl_->is_rdma_enabled()) {
+        return;
+    }
+    if (id > std::numeric_limits<std::uint16_t>::max()) {
+        LOG_LP(FATAL) << "RDMA channel_id overflow: id=" << id;
+    }
+    auto* replica_connector = channel.get_impl()->get_replica_connector();
+    if (replica_connector == nullptr) {
+        LOG_LP(FATAL) << "replica_connector missing during RDMA stream registration.";
+    }
+    auto socket_fd = impl_->rdma_ack_fd_for_test().value_or(replica_connector->get_socket_fd());
+    acquire_stream([rdma_sender](std::uint16_t cid, int fd) {
+        return rdma_sender->get_send_stream(cid, fd);
+    }, socket_fd);
+}
 
 } // namespace limestone::api

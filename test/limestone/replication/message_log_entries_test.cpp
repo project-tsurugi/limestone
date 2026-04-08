@@ -418,7 +418,7 @@ TEST_F(message_log_entries_test, write_all_entry_type_to_pwal_via_replication_ch
     // 2) Open five log channel sessions
     clients.emplace_back();
     ASSERT_TRUE(clients.back().connect_to_server("127.0.0.1", port, *ds));
-    auto request = message_log_channel_create::create();
+    auto request = std::make_unique<message_log_channel_create>(1U);
     EXPECT_TRUE(clients.back().send_message(*request));
 
     // Wait for the ack response

@@ -43,6 +43,11 @@ public:
     [[nodiscard]] uint64_t get_protocol_version() const { return protocol_version_; }
     [[nodiscard]] const std::string& get_configuration_id() const { return configuration_id_; }
     [[nodiscard]] uint64_t get_epoch_number() const { return epoch_number_; }
+    /**
+     * @brief Set protocol version for testing.
+     * @details This is intended for tests only and must not be used in production code paths.
+     */
+    void set_protocol_version(uint64_t protocol_version) { protocol_version_ = protocol_version; }
 
 private:
     // Register SESSION_BEGIN in replication_message factory map.
@@ -56,7 +61,7 @@ private:
     }(); 
 
     uint8_t connection_type_ = CONNECTION_TYPE_CONTROL_CHANNEL;
-    uint64_t protocol_version_ = 1;  // TODO: プロトコル共通のヘッダファイルに定数値で定義する。
+    uint64_t protocol_version_ = replication_protocol_version;
     std::string configuration_id_{};
     uint64_t epoch_number_{};
 };

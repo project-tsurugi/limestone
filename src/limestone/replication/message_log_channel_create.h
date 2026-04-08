@@ -22,16 +22,24 @@ namespace limestone::replication {
 
 class message_log_channel_create : public replication_message {
 public:
+    explicit message_log_channel_create(std::uint64_t channel_id) noexcept
+        : channel_id_(channel_id) {}
+
     void set_secret(std::string secret);
 
     [[nodiscard]] message_type_id get_message_type_id() const override;
     void send_body(socket_io& io) const override;
     void receive_body(socket_io& io) override;
 
-    [[nodiscard]] static std::unique_ptr<replication_message> create();
-
     [[nodiscard]] uint8_t get_connection_type() const { return connection_type_; }
     [[nodiscard]] const std::string& get_secret() const { return secret_; }
+    [[nodiscard]] std::uint64_t get_channel_id() const noexcept { return channel_id_; }
+
+    /**
+     * @brief Factory for replication_message::receive().
+     * @note channel_id is initialized as 0 for deserialization.
+     */
+    [[nodiscard]] static std::unique_ptr<replication_message> create_placeholder();
 
 private:
     // Register LOG_CHANNEL_CREATE in replication_message factory map.
@@ -42,13 +50,13 @@ private:
     inline static const bool registered_ = []() {
         replication_message::register_message_type(
             message_type_id::LOG_CHANNEL_CREATE,
-            &message_log_channel_create::create);
+            &message_log_channel_create::create_placeholder);
         return true;
     }();
 
     uint8_t connection_type_ = CONNECTION_TYPE_LOG_CHANNEL;
+    std::uint64_t channel_id_ = 0;
     std::string secret_;
 };
 
 }  // namespace limestone::replication
-

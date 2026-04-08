@@ -2,6 +2,16 @@
  * Copyright 2022-2025 Project Tsurugi.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
  */
 
 #include "replication/replica_server.h"
@@ -18,6 +28,7 @@
 #include "replication/replica_connector.h"
 #include "replication/socket_io.h"
 #include "replication/handler_resources.h"
+#include "replication/log_channel_handler.h"
 #include "replication_test_helper.h"
 namespace limestone::testing {
 
@@ -46,9 +57,9 @@ using namespace limestone::replication;
      }
  };
 
- class test_session_handler : public limestone::replication::channel_handler_base {
- public:
-     test_session_handler(limestone::replication::replica_server& server, socket_io& io, std::promise<bool>& invoked) noexcept : channel_handler_base(server, io), invoked_(invoked) {}
+class test_session_handler : public limestone::replication::channel_handler_base {
+public:
+    test_session_handler(limestone::replication::replica_server& server, socket_io& io, std::promise<bool>& invoked) noexcept : channel_handler_base(server, io), invoked_(invoked) {}
 
  protected:
      limestone::replication::validation_result authorize() override { return limestone::replication::validation_result::success(); }
@@ -62,6 +73,20 @@ using namespace limestone::replication;
  private:
      std::promise<bool>& invoked_;
  };
+
+class fake_log_channel_handler : public log_channel_handler {
+public:
+    fake_log_channel_handler(replica_server& server, socket_io& io, bool& invoked) noexcept
+        : log_channel_handler(server, io),
+          invoked_(invoked) {}
+
+    void handle_rdma_data_event(rdma_data_event const& /*event*/) override {
+        invoked_ = true;
+    }
+
+private:
+    bool& invoked_;
+};
 
  TEST_F(replica_server_test, initialize_does_not_throw) {
      replication::replica_server server;
@@ -268,6 +293,65 @@ TEST_F(replica_server_test, mark_control_channel_created_sets_flag) {
     server.initialize(location1);
 
     EXPECT_TRUE(server.mark_control_channel_created());
+}
+
+#ifdef LIMESTONE_ENABLE_RDMA
+TEST_F(replica_server_test, initialize_rdma_receiver_success_then_already_initialized) {
+    replication::replica_server server;
+    server.initialize(location1);
+
+    auto first = server.initialize_rdma_receiver(4);
+    EXPECT_EQ(first, replication::replica_server::rdma_init_result::success);
+
+    auto second = server.initialize_rdma_receiver(4);
+    EXPECT_EQ(second, replication::replica_server::rdma_init_result::already_initialized);
+}
+#endif // LIMESTONE_ENABLE_RDMA
+
+TEST_F(replica_server_test, on_rdma_receive_invokes_handler_for_data_event) {
+    replica_server server;
+    server.initialize(location1);
+
+    int pipefd[2];
+    ASSERT_EQ(::pipe(pipefd), 0);
+    socket_io io(pipefd[1]);
+    bool invoked = false;
+    auto handler = std::make_shared<fake_log_channel_handler>(server, io, invoked);
+    server.set_log_channel_handler_for_test(1U, handler);
+
+    rdma_data_event ev{};
+    ev.header.version = rdma_frame_current_version;
+    ev.header.channel_id = 1U;
+    ev.header.sequence_number = 0U;
+    ev.header.payload_size = 0U;
+    ev.payload = {};
+
+    server.on_rdma_receive(rdma_receive_event{ev});
+    EXPECT_TRUE(invoked);
+
+    ::close(pipefd[0]);
+    ::close(pipefd[1]);
+}
+
+TEST_F(replica_server_test, on_rdma_receive_error_event_does_not_invoke_handler) {
+    replica_server server;
+    server.initialize(location1);
+
+    int pipefd[2];
+    ASSERT_EQ(::pipe(pipefd), 0);
+    socket_io io(pipefd[1]);
+    bool invoked = false;
+    auto handler = std::make_shared<fake_log_channel_handler>(server, io, invoked);
+    server.set_log_channel_handler_for_test(1U, handler);
+
+    rdma_error_event err{};
+    err.error_message = "test-error";
+
+    server.on_rdma_receive(rdma_receive_event{err});
+    EXPECT_FALSE(invoked);
+
+    ::close(pipefd[0]);
+    ::close(pipefd[1]);
 }
 
 }  // namespace limestone::testing

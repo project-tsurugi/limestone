@@ -222,10 +222,45 @@ bool socket_io::flush() {
 }
 
 std::string socket_io::get_out_string() const {
+    if (! out_stream_) {
+        return std::string{};
+    }
     return out_stream_->str();
 }
 
+std::size_t socket_io::get_out_size() const {
+    if (! out_stream_) {
+        return 0;
+    }
+    std::ostream::pos_type pos = out_stream_->tellp();
+    if (pos == std::ostream::pos_type(-1)) {
+        return 0;
+    }
+    return static_cast<std::size_t>(pos);
+}
+
+bool socket_io::has_unread_data() const {
+    if (!is_string_mode_) {
+        return false;
+    }
+    if (! in_stream_) {
+        return false;
+    }
+    return in_stream_->peek() != std::char_traits<char>::eof();
+}
+
+void socket_io::reset_output_buffer() {
+    if (! out_stream_) {
+        return;
+    }
+    out_stream_->str(std::string{});
+    out_stream_->clear();
+}
+
 void socket_io::close() {
+    if (! out_stream_) {
+        return;
+    }
     flush();
     if (!is_string_mode_) {
         if (socket_fd_ != -1) {
@@ -251,6 +286,18 @@ std::istream& socket_io::get_in_stream() {
 
 bool socket_io::eof() {
     return in_stream_->eof();
+}
+
+int socket_io::get_socket_fd() const noexcept {
+    return socket_fd_;
+}
+
+void socket_io::send_blob(blob_id_type /*blob_id*/) {
+    LOG_LP(FATAL) << "send_blob called on base socket_io: blob-capable IO class required";
+}
+
+blob_id_type socket_io::receive_blob() {
+    LOG_LP(FATAL) << "receive_blob called on base socket_io: blob-capable IO class required";
 }
 
 }  // namespace limestone::replication

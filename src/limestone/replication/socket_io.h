@@ -31,8 +31,11 @@
 #include <streambuf>
 
 #include "socket_streambuf.h"
+#include <limestone/api/blob_id_type.h>
 
 namespace limestone::replication {
+
+using limestone::api::blob_id_type;
 
 class socket_io {
 public:
@@ -85,11 +88,48 @@ public:
     // Getters for the output buffer contents
     [[nodiscard]] std::string get_out_string() const;
 
+    /**
+     * @brief Returns the current byte size of the output buffer without copying its contents.
+     * @return Number of bytes currently accumulated in the output buffer.
+     */
+    [[nodiscard]] std::size_t get_out_size() const;
+
     // Close the socket file descriptor (real mode) or clear the input and output streams (string mode).
     void close();
 
     // Check if the end of the input stream has been reached.
     [[nodiscard]] bool eof();
+
+    /**
+     * @brief Returns true if there is at least one more byte available to read
+     *        in the input stream (string mode only; always false in socket mode).
+     *        Use this to loop over multiple messages packed in a single RDMA payload.
+     * @return true if more data can be read without blocking.
+     */
+    [[nodiscard]] bool has_unread_data() const;
+
+    /**
+     * @brief Retrieve the underlying socket file descriptor.
+     * @return socket file descriptor in real socket mode; -1 in string mode.
+     */
+    [[nodiscard]] int get_socket_fd() const noexcept;
+
+    /**
+     * @brief Reset output buffer while retaining allocated capacity.
+     */
+    void reset_output_buffer();
+
+    /**
+     * @brief Send a blob file over the channel.
+     * @param blob_id ID of the blob to send.
+     */
+    virtual void send_blob(blob_id_type blob_id);
+
+    /**
+     * @brief Receive a blob from the channel and write it to the datastore.
+     * @return The blob ID of the received blob.
+     */
+    virtual blob_id_type receive_blob();
 
 protected:
     [[nodiscard]] std::ostream& get_out_stream(); 

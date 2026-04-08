@@ -2,7 +2,15 @@ file(GLOB SOURCES
         "limestone/*.cpp"
         "limestone/replication/*.cpp"
         "limestone/partitioned_cursor/*.cpp"
+        "limestone/rdma/rdma_socket_io.cpp"
 )
+
+if(ENABLE_RDMA)
+    file(GLOB RDMA_SOURCES "limestone/rdma/rdma_comm/*.cpp")
+else()
+    file(GLOB RDMA_SOURCES "limestone/rdma/null/*.cpp")
+endif()
+list(APPEND SOURCES ${RDMA_SOURCES})
 
 add_library(${package_name}
         ${SOURCES}
@@ -38,6 +46,11 @@ target_link_libraries(${package_name}
         PRIVATE OpenSSL::Crypto
 )
 
+if(ENABLE_RDMA)
+    target_compile_definitions(${package_name} PRIVATE LIMESTONE_ENABLE_RDMA)
+    target_link_libraries(${package_name} PRIVATE rdma_comm)
+endif()
+
 if (ENABLE_ALTIMETER)
     target_link_libraries(${package_name}
         PRIVATE altimeter
@@ -65,6 +78,11 @@ target_link_libraries(limestone-impl
         INTERFACE OpenSSL::SSL
         INTERFACE OpenSSL::Crypto
 )
+
+if(ENABLE_RDMA)
+    target_compile_definitions(limestone-impl INTERFACE LIMESTONE_ENABLE_RDMA)
+    target_link_libraries(limestone-impl INTERFACE rdma_comm)
+endif()
 
 # utils
 file(GLOB DBLOGUTIL_SOURCES

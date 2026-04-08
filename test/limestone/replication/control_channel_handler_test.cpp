@@ -21,6 +21,7 @@
 #include "replication/message_session_begin.h"
 #include "replication/message_session_begin_ack.h"
 #include "replication/socket_io.h"
+#include "replication/message_error.h"
 
 namespace limestone::testing {
 
@@ -49,11 +50,11 @@ public:
     void call_send_initial_ack(socket_io& io) const { send_initial_ack(); }
     };
  
- TEST_F(control_channel_handler_test, validate_session_begin_success) {
-     replica_server server{};
-     socket_io io("");
-     testable_control_handler handler(reinterpret_cast<replica_server&>(server), io);
- 
+TEST_F(control_channel_handler_test, validate_session_begin_success) {
+    replica_server server{};
+    socket_io io("");
+    testable_control_handler handler(reinterpret_cast<replica_server&>(server), io);
+
      auto msg = std::make_unique<message_session_begin>();
      msg->set_param("conf", 1);
  
@@ -73,7 +74,7 @@ public:
     // Second call fails (SESSION_BEGIN is considered already received)
     auto result2 = handler.call_assign();
     EXPECT_FALSE(result2.ok());
-    EXPECT_EQ(result2.error_code(), 1);
+    EXPECT_EQ(result2.error_code(), message_error::control_channel_error_already_created);
 }
 
 TEST_F(control_channel_handler_test, validate_succeeds_after_assign) {
@@ -90,6 +91,21 @@ TEST_F(control_channel_handler_test, validate_succeeds_after_assign) {
     EXPECT_TRUE(result.ok());
 }
 
+TEST_F(control_channel_handler_test, validate_fails_on_protocol_version_mismatch) {
+    replica_server server{};
+    socket_io io("");
+    testable_control_handler handler(reinterpret_cast<replica_server&>(server), io);
+
+    auto msg = std::make_unique<message_session_begin>();
+    msg->set_param("conf", 1);
+    msg->set_protocol_version(replication::replication_protocol_version + 1U);
+
+    auto result = handler.call_validate(std::move(msg));
+    EXPECT_FALSE(result.ok());
+    EXPECT_EQ(result.error_code(), message_error::control_channel_error_unsupported_version);
+    EXPECT_NE(result.error_message().find("Unsupported protocol version"), std::string::npos);
+}
+
  
  TEST_F(control_channel_handler_test, validate_fails_on_wrong_type) {
     replica_server server;
@@ -99,7 +115,7 @@ TEST_F(control_channel_handler_test, validate_succeeds_after_assign) {
      auto wrong = std::make_unique<message_ack>();
      auto result = handler.call_validate(std::move(wrong));
      EXPECT_FALSE(result.ok());
-     EXPECT_EQ(result.error_code(), 2);
+     EXPECT_EQ(result.error_code(), message_error::control_channel_error_invalid_type);
  }
  
  TEST_F(control_channel_handler_test, validate_fails_on_failed_cast) {
@@ -119,7 +135,7 @@ TEST_F(control_channel_handler_test, validate_succeeds_after_assign) {
      auto msg = std::make_unique<bad_message>();
      auto result = handler.call_validate(std::move(msg));
      EXPECT_FALSE(result.ok());
-     EXPECT_EQ(result.error_code(), 3);
+     EXPECT_EQ(result.error_code(), message_error::control_channel_error_bad_cast);
  }
  
  TEST_F(control_channel_handler_test, send_initial_ack_outputs_session_secret) {

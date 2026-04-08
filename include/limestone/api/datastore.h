@@ -522,6 +522,8 @@ private:
 
     void check_before_ready(std::string_view func) const noexcept;
 
+    void maybe_register_rdma_stream(log_channel& channel, std::size_t id);
+
     /**
      * @brief Creates a snapshot of the current state and retrieves the maximum blob ID.
      *
