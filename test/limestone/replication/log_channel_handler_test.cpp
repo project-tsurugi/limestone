@@ -80,6 +80,7 @@ rdma_test_context make_rdma_handler_with_channel(std::string const& location) {
 
     auto create_msg = std::make_unique<message_log_channel_create>(1U);
     auto init = handler->validate_initial(std::move(create_msg));
+    EXPECT_TRUE(init.ok()) << init.error_message();
     ctx.handler = std::move(handler);
     return ctx;
 }
