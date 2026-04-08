@@ -232,7 +232,11 @@ std::size_t socket_io::get_out_size() const {
     if (! out_stream_) {
         return 0;
     }
-    return static_cast<std::size_t>(out_stream_->tellp());
+    std::ostream::pos_type pos = out_stream_->tellp();
+    if (pos == std::ostream::pos_type(-1)) {
+        return 0;
+    }
+    return static_cast<std::size_t>(pos);
 }
 
 bool socket_io::has_unread_data() const {
