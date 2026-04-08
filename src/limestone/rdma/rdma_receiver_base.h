@@ -68,7 +68,8 @@ public:
     /**
      * @brief Register an acknowledgement endpoint for the given logical channel.
      * @param channel_id  Logical channel identifier.
-     * @param ack_socket  Socket file descriptor used to send acknowledgements.
+     * @param ack_socket  Borrowed socket file descriptor used to send acknowledgements.
+     *                    Implementations must duplicate it before taking ownership.
      * @return operation_result describing success or failure.
      */
     [[nodiscard]] virtual operation_result register_channel(

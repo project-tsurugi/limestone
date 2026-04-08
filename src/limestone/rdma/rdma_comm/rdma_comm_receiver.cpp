@@ -15,6 +15,11 @@
  */
 #include <rdma/rdma_comm_receiver.h>
 
+#include <cerrno>
+#include <cstring>
+#include <string>
+#include <unistd.h>
+
 #include <rdma_comm/unique_fd.h>
 
 namespace limestone::replication {
@@ -73,9 +78,14 @@ rdma_receiver_base::operation_result rdma_comm_receiver::shutdown() noexcept {
 rdma_receiver_base::operation_result rdma_comm_receiver::register_channel(
         std::uint16_t channel_id,
         int           ack_socket) noexcept {
+    int owned_ack_socket = ::dup(ack_socket);
+    if (owned_ack_socket < 0) {
+        return {false, std::string{"dup() failed for RDMA ACK socket: "} + std::strerror(errno)};
+    }
+
     auto r = receiver_.register_channel(
         channel_id,
-        rdma::communication::unique_fd{ack_socket});
+        rdma::communication::unique_fd{owned_ack_socket});
     return {r.success, r.error_message};
 }
 
