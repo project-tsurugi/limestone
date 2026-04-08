@@ -238,7 +238,7 @@ TEST_F(log_channel_handler_test, send_initial_ack_sends_ack_message) {
     ASSERT_NE(ack, nullptr);
 }
 
-TEST_F(log_channel_handler_test, handle_rdma_data_event_sends_ack) {
+TEST_F(log_channel_handler_test, handle_rdma_data_event_applies_entries_without_tcp_ack) {
     auto ctx = make_rdma_handler_with_channel(base_location);
     ASSERT_NE(ctx.handler, nullptr);
     ASSERT_GE(ctx.read_fd, 0);
