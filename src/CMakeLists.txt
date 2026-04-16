@@ -61,6 +61,32 @@ set_compile_options(${package_name})
 
 install_custom(${package_name} ${export_name})
 
+if(ENABLE_RDMA)
+    if(NOT DEFINED rdma_comm_RUNTIME_LIBRARIES)
+        message(FATAL_ERROR "rdma_comm_RUNTIME_LIBRARIES is not defined")
+    endif()
+    if(NOT rdma_comm_RUNTIME_LIBRARIES)
+        message(FATAL_ERROR "rdma_comm_RUNTIME_LIBRARIES is empty")
+    endif()
+    if(NOT DEFINED rdma_comm_VENDOR_RUNTIME_LIBRARIES)
+        message(FATAL_ERROR "rdma_comm_VENDOR_RUNTIME_LIBRARIES is not defined")
+    endif()
+    if(NOT rdma_comm_VENDOR_RUNTIME_LIBRARIES)
+        message(FATAL_ERROR "rdma_comm_VENDOR_RUNTIME_LIBRARIES is empty")
+    endif()
+
+    install(
+        FILES ${rdma_comm_RUNTIME_LIBRARIES}
+        DESTINATION "${CMAKE_INSTALL_LIBDIR}"
+        COMPONENT Runtime
+    )
+    install(
+        FILES ${rdma_comm_VENDOR_RUNTIME_LIBRARIES}
+        DESTINATION "${CMAKE_INSTALL_LIBDIR}/rdma_comm"
+        COMPONENT Runtime
+    )
+endif()
+
 # for tests
 add_library(limestone-impl INTERFACE)
 
