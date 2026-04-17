@@ -11,13 +11,18 @@
 #include "replication/socket_io.h"
 #include "replication/blob_socket_io.h"
 #include "replication/validation_result.h"
+#include "rdma/rdma_socket_io.h"
+#include "rdma/rdma_send_stream_base.h"
 #include <boost/filesystem.hpp>
+#include <chrono>
 #include <cerrno>
+#include <cstdint>
 #include <fstream>
 #include <limits>
 #include <memory>
 #include <string>
 #include <utility>
+#include <vector>
 #include "test_message.h"
 #include "replication_test_helper.h"
 #include "test_root.h"
@@ -133,6 +138,45 @@ void set_non_blocking(int fd) {
     int flags = ::fcntl(fd, F_GETFL, 0);
     ASSERT_NE(flags, -1);
     ASSERT_EQ(::fcntl(fd, F_SETFL, flags | O_NONBLOCK), 0);
+}
+
+class capturing_rdma_send_stream : public rdma_send_stream_base {
+public:
+    [[nodiscard]] send_result send_bytes(
+            std::vector<std::uint8_t> const& payload,
+            std::size_t offset,
+            std::size_t length) noexcept override {
+        calls_.emplace_back(
+            payload.begin() + static_cast<std::ptrdiff_t>(offset),
+            payload.begin() + static_cast<std::ptrdiff_t>(offset + length));
+        return {true, "", length};
+    }
+
+    [[nodiscard]] send_result send_all_bytes(
+            std::vector<std::uint8_t> const& payload,
+            std::size_t offset,
+            std::size_t length) noexcept override {
+        return send_bytes(payload, offset, length);
+    }
+
+    [[nodiscard]] flush_result flush(std::chrono::milliseconds) noexcept override {
+        return {true, ""};
+    }
+
+    std::vector<std::vector<std::uint8_t>> calls_{};
+};
+
+rdma_data_event make_rdma_event_from_payload(
+        std::vector<std::uint8_t> const& payload,
+        std::uint16_t sequence_number) {
+    rdma_data_event ev{};
+    ev.header.version = rdma_frame_current_version;
+    ev.header.flags = 0U;
+    ev.header.sequence_number = sequence_number;
+    ev.header.channel_id = 1U;
+    ev.header.payload_size = static_cast<std::uint32_t>(payload.size());
+    ev.payload = payload;
+    return ev;
 }
 
 }  // namespace
@@ -658,6 +702,61 @@ TEST_F(log_channel_handler_test, handle_rdma_data_event_with_blob_entry_writes_b
     oss << ifs.rdbuf();
     EXPECT_EQ(oss.str(), blob_content);
 
+    ::close(ctx.read_fd);
+    ::close(ctx.write_fd);
+}
+
+TEST_F(log_channel_handler_test,
+       handle_rdma_data_event_with_blob_split_by_rdma_socket_io_fails_before_fix) {
+    auto ctx = make_rdma_handler_with_channel(base_location);
+    ASSERT_NE(ctx.handler, nullptr);
+    ASSERT_GE(ctx.read_fd, 0);
+    ASSERT_GE(ctx.write_fd, 0);
+    set_non_blocking(ctx.read_fd);
+
+    constexpr const char* sender_dir = "/tmp/replica_server_test_sender";
+    boost::filesystem::remove_all(sender_dir);
+    boost::filesystem::create_directories(sender_dir);
+    limestone::api::configuration sender_conf{};
+    sender_conf.set_data_location(sender_dir);
+    auto sender_ds = std::make_unique<limestone::api::datastore_test>(sender_conf);
+
+    blob_id_type blob_id = 56U;
+    std::string const blob_content = "rdma_socket_io_split_blob_payload";
+    auto blob_path = sender_ds->get_blob_file(blob_id).path();
+    boost::filesystem::create_directories(blob_path.parent_path());
+    {
+        std::ofstream ofs(blob_path.string(), std::ios::binary);
+        ofs << blob_content;
+    }
+
+    capturing_rdma_send_stream stream{};
+    rdma_socket_io sender_io(stream, *sender_ds);
+    message_log_entries entries(epoch_id_type{6});
+    entries.set_session_begin_flag(true);
+    entries.add_normal_with_blob(1U, "bk", "bv",
+        write_version_type{epoch_id_type{6}, 0U}, {blob_id});
+
+    replication_message::send(sender_io, entries);
+    auto remaining = sender_io.get_out_string();
+    if (! remaining.empty()) {
+        std::vector<std::uint8_t> remaining_bytes(
+            remaining.begin(), remaining.end());
+        auto result = stream.send_all_bytes(
+            remaining_bytes, 0, remaining_bytes.size());
+        ASSERT_TRUE(result.success);
+    }
+
+    ASSERT_GE(stream.calls_.size(), 2U)
+        << "rdma_socket_io should split a BLOB message into multiple RDMA sends";
+
+    auto first = make_rdma_event_from_payload(stream.calls_[0], 0U);
+    EXPECT_THROW(
+        { ctx.handler->handle_rdma_data_event(first); },
+        limestone_io_exception);
+
+    sender_ds.reset();
+    boost::filesystem::remove_all(sender_dir);
     ::close(ctx.read_fd);
     ::close(ctx.write_fd);
 }
