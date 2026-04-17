@@ -19,6 +19,7 @@
 #include <functional>
 #include <memory>
 #include <unordered_map>
+#include <unordered_set>
 #include <mutex>
 #include <vector>
 #include <boost/filesystem.hpp>
@@ -160,6 +161,8 @@ private:
     
     std::vector<std::future<void>> client_futures_;         ///< futures for client handling threads
     std::mutex futures_mutex_;                              ///< mutex for thread-safe access to client_futures_
+    std::unordered_set<int> active_client_fds_;             ///< accepted client sockets currently handled
+    std::mutex active_client_fds_mutex_;                    ///< protects active_client_fds_
 
     // Pending RDMA registrations until rdma_receiver_ is initialized.
     std::mutex pending_rdma_channels_mutex_{};
@@ -175,6 +178,24 @@ private:
     void handle_shutdown_event();
     void accept_new_client();
     void cleanup_completed_futures();
+    void register_active_client(int fd);
+    void unregister_active_client(int fd) noexcept;
+
+    class active_client_guard {
+    public:
+        active_client_guard(replica_server& server, int fd) noexcept;
+
+        active_client_guard(active_client_guard const&) = delete;
+        active_client_guard& operator=(active_client_guard const&) = delete;
+        active_client_guard(active_client_guard&&) = delete;
+        active_client_guard& operator=(active_client_guard&&) = delete;
+
+        ~active_client_guard();
+
+    private:
+        replica_server* server_;
+        int fd_;
+    };
 
     /**
      * @brief Perform LOG_CHANNEL_CREATE specific setup for the newly created handler.

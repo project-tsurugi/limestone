@@ -165,9 +165,18 @@ void replica_server::accept_new_client() {
         return;
     }
     TRACE << "Accepted new client connection: " << client_fd;
+
+    register_active_client(client_fd);
     
     // Launch async task and store future
-    auto future = std::async(std::launch::async, &replica_server::handle_client, this, client_fd);
+    std::future<void> future{};
+    try {
+        future = std::async(std::launch::async, &replica_server::handle_client, this, client_fd);
+    } catch (...) {
+        unregister_active_client(client_fd);
+        ::close(client_fd);
+        throw;
+    }
     
     {
         std::lock_guard<std::mutex> lock(futures_mutex_);
@@ -186,6 +195,25 @@ void replica_server::cleanup_completed_futures() {
             ++it;
         }
     }
+}
+
+void replica_server::register_active_client(int fd) {
+    std::lock_guard<std::mutex> lock(active_client_fds_mutex_);
+    active_client_fds_.insert(fd);
+}
+
+void replica_server::unregister_active_client(int fd) noexcept {
+    std::lock_guard<std::mutex> lock(active_client_fds_mutex_);
+    active_client_fds_.erase(fd);
+}
+
+replica_server::active_client_guard::active_client_guard(replica_server& server, int fd) noexcept
+    : server_(&server)
+    , fd_(fd)
+{}
+
+replica_server::active_client_guard::~active_client_guard() {
+    server_->unregister_active_client(fd_);
 }
 
 void replica_server::accept_loop() {
@@ -237,6 +265,8 @@ void replica_server::clear_handlers() noexcept {
 
 void replica_server::handle_client(int client_fd) {
     TRACE_START << "client_fd: " << client_fd;
+    active_client_guard guard{*this, client_fd};
+
     int opt = 1;
     if (setsockopt(client_fd, SOL_SOCKET, SO_KEEPALIVE, &opt, sizeof(opt)) < 0) {
         LOG_LP(ERROR) << "Warning: failed to set SO_KEEPALIVE: " << strerror(errno);
@@ -327,20 +357,19 @@ void replica_server::setup_log_channel_handler(
 }
 
 void replica_server::shutdown() {
-    // Wait for all client threads to complete
+    int event_fd = -1;
+    int listen_fd = -1;
     {
-        std::lock_guard<std::mutex> lock(futures_mutex_);
-        for (auto& future : client_futures_) {
-            future.wait();
-        }
-        client_futures_.clear();
+        std::lock_guard<std::mutex> lock(state_mutex_);
+        event_fd = event_fd_;
+        listen_fd = sockfd_;
+        sockfd_ = -1;
     }
-    
-    std::lock_guard<std::mutex> lock(state_mutex_);
-    if (event_fd_ >= 0) {
+
+    if (event_fd >= 0) {
         uint64_t v = 1;
         while (true) {
-            ssize_t n = ::write(event_fd_, &v, sizeof(v));
+            ssize_t n = ::write(event_fd, &v, sizeof(v));
             // Although write failure is highly unlikely, error handling is implemented
             if (n == sizeof(v)) {
                 break;  // Write succeeded
@@ -348,14 +377,41 @@ void replica_server::shutdown() {
             if (n < 0 && errno == EINTR) {
                 continue;  // Retry due to interruption
             }
+            if (n < 0 && errno == EBADF) {
+                break;  // accept_loop may have already consumed shutdown and closed event_fd_.
+            }
             LOG_LP(FATAL) << "eventfd write failed in shutdown: " << strerror(errno);
             break;
         }
     }
-    if (sockfd_ >= 0) {
-        ::shutdown(sockfd_, SHUT_RDWR);
-        ::close(sockfd_);
-        sockfd_ = -1;
+
+    if (listen_fd >= 0) {
+        ::shutdown(listen_fd, SHUT_RDWR);
+        ::close(listen_fd);
+    }
+
+    {
+        std::lock_guard<std::mutex> lock(active_client_fds_mutex_);
+        for (int client_fd : active_client_fds_) {
+            ::shutdown(client_fd, SHUT_RDWR);
+        }
+    }
+
+    if (rdma_receiver_) {
+        auto result = rdma_receiver_->shutdown();
+        if (! result.success) {
+            LOG_LP(ERROR) << "rdma_receiver::shutdown() failed: " << result.error_message;
+        }
+    }
+
+    // Wait after waking the accept loop and active client sockets. Client handlers may
+    // otherwise remain blocked in recv() while shutdown() waits for their futures.
+    {
+        std::lock_guard<std::mutex> lock(futures_mutex_);
+        for (auto& future : client_futures_) {
+            future.wait();
+        }
+        client_futures_.clear();
     }
 
     // Release datastore resources (including manifest lock) when running in-process.

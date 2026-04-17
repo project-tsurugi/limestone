@@ -20,6 +20,8 @@
 #include <gtest/gtest.h>
 
 #include <boost/filesystem.hpp>
+#include <chrono>
+#include <future>
 #include <thread>
 
 #include "replication/channel_handler_base.h"
@@ -207,6 +209,42 @@ TEST_F(replica_server_test, registered_handler_is_called) {
     EXPECT_TRUE(invoked.get_future().get());
 
     server.shutdown();
+    server_thread.join();
+}
+
+TEST_F(replica_server_test, shutdown_wakes_client_handler_blocked_in_receive) {
+    replication::replica_server server;
+    server.initialize(location1);
+    server.clear_handlers();
+    uint16_t port = get_free_port();
+    auto addr = make_listen_addr(port);
+    ASSERT_TRUE(server.start_listener(addr));
+
+    std::promise<bool> invoked;
+    server.register_handler(replication::message_type_id::SESSION_BEGIN,
+        [&server, &invoked](socket_io& io) {
+            return std::make_shared<test_session_handler>(server, io, invoked);
+        });
+
+    std::thread server_thread([&server]() { server.accept_loop(); });
+
+    replication::replica_connector client;
+    ASSERT_TRUE(client.connect_to_server("127.0.0.1", port));
+    auto request = message_session_begin::create();
+    static_cast<message_session_begin*>(request.get())->set_param("config", 100);
+    ASSERT_TRUE(client.send_message(*request));
+    ASSERT_TRUE(invoked.get_future().get());
+
+    auto shutdown_future = std::async(std::launch::async, [&server]() {
+        server.shutdown();
+    });
+
+    if (shutdown_future.wait_for(std::chrono::seconds{2}) != std::future_status::ready) {
+        ADD_FAILURE() << "server.shutdown() did not wake a client handler blocked in receive";
+        client.close_session();
+        ASSERT_EQ(shutdown_future.wait_for(std::chrono::seconds{2}), std::future_status::ready);
+    }
+    shutdown_future.get();
     server_thread.join();
 }
 
