@@ -29,6 +29,7 @@
 #include <stdexcept>
 #include <istream>
 #include <streambuf>
+#include <string_view>
 
 #include "socket_streambuf.h"
 #include <limestone/api/blob_id_type.h>
@@ -136,6 +137,16 @@ protected:
     [[nodiscard]] std::istream& get_in_stream();
 private:
     [[nodiscard]] bool wait_for_writable() const;
+
+    /**
+     * @brief Read exactly the requested number of bytes from the input stream.
+     * @param buffer Destination buffer.
+     * @param size Number of bytes to read.
+     * @param description Human-readable value description used in diagnostics.
+     * @throws limestone::api::limestone_io_exception if the stream cannot provide
+     *         exactly @p size bytes.
+     */
+    void read_exact(char* buffer, std::streamsize size, std::string_view description);
 
     bool is_string_mode_;  // true: string mode, false: real socket mode.
     int socket_fd_;        // Valid in real socket mode; -1 in string mode.

@@ -16,6 +16,7 @@
 #include "replication/socket_io.h"
 
 #include <arpa/inet.h>
+#include <cerrno>
 #include <fcntl.h>
 #include <netinet/in.h>
 #include <sys/socket.h>
@@ -32,6 +33,20 @@ namespace limestone::testing {
 
 using namespace limestone::replication;
 using limestone::api::limestone_exception;
+
+namespace {
+
+void expect_contains(std::string const& actual, std::string const& expected) {
+    EXPECT_NE(actual.find(expected), std::string::npos)
+            << "Expected substring: " << expected << "\nActual message: " << actual;
+}
+
+void expect_not_contains(std::string const& actual, std::string const& unexpected) {
+    EXPECT_EQ(actual.find(unexpected), std::string::npos)
+            << "Unexpected substring: " << unexpected << "\nActual message: " << actual;
+}
+
+} // namespace
 
 // Test subclass for socket_io to allow access to protected methods
 class testable_socket_io : public limestone::replication::socket_io {
@@ -222,9 +237,44 @@ TEST(socket_io_test, receive_uint8_empty_stream) {
         [[maybe_unused]] uint8_t value = io.receive_uint8();
         FAIL() << "Expected limestone_exception, but none was thrown.";
     } catch (const limestone_exception &ex) {
-        std::string expected = "Failed to read uint8_t from input stream";
-        EXPECT_NE(std::string(ex.what()).find(expected), std::string::npos)
-            << "Error message was: " << ex.what();
+        std::string message = ex.what();
+        expect_contains(message, "Failed to read uint8_t from input stream");
+        expect_contains(message, "requested=1");
+        expect_contains(message, "got=0");
+        expect_contains(message, "eof=1");
+        expect_contains(message, "fail=1");
+    }
+}
+
+TEST(socket_io_test, receive_uint8_empty_stream_ignores_stale_errno) {
+    errno = ENOENT;
+    socket_io io("");
+    try {
+        [[maybe_unused]] uint8_t value = io.receive_uint8();
+        FAIL() << "Expected limestone_exception, but none was thrown.";
+    } catch (const limestone_exception &ex) {
+        std::string message = ex.what();
+        expect_contains(message, "Failed to read uint8_t from input stream");
+        expect_contains(message, "Input/output error");
+        expect_contains(message, "errno = 5");
+        expect_not_contains(message, "No such file or directory");
+        EXPECT_EQ(ex.error_code(), EIO);
+    }
+}
+
+TEST(socket_io_test, receive_uint32_short_stream_reports_bytes_read) {
+    socket_io io("A");
+    try {
+        [[maybe_unused]] uint32_t value = io.receive_uint32();
+        FAIL() << "Expected limestone_exception, but none was thrown.";
+    } catch (const limestone_exception &ex) {
+        std::string message = ex.what();
+        expect_contains(message, "Failed to read uint32_t from input stream");
+        expect_contains(message, "requested=4");
+        expect_contains(message, "got=1");
+        expect_contains(message, "eof=1");
+        expect_contains(message, "fail=1");
+        EXPECT_EQ(ex.error_code(), EIO);
     }
 }
 

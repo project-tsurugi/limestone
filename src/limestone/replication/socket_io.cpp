@@ -20,8 +20,10 @@
 #include <poll.h>
 
 #include <array>
+#include <cerrno>
 #include <cstring>
 #include <memory>
+#include <sstream>
 
 #include "limestone_exception_helper.h"
 namespace limestone::replication {
@@ -135,12 +137,27 @@ void socket_io::send_string(const std::string &value) {
     out_stream_->write(value.data(), static_cast<std::streamsize>(value.size()));
 }
 
+void socket_io::read_exact(char* buffer, std::streamsize size, std::string_view description) {
+    in_stream_->read(buffer, size);
+    if (*in_stream_) {
+        return;
+    }
+
+    auto const bytes_read = in_stream_->gcount();
+    std::ostringstream message;
+    message << "Failed to read " << description << " from input stream"
+            << " (requested=" << size
+            << ", got=" << bytes_read
+            << ", eof=" << in_stream_->eof()
+            << ", fail=" << in_stream_->fail()
+            << ", bad=" << in_stream_->bad() << ")";
+
+    LOG_AND_THROW_IO_EXCEPTION(message.str(), EIO);
+}
+
 uint16_t socket_io::receive_uint16() {
     std::array<char, sizeof(uint16_t)> buffer{};
-    in_stream_->read(buffer.data(), buffer.size());
-    if (!(*in_stream_)) {
-        LOG_AND_THROW_IO_EXCEPTION("Failed to read uint16_t from input stream", errno);
-    }
+    read_exact(buffer.data(), static_cast<std::streamsize>(buffer.size()), "uint16_t");
     uint16_t net_value = 0;
     std::memcpy(&net_value, buffer.data(), sizeof(net_value));
     return ntohs(net_value);
@@ -148,10 +165,7 @@ uint16_t socket_io::receive_uint16() {
 
 uint32_t socket_io::receive_uint32() {
     std::array<char, sizeof(uint32_t)> buffer{};
-    in_stream_->read(buffer.data(), buffer.size());
-    if (!(*in_stream_)) {
-        LOG_AND_THROW_IO_EXCEPTION("Failed to read uint32_t from input stream", errno);
-    }
+    read_exact(buffer.data(), static_cast<std::streamsize>(buffer.size()), "uint32_t");
     uint32_t net_value = 0;
     std::memcpy(&net_value, buffer.data(), sizeof(net_value));
     return ntohl(net_value);
@@ -162,18 +176,12 @@ uint64_t socket_io::receive_uint64() {
     uint32_t low = 0;
     {
         std::array<char, sizeof(uint32_t)> buffer{};
-        in_stream_->read(buffer.data(), buffer.size());
-        if (!(*in_stream_)) {
-            LOG_AND_THROW_IO_EXCEPTION("Failed to read high 32 bits of uint64_t from input stream", errno);
-        }
+        read_exact(buffer.data(), static_cast<std::streamsize>(buffer.size()), "high 32 bits of uint64_t");
         std::memcpy(&high, buffer.data(), sizeof(uint32_t));
     }
     {
         std::array<char, sizeof(uint32_t)> buffer{};
-        in_stream_->read(buffer.data(), buffer.size());
-        if (!(*in_stream_)) {
-            LOG_AND_THROW_IO_EXCEPTION("Failed to read low 32 bits of uint64_t from input stream", errno);
-        }
+        read_exact(buffer.data(), static_cast<std::streamsize>(buffer.size()), "low 32 bits of uint64_t");
         std::memcpy(&low, buffer.data(), sizeof(uint32_t));
     }
     uint64_t value = (static_cast<uint64_t>(ntohl(high)) << 32U)
@@ -183,10 +191,7 @@ uint64_t socket_io::receive_uint64() {
 
 uint8_t socket_io::receive_uint8() {
     std::array<char, sizeof(uint8_t)> buffer{};
-    in_stream_->read(buffer.data(), buffer.size());
-    if (!(*in_stream_)) {
-        LOG_AND_THROW_IO_EXCEPTION("Failed to read uint8_t from input stream", errno);
-    }
+    read_exact(buffer.data(), static_cast<std::streamsize>(buffer.size()), "uint8_t");
     uint8_t value = 0;
     std::memcpy(&value, buffer.data(), sizeof(value));
     return value;
@@ -196,10 +201,7 @@ std::string socket_io::receive_string() {
     uint32_t len = receive_uint32();
     std::string result;
     result.resize(len);
-    in_stream_->read(result.data(), static_cast<std::streamsize>(result.size()));
-    if (!(*in_stream_)) {
-        LOG_AND_THROW_IO_EXCEPTION("Failed to read string body from input stream", errno);
-    }
+    read_exact(result.data(), static_cast<std::streamsize>(result.size()), "string body");
     return result;
 }
 
