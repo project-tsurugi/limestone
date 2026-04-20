@@ -8,6 +8,7 @@
 #include <stdexcept>
 #include <vector>
 #include <cstdio>
+#include "blob_send_utils.h"
 #include "limestone_exception_helper.h"
 
 namespace limestone::replication {
@@ -18,46 +19,9 @@ blob_socket_io::blob_socket_io(int fd, datastore &ds)
 blob_socket_io::blob_socket_io(const std::string &initial, datastore &ds)
     : socket_io(initial), datastore_(ds) {}
 
-// TODO: The blob file open/size-check/chunk-read logic below is duplicated in
-//       rdma_socket_io::send_blob. Consider extracting a shared helper.
 void blob_socket_io::send_blob(const blob_id_type blob_id) {
-    auto blob_file = datastore_.get_blob_file(blob_id);
-    auto path = blob_file.path();
-    auto status = boost::filesystem::symlink_status(path);
-    if (boost::filesystem::is_symlink(status)) {
-        path = boost::filesystem::canonical(path);
-        status = boost::filesystem::status(path);
-    }
-    if (!boost::filesystem::is_regular_file(status)) {
-        LOG_AND_THROW_IO_EXCEPTION("Unsupported blob path type: " + path.string(), errno);
-    }
-
-    FILE* fp = std::fopen(path.string().c_str(), "rb");  // NOLINT(cppcoreguidelines-owning-memory)
-    if (!fp) {
-        LOG_AND_THROW_IO_EXCEPTION("Failed to open blob for reading: " + path.string(), errno);
-    }
-
-    if (std::fseek(fp, 0, SEEK_END) != 0) {
-        int ec = errno;
-        safe_close(fp);
-        LOG_AND_THROW_IO_EXCEPTION("Failed to seek blob file: " + path.string(), ec);
-    }
-    int64_t pos = std::ftell(fp);
-    if (pos == -1) {
-        int ec = errno;
-        safe_close(fp);
-        LOG_AND_THROW_IO_EXCEPTION("Failed to tell blob file: " + path.string(), ec);
-    }
-    if (static_cast<uint64_t>(pos) > std::numeric_limits<uint32_t>::max()) {
-        safe_close(fp);
-        LOG_AND_THROW_IO_EXCEPTION("Blob file too large: " + path.string(), EIO);
-    }
-    auto remaining = static_cast<uint32_t>(pos);
-    if (std::fseek(fp, 0, SEEK_SET) != 0) {
-        int ec = errno;
-        safe_close(fp);
-        LOG_AND_THROW_IO_EXCEPTION("Failed to rewind blob file: " + path.string(), ec);
-    }
+    auto opened = open_blob_file_for_send(datastore_, blob_id);
+    auto remaining = opened.size;
 
     send_uint64(blob_id);
     send_uint32(remaining);
@@ -65,30 +29,12 @@ void blob_socket_io::send_blob(const blob_id_type blob_id) {
     std::vector<char> buffer(blob_buffer_size);
     while (remaining > 0) {
         std::size_t chunk = std::min(blob_buffer_size, static_cast<std::size_t>(remaining));
-        std::size_t total_read = 0;
-        while (total_read < chunk) {
-            std::size_t r = std::fread(&*std::next(buffer.begin(), static_cast<std::vector<char>::difference_type>(total_read)), 1, chunk - total_read, fp);
-            if (r == 0) {
-                // Capture errno immediately after fread before any other call may clobber it.
-                int ec = errno;
-                if (ec == EINTR) {
-                    std::clearerr(fp);
-                    continue;
-                }
-                if (std::feof(fp) != 0) {
-                    safe_close(fp);
-                    LOG_AND_THROW_IO_EXCEPTION("Unexpected EOF reading blob: " + path.string(), ec);
-                }
-                safe_close(fp);
-                LOG_AND_THROW_IO_EXCEPTION("Failed to read blob chunk: " + path.string(), ec);
-            }
-            total_read += r;
-        }
+        std::size_t total_read = read_blob_chunk(opened.fp, opened.path, buffer.data(), chunk);
         get_out_stream().write(buffer.data(), static_cast<std::streamsize>(total_read));
         remaining -= static_cast<uint32_t>(total_read);
     }
 
-    safe_close(fp);
+    safe_close(opened.fp);
     flush();
 }
 

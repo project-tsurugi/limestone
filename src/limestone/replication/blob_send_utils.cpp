@@ -1,0 +1,93 @@
+#include "blob_send_utils.h"
+
+#include <cerrno>
+#include <cstdio>
+#include <cstring>
+#include <limits>
+
+#include <boost/filesystem.hpp>
+
+#include "limestone_exception_helper.h"
+#include <limestone/api/blob_file.h>
+#include <limestone/api/datastore.h>
+
+namespace limestone::replication {
+
+opened_blob_file open_blob_file_for_send(
+        api::datastore& datastore,
+        api::blob_id_type blob_id) {
+    api::blob_file blob_file = datastore.get_blob_file(blob_id);
+    boost::filesystem::path path = blob_file.path();
+    // Resolve a symlink target and require the final path to be a regular file.
+    auto status = boost::filesystem::symlink_status(path);
+    if (boost::filesystem::is_symlink(status)) {
+        path = boost::filesystem::canonical(path);
+        status = boost::filesystem::status(path);
+    }
+    if (! boost::filesystem::is_regular_file(status)) {
+        LOG_AND_THROW_IO_EXCEPTION("Unsupported blob path type: " + path.string(), errno);
+    }
+
+    FILE* fp = std::fopen(path.string().c_str(), "rb");  // NOLINT(cppcoreguidelines-owning-memory)
+    if (! fp) {
+        LOG_AND_THROW_IO_EXCEPTION("Failed to open blob for reading: " + path.string(), errno);
+    }
+    if (std::fseek(fp, 0, SEEK_END) != 0) {
+        int ec = errno;
+        safe_close_blob_file(fp, "fclose failed for blob file after seek error");
+        LOG_AND_THROW_IO_EXCEPTION("Failed to seek blob file: " + path.string(), ec);
+    }
+    auto pos = std::ftell(fp);
+    if (pos == -1) {
+        int ec = errno;
+        safe_close_blob_file(fp, "fclose failed for blob file after tell error");
+        LOG_AND_THROW_IO_EXCEPTION("Failed to tell blob file: " + path.string(), ec);
+    }
+    if (static_cast<std::uint64_t>(pos) > std::numeric_limits<std::uint32_t>::max()) {
+        safe_close_blob_file(fp, "fclose failed for oversized blob file");
+        LOG_AND_THROW_IO_EXCEPTION("Blob file too large: " + path.string(), EIO);
+    }
+    if (std::fseek(fp, 0, SEEK_SET) != 0) {
+        int ec = errno;
+        safe_close_blob_file(fp, "fclose failed for blob file after rewind error");
+        LOG_AND_THROW_IO_EXCEPTION("Failed to rewind blob file: " + path.string(), ec);
+    }
+
+    return {std::move(path), fp, static_cast<std::uint32_t>(pos)};
+}
+
+void safe_close_blob_file(FILE* fp, char const* failure_message_prefix) {
+    if (! fp) {
+        return;
+    }
+    int ret = std::fclose(fp);  // NOLINT(cppcoreguidelines-owning-memory)
+    if (ret != 0) {
+        LOG_LP(WARNING) << failure_message_prefix << ": " << std::strerror(errno);
+    }
+}
+
+std::size_t read_blob_chunk(
+        FILE* fp,
+        boost::filesystem::path const& path,
+        char* buffer,
+        std::size_t length) {
+    std::size_t total_read = 0;
+    while (total_read < length) {
+        std::size_t r = std::fread(buffer + total_read, 1, length - total_read, fp);
+        if (r == 0) {
+            int ec = errno;
+            if (ec == EINTR) {
+                std::clearerr(fp);
+                continue;
+            }
+            if (std::feof(fp) != 0) {
+                LOG_AND_THROW_IO_EXCEPTION("Unexpected EOF reading blob: " + path.string(), ec);
+            }
+            LOG_AND_THROW_IO_EXCEPTION("Failed to read blob chunk: " + path.string(), ec);
+        }
+        total_read += r;
+    }
+    return total_read;
+}
+
+} // namespace limestone::replication

@@ -36,7 +36,7 @@ using limestone::api::blob_id_type;
  *
  * Inherits all serialization methods from socket_io (used for non-blob data).
  * Overrides send_blob() to read the blob file in chunks and transmit each chunk
- * directly via rdma_send_stream_base::send_all_bytes(), avoiding full in-memory buffering.
+ * directly via rdma_send_stream_base::send_with_writer(), avoiding full in-memory buffering.
  *
  * receive_blob() is not supported on this class (FATAL if called); RDMA receive
  * uses blob_socket_io in string mode instead.
@@ -68,8 +68,8 @@ public:
      * @brief Send a blob file via RDMA.
      *
      * First flushes any accumulated non-blob data from the inherited output buffer,
-     * then reads the blob file in blob_buffer_size chunks and sends each chunk via
-     * rdma_send_stream_base::send_all_bytes().  The wire format is identical to
+     * then fills RDMA send buffers directly from the blob file via
+     * rdma_send_stream_base::send_with_writer(). The wire format is identical to
      * blob_socket_io::send_blob(): [blob_id: 8B][size: 4B][data: size bytes].
      *
      * @param blob_id ID of the blob to send.
@@ -77,24 +77,31 @@ public:
     void send_blob(blob_id_type blob_id) override;
 
 private:
-    void safe_close(FILE* fp);
-
     /**
-     * @brief Open a blob file and return its size as uint32_t.
-     *        Throws on any I/O error or if the file is too large (> uint32_t max).
-     * @param path Resolved filesystem path to the blob file.
-     * @param[out] out_size File size in bytes.
-     * @return Open FILE pointer; caller must call safe_close() when done.
+     * @brief Flush any accumulated non-BLOB bytes buffered in the inherited output stream.
      */
-    FILE* open_blob_file(boost::filesystem::path const& path, uint32_t& out_size);
+    void flush_buffered_bytes();
 
     /**
-     * @brief Read the blob file and send its content in chunks via RDMA.
+     * @brief Send the BLOB header together with the first BLOB data chunk via RDMA.
+     * @param blob_id ID of the blob being transmitted.
      * @param fp Open FILE pointer positioned at the beginning of the blob data.
      * @param path Path used only for error messages.
-     * @param remaining Total bytes to send.
+     * @param[in,out] remaining Total bytes left to send; decremented by the first chunk size.
      */
-    void send_blob_data(FILE* fp, boost::filesystem::path const& path, uint32_t remaining);
+    void send_blob_header_and_first_chunk(
+        blob_id_type blob_id,
+        FILE* fp,
+        boost::filesystem::path const& path,
+        std::uint32_t& remaining);
+
+    /**
+     * @brief Read the blob file and send its remaining content in chunks via RDMA.
+     * @param fp Open FILE pointer positioned after the first chunk of blob data.
+     * @param path Path used only for error messages.
+     * @param remaining Total bytes still to send.
+     */
+    void send_blob_data(FILE* fp, boost::filesystem::path const& path, std::uint32_t remaining);
 
     rdma_send_stream_base& rdma_stream_;
     datastore& datastore_;
