@@ -96,19 +96,18 @@ RDMA frame callback
 
 ### 1. rdma-comm-lib で ACK / flush の責務を整理する
 
-- 現行の `flush()` / ACK 仕様を維持するか、変更するかを決める。
-- ACK を「受信側ユーザハンドラの処理完了通知」として維持するのか、
-  buffer 解放用 ACK と application completion を分離するのかを決める。
-- BLOB_DATA frame ごとに ACK を返すのか、BLOB 全体または transaction 単位で ACK を返すのかを決める。
-- 仕様変更する場合、`flush()` が待つ対象を transport ACK のままにするのか、
-  application completion を待つ API に変えるのかを決める。
-- `ack_body` を application result / error 通知に使う場合の保持方式を決める。
-  - 現状は stream あたり 1 件だけ保持し、未取得の body があると後続 body が drop される。
-  - logical ACK に使うなら queue 化や sequence number との対応付けが必要か検討する。
-- limestone 側の RDMA wrapper に必要な API を expose する。
-  - receiver 側: `receive_handler_with_ack` 相当。
-  - sender 側: `take_ack_body()` または logical ACK 取得 API。
-- この整理が終わるまで、limestone 側で ACK の意味を独自に増やさない。
+- 現行の `flush()` / ACK 仕様は維持する。
+- `flush()` は、受信側ユーザハンドラが各 RDMA frame の処理を終えて return し、
+  transport ACK が pending 0 になるまで待つ。
+- BLOB_DATA は frame ごとに処理する。
+- 受信側 callback は、受信した chunk を file に書き込んだら return する。
+- callback の return 後に rdma-comm-lib が transport ACK を返す。
+- sender 側は、必要な frame をすべて送信し終えてから `flush()` を呼ぶ。
+- `flush()` が返った時点で、その logical unit に属する全 frame について、
+  受信側 handler の処理完了まで到達したとみなす。
+- BLOB 全体完了や WAL entry 処理完了を `ack_body` で通知する設計は採用しない。
+- `take_ack_body()` は今回の主経路には使わない。
+- limestone 側設計は、この前提の上で RDMA BLOB sub-protocol をどう切るかに集中する。
 
 ### 2. RDMA BLOB sub-protocol を設計する
 
@@ -120,55 +119,106 @@ RDMA frame callback
 - receiver がどの時点で WAL entry を apply するか決める。
 - BLOB 転送が中断または失敗したときに、partial file をどう cleanup するか決める。
 
-初期案:
+暫定設計:
 
 ```text
-RDMA_STREAM_BEGIN
-RDMA_STREAM_BYTES
-RDMA_BLOB_BEGIN
-RDMA_BLOB_DATA
-RDMA_BLOB_END
-RDMA_STREAM_END
+既存の LOG_ENTRY wire format は基本的に維持する。
+
+message_type_id                 : uint8
+epoch_id                        : uint64
+entry_count                     : uint32
+
+repeat entry_count times:
+  entry_type                    : uint8
+  storage_id                    : uint64
+  key_length                    : uint32
+  key_bytes                     : key_length bytes
+  value_length                  : uint32
+  value_bytes                   : value_length bytes
+  write_version.major           : uint64
+  write_version.minor           : uint64
+  blob_count                    : uint32
+
+その後、各 BLOB について既存どおり
+
+  blob_id                       : uint64
+  blob_size                     : uint32
+  blob_bytes                    : blob_size bytes
+
+をこの順で送る。
 ```
 
-receiver は `RDMA_BLOB_DATA` を replica 側の BLOB file に直接書き込む。
-BLOB 全体を `std::vector` や `std::string` に集約してはいけない。
+ただし RDMA 版では、`blob_bytes` を byte stream として一括で受けるのではなく、
+rdma-comm-lib が 1 回の送信用に確保できたバッファサイズに応じて分割して送る。
+1 回の RDMA write では、その時点で確保できた送信バッファに収まる分だけを送る。
+したがって protocol 上は既存どおり `blob_id + blob_size + blob_bytes` だが、
+実装上は `blob_bytes` が複数回の RDMA write に分かれることを前提にする。
 
-### 3. Protocol 型とテストを追加する
+分割戦略は次のとおりとする。
 
-- frame / message type 定義を追加する。
-- encode / decode helper を追加する。
-- 各 frame 種別に対する focused unit test を追加する。
-- 不正な frame type と不正な payload の test を追加する。
+- BLOB の先頭 write では、可能なら `blob_id + blob_size + blob_bytes` の先頭部分を
+  同じ送信バッファに載せる。
+- 先頭 write に載せきれない残りの `blob_bytes` は、以後の RDMA write に分割して送る。
+- 途中 write では `blob_bytes` の未送信部分のみを送る。
+- sender は BLOB 全量を 1 個の送信バッファに載せない。
 
-### 4. Sender 側を実装する
+receiver 側では、従来の `message_log_entries::receive_body()` をそのまま使わず、
+少なくとも次の 2 段階に処理を分離する。
 
-- `rdma_socket_io::send_blob()` の暗黙的な byte-stream 分割をやめる。
-- BLOB metadata と BLOB chunk を、明示的な RDMA BLOB protocol frame として送る。
+- entry 固定部
+  - `message_type_id` から各 entry の `blob_count` までを読む。
+- blob 部
+  - `blob_id`、`blob_size`、`blob_bytes` を読み、replica 側 BLOB file を生成する。
+
+receiver は BLOB 全体を `std::vector` や `std::string` に集約せず、
+受信した `blob_bytes` をそのまま replica 側の file に追記する。
+
+また、BLOB 付き LOG_ENTRY の場合は、entry 固定部を送った時点で一度 RDMA write を実行する。
+blob 部はその後に続けて送る。
+一方、BLOB を含まない WAL entry は、従来どおり一定サイズ以上になるまで
+送信を遅延させる方針を維持する。
+
+### 3. Sender 側を実装する
+
+- `blob_socket_io::send_blob()` と `rdma_socket_io::send_blob()` に重複している
+  BLOB file の open / size check / chunk read 処理を共通化する。
+- TCP 用と RDMA 用で、BLOB の wire format の意味
+  (`blob_id + blob_size + blob_bytes`) は維持する。
+- RDMA 用では、BLOB 付き LOG_ENTRY の送信を
+  - entry 固定部の送信
+  - blob 部の送信
+  の 2 段階に分ける。
 - BLOB を含まない RDMA replication path は変えない。
-- sender 側で frame の順序と chunk 境界を確認する test を追加する。
+- sender 側で、BLOB 付き LOG_ENTRY が
+  - entry 固定部
+  - 各 BLOB の `blob_id + blob_size + blob_bytes`
+  の順で送られることを確認する test を追加する。
 - 100 MB から 1 GB 超の BLOB でも streaming で動作することを前提にする。
 
-### 5. Receiver 側を実装する
+### 4. Receiver 側を実装する
 
-- `log_channel_handler` が RDMA BLOB sub-protocol を処理できるようにする。
+- RDMA 用の `message_log_entries` 受信処理を、
+  - entry 固定部
+  - blob 部
+  に分離する。
 - BLOB chunk を replica datastore の BLOB file に直接書き込む。
 - 必要な BLOB がすべて揃うまで `message_log_entries` を apply しない。
 - BLOB 全体を `std::vector` や `std::string` に集約しない。
 - sequence number、payload size、channel validation の既存チェックを維持する。
 
-### 6. End-to-end regression test を通す
+### 5. End-to-end regression test を通す
 
-- 必要なら、新 protocol に合わせて failing regression test を調整する。
+- 必要なら、BLOB 付き LOG_ENTRY の送信順序変更に合わせて
+  failing regression test を調整する。
 - 分割された RDMA BLOB payload が正常に処理されることを確認する。
 - replica 側の BLOB file が作成され、内容が sender 側と一致することを確認する。
 - BLOB 転送完了前に WAL entry が書かれないことを確認する。
 
-### 7. 異常系 test を追加する
+### 6. 異常系 test を追加する
 
 - BLOB chunk 欠落。
 - BLOB size 不一致。
-- 予期しない `RDMA_BLOB_END`。
+- 期待する blob byte 数を満たす前の切断または abort。
 - duplicate frame または out-of-order frame。
 - BLOB 受信中の transfer abort または connection close。
 - partial BLOB file の cleanup。
