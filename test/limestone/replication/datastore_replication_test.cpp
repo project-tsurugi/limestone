@@ -55,6 +55,12 @@ public:
     [[nodiscard]] flush_result flush(std::chrono::milliseconds) noexcept override {
         return { true, "" };
     }
+
+    [[nodiscard]] send_result send_with_writer(
+            std::size_t remaining_size,
+            buffer_writer /*writer*/) noexcept override {
+        return { true, "", remaining_size };
+    }
 };
 
 }  // namespace

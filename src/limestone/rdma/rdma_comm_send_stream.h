@@ -56,6 +56,10 @@ public:
 
     [[nodiscard]] flush_result flush(std::chrono::milliseconds timeout) noexcept override;
 
+    [[nodiscard]] send_result send_with_writer(
+        std::size_t   remaining_size,
+        buffer_writer writer) noexcept override;
+
 private:
     std::unique_ptr<rdma::communication::rdma_send_stream> stream_;
 };

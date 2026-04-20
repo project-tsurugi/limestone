@@ -36,4 +36,10 @@ rdma_send_stream_base::flush_result null_rdma_send_stream::flush(
     return {true, ""};
 }
 
+rdma_send_stream_base::send_result null_rdma_send_stream::send_with_writer(
+        std::size_t   remaining_size,
+        buffer_writer /*writer*/) noexcept {
+    return {true, "", remaining_size};
+}
+
 } // namespace limestone::replication

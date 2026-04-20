@@ -163,6 +163,12 @@ public:
         return {true, ""};
     }
 
+    [[nodiscard]] send_result send_with_writer(
+            std::size_t remaining_size,
+            buffer_writer /*writer*/) noexcept override {
+        return {true, "", remaining_size};
+    }
+
     std::vector<std::vector<std::uint8_t>> calls_{};
 };
 

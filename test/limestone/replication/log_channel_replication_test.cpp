@@ -209,6 +209,14 @@ public:
         return { true, "" };
     }
 
+    [[nodiscard]] send_result send_with_writer(
+            std::size_t remaining_size,
+            buffer_writer /*writer*/) noexcept override {
+        send_count_++;
+        last_payload_size_ = remaining_size;
+        return { true, "", remaining_size };
+    }
+
     std::size_t send_count_{};
     std::size_t flush_count_{};
     std::size_t last_payload_size_{};
@@ -247,6 +255,12 @@ public:
 
     [[nodiscard]] flush_result flush(std::chrono::milliseconds) noexcept override {
         return {true, ""};
+    }
+
+    [[nodiscard]] send_result send_with_writer(
+            std::size_t remaining_size,
+            buffer_writer /*writer*/) noexcept override {
+        return {true, "", remaining_size};
     }
 
     std::vector<call_record> calls_;
