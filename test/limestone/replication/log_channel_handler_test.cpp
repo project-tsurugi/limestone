@@ -707,7 +707,7 @@ TEST_F(log_channel_handler_test, handle_rdma_data_event_with_blob_entry_writes_b
 }
 
 TEST_F(log_channel_handler_test,
-       handle_rdma_data_event_with_blob_split_by_rdma_socket_io_fails_before_fix) {
+       handle_rdma_data_event_accepts_blob_split_by_rdma_socket_io) {
     auto ctx = make_rdma_handler_with_channel(base_location);
     ASSERT_NE(ctx.handler, nullptr);
     ASSERT_GE(ctx.read_fd, 0);
@@ -750,10 +750,20 @@ TEST_F(log_channel_handler_test,
     ASSERT_GE(stream.calls_.size(), 2U)
         << "rdma_socket_io should split a BLOB message into multiple RDMA sends";
 
-    auto first = make_rdma_event_from_payload(stream.calls_[0], 0U);
-    EXPECT_THROW(
-        { ctx.handler->handle_rdma_data_event(first); },
-        limestone_io_exception);
+    for (std::size_t i = 0; i < stream.calls_.size(); ++i) {
+        auto event = make_rdma_event_from_payload(
+            stream.calls_[i], static_cast<std::uint16_t>(i));
+        EXPECT_NO_THROW({ ctx.handler->handle_rdma_data_event(event); });
+    }
+
+    auto& server_ds = ctx.server->get_datastore();
+    auto received_path = server_ds.get_blob_file(blob_id).path();
+    ASSERT_TRUE(boost::filesystem::exists(received_path))
+        << "Blob file not created at: " << received_path;
+    std::ifstream ifs(received_path.string(), std::ios::binary);
+    std::ostringstream oss;
+    oss << ifs.rdbuf();
+    EXPECT_EQ(oss.str(), blob_content);
 
     sender_ds.reset();
     boost::filesystem::remove_all(sender_dir);
