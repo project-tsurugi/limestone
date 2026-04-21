@@ -225,29 +225,6 @@ blob 部はその後に続けて送る。
 - 1 つの log entry に複数 BLOB が含まれるケース。
 - 1 session に複数の BLOB log entry が含まれるケース。
 
-## 現在の状況
-
-- `rdma-comm-lib` 側に `send_with_writer()` を追加し、
-  `limestone` 側の `rdma_send_stream_base` にも同等 I/F を追加した。
-- sender 側では、`rdma_socket_io::send_blob()` / `send_blob_data()` を
-  `send_with_writer()` ベースに切り替えた。
-  - BLOB の送信バッファを rdma-comm-lib 側で確保し、
-    その buffer に file から直接 read して送る構造に変更した。
-- `blob_send_utils` を追加し、BLOB file の open / size check / chunk read の共通化を進めた。
-- `blob_send_utils_test.*` は通過した。
-- `log_channel_replication_test` は sender 側 test double を
-  `send_with_writer()` 対応に更新した。
-  ただし RDMA BLOB まわりの test は、追加 I/F と新しい送信形に合わせた
-  調整がまだ残っている可能性がある。
-- sender 側の残件として、次を行う必要がある。
-  - 実装差分を確認し、変更が最小限に収まっているか見直す。
-  - sender 側 test が十分か確認し、必要に応じて追加する。
-  - 特に `blob_socket_io` に関する test が不足しているため、必要な test 追加を検討する。
-  - `send_with_writer()` が `remaining_size` より小さい capacity を返すケースを
-    sender 側 test double で再現し、複数回送信時の `remaining` 更新と分割送信を確認する。
-- receiver 側 (`message_log_entries` の entry 固定部 / blob 部の分離) には未着手。
-- 次回は、まず sender 側の差分確認と test 追加要否の整理を行い、
-  その後 receiver 側実装に進む。
 
 ## 積み残し事項
 
@@ -262,6 +239,18 @@ blob 部はその後に続けて送る。
 - ただしこれは今回の RDMA BLOB 修正とは独立したリファクタリングであり、
   不具合修正と混ぜずに別タスクとして扱う。
 
+### primitive wire codec の切り出し
+
+- `socket_io` の `send_uint32()` / `send_uint64()` などは、
+  I/O と wire format encoding の責務を同時に持っている。
+- `rdma_socket_io` でも BLOB header を byte 列へ変換する必要があり、
+  現状は一時的な `socket_io` を作って既存 encoding を再利用している。
+- あるべき形としては、整数型や文字列型を replication wire format の
+  byte 列へ変換する helper / codec を切り出し、
+  `socket_io` と RDMA 側で共有する。
+- ただし今回の修正では性能影響が小さく、変更範囲も広がるため、
+  別タスクとして扱う。
+
 ### blob_send_utils のエラー処理整理
 
 - `read_blob_chunk()` のエラー処理について、
@@ -271,3 +260,15 @@ blob 部はその後に続けて送る。
   `feof()` / `ferror()` の見方が妥当か確認する。
 - helper 内で例外化する方針を維持するか、
   error を返す helper に寄せるかも含めて整理する。
+
+### blob_send_utils の API / クラス設計見直し
+
+- `read_blob_chunk()` の `path` 引数は実際には診断用途だけで使われており、
+  シグネチャから責務が直感しづらい。
+- `open_blob_file_for_send()` / `read_blob_chunk()` / `safe_close_blob_file()` が
+  `FILE*` と `path` の寿命管理を呼び出し側へ漏らしているため、
+  小さい所有クラスに閉じ込めたほうが見通しが良い可能性がある。
+- `opened_blob_file` を move-only な RAII クラスに置き換え、
+  open / read / close をクラスメソッドへ寄せる案を別タスクで検討する。
+- この見直しは進行中の他修正とは分けて扱い、
+  動作変更を伴わないリファクタリングとして切り出す。

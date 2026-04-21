@@ -67,20 +67,23 @@ public:
     /**
      * @brief Send a blob file via RDMA.
      *
-     * First flushes any accumulated non-blob data from the inherited output buffer,
+     * First sends any accumulated non-blob data from the inherited output buffer,
      * then fills RDMA send buffers directly from the blob file via
      * rdma_send_stream_base::send_with_writer(). The wire format is identical to
      * blob_socket_io::send_blob(): [blob_id: 8B][size: 4B][data: size bytes].
      *
      * @param blob_id ID of the blob to send.
+     * @throws limestone::api::limestone_io_exception if the BLOB file cannot be opened,
+     *         read, or sent via the RDMA stream.
      */
     void send_blob(blob_id_type blob_id) override;
 
 private:
     /**
-     * @brief Flush any accumulated non-BLOB bytes buffered in the inherited output stream.
+     * @brief Send any accumulated non-BLOB bytes buffered in the inherited output stream.
+     * @throws limestone::api::limestone_io_exception if sending staged bytes via the RDMA stream fails.
      */
-    void flush_buffered_bytes();
+    void push_staged_bytes();
 
     /**
      * @brief Send the BLOB header together with the first BLOB data chunk via RDMA.
@@ -88,6 +91,7 @@ private:
      * @param fp Open FILE pointer positioned at the beginning of the blob data.
      * @param path Path used only for error messages.
      * @param[in,out] remaining Total bytes left to send; decremented by the first chunk size.
+     * @throws limestone::api::limestone_io_exception if sending the first RDMA buffer fails.
      */
     void send_blob_header_and_first_chunk(
         blob_id_type blob_id,
@@ -96,12 +100,49 @@ private:
         std::uint32_t& remaining);
 
     /**
+     * @brief Fill an RDMA send buffer with the BLOB header and first BLOB data chunk.
+     * @param blob_id ID of the blob being transmitted.
+     * @param blob_size Total BLOB size in bytes.
+     * @param fp Open FILE pointer positioned at the beginning of the blob data.
+     * @param path Path used only for error messages.
+     * @param buffer RDMA send buffer to fill.
+     * @param capacity Writable size of buffer in bytes.
+     * @return Result describing whether the buffer was filled successfully.
+     * @throws limestone::api::limestone_io_exception if the BLOB file cannot provide
+     *         enough bytes for the first data chunk.
+     */
+    rdma_send_stream_base::buffer_fill_result fill_blob_header_and_first_chunk(
+        blob_id_type blob_id,
+        std::uint32_t blob_size,
+        FILE* fp,
+        boost::filesystem::path const& path,
+        std::uint8_t* buffer,
+        std::size_t capacity);
+
+    /**
      * @brief Read the blob file and send its remaining content in chunks via RDMA.
      * @param fp Open FILE pointer positioned after the first chunk of blob data.
      * @param path Path used only for error messages.
      * @param remaining Total bytes still to send.
+     * @throws limestone::api::limestone_io_exception if sending a BLOB data chunk fails.
      */
     void send_blob_data(FILE* fp, boost::filesystem::path const& path, std::uint32_t remaining);
+
+    /**
+     * @brief Fill an RDMA send buffer with BLOB data only.
+     * @param fp Open FILE pointer positioned at the next BLOB byte to send.
+     * @param path Path used only for error messages.
+     * @param buffer RDMA send buffer to fill.
+     * @param capacity Writable size of buffer in bytes.
+     * @return Result describing whether the buffer was filled successfully.
+     * @throws limestone::api::limestone_io_exception if the BLOB file cannot provide
+     *         enough bytes for the data chunk.
+     */
+    rdma_send_stream_base::buffer_fill_result fill_blob_data_chunk(
+        FILE* fp,
+        boost::filesystem::path const& path,
+        std::uint8_t* buffer,
+        std::size_t capacity);
 
     rdma_send_stream_base& rdma_stream_;
     datastore& datastore_;

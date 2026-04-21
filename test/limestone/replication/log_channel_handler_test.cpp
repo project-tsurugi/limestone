@@ -166,15 +166,26 @@ public:
     [[nodiscard]] send_result send_with_writer(
             std::size_t remaining_size,
             buffer_writer writer) noexcept override {
-        std::vector<std::uint8_t> payload(remaining_size);
+        auto const capacity = max_writer_capacity_ == 0U
+            ? remaining_size
+            : std::min(remaining_size, max_writer_capacity_);
+        std::vector<std::uint8_t> payload(capacity);
         auto fill_result = writer(payload.data(), payload.size());
         if (! fill_result.success) {
             return {false, fill_result.error_message, 0U};
         }
+        auto const bytes_written = payload.size();
         calls_.emplace_back(std::move(payload));
-        return {true, "", remaining_size};
+        return {true, "", bytes_written};
     }
 
+    /**
+     * @brief Maximum temporary buffer capacity passed to send_with_writer() callbacks.
+     *
+     * A value of 0 passes the requested remaining size as the buffer capacity.
+     * Any non-zero value limits the temporary buffer capacity.
+     */
+    std::size_t max_writer_capacity_{};
     std::vector<std::vector<std::uint8_t>> calls_{};
 };
 
@@ -781,6 +792,81 @@ TEST_F(log_channel_handler_test,
     boost::filesystem::remove_all(sender_dir);
     ::close(ctx.read_fd);
     ::close(ctx.write_fd);
+}
+
+TEST_F(log_channel_handler_test,
+       rdma_socket_io_send_blob_with_empty_staged_buffer_sends_blob_only) {
+    constexpr const char* sender_dir = "/tmp/replica_server_test_sender";
+    boost::filesystem::remove_all(sender_dir);
+    boost::filesystem::create_directories(sender_dir);
+    limestone::api::configuration sender_conf{};
+    sender_conf.set_data_location(sender_dir);
+    auto sender_ds = std::make_unique<limestone::api::datastore_test>(sender_conf);
+
+    blob_id_type blob_id = 57U;
+    std::string const blob_content = "rdma_socket_io_empty_staged_buffer";
+    auto blob_path = sender_ds->get_blob_file(blob_id).path();
+    boost::filesystem::create_directories(blob_path.parent_path());
+    {
+        std::ofstream ofs(blob_path.string(), std::ios::binary);
+        ofs << blob_content;
+    }
+
+    capturing_rdma_send_stream stream{};
+    rdma_socket_io sender_io(stream, *sender_ds);
+
+    sender_io.send_blob(blob_id);
+
+    ASSERT_EQ(stream.calls_.size(), 1U)
+        << "empty staged buffer should not produce an extra RDMA send";
+    auto const& payload = stream.calls_[0];
+    auto it = std::search(
+        payload.begin(), payload.end(),
+        blob_content.begin(), blob_content.end());
+    EXPECT_NE(it, payload.end());
+
+    sender_ds.reset();
+    boost::filesystem::remove_all(sender_dir);
+}
+
+TEST_F(log_channel_handler_test,
+       rdma_socket_io_send_blob_sends_remaining_data_in_later_writes) {
+    constexpr const char* sender_dir = "/tmp/replica_server_test_sender";
+    boost::filesystem::remove_all(sender_dir);
+    boost::filesystem::create_directories(sender_dir);
+    limestone::api::configuration sender_conf{};
+    sender_conf.set_data_location(sender_dir);
+    auto sender_ds = std::make_unique<limestone::api::datastore_test>(sender_conf);
+
+    blob_id_type blob_id = 58U;
+    std::string const blob_content = "rdma_socket_io_blob_payload_split_after_header";
+    auto blob_path = sender_ds->get_blob_file(blob_id).path();
+    boost::filesystem::create_directories(blob_path.parent_path());
+    {
+        std::ofstream ofs(blob_path.string(), std::ios::binary);
+        ofs << blob_content;
+    }
+
+    capturing_rdma_send_stream stream{};
+    stream.max_writer_capacity_ = sizeof(std::uint64_t) + sizeof(std::uint32_t) + 5U;
+    rdma_socket_io sender_io(stream, *sender_ds);
+
+    sender_io.send_blob(blob_id);
+
+    ASSERT_GE(stream.calls_.size(), 2U)
+        << "remaining BLOB data should be sent after the first header write";
+
+    std::vector<std::uint8_t> all_payload;
+    for (auto const& call : stream.calls_) {
+        all_payload.insert(all_payload.end(), call.begin(), call.end());
+    }
+    auto it = std::search(
+        all_payload.begin(), all_payload.end(),
+        blob_content.begin(), blob_content.end());
+    EXPECT_NE(it, all_payload.end());
+
+    sender_ds.reset();
+    boost::filesystem::remove_all(sender_dir);
 }
 
 }  // namespace limestone::testing

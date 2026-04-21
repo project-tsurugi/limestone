@@ -34,7 +34,7 @@ void blob_socket_io::send_blob(const blob_id_type blob_id) {
         remaining -= static_cast<uint32_t>(total_read);
     }
 
-    safe_close(opened.fp);
+    safe_close_blob_file(opened.fp, "fclose failed for blob file");
     flush();
 }
 
