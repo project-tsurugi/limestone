@@ -1,11 +1,13 @@
 #pragma once
 
 #include <cstddef>
+#include <cstdio>
 #include <cstdint>
 #include <memory>
 #include <string>
 #include <string_view>
 
+#include "limestone/api/datastore.h"
 #include "message_log_entries.h"
 
 namespace limestone::replication {
@@ -41,10 +43,10 @@ namespace limestone::replication {
  * operation_flags
  * @endcode
  *
- * This parser currently parses through @c blob_count.  If an entry has no BLOBs,
- * the entry is immediately added to the in-progress @c message_log_entries.  If
- * an entry has BLOBs, parsing stops in @c status::awaiting_blob after consuming
- * @c blob_count so the caller can handle BLOB header/body data separately.
+ * If an entry has no BLOBs, the entry is immediately added to the in-progress
+ * @c message_log_entries.  If an entry has BLOBs, the parser either stops in
+ * @c status::awaiting_blob after consuming @c blob_count, or streams the BLOB
+ * bytes into replica BLOB files when constructed with a datastore.
  *
  * A single call to @c consume() may provide any number of bytes, including a
  * partial scalar or a partial string.  The parser retains unfinished field bytes
@@ -52,6 +54,23 @@ namespace limestone::replication {
  */
 class rdma_log_entries_parser {
 public:
+    /**
+     * @brief Construct a parser that stops at BLOB payload boundaries.
+     */
+    rdma_log_entries_parser() = default;
+
+    /**
+     * @brief Construct a parser that streams BLOB payloads into @p datastore.
+     */
+    explicit rdma_log_entries_parser(limestone::api::datastore& datastore) noexcept;
+
+    rdma_log_entries_parser(const rdma_log_entries_parser&) = delete;
+    rdma_log_entries_parser& operator=(const rdma_log_entries_parser&) = delete;
+    rdma_log_entries_parser(rdma_log_entries_parser&&) = delete;
+    rdma_log_entries_parser& operator=(rdma_log_entries_parser&&) = delete;
+
+    ~rdma_log_entries_parser();
+
     /**
      * @brief High-level parser state visible to the caller.
      */
@@ -93,8 +112,7 @@ public:
     /**
      * @brief Number of BLOBs expected for the current entry.
      *
-     * This is meaningful when @c awaiting_blob() is true.  Later steps will use
-     * this value to parse BLOB headers and write BLOB bytes to replica files.
+     * This is meaningful when @c awaiting_blob() is true.
      */
     [[nodiscard]] std::uint32_t pending_blob_count() const noexcept;
 
@@ -126,6 +144,9 @@ private:
         write_version_major,
         write_version_minor,
         blob_count,
+        blob_id,
+        blob_size,
+        blob_bytes,
         operation_flags,
         complete,
         awaiting_blob,
@@ -137,12 +158,10 @@ private:
     bool read_uint64(std::string_view bytes, std::size_t& offset, std::uint64_t& value);
     bool read_string_length(std::string_view bytes, std::size_t& offset, parse_state next);
     bool read_string_bytes(std::string_view bytes, std::size_t& offset, std::string& target, parse_state next);
+    bool read_blob_bytes(std::string_view bytes, std::size_t& offset);
 
     /**
-     * @brief Add the currently parsed BLOB-less entry to the in-progress message.
-     *
-     * BLOB entries are not added by this parser path because their blob_ids are
-     * only known after BLOB header/body handling completes.
+     * @brief Add the currently parsed entry to the in-progress message.
      */
     void add_current_entry();
 
@@ -150,6 +169,9 @@ private:
      * @brief Apply the final operation_flags byte to the in-progress message.
      */
     void apply_operation_flags(std::uint8_t flags);
+    void open_current_blob_file();
+    void finish_current_blob_file();
+    void close_current_blob_file_noexcept() noexcept;
 
     parse_state state_{parse_state::epoch_id};
     std::unique_ptr<message_log_entries> message_{};
@@ -160,6 +182,12 @@ private:
     std::string string_buffer_{};
     std::uint64_t write_version_major_{0};
     std::string scalar_buffer_{};
+    limestone::api::datastore* datastore_{nullptr};
+    limestone::api::blob_id_type current_blob_id_{0};
+    std::uint32_t current_blob_remaining_{0};
+    std::uint32_t blobs_remaining_in_entry_{0};
+    std::FILE* current_blob_file_{nullptr};
+    std::string current_blob_path_{};
 };
 
 }  // namespace limestone::replication

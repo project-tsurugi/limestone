@@ -1,13 +1,27 @@
 #include "rdma_log_entries_parser.h"
 
 #include <arpa/inet.h>
+#include <unistd.h>
 
 #include <algorithm>
 #include <array>
+#include <cerrno>
 #include <cstring>
+#include <iterator>
 #include <stdexcept>
 
+#include <boost/filesystem.hpp>
+
+#include "limestone_exception_helper.h"
+
 namespace limestone::replication {
+
+rdma_log_entries_parser::rdma_log_entries_parser(limestone::api::datastore& datastore) noexcept
+    : datastore_(&datastore) {}
+
+rdma_log_entries_parser::~rdma_log_entries_parser() {
+    close_current_blob_file_noexcept();
+}
 
 // Keep this state machine in one switch so the wire-field order and transitions
 // can be read top-to-bottom. Splitting each state into small functions lowers
@@ -90,9 +104,48 @@ std::size_t rdma_log_entries_parser::consume(std::string_view bytes) {
                 if (pending_blob_count_ == 0) {
                     add_current_entry();
                     state_ = entries_remaining_ == 0 ? parse_state::operation_flags : parse_state::entry_type;
+                } else if (datastore_ != nullptr) {
+                    blobs_remaining_in_entry_ = pending_blob_count_;
+                    state_ = parse_state::blob_id;
                 } else {
                     state_ = parse_state::awaiting_blob;
                     return offset;
+                }
+                break;
+            case parse_state::blob_id:
+                if (!read_uint64(bytes, offset, current_blob_id_)) {
+                    return offset;
+                }
+                current_entry_.blob_ids.push_back(current_blob_id_);
+                state_ = parse_state::blob_size;
+                break;
+            case parse_state::blob_size:
+                if (!read_uint32(bytes, offset, current_blob_remaining_)) {
+                    return offset;
+                }
+                if (current_blob_remaining_ == 0) {
+                    open_current_blob_file();
+                    finish_current_blob_file();
+                    if (--blobs_remaining_in_entry_ == 0) {
+                        add_current_entry();
+                        state_ = entries_remaining_ == 0 ? parse_state::operation_flags : parse_state::entry_type;
+                    } else {
+                        state_ = parse_state::blob_id;
+                    }
+                } else {
+                    state_ = parse_state::blob_bytes;
+                }
+                break;
+            case parse_state::blob_bytes:
+                if (!read_blob_bytes(bytes, offset)) {
+                    return offset;
+                }
+                finish_current_blob_file();
+                if (--blobs_remaining_in_entry_ == 0) {
+                    add_current_entry();
+                    state_ = entries_remaining_ == 0 ? parse_state::operation_flags : parse_state::entry_type;
+                } else {
+                    state_ = parse_state::blob_id;
                 }
                 break;
             case parse_state::operation_flags: {
@@ -145,6 +198,9 @@ std::unique_ptr<message_log_entries> rdma_log_entries_parser::take_message() {
     state_ = parse_state::epoch_id;
     entries_remaining_ = 0;
     pending_blob_count_ = 0;
+    current_blob_id_ = 0;
+    current_blob_remaining_ = 0;
+    blobs_remaining_in_entry_ = 0;
     string_length_ = 0;
     string_buffer_.clear();
     scalar_buffer_.clear();
@@ -156,7 +212,7 @@ bool rdma_log_entries_parser::read_bytes(std::string_view bytes, std::size_t& of
     std::size_t needed = size - scalar_buffer_.size();
     std::size_t available = bytes.size() - offset;
     std::size_t take = std::min(needed, available);
-    scalar_buffer_.append(bytes.data() + offset, take);
+    scalar_buffer_.append(bytes.substr(offset, take));
     offset += take;
     return scalar_buffer_.size() == size;
 }
@@ -223,7 +279,7 @@ bool rdma_log_entries_parser::read_string_bytes(
     std::size_t needed = string_length_ - string_buffer_.size();
     std::size_t available = bytes.size() - offset;
     std::size_t take = std::min(needed, available);
-    string_buffer_.append(bytes.data() + offset, take);
+    string_buffer_.append(bytes.substr(offset, take));
     offset += take;
     if (string_buffer_.size() != string_length_) {
         return false;
@@ -233,6 +289,30 @@ bool rdma_log_entries_parser::read_string_bytes(
     string_length_ = 0;
     state_ = next;
     return true;
+}
+
+bool rdma_log_entries_parser::read_blob_bytes(std::string_view bytes, std::size_t& offset) {
+    if (current_blob_file_ == nullptr) {
+        open_current_blob_file();
+    }
+
+    std::size_t available = bytes.size() - offset;
+    std::size_t take = std::min<std::size_t>(current_blob_remaining_, available);
+    std::string_view chunk = bytes.substr(offset, take);
+    std::size_t written = std::fwrite(chunk.data(), 1, chunk.size(), current_blob_file_);
+    if (written != chunk.size()) {
+        int ec = errno;
+        close_current_blob_file_noexcept();
+        LOG_AND_THROW_IO_EXCEPTION(
+                "Failed to write RDMA blob chunk: " + current_blob_path_
+                        + ", expected=" + std::to_string(chunk.size())
+                        + ", actual=" + std::to_string(written),
+                ec);
+    }
+
+    offset += take;
+    current_blob_remaining_ -= static_cast<std::uint32_t>(take);
+    return current_blob_remaining_ == 0;
 }
 
 void rdma_log_entries_parser::add_current_entry() {
@@ -281,6 +361,59 @@ void rdma_log_entries_parser::apply_operation_flags(std::uint8_t flags) {
     message_->set_session_begin_flag((flags & message_log_entries::SESSION_BEGIN_FLAG) != 0);
     message_->set_session_end_flag((flags & message_log_entries::SESSION_END_FLAG) != 0);
     message_->set_flush_flag((flags & message_log_entries::FLUSH_FLAG) != 0);
+}
+
+void rdma_log_entries_parser::open_current_blob_file() {
+    auto blob_file = datastore_->get_blob_file(current_blob_id_);
+    auto& path = blob_file.path();
+    auto parent = path.parent_path();
+
+    if (!boost::filesystem::exists(parent)) {
+        try {
+            boost::filesystem::create_directory(parent);
+        } catch (const boost::filesystem::filesystem_error& e) {
+            LOG_AND_THROW_IO_EXCEPTION(
+                    "Failed to create directory for RDMA blob file: " + parent.string(),
+                    e.code().value());
+        }
+    } else if (!boost::filesystem::is_directory(parent)) {
+        LOG_AND_THROW_IO_EXCEPTION(
+                "Expected directory at path for RDMA blob file: " + parent.string(),
+                EIO);
+    }
+
+    current_blob_path_ = path.string();
+    current_blob_file_ = std::fopen(current_blob_path_.c_str(), "wb");  // NOLINT(cppcoreguidelines-owning-memory)
+    if (current_blob_file_ == nullptr) {
+        LOG_AND_THROW_IO_EXCEPTION("Failed to open RDMA blob for writing: " + current_blob_path_, errno);
+    }
+}
+
+void rdma_log_entries_parser::finish_current_blob_file() {
+    if (current_blob_file_ == nullptr) {
+        return;
+    }
+    if (std::fflush(current_blob_file_) != 0) {
+        int ec = errno;
+        close_current_blob_file_noexcept();
+        LOG_AND_THROW_IO_EXCEPTION("Failed to flush RDMA blob file: " + current_blob_path_, ec);
+    }
+    if (fsync(fileno(current_blob_file_)) == -1) {
+        int ec = errno;
+        LOG_LP(WARNING) << "fsync failed for RDMA blob file: "
+                        << current_blob_path_ << ": " << strerror(ec);
+    }
+    close_current_blob_file_noexcept();
+}
+
+void rdma_log_entries_parser::close_current_blob_file_noexcept() noexcept {
+    if (current_blob_file_ == nullptr) {
+        return;
+    }
+    if (std::fclose(current_blob_file_) != 0) {  // NOLINT(cppcoreguidelines-owning-memory)
+        LOG_LP(ERROR) << "Failed to close RDMA blob file: " << strerror(errno);
+    }
+    current_blob_file_ = nullptr;
 }
 
 }  // namespace limestone::replication

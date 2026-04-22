@@ -2,7 +2,9 @@
 
 #include <boost/filesystem.hpp>
 #include <fstream>
+#include <iterator>
 #include <string>
+#include <vector>
 
 #include "gtest/gtest.h"
 #include "replication/blob_socket_io.h"
@@ -29,6 +31,21 @@ std::size_t consume_one_byte_at_a_time(rdma_log_entries_parser& parser, std::str
         consumed += parser.consume(std::string_view{bytes}.substr(consumed, 1));
     }
     return consumed;
+}
+
+std::string read_file(boost::filesystem::path const& path) {
+    std::ifstream in(path.string(), std::ios::binary);
+    if (!in.is_open()) {
+        ADD_FAILURE() << "Failed to open file: " << path.string();
+        return {};
+    }
+
+    std::string content{std::istreambuf_iterator<char>{in}, std::istreambuf_iterator<char>{}};
+    if (in.bad()) {
+        ADD_FAILURE() << "Failed to read file: " << path.string();
+        return {};
+    }
+    return content;
 }
 
 }  // namespace
@@ -308,6 +325,215 @@ TEST(rdma_log_entries_parser_test, parses_empty_message_and_operation_flags) {
     EXPECT_FALSE(received->has_session_begin_flag());
     EXPECT_TRUE(received->has_session_end_flag());
     EXPECT_FALSE(received->has_flush_flag());
+}
+
+TEST(rdma_log_entries_parser_test, streams_blob_body_to_replica_file) {
+    // With a datastore configured, the parser continues past blob_count and
+    // consumes the BLOB wire header/body itself.  Feeding one byte at a time
+    // makes the BLOB body cross consume() calls; the message must complete only
+    // after the file has been fully written and the blob_id has been attached to
+    // the normal_with_blob entry.
+    static constexpr const char* sender_location = "/tmp/rdma_log_entries_parser_blob_sender_test";
+    static constexpr const char* receiver_location = "/tmp/rdma_log_entries_parser_blob_receiver_test";
+    boost::filesystem::remove_all(sender_location);
+    boost::filesystem::remove_all(receiver_location);
+
+    limestone::api::configuration sender_conf{};
+    sender_conf.set_data_location(sender_location);
+    limestone::api::datastore_test sender_datastore{sender_conf};
+
+    limestone::api::configuration receiver_conf{};
+    receiver_conf.set_data_location(receiver_location);
+    limestone::api::datastore_test receiver_datastore{receiver_conf};
+
+    constexpr limestone::api::blob_id_type blob_id = 2468;
+    std::string blob_body = "split-rdma-blob-body";
+    auto sender_blob_path = sender_datastore.get_blob_file(blob_id).path();
+    boost::filesystem::create_directories(sender_blob_path.parent_path());
+    std::ofstream(sender_blob_path.string(), std::ios::binary) << blob_body;
+
+    message_log_entries original{901};
+    original.add_normal_with_blob(3, "key", "value", {4, 5}, {blob_id});
+    original.set_session_begin_flag(true);
+
+    blob_socket_io io("", sender_datastore);
+    original.send_body(io);
+    std::string body = io.get_out_string();
+
+    rdma_log_entries_parser parser{receiver_datastore};
+    EXPECT_EQ(consume_one_byte_at_a_time(parser, body), body.size());
+    ASSERT_TRUE(parser.complete());
+
+    auto received = parser.take_message();
+    EXPECT_EQ(received->get_epoch_id(), 901);
+    EXPECT_TRUE(received->has_session_begin_flag());
+    ASSERT_EQ(received->get_entries().size(), 1u);
+    EXPECT_EQ(received->get_entries()[0].type, log_entry::entry_type::normal_with_blob);
+    EXPECT_EQ(received->get_entries()[0].storage_id, 3u);
+    EXPECT_EQ(received->get_entries()[0].key, "key");
+    EXPECT_EQ(received->get_entries()[0].value, "value");
+    EXPECT_EQ(received->get_entries()[0].blob_ids, std::vector<limestone::api::blob_id_type>{blob_id});
+
+    auto receiver_blob_path = receiver_datastore.get_blob_file(blob_id).path();
+    EXPECT_TRUE(boost::filesystem::exists(receiver_blob_path));
+    EXPECT_EQ(read_file(receiver_blob_path), blob_body);
+
+    boost::filesystem::remove_all(sender_location);
+    boost::filesystem::remove_all(receiver_location);
+}
+
+TEST(rdma_log_entries_parser_test, streams_zero_length_blob_to_empty_replica_file) {
+    // A zero-length BLOB has a header but no body bytes.  The parser still has
+    // to create and close the replica file, attach the blob_id to the entry, and
+    // then continue to operation_flags without waiting for BLOB body input.
+    static constexpr const char* sender_location = "/tmp/rdma_log_entries_parser_empty_blob_sender_test";
+    static constexpr const char* receiver_location = "/tmp/rdma_log_entries_parser_empty_blob_receiver_test";
+    boost::filesystem::remove_all(sender_location);
+    boost::filesystem::remove_all(receiver_location);
+
+    limestone::api::configuration sender_conf{};
+    sender_conf.set_data_location(sender_location);
+    limestone::api::datastore_test sender_datastore{sender_conf};
+
+    limestone::api::configuration receiver_conf{};
+    receiver_conf.set_data_location(receiver_location);
+    limestone::api::datastore_test receiver_datastore{receiver_conf};
+
+    constexpr limestone::api::blob_id_type blob_id = 3579;
+    auto sender_blob_path = sender_datastore.get_blob_file(blob_id).path();
+    boost::filesystem::create_directories(sender_blob_path.parent_path());
+    std::ofstream(sender_blob_path.string(), std::ios::binary);
+
+    message_log_entries original{902};
+    original.add_normal_with_blob(3, "key", "value", {4, 5}, {blob_id});
+
+    blob_socket_io io("", sender_datastore);
+    original.send_body(io);
+    std::string body = io.get_out_string();
+
+    rdma_log_entries_parser parser{receiver_datastore};
+    EXPECT_EQ(parser.consume(body), body.size());
+    ASSERT_TRUE(parser.complete());
+
+    auto received = parser.take_message();
+    ASSERT_EQ(received->get_entries().size(), 1u);
+    EXPECT_EQ(received->get_entries()[0].blob_ids, std::vector<limestone::api::blob_id_type>{blob_id});
+
+    auto receiver_blob_path = receiver_datastore.get_blob_file(blob_id).path();
+    EXPECT_TRUE(boost::filesystem::exists(receiver_blob_path));
+    EXPECT_TRUE(read_file(receiver_blob_path).empty());
+
+    boost::filesystem::remove_all(sender_location);
+    boost::filesystem::remove_all(receiver_location);
+}
+
+TEST(rdma_log_entries_parser_test, streams_multiple_blobs_for_one_entry) {
+    // When an entry has more than one BLOB, completing the first BLOB must not
+    // add the entry yet.  The parser should loop back to blob_id, receive the
+    // next BLOB, and add the entry only after all blob_ids and files are done.
+    static constexpr const char* sender_location = "/tmp/rdma_log_entries_parser_multi_blob_sender_test";
+    static constexpr const char* receiver_location = "/tmp/rdma_log_entries_parser_multi_blob_receiver_test";
+    boost::filesystem::remove_all(sender_location);
+    boost::filesystem::remove_all(receiver_location);
+
+    limestone::api::configuration sender_conf{};
+    sender_conf.set_data_location(sender_location);
+    limestone::api::datastore_test sender_datastore{sender_conf};
+
+    limestone::api::configuration receiver_conf{};
+    receiver_conf.set_data_location(receiver_location);
+    limestone::api::datastore_test receiver_datastore{receiver_conf};
+
+    constexpr limestone::api::blob_id_type first_blob_id = 4680;
+    constexpr limestone::api::blob_id_type second_blob_id = 4681;
+    std::string first_body = "first-blob";
+    std::string second_body = "second-blob";
+
+    auto first_sender_path = sender_datastore.get_blob_file(first_blob_id).path();
+    boost::filesystem::create_directories(first_sender_path.parent_path());
+    std::ofstream(first_sender_path.string(), std::ios::binary) << first_body;
+    auto second_sender_path = sender_datastore.get_blob_file(second_blob_id).path();
+    boost::filesystem::create_directories(second_sender_path.parent_path());
+    std::ofstream(second_sender_path.string(), std::ios::binary) << second_body;
+
+    message_log_entries original{903};
+    original.add_normal_with_blob(3, "key", "value", {4, 5}, {first_blob_id, second_blob_id});
+
+    blob_socket_io io("", sender_datastore);
+    original.send_body(io);
+    std::string body = io.get_out_string();
+
+    rdma_log_entries_parser parser{receiver_datastore};
+    EXPECT_EQ(consume_one_byte_at_a_time(parser, body), body.size());
+    ASSERT_TRUE(parser.complete());
+
+    auto received = parser.take_message();
+    ASSERT_EQ(received->get_entries().size(), 1u);
+    EXPECT_EQ(received->get_entries()[0].blob_ids,
+            (std::vector<limestone::api::blob_id_type>{first_blob_id, second_blob_id}));
+
+    auto first_receiver_path = receiver_datastore.get_blob_file(first_blob_id).path();
+    auto second_receiver_path = receiver_datastore.get_blob_file(second_blob_id).path();
+    EXPECT_EQ(read_file(first_receiver_path), first_body);
+    EXPECT_EQ(read_file(second_receiver_path), second_body);
+
+    boost::filesystem::remove_all(sender_location);
+    boost::filesystem::remove_all(receiver_location);
+}
+
+TEST(rdma_log_entries_parser_test, partial_blob_body_keeps_reading_until_remaining_bytes_arrive) {
+    // A positive-size BLOB may be split across consume() calls.  After only the
+    // first body byte arrives, the parser must stay in reading state, keep the
+    // partial file open internally, and resume the same BLOB when the remaining
+    // bytes arrive.
+    static constexpr const char* sender_location = "/tmp/rdma_log_entries_parser_empty_body_sender_test";
+    static constexpr const char* receiver_location = "/tmp/rdma_log_entries_parser_empty_body_receiver_test";
+    boost::filesystem::remove_all(sender_location);
+    boost::filesystem::remove_all(receiver_location);
+
+    limestone::api::configuration sender_conf{};
+    sender_conf.set_data_location(sender_location);
+    limestone::api::datastore_test sender_datastore{sender_conf};
+
+    limestone::api::configuration receiver_conf{};
+    receiver_conf.set_data_location(receiver_location);
+    limestone::api::datastore_test receiver_datastore{receiver_conf};
+
+    constexpr limestone::api::blob_id_type blob_id = 5791;
+    std::string blob_body = "body-after-empty-input";
+    auto sender_blob_path = sender_datastore.get_blob_file(blob_id).path();
+    boost::filesystem::create_directories(sender_blob_path.parent_path());
+    std::ofstream(sender_blob_path.string(), std::ios::binary) << blob_body;
+
+    message_log_entries original{904};
+    original.add_normal_with_blob(3, "key", "value", {4, 5}, {blob_id});
+
+    blob_socket_io io("", sender_datastore);
+    original.send_body(io);
+    std::string body = io.get_out_string();
+
+    rdma_log_entries_parser parser{receiver_datastore};
+    std::size_t consumed = 0;
+    auto receiver_blob_path = receiver_datastore.get_blob_file(blob_id).path();
+    while (consumed < body.size() && !boost::filesystem::exists(receiver_blob_path)) {
+        consumed += parser.consume(std::string_view{body}.substr(consumed, 1));
+    }
+    ASSERT_GT(consumed, 0u);
+    ASSERT_LT(consumed, body.size());
+    ASSERT_TRUE(boost::filesystem::exists(receiver_blob_path));
+
+    EXPECT_FALSE(parser.complete());
+
+    EXPECT_EQ(parser.consume(std::string_view{body}.substr(consumed)), body.size() - consumed);
+    ASSERT_TRUE(parser.complete());
+
+    auto received = parser.take_message();
+    ASSERT_EQ(received->get_entries().size(), 1u);
+    EXPECT_EQ(received->get_entries()[0].blob_ids, std::vector<limestone::api::blob_id_type>{blob_id});
+    EXPECT_EQ(read_file(receiver_blob_path), blob_body);
+
+    boost::filesystem::remove_all(sender_location);
+    boost::filesystem::remove_all(receiver_location);
 }
 
 }  // namespace limestone::testing
