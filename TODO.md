@@ -593,6 +593,31 @@ RDMA payload に再利用しているため、小さい BLOB では動く。
 - ただし今回の修正では性能影響が小さく、変更範囲も広がるため、
   別タスクとして扱う。
 
+### LOG_ENTRY wire format codec の切り出し
+
+- RDMA streaming receiver 実装により、LOG_ENTRY message body の wire format に関する知識が
+  `message_log_entries::send_body()` / `message_log_entries::receive_body()` と
+  RDMA 側 parser に重複する。
+- 重複対象は、`epoch_id`、`entry_count`、entry fields の順序、
+  `blob_count`、`operation_flags` などである。
+- 一連の RDMA BLOB streaming 対応が完了した後で、
+  `message_log_entries_wire_codec` のような共通 helper へ整理する。
+- ただし現段階で抽象化すると 4.5.2 以降の実装前に設計が先行しすぎるため、
+  まずは streaming receiver の動作を完成させ、その後のリファクタリングとして扱う。
+
+### RDMA sender 初期化テストの不安定性調査
+
+- `initialize_rdma_sender_success_sets_sender` と
+  `shutdown_rdma_sender_after_initialize_clears_sender` が、全テスト実行時に
+  確率的に失敗することがある。
+- IDE から単独実行する限りは安定して成功しているため、実行順序、
+  vendor RDMA mock の共有状態、receiver 側準備状態、環境変数、または
+  前後テストの cleanup との相互作用を疑う。
+- 失敗時には sender 初期化で vendor mock 側が receiver 準備不足を示すことがある。
+  ただし再現条件が実行環境に依存しているため、今回の RDMA BLOB streaming 修正とは分けて扱う。
+- 後続で、RDMA mock の初期状態リセット方法、receiver/sender mock 資源の隔離、
+  およびこの 2 テストを unit test として fake sender に寄せるべきかを検討する。
+
 ### blob_send_utils のエラー処理整理
 
 - `read_blob_chunk()` のエラー処理について、
