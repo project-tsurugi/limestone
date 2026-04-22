@@ -202,9 +202,331 @@ blob 部はその後に続けて送る。
   - blob 部
   に分離する。
 - BLOB chunk を replica datastore の BLOB file に直接書き込む。
-- 必要な BLOB がすべて揃うまで `message_log_entries` を apply しない。
+- 必要な BLOB がすべて揃うまで `message_log_entries::post_receive()` を呼ばず、
+  replica 側 `log_channel` に WAL entry を反映しない。
 - BLOB 全体を `std::vector` や `std::string` に集約しない。
 - sequence number、payload size、channel validation の既存チェックを維持する。
+
+#### 4.1 entry という語の整理
+
+この作業では `entry` という語が複数の意味で出てくるため、
+TODO ではどちらを指しているかを明示する。
+
+1. WAL entry type: `limestone::api::log_entry::entry_type`
+   - WAL file の `log_entry` が持つ entry type。
+   - 代表的な値は次のとおり。
+     - `normal_entry`
+     - `normal_with_blob`
+     - `remove_entry`
+     - `marker_begin`
+     - `marker_end`
+     - `marker_durable`
+     - `marker_invalidated_begin`
+     - `clear_storage`
+     - `add_storage`
+     - `remove_storage`
+   - WAL file 上の binary format は `log_entry::write()` / `log_entry::read_entry_from()`
+     が定義している。
+
+2. replication entry: `message_log_entries::entry`
+   - `message_log_entries` が replication 用に持つ entry。
+   - `log_entry::entry_type` を field として持つが、
+     replication wire format は WAL file の `log_entry::write()` と同一ではない。
+   - `message_log_entries::send_body()` は、`entries_` に含まれる各 entry について
+     現在は次の順でシリアライズしている。
+     - `entry_type`
+     - `storage_id`
+     - `key`
+     - `value`
+     - `write_version.major`
+     - `write_version.minor`
+     - `blob_count`
+     - `blob_id + blob_size + blob_bytes` を `blob_count` 回
+   - `message_log_entries` が通常追加する entry は次。
+     - `add_normal_entry()`
+     - `add_normal_with_blob()`
+     - `add_remove_entry()`
+     - `add_clear_storage()`
+     - `add_add_storage()`
+     - `add_remove_storage()`
+   - `message_log_entries::post_receive()` では次のように replica 側 `log_channel` に反映する。
+     - `normal_entry` -> `log_channel.add_entry(...)`
+     - `normal_with_blob` -> `log_channel.add_entry(..., blob_ids)`
+     - `remove_entry` -> `log_channel.remove_entry(...)`
+     - `clear_storage` -> `log_channel.truncate_storage(...)`
+     - `add_storage` -> `log_channel.add_storage(...)`
+     - `remove_storage` -> `log_channel.remove_storage(...)`
+   - `marker_begin` / `marker_end` / `marker_durable` /
+     `marker_invalidated_begin` は、WAL file の epoch marker や
+     破損 WAL file の修復時に現れる entry type であり、
+     replication の通常送信対象にはならない。
+     そのため replication entry としては扱わず、
+     `post_receive()` では invalid entry type として扱われる。
+   - replication の session begin / session end / flush は entry ではなく、
+     `message_log_entries` 末尾の `operation_flags` で表現される。
+
+以降、このセクションで単に `entry` と書く場合は、
+原則として replication message の `message_log_entries::entry` を指す。
+WAL file の entry type 全体を指す場合は `log_entry::entry_type` と明記する。
+
+#### 4.2 現行の RDMA 受信フロー
+
+```text
+[現行-1] rdma-comm-lib receive callback
+  - rdma-comm-lib が RDMA write で届いた 1 frame を受信し、
+    limestone 側 callback を呼ぶ。
+  - この時点のデータ形状は rdma_receive_event。
+
+[現行-2] replica_server::on_rdma_receive()
+  - rdma_receive_event が data event か error event かを振り分ける。
+  - data event の場合だけ次へ進む。
+
+[現行-3] replica_server::handle_rdma_data_event()
+  - frame header の channel_id を見て、対応する log_channel_handler を探す。
+  - channel_id が不正、または handler 未登録ならここで捨てる。
+
+[現行-4] log_channel_handler::handle_rdma_data_event()
+  - frame version、payload_size、sequence_number を検査する。
+  - duplicate / stale / gap を検出する。
+  - 検査を通った frame を pending_rdma_frames_ に蓄積する。
+
+[現行-5] log_channel_handler::process_pending_rdma_messages_locked()
+  - pending_rdma_frames_ から、1 logical RDMA payload に属する frame 群を探す。
+  - rdma_frame_flag_partial_payload が付いている frame は
+    「まだ payload が続く」とみなし、non-partial frame が来るまで待つ。
+  - complete した frame 群を aggregated vector に連結する。
+  - この時点で、分割 frame は 1 個の連続 byte 列に戻される。
+
+[現行-6] log_channel_handler::process_rdma_message_locked()
+  - aggregated vector を std::string payload_string へコピーする。
+  - payload_string を入力にして blob_socket_io を作る。
+  - 以後は RDMA 専用処理ではなく、TCP stream と同じ socket_io 風の
+    deserialize 経路に乗せている。
+
+[現行-7] replication_message::receive()
+  - blob_socket_io から message_type_id を 1 byte 読む。
+  - message_type_id に対応する replication_message 派生型を factory で作る。
+  - LOG_ENTRY の場合は message_log_entries を作る。
+  - 作成した message に対して receive_body() を呼ぶ。
+
+[現行-8] message_log_entries::receive_body()
+  - epoch_id、entry_count、各 entry の固定部を読む。
+  - 各 entry について blob_count を読み、
+    blob_count 回だけ io.receive_blob() を呼ぶ。
+  - 最後に operation_flags を読む。
+
+[現行-9] blob_socket_io::receive_blob()
+  - blob_id、blob_size を読む。
+  - blob_size byte の blob_bytes を同じ入力 stream から読み続ける。
+  - 読んだ blob_bytes を replica datastore の BLOB file に書き込む。
+  - blob 全体を読み終えるまで return しない。
+
+[現行-10] message_log_entries::post_receive()
+  - receive_body() が完了した message_log_entries を log_channel に反映する。
+  - normal_with_blob の場合は、すでに BLOB file が存在する前提で
+    log_channel.add_entry(..., blob_ids) を呼ぶ。
+```
+
+#### 4.3 現行フローの問題点
+
+上記の現行フローは TCP stream 用の `blob_socket_io` / `receive_body()` を
+RDMA payload に再利用しているため、小さい BLOB では動く。
+しかし RDMA BLOB streaming では次の理由で不適切。
+
+- [現行-5] `process_pending_rdma_messages_locked()` が BLOB payload を含む frame を
+  `aggregated` に連結するため、巨大 BLOB 全体をメモリに持つ。
+- [現行-6] `process_rdma_message_locked()` が `std::string payload_string` を作るため、
+  さらに copy が発生する。
+- [現行-8] `message_log_entries::receive_body()` は [現行-9] `receive_blob()` まで一気に読むため、
+  entry 固定部と BLOB data が別 RDMA write に分かれる新 sender と合わない。
+- BLOB data が後続 frame に分割された場合、従来の [現行-9] `receive_blob()` は
+  その場で必要 byte 数を読み切れず EOF とみなす。
+
+そのため Receiver 側実装では、上記のうち
+[現行-4] `log_channel_handler::handle_rdma_data_event()` までは基本的に維持し、
+その後の
+
+```text
+[現行-5] pending_rdma_frames_ 集約
+  -> [現行-6] process_rdma_message_locked()
+  -> [現行-6] blob_socket_io
+  -> [現行-7] replication_message::receive()
+  -> [現行-8] message_log_entries::receive_body()
+```
+
+の流れを RDMA streaming receiver に置き換える。
+
+#### 4.4 新しい RDMA 受信フロー
+
+```text
+[新-1] rdma-comm-lib receive callback
+  - rdma-comm-lib が RDMA write で届いた 1 frame を受信し、
+    limestone 側 callback を呼ぶ。
+  - この時点のデータ形状は rdma_receive_event。
+
+[新-2] replica_server::on_rdma_receive()
+  - rdma_receive_event が data event か error event かを振り分ける。
+  - data event の場合だけ次へ進む。
+
+[新-3] replica_server::handle_rdma_data_event()
+  - frame header の channel_id を見て、対応する log_channel_handler を探す。
+  - channel_id が不正、または handler 未登録ならここで捨てる。
+
+[新-4] log_channel_handler::handle_rdma_data_event()
+  - frame version、payload_size、sequence_number を検査する。
+  - duplicate / stale / gap を検出する。
+  - 検査を通った frame payload を RDMA streaming receiver に渡す。
+  - ここでは BLOB payload を aggregated vector に連結しない。
+
+[新-5] RDMA streaming receiver
+  - 受信状態を持ちながら、渡された frame payload を先頭から順番に消費する。
+  - frame payload を std::string にコピーせず、byte 列として扱う。
+  - 1 frame の中に複数 message の一部または全部が含まれる場合も、
+    状態を進められるところまで進める。
+
+[新-6] message_type_id の読み取り
+  - 現在の `replication_message::receive()` をそのまま使わず、
+    receiver 状態が payload から `message_type_id` を読む。
+  - RDMA log channel では LOG_ENTRY だけを受け付ける。
+  - LOG_ENTRY 以外なら protocol error として処理を中断する。
+
+[新-7] message_log_entries の BLOB 前までの読み取り
+  - `epoch_id` と `entry_count` を読む。
+  - `entry_count` は、この LOG_ENTRY message に含まれる
+    `message_log_entries::entry` の数。
+  - ここでいう entry は [4.1](#41-entry-という語の整理) の
+    replication entry、つまり `message_log_entries::entry` を指す。
+  - 現行の replication wire format では、`message_log_entries::entry` ごとに
+    `entry_type`、`storage_id`、`key`、`value`、
+    `write_version.major`、`write_version.minor`、`blob_count` の順で
+    シリアライズされている。
+  - ただし各 field の意味は `entry_type` によって異なる。
+    例えば BLOB を持たない entry では `blob_count` は 0 であり、
+    `normal_with_blob` の場合だけ後続に BLOB 本体が続く。
+  - ここでは wire format 上 BLOB 本体より前に置かれている部分だけを読む。
+    この時点では `message_log_entries::post_receive()` を呼ばず、
+    BLOB 付きでない entry も含めて、まだ replica 側 `log_channel` へ反映しない。
+
+[新-8] BLOB header の読み取り
+  - BLOB 付き entry では、各 BLOB について `blob_id` と `blob_size` を読む。
+  - この時点では `blob_id` に対応する replica datastore 側の BLOB file は開かない。
+    1 つの entry に大量の BLOB がある場合でも未書き込み file handle を抱えないように、
+    file はその BLOB の最初の `blob_bytes` を書き込むタイミングで開く。
+  - `blob_size` を残り byte 数として receiver 状態に保持する。
+
+[新-9] BLOB bytes の file 書き込み
+  - 後続 payload から読める分だけ `blob_bytes` を取り出し、
+    対象 BLOB file に書き込む。
+  - 対象 BLOB file がまだ開かれていなければ、この最初の書き込み直前に開く。
+  - 1 frame で BLOB 全体を読み切れない場合は、残り byte 数を保持して
+    次の frame を待つ。
+  - `blob_size` byte を書き終えたら file を close し、
+    次の BLOB または次の entry の処理へ進む。
+  - BLOB 全体を `std::vector` や `std::string` に集約しない。
+
+[新-10] operation_flags の読み取り
+  - 全 entry と全 BLOB を読み終えた後で `operation_flags` を読む。
+  - ここまで到達したら `message_log_entries` の deserialize 完了とみなす。
+
+[新-11] message_log_entries::post_receive()
+  - 完成した `message_log_entries` を log_channel に反映する。
+  - normal_with_blob の場合は、すでに BLOB file が作成済みであることを前提に
+    log_channel.add_entry(..., blob_ids) を呼ぶ。
+```
+
+#### 4.5 実装順序
+
+実装は、各番号ごとに build / test / commit できる粒度に分けて進める。
+既存 TCP 経路と、既存 RDMA 経路の validation / channel dispatch は、
+切り替え step までは挙動を変えない。
+
+1. `message_log_entries` に BLOB なしでも使える incremental deserialize API を追加する。
+
+   [現行-8] `message_log_entries::receive_body()` が一括で行っている処理のうち、
+   [新-7] と [新-10] に相当する部分を、途中で止められる API として切り出す。
+   ここでは BLOB file 書き込みや RDMA 経路への接続はまだ行わない。
+
+   - message body 先頭の `epoch_id` と `entry_count` を読む。
+   - 各 `message_log_entries::entry` について、現行 replication wire format で
+     BLOB 本体より前に置かれている
+     `entry_type`、`storage_id`、`key`、`value`、
+     `write_version.major`、`write_version.minor`、`blob_count` までを読む。
+   - BLOB 付き entry では、`blob_count` と BLOB 受信予定情報だけを記録し、
+     BLOB 本体はまだ読まない。
+   - BLOB なし message については、`operation_flags` まで読めることを確認する。
+   - TCP 既存経路の `receive_body()` は壊さない。
+
+2. BLOB header / BLOB bytes 受信用の状態と file 書き込み処理を追加する。
+
+   [新-8] / [新-9] に相当する処理を、既存 RDMA 経路に接続しない部品として追加する。
+   この step では、byte 列を分割して渡しても BLOB を最後まで復元できることを
+   単体テストで確認する。
+
+   - BLOB ごとに `blob_id`、`blob_size`、残り byte 数を保持する。
+   - BLOB header 読み取り時点では replica datastore 側の BLOB file を開かない。
+   - その BLOB の最初の `blob_bytes` を書き込む直前に file を開く。
+   - `blob_size` byte を書き終えたら file を close する。
+   - BLOB 全体を `std::vector` や `std::string` に集約しない。
+
+3. RDMA streaming receiver クラスを追加する。
+
+   [新-5] / [新-6] / [新-7] / [新-8] / [新-9] / [新-10] をまとめる
+   状態クラスを追加する。
+   ただし、この step ではまだ [現行-5] / [現行-6] の既存 RDMA 経路には接続しない。
+
+   状態クラスは少なくとも次を保持する。
+
+   - 現在受信中の `message_log_entries`
+   - message type を読み終えたかどうか
+   - `epoch_id` / `entry_count` を読み終えたかどうか
+   - 現在処理中の entry index
+   - 現在処理中の blob index
+   - `blob_id`
+   - `blob_size`
+   - BLOB の残り byte 数
+   - 書き込み中の場合だけ開いている replica BLOB file handle
+   - `operation_flags` を読み終えたかどうか
+
+   この receiver は、渡された byte 列内で message が完成するたびに
+   完成した `message_log_entries` を取り出せるようにする。
+   同じ byte 列に未消費 byte が残っている場合は、その byte 列を次の message の
+   先頭として続けて処理できるようにする。
+   ここでは BLOB なし message、BLOB 付き message、分割 BLOB、複数 message 同梱を
+   単体テストする。
+
+4. RDMA 受信経路を streaming receiver に切り替える。
+
+   [現行-5] `process_pending_rdma_messages_locked()` と
+   [現行-6] `process_rdma_message_locked()` の
+   `aggregated vector -> std::string payload_string -> blob_socket_io` 経路をやめ、
+   [新-4] で validation 済みの frame payload を到着順に [新-5] へ渡す。
+
+   `rdma_frame_flag_partial_payload` は frame payload が次 frame に継続するかどうかの
+   判断に使うが、message 完了判定そのものは受信状態クラスの deserialize 状態で行う。
+   BLOB data は frame ごとに file へ書き込む。
+   receiver が完成した `message_log_entries` を返した時点で、
+   現在と同じ `log_channel_handler_resources` を使って
+   [新-11] `message_log_entries::post_receive()` を呼ぶ。
+
+   `sequence_number`、`payload_size`、version mismatch、
+   out-of-order / duplicate frame の扱いは現在の
+   [現行-4] / [新-4] `handle_rdma_data_event()` 側の責務として残す。
+   変更対象は validation 後の payload 処理であり、
+   channel dispatch や sequence check の意味は変えない。
+
+5. End-to-end regression test を通す。
+
+   RDMA BLOB streaming の統合動作を確認する。
+   必要なら、BLOB 付き LOG_ENTRY の送信順序変更に合わせて
+   failing regression test を調整する。
+   具体的な確認項目は [5. End-to-end regression test を通す](#5-end-to-end-regression-test-を通す)
+   に従う。
+
+6. 後始末を行う。
+
+   streaming receiver への切り替え後に不要になった RDMA 側の
+   `blob_socket_io` 経路、helper、コメントを整理する。
+   ただし TCP 既存経路で使っている `blob_socket_io` / `receive_body()` は削除しない。
 
 ### 5. End-to-end regression test を通す
 
