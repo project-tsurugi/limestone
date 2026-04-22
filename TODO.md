@@ -440,20 +440,38 @@ RDMA payload に再利用しているため、小さい BLOB では動く。
 既存 TCP 経路と、既存 RDMA 経路の validation / channel dispatch は、
 切り替え step までは挙動を変えない。
 
-1. `message_log_entries` に BLOB なしでも使える incremental deserialize API を追加する。
+1. RDMA streaming receiver 用の entry 単位 incremental parser の土台を追加する。
 
-   [現行-8] `message_log_entries::receive_body()` が一括で行っている処理のうち、
-   [新-7] と [新-10] に相当する部分を、途中で止められる API として切り出す。
-   ここでは BLOB file 書き込みや RDMA 経路への接続はまだ行わない。
+   既存 TCP 経路の `message_log_entries::receive_body()` は変更しない。
+   `receive_body()` は、現在の TCP / socket stream 用 wire format を一括で読む責務に残す。
+   RDMA 用の途中状態は `message_log_entries` に持たせず、RDMA streaming receiver 側に持たせる。
 
-   - message body 先頭の `epoch_id` と `entry_count` を読む。
-   - 各 `message_log_entries::entry` について、現行 replication wire format で
-     BLOB 本体より前に置かれている
+   現行 replication wire format では、BLOB data は message 末尾にまとめて置かれるのではなく、
+   BLOB を持つ entry の直後に置かれる。
+
+   ```text
+   entry fixed fields
+   blob_count
+   blob_id + blob_size + blob_bytes
+   next entry fixed fields
+   ...
+   operation_flags
+   ```
+
+   そのため、「全 entry の固定部を先に読んでから全 BLOB を読む」形の
+   `message_log_entries` API は追加しない。
+   RDMA receiver は、entry ごとに固定部、BLOB header、BLOB bytes を順番に消費し、
+   BLOB file を作成し終えたあとで完成済み entry として `message_log_entries` に追加する。
+
+   - message body 先頭の `epoch_id` と `entry_count` を incremental に読む状態を用意する。
+   - 1 つの `message_log_entries::entry` について、
      `entry_type`、`storage_id`、`key`、`value`、
-     `write_version.major`、`write_version.minor`、`blob_count` までを読む。
-   - BLOB 付き entry では、`blob_count` と BLOB 受信予定情報だけを記録し、
-     BLOB 本体はまだ読まない。
-   - BLOB なし message については、`operation_flags` まで読めることを確認する。
+     `write_version.major`、`write_version.minor`、`blob_count` までを
+     incremental に読む状態を用意する。
+   - BLOB なし entry では、その時点で `message_log_entries` に entry を追加できることを確認する。
+   - BLOB 付き entry では、`blob_count` と BLOB 受信予定情報を receiver 状態に保持し、
+     entry は BLOB file の書き込み完了後に `message_log_entries` へ追加する。
+   - `operation_flags` は全 entry と全 BLOB を読み終えたあとに読む。
    - TCP 既存経路の `receive_body()` は壊さない。
 
 2. BLOB header / BLOB bytes 受信用の状態と file 書き込み処理を追加する。
@@ -489,6 +507,8 @@ RDMA payload に再利用しているため、小さい BLOB では動く。
 
    この receiver は、渡された byte 列内で message が完成するたびに
    完成した `message_log_entries` を取り出せるようにする。
+   完成した `message_log_entries` は `receive_body()` を通さず、
+   receiver が `add_normal_entry()` / `add_normal_with_blob()` などを使って直接構築する。
    同じ byte 列に未消費 byte が残っている場合は、その byte 列を次の message の
    先頭として続けて処理できるようにする。
    ここでは BLOB なし message、BLOB 付き message、分割 BLOB、複数 message 同梱を
