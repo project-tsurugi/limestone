@@ -7,12 +7,16 @@
 
 namespace limestone::replication {
 
-using limestone::internal::blob_file_resolver;    
 using limestone::api::datastore;
 using limestone::api::blob_id_type;
 
-// TODO socket_ioから、blob_sokcet_ioを派生するのはソースコードの修正を少なくするためで、
-// 本当は、socket_ioクラスにblob_socket_ioの機能を組み込むべき。
+/**
+ * @brief socket_io extension that can send and receive BLOB payloads on the TCP path.
+ *
+ * TCP replication still deserializes LOG_ENTRY messages via
+ * replication_message::receive() / message_log_entries::receive_body(), so BLOB
+ * payload handling remains here.
+ */
 class blob_socket_io : public socket_io {
 public:
     static constexpr std::size_t blob_buffer_size = 64UL * 1024UL;

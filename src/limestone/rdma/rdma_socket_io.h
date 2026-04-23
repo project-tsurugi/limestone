@@ -38,8 +38,9 @@ using limestone::api::blob_id_type;
  * Overrides send_blob() to read the blob file in chunks and transmit each chunk
  * directly via rdma_send_stream_base::send_with_writer(), avoiding full in-memory buffering.
  *
- * receive_blob() is not supported on this class (FATAL if called); RDMA receive
- * uses blob_socket_io in string mode instead.
+ * receive_blob() is not supported on this class (FATAL if called). RDMA receive
+ * is handled by rdma_log_entries_receiver / rdma_log_entries_parser, not by
+ * socket_io-style deserialization.
  *
  * TODO: For very large BLOBs the send path still buffers the non-blob portion of
  * the message in the inherited socket_io output stream before flushing.  The blob
