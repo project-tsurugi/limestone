@@ -60,7 +60,8 @@ std::uint64_t decode_uint64(std::string_view bytes) noexcept {
     std::uint32_t high = 0;
     std::uint32_t low = 0;
     std::memcpy(&high, bytes.data(), sizeof(high));
-    std::memcpy(&low, std::next(bytes.data(), static_cast<std::ptrdiff_t>(sizeof(high))), sizeof(low));
+    auto const low_view = bytes.substr(sizeof(high), sizeof(low));
+    std::memcpy(&low, low_view.data(), sizeof(low));
     return (static_cast<std::uint64_t>(ntohl(high)) << 32U) | static_cast<std::uint64_t>(ntohl(low));
 }
 
