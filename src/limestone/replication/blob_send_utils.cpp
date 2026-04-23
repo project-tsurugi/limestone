@@ -3,6 +3,7 @@
 #include <cerrno>
 #include <cstdio>
 #include <cstring>
+#include <iterator>
 #include <limits>
 
 #include <boost/filesystem.hpp>
@@ -69,11 +70,13 @@ void safe_close_blob_file(FILE* fp, char const* failure_message_prefix) {
 std::size_t read_blob_chunk(
         FILE* fp,
         boost::filesystem::path const& path,
-        char* buffer,
+        std::uint8_t* buffer,
         std::size_t length) {
     std::size_t total_read = 0;
     while (total_read < length) {
-        std::size_t r = std::fread(buffer + total_read, 1, length - total_read, fp);
+        using buffer_offset_type = std::iterator_traits<std::uint8_t*>::difference_type;
+        auto const offset = static_cast<buffer_offset_type>(total_read);
+        std::size_t r = std::fread(std::next(buffer, offset), 1, length - total_read, fp);
         if (r == 0) {
             int ec = errno;
             if (ec == EINTR) {

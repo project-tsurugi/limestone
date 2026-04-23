@@ -99,7 +99,7 @@ TEST_F(blob_send_utils_test, read_blob_chunk_reads_exact_bytes) {
     opened_blob_file opened = open_blob_file_for_send(*datastore_, blob_id);
     ASSERT_NE(opened.fp, nullptr);
 
-    std::vector<char> buffer(6);
+    std::vector<std::uint8_t> buffer(6);
     std::size_t bytes_read = read_blob_chunk(
         opened.fp, opened.path, buffer.data(), buffer.size());
     EXPECT_EQ(bytes_read, buffer.size());
@@ -116,7 +116,7 @@ TEST_F(blob_send_utils_test, read_blob_chunk_throws_on_unexpected_eof) {
     opened_blob_file opened = open_blob_file_for_send(*datastore_, blob_id);
     ASSERT_NE(opened.fp, nullptr);
 
-    std::vector<char> buffer(content.size() + 1);
+    std::vector<std::uint8_t> buffer(content.size() + 1);
     EXPECT_THROW({
         [[maybe_unused]] std::size_t bytes_read =
             read_blob_chunk(opened.fp, opened.path, buffer.data(), buffer.size());

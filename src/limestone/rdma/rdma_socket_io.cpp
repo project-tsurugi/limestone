@@ -18,7 +18,7 @@
 
 #include <algorithm>
 #include <array>
-#include <cstring>
+#include <iterator>
 #include <vector>
 
 #include "replication/blob_send_utils.h"
@@ -94,7 +94,7 @@ rdma_send_stream_base::buffer_fill_result rdma_socket_io::fill_blob_header_and_f
     if (encoded.size() != blob_header_size) {
         return {false, "encoded blob header size mismatch"};
     }
-    std::memcpy(buffer, encoded.data(), encoded.size());
+    std::copy(encoded.begin(), encoded.end(), buffer);
     auto const payload_capacity = capacity - blob_header_size;
     if (payload_capacity > 0U) {
         // read_blob_chunk() returns only after reading the requested length;
@@ -102,7 +102,7 @@ rdma_send_stream_base::buffer_fill_result rdma_socket_io::fill_blob_header_and_f
         [[maybe_unused]] auto const bytes_read = read_blob_chunk(
             fp,
             path,
-            reinterpret_cast<char*>(buffer + blob_header_size),
+            std::next(buffer, blob_header_size),
             payload_capacity);
     }
     return {true, ""};
@@ -133,7 +133,7 @@ rdma_send_stream_base::buffer_fill_result rdma_socket_io::fill_blob_data_chunk(
     // read_blob_chunk() returns only after reading the requested length;
     // otherwise it throws, so bytes_read is intentionally not used here.
     [[maybe_unused]] auto const bytes_read =
-        read_blob_chunk(fp, path, reinterpret_cast<char*>(buffer), capacity);
+        read_blob_chunk(fp, path, buffer, capacity);
     return {true, ""};
 }
 

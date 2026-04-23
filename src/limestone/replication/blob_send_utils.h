@@ -51,7 +51,7 @@ void safe_close_blob_file(FILE* fp, char const* failure_message_prefix);
 [[nodiscard]] std::size_t read_blob_chunk(
     FILE* fp,
     boost::filesystem::path const& path,
-    char* buffer,
+    std::uint8_t* buffer,
     std::size_t length);
 
 } // namespace limestone::replication
