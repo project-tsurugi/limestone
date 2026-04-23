@@ -10,6 +10,7 @@
 
 #include "datastore_impl.h"
 #include "limestone_exception_helper.h"
+#include "message_log_entries_wire_codec.h"
 #include "primitive_wire_codec.h"
 
 namespace limestone::replication {
@@ -50,7 +51,7 @@ std::size_t rdma_log_entries_parser::consume(std::string_view bytes) {
                     return offset;
                 }
                 current_entry_ = message_log_entries::entry{};
-                current_entry_.type = static_cast<log_entry::entry_type>(value);
+                current_entry_.type = message_log_entries_wire_codec::decode_entry_type(value);
                 state_ = parse_state::storage_id;
                 break;
             }
@@ -91,7 +92,8 @@ std::size_t rdma_log_entries_parser::consume(std::string_view bytes) {
                 if (!read_uint64(bytes, offset, minor)) {
                     return offset;
                 }
-                current_entry_.write_version = write_version_type{write_version_major_, minor};
+                current_entry_.write_version =
+                        message_log_entries_wire_codec::make_write_version(write_version_major_, minor);
                 state_ = parse_state::blob_count;
                 break;
             }
@@ -342,9 +344,7 @@ void rdma_log_entries_parser::add_current_entry() {
 }
 
 void rdma_log_entries_parser::apply_operation_flags(std::uint8_t flags) {
-    message_->set_session_begin_flag((flags & message_log_entries::SESSION_BEGIN_FLAG) != 0);
-    message_->set_session_end_flag((flags & message_log_entries::SESSION_END_FLAG) != 0);
-    message_->set_flush_flag((flags & message_log_entries::FLUSH_FLAG) != 0);
+    message_log_entries_wire_codec::apply_operation_flags(*message_, flags);
 }
 
 void rdma_log_entries_parser::open_current_blob_file() {

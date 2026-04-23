@@ -701,17 +701,19 @@ string length / string bytes は `uint32` length + raw bytes の組み合わせ�
 
 ### 5. LOG_ENTRY wire format codec を切り出す
 
-`message_log_entries::send_body()` / `receive_body()` と
-`rdma_log_entries_parser` に重複している LOG_ENTRY wire format の知識を整理する。
+対応済み。`message_log_entries::send_body()` / `receive_body()` と
+`rdma_log_entries_parser` に重複していた LOG_ENTRY wire format の知識を
+`message_log_entries_wire_codec` に切り出した。
 
-- `epoch_id`。
-- `entry_count`。
-- entry fields の順序。
+- `epoch_id` と `entry_count` の header field。
+- entry fixed fields の順序。
 - `blob_count`。
 - `operation_flags`。
+- entry type / write version / operation flags の decode helper。
 
-primitive wire codec を先に用意し、その上で `message_log_entries_wire_codec`
-のような共通 helper へ整理する。
+RDMA 側の incremental parser は frame 境界をまたぐ状態管理を持つため、
+field の読み進め自体は parser に残し、decode / model 反映の共通部分を
+codec helper に寄せる。
 
 ### 6. I/O クラスの命名と責務整理
 
