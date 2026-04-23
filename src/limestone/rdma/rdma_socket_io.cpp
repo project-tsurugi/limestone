@@ -21,7 +21,7 @@
 #include <iterator>
 #include <vector>
 
-#include "replication/blob_send_utils.h"
+#include "replication/opened_blob_file.h"
 #include "limestone_exception_helper.h"
 
 namespace limestone::replication {
@@ -33,13 +33,12 @@ rdma_socket_io::rdma_socket_io(rdma_send_stream_base& rdma_stream, datastore& ds
 {}
 
 void rdma_socket_io::send_blob(blob_id_type blob_id) {
-    auto opened = open_blob_file_for_send(datastore_, blob_id);
-    auto remaining = opened.size;
+    auto opened = opened_blob_file::open_for_send(datastore_, blob_id);
+    auto remaining = opened.size();
 
     push_staged_bytes();
-    send_blob_header_and_first_chunk(blob_id, opened.fp, opened.path, remaining);
-    send_blob_data(opened.fp, opened.path, remaining);
-    safe_close_blob_file(opened.fp, "fclose failed for blob file");
+    send_blob_header_and_first_chunk(blob_id, opened, remaining);
+    send_blob_data(opened, remaining);
 }
 
 void rdma_socket_io::push_staged_bytes() {
@@ -58,16 +57,15 @@ void rdma_socket_io::push_staged_bytes() {
 
 void rdma_socket_io::send_blob_header_and_first_chunk(
         blob_id_type blob_id,
-        FILE* fp,
-        boost::filesystem::path const& path,
+        opened_blob_file& blob,
         std::uint32_t& remaining) {
     constexpr std::size_t blob_header_size = sizeof(std::uint64_t) + sizeof(std::uint32_t);
     auto const blob_size = remaining;
     // The writer callback receives the RDMA send buffer allocated by rdma-comm-lib.
     auto result = rdma_stream_.send_with_writer(
         blob_header_size + static_cast<std::size_t>(blob_size),
-        [this, blob_id, blob_size, fp, &path](std::uint8_t* buffer, std::size_t capacity) {
-            return fill_blob_header_and_first_chunk(blob_id, blob_size, fp, path, buffer, capacity);
+        [this, blob_id, blob_size, &blob](std::uint8_t* buffer, std::size_t capacity) {
+            return fill_blob_header_and_first_chunk(blob_id, blob_size, blob, buffer, capacity);
         });
     if (! result.success || result.bytes_written < blob_header_size) {
         LOG_AND_THROW_IO_EXCEPTION(
@@ -79,8 +77,7 @@ void rdma_socket_io::send_blob_header_and_first_chunk(
 rdma_send_stream_base::buffer_fill_result rdma_socket_io::fill_blob_header_and_first_chunk(
         blob_id_type blob_id,
         std::uint32_t blob_size,
-        FILE* fp,
-        boost::filesystem::path const& path,
+        opened_blob_file& blob,
         std::uint8_t* buffer,
         std::size_t capacity) {
     constexpr std::size_t blob_header_size = sizeof(std::uint64_t) + sizeof(std::uint32_t);
@@ -97,25 +94,22 @@ rdma_send_stream_base::buffer_fill_result rdma_socket_io::fill_blob_header_and_f
     std::copy(encoded.begin(), encoded.end(), buffer);
     auto const payload_capacity = capacity - blob_header_size;
     if (payload_capacity > 0U) {
-        // read_blob_chunk() returns only after reading the requested length;
+        // opened_blob_file::read_chunk() returns only after reading the requested length;
         // otherwise it throws, so bytes_read is intentionally not used here.
-        [[maybe_unused]] auto const bytes_read = read_blob_chunk(
-            fp,
-            path,
-            std::next(buffer, blob_header_size),
-            payload_capacity);
+        [[maybe_unused]] auto const bytes_read =
+            blob.read_chunk(std::next(buffer, blob_header_size), payload_capacity);
     }
     return {true, ""};
 }
 
 void rdma_socket_io::send_blob_data(
-        FILE* fp, boost::filesystem::path const& path, std::uint32_t remaining) {
+        opened_blob_file& blob, std::uint32_t remaining) {
     while (remaining > 0) {
         // The writer callback receives the RDMA send buffer allocated by rdma-comm-lib.
         auto result = rdma_stream_.send_with_writer(
             remaining,
-            [this, fp, &path](std::uint8_t* buffer, std::size_t capacity) {
-                return fill_blob_data_chunk(fp, path, buffer, capacity);
+            [this, &blob](std::uint8_t* buffer, std::size_t capacity) {
+                return fill_blob_data_chunk(blob, buffer, capacity);
             });
         if (! result.success || result.bytes_written == 0) {
             LOG_AND_THROW_IO_EXCEPTION(
@@ -126,14 +120,13 @@ void rdma_socket_io::send_blob_data(
 }
 
 rdma_send_stream_base::buffer_fill_result rdma_socket_io::fill_blob_data_chunk(
-        FILE* fp,
-        boost::filesystem::path const& path,
+        opened_blob_file& blob,
         std::uint8_t* buffer,
         std::size_t capacity) {
-    // read_blob_chunk() returns only after reading the requested length;
+    // opened_blob_file::read_chunk() returns only after reading the requested length;
     // otherwise it throws, so bytes_read is intentionally not used here.
     [[maybe_unused]] auto const bytes_read =
-        read_blob_chunk(fp, path, buffer, capacity);
+        blob.read_chunk(buffer, capacity);
     return {true, ""};
 }
 

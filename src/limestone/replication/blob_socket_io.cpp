@@ -8,7 +8,7 @@
 #include <stdexcept>
 #include <vector>
 #include <cstdio>
-#include "blob_send_utils.h"
+#include "opened_blob_file.h"
 #include "datastore_impl.h"
 #include "limestone_exception_helper.h"
 
@@ -21,8 +21,8 @@ blob_socket_io::blob_socket_io(const std::string &initial, datastore &ds)
     : socket_io(initial), datastore_(ds) {}
 
 void blob_socket_io::send_blob(const blob_id_type blob_id) {
-    auto opened = open_blob_file_for_send(datastore_, blob_id);
-    auto remaining = opened.size;
+    auto opened = opened_blob_file::open_for_send(datastore_, blob_id);
+    auto remaining = opened.size();
 
     send_uint64(blob_id);
     send_uint32(remaining);
@@ -30,14 +30,13 @@ void blob_socket_io::send_blob(const blob_id_type blob_id) {
     std::vector<std::uint8_t> buffer(blob_buffer_size);
     while (remaining > 0) {
         std::size_t chunk = std::min(blob_buffer_size, static_cast<std::size_t>(remaining));
-        std::size_t total_read = read_blob_chunk(opened.fp, opened.path, buffer.data(), chunk);
+        std::size_t total_read = opened.read_chunk(buffer.data(), chunk);
         get_out_stream().write(
             reinterpret_cast<char const*>(buffer.data()),  // NOLINT(cppcoreguidelines-pro-type-reinterpret-cast)
             static_cast<std::streamsize>(total_read));
         remaining -= static_cast<uint32_t>(total_read);
     }
 
-    safe_close_blob_file(opened.fp, "fclose failed for blob file");
     flush();
 }
 

@@ -628,17 +628,13 @@ RDMA payload に再利用しているため、小さい BLOB では動く。
 - helper 内で例外化する方針を維持するか、
   error を返す helper に寄せるかも含めて整理する。
 
-### blob_send_utils の API / クラス設計見直し
+### opened_blob_file の API / クラス設計見直し
 
-- `read_blob_chunk()` の `path` 引数は実際には診断用途だけで使われており、
-  シグネチャから責務が直感しづらい。
-- `open_blob_file_for_send()` / `read_blob_chunk()` / `safe_close_blob_file()` が
-  `FILE*` と `path` の寿命管理を呼び出し側へ漏らしているため、
-  小さい所有クラスに閉じ込めたほうが見通しが良い可能性がある。
-- `opened_blob_file` を move-only な RAII クラスに置き換え、
-  open / read / close をクラスメソッドへ寄せる案を別タスクで検討する。
-- この見直しは進行中の他修正とは分けて扱い、
-  動作変更を伴わないリファクタリングとして切り出す。
+- `blob_send_utils` は `opened_blob_file` にリネームし、file 名と class 名を合わせる。
+- `open_blob_file_for_send()` は `opened_blob_file::open_for_send()` に寄せ、
+  open / read / close を move-only な RAII クラスへ閉じ込める。
+- 呼び出し側は `FILE*` に直接触れず、`path()` / `size()` / `read_chunk()` を使う。
+- この見直しは動作変更を伴わないリファクタリングとして切り出す。
 
 ## 積み残し事項の対応方針
 
@@ -678,14 +674,14 @@ partial file が残っても message が完成せず、WAL entry が反映され
 この作業は BLOB streaming の I/O failure handling に直結するため、
 codec 共通化より前に扱う。
 
-### 3. blob_send_utils の API / クラス設計を見直す
+### 3. opened_blob_file の API / クラス設計を見直す
 
 エラー処理方針を整理した後で、`opened_blob_file` 周辺を見直す。
 
-- `FILE*` と `path` の寿命管理が呼び出し側に漏れている点を整理する。
-- `opened_blob_file` を move-only RAII クラスにするか検討する。
-- `open_blob_file_for_send()` / `read_blob_chunk()` / `safe_close_blob_file()` を
-  小さい所有クラスのメソッドへ寄せられるか確認する。
+- `blob_send_utils` を `opened_blob_file` にリネームし、file 名と class 名を合わせる。
+- `open_blob_file_for_send()` を `opened_blob_file::open_for_send()` に移し、
+  open / read / close を move-only RAII クラスへ閉じ込める。
+- `FILE*` accessor は公開せず、送信側は `read_chunk()` だけを使う。
 
 これは動作変更を伴わないリファクタリングとして、エラー処理整理とは
 別の commit に分ける。
