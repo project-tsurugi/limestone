@@ -17,6 +17,7 @@
 #include "log_channel_handler.h"
 
 #include <string>
+#include <string_view>
 #include <vector>
 
 #include <glog/logging.h>
@@ -27,7 +28,6 @@
 #include "message_log_entries.h"
 #include "validation_result.h"
 #include "socket_io.h"
-#include "blob_socket_io.h"
 #include "logging_helper.h"
 
 namespace limestone::replication {
@@ -79,6 +79,7 @@ void log_channel_handler::handle_rdma_data_event(
                       << static_cast<int>(rdma_frame_current_version)
                       << " got " << static_cast<int>(header.version);
         pending_rdma_frames_.clear();
+        rdma_receiver_.reset();
         TRACE_ABORT << "version mismatch";
         return;
     }
@@ -87,6 +88,7 @@ void log_channel_handler::handle_rdma_data_event(
         LOG_LP(ERROR) << "RDMA payload size mismatch: header=" << header.payload_size
                       << " actual=" << event.payload.size();
         pending_rdma_frames_.clear();
+        rdma_receiver_.reset();
         TRACE_ABORT << "payload size mismatch";
         return;
     }
@@ -115,37 +117,9 @@ void log_channel_handler::process_pending_rdma_messages_locked() {
             return;
         }
 
-        std::size_t message_end_index = pending_rdma_frames_.size();
-        std::size_t total_size = 0;
-        for (std::size_t idx = 0; idx < pending_rdma_frames_.size(); ++idx) {
-            auto const& frame = pending_rdma_frames_[idx];
-            total_size += frame.payload.size();
-            bool const is_partial =
-                (frame.header.flags &
-                 rdma_frame_flag_partial_payload) != 0;
-            if (! is_partial) {
-                message_end_index = idx;
-                break;
-            }
-        }
-        if (message_end_index == pending_rdma_frames_.size()) {
-            // No complete message yet (all frames are partial so far).
-            return;
-        }
-
-        std::vector<std::uint8_t> aggregated;
-        aggregated.reserve(total_size);
-        for (std::size_t idx = 0; idx <= message_end_index; ++idx) {
-            auto const& frame = pending_rdma_frames_[idx];
-            aggregated.insert(aggregated.end(), frame.payload.begin(), frame.payload.end());
-        }
-        auto last_header = pending_rdma_frames_[message_end_index].header;
-        pending_rdma_frames_.erase(
-            pending_rdma_frames_.begin(),
-            pending_rdma_frames_.begin()
-                + static_cast<std::ptrdiff_t>(message_end_index + 1));
-
-        process_rdma_message_locked(aggregated, last_header);
+        auto event = std::move(pending_rdma_frames_.front());
+        pending_rdma_frames_.erase(pending_rdma_frames_.begin());
+        process_rdma_message_locked(event.payload, event.header);
     }
 }
 
@@ -154,36 +128,24 @@ void log_channel_handler::process_rdma_message_locked(
     rdma_frame_header const& last_header) {
     TRACE_START << "frames_for_ack_seq=" << last_header.sequence_number
                 << " payload_size=" << payload.size();
-    // TODO: avoid extra copy by feeding payload directly without socket_io.
-    // TODO: large BLOBs cause full in-memory expansion of the aggregated buffer here.
-    //       Resolve by streaming the RDMA payload without full aggregation.
-    std::string payload_string(payload.begin(), payload.end());
-    blob_socket_io io(payload_string, get_server().get_datastore());
+    if (!rdma_receiver_) {
+        rdma_receiver_ = std::make_unique<rdma_log_entries_receiver>(get_server().get_datastore());
+    }
 
-    // A single RDMA frame may carry multiple serialized messages (batched for efficiency).
-    // Loop until all messages in the payload have been processed.
-    while (io.has_unread_data()) {
-        auto message = replication_message::receive(io);
-        if (! message) {
-            LOG_LP(ERROR) << "RDMA failed to deserialize replication_message.";
-            TRACE_ABORT << "deserialize failed";
-            return;
-        }
-        if (message->get_message_type_id() != message_type_id::LOG_ENTRY) {
-            LOG_LP(ERROR) << "RDMA unexpected message type: "
-                          << static_cast<int>(message->get_message_type_id());
-            TRACE_ABORT << "unexpected message type id=" << static_cast<int>(message->get_message_type_id());
-            return;
-        }
+    std::string_view bytes{
+        reinterpret_cast<char const*>(payload.data()),  // NOLINT(cppcoreguidelines-pro-type-reinterpret-cast)
+        payload.size()};
+    std::size_t consumed = rdma_receiver_->consume(bytes);
+    if (consumed != payload.size()) {
+        LOG_LP(ERROR) << "RDMA receiver left unconsumed payload bytes: consumed="
+                      << consumed << " size=" << payload.size();
+        rdma_receiver_.reset();
+        TRACE_ABORT << "unconsumed payload bytes";
+        return;
+    }
 
-        auto* log_entries = dynamic_cast<message_log_entries*>(message.get());
-        if (! log_entries) {
-            LOG_LP(ERROR) << "RDMA LOG_ENTRY cast failed.";
-            TRACE_ABORT << "cast failed";
-            return;
-        }
-
-        // Apply entries but skip TCP ACK because this is the RDMA path.
+    while (rdma_receiver_->has_message()) {
+        auto log_entries = rdma_receiver_->take_message();
         auto resources = std::make_unique<log_channel_handler_resources>(get_socket_io(), *log_channel_, false);
         log_entries->post_receive(*resources);
     }
