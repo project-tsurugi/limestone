@@ -12,6 +12,7 @@
 
 #include <boost/filesystem.hpp>
 
+#include "datastore_impl.h"
 #include "limestone_exception_helper.h"
 
 namespace limestone::replication {
@@ -364,8 +365,7 @@ void rdma_log_entries_parser::apply_operation_flags(std::uint8_t flags) {
 }
 
 void rdma_log_entries_parser::open_current_blob_file() {
-    auto blob_file = datastore_->get_blob_file(current_blob_id_);
-    auto& path = blob_file.path();
+    auto path = datastore_->get_impl()->resolve_blob_path(current_blob_id_);
     auto parent = path.parent_path();
 
     if (!boost::filesystem::exists(parent)) {

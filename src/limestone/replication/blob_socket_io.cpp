@@ -9,6 +9,7 @@
 #include <vector>
 #include <cstdio>
 #include "blob_send_utils.h"
+#include "datastore_impl.h"
 #include "limestone_exception_helper.h"
 
 namespace limestone::replication {
@@ -41,8 +42,7 @@ void blob_socket_io::send_blob(const blob_id_type blob_id) {
 blob_id_type blob_socket_io::receive_blob() {
     blob_id_type blob_id = receive_uint64();
     uint32_t remaining = receive_uint32();
-    auto blob_file = datastore_.get_blob_file(blob_id);
-    auto& path = blob_file.path();
+    auto path = datastore_.get_impl()->resolve_blob_path(blob_id);
     auto parent = path.parent_path();
 
     if (!boost::filesystem::exists(parent)) {

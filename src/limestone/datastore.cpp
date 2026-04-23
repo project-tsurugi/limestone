@@ -171,8 +171,8 @@ datastore::datastore(configuration const& conf) : location_(conf.data_location_)
         recover_max_parallelism_ = conf.recover_max_parallelism_;
         LOG(INFO) << "/:limestone:config:datastore setting the number of recover process thread = " << recover_max_parallelism_;
 
-        blob_file_resolver_ = std::make_unique<blob_file_resolver>(location_);
-        auto blob_root = blob_file_resolver_->get_blob_root();
+        impl_->initialize_blob_file_resolver(location_);
+        auto blob_root = impl_->blob_file_resolver().get_blob_root();
         const bool blob_root_exists = boost::filesystem::exists(blob_root, error);
         if (!blob_root_exists || error) {
             const bool result_mkdir = boost::filesystem::create_directories(blob_root, error);
@@ -330,7 +330,7 @@ void datastore::ready() {
     try {
         blob_id_type max_blob_id =
             std::max(create_snapshot_and_get_max_blob_id_with_wal_started_log(), compaction_catalog_->get_max_blob_id());
-        blob_file_garbage_collector_ = std::make_unique<blob_file_garbage_collector>(*blob_file_resolver_);
+        blob_file_garbage_collector_ = std::make_unique<blob_file_garbage_collector>(impl_->blob_file_resolver());
         blob_file_garbage_collector_->scan_blob_files(max_blob_id);
 
         boost::filesystem::path compacted_file = location_ / limestone::internal::compaction_catalog::get_compacted_filename();
@@ -602,7 +602,7 @@ backup& datastore::begin_backup() {
         auto tmp_files = get_files();
         
         // Use blob_file_scanner to add blob files to the backup target
-        blob_file_scanner scanner(blob_file_resolver_.get());
+        blob_file_scanner scanner(&impl_->blob_file_resolver());
         for (const auto& blob_file : scanner) {
             tmp_files.insert(blob_file);
         }
@@ -699,9 +699,9 @@ std::unique_ptr<backup_detail> datastore::begin_backup(backup_type btype) {  // 
             }
         }
         // Add blob files to the backup target
-        blob_file_scanner scanner(blob_file_resolver_.get());
+        blob_file_scanner scanner(&impl_->blob_file_resolver());
         // Use the parent of the blob root as the base for computing the relative path.
-        boost::filesystem::path backup_root = blob_file_resolver_->get_blob_root().parent_path();
+        boost::filesystem::path backup_root = impl_->blob_file_resolver().get_blob_root().parent_path();
         for (const auto& src : scanner) {
             entries.emplace_back(src, src.filename(), false, false);
         }
@@ -1006,7 +1006,10 @@ std::unique_ptr<blob_pool> datastore::acquire_blob_pool() {
 
     // Create a blob_pool_impl instance by passing the ID generator lambda and blob_file_resolver.
     // This approach allows flexible configuration and dependency injection for the blob pool.
-    auto pool = std::make_unique<limestone::internal::blob_pool_impl>(id_generator, *blob_file_resolver_, *this);
+    auto pool = std::make_unique<limestone::internal::blob_pool_impl>(
+            id_generator,
+            impl_->blob_file_resolver(),
+            *this);
     TRACE_END;
     return pool; // Return the constructed blob pool.
 }
@@ -1014,7 +1017,7 @@ std::unique_ptr<blob_pool> datastore::acquire_blob_pool() {
 blob_file datastore::get_blob_file(blob_id_type reference) {
     TRACE_START << "reference=" << reference;
     check_after_ready(static_cast<const char*>(__func__));
-    auto path = blob_file_resolver_->resolve_path(reference);
+    auto path = impl_->resolve_blob_path(reference);
     bool available = reference < next_blob_id_.load(std::memory_order_acquire);
     if (available) {
         try {

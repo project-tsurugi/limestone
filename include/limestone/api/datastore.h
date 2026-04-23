@@ -560,8 +560,6 @@ private:
     
     int epoch_write_counter = 0;
 
-    std::unique_ptr<limestone::internal::blob_file_resolver> blob_file_resolver_;
-
     std::atomic<std::uint64_t> next_blob_id_{0};
 
     std::set<blob_id_type> persistent_blob_ids_;
