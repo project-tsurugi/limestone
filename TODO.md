@@ -639,3 +639,91 @@ RDMA payload に再利用しているため、小さい BLOB では動く。
   open / read / close をクラスメソッドへ寄せる案を別タスクで検討する。
 - この見直しは進行中の他修正とは分けて扱い、
   動作変更を伴わないリファクタリングとして切り出す。
+
+## 積み残し事項の対応方針
+
+現時点で残っている作業は、テスト残件、BLOB 送信 helper の整理、
+wire codec の共通化、I/O クラスの責務整理に分けて扱う。
+
+### 1. TODO 6 の残り異常系 test を閉じる
+
+次の項目は対応済み、または既存 test で確認済みである。
+
+- BLOB chunk 欠落。
+- BLOB size 不一致。
+- duplicate frame または out-of-order frame。
+- 1 つの log entry に複数 BLOB が含まれるケース。
+- 1 session に複数の BLOB log entry が含まれるケース。
+
+残りは次の項目である。
+
+- 期待する blob byte 数を満たす前の切断または abort。
+- BLOB 受信中の transfer abort または connection close。
+
+`partial BLOB file の cleanup` については、cleanup しない仕様とする。
+未完成 BLOB file が残っても、それを参照する WAL entry は作成されないため、
+通常の BLOB GC で後から削除される。したがって test では cleanup 自体ではなく、
+partial file が残っても message が完成せず、WAL entry が反映されないことを確認する。
+
+### 2. blob_send_utils のエラー処理を整理する
+
+次に `read_blob_chunk()` のエラー処理を確認する。
+
+- `fread()` 失敗時の `errno` の扱い。
+- `feof()` / `ferror()` の判定順序。
+- `EINTR` を retry する必要があるか。
+- helper 内で `LOG_AND_THROW_IO_EXCEPTION` を使い続けるか、
+  error を返す helper に寄せるか。
+
+この作業は BLOB streaming の I/O failure handling に直結するため、
+codec 共通化より前に扱う。
+
+### 3. blob_send_utils の API / クラス設計を見直す
+
+エラー処理方針を整理した後で、`opened_blob_file` 周辺を見直す。
+
+- `FILE*` と `path` の寿命管理が呼び出し側に漏れている点を整理する。
+- `opened_blob_file` を move-only RAII クラスにするか検討する。
+- `open_blob_file_for_send()` / `read_blob_chunk()` / `safe_close_blob_file()` を
+  小さい所有クラスのメソッドへ寄せられるか確認する。
+
+これは動作変更を伴わないリファクタリングとして、エラー処理整理とは
+別の commit に分ける。
+
+### 4. primitive wire codec を切り出す
+
+`socket_io` の整数 encoding / decoding と RDMA 側の byte buffer encoding が
+重複しないよう、primitive wire codec を切り出す。
+
+- `uint8` / `uint32` / `uint64` の wire format helper。
+- 必要なら string length / string bytes helper。
+- `socket_io` と `rdma_socket_io` の双方から利用できる形にする。
+
+この作業は比較的小さく切り出せるため、LOG_ENTRY codec より先に行う。
+
+### 5. LOG_ENTRY wire format codec を切り出す
+
+`message_log_entries::send_body()` / `receive_body()` と
+`rdma_log_entries_parser` に重複している LOG_ENTRY wire format の知識を整理する。
+
+- `epoch_id`。
+- `entry_count`。
+- entry fields の順序。
+- `blob_count`。
+- `operation_flags`。
+
+primitive wire codec を先に用意し、その上で `message_log_entries_wire_codec`
+のような共通 helper へ整理する。
+
+### 6. I/O クラスの命名と責務整理
+
+最後に、`socket_io` / `blob_socket_io` / `rdma_socket_io` の名前と責務を整理する。
+
+`socket_io` は現状では socket 専用 I/O ではなく、replication message の
+serialize / deserialize 基盤として使われている。責務整理の影響範囲が広いため、
+BLOB streaming 修正や codec 共通化とは分け、最後に別タスクとして扱う。
+
+### 完了扱い
+
+`RDMA sender 初期化テストの不安定性調査` は対応済みのため、
+以降の積み残し対象から外す。

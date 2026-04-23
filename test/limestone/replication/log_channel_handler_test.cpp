@@ -877,6 +877,88 @@ TEST_F(log_channel_handler_test,
 }
 
 TEST_F(log_channel_handler_test,
+       handle_rdma_data_event_with_partial_blob_reset_does_not_write_pwal) {
+    auto ctx = make_rdma_handler_with_channel(base_location);
+    ASSERT_NE(ctx.handler, nullptr);
+    ASSERT_GE(ctx.read_fd, 0);
+    ASSERT_GE(ctx.write_fd, 0);
+    set_non_blocking(ctx.read_fd);
+
+    constexpr const char* sender_dir = "/tmp/replica_server_test_sender";
+    boost::filesystem::remove_all(sender_dir);
+    boost::filesystem::create_directories(sender_dir);
+    limestone::api::configuration sender_conf{};
+    sender_conf.set_data_location(sender_dir);
+    auto sender_ds = std::make_unique<limestone::api::datastore_test>(sender_conf);
+
+    constexpr blob_id_type blob_id = 59U;
+    std::string const blob_content(4096, 'c');
+    auto blob_path = sender_ds->get_blob_file(blob_id).path();
+    boost::filesystem::create_directories(blob_path.parent_path());
+    {
+        std::ofstream ofs(blob_path.string(), std::ios::binary);
+        ofs.write(
+            blob_content.data(),
+            static_cast<std::streamsize>(blob_content.size()));
+    }
+
+    capturing_rdma_send_stream stream{};
+    stream.max_writer_capacity_ = 256U;
+    rdma_socket_io sender_io(stream, *sender_ds);
+    message_log_entries entries(epoch_id_type{8});
+    entries.set_session_begin_flag(true);
+    entries.set_session_end_flag(true);
+    entries.add_normal_with_blob(1U, "abort-key", "abort-value",
+        write_version_type{epoch_id_type{8}, 0U}, {blob_id});
+
+    replication_message::send(sender_io, entries);
+    auto remaining = sender_io.get_out_string();
+    if (! remaining.empty()) {
+        std::vector<std::uint8_t> remaining_bytes(
+            remaining.begin(), remaining.end());
+        auto result = stream.send_all_bytes(
+            remaining_bytes, 0, remaining_bytes.size());
+        ASSERT_TRUE(result.success);
+    }
+    ASSERT_GE(stream.calls_.size(), 2U);
+
+    auto partial_blob_path = ctx.server->get_datastore().get_blob_file(blob_id).path();
+    std::size_t next_call = 0;
+    while (next_call + 1 < stream.calls_.size()
+            && !boost::filesystem::exists(partial_blob_path)) {
+        ctx.handler->handle_rdma_data_event(
+            make_rdma_event_from_payload(
+                stream.calls_[next_call],
+                static_cast<std::uint16_t>(next_call)));
+        ++next_call;
+    }
+    EXPECT_TRUE(boost::filesystem::exists(partial_blob_path));
+
+    // A bad frame after the partial BLOB body models transfer abort/connection
+    // close from the handler's point of view: the streaming receiver state is
+    // discarded, but the partial BLOB file may remain for later GC.  The WAL
+    // entry must not be written because the BLOB message never completed.
+    ASSERT_LT(next_call, stream.calls_.size());
+    auto bad_event = make_rdma_event_from_payload(
+        stream.calls_[next_call], static_cast<std::uint16_t>(next_call));
+    bad_event.header.version = static_cast<std::uint8_t>(rdma_frame_current_version + 1U);
+    ctx.handler->handle_rdma_data_event(bad_event);
+
+    auto replica_pwal_path = boost::filesystem::path(base_location) / "pwal_0000";
+    if (boost::filesystem::exists(replica_pwal_path)) {
+        auto replica_entries = read_log_file(base_location, "pwal_0000");
+        EXPECT_TRUE(replica_entries.empty())
+            << "PWAL must stay empty after aborting a partial BLOB message";
+    }
+    EXPECT_TRUE(boost::filesystem::exists(partial_blob_path));
+
+    sender_ds.reset();
+    boost::filesystem::remove_all(sender_dir);
+    ::close(ctx.read_fd);
+    ::close(ctx.write_fd);
+}
+
+TEST_F(log_channel_handler_test,
        rdma_socket_io_send_blob_with_empty_staged_buffer_sends_blob_only) {
     constexpr const char* sender_dir = "/tmp/replica_server_test_sender";
     boost::filesystem::remove_all(sender_dir);
