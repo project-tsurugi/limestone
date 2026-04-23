@@ -1,6 +1,7 @@
 #include "replication/rdma_log_entries_parser.h"
 
 #include <boost/filesystem.hpp>
+#include <arpa/inet.h>
 #include <fstream>
 #include <iterator>
 #include <string>
@@ -531,6 +532,98 @@ TEST(rdma_log_entries_parser_test, partial_blob_body_keeps_reading_until_remaini
     ASSERT_EQ(received->get_entries().size(), 1u);
     EXPECT_EQ(received->get_entries()[0].blob_ids, std::vector<limestone::api::blob_id_type>{blob_id});
     EXPECT_EQ(read_file(receiver_blob_path), blob_body);
+
+    boost::filesystem::remove_all(sender_location);
+    boost::filesystem::remove_all(receiver_location);
+}
+
+TEST(rdma_log_entries_parser_test, incomplete_blob_body_keeps_partial_file_and_message_incomplete) {
+    // Simulate a transfer that stops before all BLOB body bytes arrive.  The
+    // parser may leave the partially written BLOB file on disk, but the
+    // LOG_ENTRY message must stay incomplete so no WAL entry can reference it.
+    static constexpr const char* sender_location = "/tmp/rdma_log_entries_parser_incomplete_sender_test";
+    static constexpr const char* receiver_location = "/tmp/rdma_log_entries_parser_incomplete_receiver_test";
+    boost::filesystem::remove_all(sender_location);
+    boost::filesystem::remove_all(receiver_location);
+
+    limestone::api::configuration sender_conf{};
+    sender_conf.set_data_location(sender_location);
+    limestone::api::datastore_test sender_datastore{sender_conf};
+
+    limestone::api::configuration receiver_conf{};
+    receiver_conf.set_data_location(receiver_location);
+    limestone::api::datastore_test receiver_datastore{receiver_conf};
+
+    constexpr limestone::api::blob_id_type blob_id = 6001;
+    std::string const blob_body = "incomplete-blob-body";
+    auto sender_blob_path = sender_datastore.get_blob_file(blob_id).path();
+    boost::filesystem::create_directories(sender_blob_path.parent_path());
+    std::ofstream(sender_blob_path.string(), std::ios::binary) << blob_body;
+
+    message_log_entries original{905};
+    original.add_normal_with_blob(3, "key", "value", {4, 5}, {blob_id});
+
+    blob_socket_io io("", sender_datastore);
+    original.send_body(io);
+    std::string body = io.get_out_string();
+
+    auto receiver_blob_path = receiver_datastore.get_blob_file(blob_id).path();
+    auto const truncated_size = body.size() - 3;
+
+    rdma_log_entries_parser parser{receiver_datastore};
+    EXPECT_EQ(parser.consume(std::string_view{body}.substr(0, truncated_size)), truncated_size);
+    EXPECT_FALSE(parser.complete());
+    EXPECT_EQ(parser.get_status(), rdma_log_entries_parser::status::reading);
+    EXPECT_TRUE(boost::filesystem::exists(receiver_blob_path));
+    EXPECT_THROW([[maybe_unused]] auto msg = parser.take_message(), std::logic_error);
+
+    boost::filesystem::remove_all(sender_location);
+    boost::filesystem::remove_all(receiver_location);
+}
+
+TEST(rdma_log_entries_parser_test, blob_size_mismatch_larger_than_payload_leaves_partial_file_and_incomplete_message) {
+    // Corrupt the encoded BLOB size so it is larger than the bytes actually
+    // present in the payload.  This models a size mismatch / missing trailing
+    // chunk: the parser must keep waiting instead of completing the message
+    // with a reference to an incomplete BLOB.
+    static constexpr const char* sender_location = "/tmp/rdma_log_entries_parser_size_mismatch_sender_test";
+    static constexpr const char* receiver_location = "/tmp/rdma_log_entries_parser_size_mismatch_receiver_test";
+    boost::filesystem::remove_all(sender_location);
+    boost::filesystem::remove_all(receiver_location);
+
+    limestone::api::configuration sender_conf{};
+    sender_conf.set_data_location(sender_location);
+    limestone::api::datastore_test sender_datastore{sender_conf};
+
+    limestone::api::configuration receiver_conf{};
+    receiver_conf.set_data_location(receiver_location);
+    limestone::api::datastore_test receiver_datastore{receiver_conf};
+
+    constexpr limestone::api::blob_id_type blob_id = 6002;
+    std::string const blob_body = "blob-size-mismatch";
+    auto sender_blob_path = sender_datastore.get_blob_file(blob_id).path();
+    boost::filesystem::create_directories(sender_blob_path.parent_path());
+    std::ofstream(sender_blob_path.string(), std::ios::binary) << blob_body;
+
+    message_log_entries original{906};
+    original.add_normal_with_blob(3, "key", "value", {4, 5}, {blob_id});
+
+    blob_socket_io io("", sender_datastore);
+    original.send_body(io);
+    std::string body = io.get_out_string();
+
+    auto const blob_size_offset = body.size() - 1 - blob_body.size() - sizeof(std::uint32_t);
+    auto encoded_size = htonl(static_cast<std::uint32_t>(blob_body.size() + 5));
+    std::memcpy(body.data() + static_cast<std::ptrdiff_t>(blob_size_offset), &encoded_size, sizeof(encoded_size));
+
+    auto receiver_blob_path = receiver_datastore.get_blob_file(blob_id).path();
+
+    rdma_log_entries_parser parser{receiver_datastore};
+    EXPECT_EQ(parser.consume(body), body.size());
+    EXPECT_FALSE(parser.complete());
+    EXPECT_EQ(parser.get_status(), rdma_log_entries_parser::status::reading);
+    EXPECT_TRUE(boost::filesystem::exists(receiver_blob_path));
+    EXPECT_THROW([[maybe_unused]] auto msg = parser.take_message(), std::logic_error);
 
     boost::filesystem::remove_all(sender_location);
     boost::filesystem::remove_all(receiver_location);
