@@ -690,7 +690,9 @@ TEST_F(log_channel_handler_test, handle_rdma_data_event_with_blob_entry_writes_b
     boost::filesystem::create_directories(blob_path.parent_path());
     {
         std::ofstream ofs(blob_path.string(), std::ios::binary);
-        ofs << blob_content;
+        ofs.write(
+            blob_content.data(),
+            static_cast<std::streamsize>(blob_content.size()));
     }
 
     // Serialise the message including the blob data using blob_socket_io (string mode).
@@ -783,6 +785,86 @@ TEST_F(log_channel_handler_test,
     auto received_path = server_ds.get_blob_file(blob_id).path();
     ASSERT_TRUE(boost::filesystem::exists(received_path))
         << "Blob file not created at: " << received_path;
+    std::ifstream ifs(received_path.string(), std::ios::binary);
+    std::ostringstream oss;
+    oss << ifs.rdbuf();
+    EXPECT_EQ(oss.str(), blob_content);
+
+    sender_ds.reset();
+    boost::filesystem::remove_all(sender_dir);
+    ::close(ctx.read_fd);
+    ::close(ctx.write_fd);
+}
+
+TEST_F(log_channel_handler_test,
+       handle_rdma_data_event_with_partial_blob_does_not_write_pwal_until_complete) {
+    auto ctx = make_rdma_handler_with_channel(base_location);
+    ASSERT_NE(ctx.handler, nullptr);
+    ASSERT_GE(ctx.read_fd, 0);
+    ASSERT_GE(ctx.write_fd, 0);
+    set_non_blocking(ctx.read_fd);
+
+    constexpr const char* sender_dir = "/tmp/replica_server_test_sender";
+    boost::filesystem::remove_all(sender_dir);
+    boost::filesystem::create_directories(sender_dir);
+    limestone::api::configuration sender_conf{};
+    sender_conf.set_data_location(sender_dir);
+    auto sender_ds = std::make_unique<limestone::api::datastore_test>(sender_conf);
+
+    constexpr blob_id_type blob_id = 58U;
+    std::string const blob_content(4096, 'b');
+    auto blob_path = sender_ds->get_blob_file(blob_id).path();
+    boost::filesystem::create_directories(blob_path.parent_path());
+    {
+        std::ofstream ofs(blob_path.string(), std::ios::binary);
+        ofs << blob_content;
+    }
+
+    capturing_rdma_send_stream stream{};
+    stream.max_writer_capacity_ = 256U;
+    rdma_socket_io sender_io(stream, *sender_ds);
+    message_log_entries entries(epoch_id_type{7});
+    entries.set_session_begin_flag(true);
+    entries.set_session_end_flag(true);
+    entries.add_normal_with_blob(1U, "bk", "bv",
+        write_version_type{epoch_id_type{7}, 0U}, {blob_id});
+
+    replication_message::send(sender_io, entries);
+    auto remaining = sender_io.get_out_string();
+    if (! remaining.empty()) {
+        std::vector<std::uint8_t> remaining_bytes(
+            remaining.begin(), remaining.end());
+        auto result = stream.send_all_bytes(
+            remaining_bytes, 0, remaining_bytes.size());
+        ASSERT_TRUE(result.success);
+    }
+
+    ASSERT_GE(stream.calls_.size(), 2U);
+
+    ctx.handler->handle_rdma_data_event(
+        make_rdma_event_from_payload(stream.calls_.front(), 0U));
+
+    auto replica_pwal_path = boost::filesystem::path(base_location) / "pwal_0000";
+    if (boost::filesystem::exists(replica_pwal_path)) {
+        auto replica_entries = read_log_file(base_location, "pwal_0000");
+        EXPECT_TRUE(replica_entries.empty())
+            << "PWAL must stay empty until the split BLOB payload is fully received";
+    }
+
+    for (std::size_t i = 1; i < stream.calls_.size(); ++i) {
+        ctx.handler->handle_rdma_data_event(
+            make_rdma_event_from_payload(
+                stream.calls_[i], static_cast<std::uint16_t>(i)));
+    }
+
+    auto replica_entries = read_log_file(base_location, "pwal_0000");
+    ASSERT_EQ(replica_entries.size(), 1U);
+    EXPECT_TRUE(AssertLogEntry(
+        replica_entries[0], 1U, "bk", "bv", 7U, 0U, {blob_id},
+        log_entry::entry_type::normal_with_blob));
+
+    auto received_path = ctx.server->get_datastore().get_blob_file(blob_id).path();
+    ASSERT_TRUE(boost::filesystem::exists(received_path));
     std::ifstream ifs(received_path.string(), std::ios::binary);
     std::ostringstream oss;
     oss << ifs.rdbuf();

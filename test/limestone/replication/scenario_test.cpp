@@ -10,11 +10,13 @@
 #include <cstdlib>
 #include <cstring>
 #include <future>
+#include <fstream>
 #include <iostream>
 #include <iterator>
 #include <memory>
 #include <mutex>
 #include <optional>
+#include <sstream>
 #include <thread>
 
 #include "gtest/gtest.h"
@@ -57,6 +59,13 @@ struct snapshot_entry {
     std::string value;
     storage_id_type storage_id;
 };
+
+std::string read_file(boost::filesystem::path const& path) {
+    std::ifstream ifs(path.string(), std::ios::binary);
+    std::ostringstream oss;
+    oss << ifs.rdbuf();
+    return oss.str();
+}
 
 
 class scenario_test : public ::testing::Test, public ::testing::WithParamInterface<rdma_param> {
@@ -277,6 +286,19 @@ protected:
     auto get_master_epoch() { return get_epoch(master_location); }
     auto get_replica_epoch() { return get_epoch(replica_location); }
 
+    template<typename Predicate>
+    void wait_until(Predicate predicate,
+                    std::chrono::milliseconds timeout = std::chrono::seconds(5)) {
+        auto const deadline = std::chrono::steady_clock::now() + timeout;
+        while (std::chrono::steady_clock::now() < deadline) {
+            if (predicate()) {
+                return;
+            }
+            std::this_thread::sleep_for(std::chrono::milliseconds(10));
+        }
+        ASSERT_TRUE(predicate()) << "Timed out waiting for replication result";
+    }
+
 private:
     epoch_id_type get_epoch(boost::filesystem::path location) {
         auto epoch = last_durable_epoch(location / std::string(epoch_file_name));
@@ -402,6 +424,56 @@ TEST_P(scenario_test, minimal_test) {
         EXPECT_EQ(snapshot_entries[1].value, "v2");
         EXPECT_EQ(snapshot_entries[1].storage_id, 1);
     }
+}
+
+TEST_P(scenario_test, blob_replication_end_to_end) {
+    gen_datastore(master_location);
+
+    if (GetParam().rdma_slots.has_value()) {
+        EXPECT_TRUE(ds->get_impl()->is_rdma_enabled());
+        EXPECT_NE(ds->get_impl()->get_rdma_sender(), nullptr);
+        EXPECT_TRUE(lc0_->get_impl()->has_rdma_send_stream());
+    }
+
+    constexpr blob_id_type blob_id = 9001U;
+    std::string blob_content(8192, '\0');
+    for (std::size_t i = 0; i < blob_content.size(); ++i) {
+        blob_content[i] = static_cast<char>('a' + (i % 26));
+    }
+
+    auto master_blob_path = ds->get_blob_file(blob_id).path();
+    boost::filesystem::create_directories(master_blob_path.parent_path());
+    {
+        std::ofstream ofs(master_blob_path.string(), std::ios::binary);
+        ofs.write(blob_content.data(), static_cast<std::streamsize>(blob_content.size()));
+    }
+
+    ds->switch_epoch(1);
+
+    lc0_->begin_session();
+    lc0_->add_entry(1, "blob-key", "blob-value", {1, 0}, {blob_id});
+    lc0_->end_session();
+
+    wait_until([this]() {
+        auto replica_entries = read_replica_pwal00();
+        return replica_entries.size() == 1;
+    });
+
+    auto replica_entries = read_replica_pwal00();
+    ASSERT_EQ(replica_entries.size(), 1U);
+    EXPECT_TRUE(AssertLogEntry(
+        replica_entries[0], 1, "blob-key", "blob-value", 1, 0, {blob_id},
+        log_entry::entry_type::normal_with_blob));
+
+    auto replica_blob_path = server.get_datastore().get_impl()->resolve_blob_path(blob_id);
+    wait_until([&replica_blob_path]() {
+        return boost::filesystem::exists(replica_blob_path);
+    });
+    EXPECT_EQ(read_file(replica_blob_path), blob_content);
+
+    ds->switch_epoch(2);
+    EXPECT_EQ(get_master_epoch(), 1);
+    EXPECT_EQ(get_replica_epoch(), 1);
 }
 
 #ifdef LIMESTONE_ENABLE_RDMA
