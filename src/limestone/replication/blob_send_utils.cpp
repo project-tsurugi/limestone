@@ -77,18 +77,30 @@ std::size_t read_blob_chunk(
         using buffer_offset_type = std::iterator_traits<std::uint8_t*>::difference_type;
         auto const offset = static_cast<buffer_offset_type>(total_read);
         std::size_t r = std::fread(std::next(buffer, offset), 1, length - total_read, fp);
-        if (r == 0) {
-            int ec = errno;
+        int const saved_errno = errno;
+        if (r > 0) {
+            total_read += r;
+            continue;
+        }
+        if (std::ferror(fp) != 0) {
+            int ec = saved_errno;
             if (ec == EINTR) {
                 std::clearerr(fp);
                 continue;
             }
-            if (std::feof(fp) != 0) {
-                LOG_AND_THROW_IO_EXCEPTION("Unexpected EOF reading blob: " + path.string(), ec);
+            if (ec == 0) {
+                ec = EIO;
             }
             LOG_AND_THROW_IO_EXCEPTION("Failed to read blob chunk: " + path.string(), ec);
         }
-        total_read += r;
+        if (std::feof(fp) != 0) {
+            LOG_AND_THROW_IO_EXCEPTION("Unexpected EOF reading blob: " + path.string(), EIO);
+        }
+        // Defensive fallback: zero-byte fread() without ferror() or feof()
+        // should not normally occur. Treat it as an I/O failure to avoid
+        // spinning forever without making progress.
+        LOG_AND_THROW_IO_EXCEPTION(
+                "Failed to read blob chunk without progress: " + path.string(), EIO);
     }
     return total_read;
 }
