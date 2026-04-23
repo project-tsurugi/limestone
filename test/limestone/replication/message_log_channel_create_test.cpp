@@ -48,10 +48,10 @@ TEST(message_log_channel_create_test, replication_message_round_trip) {
     message_log_channel_create original(3U);
     original.set_secret("roundtrip_secret");
 
-    socket_io out("");
+    replication_message_io out("");
     replication_message::send(out, original);
 
-    socket_io in(out.get_out_string());
+    replication_message_io in(out.get_out_string());
     auto received_base = replication_message::receive(in);
     auto *received = dynamic_cast<message_log_channel_create*>(received_base.get());
     ASSERT_NE(received, nullptr);
@@ -61,18 +61,18 @@ TEST(message_log_channel_create_test, replication_message_round_trip) {
 }
  
  TEST(message_log_channel_create_test, invalid_connection_type_throws) {
-     socket_io out("");
+     replication_message_io out("");
      out.send_uint16(static_cast<uint16_t>(message_type_id::LOG_CHANNEL_CREATE));
      out.send_uint8(CONNECTION_TYPE_CONTROL_CHANNEL);
      out.send_string("wrong_secret");
  
-     socket_io in(out.get_out_string());
+     replication_message_io in(out.get_out_string());
      EXPECT_THROW(replication_message::receive(in), std::runtime_error);
  }
  
 TEST(message_log_channel_create_test, post_receive_throws) {
    message_log_channel_create msg(4U);
-   socket_io io("");
+   replication_message_io io("");
    handler_resources resources{io};
    EXPECT_THROW(msg.post_receive(resources), std::logic_error);
 }

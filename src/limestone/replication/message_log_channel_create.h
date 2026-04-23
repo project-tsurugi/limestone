@@ -28,8 +28,8 @@ public:
     void set_secret(std::string secret);
 
     [[nodiscard]] message_type_id get_message_type_id() const override;
-    void send_body(socket_io& io) const override;
-    void receive_body(socket_io& io) override;
+    void send_body(replication_message_io& io) const override;
+    void receive_body(replication_message_io& io) override;
 
     [[nodiscard]] uint8_t get_connection_type() const { return connection_type_; }
     [[nodiscard]] const std::string& get_secret() const { return secret_; }

@@ -22,7 +22,7 @@
 #include "message_error.h"
 #include "replica_server.h"
 #include "replication_message.h"
-#include "socket_io.h"
+#include "replication_message_io.h"
 #include "validation_result.h"
 #include "handler_resources.h"
 
@@ -31,7 +31,7 @@ namespace limestone::replication {
 
 class channel_handler_base {
 public:
-    explicit channel_handler_base(replica_server& server, socket_io& io) noexcept;
+    explicit channel_handler_base(replica_server& server, replication_message_io& io) noexcept;
     virtual ~channel_handler_base() = default;
 
     // Delete copy and move operations to follow special member functions guideline.
@@ -75,14 +75,14 @@ protected:
     void process_loop();
 
     // Socket I/O object for communication
-    [[nodiscard]] socket_io& get_socket_io() const { return socket_io_; }
+    [[nodiscard]] replication_message_io& get_replication_message_io() const { return replication_message_io_; }
 
     // Get the handler resources
     [[nodiscard]] virtual std::unique_ptr<handler_resources> create_handler_resources();
 
 private:
     replica_server& server_;
-    socket_io& socket_io_;
+    replication_message_io& replication_message_io_;
 };
 
 }  // namespace limestone::replication

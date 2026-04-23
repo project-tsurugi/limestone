@@ -10,7 +10,7 @@
 
 namespace limestone::replication {
 
-class socket_io;
+class replication_message_io;
 
 namespace message_log_entries_wire_codec {
 
@@ -26,7 +26,7 @@ struct message_header {
  * @param entry_count Number of entries in the message.
  */
 void send_message_header(
-        socket_io& io,
+        replication_message_io& io,
         limestone::api::epoch_id_type epoch_id,
         std::size_t entry_count);
 
@@ -35,49 +35,49 @@ void send_message_header(
  * @param io Source socket-style wire reader.
  * @return Decoded epoch ID and entry count.
  */
-[[nodiscard]] message_header receive_message_header(socket_io& io);
+[[nodiscard]] message_header receive_message_header(replication_message_io& io);
 
 /**
  * @brief Send the fixed fields of one LOG_ENTRY entry, excluding BLOB payloads.
  * @param io Destination socket-style wire writer.
  * @param entry Entry whose type, storage ID, key, value, and write version are sent.
  */
-void send_entry_fixed_fields(socket_io& io, message_log_entries::entry const& entry);
+void send_entry_fixed_fields(replication_message_io& io, message_log_entries::entry const& entry);
 
 /**
  * @brief Receive the fixed fields of one LOG_ENTRY entry, excluding BLOB payloads.
  * @param io Source socket-style wire reader.
  * @return Entry populated with type, storage ID, key, value, and write version.
  */
-[[nodiscard]] message_log_entries::entry receive_entry_fixed_fields(socket_io& io);
+[[nodiscard]] message_log_entries::entry receive_entry_fixed_fields(replication_message_io& io);
 
 /**
  * @brief Send the number of BLOBs attached to the current entry.
  * @param io Destination socket-style wire writer.
  * @param blob_count Number of BLOB IDs and payloads that follow.
  */
-void send_blob_count(socket_io& io, std::size_t blob_count);
+void send_blob_count(replication_message_io& io, std::size_t blob_count);
 
 /**
  * @brief Receive the number of BLOBs attached to the current entry.
  * @param io Source socket-style wire reader.
  * @return Number of BLOB IDs and payloads that follow.
  */
-[[nodiscard]] std::uint32_t receive_blob_count(socket_io& io);
+[[nodiscard]] std::uint32_t receive_blob_count(replication_message_io& io);
 
 /**
  * @brief Send the final LOG_ENTRY operation flags byte.
  * @param io Destination socket-style wire writer.
  * @param flags Bitset of session begin, session end, and flush flags.
  */
-void send_operation_flags(socket_io& io, std::uint8_t flags);
+void send_operation_flags(replication_message_io& io, std::uint8_t flags);
 
 /**
  * @brief Receive the final LOG_ENTRY operation flags byte.
  * @param io Source socket-style wire reader.
  * @return Bitset of session begin, session end, and flush flags.
  */
-[[nodiscard]] std::uint8_t receive_operation_flags(socket_io& io);
+[[nodiscard]] std::uint8_t receive_operation_flags(replication_message_io& io);
 
 /**
  * @brief Convert an encoded entry type byte into the LOG entry enum.

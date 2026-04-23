@@ -23,7 +23,7 @@
 #include <unordered_map>
 
 #include "limestone_exception_helper.h"
-#include "socket_io.h"
+#include "replication_message_io.h"
 #include "handler_resources.h"
 
 namespace limestone::replication {
@@ -79,8 +79,8 @@ public:
     [[nodiscard]] virtual message_type_id get_message_type_id() const = 0;
 
     // Method to serialize and deserialize with type information
-    static void send(socket_io& io, const replication_message& message);
-    static std::unique_ptr<replication_message> receive(socket_io& io);
+    static void send(replication_message_io& io, const replication_message& message);
+    static std::unique_ptr<replication_message> receive(replication_message_io& io);
 
     // Create message object based on type ID (factory method)
     [[nodiscard]] static std::unique_ptr<replication_message> create_message(message_type_id type);
@@ -95,12 +95,12 @@ public:
  protected:
      replication_message() = default;
      // This function is used to write the type information along with the message data
-     static void write_type_info(socket_io& io, message_type_id type_id);
+     static void write_type_info(replication_message_io& io, message_type_id type_id);
  
      // send_body and receive_body should not be accessed externally, so make them protected
      // These are only intended to be overridden by derived classes
-     virtual void send_body(socket_io& io) const = 0;
-     virtual void receive_body(socket_io& io) = 0;
+     virtual void send_body(replication_message_io& io) const = 0;
+     virtual void receive_body(replication_message_io& io) = 0;
  
  
 

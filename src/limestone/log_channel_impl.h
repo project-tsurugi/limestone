@@ -29,7 +29,7 @@
 #include "limestone/api/write_version_type.h"
 #include "limestone/status.h"
 #include "replication/replica_connector.h"
-#include "replication/socket_io.h"
+#include "replication/replication_message_io.h"
 #include "replication/message_log_entries.h"
 
 namespace limestone::api {
@@ -132,7 +132,7 @@ public:
 private:
     std::unique_ptr<replication::replica_connector> replica_connector_;
     std::unique_ptr<replication::rdma_send_stream_base> rdma_send_stream_;
-    replication::socket_io rdma_serializer_io_;
+    replication::replication_message_io rdma_serializer_io_;
     datastore* datastore_{nullptr};
     std::unique_ptr<boost::asio::thread_pool> ack_thread_pool_;
     std::once_flag ack_thread_pool_once_;

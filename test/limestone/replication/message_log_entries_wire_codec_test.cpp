@@ -1,17 +1,17 @@
 #include <gtest/gtest.h>
 
 #include "replication/message_log_entries_wire_codec.h"
-#include "replication/socket_io.h"
+#include "replication/replication_message_io.h"
 
 namespace limestone::testing {
 
 using namespace limestone::replication;
 
 TEST(message_log_entries_wire_codec_test, message_header_round_trip) {
-    socket_io out("");
+    replication_message_io out("");
     message_log_entries_wire_codec::send_message_header(out, limestone::api::epoch_id_type{123}, 2U);
 
-    socket_io in(out.get_out_string());
+    replication_message_io in(out.get_out_string());
     auto const header = message_log_entries_wire_codec::receive_message_header(in);
 
     EXPECT_EQ(header.epoch_id, limestone::api::epoch_id_type{123});
@@ -26,10 +26,10 @@ TEST(message_log_entries_wire_codec_test, entry_fixed_fields_round_trip) {
     entry.value = "value";
     entry.write_version = limestone::api::write_version_type{789U, 10U};
 
-    socket_io out("");
+    replication_message_io out("");
     message_log_entries_wire_codec::send_entry_fixed_fields(out, entry);
 
-    socket_io in(out.get_out_string());
+    replication_message_io in(out.get_out_string());
     auto const decoded = message_log_entries_wire_codec::receive_entry_fixed_fields(in);
 
     EXPECT_EQ(decoded.type, entry.type);
@@ -42,10 +42,10 @@ TEST(message_log_entries_wire_codec_test, entry_fixed_fields_round_trip) {
 }
 
 TEST(message_log_entries_wire_codec_test, blob_count_round_trip) {
-    socket_io out("");
+    replication_message_io out("");
     message_log_entries_wire_codec::send_blob_count(out, 3U);
 
-    socket_io in(out.get_out_string());
+    replication_message_io in(out.get_out_string());
     EXPECT_EQ(message_log_entries_wire_codec::receive_blob_count(in), 3U);
 }
 

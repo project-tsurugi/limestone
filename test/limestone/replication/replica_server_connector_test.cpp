@@ -22,7 +22,7 @@ using namespace limestone::replication;
 
 class testing_echo_handler : public limestone::replication::channel_handler_base {
 public:
-    explicit testing_echo_handler(limestone::replication::replica_server& server, socket_io& io) noexcept : channel_handler_base(server, io) {}
+    explicit testing_echo_handler(limestone::replication::replica_server& server, replication_message_io& io) noexcept : channel_handler_base(server, io) {}
 
 protected:
     validation_result authorize() override { return validation_result::success(); }
@@ -35,8 +35,8 @@ protected:
 
     void send_initial_ack() const override {
         // Echo the very first request
-        replication_message::send(get_socket_io(), *first_msg_);
-        get_socket_io() .flush();
+        replication_message::send(get_replication_message_io(), *first_msg_);
+        get_replication_message_io() .flush();
     }
 
     void dispatch(replication_message& /*message*/, handler_resources& /*resources*/) override {
@@ -68,7 +68,7 @@ TEST_F(replica_server_connector_test, echo_test_message_between_server_and_conne
 
     // Register shared handler instance instead of lambda
     server.register_handler(replication::message_type_id::TESTING,
-        [&server](socket_io& io) {
+        [&server](replication_message_io& io) {
             return std::make_shared<testing_echo_handler>(server, io);
         });
     

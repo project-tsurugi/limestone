@@ -75,7 +75,7 @@ public:
     /**
      * Register a handler function for a specific message_type_id.
      */
-    void register_handler(message_type_id type, std::function<std::shared_ptr<channel_handler_base>(socket_io&)> factory) noexcept;
+    void register_handler(message_type_id type, std::function<std::shared_ptr<channel_handler_base>(replication_message_io&)> factory) noexcept;
 
     /**
      * Clear all registered handlers. Intended for testing only.
@@ -149,7 +149,7 @@ public:
     void handle_rdma_data_event(rdma_data_event const& event);
 private:
     boost::filesystem::path location_;                      ///< filesystem path for datastore
-    std::unordered_map<message_type_id, std::function<std::shared_ptr<channel_handler_base>(socket_io&)>> handler_factories_;
+    std::unordered_map<message_type_id, std::function<std::shared_ptr<channel_handler_base>(replication_message_io&)>> handler_factories_;
                                                             ///< factories for creating handlers
     std::unique_ptr<limestone::api::datastore> datastore_;  ///< underlying datastore instance
     std::mutex state_mutex_;                                ///< mutex for thread safety

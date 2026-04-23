@@ -35,8 +35,8 @@ public:
     explicit message_rdma_init(uint32_t slot_count);
 
     [[nodiscard]] message_type_id get_message_type_id() const override;
-    void send_body(socket_io& io) const override;
-    void receive_body(socket_io& io) override;
+    void send_body(replication_message_io& io) const override;
+    void receive_body(replication_message_io& io) override;
 
     /**
      * @brief Placeholder for RDMA initialization handling on replica side.

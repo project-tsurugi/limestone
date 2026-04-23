@@ -26,27 +26,27 @@ using namespace limestone::replication;
 
 TEST(message_ack_test, round_trip) {
     message_ack original;
-    socket_io out("");
+    replication_message_io out("");
     replication_message::send(out, original);
 
-    socket_io in(out.get_out_string());
+    replication_message_io in(out.get_out_string());
     auto received_ptr = replication_message::receive(in);
     auto* received = dynamic_cast<message_ack*>(received_ptr.get());
     ASSERT_NE(received, nullptr);
 }
 
 TEST(message_ack_test, invalid_body_throws) {
-    socket_io out("");
+    replication_message_io out("");
     out.send_uint16(static_cast<uint16_t>(message_type_id::COMMON_ACK));
     out.send_uint8(0xFF);
 
-    socket_io in(out.get_out_string());
+    replication_message_io in(out.get_out_string());
     EXPECT_THROW(replication_message::receive(in), std::runtime_error);
 }
 
 TEST(message_ack_test, post_receive_throws) {
     message_ack msg;
-    socket_io io("");
+    replication_message_io io("");
     handler_resources resources{io};
     EXPECT_THROW(msg.post_receive(resources), std::logic_error);
 }

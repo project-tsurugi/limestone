@@ -31,7 +31,7 @@
 #include "replication_test_helper.h"
 #include "test_root.h"
 #include "log_channel_impl.h"
-#include "replication/socket_io.h"
+#include "replication/replication_message_io.h"
 #include "rdma/rdma_send_stream_base.h"
 #include <optional>
 
@@ -56,11 +56,11 @@ inline std::ostream& operator<<(std::ostream& os, rdma_param const& param) {
 
 class test_echo_log_channel_handler : public log_channel_handler {
 public:
-    explicit test_echo_log_channel_handler(replica_server& server, socket_io& io) noexcept : log_channel_handler(server, io) {}
+    explicit test_echo_log_channel_handler(replica_server& server, replication_message_io& io) noexcept : log_channel_handler(server, io) {}
 
 protected:
     void dispatch(replication_message& message, handler_resources& resources) override {
-        auto& io = resources.get_socket_io();
+        auto& io = resources.get_replication_message_io();
         replication_message::send(io, message);
         io.flush();
     }
@@ -126,12 +126,12 @@ protected:
         server_.clear_handlers();
     
         server_.register_handler(message_type_id::SESSION_BEGIN,
-            [this](socket_io& io) {
+            [this](replication_message_io& io) {
                 return std::make_shared<control_channel_handler>(server_, io);
             });
     
         server_.register_handler(message_type_id::LOG_CHANNEL_CREATE,
-            [this](socket_io& io) {
+            [this](replication_message_io& io) {
                 return std::make_shared<test_echo_log_channel_handler>(server_, io);
             });
     

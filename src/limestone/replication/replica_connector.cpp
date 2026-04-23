@@ -25,10 +25,10 @@
 #include <cstring>
 #include <sstream>
 
-#include "blob_socket_io.h"
+#include "tcp_replication_message_io.h"
 #include "limestone_exception_helper.h"
 #include "replication_message.h"
-#include "socket_io.h"
+#include "replication_message_io.h"
 
 namespace limestone::replication {
 
@@ -80,7 +80,7 @@ bool replica_connector::connect_to_server(const std::string &host, uint16_t port
         return false;
     }
 
-    socket_io_ = std::make_unique<socket_io>(socket_fd);
+    replication_message_io_ = std::make_unique<replication_message_io>(socket_fd);
     freeaddrinfo(res);
     return true;
 }
@@ -94,8 +94,8 @@ bool replica_connector::connect_to_server(const std::string &host, uint16_t port
     }
 
     
-    socket_io_ = std::make_unique<blob_socket_io>(socket_fd, ds);
-    if (!socket_io_) {
+    replication_message_io_ = std::make_unique<tcp_replication_message_io>(socket_fd, ds);
+    if (!replication_message_io_) {
         ::close(socket_fd);  // Ensure socket is closed if memory allocation fails
         freeaddrinfo(res);
         return false;
@@ -108,15 +108,15 @@ bool replica_connector::connect_to_server(const std::string &host, uint16_t port
 bool replica_connector::send_message(const replication_message &msg) {
     TRACE_START << "Sending message, message_type_id: " << static_cast<int>(msg.get_message_type_id());
     // Serialize the message into a string using the replication_message::send method.
-    replication_message::send(*socket_io_, msg);
-    auto ret = socket_io_->flush();
+    replication_message::send(*replication_message_io_, msg);
+    auto ret = replication_message_io_->flush();
     TRACE_END << "ret = " << ret;
     return ret;
 }
 
 std::unique_ptr<replication_message> replica_connector::receive_message() {
     try {
-        return replication_message::receive(*socket_io_);
+        return replication_message::receive(*replication_message_io_);
     } catch (const std::exception &ex) {
         LOG_LP(FATAL) << "Exception during message reception: " << ex.what();
         return nullptr;
@@ -124,16 +124,16 @@ std::unique_ptr<replication_message> replica_connector::receive_message() {
 }
 
 void replica_connector::close_session() {
-    if (socket_io_) {
-        socket_io_->close();
+    if (replication_message_io_) {
+        replication_message_io_->close();
     }
 }
 
 int replica_connector::get_socket_fd() const noexcept {
-    if (! socket_io_) {
+    if (! replication_message_io_) {
         return -1;
     }
-    return socket_io_->get_socket_fd();
+    return replication_message_io_->get_socket_fd();
 }
 
 }  // namespace limestone::replication

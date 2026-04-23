@@ -25,7 +25,7 @@ namespace limestone::replication {
 
 class control_channel_handler : public channel_handler_base {
 public:
-    explicit control_channel_handler(replica_server& server, socket_io& io) noexcept;
+    explicit control_channel_handler(replica_server& server, replication_message_io& io) noexcept;
 
 protected:
     validation_result authorize() override;

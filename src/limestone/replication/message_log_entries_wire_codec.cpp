@@ -3,7 +3,7 @@
 #include <limits>
 
 #include "limestone_exception_helper.h"
-#include "socket_io.h"
+#include "replication_message_io.h"
 
 namespace limestone::replication::message_log_entries_wire_codec {
 
@@ -19,21 +19,21 @@ namespace {
 }  // namespace
 
 void send_message_header(
-        socket_io& io,
+        replication_message_io& io,
         limestone::api::epoch_id_type epoch_id,
         std::size_t entry_count) {
     io.send_uint64(static_cast<std::uint64_t>(epoch_id));
     io.send_uint32(checked_count(entry_count, "Too many log entries in replication message"));
 }
 
-message_header receive_message_header(socket_io& io) {
+message_header receive_message_header(replication_message_io& io) {
     message_header header{};
     header.epoch_id = limestone::api::epoch_id_type{io.receive_uint64()};
     header.entry_count = io.receive_uint32();
     return header;
 }
 
-void send_entry_fixed_fields(socket_io& io, message_log_entries::entry const& entry) {
+void send_entry_fixed_fields(replication_message_io& io, message_log_entries::entry const& entry) {
     io.send_uint8(static_cast<std::uint8_t>(entry.type));
     io.send_uint64(entry.storage_id);
     io.send_string(entry.key);
@@ -42,7 +42,7 @@ void send_entry_fixed_fields(socket_io& io, message_log_entries::entry const& en
     io.send_uint64(entry.write_version.get_minor());
 }
 
-message_log_entries::entry receive_entry_fixed_fields(socket_io& io) {
+message_log_entries::entry receive_entry_fixed_fields(replication_message_io& io) {
     message_log_entries::entry entry{};
     entry.type = decode_entry_type(io.receive_uint8());
     entry.storage_id = io.receive_uint64();
@@ -54,19 +54,19 @@ message_log_entries::entry receive_entry_fixed_fields(socket_io& io) {
     return entry;
 }
 
-void send_blob_count(socket_io& io, std::size_t blob_count) {
+void send_blob_count(replication_message_io& io, std::size_t blob_count) {
     io.send_uint32(checked_count(blob_count, "Too many blob IDs in replication message entry"));
 }
 
-std::uint32_t receive_blob_count(socket_io& io) {
+std::uint32_t receive_blob_count(replication_message_io& io) {
     return io.receive_uint32();
 }
 
-void send_operation_flags(socket_io& io, std::uint8_t flags) {
+void send_operation_flags(replication_message_io& io, std::uint8_t flags) {
     io.send_uint8(flags);
 }
 
-std::uint8_t receive_operation_flags(socket_io& io) {
+std::uint8_t receive_operation_flags(replication_message_io& io) {
     return io.receive_uint8();
 }
 

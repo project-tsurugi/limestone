@@ -25,8 +25,8 @@ class message_session_begin : public replication_message {
 public:
     void set_param(std::string configuration_id, uint64_t epoch_number);
 
-    void send_body(socket_io& io) const override;
-    void receive_body(socket_io& io) override;
+    void send_body(replication_message_io& io) const override;
+    void receive_body(replication_message_io& io) override;
     [[nodiscard]] message_type_id get_message_type_id() const override;
 
     // Process the message after it has been received.

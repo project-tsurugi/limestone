@@ -26,8 +26,8 @@ public:
     explicit message_group_commit(uint64_t epoch_number = 0);
 
     [[nodiscard]] message_type_id get_message_type_id() const override;
-    void send_body(socket_io& io) const override;
-    void receive_body(socket_io& io) override;
+    void send_body(replication_message_io& io) const override;
+    void receive_body(replication_message_io& io) override;
 
     [[nodiscard]] static std::unique_ptr<replication_message> create();
 

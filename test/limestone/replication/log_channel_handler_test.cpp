@@ -8,10 +8,10 @@
 #include "replication/message_log_channel_create.h"
 #include "replication/message_log_entries.h"
 #include "replication/replica_server.h"
-#include "replication/socket_io.h"
-#include "replication/blob_socket_io.h"
+#include "replication/replication_message_io.h"
+#include "replication/tcp_replication_message_io.h"
 #include "replication/validation_result.h"
-#include "rdma/rdma_socket_io.h"
+#include "rdma/rdma_replication_message_io.h"
 #include "rdma/rdma_send_stream_base.h"
 #include <boost/filesystem.hpp>
 #include <chrono>
@@ -65,7 +65,7 @@ struct rdma_test_context {
     int read_fd{-1};
     int write_fd{-1};
     std::unique_ptr<replica_server> server;
-    std::unique_ptr<socket_io> io;
+    std::unique_ptr<replication_message_io> io;
     std::unique_ptr<testable_log_handler> handler;
 };
 
@@ -80,7 +80,7 @@ rdma_test_context make_rdma_handler_with_channel(std::string const& location) {
 
     ctx.server = std::make_unique<replica_server>();
     ctx.server->initialize(location);
-    ctx.io = std::make_unique<socket_io>(ctx.write_fd);
+    ctx.io = std::make_unique<replication_message_io>(ctx.write_fd);
     auto handler = std::make_unique<testable_log_handler>(*ctx.server, *ctx.io);
 
     auto create_msg = std::make_unique<message_log_channel_create>(1U);
@@ -93,7 +93,7 @@ rdma_test_context make_rdma_handler_with_channel(std::string const& location) {
 rdma_data_event make_rdma_event_from_message(
     replication_message& message,
     std::uint16_t sequence_number) {
-    socket_io out_io(std::string{});
+    replication_message_io out_io(std::string{});
     replication_message::send(out_io, message);
     std::string payload = out_io.get_out_string();
 
@@ -109,7 +109,7 @@ rdma_data_event make_rdma_event_from_message(
 
 std::pair<rdma_data_event, rdma_data_event>
 make_split_events(replication_message& message, std::uint16_t sequence_start) {
-    socket_io out_io(std::string{});
+    replication_message_io out_io(std::string{});
     replication_message::send(out_io, message);
     std::string payload = out_io.get_out_string();
     std::size_t mid = payload.size() / 2;
@@ -207,7 +207,7 @@ rdma_data_event make_rdma_event_from_payload(
 TEST_F(log_channel_handler_test, validate_initial_and_dispatch_succeeds) {
     replica_server server{};
     server.initialize(base_location);
-    socket_io out("");
+    replication_message_io out("");
     testable_log_handler handler(reinterpret_cast<replica_server&>(server), out);
 
     auto msg = std::make_unique<message_log_channel_create>(1234U);
@@ -220,7 +220,7 @@ TEST_F(log_channel_handler_test, validate_initial_and_dispatch_succeeds) {
     
     test_message test_msg{};
     replication_message::send(out, test_msg);
-    socket_io in(out.get_out_string());
+    replication_message_io in(out.get_out_string());
     test_message::post_receive_called = false;
     testable_log_handler handler2(reinterpret_cast<replica_server&>(server), in);
     EXPECT_THROW({ handler2.process_loop(); }, limestone_io_exception); // Exception is thrown when the stream becomes unreadable, but it is ignored
@@ -229,7 +229,7 @@ TEST_F(log_channel_handler_test, validate_initial_and_dispatch_succeeds) {
 
 TEST_F(log_channel_handler_test, authorize_succeeds_then_fails_at_limit_boundary) {
     dummy_server server;
-    socket_io io("");
+    replication_message_io io("");
     testable_log_handler handler(reinterpret_cast<replica_server&>(server), io);
 
     // Set the counter to one before the maximum limit
@@ -252,7 +252,7 @@ TEST_F(log_channel_handler_test, authorize_succeeds_then_fails_at_limit_boundary
 
 TEST_F(log_channel_handler_test, authorize_fails_when_exceeded) {
     dummy_server server;
-    socket_io io("");
+    replication_message_io io("");
     testable_log_handler handler(reinterpret_cast<replica_server&>(server), io);
 
     handler.set_log_channel_id_counter_for_test(log_channel_handler::MAX_LOG_CHANNEL_COUNT);
@@ -263,7 +263,7 @@ TEST_F(log_channel_handler_test, authorize_fails_when_exceeded) {
 
 TEST_F(log_channel_handler_test, validate_fails_on_wrong_type) {
     dummy_server server;
-    socket_io io("");
+    replication_message_io io("");
     testable_log_handler handler(reinterpret_cast<replica_server&>(server), io);
 
     auto wrong = std::make_unique<message_ack>();
@@ -274,15 +274,15 @@ TEST_F(log_channel_handler_test, validate_fails_on_wrong_type) {
 
 TEST_F(log_channel_handler_test, validate_fails_on_failed_cast) {
     dummy_server server;
-    socket_io io("");
+    replication_message_io io("");
     testable_log_handler handler(reinterpret_cast<replica_server&>(server), io);
 
     class bad_message : public replication_message {
         message_type_id get_message_type_id() const override {
             return message_type_id::LOG_CHANNEL_CREATE;
         }
-        void send_body(socket_io&) const override {}
-        void receive_body(socket_io&) override {}
+        void send_body(replication_message_io&) const override {}
+        void receive_body(replication_message_io&) override {}
         void post_receive(handler_resources&) override {}
     };
 
@@ -294,12 +294,12 @@ TEST_F(log_channel_handler_test, validate_fails_on_failed_cast) {
 
 TEST_F(log_channel_handler_test, send_initial_ack_sends_ack_message) {
     dummy_server server;
-    socket_io io("");
+    replication_message_io io("");
     testable_log_handler handler(reinterpret_cast<replica_server&>(server), io);
 
     handler.send_initial_ack();
 
-    socket_io reader(io.get_out_string());
+    replication_message_io reader(io.get_out_string());
     auto msg = replication_message::receive(reader);
     auto* ack = dynamic_cast<message_ack*>(msg.get());
     ASSERT_NE(ack, nullptr);
@@ -486,7 +486,7 @@ TEST_F(log_channel_handler_test, process_rdma_message_locked_processes_single_me
     entries.set_session_begin_flag(true);
     entries.add_normal_entry(1U, "k", "v", write_version_type{epoch_id_type{0}, 0U});
 
-    socket_io out_io(std::string{});
+    replication_message_io out_io(std::string{});
     replication_message::send(out_io, entries);
     std::string payload = out_io.get_out_string();
     std::vector<std::uint8_t> aggregated(payload.begin(), payload.end());
@@ -641,7 +641,7 @@ TEST_F(log_channel_handler_test,
     second.add_normal_entry(2U, "k2", "v2", write_version_type{epoch_id_type{1}, 0U});
     second.set_session_end_flag(true);
 
-    socket_io out(std::string{});
+    replication_message_io out(std::string{});
     replication_message::send(out, first);
     replication_message::send(out, second);
     std::string combined = out.get_out_string();
@@ -695,8 +695,8 @@ TEST_F(log_channel_handler_test, handle_rdma_data_event_with_blob_entry_writes_b
             static_cast<std::streamsize>(blob_content.size()));
     }
 
-    // Serialise the message including the blob data using blob_socket_io (string mode).
-    replication::blob_socket_io sender_io(std::string{}, *sender_ds);
+    // Serialise the message including the blob data using tcp_replication_message_io (string mode).
+    replication::tcp_replication_message_io sender_io(std::string{}, *sender_ds);
     message_log_entries entries(epoch_id_type{5});
     entries.set_session_begin_flag(true);
     entries.add_normal_with_blob(1U, "bk", "bv",
@@ -732,7 +732,7 @@ TEST_F(log_channel_handler_test, handle_rdma_data_event_with_blob_entry_writes_b
 }
 
 TEST_F(log_channel_handler_test,
-       handle_rdma_data_event_accepts_blob_split_by_rdma_socket_io) {
+       handle_rdma_data_event_accepts_blob_split_by_rdma_replication_message_io) {
     auto ctx = make_rdma_handler_with_channel(base_location);
     ASSERT_NE(ctx.handler, nullptr);
     ASSERT_GE(ctx.read_fd, 0);
@@ -747,7 +747,7 @@ TEST_F(log_channel_handler_test,
     auto sender_ds = std::make_unique<limestone::api::datastore_test>(sender_conf);
 
     blob_id_type blob_id = 56U;
-    std::string const blob_content = "rdma_socket_io_split_blob_payload";
+    std::string const blob_content = "rdma_replication_message_io_split_blob_payload";
     auto blob_path = sender_ds->get_blob_file(blob_id).path();
     boost::filesystem::create_directories(blob_path.parent_path());
     {
@@ -756,7 +756,7 @@ TEST_F(log_channel_handler_test,
     }
 
     capturing_rdma_send_stream stream{};
-    rdma_socket_io sender_io(stream, *sender_ds);
+    rdma_replication_message_io sender_io(stream, *sender_ds);
     message_log_entries entries(epoch_id_type{6});
     entries.set_session_begin_flag(true);
     entries.add_normal_with_blob(1U, "bk", "bv",
@@ -773,7 +773,7 @@ TEST_F(log_channel_handler_test,
     }
 
     ASSERT_GE(stream.calls_.size(), 2U)
-        << "rdma_socket_io should split a BLOB message into multiple RDMA sends";
+        << "rdma_replication_message_io should split a BLOB message into multiple RDMA sends";
 
     for (std::size_t i = 0; i < stream.calls_.size(); ++i) {
         auto event = make_rdma_event_from_payload(
@@ -822,7 +822,7 @@ TEST_F(log_channel_handler_test,
 
     capturing_rdma_send_stream stream{};
     stream.max_writer_capacity_ = 256U;
-    rdma_socket_io sender_io(stream, *sender_ds);
+    rdma_replication_message_io sender_io(stream, *sender_ds);
     message_log_entries entries(epoch_id_type{7});
     entries.set_session_begin_flag(true);
     entries.set_session_end_flag(true);
@@ -904,7 +904,7 @@ TEST_F(log_channel_handler_test,
 
     capturing_rdma_send_stream stream{};
     stream.max_writer_capacity_ = 256U;
-    rdma_socket_io sender_io(stream, *sender_ds);
+    rdma_replication_message_io sender_io(stream, *sender_ds);
     message_log_entries entries(epoch_id_type{8});
     entries.set_session_begin_flag(true);
     entries.set_session_end_flag(true);
@@ -959,7 +959,7 @@ TEST_F(log_channel_handler_test,
 }
 
 TEST_F(log_channel_handler_test,
-       rdma_socket_io_send_blob_with_empty_staged_buffer_sends_blob_only) {
+       rdma_replication_message_io_send_blob_with_empty_staged_buffer_sends_blob_only) {
     constexpr const char* sender_dir = "/tmp/replica_server_test_sender";
     boost::filesystem::remove_all(sender_dir);
     boost::filesystem::create_directories(sender_dir);
@@ -968,7 +968,7 @@ TEST_F(log_channel_handler_test,
     auto sender_ds = std::make_unique<limestone::api::datastore_test>(sender_conf);
 
     blob_id_type blob_id = 57U;
-    std::string const blob_content = "rdma_socket_io_empty_staged_buffer";
+    std::string const blob_content = "rdma_replication_message_io_empty_staged_buffer";
     auto blob_path = sender_ds->get_blob_file(blob_id).path();
     boost::filesystem::create_directories(blob_path.parent_path());
     {
@@ -977,7 +977,7 @@ TEST_F(log_channel_handler_test,
     }
 
     capturing_rdma_send_stream stream{};
-    rdma_socket_io sender_io(stream, *sender_ds);
+    rdma_replication_message_io sender_io(stream, *sender_ds);
 
     sender_io.send_blob(blob_id);
 
@@ -994,7 +994,7 @@ TEST_F(log_channel_handler_test,
 }
 
 TEST_F(log_channel_handler_test,
-       rdma_socket_io_send_blob_sends_remaining_data_in_later_writes) {
+       rdma_replication_message_io_send_blob_sends_remaining_data_in_later_writes) {
     constexpr const char* sender_dir = "/tmp/replica_server_test_sender";
     boost::filesystem::remove_all(sender_dir);
     boost::filesystem::create_directories(sender_dir);
@@ -1003,7 +1003,7 @@ TEST_F(log_channel_handler_test,
     auto sender_ds = std::make_unique<limestone::api::datastore_test>(sender_conf);
 
     blob_id_type blob_id = 58U;
-    std::string const blob_content = "rdma_socket_io_blob_payload_split_after_header";
+    std::string const blob_content = "rdma_replication_message_io_blob_payload_split_after_header";
     auto blob_path = sender_ds->get_blob_file(blob_id).path();
     boost::filesystem::create_directories(blob_path.parent_path());
     {
@@ -1013,7 +1013,7 @@ TEST_F(log_channel_handler_test,
 
     capturing_rdma_send_stream stream{};
     stream.max_writer_capacity_ = sizeof(std::uint64_t) + sizeof(std::uint32_t) + 5U;
-    rdma_socket_io sender_io(stream, *sender_ds);
+    rdma_replication_message_io sender_io(stream, *sender_ds);
 
     sender_io.send_blob(blob_id);
 

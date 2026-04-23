@@ -8,13 +8,13 @@ namespace limestone::replication {
 class test_message : public replication_message {
 public:
     // Implement the send_body method (serialization)
-    void send_body(socket_io& io) const override {
+    void send_body(replication_message_io& io) const override {
         // For test purposes, we'll just write a simple string as message data
         io.send_string("Test Message Data");
     }
 
     // Implement the receive_body method (deserialization)
-    void receive_body(socket_io& io) override {
+    void receive_body(replication_message_io& io) override {
         data = io.receive_string();
     }
 

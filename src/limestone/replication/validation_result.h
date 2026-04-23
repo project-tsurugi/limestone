@@ -22,6 +22,6 @@ private:
     std::string error_message_;
 };
 
-// TODO: 現状は、error_codeにダミー値を入れているが、整理して適切な値を入れる必要がある
+// TODO: Replace dummy error codes with appropriate values.
 
 } // namespace limestone::replication

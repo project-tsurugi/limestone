@@ -16,7 +16,7 @@
 
 
 #include "replication/message_gc_boundary_switch.h"
-#include "socket_io.h"
+#include "replication_message_io.h"
 #include "limestone_exception_helper.h"
 
 namespace limestone::replication {
@@ -28,11 +28,11 @@ message_type_id message_gc_boundary_switch::get_message_type_id() const {
     return message_type_id::GC_BOUNDARY_SWITCH;
 }
 
-void message_gc_boundary_switch::send_body(socket_io& io) const {
+void message_gc_boundary_switch::send_body(replication_message_io& io) const {
     io.send_uint16(write_version_);
 }
 
-void message_gc_boundary_switch::receive_body(socket_io& io) {
+void message_gc_boundary_switch::receive_body(replication_message_io& io) {
     write_version_ = io.receive_uint16();
 }
 

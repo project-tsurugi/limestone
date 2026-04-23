@@ -26,10 +26,10 @@ TEST(message_error_test, round_trip_error) {
     message_error original;
     original.set_error(123, "test error message");
 
-    socket_io out("");
+    replication_message_io out("");
     replication_message::send(out, original);
 
-    socket_io in(out.get_out_string());
+    replication_message_io in(out.get_out_string());
     auto received_base = replication_message::receive(in);
     auto received = dynamic_cast<message_error*>(received_base.get());
     ASSERT_NE(received, nullptr);
@@ -38,17 +38,17 @@ TEST(message_error_test, round_trip_error) {
 }
 
 TEST(message_error_test, invalid_response_type_throws) {
-    socket_io out("");
+    replication_message_io out("");
     out.send_uint16(static_cast<uint16_t>(message_type_id::COMMON_ERROR));
     out.send_uint8(0xFF);
 
-    socket_io in(out.get_out_string());
+    replication_message_io in(out.get_out_string());
     EXPECT_THROW(replication_message::receive(in), std::runtime_error);
 }
 
 TEST(message_error_test, post_receive_throws) {
     message_error msg;
-    socket_io io("");
+    replication_message_io io("");
     handler_resources resources{io};
     EXPECT_THROW(msg.post_receive(resources), std::logic_error);
 }

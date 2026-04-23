@@ -9,8 +9,8 @@
 #include "replication_test_helper.h"
 #include "blob_file_resolver.h"
 #include "log_entry.h"
-#include "replication/blob_socket_io.h"
-#include "replication/socket_io.h"
+#include "replication/tcp_replication_message_io.h"
+#include "replication/replication_message_io.h"
 #include "test_root.h"
 #include "replication/message_log_channel_create.h"
 #include "replication/message_session_begin.h"
@@ -51,11 +51,11 @@ TEST_F(message_log_entries_test, serialize_and_deserialize_log_entries) {
     original.add_normal_entry(1, "key1", "value1", {100, 1});
     original.add_normal_entry(2, "key2", "value2", {200, 2});
 
-    blob_socket_io blob_out("", *datastore_);
+    tcp_replication_message_io blob_out("", *datastore_);
     replication_message::send(blob_out, original);
     std::string wire = blob_out.get_out_string();
 
-    blob_socket_io blob_in(wire, *datastore_);
+    tcp_replication_message_io blob_in(wire, *datastore_);
     std::unique_ptr<replication_message> result = replication_message::receive(blob_in);
 
     ASSERT_EQ(result->get_message_type_id(), message_type_id::LOG_ENTRY);
@@ -70,11 +70,11 @@ TEST_F(message_log_entries_test, serialize_and_deserialize_log_entries) {
 
 TEST_F(message_log_entries_test, serialize_and_deserialize_empty_entries) {
     message_log_entries original{100};
-    socket_io out("" );
+    replication_message_io out("" );
     replication_message::send(out, original);
     std::string data = out.get_out_string();
 
-    socket_io in(data);
+    replication_message_io in(data);
     std::unique_ptr<replication_message> received = replication_message::receive(in);
 
     ASSERT_EQ(received->get_message_type_id(), message_type_id::LOG_ENTRY);
@@ -91,11 +91,11 @@ TEST_F(message_log_entries_test, create_message_via_factory) {
 
 TEST_F(message_log_entries_test, epoch_id_round_trip) {
     message_log_entries original{12345};
-    blob_socket_io out("", *datastore_);
+    tcp_replication_message_io out("", *datastore_);
     replication_message::send(out, original);
     std::string wire = out.get_out_string();
 
-    blob_socket_io in(wire, *datastore_);
+    tcp_replication_message_io in(wire, *datastore_);
     auto received = replication_message::receive(in);
     auto* msg = dynamic_cast<message_log_entries*>(received.get());
     ASSERT_NE(msg, nullptr);
@@ -120,7 +120,7 @@ TEST_F(message_log_entries_test, serialize_and_deserialize_normal_with_blob) {
     original.add_normal_with_blob(5, "key", "value", {7, 8}, blobs);
 
     // Serialize
-    blob_socket_io out("", *datastore_);
+    tcp_replication_message_io out("", *datastore_);
     replication_message::send(out, original);
     std::string wire = out.get_out_string();
 
@@ -129,7 +129,7 @@ TEST_F(message_log_entries_test, serialize_and_deserialize_normal_with_blob) {
     boost::filesystem::remove(path2);
 
     // Deserialize
-    blob_socket_io in(wire, *datastore_);
+    tcp_replication_message_io in(wire, *datastore_);
     auto received_msg = replication_message::receive(in);
     ASSERT_EQ(received_msg->get_message_type_id(), message_type_id::LOG_ENTRY);
 
@@ -168,11 +168,11 @@ TEST_F(message_log_entries_test, serialize_and_deserialize_various_entry_types) 
     original.add_add_storage(40, {7, 8});
     original.add_remove_storage(50, {9, 10});
 
-    blob_socket_io out("", *datastore_);
+    tcp_replication_message_io out("", *datastore_);
     replication_message::send(out, original);
     std::string wire = out.get_out_string();
 
-    blob_socket_io in(wire, *datastore_);
+    tcp_replication_message_io in(wire, *datastore_);
     auto received = replication_message::receive(in);
     ASSERT_EQ(received->get_message_type_id(), message_type_id::LOG_ENTRY);
 
@@ -219,11 +219,11 @@ TEST_F(message_log_entries_test, operation_flags_round_trip) {
         original.set_session_end_flag(mask & message_log_entries::SESSION_END_FLAG);
         original.set_flush_flag(mask & message_log_entries::FLUSH_FLAG);
 
-        socket_io out("");
+        replication_message_io out("");
         replication_message::send(out, original);
         std::string wire = out.get_out_string();
 
-        socket_io in(wire);
+        replication_message_io in(wire);
         auto received = replication_message::receive(in);
         ASSERT_EQ(received->get_message_type_id(), message_type_id::LOG_ENTRY);
 
@@ -246,11 +246,11 @@ TEST_F(message_log_entries_test, write_version_round_trip) {
     original.add_normal_entry(100, "key1", "value1", version1);
     original.add_remove_entry(200, "key2", version2);
 
-    socket_io out("");
+    replication_message_io out("");
     replication_message::send(out, original);
     std::string wire = out.get_out_string();
 
-    socket_io in(wire);
+    replication_message_io in(wire);
     auto received = replication_message::receive(in);
     ASSERT_EQ(received->get_message_type_id(), message_type_id::LOG_ENTRY);
 
@@ -267,19 +267,19 @@ TEST_F(message_log_entries_test, write_version_round_trip) {
     EXPECT_EQ(entries[1].write_version.get_minor(), 44u);
 }
 
-TEST_F(message_log_entries_test, mixed_socket_io_blob_socket_io_round_trip) {
+TEST_F(message_log_entries_test, mixed_replication_message_io_tcp_replication_message_io_round_trip) {
     constexpr epoch_id_type k_epoch = 2025;
     message_log_entries original{k_epoch};
 
-    // Case A: no blobs -> both socket_io↔blob_socket_io must work
+    // Case A: no blobs -> both replication_message_io↔tcp_replication_message_io must work
     original.add_normal_entry(1, "k", "v", {1,1});
 
     {
-        socket_io out("");
+        replication_message_io out("");
         replication_message::send(out, original);
         std::string wire = out.get_out_string();
 
-        blob_socket_io in(wire, *datastore_);
+        tcp_replication_message_io in(wire, *datastore_);
         auto received = replication_message::receive(in);
         auto* msg = dynamic_cast<message_log_entries*>(received.get());
         ASSERT_NE(msg, nullptr);
@@ -287,11 +287,11 @@ TEST_F(message_log_entries_test, mixed_socket_io_blob_socket_io_round_trip) {
         EXPECT_EQ(msg->get_entries().size(), 1u);
     }
     {
-        blob_socket_io out("", *datastore_);
+        tcp_replication_message_io out("", *datastore_);
         replication_message::send(out, original);
         std::string wire = out.get_out_string();
 
-        socket_io in(wire);
+        replication_message_io in(wire);
         auto received = replication_message::receive(in);
         auto* msg = dynamic_cast<message_log_entries*>(received.get());
         ASSERT_NE(msg, nullptr);
@@ -299,21 +299,21 @@ TEST_F(message_log_entries_test, mixed_socket_io_blob_socket_io_round_trip) {
         EXPECT_EQ(msg->get_entries().size(), 1u);
     }
 
-    // Case B: with blobs -> socket_io send should ASSERT_DEATH
+    // Case B: with blobs -> replication_message_io send should ASSERT_DEATH
     message_log_entries with_blobs{k_epoch};
     with_blobs.add_normal_with_blob(2, "k2", "v2", {2,2}, {42});
 
 
     EXPECT_DEATH(
         {
-            socket_io out("");
+            replication_message_io out("");
             replication_message::send(out, with_blobs);
         },
         ".*"
     );
 }
 
-TEST_F(message_log_entries_test, receiving_blob_entry_with_socket_io_should_fail) {
+TEST_F(message_log_entries_test, receiving_blob_entry_with_replication_message_io_should_fail) {
     message_log_entries original{42};
     limestone::api::blob_id_type blob_id = 999;
     auto path = datastore_->get_blob_file(blob_id).path();
@@ -322,15 +322,15 @@ TEST_F(message_log_entries_test, receiving_blob_entry_with_socket_io_should_fail
 
     original.add_normal_with_blob(1, "key", "value", {1, 1}, {blob_id});
 
-    // Serialize with blob_socket_io (OK)
-    blob_socket_io blob_out("", *datastore_);
+    // Serialize with tcp_replication_message_io (OK)
+    tcp_replication_message_io blob_out("", *datastore_);
     replication_message::send(blob_out, original);
     std::string wire = blob_out.get_out_string();
 
-    // Deserialize with plain socket_io (this should fail)
+    // Deserialize with plain replication_message_io (this should fail)
     EXPECT_DEATH(
         {
-            socket_io in(wire);  // intentionally wrong
+            replication_message_io in(wire);  // intentionally wrong
             replication_message::receive(in);  // this should hit the FATAL
         },
         ".*"
@@ -340,7 +340,7 @@ TEST_F(message_log_entries_test, receiving_blob_entry_with_socket_io_should_fail
 TEST_F(message_log_entries_test, post_receive) {
     auto& lc = datastore_->create_channel();
     datastore_->ready();
-    socket_io io("");
+    replication_message_io io("");
     log_channel_handler_resources resources(io, lc);
 
     // 正常系

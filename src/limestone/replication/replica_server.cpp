@@ -34,7 +34,7 @@
 #include "logging_helper.h"
 #include "message_error.h"
 #include "limestone_exception_helper.h"
-#include "blob_socket_io.h"
+#include "tcp_replication_message_io.h"
 #include "datastore_impl.h"
 #include "message_log_channel_create.h"
 
@@ -51,11 +51,11 @@ void replica_server::initialize(const boost::filesystem::path& location) {
     datastore_ = std::make_unique<limestone::api::datastore>(conf);
     datastore_->get_impl()->set_replica_role();
 
-    handler_factories_[message_type_id::SESSION_BEGIN] = [this](socket_io& io) {
+    handler_factories_[message_type_id::SESSION_BEGIN] = [this](replication_message_io& io) {
         return std::make_shared<control_channel_handler>(*this, io);
     };
     
-    handler_factories_[message_type_id::LOG_CHANNEL_CREATE] = [this](socket_io& io) {
+    handler_factories_[message_type_id::LOG_CHANNEL_CREATE] = [this](replication_message_io& io) {
         return std::make_shared<log_channel_handler>(*this, io);
     };
 
@@ -244,7 +244,7 @@ void replica_server::accept_loop() {
     }
 }
 
-void replica_server::register_handler(message_type_id type, std::function<std::shared_ptr<channel_handler_base>(socket_io&)> factory) noexcept {
+void replica_server::register_handler(message_type_id type, std::function<std::shared_ptr<channel_handler_base>(replication_message_io&)> factory) noexcept {
     TRACE_START << "type: " << static_cast<uint16_t>(type);
     {
         std::lock_guard<std::mutex> lock(state_mutex_);
@@ -275,7 +275,7 @@ void replica_server::handle_client(int client_fd) {
         LOG_LP(ERROR) << "Warning: failed to set TCP_NODELAY: " << strerror(errno);
     }
 
-    blob_socket_io io(client_fd, *datastore_);
+    tcp_replication_message_io io(client_fd, *datastore_);
     try {
         auto msg = replication_message::receive(io);
         message_type_id type = msg->get_message_type_id();
@@ -283,10 +283,10 @@ void replica_server::handle_client(int client_fd) {
         std::shared_ptr<channel_handler_base> handler;
         {
             std::lock_guard<std::mutex> lock(state_mutex_);
-            // ファクトリを取り出してインスタンスを生成（socket_ioを渡す）
+            // Look up the registered factory and create a handler with the message I/O.
             auto factory_it = handler_factories_.find(type);
             if (factory_it != handler_factories_.end()) {
-                handler = factory_it->second(io);  // socket_ioを渡す
+                handler = factory_it->second(io);
             }
         }
         if (handler) {

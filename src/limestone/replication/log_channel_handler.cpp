@@ -27,12 +27,12 @@
 #include "message_log_channel_create.h"
 #include "message_log_entries.h"
 #include "validation_result.h"
-#include "socket_io.h"
+#include "replication_message_io.h"
 #include "logging_helper.h"
 
 namespace limestone::replication {
 
-log_channel_handler::log_channel_handler(replica_server &server, socket_io& io) noexcept
+log_channel_handler::log_channel_handler(replica_server &server, replication_message_io& io) noexcept
     : channel_handler_base(server, io){}
 
 validation_result log_channel_handler::validate_initial(std::unique_ptr<replication_message> request) {
@@ -146,7 +146,7 @@ void log_channel_handler::process_rdma_message_locked(
 
     while (rdma_receiver_->has_message()) {
         auto log_entries = rdma_receiver_->take_message();
-        auto resources = std::make_unique<log_channel_handler_resources>(get_socket_io(), *log_channel_, false);
+        auto resources = std::make_unique<log_channel_handler_resources>(get_replication_message_io(), *log_channel_, false);
         log_entries->post_receive(*resources);
     }
 
@@ -188,7 +188,7 @@ log_channel& log_channel_handler::get_log_channel() {
 }
 
 std::unique_ptr<handler_resources> log_channel_handler::create_handler_resources() {
-    return std::make_unique<log_channel_handler_resources>(get_socket_io(), *log_channel_, true);
+    return std::make_unique<log_channel_handler_resources>(get_replication_message_io(), *log_channel_, true);
 }
 
 } // namespace limestone::replication

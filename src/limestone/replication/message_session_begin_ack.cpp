@@ -16,7 +16,7 @@
 
 
  #include "replication/message_session_begin_ack.h"
- #include "socket_io.h"
+ #include "replication_message_io.h"
  #include "limestone_exception_helper.h"
  
  namespace limestone::replication {
@@ -29,12 +29,12 @@
      return message_type_id::SESSION_BEGIN_ACK;
  }
  
- void message_session_begin_ack::send_body(socket_io& io) const {
+ void message_session_begin_ack::send_body(replication_message_io& io) const {
      io.send_uint8(static_cast<uint8_t>(response_type::RESPONSE_TYPE_ACK));
      io.send_string(session_secret_);
  }
  
- void message_session_begin_ack::receive_body(socket_io& io) {
+ void message_session_begin_ack::receive_body(replication_message_io& io) {
      uint8_t resp = io.receive_uint8();
      if (resp != static_cast<uint8_t>(response_type::RESPONSE_TYPE_ACK)) {
          LOG_AND_THROW_EXCEPTION("Invalid response_type for session_begin_ack");

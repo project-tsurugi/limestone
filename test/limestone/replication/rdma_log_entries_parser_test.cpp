@@ -8,9 +8,9 @@
 #include <vector>
 
 #include "gtest/gtest.h"
-#include "replication/blob_socket_io.h"
+#include "replication/tcp_replication_message_io.h"
 #include "replication/message_log_entries.h"
-#include "replication/socket_io.h"
+#include "replication/replication_message_io.h"
 #include "test_root.h"
 
 namespace limestone::testing {
@@ -20,7 +20,7 @@ using namespace limestone::replication;
 namespace {
 
 std::string serialize_body(message_log_entries const& message) {
-    socket_io io("");
+    replication_message_io io("");
     message.send_body(io);
     return io.get_out_string();
 }
@@ -132,7 +132,7 @@ TEST(rdma_log_entries_parser_test, stops_after_blob_count_without_consuming_blob
     original.add_normal_with_blob(3, "key", "value", {31, 32}, {blob_id});
     original.set_session_end_flag(true);
 
-    blob_socket_io io("", datastore);
+    tcp_replication_message_io io("", datastore);
     original.send_body(io);
     std::string body = io.get_out_string();
 
@@ -239,7 +239,7 @@ TEST(rdma_log_entries_parser_test, consume_returns_zero_while_awaiting_blob) {
     message_log_entries original{790};
     original.add_normal_with_blob(3, "key", "value", {4, 5}, {blob_id});
 
-    blob_socket_io io("", datastore);
+    tcp_replication_message_io io("", datastore);
     original.send_body(io);
 
     rdma_log_entries_parser parser;
@@ -292,7 +292,7 @@ TEST(rdma_log_entries_parser_test, blob_entry_leaves_blob_body_and_following_byt
     message_log_entries original{789};
     original.add_normal_with_blob(3, "key", "value", {4, 5}, {blob_id});
 
-    blob_socket_io io("", datastore);
+    tcp_replication_message_io io("", datastore);
     original.send_body(io);
     std::string body = io.get_out_string();
     std::string bytes = body + "following";
@@ -357,7 +357,7 @@ TEST(rdma_log_entries_parser_test, streams_blob_body_to_replica_file) {
     original.add_normal_with_blob(3, "key", "value", {4, 5}, {blob_id});
     original.set_session_begin_flag(true);
 
-    blob_socket_io io("", sender_datastore);
+    tcp_replication_message_io io("", sender_datastore);
     original.send_body(io);
     std::string body = io.get_out_string();
 
@@ -408,7 +408,7 @@ TEST(rdma_log_entries_parser_test, streams_zero_length_blob_to_empty_replica_fil
     message_log_entries original{902};
     original.add_normal_with_blob(3, "key", "value", {4, 5}, {blob_id});
 
-    blob_socket_io io("", sender_datastore);
+    tcp_replication_message_io io("", sender_datastore);
     original.send_body(io);
     std::string body = io.get_out_string();
 
@@ -460,7 +460,7 @@ TEST(rdma_log_entries_parser_test, streams_multiple_blobs_for_one_entry) {
     message_log_entries original{903};
     original.add_normal_with_blob(3, "key", "value", {4, 5}, {first_blob_id, second_blob_id});
 
-    blob_socket_io io("", sender_datastore);
+    tcp_replication_message_io io("", sender_datastore);
     original.send_body(io);
     std::string body = io.get_out_string();
 
@@ -509,7 +509,7 @@ TEST(rdma_log_entries_parser_test, partial_blob_body_keeps_reading_until_remaini
     message_log_entries original{904};
     original.add_normal_with_blob(3, "key", "value", {4, 5}, {blob_id});
 
-    blob_socket_io io("", sender_datastore);
+    tcp_replication_message_io io("", sender_datastore);
     original.send_body(io);
     std::string body = io.get_out_string();
 
@@ -563,7 +563,7 @@ TEST(rdma_log_entries_parser_test, incomplete_blob_body_keeps_partial_file_and_m
     message_log_entries original{905};
     original.add_normal_with_blob(3, "key", "value", {4, 5}, {blob_id});
 
-    blob_socket_io io("", sender_datastore);
+    tcp_replication_message_io io("", sender_datastore);
     original.send_body(io);
     std::string body = io.get_out_string();
 
@@ -608,7 +608,7 @@ TEST(rdma_log_entries_parser_test, blob_size_mismatch_larger_than_payload_leaves
     message_log_entries original{906};
     original.add_normal_with_blob(3, "key", "value", {4, 5}, {blob_id});
 
-    blob_socket_io io("", sender_datastore);
+    tcp_replication_message_io io("", sender_datastore);
     original.send_body(io);
     std::string body = io.get_out_string();
 

@@ -9,7 +9,7 @@ RDMA BLOB レプリケーションで、大きな BLOB を sender / receiver の
 
 ```sh
 ./build-rdma-rep-tests/test/limestone-test \
-  --gtest_filter=log_channel_handler_test.handle_rdma_data_event_accepts_blob_split_by_rdma_socket_io
+  --gtest_filter=log_channel_handler_test.handle_rdma_data_event_accepts_blob_split_by_rdma_replication_message_io
 ```
 
 ## 方針検討
@@ -17,7 +17,7 @@ RDMA BLOB レプリケーションで、大きな BLOB を sender / receiver の
 ### 受信処理方式と性能
 
 RDMA 版を TCP 版のような stream 処理に寄せる案も検討した。
-設計としてはきれいで、既存の `socket_io` / `blob_socket_io` に近づけやすい。
+設計としてはきれいで、既存の `replication_message_io` / `tcp_replication_message_io` に近づけやすい。
 しかし RDMA write size は 4 KB から 64 KB 程度と小さいため、callback ごとに
 worker thread を起こす素朴な stream 実装では context switch の回数が多くなり、
 性能面で不利になる可能性が高い。
@@ -180,7 +180,7 @@ blob 部はその後に続けて送る。
 
 ### 3. Sender 側を実装する
 
-- `blob_socket_io::send_blob()` と `rdma_socket_io::send_blob()` に重複している
+- `tcp_replication_message_io::send_blob()` と `rdma_replication_message_io::send_blob()` に重複している
   BLOB file の open / size check / chunk read 処理を共通化する。
 - TCP 用と RDMA 用で、BLOB の wire format の意味
   (`blob_id + blob_size + blob_bytes`) は維持する。
@@ -299,12 +299,12 @@ WAL file の entry type 全体を指す場合は `log_entry::entry_type` と明�
 
 [現行-6] log_channel_handler::process_rdma_message_locked()
   - aggregated vector を std::string payload_string へコピーする。
-  - payload_string を入力にして blob_socket_io を作る。
-  - 以後は RDMA 専用処理ではなく、TCP stream と同じ socket_io 風の
+  - payload_string を入力にして tcp_replication_message_io を作る。
+  - 以後は RDMA 専用処理ではなく、TCP stream と同じ replication_message_io 風の
     deserialize 経路に乗せている。
 
 [現行-7] replication_message::receive()
-  - blob_socket_io から message_type_id を 1 byte 読む。
+  - tcp_replication_message_io から message_type_id を 1 byte 読む。
   - message_type_id に対応する replication_message 派生型を factory で作る。
   - LOG_ENTRY の場合は message_log_entries を作る。
   - 作成した message に対して receive_body() を呼ぶ。
@@ -315,7 +315,7 @@ WAL file の entry type 全体を指す場合は `log_entry::entry_type` と明�
     blob_count 回だけ io.receive_blob() を呼ぶ。
   - 最後に operation_flags を読む。
 
-[現行-9] blob_socket_io::receive_blob()
+[現行-9] tcp_replication_message_io::receive_blob()
   - blob_id、blob_size を読む。
   - blob_size byte の blob_bytes を同じ入力 stream から読み続ける。
   - 読んだ blob_bytes を replica datastore の BLOB file に書き込む。
@@ -329,7 +329,7 @@ WAL file の entry type 全体を指す場合は `log_entry::entry_type` と明�
 
 #### 4.3 現行フローの問題点
 
-上記の現行フローは TCP stream 用の `blob_socket_io` / `receive_body()` を
+上記の現行フローは TCP stream 用の `tcp_replication_message_io` / `receive_body()` を
 RDMA payload に再利用しているため、小さい BLOB では動く。
 しかし RDMA BLOB streaming では次の理由で不適切。
 
@@ -349,7 +349,7 @@ RDMA payload に再利用しているため、小さい BLOB では動く。
 ```text
 [現行-5] pending_rdma_frames_ 集約
   -> [現行-6] process_rdma_message_locked()
-  -> [現行-6] blob_socket_io
+  -> [現行-6] tcp_replication_message_io
   -> [現行-7] replication_message::receive()
   -> [現行-8] message_log_entries::receive_body()
 ```
@@ -518,7 +518,7 @@ RDMA payload に再利用しているため、小さい BLOB では動く。
 
    [現行-5] `process_pending_rdma_messages_locked()` と
    [現行-6] `process_rdma_message_locked()` の
-   `aggregated vector -> std::string payload_string -> blob_socket_io` 経路をやめ、
+   `aggregated vector -> std::string payload_string -> tcp_replication_message_io` 経路をやめ、
    [新-4] で validation 済みの frame payload を到着順に [新-5] へ渡す。
 
    `rdma_frame_flag_partial_payload` は frame payload が次 frame に継続するかどうかの
@@ -545,8 +545,8 @@ RDMA payload に再利用しているため、小さい BLOB では動く。
 6. 後始末を行う。
 
    streaming receiver への切り替え後に不要になった RDMA 側の
-   `blob_socket_io` 経路、helper、コメントを整理する。
-   ただし TCP 既存経路で使っている `blob_socket_io` / `receive_body()` は削除しない。
+   `tcp_replication_message_io` 経路、helper、コメントを整理する。
+   ただし TCP 既存経路で使っている `tcp_replication_message_io` / `receive_body()` は削除しない。
 
 ### 5. End-to-end regression test を通す
 
@@ -572,24 +572,24 @@ RDMA payload に再利用しているため、小さい BLOB では動く。
 
 ### I/O クラスの命名と責務整理
 
-- `socket_io` は現状では socket 専用 I/O というより、
+- `replication_message_io` は現状では socket 専用 I/O というより、
   replication message の serialize / deserialize 基盤として使われている。
-- `blob_socket_io` や `rdma_socket_io` との関係を考えると、
+- `tcp_replication_message_io` や `rdma_replication_message_io` との関係を考えると、
   将来的には `replication_io` のような名前と責務に整理し直す余地がある。
-- `rdma_socket_io` という名前も既存の `socket_io` に引きずられた命名であり、
+- `rdma_replication_message_io` という名前も既存の `replication_message_io` に引きずられた命名であり、
   上記の整理と合わせて見直す。
 - ただしこれは今回の RDMA BLOB 修正とは独立したリファクタリングであり、
   不具合修正と混ぜずに別タスクとして扱う。
 
 ### primitive wire codec の切り出し
 
-- `socket_io` の `send_uint32()` / `send_uint64()` などは、
+- `replication_message_io` の `send_uint32()` / `send_uint64()` などは、
   I/O と wire format encoding の責務を同時に持っている。
-- `rdma_socket_io` でも BLOB header を byte 列へ変換する必要があり、
-  現状は一時的な `socket_io` を作って既存 encoding を再利用している。
+- `rdma_replication_message_io` でも BLOB header を byte 列へ変換する必要があり、
+  現状は一時的な `replication_message_io` を作って既存 encoding を再利用している。
 - あるべき形としては、整数型や文字列型を replication wire format の
   byte 列へ変換する helper / codec を切り出し、
-  `socket_io` と RDMA 側で共有する。
+  `replication_message_io` と RDMA 側で共有する。
 - ただし今回の修正では性能影響が小さく、変更範囲も広がるため、
   別タスクとして扱う。
 
@@ -688,12 +688,12 @@ codec 共通化より前に扱う。
 
 ### 4. primitive wire codec を切り出す
 
-対応済み。`socket_io` の整数 encoding / decoding と RDMA 側の byte buffer
+対応済み。`replication_message_io` の整数 encoding / decoding と RDMA 側の byte buffer
 encoding が重複しないよう、`primitive_wire_codec` を切り出した。
 
 - `uint8` / `uint16` / `uint32` / `uint64` の wire format helper を追加。
-- `socket_io` の primitive send / receive は codec を利用する。
-- `rdma_socket_io` の BLOB header encoding は codec を利用する。
+- `replication_message_io` の primitive send / receive は codec を利用する。
+- `rdma_replication_message_io` の BLOB header encoding は codec を利用する。
 - `rdma_log_entries_parser` の scalar decode は codec を利用する。
 
 string length / string bytes は `uint32` length + raw bytes の組み合わせであり、
@@ -717,11 +717,13 @@ codec helper に寄せる。
 
 ### 6. I/O クラスの命名と責務整理
 
-最後に、`socket_io` / `blob_socket_io` / `rdma_socket_io` の名前と責務を整理する。
+対応済み。I/O クラス名を現在の責務に合わせて整理した。
 
-`socket_io` は現状では socket 専用 I/O ではなく、replication message の
-serialize / deserialize 基盤として使われている。責務整理の影響範囲が広いため、
-BLOB streaming 修正や codec 共通化とは分け、最後に別タスクとして扱う。
+- base I/O は replication message の serialize / deserialize 基盤であることが
+  分かる名前に変更した。
+- TCP BLOB 対応 I/O と RDMA 送信対応 I/O も、それぞれの transport と責務が
+  分かる名前に変更した。
+- 関連する file 名、include、test 名も同じ命名に合わせた。
 
 ### 完了扱い
 

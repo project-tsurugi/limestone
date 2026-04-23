@@ -15,7 +15,7 @@
  * 
  */
 
-#include "socket_io.h"
+#include "replication_message_io.h"
 
 #include <poll.h>
 
@@ -24,6 +24,7 @@
 #include <cstddef>
 #include <cstring>
 #include <iterator>
+#include <limits>
 #include <memory>
 #include <sstream>
 
@@ -31,8 +32,19 @@
 #include "primitive_wire_codec.h"
 namespace limestone::replication {
 
+namespace {
+
+[[nodiscard]] std::uint32_t checked_string_size(std::size_t size) {
+    if (size > std::numeric_limits<std::uint32_t>::max()) {
+        LOG_AND_THROW_EXCEPTION("Replication string payload is too large");
+    }
+    return static_cast<std::uint32_t>(size);
+}
+
+}  // namespace
+
 // Constructor for real socket mode.
-socket_io::socket_io(int fd)
+replication_message_io::replication_message_io(int fd)
     : is_string_mode_(false),
       socket_fd_(fd),
       socket_buf_(std::make_unique<socket_streambuf>(fd)),
@@ -43,22 +55,22 @@ socket_io::socket_io(int fd)
 }
 
 // Constructor for string mode.
-socket_io::socket_io(const std::string &initial)
+replication_message_io::replication_message_io(const std::string &initial)
     : is_string_mode_(true),
       socket_fd_(-1),
       socket_buf_(nullptr),
       out_stream_(std::make_unique<std::ostringstream>(std::ios_base::out))
 {
     // Create std::istringstream from the initial string.
-    in_stream_ = std::unique_ptr<std::istream>(new std::istringstream(initial) );
+    in_stream_ = std::make_unique<std::istringstream>(initial);
 }
 
-socket_io::~socket_io() {
+replication_message_io::~replication_message_io() {
     close();
 }
 
 
-bool socket_io::wait_for_writable() const {
+bool replication_message_io::wait_for_writable() const {
     struct pollfd pfd{ socket_fd_, POLLOUT, 0 };
     while (true) {
         int ret = poll(&pfd, 1, 10000);
@@ -75,7 +87,7 @@ bool socket_io::wait_for_writable() const {
     }
 }
 
-bool socket_io::send_raw(const std::string &data) const {
+bool replication_message_io::send_raw(const std::string &data) const {
     TRACE_START;
     std::string_view buffer{data};
 
@@ -105,32 +117,32 @@ bool socket_io::send_raw(const std::string &data) const {
     return true;
 }
 
-void socket_io::send_uint16(uint16_t value) {
+void replication_message_io::send_uint16(uint16_t value) {
     auto buffer = primitive_wire_codec::encode_uint16(value);
     out_stream_->write(buffer.data(), buffer.size());
 }
 
-void socket_io::send_uint32(uint32_t value) {
+void replication_message_io::send_uint32(uint32_t value) {
     auto buffer = primitive_wire_codec::encode_uint32(value);
     out_stream_->write(buffer.data(), buffer.size());
 }
 
-void socket_io::send_uint64(uint64_t value) {
+void replication_message_io::send_uint64(uint64_t value) {
     auto buffer = primitive_wire_codec::encode_uint64(value);
     out_stream_->write(buffer.data(), buffer.size());
 }
 
-void socket_io::send_uint8(uint8_t value) {
+void replication_message_io::send_uint8(uint8_t value) {
     auto buffer = primitive_wire_codec::encode_uint8(value);
     out_stream_->write(buffer.data(), buffer.size());
 }
 
-void socket_io::send_string(const std::string &value) {
-    send_uint32(static_cast<uint32_t>(value.size()));  // TODO: Check for overflow
+void replication_message_io::send_string(const std::string &value) {
+    send_uint32(checked_string_size(value.size()));
     out_stream_->write(value.data(), static_cast<std::streamsize>(value.size()));
 }
 
-void socket_io::read_exact(char* buffer, std::streamsize size, std::string_view description) {
+void replication_message_io::read_exact(char* buffer, std::streamsize size, std::string_view description) {
     in_stream_->read(buffer, size);
     if (*in_stream_) {
         return;
@@ -148,19 +160,19 @@ void socket_io::read_exact(char* buffer, std::streamsize size, std::string_view 
     LOG_AND_THROW_IO_EXCEPTION(message.str(), EIO);
 }
 
-uint16_t socket_io::receive_uint16() {
+uint16_t replication_message_io::receive_uint16() {
     std::array<char, sizeof(uint16_t)> buffer{};
     read_exact(buffer.data(), static_cast<std::streamsize>(buffer.size()), "uint16_t");
     return primitive_wire_codec::decode_uint16(std::string_view{buffer.data(), buffer.size()});
 }
 
-uint32_t socket_io::receive_uint32() {
+uint32_t replication_message_io::receive_uint32() {
     std::array<char, sizeof(uint32_t)> buffer{};
     read_exact(buffer.data(), static_cast<std::streamsize>(buffer.size()), "uint32_t");
     return primitive_wire_codec::decode_uint32(std::string_view{buffer.data(), buffer.size()});
 }
 
-uint64_t socket_io::receive_uint64() {
+uint64_t replication_message_io::receive_uint64() {
     std::array<char, sizeof(uint64_t)> buffer{};
     read_exact(buffer.data(), static_cast<std::streamsize>(sizeof(uint32_t)), "high 32 bits of uint64_t");
     read_exact(
@@ -170,13 +182,13 @@ uint64_t socket_io::receive_uint64() {
     return primitive_wire_codec::decode_uint64(std::string_view{buffer.data(), buffer.size()});
 }
 
-uint8_t socket_io::receive_uint8() {
+uint8_t replication_message_io::receive_uint8() {
     std::array<char, sizeof(uint8_t)> buffer{};
     read_exact(buffer.data(), static_cast<std::streamsize>(buffer.size()), "uint8_t");
     return primitive_wire_codec::decode_uint8(std::string_view{buffer.data(), buffer.size()});
 }
 
-std::string socket_io::receive_string() {
+std::string replication_message_io::receive_string() {
     uint32_t len = receive_uint32();
     std::string result;
     result.resize(len);
@@ -184,7 +196,7 @@ std::string socket_io::receive_string() {
     return result;
 }
 
-bool socket_io::flush() {
+bool replication_message_io::flush() {
     TRACE_START;
     if (is_string_mode_) {
         std::string data = out_stream_->str();
@@ -202,14 +214,14 @@ bool socket_io::flush() {
     return ret;
 }
 
-std::string socket_io::get_out_string() const {
+std::string replication_message_io::get_out_string() const {
     if (! out_stream_) {
         return std::string{};
     }
     return out_stream_->str();
 }
 
-std::size_t socket_io::get_out_size() const {
+std::size_t replication_message_io::get_out_size() const {
     if (! out_stream_) {
         return 0;
     }
@@ -220,7 +232,7 @@ std::size_t socket_io::get_out_size() const {
     return static_cast<std::size_t>(pos);
 }
 
-bool socket_io::has_unread_data() const {
+bool replication_message_io::has_unread_data() const {
     if (!is_string_mode_) {
         return false;
     }
@@ -230,7 +242,7 @@ bool socket_io::has_unread_data() const {
     return in_stream_->peek() != std::char_traits<char>::eof();
 }
 
-void socket_io::reset_output_buffer() {
+void replication_message_io::reset_output_buffer() {
     if (! out_stream_) {
         return;
     }
@@ -238,7 +250,7 @@ void socket_io::reset_output_buffer() {
     out_stream_->clear();
 }
 
-void socket_io::close() {
+void replication_message_io::close() {
     if (! out_stream_) {
         return;
     }
@@ -257,28 +269,28 @@ void socket_io::close() {
     }
 }
 
-std::ostream& socket_io::get_out_stream() {
+std::ostream& replication_message_io::get_out_stream() {
     return *out_stream_;
 }
 
-std::istream& socket_io::get_in_stream() {
+std::istream& replication_message_io::get_in_stream() {
     return *in_stream_;
 }
 
-bool socket_io::eof() {
+bool replication_message_io::eof() {
     return in_stream_->eof();
 }
 
-int socket_io::get_socket_fd() const noexcept {
+int replication_message_io::get_socket_fd() const noexcept {
     return socket_fd_;
 }
 
-void socket_io::send_blob(blob_id_type /*blob_id*/) {
-    LOG_LP(FATAL) << "send_blob called on base socket_io: blob-capable IO class required";
+void replication_message_io::send_blob(blob_id_type /*blob_id*/) {
+    LOG_LP(FATAL) << "send_blob called on base replication_message_io: blob-capable IO class required";
 }
 
-blob_id_type socket_io::receive_blob() {
-    LOG_LP(FATAL) << "receive_blob called on base socket_io: blob-capable IO class required";
+blob_id_type replication_message_io::receive_blob() {
+    LOG_LP(FATAL) << "receive_blob called on base replication_message_io: blob-capable IO class required";
 }
 
 }  // namespace limestone::replication

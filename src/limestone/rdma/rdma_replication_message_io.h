@@ -20,7 +20,7 @@
 
 #include <rdma/rdma_send_stream_base.h>
 #include <replication/opened_blob_file.h>
-#include <replication/socket_io.h>
+#include <replication/replication_message_io.h>
 #include <limestone/api/blob_id_type.h>
 #include <limestone/api/datastore.h>
 
@@ -30,38 +30,41 @@ using limestone::api::datastore;
 using limestone::api::blob_id_type;
 
 /**
- * @brief A socket_io subclass for the RDMA send path.
+ * @brief A replication_message_io subclass for the RDMA send path.
  *
- * Inherits all serialization methods from socket_io (used for non-blob data).
+ * Inherits all serialization methods from replication_message_io (used for non-blob data).
  * Overrides send_blob() to read the blob file in chunks and transmit each chunk
  * directly via rdma_send_stream_base::send_with_writer(), avoiding full in-memory buffering.
  *
  * receive_blob() is not supported on this class (FATAL if called). RDMA receive
  * is handled by rdma_log_entries_receiver / rdma_log_entries_parser, not by
- * socket_io-style deserialization.
+ * replication_message_io-style deserialization.
  *
  * TODO: For very large BLOBs the send path still buffers the non-blob portion of
- * the message in the inherited socket_io output stream before flushing.  The blob
+ * the message in the inherited replication_message_io output stream before flushing.  The blob
  * data itself is streamed in blob_buffer_size (64 KB) chunks and therefore does
  * not require full in-memory allocation.
  */
-class rdma_socket_io : public socket_io {
+class rdma_replication_message_io : public replication_message_io {
 public:
+    /**
+     * @brief Maximum BLOB payload chunk size used for RDMA send buffers, in bytes.
+     */
     static constexpr std::size_t blob_buffer_size = 64UL * 1024UL;
 
-    rdma_socket_io(const rdma_socket_io&) = delete;
-    rdma_socket_io& operator=(const rdma_socket_io&) = delete;
-    rdma_socket_io(rdma_socket_io&&) = delete;
-    rdma_socket_io& operator=(rdma_socket_io&&) = delete;
+    rdma_replication_message_io(const rdma_replication_message_io&) = delete;
+    rdma_replication_message_io& operator=(const rdma_replication_message_io&) = delete;
+    rdma_replication_message_io(rdma_replication_message_io&&) = delete;
+    rdma_replication_message_io& operator=(rdma_replication_message_io&&) = delete;
 
-    ~rdma_socket_io() override = default;
+    ~rdma_replication_message_io() override = default;
 
     /**
      * @brief Construct in string-mode backed by the given RDMA send stream and datastore.
      * @param rdma_stream RDMA send stream used to transmit data.
      * @param ds Datastore used to resolve blob file paths.
      */
-    rdma_socket_io(rdma_send_stream_base& rdma_stream, datastore& ds);
+    rdma_replication_message_io(rdma_send_stream_base& rdma_stream, datastore& ds);
 
     /**
      * @brief Send a blob file via RDMA.
@@ -69,7 +72,7 @@ public:
      * First sends any accumulated non-blob data from the inherited output buffer,
      * then fills RDMA send buffers directly from the blob file via
      * rdma_send_stream_base::send_with_writer(). The wire format is identical to
-     * blob_socket_io::send_blob(): [blob_id: 8B][size: 4B][data: size bytes].
+     * tcp_replication_message_io::send_blob(): [blob_id: 8B][size: 4B][data: size bytes].
      *
      * @param blob_id ID of the blob to send.
      * @throws limestone::api::limestone_io_exception if the BLOB file cannot be opened,

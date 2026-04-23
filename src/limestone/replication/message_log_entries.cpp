@@ -4,7 +4,7 @@
 #include <cassert>
 
 #include "limestone_exception_helper.h"
-#include "socket_io.h"
+#include "replication_message_io.h"
 #include "log_channel_handler_resources.h"
 #include "limestone/api/log_channel.h"
 #include "message_ack.h"
@@ -13,7 +13,7 @@ namespace limestone::replication {
 
 using limestone::api::epoch_id_type;
 
-void message_log_entries::send_body(socket_io& io) const {
+void message_log_entries::send_body(replication_message_io& io) const {
     TRACE_START << "epoch id =" << epoch_id_ << ", entries size = " << entries_.size();
     message_log_entries_wire_codec::send_message_header(io, epoch_id_, entries_.size());
 
@@ -33,7 +33,7 @@ void message_log_entries::send_body(socket_io& io) const {
     TRACE_END;
 }
 
-void message_log_entries::receive_body(socket_io& io) {
+void message_log_entries::receive_body(replication_message_io& io) {
     // Receive the number of entries
     auto const header = message_log_entries_wire_codec::receive_message_header(io);
     epoch_id_ = header.epoch_id;
@@ -210,7 +210,7 @@ void message_log_entries::post_receive(handler_resources& resources) {
         log_channel.end_session();
         if (lch_resources.ack_enabled()) {
             message_ack ack;
-            socket_io& io = lch_resources.get_socket_io();
+            replication_message_io& io = lch_resources.get_replication_message_io();
             replication_message::send(io, ack);
             io.flush();
         }

@@ -23,19 +23,19 @@ TEST_F(handler_resources_test, returns_correct_server_and_channel) {
     server.initialize(base_location);
     auto& ds = server.get_datastore();
     auto& channel = ds.create_channel();
-    socket_io io("");
+    replication_message_io io("");
 
     log_channel_handler_resources resources{io, channel};
 
     EXPECT_EQ(&resources.get_log_channel(), &channel);
-    EXPECT_EQ(&resources.get_socket_io(), &io); 
+    EXPECT_EQ(&resources.get_replication_message_io(), &io); 
 }
 
 TEST_F(handler_resources_test, returns_correct_socket) {
-    socket_io io("dummy");
+    replication_message_io io("dummy");
     handler_resources resources{io};
 
-    EXPECT_EQ(&resources.get_socket_io(), &io);
+    EXPECT_EQ(&resources.get_replication_message_io(), &io);
 }
 
 TEST_F(handler_resources_test, returns_correct_datastore) {
@@ -43,7 +43,7 @@ TEST_F(handler_resources_test, returns_correct_datastore) {
     server.initialize(base_location);
     auto& ds = server.get_datastore();
 
-    socket_io io("dummy");
+    replication_message_io io("dummy");
     control_channel_handler_resources resources(io, server, ds);
 
     EXPECT_EQ(&resources.get_datastore(), &ds);

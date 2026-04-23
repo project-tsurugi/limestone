@@ -14,7 +14,7 @@
  * limitations under the License.
  */
 
-#include <rdma/rdma_socket_io.h>
+#include <rdma/rdma_replication_message_io.h>
 
 #include <algorithm>
 #include <iterator>
@@ -26,13 +26,13 @@
 
 namespace limestone::replication {
 
-rdma_socket_io::rdma_socket_io(rdma_send_stream_base& rdma_stream, datastore& ds)
-    : socket_io(std::string{})
+rdma_replication_message_io::rdma_replication_message_io(rdma_send_stream_base& rdma_stream, datastore& ds)
+    : replication_message_io(std::string{})
     , rdma_stream_(rdma_stream)
     , datastore_(ds)
 {}
 
-void rdma_socket_io::send_blob(blob_id_type blob_id) {
+void rdma_replication_message_io::send_blob(blob_id_type blob_id) {
     auto opened = opened_blob_file::open_for_send(datastore_, blob_id);
     auto remaining = opened.size();
 
@@ -41,7 +41,7 @@ void rdma_socket_io::send_blob(blob_id_type blob_id) {
     send_blob_data(opened, remaining);
 }
 
-void rdma_socket_io::push_staged_bytes() {
+void rdma_replication_message_io::push_staged_bytes() {
     auto buffered = get_out_string();
     if (buffered.empty()) {
         return;
@@ -55,7 +55,7 @@ void rdma_socket_io::push_staged_bytes() {
     reset_output_buffer();
 }
 
-void rdma_socket_io::send_blob_header_and_first_chunk(
+void rdma_replication_message_io::send_blob_header_and_first_chunk(
         blob_id_type blob_id,
         opened_blob_file& blob,
         std::uint32_t& remaining) {
@@ -74,7 +74,7 @@ void rdma_socket_io::send_blob_header_and_first_chunk(
     remaining -= static_cast<std::uint32_t>(result.bytes_written - blob_header_size);
 }
 
-rdma_send_stream_base::buffer_fill_result rdma_socket_io::fill_blob_header_and_first_chunk(
+rdma_send_stream_base::buffer_fill_result rdma_replication_message_io::fill_blob_header_and_first_chunk(
         blob_id_type blob_id,
         std::uint32_t blob_size,
         opened_blob_file& blob,
@@ -98,7 +98,7 @@ rdma_send_stream_base::buffer_fill_result rdma_socket_io::fill_blob_header_and_f
     return {true, ""};
 }
 
-void rdma_socket_io::send_blob_data(
+void rdma_replication_message_io::send_blob_data(
         opened_blob_file& blob, std::uint32_t remaining) {
     while (remaining > 0) {
         // The writer callback receives the RDMA send buffer allocated by rdma-comm-lib.
@@ -115,7 +115,7 @@ void rdma_socket_io::send_blob_data(
     }
 }
 
-rdma_send_stream_base::buffer_fill_result rdma_socket_io::fill_blob_data_chunk(
+rdma_send_stream_base::buffer_fill_result rdma_replication_message_io::fill_blob_data_chunk(
         opened_blob_file& blob,
         std::uint8_t* buffer,
         std::size_t capacity) {

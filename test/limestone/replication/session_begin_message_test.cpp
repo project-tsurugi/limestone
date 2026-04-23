@@ -16,11 +16,11 @@
 
 #include "replication/message_session_begin.h"
 #include "gtest/gtest.h"
-#include "replication/socket_io.h"
+#include "replication/replication_message_io.h"
 
 namespace limestone::testing {
 
-using limestone::replication::socket_io;
+using limestone::replication::replication_message_io;
 
 // Test default send_body produces expected fields
 TEST(session_begin_message_test, default_body_serialization) {
@@ -53,10 +53,10 @@ TEST(session_begin_message_test, replication_message_round_trip) {
     replication::message_session_begin original;
     original.set_param("roundtrip", 100);
 
-    socket_io out("");
+    replication_message_io out("");
     replication::replication_message::send(out, original);
 
-    socket_io in(out.get_out_string());
+    replication_message_io in(out.get_out_string());
     auto received_base = replication::replication_message::receive(in);
     auto received = dynamic_cast<replication::message_session_begin*>(received_base.get());
     ASSERT_NE(received, nullptr);

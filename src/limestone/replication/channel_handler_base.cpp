@@ -20,7 +20,7 @@
 
 namespace limestone::replication {
 
-channel_handler_base::channel_handler_base(replica_server& server, socket_io& io) noexcept : server_(server), socket_io_(io) {}
+channel_handler_base::channel_handler_base(replica_server& server, replication_message_io& io) noexcept : server_(server), replication_message_io_(io) {}
 
 void channel_handler_base::run(std::unique_ptr<replication_message> first_request) {
     auto assignment_result = authorize();
@@ -41,25 +41,25 @@ void channel_handler_base::run(std::unique_ptr<replication_message> first_reques
 
 void channel_handler_base::send_ack() const {
     message_ack ack;
-    replication_message::send(socket_io_, ack);
-    socket_io_.flush();
+    replication_message::send(replication_message_io_, ack);
+    replication_message_io_.flush();
 }
 
 void channel_handler_base::send_error(const validation_result& result) const {
     message_error err;
     err.set_error(result.error_code(), result.error_message());
-    replication_message::send(socket_io_, err);
-    socket_io_.flush();
+    replication_message::send(replication_message_io_, err);
+    replication_message_io_.flush();
 }
 
 std::unique_ptr<handler_resources> channel_handler_base::create_handler_resources() {
-    return std::make_unique<handler_resources>(socket_io_);
+    return std::make_unique<handler_resources>(replication_message_io_);
 }
 
 void channel_handler_base::process_loop() {
     auto resources = create_handler_resources();
     while (true) {
-        auto message = replication_message::receive(socket_io_);
+        auto message = replication_message::receive(replication_message_io_);
         dispatch(*message, *resources);
     }
 }

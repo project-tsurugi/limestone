@@ -8,7 +8,7 @@
 
 #include <thread>
 
-#include "replication/socket_io.h"
+#include "replication/replication_message_io.h"
 #include "test_message.h"
 #include "replication_test_helper.h"
 #include "blob_file_resolver.h"
@@ -58,7 +58,7 @@ TEST_F(replica_connector_test, send_and_receive_echo_message) {
             client_fd = ::accept(listen_fd, nullptr, nullptr);
         }
         // Server-side logic to handle connection
-        replication::socket_io io(client_fd);
+        replication::replication_message_io io(client_fd);
 
         auto incoming = replication::replication_message::receive(io);
         auto* req = static_cast<replication::test_message*>(incoming.get());
@@ -159,7 +159,7 @@ TEST_F(replica_connector_test, connect_to_server_with_blob_support) {
             client_fd = ::accept(listen_fd, nullptr, nullptr);
         }
         // Server-side logic to handle connection
-        replication::socket_io io(client_fd);
+        replication::replication_message_io io(client_fd);
 
         auto incoming = replication::replication_message::receive(io);
         auto* req = static_cast<replication::test_message*>(incoming.get());

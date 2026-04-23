@@ -10,10 +10,10 @@ using namespace limestone::replication;
 
 TEST(message_gc_boundary_switch_test, round_trip) {
     message_gc_boundary_switch original(42);
-    socket_io out("");
+    replication_message_io out("");
     replication_message::send(out, original);
 
-    socket_io in(out.get_out_string());
+    replication_message_io in(out.get_out_string());
     auto received_base = replication_message::receive(in);
     auto received = dynamic_cast<message_gc_boundary_switch*>(received_base.get());
     ASSERT_NE(received, nullptr);
@@ -22,7 +22,7 @@ TEST(message_gc_boundary_switch_test, round_trip) {
 
 TEST(message_gc_boundary_switch_test, post_receive_throws) {
     message_gc_boundary_switch msg(123);
-    socket_io io("");
+    replication_message_io io("");
     handler_resources resources{io};
     EXPECT_THROW(msg.post_receive(resources), std::logic_error);
 }

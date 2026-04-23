@@ -34,10 +34,10 @@ protected:
 
 TEST_F(message_group_commit_test, round_trip) {
     message_group_commit original(123456789);
-    socket_io out("");
+    replication_message_io out("");
     replication_message::send(out, original);
 
-    socket_io in(out.get_out_string());
+    replication_message_io in(out.get_out_string());
     auto received_base = replication_message::receive(in);
     auto received = dynamic_cast<message_group_commit*>(received_base.get());
     ASSERT_NE(received, nullptr);
@@ -48,7 +48,7 @@ TEST_F(message_group_commit_test, post_receive) {
     datastore_->switch_epoch(1);
     EXPECT_EQ(datastore_->epoch_id_switched(), 1);
     message_group_commit msg(999);
-    socket_io io("");
+    replication_message_io io("");
     replica_server dummy_server{};
     control_channel_handler_resources resources(io, dummy_server, *datastore_);
     msg.post_receive(resources);

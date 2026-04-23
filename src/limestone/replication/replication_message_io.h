@@ -38,22 +38,30 @@ namespace limestone::replication {
 
 using limestone::api::blob_id_type;
 
-class socket_io {
+/**
+ * @brief I/O helper for replication message serialization and deserialization.
+ *
+ * This class owns the byte streams used by replication_message implementations
+ * and provides primitive wire-format read/write operations.  It can operate on
+ * a real socket file descriptor, or on an in-memory string stream for tests and
+ * RDMA staging.  BLOB transfer is an optional capability supplied by subclasses.
+ */
+class replication_message_io {
 public:
     // Constructor for real socket mode: initialize with a valid socket file descriptor.
-    explicit socket_io(int fd);
+    explicit replication_message_io(int fd);
 
     // Constructor for string mode: initializes both input and output streams using the provided string.
     // for testing purposes.
-    explicit socket_io(const std::string &initial);
+    explicit replication_message_io(const std::string &initial);
 
-    virtual ~socket_io();
+    virtual ~replication_message_io();
 
     // Deleted copy constructor and assignment operator to prevent copying.
-    socket_io(const socket_io &) = delete;
-    socket_io &operator=(const socket_io &) = delete;
-    socket_io(socket_io &&) noexcept = default;
-    socket_io &operator=(socket_io &&) noexcept = default;
+    replication_message_io(const replication_message_io &) = delete;
+    replication_message_io &operator=(const replication_message_io &) = delete;
+    replication_message_io(replication_message_io &&) noexcept = default;
+    replication_message_io &operator=(replication_message_io &&) noexcept = default;
 
     /**
      * Sends raw binary data over the socket.
@@ -61,7 +69,7 @@ public:
      * NOTE: This method includes logic to handle partial writes and EAGAIN/EWOULDBLOCK errors
      * using poll() for compatibility with unit tests using non-blocking sockets.
      *
-     * However, socket_io is designed primarily for use with blocking sockets.
+     * However, replication_message_io is designed primarily for use with blocking sockets.
      * Do NOT use this method in production with non-blocking sockets, as its non-blocking
      * behavior is intended solely for unit testing purposes and is not fully configurable
      * (e.g., timeout values are fixed, EINTR handling is not extensively tested).

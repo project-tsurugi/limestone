@@ -9,9 +9,9 @@
 #include <vector>
 
 #include "gtest/gtest.h"
-#include "replication/blob_socket_io.h"
+#include "replication/tcp_replication_message_io.h"
 #include "replication/replication_message.h"
-#include "replication/socket_io.h"
+#include "replication/replication_message_io.h"
 #include "test_root.h"
 
 namespace limestone::testing {
@@ -21,13 +21,13 @@ using namespace limestone::replication;
 namespace {
 
 std::string serialize_message(replication_message const& message) {
-    socket_io io("");
+    replication_message_io io("");
     replication_message::send(io, message);
     return io.get_out_string();
 }
 
 std::string serialize_message_with_blobs(replication_message const& message, limestone::api::datastore& datastore) {
-    blob_socket_io io("", datastore);
+    tcp_replication_message_io io("", datastore);
     replication_message::send(io, message);
     return io.get_out_string();
 }

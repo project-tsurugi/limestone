@@ -1,4 +1,4 @@
-#include "blob_socket_io.h"
+#include "tcp_replication_message_io.h"
 
 #include <unistd.h>
 
@@ -14,13 +14,13 @@
 
 namespace limestone::replication {
 
-blob_socket_io::blob_socket_io(int fd, datastore &ds)
-    : socket_io(fd), datastore_(ds) {}
+tcp_replication_message_io::tcp_replication_message_io(int fd, datastore &ds)
+    : replication_message_io(fd), datastore_(ds) {}
 
-blob_socket_io::blob_socket_io(const std::string &initial, datastore &ds)
-    : socket_io(initial), datastore_(ds) {}
+tcp_replication_message_io::tcp_replication_message_io(const std::string &initial, datastore &ds)
+    : replication_message_io(initial), datastore_(ds) {}
 
-void blob_socket_io::send_blob(const blob_id_type blob_id) {
+void tcp_replication_message_io::send_blob(const blob_id_type blob_id) {
     auto opened = opened_blob_file::open_for_send(datastore_, blob_id);
     auto remaining = opened.size();
 
@@ -40,7 +40,7 @@ void blob_socket_io::send_blob(const blob_id_type blob_id) {
     flush();
 }
 
-blob_id_type blob_socket_io::receive_blob() {
+blob_id_type tcp_replication_message_io::receive_blob() {
     blob_id_type blob_id = receive_uint64();
     uint32_t remaining = receive_uint32();
     auto path = datastore_.get_impl()->resolve_blob_path(blob_id);
@@ -99,7 +99,7 @@ blob_id_type blob_socket_io::receive_blob() {
     return blob_id;
 }
 
-void blob_socket_io::safe_close(FILE *fp) {
+void tcp_replication_message_io::safe_close(FILE *fp) {
     if (fp) {
         int ret = std::fclose(fp);  // NOLINT(cppcoreguidelines-owning-memory)
         if (ret != 0) {

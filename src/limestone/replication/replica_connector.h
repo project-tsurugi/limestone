@@ -67,7 +67,7 @@ public:
 
 private:
     [[nodiscard]] bool connect_to_server_common(const std::string &host, uint16_t port, struct ::addrinfo **res, int &socket_fd);
-    std::unique_ptr<socket_io> socket_io_{};
+    std::unique_ptr<replication_message_io> replication_message_io_{};
 };
 
 }  // namespace limestone::replication

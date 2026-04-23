@@ -38,7 +38,7 @@ public:
     static constexpr int MAX_LOG_CHANNEL_COUNT =
         static_cast<int>(log_channel_slots_limit);
 
-    explicit log_channel_handler(replica_server &server, socket_io& io) noexcept;
+    explicit log_channel_handler(replica_server &server, replication_message_io& io) noexcept;
     ~log_channel_handler() override = default;
 
     // Delete copy and move constructors and assignment operators
