@@ -21,11 +21,14 @@
 
 #include <array>
 #include <cerrno>
+#include <cstddef>
 #include <cstring>
+#include <iterator>
 #include <memory>
 #include <sstream>
 
 #include "limestone_exception_helper.h"
+#include "primitive_wire_codec.h"
 namespace limestone::replication {
 
 // Constructor for real socket mode.
@@ -103,32 +106,22 @@ bool socket_io::send_raw(const std::string &data) const {
 }
 
 void socket_io::send_uint16(uint16_t value) {
-    uint16_t net_value = htons(value);
-    std::array<char, sizeof(net_value)> buffer{};
-    std::memcpy(buffer.data(), &net_value, sizeof(net_value));
+    auto buffer = primitive_wire_codec::encode_uint16(value);
     out_stream_->write(buffer.data(), buffer.size());
 }
 
 void socket_io::send_uint32(uint32_t value) {
-    uint32_t net_value = htonl(value);
-    std::array<char, sizeof(net_value)> buffer{};
-    std::memcpy(buffer.data(), &net_value, sizeof(net_value));
+    auto buffer = primitive_wire_codec::encode_uint32(value);
     out_stream_->write(buffer.data(), buffer.size());
 }
 
 void socket_io::send_uint64(uint64_t value) {
-    constexpr uint64_t mask32 = 0xFFFFFFFFULL;
-    uint32_t high = htonl(static_cast<uint32_t>(value >> 32U));
-    uint32_t low  = htonl(static_cast<uint32_t>(value & mask32));
-    std::array<char, sizeof(high) + sizeof(low)> buffer{};
-    std::memcpy(buffer.data(), &high, sizeof(high));
-    std::memcpy(buffer.data() + sizeof(high), &low, sizeof(low));
+    auto buffer = primitive_wire_codec::encode_uint64(value);
     out_stream_->write(buffer.data(), buffer.size());
 }
 
 void socket_io::send_uint8(uint8_t value) {
-    std::array<char, sizeof(value)> buffer{};
-    std::memcpy(buffer.data(), &value, sizeof(value));
+    auto buffer = primitive_wire_codec::encode_uint8(value);
     out_stream_->write(buffer.data(), buffer.size());
 }
 
@@ -158,43 +151,29 @@ void socket_io::read_exact(char* buffer, std::streamsize size, std::string_view 
 uint16_t socket_io::receive_uint16() {
     std::array<char, sizeof(uint16_t)> buffer{};
     read_exact(buffer.data(), static_cast<std::streamsize>(buffer.size()), "uint16_t");
-    uint16_t net_value = 0;
-    std::memcpy(&net_value, buffer.data(), sizeof(net_value));
-    return ntohs(net_value);
+    return primitive_wire_codec::decode_uint16(std::string_view{buffer.data(), buffer.size()});
 }
 
 uint32_t socket_io::receive_uint32() {
     std::array<char, sizeof(uint32_t)> buffer{};
     read_exact(buffer.data(), static_cast<std::streamsize>(buffer.size()), "uint32_t");
-    uint32_t net_value = 0;
-    std::memcpy(&net_value, buffer.data(), sizeof(net_value));
-    return ntohl(net_value);
+    return primitive_wire_codec::decode_uint32(std::string_view{buffer.data(), buffer.size()});
 }
 
 uint64_t socket_io::receive_uint64() {
-    uint32_t high = 0;
-    uint32_t low = 0;
-    {
-        std::array<char, sizeof(uint32_t)> buffer{};
-        read_exact(buffer.data(), static_cast<std::streamsize>(buffer.size()), "high 32 bits of uint64_t");
-        std::memcpy(&high, buffer.data(), sizeof(uint32_t));
-    }
-    {
-        std::array<char, sizeof(uint32_t)> buffer{};
-        read_exact(buffer.data(), static_cast<std::streamsize>(buffer.size()), "low 32 bits of uint64_t");
-        std::memcpy(&low, buffer.data(), sizeof(uint32_t));
-    }
-    uint64_t value = (static_cast<uint64_t>(ntohl(high)) << 32U)
-                     | static_cast<uint64_t>(ntohl(low));
-    return value;
+    std::array<char, sizeof(uint64_t)> buffer{};
+    read_exact(buffer.data(), static_cast<std::streamsize>(sizeof(uint32_t)), "high 32 bits of uint64_t");
+    read_exact(
+            std::next(buffer.data(), static_cast<std::ptrdiff_t>(sizeof(uint32_t))),
+            static_cast<std::streamsize>(sizeof(uint32_t)),
+            "low 32 bits of uint64_t");
+    return primitive_wire_codec::decode_uint64(std::string_view{buffer.data(), buffer.size()});
 }
 
 uint8_t socket_io::receive_uint8() {
     std::array<char, sizeof(uint8_t)> buffer{};
     read_exact(buffer.data(), static_cast<std::streamsize>(buffer.size()), "uint8_t");
-    uint8_t value = 0;
-    std::memcpy(&value, buffer.data(), sizeof(value));
-    return value;
+    return primitive_wire_codec::decode_uint8(std::string_view{buffer.data(), buffer.size()});
 }
 
 std::string socket_io::receive_string() {

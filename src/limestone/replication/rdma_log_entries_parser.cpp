@@ -1,19 +1,16 @@
 #include "rdma_log_entries_parser.h"
 
-#include <arpa/inet.h>
 #include <unistd.h>
 
 #include <algorithm>
-#include <array>
 #include <cerrno>
-#include <cstring>
-#include <iterator>
 #include <stdexcept>
 
 #include <boost/filesystem.hpp>
 
 #include "datastore_impl.h"
 #include "limestone_exception_helper.h"
+#include "primitive_wire_codec.h"
 
 namespace limestone::replication {
 
@@ -222,19 +219,17 @@ bool rdma_log_entries_parser::read_uint8(std::string_view bytes, std::size_t& of
     if (!read_bytes(bytes, offset, sizeof(value))) {
         return false;
     }
-    std::memcpy(&value, scalar_buffer_.data(), sizeof(value));
+    value = primitive_wire_codec::decode_uint8(scalar_buffer_);
     scalar_buffer_.clear();
     return true;
 }
 
 bool rdma_log_entries_parser::read_uint32(std::string_view bytes, std::size_t& offset, std::uint32_t& value) {
-    std::uint32_t net_value = 0;
-    if (!read_bytes(bytes, offset, sizeof(net_value))) {
+    if (!read_bytes(bytes, offset, sizeof(value))) {
         return false;
     }
-    std::memcpy(&net_value, scalar_buffer_.data(), sizeof(net_value));
+    value = primitive_wire_codec::decode_uint32(scalar_buffer_);
     scalar_buffer_.clear();
-    value = ntohl(net_value);
     return true;
 }
 
@@ -242,20 +237,8 @@ bool rdma_log_entries_parser::read_uint64(std::string_view bytes, std::size_t& o
     if (!read_bytes(bytes, offset, sizeof(std::uint64_t))) {
         return false;
     }
-    std::array<char, sizeof(std::uint64_t)> raw{};
-    std::copy_n(scalar_buffer_.begin(), raw.size(), raw.begin());
-
-    std::uint32_t high = 0;
-    std::uint32_t low = 0;
-    std::array<char, sizeof(high)> high_bytes{};
-    std::array<char, sizeof(low)> low_bytes{};
-    std::copy_n(raw.begin(), high_bytes.size(), high_bytes.begin());
-    std::copy_n(std::next(raw.begin(), static_cast<std::ptrdiff_t>(high_bytes.size())),
-            low_bytes.size(), low_bytes.begin());
-    std::memcpy(&high, high_bytes.data(), sizeof(high));
-    std::memcpy(&low, low_bytes.data(), sizeof(low));
+    value = primitive_wire_codec::decode_uint64(scalar_buffer_);
     scalar_buffer_.clear();
-    value = (static_cast<std::uint64_t>(ntohl(high)) << 32U) | static_cast<std::uint64_t>(ntohl(low));
     return true;
 }
 

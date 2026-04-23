@@ -17,11 +17,11 @@
 #include <rdma/rdma_socket_io.h>
 
 #include <algorithm>
-#include <array>
 #include <iterator>
 #include <vector>
 
 #include "replication/opened_blob_file.h"
+#include "replication/primitive_wire_codec.h"
 #include "limestone_exception_helper.h"
 
 namespace limestone::replication {
@@ -84,14 +84,10 @@ rdma_send_stream_base::buffer_fill_result rdma_socket_io::fill_blob_header_and_f
     if (capacity < blob_header_size) {
         return {false, "RDMA send buffer is smaller than blob header"};
     }
-    socket_io header_io(std::string{});
-    header_io.send_uint64(blob_id);
-    header_io.send_uint32(blob_size);
-    auto encoded = header_io.get_out_string();
-    if (encoded.size() != blob_header_size) {
-        return {false, "encoded blob header size mismatch"};
-    }
-    std::copy(encoded.begin(), encoded.end(), buffer);
+    auto const encoded_blob_id = primitive_wire_codec::encode_uint64(blob_id);
+    auto const encoded_blob_size = primitive_wire_codec::encode_uint32(blob_size);
+    auto out = std::copy(encoded_blob_id.begin(), encoded_blob_id.end(), buffer);
+    std::copy(encoded_blob_size.begin(), encoded_blob_size.end(), out);
     auto const payload_capacity = capacity - blob_header_size;
     if (payload_capacity > 0U) {
         // opened_blob_file::read_chunk() returns only after reading the requested length;

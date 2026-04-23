@@ -688,14 +688,16 @@ codec 共通化より前に扱う。
 
 ### 4. primitive wire codec を切り出す
 
-`socket_io` の整数 encoding / decoding と RDMA 側の byte buffer encoding が
-重複しないよう、primitive wire codec を切り出す。
+対応済み。`socket_io` の整数 encoding / decoding と RDMA 側の byte buffer
+encoding が重複しないよう、`primitive_wire_codec` を切り出した。
 
-- `uint8` / `uint32` / `uint64` の wire format helper。
-- 必要なら string length / string bytes helper。
-- `socket_io` と `rdma_socket_io` の双方から利用できる形にする。
+- `uint8` / `uint16` / `uint32` / `uint64` の wire format helper を追加。
+- `socket_io` の primitive send / receive は codec を利用する。
+- `rdma_socket_io` の BLOB header encoding は codec を利用する。
+- `rdma_log_entries_parser` の scalar decode は codec を利用する。
 
-この作業は比較的小さく切り出せるため、LOG_ENTRY codec より先に行う。
+string length / string bytes は `uint32` length + raw bytes の組み合わせであり、
+現時点では primitive codec には含めない。
 
 ### 5. LOG_ENTRY wire format codec を切り出す
 
