@@ -55,7 +55,7 @@ public:
     }
 
     // Override method to send message body to socket
-    void send_body(socket_io& io) const override;
+    void send_body(replication_message_io& io) const override;
 
     // Getter
     [[nodiscard]] epoch_id_type get_epoch_id() const;
@@ -69,7 +69,7 @@ public:
     [[nodiscard]] bool has_any_blobs() const noexcept;
 
     // Override method to receive message body from socket
-    void receive_body(socket_io& io) override;
+    void receive_body(replication_message_io& io) override;
 
     // Set session begin flag (0x01)
     void set_session_begin_flag(bool flag);

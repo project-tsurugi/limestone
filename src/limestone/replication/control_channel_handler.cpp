@@ -15,7 +15,7 @@
  */
 
 #include "replication/control_channel_handler.h"
-#include "socket_io.h"
+#include "replication_message_io.h"
 #include "limestone_exception_helper.h"
 #include "logging_helper.h"
 #include "control_channel_handler_resources.h"
@@ -23,12 +23,12 @@
 
 namespace limestone::replication {
 
-control_channel_handler::control_channel_handler(replica_server& server, socket_io& io) noexcept
+control_channel_handler::control_channel_handler(replica_server& server, replication_message_io& io) noexcept
      : channel_handler_base(server, io), server_(server) {}
 
 validation_result control_channel_handler::authorize() {
     TRACE_START;
-    // TODO その他の認証を実装する
+    // TODO: Implement additional authorization checks.
     if (!get_server().mark_control_channel_created()) {
         LOG_LP(ERROR) << "Control channel already created";
         return validation_result::error(
@@ -70,8 +70,8 @@ validation_result control_channel_handler::validate_initial(std::unique_ptr<repl
  void control_channel_handler::send_initial_ack() const {
      message_session_begin_ack ack;
      ack.set_session_secret("server_.get_session_secret()"); // TODO: actual secret
-     replication_message::send(get_socket_io(), ack);
-     get_socket_io().flush();
+     replication_message::send(get_replication_message_io(), ack);
+     get_replication_message_io().flush();
  }
  
  void control_channel_handler::dispatch(replication_message &message, handler_resources& resources) {
@@ -80,7 +80,7 @@ validation_result control_channel_handler::validate_initial(std::unique_ptr<repl
 
 std::unique_ptr<handler_resources> control_channel_handler::create_handler_resources() {
     return std::make_unique<control_channel_handler_resources>(
-        get_socket_io(), server_, server_.get_datastore(), true);
+        get_replication_message_io(), server_, server_.get_datastore(), true);
 }
 
 }  // namespace limestone::replication

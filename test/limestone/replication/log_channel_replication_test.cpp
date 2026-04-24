@@ -31,7 +31,7 @@
 #include "replication_test_helper.h"
 #include "test_root.h"
 #include "log_channel_impl.h"
-#include "replication/socket_io.h"
+#include "replication/replication_message_io.h"
 #include "rdma/rdma_send_stream_base.h"
 #include <optional>
 
@@ -56,11 +56,11 @@ inline std::ostream& operator<<(std::ostream& os, rdma_param const& param) {
 
 class test_echo_log_channel_handler : public log_channel_handler {
 public:
-    explicit test_echo_log_channel_handler(replica_server& server, socket_io& io) noexcept : log_channel_handler(server, io) {}
+    explicit test_echo_log_channel_handler(replica_server& server, replication_message_io& io) noexcept : log_channel_handler(server, io) {}
 
 protected:
     void dispatch(replication_message& message, handler_resources& resources) override {
-        auto& io = resources.get_socket_io();
+        auto& io = resources.get_replication_message_io();
         replication_message::send(io, message);
         io.flush();
     }
@@ -126,12 +126,12 @@ protected:
         server_.clear_handlers();
     
         server_.register_handler(message_type_id::SESSION_BEGIN,
-            [this](socket_io& io) {
+            [this](replication_message_io& io) {
                 return std::make_shared<control_channel_handler>(server_, io);
             });
     
         server_.register_handler(message_type_id::LOG_CHANNEL_CREATE,
-            [this](socket_io& io) {
+            [this](replication_message_io& io) {
                 return std::make_shared<test_echo_log_channel_handler>(server_, io);
             });
     
@@ -209,6 +209,19 @@ public:
         return { true, "" };
     }
 
+    [[nodiscard]] send_result send_with_writer(
+            std::size_t remaining_size,
+            buffer_writer writer) noexcept override {
+        send_count_++;
+        std::vector<std::uint8_t> payload(remaining_size);
+        auto fill_result = writer(payload.data(), payload.size());
+        if (! fill_result.success) {
+            return {false, fill_result.error_message, 0U};
+        }
+        last_payload_size_ = remaining_size;
+        return { true, "", remaining_size };
+    }
+
     std::size_t send_count_{};
     std::size_t flush_count_{};
     std::size_t last_payload_size_{};
@@ -247,6 +260,18 @@ public:
 
     [[nodiscard]] flush_result flush(std::chrono::milliseconds) noexcept override {
         return {true, ""};
+    }
+
+    [[nodiscard]] send_result send_with_writer(
+            std::size_t remaining_size,
+            buffer_writer writer) noexcept override {
+        std::vector<std::uint8_t> payload(remaining_size);
+        auto fill_result = writer(payload.data(), payload.size());
+        if (! fill_result.success) {
+            return {false, fill_result.error_message, 0U};
+        }
+        calls_.push_back({"send_with_writer", std::move(payload)});
+        return {true, "", remaining_size};
     }
 
     std::vector<call_record> calls_;
@@ -525,8 +550,8 @@ TEST_P(log_channel_replication_test, log_channel_truncate_storage) {
 
 
 // Verify that when a BLOB message is sent via RDMA, any non-BLOB data accumulated
-// in rdma_serializer_io_ is flushed (via send_bytes) BEFORE the BLOB data is
-// sent (via send_all_bytes), preserving message ordering.
+// in rdma_serializer_io_ is flushed before the BLOB payload is sent, preserving
+// message ordering.
 TEST_P(log_channel_replication_test, rdma_send_blob_flushes_pending_buffer_first) {
     auto connector = begin_session_and_get_connector();
     auto* impl = log_channel_->get_impl();
@@ -556,27 +581,31 @@ TEST_P(log_channel_replication_test, rdma_send_blob_flushes_pending_buffer_first
             write_version_type{epoch_id_type{111}, 0U}, {blob_id});
     });
 
-    // First call must be send_bytes (flushing the non-blob buffer).
+    // First call must flush the pending non-blob buffer.
     ASSERT_GE(ptr->calls_.size(), 2U);
     EXPECT_EQ(ptr->calls_[0].type, "send_bytes");
-    // At least one send_all_bytes call must follow (blob header + data).
+    // At least one additional RDMA send must follow for the BLOB payload.
     bool found_send_all = std::any_of(
         std::next(ptr->calls_.begin()), ptr->calls_.end(),
         [](capturing_rdma_send_stream::call_record const& c) {
-            return c.type == "send_all_bytes";
+            return c.type == "send_bytes"
+                || c.type == "send_all_bytes"
+                || c.type == "send_with_writer";
         });
-    EXPECT_TRUE(found_send_all) << "No send_all_bytes found after non-blob flush";
+    EXPECT_TRUE(found_send_all) << "No RDMA send found after non-blob flush";
+
+    std::string const expected_ordering = "blob_ordering_test";
 
     // Verify that the RDMA stream actually contains the BLOB file content.
-    // Use std::search on raw bytes to handle binary data correctly.
     std::vector<std::uint8_t> all_rdma_blob_bytes;
     for (auto const& call : ptr->calls_) {
-        if (call.type == "send_all_bytes") {
+        if (call.type == "send_bytes"
+            || call.type == "send_all_bytes"
+            || call.type == "send_with_writer") {
             all_rdma_blob_bytes.insert(
                 all_rdma_blob_bytes.end(), call.data.begin(), call.data.end());
         }
     }
-    std::string const expected_ordering = "blob_ordering_test";
     auto it = std::search(
         all_rdma_blob_bytes.begin(), all_rdma_blob_bytes.end(),
         expected_ordering.begin(), expected_ordering.end());
@@ -584,8 +613,8 @@ TEST_P(log_channel_replication_test, rdma_send_blob_flushes_pending_buffer_first
         << "BLOB content not found in RDMA-transmitted bytes for ordering test";
 }
 
-// Verify that the blob file content is correctly transmitted via RDMA.  The
-// raw bytes received by the send stream must contain the verbatim blob data.
+// Verify that the blob file content is correctly transmitted via RDMA. The raw
+// bytes sent through the RDMA stream must contain the verbatim blob data.
 TEST_P(log_channel_replication_test, rdma_send_blob_data_content_is_transmitted) {
     auto connector = begin_session_and_get_connector();
     auto* impl = log_channel_->get_impl();
@@ -609,11 +638,13 @@ TEST_P(log_channel_replication_test, rdma_send_blob_data_content_is_transmitted)
             write_version_type{epoch_id_type{111}, 0U}, {blob_id});
     });
 
-    // The blob data is transmitted via send_all_bytes.
-    // Collect all bytes from those calls and use std::search for binary-safe content check.
+    // The blob data is transmitted via RDMA send calls. Collect all bytes from
+    // those calls and use std::search for binary-safe content check.
     std::vector<std::uint8_t> all_rdma_bytes;
     for (auto const& call : ptr->calls_) {
-        if (call.type == "send_all_bytes") {
+        if (call.type == "send_bytes"
+            || call.type == "send_all_bytes"
+            || call.type == "send_with_writer") {
             all_rdma_bytes.insert(all_rdma_bytes.end(), call.data.begin(), call.data.end());
         }
     }

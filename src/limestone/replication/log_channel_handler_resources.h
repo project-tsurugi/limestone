@@ -26,7 +26,7 @@ using namespace limestone::api;
 class log_channel_handler_resources : public handler_resources {
 public:
     log_channel_handler_resources(
-        socket_io& io,
+        replication_message_io& io,
         log_channel& channel,
         bool ack_enabled = true)
         : handler_resources(io, ack_enabled)

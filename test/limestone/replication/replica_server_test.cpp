@@ -20,13 +20,15 @@
 #include <gtest/gtest.h>
 
 #include <boost/filesystem.hpp>
+#include <chrono>
+#include <future>
 #include <thread>
 
 #include "replication/channel_handler_base.h"
 #include "replication/message_error.h"
 #include "replication/message_session_begin.h"
 #include "replication/replica_connector.h"
-#include "replication/socket_io.h"
+#include "replication/replication_message_io.h"
 #include "replication/handler_resources.h"
 #include "replication/log_channel_handler.h"
 #include "replication_test_helper.h"
@@ -59,7 +61,7 @@ using namespace limestone::replication;
 
 class test_session_handler : public limestone::replication::channel_handler_base {
 public:
-    test_session_handler(limestone::replication::replica_server& server, socket_io& io, std::promise<bool>& invoked) noexcept : channel_handler_base(server, io), invoked_(invoked) {}
+    test_session_handler(limestone::replication::replica_server& server, replication_message_io& io, std::promise<bool>& invoked) noexcept : channel_handler_base(server, io), invoked_(invoked) {}
 
  protected:
      limestone::replication::validation_result authorize() override { return limestone::replication::validation_result::success(); }
@@ -76,7 +78,7 @@ public:
 
 class fake_log_channel_handler : public log_channel_handler {
 public:
-    fake_log_channel_handler(replica_server& server, socket_io& io, bool& invoked) noexcept
+    fake_log_channel_handler(replica_server& server, replication_message_io& io, bool& invoked) noexcept
         : log_channel_handler(server, io),
           invoked_(invoked) {}
 
@@ -190,7 +192,7 @@ TEST_F(replica_server_test, registered_handler_is_called) {
     std::promise<bool> invoked;
     
     server.register_handler(replication::message_type_id::SESSION_BEGIN,
-        [&server, &invoked](socket_io& io) {
+        [&server, &invoked](replication_message_io& io) {
             return std::make_shared<test_session_handler>(server, io, invoked);
         });
     
@@ -207,6 +209,42 @@ TEST_F(replica_server_test, registered_handler_is_called) {
     EXPECT_TRUE(invoked.get_future().get());
 
     server.shutdown();
+    server_thread.join();
+}
+
+TEST_F(replica_server_test, shutdown_wakes_client_handler_blocked_in_receive) {
+    replication::replica_server server;
+    server.initialize(location1);
+    server.clear_handlers();
+    uint16_t port = get_free_port();
+    auto addr = make_listen_addr(port);
+    ASSERT_TRUE(server.start_listener(addr));
+
+    std::promise<bool> invoked;
+    server.register_handler(replication::message_type_id::SESSION_BEGIN,
+        [&server, &invoked](replication_message_io& io) {
+            return std::make_shared<test_session_handler>(server, io, invoked);
+        });
+
+    std::thread server_thread([&server]() { server.accept_loop(); });
+
+    replication::replica_connector client;
+    ASSERT_TRUE(client.connect_to_server("127.0.0.1", port));
+    auto request = message_session_begin::create();
+    static_cast<message_session_begin*>(request.get())->set_param("config", 100);
+    ASSERT_TRUE(client.send_message(*request));
+    ASSERT_TRUE(invoked.get_future().get());
+
+    auto shutdown_future = std::async(std::launch::async, [&server]() {
+        server.shutdown();
+    });
+
+    if (shutdown_future.wait_for(std::chrono::seconds{2}) != std::future_status::ready) {
+        ADD_FAILURE() << "server.shutdown() did not wake a client handler blocked in receive";
+        client.close_session();
+        ASSERT_EQ(shutdown_future.wait_for(std::chrono::seconds{2}), std::future_status::ready);
+    }
+    shutdown_future.get();
     server_thread.join();
 }
 
@@ -314,7 +352,7 @@ TEST_F(replica_server_test, on_rdma_receive_invokes_handler_for_data_event) {
 
     int pipefd[2];
     ASSERT_EQ(::pipe(pipefd), 0);
-    socket_io io(pipefd[1]);
+    replication_message_io io(pipefd[1]);
     bool invoked = false;
     auto handler = std::make_shared<fake_log_channel_handler>(server, io, invoked);
     server.set_log_channel_handler_for_test(1U, handler);
@@ -339,7 +377,7 @@ TEST_F(replica_server_test, on_rdma_receive_error_event_does_not_invoke_handler)
 
     int pipefd[2];
     ASSERT_EQ(::pipe(pipefd), 0);
-    socket_io io(pipefd[1]);
+    replication_message_io io(pipefd[1]);
     bool invoked = false;
     auto handler = std::make_shared<fake_log_channel_handler>(server, io, invoked);
     server.set_log_channel_handler_for_test(1U, handler);

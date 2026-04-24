@@ -15,14 +15,14 @@
  */
 #pragma once
 
-#include "socket_io.h"
+#include "replication_message_io.h"
 
 namespace limestone::replication {
 
 class handler_resources {
 public:
-    explicit handler_resources(socket_io& io, bool ack_enabled = true)
-        : socket_io_(io)
+    explicit handler_resources(replication_message_io& io, bool ack_enabled = true)
+        : replication_message_io_(io)
         , ack_enabled_(ack_enabled) {}
     virtual ~handler_resources() = default;
 
@@ -31,11 +31,11 @@ public:
     handler_resources(handler_resources&&) = delete;
     handler_resources& operator=(handler_resources&&) = delete;
 
-    [[nodiscard]] socket_io& get_socket_io() const { return socket_io_; }
+    [[nodiscard]] replication_message_io& get_replication_message_io() const { return replication_message_io_; }
     [[nodiscard]] bool ack_enabled() const noexcept { return ack_enabled_; }
 
 private:
-    socket_io& socket_io_;
+    replication_message_io& replication_message_io_;
     bool ack_enabled_{true};
 };
 

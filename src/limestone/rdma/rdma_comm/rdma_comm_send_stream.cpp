@@ -44,4 +44,17 @@ rdma_send_stream_base::flush_result rdma_comm_send_stream::flush(
     return {r.success, r.error_message};
 }
 
+rdma_send_stream_base::send_result rdma_comm_send_stream::send_with_writer(
+        std::size_t   remaining_size,
+        buffer_writer writer) noexcept {
+    auto rdma_writer = [&writer](
+            std::uint8_t* buffer,
+            std::size_t   capacity) -> rdma::communication::rdma_send_stream::buffer_fill_result {
+        auto r = writer(buffer, capacity);
+        return {r.success, r.error_message};
+    };
+    auto r = stream_->send_with_writer(remaining_size, rdma_writer);
+    return {r.success, r.error_message, r.bytes_written};
+}
+
 } // namespace limestone::replication

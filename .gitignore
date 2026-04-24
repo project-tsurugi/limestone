@@ -32,3 +32,6 @@ HTML/
 
 #Dev Container
 .devcontainer
+
+# Codex local metadata
+.codex

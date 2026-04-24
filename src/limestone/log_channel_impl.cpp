@@ -7,8 +7,8 @@
 #include "replication/replica_connector.h"
 #include "replication/message_log_entries.h"
 #include "replication/replication_message.h"
-#include "replication/socket_io.h"
-#include "rdma/rdma_socket_io.h"
+#include "replication/replication_message_io.h"
+#include "rdma/rdma_replication_message_io.h"
 #include "limestone/api/datastore.h"
 #include "limestone/logging.h"
 #include "logging_helper.h"
@@ -54,12 +54,12 @@ bool log_channel_impl::send_replica_message(
         if (message.has_any_blobs()) {
             // BLOBs must be sent directly via RDMA without in-memory buffering.
             // First flush any accumulated non-blob data, then send the blob message
-            // using rdma_socket_io which streams blob file data chunk-by-chunk.
+            // using rdma_replication_message_io which streams blob file data chunk-by-chunk.
             if (! datastore_) {
                 LOG_LP(FATAL) << "datastore not set; cannot send blob via RDMA";
             }
             flush_rdma_serializer_io_locked();
-            replication::rdma_socket_io rdma_io(*rdma_send_stream_, *datastore_);
+            replication::rdma_replication_message_io rdma_io(*rdma_send_stream_, *datastore_);
             replication::replication_message::send(rdma_io, message);
             // Flush any remaining non-blob serialized data left in the rdma_io buffer.
             auto remaining = rdma_io.get_out_string();

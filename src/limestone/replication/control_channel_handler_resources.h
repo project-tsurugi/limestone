@@ -27,7 +27,7 @@ using namespace limestone::api;
 class control_channel_handler_resources : public handler_resources {
 public:
     control_channel_handler_resources(
-        socket_io& io,
+        replication_message_io& io,
         replica_server& server,
         datastore& ds,
         bool ack_enabled = true)

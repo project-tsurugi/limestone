@@ -18,11 +18,11 @@
 
 #include <gtest/gtest.h>
 
-#include <replication/socket_io.h>
+#include <replication/replication_message_io.h>
 
 namespace limestone::testing {
 
-using limestone::replication::socket_io;
+using limestone::replication::replication_message_io;
 
 TEST(message_rdma_init_ack_test, constructor_sets_remote_dma_address) {
     replication::message_rdma_init_ack msg(1234U);
@@ -37,10 +37,10 @@ TEST(message_rdma_init_ack_test, get_message_type_id) {
 TEST(message_rdma_init_ack_test, replication_message_round_trip) {
     replication::message_rdma_init_ack original(0xdeadbeefcafebabeULL);
 
-    socket_io out("");
+    replication_message_io out("");
     replication::replication_message::send(out, original);
 
-    socket_io in(out.get_out_string());
+    replication_message_io in(out.get_out_string());
     auto received_base = replication::replication_message::receive(in);
     auto received = dynamic_cast<replication::message_rdma_init_ack*>(received_base.get());
     ASSERT_NE(received, nullptr);

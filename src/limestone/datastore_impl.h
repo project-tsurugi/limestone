@@ -27,6 +27,9 @@
 #include <cstdint>
 #include <functional>
 
+#include <boost/filesystem/path.hpp>
+
+#include "blob_file_resolver.h"
 #include "manifest.h"
 #include "replication/replica_connector.h"
 #include "replication/replication_endpoint.h"
@@ -145,6 +148,25 @@ public:
             blob_id_type blob_id,
             std::uint64_t transaction_id) const;
 
+    /**
+     * @brief Initializes the internal BLOB file resolver for this datastore location.
+     * @param location datastore location.
+     */
+    void initialize_blob_file_resolver(boost::filesystem::path const& location);
+
+    /**
+     * @brief Returns the internal BLOB file resolver.
+     */
+    [[nodiscard]] limestone::internal::blob_file_resolver& blob_file_resolver() noexcept;
+    [[nodiscard]] limestone::internal::blob_file_resolver const& blob_file_resolver() const noexcept;
+
+    /**
+     * @brief Resolves a BLOB ID to its local BLOB file path without datastore ready-state checks.
+     * @param blob_id BLOB ID to resolve.
+     * @return local BLOB file path.
+     */
+    [[nodiscard]] boost::filesystem::path resolve_blob_path(blob_id_type blob_id) const noexcept;
+
     // Setter/getter for instance_id
     /**
      * @brief Sets the instance ID for this datastore.
@@ -256,6 +278,9 @@ public:
     [[nodiscard]] std::optional<int> rdma_ack_fd_for_test() const noexcept;
 
 private:
+    [[nodiscard]] limestone::internal::blob_file_resolver& require_blob_file_resolver() noexcept;
+    [[nodiscard]] limestone::internal::blob_file_resolver const& require_blob_file_resolver() const noexcept;
+
     // Atomic counter for tracking active backup operations.
     std::atomic<int> backup_counter_;
     std::atomic<bool> replica_exists_;
@@ -306,6 +331,10 @@ private:
 
     // Test hook: override ack fd used for RDMA registration.
     std::optional<int> rdma_ack_fd_for_test_{};
+
+    // Resolver for local BLOB file paths. Owned by datastore_impl so internal
+    // replication/restore paths can resolve paths without using public APIs.
+    std::unique_ptr<limestone::internal::blob_file_resolver> blob_file_resolver_{};
 };
 
 }  // namespace limestone::api

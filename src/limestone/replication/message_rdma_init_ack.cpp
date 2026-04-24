@@ -16,7 +16,7 @@
 
 #include <replication/message_rdma_init_ack.h>
 
-#include <replication/socket_io.h>
+#include <replication/replication_message_io.h>
 
 namespace limestone::replication {
 
@@ -24,11 +24,11 @@ message_type_id message_rdma_init_ack::get_message_type_id() const {
     return message_type_id::RDMA_INIT_ACK;
 }
 
-void message_rdma_init_ack::send_body(socket_io& io) const {
+void message_rdma_init_ack::send_body(replication_message_io& io) const {
     io.send_uint64(remote_dma_address_);
 }
 
-void message_rdma_init_ack::receive_body(socket_io& io) {
+void message_rdma_init_ack::receive_body(replication_message_io& io) {
     remote_dma_address_ = io.receive_uint64();
 }
 

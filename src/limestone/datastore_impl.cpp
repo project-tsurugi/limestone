@@ -601,4 +601,34 @@ blob_reference_tag_type datastore_impl::generate_reference_tag(
     return tag;
 }
 
+void datastore_impl::initialize_blob_file_resolver(boost::filesystem::path const& location) {
+    blob_file_resolver_ = std::make_unique<limestone::internal::blob_file_resolver>(location);
+}
+
+limestone::internal::blob_file_resolver& datastore_impl::blob_file_resolver() noexcept {
+    return require_blob_file_resolver();
+}
+
+limestone::internal::blob_file_resolver const& datastore_impl::blob_file_resolver() const noexcept {
+    return require_blob_file_resolver();
+}
+
+boost::filesystem::path datastore_impl::resolve_blob_path(blob_id_type blob_id) const noexcept {
+    return require_blob_file_resolver().resolve_path(blob_id);
+}
+
+limestone::internal::blob_file_resolver& datastore_impl::require_blob_file_resolver() noexcept {
+    if (!blob_file_resolver_) {
+        LOG_LP(FATAL) << "BLOB file resolver is not initialized.";
+    }
+    return *blob_file_resolver_;
+}
+
+limestone::internal::blob_file_resolver const& datastore_impl::require_blob_file_resolver() const noexcept {
+    if (!blob_file_resolver_) {
+        LOG_LP(FATAL) << "BLOB file resolver is not initialized.";
+    }
+    return *blob_file_resolver_;
+}
+
 }  // namespace limestone::api

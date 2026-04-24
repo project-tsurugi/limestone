@@ -16,7 +16,7 @@
 
 #include "message_session_begin.h"
 
-#include "socket_io.h"
+#include "replication_message_io.h"
 
 namespace limestone::replication {
 
@@ -26,7 +26,7 @@ void message_session_begin::set_param(std::string configuration_id, uint64_t epo
  }
 
  // Send the actual session begin message data
- void message_session_begin::send_body(socket_io& io) const {
+ void message_session_begin::send_body(replication_message_io& io) const {
     io.send_uint8(connection_type_);
     io.send_uint64(protocol_version_);
     io.send_string(configuration_id_);
@@ -34,7 +34,7 @@ void message_session_begin::set_param(std::string configuration_id, uint64_t epo
  }
 
  // Deserialize the session begin message data
- void message_session_begin::receive_body(socket_io& io) {
+ void message_session_begin::receive_body(replication_message_io& io) {
      connection_type_ = io.receive_uint8();
      protocol_version_ = io.receive_uint64();
      configuration_id_ = io.receive_string();

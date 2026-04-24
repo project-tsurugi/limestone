@@ -45,13 +45,13 @@ public:
      * @brief Serialize body.
      * @param io socket I/O.
      */
-    void send_body(socket_io& io) const override;
+    void send_body(replication_message_io& io) const override;
 
     /**
      * @brief Deserialize body.
      * @param io socket I/O.
      */
-    void receive_body(socket_io& io) override;
+    void receive_body(replication_message_io& io) override;
 
     /**
      * @brief Factory function.

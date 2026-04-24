@@ -27,12 +27,12 @@ using limestone::api::limestone_exception;
 // Test for creating a message using the message type ID
 TEST(replication_message_test, create_message_with_valid_type_id) {
     // Create a stream and write type information and message data
-    socket_io out("");
+    replication_message_io out("");
     message_type_id type_id = message_type_id::TESTING;
-    out.send_uint8(static_cast<uint16_t>(type_id));  // Write the message type ID
+    out.send_uint8(static_cast<uint8_t>(type_id));  // Write the message type ID
     out.send_string("Test Message Data");  // Write some dummy message data
     
-    socket_io in(out.get_out_string());
+    replication_message_io in(out.get_out_string());
     // Deserialize the message
     auto message = replication_message::receive(in);
     
@@ -47,12 +47,12 @@ TEST(replication_message_test, create_message_with_valid_type_id) {
 TEST(replication_message_test, create_message_with_invalid_type_id) {
     // Create a stream and write invalid type information (e.g., type_id = 999)
 
-    socket_io out("");
+    replication_message_io out("");
     message_type_id invalid_type_id = static_cast<message_type_id>(0xfe);  // Invalid type ID
     out.send_uint8(static_cast<uint16_t>(invalid_type_id));  // Write invalid type ID
     out.send_string("Invalid Test Message Data");  // Write some dummy message data
 
-    socket_io in(out.get_out_string());
+    replication_message_io in(out.get_out_string());
     
     // Expect the runtime_error exception with the expected message
     try {
@@ -72,12 +72,12 @@ TEST(replication_message_test, create_message_with_invalid_type_id) {
      test_message msg;
  
      // Serialize message to stringstream (or other suitable stream) with type info
-     socket_io out("");
+     replication_message_io out("");
      replication_message::send(out, msg);  // Send with type info
      std::string serialized_data = out.get_out_string();
  
      // Deserialize message from stringstream
-     socket_io in(serialized_data);
+     replication_message_io in(serialized_data);
      auto deserialized_msg = replication_message::receive(in);  // Receive with type info
 
      // Verify that the deserialized message type matches the original message
@@ -99,13 +99,13 @@ TEST(replication_message_test, send_body_receive_body) {
     test_message msg;
 
     // Prepare an output stream to serialize the message
-    socket_io out("");
+    replication_message_io out("");
     msg.send_body(out);  // Call the protected send_body method
 
 
     // Prepare an input stream to deserialize the message
     test_message deserialized_msg;
-    socket_io in(out.get_out_string());
+    replication_message_io in(out.get_out_string());
     deserialized_msg.receive_body(in);  // Call the protected receive_body method
 
     // Verify that the deserialized message data matches the original message
@@ -115,7 +115,7 @@ TEST(replication_message_test, send_body_receive_body) {
  
 // Test for incomplete stream with 0 bytes
 TEST(replication_message_test, incomplete_stream_0_bytes) {
-   socket_io io("");
+   replication_message_io io("");
    try {
        auto message = replication_message::receive(io);
        FAIL() << "Expected limestone_io_exception, but none was thrown.";
@@ -129,10 +129,10 @@ TEST(replication_message_test, incomplete_stream_0_bytes) {
 
 // Test for incomplete stream with 1 byte (only part of type information)
 TEST(replication_message_test, incomplete_stream_1_byte) {
-    socket_io out("");
+    replication_message_io out("");
     message_type_id type_id = message_type_id::TESTING;
     out.send_uint8(static_cast<uint8_t>(type_id));  // Write the message type ID
-    socket_io in(out.get_out_string());
+    replication_message_io in(out.get_out_string());
    try {
        auto message = replication_message::receive(in);
        FAIL() << "Expected limestone_io_exception, but none was thrown.";
@@ -146,11 +146,11 @@ TEST(replication_message_test, incomplete_stream_1_byte) {
 
 // Test for incomplete stream with 2 bytes (type information exists but no message body)
 TEST(replication_message_test, incomplete_stream_2_bytes) {
-    socket_io out("");
+    replication_message_io out("");
     message_type_id type_id = message_type_id::TESTING;
     out.send_uint8(static_cast<uint8_t>(type_id));  // Write the message type ID
     out.send_uint8('A');  // Write an extra byte
-    socket_io in(out.get_out_string());
+    replication_message_io in(out.get_out_string());
     try {
         auto message = replication_message::receive(in);
         FAIL() << "Expected limestone_io_exception, but none was thrown.";
@@ -163,12 +163,12 @@ TEST(replication_message_test, incomplete_stream_2_bytes) {
 
 // Test for incomplete stream with 3 bytes (type information exists but no message body)
 TEST(replication_message_test, incomplete_stream_3_bytes) {
-    socket_io out("");
+    replication_message_io out("");
     message_type_id type_id = message_type_id::TESTING;
     out.send_uint8(static_cast<uint8_t>(type_id));  // Write the message type ID
     out.send_uint8('A');  // Write an extra byte
     out.send_uint8('B');  // Write an extra byte
-    socket_io in(out.get_out_string());
+    replication_message_io in(out.get_out_string());
     try {
         auto message = replication_message::receive(in);
         FAIL() << "Expected limestone_io_exception, but none was thrown.";
@@ -182,14 +182,14 @@ TEST(replication_message_test, incomplete_stream_3_bytes) {
 class dummy_message : public replication_message {
 public:
     message_type_id get_message_type_id() const override { return message_type_id::TESTING; }
-    void send_body(socket_io&) const override {}
-    void receive_body(socket_io&) override {}
+    void send_body(replication_message_io&) const override {}
+    void receive_body(replication_message_io&) override {}
 };
 
 TEST(replication_message_test, post_receive_throws_if_not_overridden) {
     dummy_message msg;
     try {
-        socket_io io("");
+        replication_message_io io("");
         handler_resources resources{io};
         msg.post_receive(resources);
         FAIL() << "Expected std::logic_error";

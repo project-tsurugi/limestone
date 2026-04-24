@@ -15,7 +15,7 @@
  */
 
  #include "replication/message_log_channel_create.h"
- #include "socket_io.h"
+ #include "replication_message_io.h"
  #include "limestone_exception_helper.h"
  
  namespace limestone::replication {
@@ -28,13 +28,13 @@ message_type_id message_log_channel_create::get_message_type_id() const {
     return message_type_id::LOG_CHANNEL_CREATE;
 }
 
-void message_log_channel_create::send_body(socket_io& io) const {
+void message_log_channel_create::send_body(replication_message_io& io) const {
     io.send_uint8(connection_type_);
     io.send_uint64(channel_id_);
     io.send_string(secret_);
 }
 
-void message_log_channel_create::receive_body(socket_io& io) {
+void message_log_channel_create::receive_body(replication_message_io& io) {
     connection_type_ = io.receive_uint8();
     channel_id_ = io.receive_uint64();
     if (connection_type_ != CONNECTION_TYPE_LOG_CHANNEL) {

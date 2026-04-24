@@ -20,7 +20,7 @@
 #include "replication/message_ack.h"
 #include "replication/message_session_begin.h"
 #include "replication/message_session_begin_ack.h"
-#include "replication/socket_io.h"
+#include "replication/replication_message_io.h"
 #include "replication/message_error.h"
 
 namespace limestone::testing {
@@ -47,12 +47,12 @@ public:
 
     validation_result call_assign() { return authorize(); }
 
-    void call_send_initial_ack(socket_io& io) const { send_initial_ack(); }
+    void call_send_initial_ack(replication_message_io& io) const { send_initial_ack(); }
     };
  
 TEST_F(control_channel_handler_test, validate_session_begin_success) {
     replica_server server{};
-    socket_io io("");
+    replication_message_io io("");
     testable_control_handler handler(reinterpret_cast<replica_server&>(server), io);
 
      auto msg = std::make_unique<message_session_begin>();
@@ -64,7 +64,7 @@ TEST_F(control_channel_handler_test, validate_session_begin_success) {
  
  TEST_F(control_channel_handler_test, assign_fails_on_second_call) {
     replica_server server;
-    socket_io io("");
+    replication_message_io io("");
     testable_control_handler handler(reinterpret_cast<replica_server&>(server), io);
 
     // First call succeeds
@@ -79,7 +79,7 @@ TEST_F(control_channel_handler_test, validate_session_begin_success) {
 
 TEST_F(control_channel_handler_test, validate_succeeds_after_assign) {
     replica_server server;
-    socket_io io("");
+    replication_message_io io("");
     testable_control_handler handler(reinterpret_cast<replica_server&>(server), io);
 
     EXPECT_TRUE(handler.call_assign().ok());
@@ -93,7 +93,7 @@ TEST_F(control_channel_handler_test, validate_succeeds_after_assign) {
 
 TEST_F(control_channel_handler_test, validate_fails_on_protocol_version_mismatch) {
     replica_server server{};
-    socket_io io("");
+    replication_message_io io("");
     testable_control_handler handler(reinterpret_cast<replica_server&>(server), io);
 
     auto msg = std::make_unique<message_session_begin>();
@@ -109,7 +109,7 @@ TEST_F(control_channel_handler_test, validate_fails_on_protocol_version_mismatch
  
  TEST_F(control_channel_handler_test, validate_fails_on_wrong_type) {
     replica_server server;
-     socket_io io("");
+     replication_message_io io("");
      testable_control_handler handler(reinterpret_cast<replica_server&>(server), io);
  
      auto wrong = std::make_unique<message_ack>();
@@ -120,15 +120,15 @@ TEST_F(control_channel_handler_test, validate_fails_on_protocol_version_mismatch
  
  TEST_F(control_channel_handler_test, validate_fails_on_failed_cast) {
     replica_server server;
-     socket_io io("");
+     replication_message_io io("");
      testable_control_handler handler(reinterpret_cast<replica_server&>(server), io);
 
      class bad_message : public replication_message {
          message_type_id get_message_type_id() const override {
              return message_type_id::SESSION_BEGIN;
          }
-         void send_body(socket_io&) const override {}
-         void receive_body(socket_io&) override {}
+         void send_body(replication_message_io&) const override {}
+         void receive_body(replication_message_io&) override {}
          void post_receive(handler_resources&) override {}
      };
  
@@ -140,12 +140,12 @@ TEST_F(control_channel_handler_test, validate_fails_on_protocol_version_mismatch
  
  TEST_F(control_channel_handler_test, send_initial_ack_outputs_session_secret) {
     replica_server server;
-     socket_io io("");
+     replication_message_io io("");
      testable_control_handler handler(reinterpret_cast<replica_server&>(server), io);
  
      handler.call_send_initial_ack(io);
  
-     socket_io reader(io.get_out_string());
+     replication_message_io reader(io.get_out_string());
      auto msg = replication_message::receive(reader);
      auto* ack = dynamic_cast<message_session_begin_ack*>(msg.get());
      ASSERT_NE(ack, nullptr);

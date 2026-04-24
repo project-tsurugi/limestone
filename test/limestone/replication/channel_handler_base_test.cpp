@@ -2,7 +2,7 @@
 #include "replication/validation_result.h"
 #include "replication/message_ack.h"
 #include "replication/message_error.h"
-#include "replication/socket_io.h"
+#include "replication/replication_message_io.h"
 #include "gtest/gtest.h"
 #include <pthread.h>
 
@@ -13,7 +13,7 @@ class dummy_server {};
 
 class test_handler : public channel_handler_base {
 public:
-    test_handler(dummy_server& server, socket_io& io, bool valid)
+    test_handler(dummy_server& server, replication_message_io& io, bool valid)
         : channel_handler_base(reinterpret_cast<replica_server&>(server), io), valid_(valid), dispatched_(false) {}
     using channel_handler_base::get_server;
 protected:
@@ -28,7 +28,7 @@ protected:
     }
 
     void send_initial_ack() const override {
-        get_socket_io().send_string("ACK_SENT");
+        get_replication_message_io().send_string("ACK_SENT");
     }
 
     void dispatch(replication_message&, handler_resources& resources) override {
@@ -45,18 +45,18 @@ private:
 };
 
 TEST(channel_handler_base_test, run_sends_initial_ack_and_dispatches) {
-    socket_io preparer("");
+    replication_message_io preparer("");
     dummy_server server;
     
 
     message_ack dummy_msg;
 
     replication_message::send(preparer, dummy_msg);
-    socket_io io(preparer.get_out_string());
+    replication_message_io io(preparer.get_out_string());
     test_handler handler(server, io, true);
     EXPECT_THROW(handler.run(std::make_unique<message_ack>()), std::runtime_error);
 
-    socket_io ack_io(io.get_out_string());
+    replication_message_io ack_io(io.get_out_string());
     EXPECT_EQ(ack_io.receive_string(), "ACK_SENT");
     EXPECT_TRUE(handler.dispatched());
 
@@ -67,13 +67,13 @@ TEST(channel_handler_base_test, run_sends_initial_ack_and_dispatches) {
 
 TEST(channel_handler_base_test, run_sends_error_on_validation_failure) {
     dummy_server server;
-    socket_io out("");
+    replication_message_io out("");
     test_handler handler(server, out, false);
 
     
     handler.run(std::make_unique<message_ack>());
 
-    socket_io in(out.get_out_string());
+    replication_message_io in(out.get_out_string());
     auto resp = replication_message::receive(in);
     auto* err = dynamic_cast<message_error*>(resp.get());
     ASSERT_NE(err, nullptr);
@@ -89,15 +89,15 @@ TEST(channel_handler_base_test, send_ack_in_loop) {
     dummy_server server;
 
     message_ack dummy_msg;
-    socket_io preparer("");
+    replication_message_io preparer("");
     replication_message::send(preparer, dummy_msg);
-    socket_io io(preparer.get_out_string());
+    replication_message_io io(preparer.get_out_string());
     std::cerr << preparer.get_out_string() << std::endl;
     std::cerr << "io = " << io.get_out_string() << std::endl;
 
     class ack_handler : public channel_handler_base {
     public:
-        explicit ack_handler(dummy_server& s, socket_io& io)
+        explicit ack_handler(dummy_server& s, replication_message_io& io)
             : channel_handler_base(reinterpret_cast<replica_server&>(s), io) {}
 
     protected:
@@ -120,7 +120,7 @@ TEST(channel_handler_base_test, send_ack_in_loop) {
     EXPECT_THROW(handler.run(std::make_unique<message_ack>()), std::runtime_error);
     std::cerr << "io = " << io.get_out_string() << std::endl;
 
-    socket_io in(io.get_out_string());
+    replication_message_io in(io.get_out_string());
     auto response = replication_message::receive(in);
     auto* ack = dynamic_cast<message_ack*>(response.get());
     ASSERT_NE(ack, nullptr);
@@ -135,7 +135,7 @@ TEST(channel_handler_base_test, run_sends_error_when_assign_fails) {
 
     class failing_handler : public channel_handler_base {
     public:
-        explicit failing_handler(dummy_server& s, socket_io& io)
+        explicit failing_handler(dummy_server& s, replication_message_io& io)
             : channel_handler_base(reinterpret_cast<replica_server&>(s), io) {}
 
     protected:
@@ -151,12 +151,12 @@ TEST(channel_handler_base_test, run_sends_error_when_assign_fails) {
         void dispatch(replication_message&, handler_resources&) override {}
     };
 
-    socket_io io("");
+    replication_message_io io("");
     failing_handler handler(server, io);
 
     handler.run(std::make_unique<message_ack>());
 
-    socket_io reader(io.get_out_string());
+    replication_message_io reader(io.get_out_string());
     auto msg = replication_message::receive(reader);
     auto* err = dynamic_cast<message_error*>(msg.get());
     ASSERT_NE(err, nullptr);
@@ -167,7 +167,7 @@ TEST(channel_handler_base_test, run_sends_error_when_assign_fails) {
 
 TEST(channel_handler_base_test, get_server) {
     dummy_server server;
-    socket_io io("");
+    replication_message_io io("");
     test_handler handler(server, io, true);
     replica_server& got_server = handler.get_server();
 

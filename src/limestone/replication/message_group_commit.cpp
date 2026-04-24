@@ -19,7 +19,7 @@
 #include "control_channel_handler_resources.h"
 #include "limestone_exception_helper.h"
 #include "replication/message_ack.h"
-#include "socket_io.h"
+#include "replication_message_io.h"
 namespace limestone::replication {
 
 message_group_commit::message_group_commit(uint64_t epoch_number)
@@ -29,11 +29,11 @@ message_type_id message_group_commit::get_message_type_id() const {
     return message_type_id::GROUP_COMMIT;
 }
 
-void message_group_commit::send_body(socket_io& io) const {
+void message_group_commit::send_body(replication_message_io& io) const {
     io.send_uint64(epoch_number_);
 }
 
-void message_group_commit::receive_body(socket_io& io) {
+void message_group_commit::receive_body(replication_message_io& io) {
     epoch_number_ = io.receive_uint64();
 }
 
@@ -55,7 +55,7 @@ void message_group_commit::post_receive(handler_resources& resources) {
 
     // Send acknowledgment
     message_ack ack;
-    socket_io& io = cch_resources.get_socket_io();
+    replication_message_io& io = cch_resources.get_replication_message_io();
     replication_message::send(io, ack);
     io.flush();
     TRACE_END;

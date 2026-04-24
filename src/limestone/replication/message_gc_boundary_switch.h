@@ -27,8 +27,8 @@ public:
     explicit message_gc_boundary_switch(uint16_t write_version = 0);
 
     [[nodiscard]] message_type_id get_message_type_id() const override;
-    void send_body(socket_io& io) const override;
-    void receive_body(socket_io& io) override;
+    void send_body(replication_message_io& io) const override;
+    void receive_body(replication_message_io& io) override;
 
     [[nodiscard]] static std::unique_ptr<replication_message> create();
 

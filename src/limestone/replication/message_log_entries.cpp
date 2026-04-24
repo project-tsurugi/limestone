@@ -2,73 +2,52 @@
 
 #include <algorithm>
 #include <cassert>
-#include <limits>
 
 #include "limestone_exception_helper.h"
-#include "socket_io.h"
+#include "replication_message_io.h"
 #include "log_channel_handler_resources.h"
 #include "limestone/api/log_channel.h"
 #include "message_ack.h"
+#include "message_log_entries_wire_codec.h"
 namespace limestone::replication {
 
 using limestone::api::epoch_id_type;
 
-void message_log_entries::send_body(socket_io& io) const {
-    TRACE_START << "epcoh id =" << epoch_id_ << ", entries size = " << entries_.size();
-    if (entries_.size() > std::numeric_limits<std::uint32_t>::max()) {
-        LOG_AND_THROW_EXCEPTION("Too many log entries in replication message");
-    }
-    io.send_uint64(static_cast<uint64_t>(epoch_id_)); 
-    auto entry_count = static_cast<uint32_t>(entries_.size());
-    io.send_uint32(entry_count);
+void message_log_entries::send_body(replication_message_io& io) const {
+    TRACE_START << "epoch id =" << epoch_id_ << ", entries size = " << entries_.size();
+    message_log_entries_wire_codec::send_message_header(io, epoch_id_, entries_.size());
 
     // Send each entry
     for (const auto& entry : entries_) {
-        io.send_uint8(static_cast<uint8_t>(entry.type));
-        io.send_uint64(entry.storage_id);
-        io.send_string(entry.key);
-        io.send_string(entry.value);
-        io.send_uint64(entry.write_version.get_major());
-        io.send_uint64(entry.write_version.get_minor());
+        message_log_entries_wire_codec::send_entry_fixed_fields(io, entry);
         
         // Send the blob list
-        if (entry.blob_ids.size() > std::numeric_limits<std::uint32_t>::max()) {
-            LOG_AND_THROW_EXCEPTION("Too many blob IDs in replication message entry");
-        }
-        io.send_uint32(static_cast<uint32_t>(entry.blob_ids.size()));
+        message_log_entries_wire_codec::send_blob_count(io, entry.blob_ids.size());
         for (const auto& blob_id : entry.blob_ids) {
             io.send_blob(blob_id);
         }
     }
 
     // Send the operation flags (session begin, end, flush)
-    io.send_uint8(operation_flags_);
+    message_log_entries_wire_codec::send_operation_flags(io, operation_flags_);
     TRACE_END;
 }
 
-void message_log_entries::receive_body(socket_io& io) {
+void message_log_entries::receive_body(replication_message_io& io) {
     // Receive the number of entries
-    epoch_id_ = io.receive_uint64();
-    uint32_t entry_count = io.receive_uint32();
+    auto const header = message_log_entries_wire_codec::receive_message_header(io);
+    epoch_id_ = header.epoch_id;
 
     // Clear existing entries and reserve space
     entries_.clear();
-    entries_.reserve(entry_count);
+    entries_.reserve(header.entry_count);
 
     // Receive each entry
-    for (uint32_t i = 0; i < entry_count; ++i) {
-        entry new_entry;
-        new_entry.type = static_cast<log_entry::entry_type>(io.receive_uint8());
-        new_entry.storage_id = io.receive_uint64();
-        new_entry.key = io.receive_string();
-        new_entry.value = io.receive_string();
-
-        epoch_id_type epoch_number = io.receive_uint64();
-        std::uint64_t minor_write_version = io.receive_uint64();
-        new_entry.write_version  = write_version_type(epoch_number, minor_write_version);
+    for (uint32_t i = 0; i < header.entry_count; ++i) {
+        entry new_entry = message_log_entries_wire_codec::receive_entry_fixed_fields(io);
 
         // Receive blob list
-        uint32_t blob_count = io.receive_uint32();
+        uint32_t blob_count = message_log_entries_wire_codec::receive_blob_count(io);
         new_entry.blob_ids.resize(blob_count);
         for (uint32_t j = 0; j < blob_count; ++j) {
             new_entry.blob_ids[j] = io.receive_blob();
@@ -79,7 +58,7 @@ void message_log_entries::receive_body(socket_io& io) {
     }
 
     // Receive the operation flags (session begin, end, flush)
-    operation_flags_ = io.receive_uint8();
+    operation_flags_ = message_log_entries_wire_codec::receive_operation_flags(io);
 }
 
 bool message_log_entries::has_any_blobs() const noexcept {
@@ -231,7 +210,7 @@ void message_log_entries::post_receive(handler_resources& resources) {
         log_channel.end_session();
         if (lch_resources.ack_enabled()) {
             message_ack ack;
-            socket_io& io = lch_resources.get_socket_io();
+            replication_message_io& io = lch_resources.get_replication_message_io();
             replication_message::send(io, ack);
             io.flush();
         }

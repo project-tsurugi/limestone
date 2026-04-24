@@ -13,9 +13,10 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-#include "replication/socket_io.h"
+#include "replication/replication_message_io.h"
 
 #include <arpa/inet.h>
+#include <cerrno>
 #include <fcntl.h>
 #include <netinet/in.h>
 #include <sys/socket.h>
@@ -26,23 +27,37 @@
 
 #include "gtest/gtest.h"
 #include "limestone/api/limestone_exception.h"
-#include "replication/socket_io.h"
+#include "replication/replication_message_io.h"
 
 namespace limestone::testing {
 
 using namespace limestone::replication;
 using limestone::api::limestone_exception;
 
-// Test subclass for socket_io to allow access to protected methods
-class testable_socket_io : public limestone::replication::socket_io {
+namespace {
+
+void expect_contains(std::string const& actual, std::string const& expected) {
+    EXPECT_NE(actual.find(expected), std::string::npos)
+            << "Expected substring: " << expected << "\nActual message: " << actual;
+}
+
+void expect_not_contains(std::string const& actual, std::string const& unexpected) {
+    EXPECT_EQ(actual.find(unexpected), std::string::npos)
+            << "Unexpected substring: " << unexpected << "\nActual message: " << actual;
+}
+
+} // namespace
+
+// Test subclass for replication_message_io to allow access to protected methods
+class testable_replication_message_io : public limestone::replication::replication_message_io {
 public:
-    using limestone::replication::socket_io::get_in_stream;  
-    using limestone::replication::socket_io::socket_io;     
+    using limestone::replication::replication_message_io::get_in_stream;  
+    using limestone::replication::replication_message_io::replication_message_io;     
 };
 
 // Test for receive_uint16 with an empty stream
-TEST(socket_io_test, receive_uint16_empty_stream) {
-    socket_io io("");
+TEST(replication_message_io_test, receive_uint16_empty_stream) {
+    replication_message_io io("");
     try {
         [[maybe_unused]] uint16_t value = io.receive_uint16();
         FAIL() << "Expected limestone_exception, but none was thrown.";
@@ -54,9 +69,9 @@ TEST(socket_io_test, receive_uint16_empty_stream) {
 }
 
 // Test for receive_uint16 with an insufficient stream (only 1 byte)
-TEST(socket_io_test, receive_uint16_insufficient_stream) {
+TEST(replication_message_io_test, receive_uint16_insufficient_stream) {
     // 1 byte provided, but 2 bytes are needed for uint16_t
-    socket_io io("A");
+    replication_message_io io("A");
     try {
         [[maybe_unused]] uint16_t value = io.receive_uint16();
         FAIL() << "Expected limestone_exception, but none was thrown.";
@@ -67,8 +82,8 @@ TEST(socket_io_test, receive_uint16_insufficient_stream) {
 }
 
 // Test for receive_uint32 with an empty stream
-TEST(socket_io_test, receive_uint32_empty_stream) {
-    socket_io io("");
+TEST(replication_message_io_test, receive_uint32_empty_stream) {
+    replication_message_io io("");
     try {
         [[maybe_unused]] uint16_t value = io.receive_uint32();
         FAIL() << "Expected limestone_exception, but none was thrown.";
@@ -79,9 +94,9 @@ TEST(socket_io_test, receive_uint32_empty_stream) {
 }
 
 // Test for receive_uint32 with an insufficient stream (only 3 bytes)
-TEST(socket_io_test, receive_uint32_insufficient_stream) {
+TEST(replication_message_io_test, receive_uint32_insufficient_stream) {
    // 3 bytes provided, but 4 bytes are needed for uint32_t
-   socket_io io("ABC");
+   replication_message_io io("ABC");
    try {
     [[maybe_unused]] uint32_t value = io.receive_uint32();
        FAIL() << "Expected limestone_exception, but none was thrown.";
@@ -92,8 +107,8 @@ TEST(socket_io_test, receive_uint32_insufficient_stream) {
 }
 
 // Test for receive_uint64 with an empty stream
-TEST(socket_io_test, receive_uint64_empty_stream) {
-    socket_io io("");
+TEST(replication_message_io_test, receive_uint64_empty_stream) {
+    replication_message_io io("");
     try {
         [[maybe_unused]] uint64_t value = io.receive_uint64();
         FAIL() << "Expected limestone_exception, but none was thrown.";
@@ -105,9 +120,9 @@ TEST(socket_io_test, receive_uint64_empty_stream) {
 }
 
 // Test for receive_uint64 with insufficient stream for the high 32 bits
-TEST(socket_io_test, receive_uint64_insufficient_stream_for_high) {
+TEST(replication_message_io_test, receive_uint64_insufficient_stream_for_high) {
    // Only 3 bytes provided; 4 bytes are needed for the high 32 bits of uint64_t
-   socket_io io("ABC");
+   replication_message_io io("ABC");
    try {
        [[maybe_unused]] uint64_t value = io.receive_uint64();
        FAIL() << "Expected limestone_exception, but none was thrown.";
@@ -118,10 +133,10 @@ TEST(socket_io_test, receive_uint64_insufficient_stream_for_high) {
 }
 
 // Test for receive_uint64 with insufficient stream for the low 32 bits
-TEST(socket_io_test, receive_uint64_insufficient_stream_for_low) {
+TEST(replication_message_io_test, receive_uint64_insufficient_stream_for_low) {
     // Provide 5 bytes: 4 bytes for high 32 bits and 1 byte for low 32 bits (insufficient for low part)
     std::string data(5, 'A');
-    socket_io io(data);
+    replication_message_io io(data);
     try {
         [[maybe_unused]] uint64_t value = io.receive_uint64();
         FAIL() << "Expected limestone_exception, but none was thrown.";
@@ -131,8 +146,8 @@ TEST(socket_io_test, receive_uint64_insufficient_stream_for_low) {
     }
 }
 
-// Test for byte order conversion using socket_io's get_out_string() and round-trip functionality.
-TEST(socket_io_test, byte_order_conversion_with_streams) {
+// Test for byte order conversion using replication_message_io's get_out_string() and round-trip functionality.
+TEST(replication_message_io_test, byte_order_conversion_with_streams) {
     // Define host values.
     uint8_t host8 = 0x12;                   // 8-bit value.
     uint16_t host16 = 0x1234;               // 16-bit value.
@@ -140,8 +155,8 @@ TEST(socket_io_test, byte_order_conversion_with_streams) {
     uint64_t host64 = 0x1234567890ABCDEF;    // 64-bit value.
     std::string host_string = "Hello, World!"; // String value.
 
-    // Create a socket_io instance in string mode.
-    socket_io io_send("");
+    // Create a replication_message_io instance in string mode.
+    replication_message_io io_send("");
     
     // Write values to the internal output buffer.
     io_send.send_uint8(host8);
@@ -198,8 +213,8 @@ TEST(socket_io_test, byte_order_conversion_with_streams) {
     std::string out_string_body(out_data.begin() + pos, out_data.end());
     EXPECT_EQ(out_string_body, host_string);
     
-    // --- Round-trip test: use the output data as input for a new socket_io instance ---
-    socket_io io_receive(out_data);
+    // --- Round-trip test: use the output data as input for a new replication_message_io instance ---
+    replication_message_io io_receive(out_data);
     uint8_t rec8 = io_receive.receive_uint8();
     uint16_t rec16 = io_receive.receive_uint16();
     uint32_t rec32 = io_receive.receive_uint32();
@@ -215,22 +230,57 @@ TEST(socket_io_test, byte_order_conversion_with_streams) {
 
 
 // Test for receive_uint8 with an empty stream.
-TEST(socket_io_test, receive_uint8_empty_stream) {
-    // Create a socket_io in string mode with an empty input.
-    socket_io io("");
+TEST(replication_message_io_test, receive_uint8_empty_stream) {
+    // Create a replication_message_io in string mode with an empty input.
+    replication_message_io io("");
     try {
         [[maybe_unused]] uint8_t value = io.receive_uint8();
         FAIL() << "Expected limestone_exception, but none was thrown.";
     } catch (const limestone_exception &ex) {
-        std::string expected = "Failed to read uint8_t from input stream";
-        EXPECT_NE(std::string(ex.what()).find(expected), std::string::npos)
-            << "Error message was: " << ex.what();
+        std::string message = ex.what();
+        expect_contains(message, "Failed to read uint8_t from input stream");
+        expect_contains(message, "requested=1");
+        expect_contains(message, "got=0");
+        expect_contains(message, "eof=1");
+        expect_contains(message, "fail=1");
+    }
+}
+
+TEST(replication_message_io_test, receive_uint8_empty_stream_ignores_stale_errno) {
+    errno = ENOENT;
+    replication_message_io io("");
+    try {
+        [[maybe_unused]] uint8_t value = io.receive_uint8();
+        FAIL() << "Expected limestone_exception, but none was thrown.";
+    } catch (const limestone_exception &ex) {
+        std::string message = ex.what();
+        expect_contains(message, "Failed to read uint8_t from input stream");
+        expect_contains(message, "Input/output error");
+        expect_contains(message, "errno = 5");
+        expect_not_contains(message, "No such file or directory");
+        EXPECT_EQ(ex.error_code(), EIO);
+    }
+}
+
+TEST(replication_message_io_test, receive_uint32_short_stream_reports_bytes_read) {
+    replication_message_io io("A");
+    try {
+        [[maybe_unused]] uint32_t value = io.receive_uint32();
+        FAIL() << "Expected limestone_exception, but none was thrown.";
+    } catch (const limestone_exception &ex) {
+        std::string message = ex.what();
+        expect_contains(message, "Failed to read uint32_t from input stream");
+        expect_contains(message, "requested=4");
+        expect_contains(message, "got=1");
+        expect_contains(message, "eof=1");
+        expect_contains(message, "fail=1");
+        EXPECT_EQ(ex.error_code(), EIO);
     }
 }
 
 // Test for receive_string with an empty stream (i.e. missing length).
-TEST(socket_io_test, receive_string_empty_stream) {
-    socket_io io("");
+TEST(replication_message_io_test, receive_string_empty_stream) {
+    replication_message_io io("");
     try {
         [[maybe_unused]] std::string s = io.receive_string();
         FAIL() << "Expected limestone_exception, but none was thrown.";
@@ -243,15 +293,15 @@ TEST(socket_io_test, receive_string_empty_stream) {
 }
 
 // Test for receive_string with insufficient body data.
-TEST(socket_io_test, receive_string_insufficient_body) {
-    // Prepare a socket_io in string mode with only the length field (5) but no body.
-    socket_io io_send("");
+TEST(replication_message_io_test, receive_string_insufficient_body) {
+    // Prepare a replication_message_io in string mode with only the length field (5) but no body.
+    replication_message_io io_send("");
     io_send.send_uint32(5); // length = 5, but no subsequent string data.
     ASSERT_TRUE(io_send.flush());
     std::string out_data = io_send.get_out_string();
     
-    // Create a new socket_io for receiving using the generated output.
-    socket_io io_receive(out_data);
+    // Create a new replication_message_io for receiving using the generated output.
+    replication_message_io io_receive(out_data);
     try {
         [[maybe_unused]] std::string s = io_receive.receive_string();
         FAIL() << "Expected limestone_exception, but none was thrown.";
@@ -263,28 +313,28 @@ TEST(socket_io_test, receive_string_insufficient_body) {
 }
 
 // Test for string round-trip (binary data).
-TEST(socket_io_test, string_round_trip) {
+TEST(replication_message_io_test, string_round_trip) {
     std::string original = std::string("Hello\0World", 11);
-    socket_io io_send("");
+    replication_message_io io_send("");
     io_send.send_string(original);
     ASSERT_TRUE(io_send.flush());
     std::string out_data = io_send.get_out_string();
     
-    // Use the output data as the input for a new socket_io.
-    socket_io io_receive(out_data);
+    // Use the output data as the input for a new replication_message_io.
+    replication_message_io io_receive(out_data);
     std::string result = io_receive.receive_string();
     EXPECT_EQ(result, original);
 }
 
 // Test for round-trip of an empty string.
-TEST(socket_io_test, string_round_trip_empty) {
+TEST(replication_message_io_test, string_round_trip_empty) {
     std::string original = "";
-    socket_io io_send("");
+    replication_message_io io_send("");
     io_send.send_string(original);
     ASSERT_TRUE(io_send.flush());
     std::string out_data = io_send.get_out_string();
     
-    socket_io io_receive(out_data);
+    replication_message_io io_receive(out_data);
     std::string result = io_receive.receive_string();
     EXPECT_EQ(result.size(), 0u);
     EXPECT_EQ(result, original);
@@ -313,10 +363,10 @@ int create_server_socket(uint16_t port) {
     return listen_fd;
 }
 
-// Test for socket-based communication (round-trip test)
-TEST(socket_io_test, socket_round_trip) {
+// Test for real file-descriptor based communication.
+TEST(replication_message_io_test, real_fd_round_trip) {
     const uint16_t test_port = 12345;
-    const std::string test_message = "Test socket_io message";
+    const std::string test_message = "Test replication_message_io message";
 
     int listen_fd = create_server_socket(test_port);
 
@@ -327,7 +377,7 @@ TEST(socket_io_test, socket_round_trip) {
         int conn_fd = ::accept(listen_fd, reinterpret_cast<sockaddr*>(&client_addr), &addr_len);
         EXPECT_NE(conn_fd, -1) << "Failed to accept connection: " << strerror(errno);
 
-        socket_io server_io(conn_fd);
+        replication_message_io server_io(conn_fd);
         std::string received_message = server_io.receive_string();
         EXPECT_EQ(received_message, test_message);
 
@@ -352,7 +402,7 @@ TEST(socket_io_test, socket_round_trip) {
     EXPECT_EQ(::connect(client_fd, reinterpret_cast<sockaddr*>(&server_addr), sizeof(server_addr)), 0)
         << "Failed to connect to server: " << strerror(errno);
 
-    socket_io client_io(client_fd);
+    replication_message_io client_io(client_fd);
     client_io.send_string(test_message);
     EXPECT_TRUE(client_io.flush());
 
@@ -365,7 +415,7 @@ TEST(socket_io_test, socket_round_trip) {
     ::close(listen_fd);
 }
 
-TEST(socket_io_test, socket_round_trip_large_nonblocking) {
+TEST(replication_message_io_test, real_fd_round_trip_large_nonblocking) {
     const uint16_t test_port = 12345;
 
     int listen_fd = ::socket(AF_INET, SOCK_STREAM, 0);
@@ -388,7 +438,7 @@ TEST(socket_io_test, socket_round_trip_large_nonblocking) {
         int conn_fd = ::accept(listen_fd, reinterpret_cast<sockaddr*>(&client_addr), &addr_len);
         ASSERT_NE(conn_fd, -1);
 
-        socket_io server_io(conn_fd);
+        replication_message_io server_io(conn_fd);
         std::string received_message = server_io.receive_string();
         server_io.send_string(received_message);
         ASSERT_TRUE(server_io.flush());
@@ -437,7 +487,7 @@ TEST(socket_io_test, socket_round_trip_large_nonblocking) {
         }
     }
 
-    socket_io client_io(client_fd);
+    replication_message_io client_io(client_fd);
 
     // The first call to send() implicitly waits until connection established or fails
     client_io.send_string(large_message);
@@ -453,8 +503,8 @@ TEST(socket_io_test, socket_round_trip_large_nonblocking) {
 }
 
 // Test for EOF on an empty stream
-TEST(socket_io_test, eof_empty_stream) {
-    testable_socket_io io("");
+TEST(replication_message_io_test, eof_empty_stream) {
+    testable_replication_message_io io("");
     EXPECT_FALSE(io.eof());
     // Attempt to read data from the stream
     char buffer;
@@ -465,14 +515,14 @@ TEST(socket_io_test, eof_empty_stream) {
 }
 
 // Test for not EOF when data is available in the stream
-TEST(socket_io_test, eof_data_available) {
-    socket_io io("Test data");
+TEST(replication_message_io_test, eof_data_available) {
+    replication_message_io io("Test data");
     EXPECT_FALSE(io.eof()) << "Expected not EOF, but the stream reached EOF prematurely.";
 }
 
 // Test for EOF when the stream ends before receiving expected data
-TEST(socket_io_test, eof_incomplete_data) {
-    socket_io io("A");  // Only one byte, expecting two bytes for uint16_t
+TEST(replication_message_io_test, eof_incomplete_data) {
+    replication_message_io io("A");  // Only one byte, expecting two bytes for uint16_t
     try {
         [[maybe_unused]] uint16_t value = io.receive_uint16();
         FAIL() << "Expected limestone_exception, but none was thrown.";
@@ -487,8 +537,8 @@ TEST(socket_io_test, eof_incomplete_data) {
 }
 
 // Test for EOF in string mode after the stream is closed
-TEST(socket_io_test, eof_after_close_string_mode) {
-    testable_socket_io io("AAA");
+TEST(replication_message_io_test, eof_after_close_string_mode) {
+    testable_replication_message_io io("AAA");
     io.close();  // Close the stream
 
     // Attempt to read data from the stream
@@ -496,42 +546,42 @@ TEST(socket_io_test, eof_after_close_string_mode) {
     io.get_in_stream().read(&buffer, 1);
 
     // Check that EOF is not true in string mode after closing the stream
-    EXPECT_TRUE(io.eof()) << "Expected EOF after stream close in socket mode, but it was not EOF.";
+    EXPECT_TRUE(io.eof()) << "Expected EOF after stream close in string mode, but it was not EOF.";
 }
 
-// Test for EOF after the stream is closed in socket mode
-TEST(socket_io_test, eof_after_close_socket_mode) {
-    // Create a socket in a server-client setup or mock it
+// Test for EOF after the stream is closed in real file-descriptor mode.
+TEST(replication_message_io_test, eof_after_close_real_fd_mode) {
+    // Create a socket-backed file descriptor for the input stream.
     int server_fd = ::socket(AF_INET, SOCK_STREAM, 0);
     EXPECT_NE(server_fd, -1);
 
-    testable_socket_io io(server_fd);
+    testable_replication_message_io io(server_fd);
     io.close();  // Close the socket
 
     // Attempt to read data from the stream
     char buffer;
     io.get_in_stream().read(&buffer, 1);
 
-    // Check that EOF is true after closing the stream in socket mode
-    EXPECT_TRUE(io.eof()) << "Expected EOF after stream close in socket mode, but it was not EOF.";
+    // Check that EOF is true after closing the stream in real file-descriptor mode.
+    EXPECT_TRUE(io.eof()) << "Expected EOF after stream close in real file-descriptor mode, but it was not EOF.";
 }
 
-TEST(socket_io_test, get_socket_fd_real_and_string_mode) {
+TEST(replication_message_io_test, get_socket_fd_real_fd_and_string_mode) {
     int fds[2]{-1, -1};
     ASSERT_EQ(::socketpair(AF_UNIX, SOCK_STREAM, 0, fds), 0);
 
     {
-        socket_io io_real(fds[0]);
+        replication_message_io io_real(fds[0]);
         EXPECT_EQ(io_real.get_socket_fd(), fds[0]);
     }
     ::close(fds[1]);
 
-    socket_io io_string("");
+    replication_message_io io_string("");
     EXPECT_EQ(io_string.get_socket_fd(), -1);
 }
 
-TEST(socket_io_test, reset_output_buffer_clears_content_and_reuse) {
-    socket_io io(std::string{});
+TEST(replication_message_io_test, reset_output_buffer_clears_content_and_reuse) {
+    replication_message_io io(std::string{});
 
     io.send_uint32(0x12345678U);
     auto before = io.get_out_string();
@@ -547,9 +597,9 @@ TEST(socket_io_test, reset_output_buffer_clears_content_and_reuse) {
     EXPECT_EQ(static_cast<unsigned char>(reused[0]), 0xAB);
 }
 
-TEST(socket_io_test, reset_output_buffer_handles_moved_from_object) {
-    socket_io io(std::string{});
-    socket_io moved{std::move(io)};
+TEST(replication_message_io_test, reset_output_buffer_handles_moved_from_object) {
+    replication_message_io io(std::string{});
+    replication_message_io moved{std::move(io)};
 
     // moved-from object should safely ignore reset
     ASSERT_NO_THROW(io.reset_output_buffer());
@@ -562,65 +612,65 @@ TEST(socket_io_test, reset_output_buffer_handles_moved_from_object) {
     EXPECT_EQ(static_cast<unsigned char>(payload[0]), 0x7F);
 }
 
-TEST(socket_io_test, reset_output_buffer_socket_mode_is_noop) {
+TEST(replication_message_io_test, reset_output_buffer_real_fd_mode_is_noop) {
     int fds[2]{-1, -1};
     ASSERT_EQ(::socketpair(AF_UNIX, SOCK_STREAM, 0, fds), 0);
 
-    socket_io io_real(fds[0]);
-    // In socket mode, reset_output_buffer should be a no-op without throwing.
+    replication_message_io io_real(fds[0]);
+    // In real file-descriptor mode, reset_output_buffer should be a no-op without throwing.
     ASSERT_NO_THROW(io_real.reset_output_buffer());
 
     ::close(fds[1]);
     ::close(fds[0]);
 }
 
-TEST(socket_io_test, get_out_size_empty) {
-    socket_io io(std::string{});
+TEST(replication_message_io_test, get_out_size_empty) {
+    replication_message_io io(std::string{});
     EXPECT_EQ(io.get_out_size(), 0U);
 }
 
-TEST(socket_io_test, get_out_size_after_write) {
-    socket_io io(std::string{});
+TEST(replication_message_io_test, get_out_size_after_write) {
+    replication_message_io io(std::string{});
     io.send_uint32(0x12345678U);
     EXPECT_EQ(io.get_out_size(), sizeof(uint32_t));
 }
 
-TEST(socket_io_test, get_out_size_after_reset) {
-    socket_io io(std::string{});
+TEST(replication_message_io_test, get_out_size_after_reset) {
+    replication_message_io io(std::string{});
     io.send_uint32(0xDEADBEEFU);
     ASSERT_GT(io.get_out_size(), 0U);
     io.reset_output_buffer();
     EXPECT_EQ(io.get_out_size(), 0U);
 }
 
-TEST(socket_io_test, has_unread_data_empty_stream) {
-    socket_io io(std::string{});
+TEST(replication_message_io_test, has_unread_data_empty_stream) {
+    replication_message_io io(std::string{});
     EXPECT_FALSE(io.has_unread_data());
 }
 
-TEST(socket_io_test, has_unread_data_with_data) {
-    socket_io io(std::string{"ABC"});
+TEST(replication_message_io_test, has_unread_data_with_data) {
+    replication_message_io io(std::string{"ABC"});
     EXPECT_TRUE(io.has_unread_data());
 }
 
-TEST(socket_io_test, has_unread_data_after_consume) {
-    socket_io io_src(std::string{});
+TEST(replication_message_io_test, has_unread_data_after_consume) {
+    replication_message_io io_src(std::string{});
     io_src.send_uint8(0xABU);
-    socket_io io(io_src.get_out_string());
+    replication_message_io io(io_src.get_out_string());
     EXPECT_TRUE(io.has_unread_data());
     [[maybe_unused]] auto _ = io.receive_uint8();
     EXPECT_FALSE(io.has_unread_data());
 }
 
-// send_blob and receive_blob on the base socket_io must FATAL immediately
+// send_blob and receive_blob on the base replication_message_io must FATAL immediately
 // because blob handling requires a blob-capable subclass.
-TEST(socket_io_death_test, send_blob_on_base_class_is_fatal) {
-    socket_io io(std::string{});
+TEST(replication_message_io_death_test, send_blob_on_base_class_is_fatal) {
+    replication_message_io io(std::string{});
     EXPECT_DEATH(io.send_blob(0U), "");
 }
 
-TEST(socket_io_death_test, receive_blob_on_base_class_is_fatal) {
-    socket_io io(std::string{});
+TEST(replication_message_io_death_test, receive_blob_on_base_class_is_fatal) {
+    replication_message_io io(std::string{});
     EXPECT_DEATH(io.receive_blob(), "");
 }
 
