@@ -359,7 +359,7 @@ TEST_F(log_channel_handler_test, handle_rdma_data_event_sequence_mismatch_no_ack
     ::close(ctx.write_fd);
 }
 
-TEST_F(log_channel_handler_test, handle_rdma_data_event_payload_size_mismatch_no_ack) {
+TEST_F(log_channel_handler_test, handle_rdma_data_event_payload_size_mismatch_fatals) {
     auto ctx = make_rdma_handler_with_channel(base_location);
     ASSERT_NE(ctx.handler, nullptr);
     ASSERT_GE(ctx.read_fd, 0);
@@ -374,13 +374,8 @@ TEST_F(log_channel_handler_test, handle_rdma_data_event_payload_size_mismatch_no
     auto ev = make_rdma_event_from_message(entries, 0U);
     ev.header.payload_size += 1U;  // mismatch
 
-    ctx.handler->handle_rdma_data_event(ev);
-
-    std::array<std::uint8_t, 4> buf{};
-    ssize_t n = ::read(ctx.read_fd, buf.data(), buf.size());
-    int saved_errno = errno;
-    EXPECT_LT(n, 0);
-    EXPECT_EQ(saved_errno, EAGAIN);
+    EXPECT_DEATH({ ctx.handler->handle_rdma_data_event(ev); },
+                 "RDMA payload size mismatch");
 
     ::close(ctx.read_fd);
     ::close(ctx.write_fd);
@@ -419,7 +414,7 @@ TEST_F(log_channel_handler_test, handle_rdma_data_event_partial_then_complete_ac
     ::close(ctx.write_fd);
 }
 
-TEST_F(log_channel_handler_test, handle_rdma_data_event_partial_clears_on_version_mismatch) {
+TEST_F(log_channel_handler_test, handle_rdma_data_event_version_mismatch_fatals) {
     auto ctx = make_rdma_handler_with_channel(base_location);
     ASSERT_NE(ctx.handler, nullptr);
     ASSERT_GE(ctx.read_fd, 0);
@@ -437,13 +432,8 @@ TEST_F(log_channel_handler_test, handle_rdma_data_event_partial_clears_on_versio
 
     auto bad = events.second;
     bad.header.version = static_cast<std::uint8_t>(events.second.header.version + 1U);
-    ctx.handler->handle_rdma_data_event(bad);
-
-    std::array<std::uint8_t, 4> buf{};
-    ssize_t n = ::read(ctx.read_fd, buf.data(), buf.size());
-    int saved_errno = errno;
-    EXPECT_LT(n, 0);
-    EXPECT_EQ(saved_errno, EAGAIN);
+    EXPECT_DEATH({ ctx.handler->handle_rdma_data_event(bad); },
+                 "RDMA frame version mismatch");
 
     ::close(ctx.read_fd);
     ::close(ctx.write_fd);
@@ -667,6 +657,27 @@ TEST_F(log_channel_handler_test,
     ::close(ctx.write_fd);
 }
 
+TEST_F(log_channel_handler_test,
+       process_rdma_message_locked_receiver_exception_fatals) {
+    auto ctx = make_rdma_handler_with_channel(base_location);
+    ASSERT_NE(ctx.handler, nullptr);
+
+    std::vector<std::uint8_t> invalid_payload{
+        static_cast<std::uint8_t>(message_type_id::COMMON_ACK)};
+
+    rdma_frame_header header{};
+    header.version = rdma_frame_current_version;
+    header.flags = 0U;
+    header.sequence_number = 0U;
+    header.payload_size = static_cast<std::uint32_t>(invalid_payload.size());
+
+    EXPECT_DEATH({ ctx.handler->process_rdma_message_locked(invalid_payload, header); },
+                 "RDMA receiver failed while processing payload");
+
+    ::close(ctx.read_fd);
+    ::close(ctx.write_fd);
+}
+
 // Verify that a BLOB entry received over RDMA is correctly deserialised and
 // written as a blob file in the replica datastore.
 TEST_F(log_channel_handler_test, handle_rdma_data_event_with_blob_entry_writes_blob_file) {
@@ -877,7 +888,7 @@ TEST_F(log_channel_handler_test,
 }
 
 TEST_F(log_channel_handler_test,
-       handle_rdma_data_event_with_partial_blob_reset_does_not_write_pwal) {
+       handle_rdma_data_event_with_partial_blob_version_mismatch_fatals) {
     auto ctx = make_rdma_handler_with_channel(base_location);
     ASSERT_NE(ctx.handler, nullptr);
     ASSERT_GE(ctx.read_fd, 0);
@@ -934,23 +945,14 @@ TEST_F(log_channel_handler_test,
     }
     EXPECT_TRUE(boost::filesystem::exists(partial_blob_path));
 
-    // A bad frame after the partial BLOB body models transfer abort/connection
-    // close from the handler's point of view: the streaming receiver state is
-    // discarded, but the partial BLOB file may remain for later GC.  The WAL
-    // entry must not be written because the BLOB message never completed.
+    // A bad frame after the partial BLOB body is now fatal because the RDMA
+    // stream can no longer be trusted once frame validation fails.
     ASSERT_LT(next_call, stream.calls_.size());
     auto bad_event = make_rdma_event_from_payload(
         stream.calls_[next_call], static_cast<std::uint16_t>(next_call));
     bad_event.header.version = static_cast<std::uint8_t>(rdma_frame_current_version + 1U);
-    ctx.handler->handle_rdma_data_event(bad_event);
-
-    auto replica_pwal_path = boost::filesystem::path(base_location) / "pwal_0000";
-    if (boost::filesystem::exists(replica_pwal_path)) {
-        auto replica_entries = read_log_file(base_location, "pwal_0000");
-        EXPECT_TRUE(replica_entries.empty())
-            << "PWAL must stay empty after aborting a partial BLOB message";
-    }
-    EXPECT_TRUE(boost::filesystem::exists(partial_blob_path));
+    EXPECT_DEATH({ ctx.handler->handle_rdma_data_event(bad_event); },
+                 "RDMA frame version mismatch");
 
     sender_ds.reset();
     boost::filesystem::remove_all(sender_dir);

@@ -75,22 +75,14 @@ void log_channel_handler::handle_rdma_data_event(
                 << " pending=" << pending_rdma_frames_.size()
                 << " next_expected=" << next_sequence_number_;
     if (header.version != rdma_frame_current_version) {
-        LOG_LP(ERROR) << "RDMA frame version mismatch: expected "
+        LOG_LP(FATAL) << "RDMA frame version mismatch: expected "
                       << static_cast<int>(rdma_frame_current_version)
                       << " got " << static_cast<int>(header.version);
-        pending_rdma_frames_.clear();
-        rdma_receiver_.reset();
-        TRACE_ABORT << "version mismatch";
-        return;
     }
 
     if (header.payload_size != event.payload.size()) {
-        LOG_LP(ERROR) << "RDMA payload size mismatch: header=" << header.payload_size
+        LOG_LP(FATAL) << "RDMA payload size mismatch: header=" << header.payload_size
                       << " actual=" << event.payload.size();
-        pending_rdma_frames_.clear();
-        rdma_receiver_.reset();
-        TRACE_ABORT << "payload size mismatch";
-        return;
     }
 
     if (header.sequence_number < next_sequence_number_) {
@@ -135,19 +127,19 @@ void log_channel_handler::process_rdma_message_locked(
     std::string_view bytes{
         reinterpret_cast<char const*>(payload.data()),  // NOLINT(cppcoreguidelines-pro-type-reinterpret-cast)
         payload.size()};
-    std::size_t consumed = rdma_receiver_->consume(bytes);
-    if (consumed != payload.size()) {
-        LOG_LP(ERROR) << "RDMA receiver left unconsumed payload bytes: consumed="
-                      << consumed << " size=" << payload.size();
-        rdma_receiver_.reset();
-        TRACE_ABORT << "unconsumed payload bytes";
-        return;
-    }
+    try {
+        // The receiver consumes the full payload or throws on protocol errors,
+        // so there is no partial-consume path to handle here.
+        rdma_receiver_->consume(bytes);
 
-    while (rdma_receiver_->has_message()) {
-        auto log_entries = rdma_receiver_->take_message();
-        auto resources = std::make_unique<log_channel_handler_resources>(get_replication_message_io(), *log_channel_, false);
-        log_entries->post_receive(*resources);
+        while (rdma_receiver_->has_message()) {
+            auto log_entries = rdma_receiver_->take_message();
+            auto resources = std::make_unique<log_channel_handler_resources>(get_replication_message_io(), *log_channel_, false);
+            log_entries->post_receive(*resources);
+        }
+    } catch (std::exception const& e) {
+        LOG_LP(FATAL) << "RDMA receiver failed while processing payload: "
+                      << e.what();
     }
 
     TRACE_END;
