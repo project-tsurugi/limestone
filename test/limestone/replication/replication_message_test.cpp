@@ -29,7 +29,7 @@ TEST(replication_message_test, create_message_with_valid_type_id) {
     // Create a stream and write type information and message data
     replication_message_io out("");
     message_type_id type_id = message_type_id::TESTING;
-    out.send_uint8(static_cast<uint16_t>(type_id));  // Write the message type ID
+    out.send_uint8(static_cast<uint8_t>(type_id));  // Write the message type ID
     out.send_string("Test Message Data");  // Write some dummy message data
     
     replication_message_io in(out.get_out_string());

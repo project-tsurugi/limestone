@@ -50,7 +50,7 @@ void rdma_replication_message_io::push_staged_bytes() {
     auto result = rdma_stream_.send_all_bytes(payload, 0, payload.size());
     if (! result.success || result.bytes_written != payload.size()) {
         LOG_AND_THROW_IO_EXCEPTION(
-            "RDMA send_bytes failed for buffered payload: " + result.error_message, EIO);
+            "RDMA send_all_bytes failed for buffered payload: " + result.error_message, EIO);
     }
     reset_output_buffer();
 }

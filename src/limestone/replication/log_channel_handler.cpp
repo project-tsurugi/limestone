@@ -130,7 +130,7 @@ void log_channel_handler::process_rdma_message_locked(
     try {
         // The receiver consumes the full payload or throws on protocol errors,
         // so there is no partial-consume path to handle here.
-        rdma_receiver_->consume(bytes);
+        static_cast<void>(rdma_receiver_->consume(bytes));
 
         while (rdma_receiver_->has_message()) {
             auto log_entries = rdma_receiver_->take_message();

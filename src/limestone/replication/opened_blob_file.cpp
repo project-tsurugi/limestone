@@ -125,7 +125,7 @@ opened_blob_file opened_blob_file::open_for_send(
         status = boost::filesystem::status(path);
     }
     if (! boost::filesystem::is_regular_file(status)) {
-        LOG_AND_THROW_IO_EXCEPTION("Unsupported blob path type: " + path.string(), errno);
+        LOG_AND_THROW_EXCEPTION("Unsupported blob path type: " + path.string());
     }
 
     FILE* fp = std::fopen(path.string().c_str(), "rb");  // NOLINT(cppcoreguidelines-owning-memory)
