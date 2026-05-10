@@ -22,6 +22,7 @@
 #include "gtest/gtest.h"
 #include <datastore_impl.h>
 #include <log_channel_impl.h>
+#include "blob_file_resolver.h"
 #include "internal.h"
 #include "replication/replica_server.h"
 #include "replication/replication_endpoint.h"
@@ -38,20 +39,26 @@ using limestone::internal::epoch_file_name;
 using limestone::internal::last_durable_epoch;
 using limestone::api::storage_id_type;
 
-static constexpr const bool server_execute_as_thread = true;
-
 static constexpr const char* base_location = "/tmp/scenario_test";
 static constexpr const char* master_location = "/tmp/scenario_test/master";
 static constexpr const char* replica_location = "/tmp/scenario_test/replica";
 
-struct rdma_param {
+// File-local: keep this struct out of external linkage to avoid ODR collision
+// with similarly-shaped parametrization structs that other replication test
+// files define in the same namespace.
+namespace {
+
+struct scenario_param {
     std::string name;
     std::optional<uint32_t> rdma_slots;
+    bool execute_as_process;
 };
 
-inline std::ostream& operator<<(std::ostream& os, rdma_param const& param) {
+inline std::ostream& operator<<(std::ostream& os, scenario_param const& param) {
     return os << param.name;
 }
+
+} // namespace
 
 
 struct snapshot_entry {
@@ -68,7 +75,7 @@ std::string read_file(boost::filesystem::path const& path) {
 }
 
 
-class scenario_test : public ::testing::Test, public ::testing::WithParamInterface<rdma_param> {
+class scenario_test : public ::testing::Test, public ::testing::WithParamInterface<scenario_param> {
 protected:
     void SetUp() override {
         pthread_setname_np(pthread_self(), "master_main");
@@ -91,11 +98,11 @@ protected:
         // start replica server
         uint16_t port = get_free_port();
         setenv("TSURUGI_REPLICATION_ENDPOINT", ("tcp://127.0.0.1:" + std::to_string(port)).c_str(), 1);
-        if (server_execute_as_thread) {
+        if (param.execute_as_process) {
+            start_replica_as_process();
+        } else {
             int result = start_replica_as_thread();
             ASSERT_EQ(result, 0) << "Failed to start replica thread";
-        } else {
-            start_replica_as_process();
         }
     }
 
@@ -222,7 +229,7 @@ protected:
     }
 
     void stop_replica() {
-        if (server_execute_as_thread) {
+        if (! GetParam().execute_as_process) {
             if (replica_thread_.joinable()) {
                 server.shutdown();
                 replica_thread_.join();
@@ -465,7 +472,9 @@ TEST_P(scenario_test, blob_replication_end_to_end) {
         replica_entries[0], 1, "blob-key", "blob-value", 1, 0, {blob_id},
         log_entry::entry_type::normal_with_blob));
 
-    auto replica_blob_path = server.get_datastore().get_impl()->resolve_blob_path(blob_id);
+    limestone::internal::blob_file_resolver replica_blob_resolver{
+        boost::filesystem::path(replica_location)};
+    auto replica_blob_path = replica_blob_resolver.resolve_path(blob_id);
     wait_until([&replica_blob_path]() {
         return boost::filesystem::exists(replica_blob_path);
     });
@@ -476,20 +485,33 @@ TEST_P(scenario_test, blob_replication_end_to_end) {
     EXPECT_EQ(get_replica_epoch(), 1);
 }
 
+// TCP variant runs in both thread and process modes since either may surface
+// distinct bugs (e.g. process-only catches wire/handshake issues; thread-only
+// catches in-process replica_server lifecycle issues and provides a faster dev
+// loop). RDMA variant runs only in process mode because the vendor mock returns
+// process-wide singletons (one GnRdmaWrite / GnRdmaReceive instance per process),
+// so master and replica must live in different processes. If the vendor mock
+// drops the singleton constraint in the future, the RDMA variant can also be
+// extended to thread mode just like TCP.
 #ifdef LIMESTONE_ENABLE_RDMA
 INSTANTIATE_TEST_SUITE_P(
-    rdma_toggle,
+    variants,
     scenario_test,
-    ::testing::Values(rdma_param{"tcp", std::nullopt}, rdma_param{"rdma_1", 1024U}),
-    [](const ::testing::TestParamInfo<rdma_param>& info) {
+    ::testing::Values(
+        scenario_param{"tcp_thread", std::nullopt, false},
+        scenario_param{"tcp_process", std::nullopt, true},
+        scenario_param{"rdma_1", 1024U, true}),
+    [](const ::testing::TestParamInfo<scenario_param>& info) {
         return info.param.name;
     });
 #else
 INSTANTIATE_TEST_SUITE_P(
-    rdma_toggle,
+    variants,
     scenario_test,
-    ::testing::Values(rdma_param{"tcp", std::nullopt}),
-    [](const ::testing::TestParamInfo<rdma_param>& info) {
+    ::testing::Values(
+        scenario_param{"tcp_thread", std::nullopt, false},
+        scenario_param{"tcp_process", std::nullopt, true}),
+    [](const ::testing::TestParamInfo<scenario_param>& info) {
         return info.param.name;
     });
 #endif // LIMESTONE_ENABLE_RDMA
