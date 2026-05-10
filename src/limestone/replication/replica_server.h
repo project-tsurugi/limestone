@@ -176,6 +176,47 @@ public:
     void set_ack_sender_for_test(std::unique_ptr<rdma_sender_base> sender) noexcept;
 
     /**
+     * @brief Factory function used by initialize_rdma() to create the data receiver.
+     *
+     * Tests can install a custom factory via set_rdma_receiver_factory_for_test() to
+     * substitute a stub instance for the real make_rdma_receiver() result.
+     *
+     * @param slot_count requested RDMA slot count, forwarded from initialize_rdma().
+     * @return Newly created rdma_receiver_base instance, transferred to the caller.
+     */
+    using rdma_receiver_factory =
+        std::function<std::unique_ptr<rdma_receiver_base>(std::uint32_t slot_count)>;
+
+    /**
+     * @brief Factory function used by initialize_rdma() to create the ACK sender.
+     *
+     * Tests can install a custom factory via set_ack_sender_factory_for_test() to
+     * substitute a stub instance for the real make_rdma_sender() result.
+     *
+     * @param slot_count requested RDMA slot count, forwarded from initialize_rdma().
+     * @return Newly created rdma_sender_base instance, transferred to the caller.
+     */
+    using rdma_sender_factory =
+        std::function<std::unique_ptr<rdma_sender_base>(std::uint32_t slot_count)>;
+
+    /**
+     * @brief Test hook to override the factory used by initialize_rdma() for the data receiver.
+     *
+     * When unset, initialize_rdma() falls back to make_rdma_receiver(). Tests can install a
+     * factory that returns a stub instance to bypass the vendor RDMA mock — that mock is a
+     * process-wide singleton and conflicts when leader and replica run in the same process.
+     *
+     * @note Test-only; do not use in production code.
+     */
+    void set_rdma_receiver_factory_for_test(rdma_receiver_factory factory) noexcept;
+
+    /**
+     * @brief Test hook to override the factory used by initialize_rdma() for the ACK sender.
+     * @note Test-only; do not use in production code. See set_rdma_receiver_factory_for_test.
+     */
+    void set_ack_sender_factory_for_test(rdma_sender_factory factory) noexcept;
+
+    /**
      * @brief RDMA receive handler entry point.
      * @param event RDMA receive event.
      */
@@ -198,6 +239,8 @@ private:
     std::unique_ptr<rdma_receiver_base> rdma_receiver_; ///< RDMA data receiver owned for process lifetime
     std::unique_ptr<rdma_sender_base> ack_sender_;      ///< RDMA ACK sender targeting the leader's ACK buffer
     std::mutex rdma_init_mutex_{};                      ///< Protect RDMA stack initialization
+    rdma_receiver_factory rdma_receiver_factory_for_test_{}; ///< Optional test override for receiver creation
+    rdma_sender_factory ack_sender_factory_for_test_{};      ///< Optional test override for ACK sender creation
     
     std::vector<std::future<void>> client_futures_;         ///< futures for client handling threads
     std::mutex futures_mutex_;                              ///< mutex for thread-safe access to client_futures_

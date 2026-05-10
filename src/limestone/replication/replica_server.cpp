@@ -452,6 +452,16 @@ void replica_server::set_ack_sender_for_test(std::unique_ptr<rdma_sender_base> s
     ack_sender_ = std::move(sender);
 }
 
+void replica_server::set_rdma_receiver_factory_for_test(rdma_receiver_factory factory) noexcept {
+    std::lock_guard<std::mutex> lock(rdma_init_mutex_);
+    rdma_receiver_factory_for_test_ = std::move(factory);
+}
+
+void replica_server::set_ack_sender_factory_for_test(rdma_sender_factory factory) noexcept {
+    std::lock_guard<std::mutex> lock(rdma_init_mutex_);
+    ack_sender_factory_for_test_ = std::move(factory);
+}
+
 void replica_server::on_rdma_receive(rdma_receive_event const& event) {
     if (auto const* err = std::get_if<rdma_error_event>(&event)) {
         LOG_LP(ERROR) << "RDMA receive error: " << err->error_message;
@@ -508,7 +518,9 @@ replica_server::rdma_init_result replica_server::initialize_rdma(
         return rdma_init_result::failed;
     }
 
-    rdma_receiver_ = make_rdma_receiver(slot_count);
+    rdma_receiver_ = rdma_receiver_factory_for_test_
+        ? rdma_receiver_factory_for_test_(slot_count)
+        : make_rdma_receiver(slot_count);
     auto receiver_init = rdma_receiver_->initialize(
         [this](rdma_receive_event const& event) { this->on_rdma_receive(event); });
     if (! receiver_init.success) {
@@ -525,7 +537,9 @@ replica_server::rdma_init_result replica_server::initialize_rdma(
         return rdma_init_result::failed;
     }
 
-    ack_sender_ = make_rdma_sender(slot_count);
+    ack_sender_ = ack_sender_factory_for_test_
+        ? ack_sender_factory_for_test_(slot_count)
+        : make_rdma_sender(slot_count);
     auto sender_init = ack_sender_->initialize(leader_ack_dma_address);
     if (! sender_init.success) {
         LOG_LP(ERROR) << "ack_sender::initialize() failed: " << sender_init.error_message;

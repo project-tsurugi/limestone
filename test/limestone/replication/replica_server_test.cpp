@@ -33,56 +33,11 @@
 #include "replication/replication_message_io.h"
 #include "replication/handler_resources.h"
 #include "replication/log_channel_handler.h"
+#include "noop_rdma_mocks.h"
 #include "replication_test_helper.h"
 namespace limestone::testing {
 
 using namespace limestone::replication;
-
-namespace {
-
-/**
- * @brief Minimal rdma_receiver_base stand-in used by partial-state tests.
- *
- * Populates replica_server::rdma_receiver_ via the test hook so that
- * initialize_rdma() observes an inconsistent state. The methods are never
- * invoked because initialize_rdma() rejects the inconsistent state up front,
- * so trivially-successful results are sufficient.
- */
-class noop_rdma_receiver : public limestone::replication::rdma_receiver_base {
-public:
-    operation_result initialize(rdma_receive_handler /*handler*/) noexcept override {
-        return {true, {}};
-    }
-    operation_result shutdown() noexcept override { return {true, {}}; }
-    std::optional<std::uint64_t> get_dma_address() const noexcept override {
-        return std::nullopt;
-    }
-    operation_result finalize_channel_setup_with_sender(
-            limestone::replication::rdma_sender_base* /*sender*/) noexcept override {
-        return {true, {}};
-    }
-};
-
-/**
- * @brief Minimal rdma_sender_base stand-in used by partial-state tests.
- *
- * Symmetric counterpart to noop_rdma_receiver. Populates
- * replica_server::ack_sender_ via the test hook; methods are never invoked
- * for the same reason described on noop_rdma_receiver.
- */
-class noop_rdma_sender : public limestone::replication::rdma_sender_base {
-public:
-    operation_result initialize(std::uint64_t /*remote_dma_address*/) noexcept override {
-        return {true, {}};
-    }
-    stream_acquire_result get_send_stream(std::uint16_t /*channel_id*/) noexcept override {
-        return {{false, "unused in test"}, nullptr};
-    }
-    operation_result finalize_channel_setup() noexcept override { return {true, {}}; }
-    operation_result shutdown() noexcept override { return {true, {}}; }
-};
-
-}  // namespace
 
  class replica_server_test : public ::testing::Test {
  public:

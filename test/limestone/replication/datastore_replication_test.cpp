@@ -17,6 +17,7 @@
 #include "log_channel_impl.h"
 #include "log_entry.h"
 #include "limestone/logging.h"
+#include "noop_rdma_mocks.h"
 #include "replication/replica_server.h"
 #include "replication_test_helper.h"
 #include "test_root.h"
@@ -124,6 +125,19 @@ protected:
     void start_replica_server(uint16_t port) {
         // Start the replica server in a separate thread
         server_.initialize(boost::filesystem::path(replica));
+
+        // Replace the replica-side RDMA stack with stub instances so that the
+        // process-wide vendor RDMA mock is engaged only by the leader (running
+        // in this same process). The vendor mock is a singleton and crashes on
+        // teardown when leader and replica both bring up real RDMA stacks.
+        server_.set_rdma_receiver_factory_for_test(
+            [](std::uint32_t /*slot_count*/) -> std::unique_ptr<replication::rdma_receiver_base> {
+                return std::make_unique<noop_rdma_receiver>();
+            });
+        server_.set_ack_sender_factory_for_test(
+            [](std::uint32_t /*slot_count*/) -> std::unique_ptr<replication::rdma_sender_base> {
+                return std::make_unique<noop_rdma_sender>();
+            });
 
         auto addr = make_listen_addr(port);
         ASSERT_TRUE(server_.start_listener(addr));
