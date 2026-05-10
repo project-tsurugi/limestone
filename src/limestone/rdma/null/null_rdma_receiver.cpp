@@ -30,4 +30,12 @@ std::optional<std::uint64_t> null_rdma_receiver::get_dma_address() const noexcep
     return std::nullopt;
 }
 
+// Defined for base I/F completeness. Production paths cannot reach this method
+// because initialize() already returns failure when RDMA is disabled, so callers
+// short-circuit before any finalize step.
+rdma_receiver_base::operation_result null_rdma_receiver::finalize_channel_setup_with_sender(
+        rdma_sender_base* /*sender*/) noexcept {
+    return {false, "RDMA is not enabled in this build (ENABLE_RDMA=OFF)"};
+}
+
 } // namespace limestone::replication

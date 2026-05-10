@@ -24,6 +24,8 @@
 
 namespace limestone::replication {
 
+class rdma_sender_base;
+
 /// @brief Callback type invoked for each RDMA receive event.
 using rdma_receive_handler = std::function<void(rdma_receive_event const&)>;
 
@@ -70,6 +72,17 @@ public:
      * @return DMA address when initialized; std::nullopt otherwise.
      */
     [[nodiscard]] virtual std::optional<std::uint64_t> get_dma_address() const noexcept = 0;
+
+    /**
+     * @brief Bind the sender used for the RDMA ACK return path and transition
+     *        from SETUP to TRANSFER phase.
+     * @param sender RDMA sender instance whose buffer is used as the ACK destination.
+     * @return operation_result describing success or failure.
+     * @note Must be called before the receiver starts delivering RDMA frames so
+     *       that ACK frames can be RDMA-written back through @p sender.
+     */
+    [[nodiscard]] virtual operation_result finalize_channel_setup_with_sender(
+        rdma_sender_base* sender) noexcept = 0;
 };
 
 } // namespace limestone::replication

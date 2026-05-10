@@ -50,6 +50,9 @@ public:
 
     [[nodiscard]] std::optional<std::uint64_t> get_dma_address() const noexcept override;
 
+    [[nodiscard]] operation_result finalize_channel_setup_with_sender(
+        rdma_sender_base* sender) noexcept override;
+
 private:
     rdma::communication::rdma_receiver receiver_;
 };

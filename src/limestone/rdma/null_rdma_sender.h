@@ -38,6 +38,7 @@ public:
 
     [[nodiscard]] operation_result initialize(std::uint64_t remote_dma_address) noexcept override;
     [[nodiscard]] stream_acquire_result get_send_stream(std::uint16_t channel_id) noexcept override;
+    [[nodiscard]] operation_result finalize_channel_setup() noexcept override;
     [[nodiscard]] operation_result shutdown() noexcept override;
 };
 

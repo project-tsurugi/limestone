@@ -72,6 +72,15 @@ public:
         std::uint16_t channel_id) noexcept = 0;
 
     /**
+     * @brief Finalize channel setup and transition from SETUP to TRANSFER phase.
+     * @return operation_result describing success or failure.
+     * @note Must be called after every required channel has been acquired via
+     *       get_send_stream(). After this call, additional get_send_stream()
+     *       invocations are rejected by the underlying library.
+     */
+    [[nodiscard]] virtual operation_result finalize_channel_setup() noexcept = 0;
+
+    /**
      * @brief Shut down the sender and release all resources.
      * @return operation_result describing success or failure.
      */

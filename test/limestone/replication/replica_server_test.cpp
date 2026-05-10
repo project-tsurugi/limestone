@@ -57,6 +57,10 @@ public:
     std::optional<std::uint64_t> get_dma_address() const noexcept override {
         return std::nullopt;
     }
+    operation_result finalize_channel_setup_with_sender(
+            limestone::replication::rdma_sender_base* /*sender*/) noexcept override {
+        return {true, {}};
+    }
 };
 
 /**
@@ -74,6 +78,7 @@ public:
     stream_acquire_result get_send_stream(std::uint16_t /*channel_id*/) noexcept override {
         return {{false, "unused in test"}, nullptr};
     }
+    operation_result finalize_channel_setup() noexcept override { return {true, {}}; }
     operation_result shutdown() noexcept override { return {true, {}}; }
 };
 

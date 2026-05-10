@@ -17,6 +17,8 @@
 
 #include <string>
 
+#include <rdma/rdma_comm_sender.h>
+
 namespace limestone::replication {
 
 namespace {
@@ -72,6 +74,26 @@ rdma_receiver_base::operation_result rdma_comm_receiver::shutdown() noexcept {
 
 std::optional<std::uint64_t> rdma_comm_receiver::get_dma_address() const noexcept {
     return receiver_.get_dma_address();
+}
+
+rdma_receiver_base::operation_result rdma_comm_receiver::finalize_channel_setup_with_sender(
+        rdma_sender_base* sender) noexcept {
+    if (sender == nullptr) {
+        return {false, "rdma_comm_receiver::finalize_channel_setup_with_sender: sender is null"};
+    }
+    // rdma_*_base abstractions exist solely as ENABLE_RDMA build-time toggles:
+    // null_* and rdma_comm_* implementations are never mixed within a single
+    // process (factory selects one based on build configuration). The dynamic_cast
+    // here is a cheap runtime guard for that invariant rather than a polymorphic
+    // dispatch over multiple coexisting sender kinds.
+    auto* comm_sender = dynamic_cast<rdma_comm_sender*>(sender);
+    if (comm_sender == nullptr) {
+        return {false,
+                "rdma_comm_receiver::finalize_channel_setup_with_sender: "
+                "sender is not an rdma_comm_sender instance"};
+    }
+    auto r = receiver_.finalize_channel_setup_with_sender(comm_sender->get_underlying_sender());
+    return {r.success, r.error_message};
 }
 
 } // namespace limestone::replication
