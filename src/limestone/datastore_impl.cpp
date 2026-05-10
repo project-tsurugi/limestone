@@ -44,6 +44,8 @@
 #include <replication/message_error.h>
 #include <replication/message_rdma_init.h>
 #include <replication/message_rdma_init_ack.h>
+#include <replication/message_rdma_finalize.h>
+#include <replication/message_rdma_finalize_ack.h>
 #include <rdma/rdma_factory.h>
 #include <rdma/rdma_receive_event.h>
 #include <manifest.h>
@@ -473,6 +475,51 @@ void datastore_impl::initialize_rdma_slots() {
     rdma_slot_count_ = static_cast<std::int32_t>(parsed);
     LOG_LP(INFO) << "REPLICATION_RDMA_SLOTS: enabled with " << rdma_slot_count_.value()
                  << " slots (4KB each)";
+}
+
+bool datastore_impl::maybe_finalize_rdma() {
+    if (! rdma_sender_) {
+        // RDMA not enabled or sender initialization failed; nothing to finalize.
+        return true;
+    }
+
+    message_rdma_finalize finalize_msg{};
+    if (! control_channel_->send_message(finalize_msg)) {
+        LOG_LP(ERROR) << "Failed to send RDMA_FINALIZE message.";
+        return false;
+    }
+
+    auto response = control_channel_->receive_message();
+    if (response == nullptr) {
+        LOG_LP(ERROR) << "Failed to receive RDMA_FINALIZE response.";
+        return false;
+    }
+
+    if (response->get_message_type_id() == message_type_id::COMMON_ERROR) {
+        auto* err = dynamic_cast<message_error*>(response.get());
+        if (err != nullptr) {
+            LOG_LP(ERROR) << "RDMA_FINALIZE failed: code=" << err->get_error_code()
+                          << " message=" << err->get_error_message();
+        } else {
+            LOG_LP(ERROR) << "RDMA_FINALIZE failed with unknown error response.";
+        }
+        return false;
+    }
+
+    if (response->get_message_type_id() != message_type_id::RDMA_FINALIZE_ACK) {
+        LOG_LP(ERROR) << "Unexpected RDMA_FINALIZE response type: "
+                      << static_cast<uint16_t>(response->get_message_type_id());
+        return false;
+    }
+
+    auto result = rdma_sender_->finalize_channel_setup();
+    if (! result.success) {
+        LOG_LP(ERROR) << "rdma_sender::finalize_channel_setup() failed: " << result.error_message;
+        return false;
+    }
+
+    LOG_LP(INFO) << "RDMA channel setup finalized; entering TRANSFER phase.";
+    return true;
 }
 
 bool datastore_impl::initialize_rdma_sender(uint32_t slot_count, uint64_t remote_dma_address) {

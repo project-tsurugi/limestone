@@ -36,6 +36,8 @@ enum class message_type_id : uint8_t {
     GC_BOUNDARY_SWITCH = 0x04,
     RDMA_INIT = 0x30,
     RDMA_INIT_ACK = 0x31,
+    RDMA_FINALIZE = 0x32,
+    RDMA_FINALIZE_ACK = 0x33,
 
     // Log‑channel requests
     LOG_CHANNEL_CREATE = 0x10,

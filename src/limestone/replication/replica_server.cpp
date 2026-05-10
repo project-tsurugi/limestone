@@ -538,6 +538,24 @@ replica_server::rdma_init_result replica_server::initialize_rdma(
     return rdma_init_result::success;
 }
 
+replica_server::rdma_finalize_result replica_server::finalize_rdma() {
+    std::lock_guard<std::mutex> lock(rdma_init_mutex_);
+    if (! rdma_receiver_ || ! ack_sender_) {
+        LOG_LP(ERROR) << "RDMA stack not initialized; cannot finalize: receiver="
+                      << (rdma_receiver_ ? "set" : "null")
+                      << " ack_sender=" << (ack_sender_ ? "set" : "null");
+        return rdma_finalize_result::not_initialized;
+    }
+
+    auto result = rdma_receiver_->finalize_channel_setup_with_sender(ack_sender_.get());
+    if (! result.success) {
+        LOG_LP(ERROR) << "rdma_receiver::finalize_channel_setup_with_sender() failed: "
+                      << result.error_message;
+        return rdma_finalize_result::failed;
+    }
+    return rdma_finalize_result::success;
+}
+
 std::optional<std::uint64_t> replica_server::get_rdma_dma_address() const noexcept {
     if (! rdma_receiver_) {
         return std::nullopt;

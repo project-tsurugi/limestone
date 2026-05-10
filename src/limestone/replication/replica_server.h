@@ -128,6 +128,23 @@ public:
         uint32_t slot_count, std::uint64_t leader_ack_dma_address);
 
     /**
+     * @brief Finalize the replica-side RDMA stack.
+     *
+     * Binds the data receiver to the ACK sender via
+     * rdma_receiver_base::finalize_channel_setup_with_sender, transitioning the
+     * receiver into the TRANSFER phase so that incoming data frames can be
+     * acknowledged via RDMA.
+     *
+     * @return finalize result.
+     */
+    enum class rdma_finalize_result {
+        success,
+        not_initialized,
+        failed,
+    };
+    [[nodiscard]] rdma_finalize_result finalize_rdma();
+
+    /**
      * @brief Get DMA address exposed by the data receiver.
      * @return optional DMA address if available.
      */

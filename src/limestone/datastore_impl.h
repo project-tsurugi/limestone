@@ -257,6 +257,18 @@ public:
     bool maybe_initialize_rdma_sender();
 
     /**
+     * @brief Finalize the RDMA channel setup if the sender is active.
+     *
+     * Sends RDMA_FINALIZE to the replica, waits for RDMA_FINALIZE_ACK, and then
+     * calls rdma_sender_base::finalize_channel_setup() locally to transition
+     * from SETUP to TRANSFER phase. No-op when RDMA is not enabled or the
+     * sender failed to initialize.
+     *
+     * @return true on success or skip; false on failure.
+     */
+    bool maybe_finalize_rdma();
+
+    /**
      * @brief Shut down RDMA sender if initialized.
      * @return true on success or when sender is absent; false if shutdown fails.
      */
