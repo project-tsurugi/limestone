@@ -520,7 +520,7 @@ replica_server::rdma_init_result replica_server::initialize_rdma(
 
     rdma_receiver_ = rdma_receiver_factory_for_test_
         ? rdma_receiver_factory_for_test_(slot_count)
-        : make_rdma_receiver(slot_count);
+        : make_rdma_data_receiver(slot_count);
     auto receiver_init = rdma_receiver_->initialize(
         [this](rdma_receive_event const& event) { this->on_rdma_receive(event); });
     if (! receiver_init.success) {
@@ -539,7 +539,7 @@ replica_server::rdma_init_result replica_server::initialize_rdma(
 
     ack_sender_ = ack_sender_factory_for_test_
         ? ack_sender_factory_for_test_(slot_count)
-        : make_rdma_sender(slot_count);
+        : make_rdma_ack_sender(slot_count);
     auto sender_init = ack_sender_->initialize(leader_ack_dma_address);
     if (! sender_init.success) {
         LOG_LP(ERROR) << "ack_sender::initialize() failed: " << sender_init.error_message;

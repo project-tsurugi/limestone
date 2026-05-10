@@ -24,25 +24,47 @@
 namespace limestone::replication {
 
 /**
- * @brief Creates an rdma_sender_base instance appropriate for this build.
+ * @brief Creates a data-send rdma_sender_base instance (master side, data_only buffer).
  *
  * Returns rdma_comm_sender when built with ENABLE_RDMA=ON,
  * or null_rdma_sender when built with ENABLE_RDMA=OFF.
  *
  * @param slot_count Number of RDMA slots (buffer capacity).
- * @return Newly created sender instance.
+ * @return Newly created sender instance configured for data-only transmission.
  */
-std::unique_ptr<rdma_sender_base> make_rdma_sender(std::uint32_t slot_count);
+std::unique_ptr<rdma_sender_base> make_rdma_data_sender(std::uint32_t slot_count);
 
 /**
- * @brief Creates an rdma_receiver_base instance appropriate for this build.
+ * @brief Creates an ACK-send rdma_sender_base instance (replica side, ack_only buffer).
+ *
+ * Returns rdma_comm_sender when built with ENABLE_RDMA=ON,
+ * or null_rdma_sender when built with ENABLE_RDMA=OFF.
+ *
+ * @param slot_count Number of RDMA slots (buffer capacity).
+ * @return Newly created sender instance configured for ACK-only transmission.
+ */
+std::unique_ptr<rdma_sender_base> make_rdma_ack_sender(std::uint32_t slot_count);
+
+/**
+ * @brief Creates a data-receive rdma_receiver_base instance (replica side, data_only buffer).
  *
  * Returns rdma_comm_receiver when built with ENABLE_RDMA=ON,
  * or null_rdma_receiver when built with ENABLE_RDMA=OFF.
  *
  * @param slot_count Number of RDMA slots (buffer capacity).
- * @return Newly created receiver instance.
+ * @return Newly created receiver instance configured for data-only reception.
  */
-std::unique_ptr<rdma_receiver_base> make_rdma_receiver(std::uint32_t slot_count);
+std::unique_ptr<rdma_receiver_base> make_rdma_data_receiver(std::uint32_t slot_count);
+
+/**
+ * @brief Creates an ACK-receive rdma_receiver_base instance (master side, ack_only buffer).
+ *
+ * Returns rdma_comm_receiver when built with ENABLE_RDMA=ON,
+ * or null_rdma_receiver when built with ENABLE_RDMA=OFF.
+ *
+ * @param slot_count Number of RDMA slots (buffer capacity).
+ * @return Newly created receiver instance configured for ACK-only reception.
+ */
+std::unique_ptr<rdma_receiver_base> make_rdma_ack_receiver(std::uint32_t slot_count);
 
 } // namespace limestone::replication

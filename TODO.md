@@ -136,6 +136,11 @@ master へは未マージだが、新 I/F のヘッダ・ライブラリは `fin
   この浪費は lib 仕様起因なので「将来の lib 改善要望」として下記「積み残し」に転記する。
   今回 §2 ではこのまま受け入れて進める。
 
+  **[解消済み]** rdma-comm-lib に `rdma_buffer_kind { data_and_ack, data_only, ack_only }`
+  が追加され (commit `a1891d9`)、limestone 側も各 instance の役割に応じて kind を指定
+  するよう対応した。結果、side あたり実メモリ 2×region_size (有効 2×region_size) に
+  削減され、浪費なし。詳細は下記「積み残し」節を参照。
+
 #### handshake 拡張内容
 
 - 現在の handshake は `RDMA_INIT (leader → replica): { slot_count }` →
@@ -322,9 +327,10 @@ lib の自動 ACK によって leader 側 `flush()` が完了する。TCP replic
   必要がある。N は定数 512 とし、初期化時に 512 個の channel を pre-create する。
   これを超える `LOG_CHANNEL_CREATE` 要求が来た場合はエラーにする。これにより
   「LOG_CHANNEL_CREATE の到着で動的に増える」構造が不要になる。
-- buffer の 2x 確保は rdma-comm-lib が内部で行うため limestone 側はサイズ計算を意識
-  する必要がないが、実メモリ使用量が指定 `region_size_bytes` の 2 倍になる点だけは
-  押さえておく。
+- buffer 確保量は instance の role (kind) によって異なる。`data_only` / `ack_only` instance
+  は `region_size_bytes` ぴったり (1x)、`data_and_ack` instance は 2x 確保される。
+  limestone は役割別 factory 経由で kind を固定しているため、呼び出し側がサイズを
+  意識する必要はない。
 - RDMA replication における `log_channel` の不要化 (§6b) は影響範囲が広い。
   本 TODO ではクローズし、別 issue で扱う。
 - sequence の wrap-around と複数フレームをまたぐ 1 メッセージの ACK 粒度については、
@@ -353,17 +359,20 @@ master 側 `create_log_channel_connector` の RDMA 分岐、replica 側 `log_cha
 
 優先度: 低 (機能性ではなくリソース効率の問題)。本 TODO とは別 issue で扱う。
 
-### rdma-comm-lib への仕様改善要望: 片方向 RDMA Write 用途での buffer 浪費の解消
+### rdma-comm-lib への仕様改善要望: 片方向 RDMA Write 用途での buffer 浪費の解消 — 解消済み
 
-`feat/rdma-ack-over-rdma` 現仕様では、各 side が `rdma_sender` と `rdma_receiver` を
-別 instance として new し、それぞれが独立に 2x buffer を確保する。`blob_relay` のよう
-に双方向 RDMA Write を行う用途では両半分とも有効活用できるが、limestone のように
-片方向 RDMA Write しか使わない用途では、各 instance の半分が常に未使用となる
-(side あたり実 4x、有効 2x)。
+**[解消済み]**
 
-要望内容: 片方向 RDMA Write 用途で 1 side = 1 instance / 1 buffer (2x) で済むよう、
-sender に「ACK 受信領域」、receiver に「ACK 送信領域」を同一 buffer 内へ集約できる
-モードを設ける (もしくは sender/receiver を統合した新 facade を提供する)。
+rdma-comm-lib `feat/rdma-ack-over-rdma` (commit `a1891d9`) で `rdma_buffer_kind` が追加され、
+片方向 RDMA Write 用途での buffer 浪費が解消された。
 
-優先度: 低 (機能性ではなくメモリ効率の問題、機能完成後に lib 側で検討)。
-本 TODO の §2〜§6 の範囲では現仕様を受け入れて進める。
+採択された設計 (case 1): `rdma_buffer_config::kind` フィールドに
+`data_only` / `ack_only` / `data_and_ack` (default) を指定することで、
+`data_only` / `ack_only` instance は `region_size_bytes` 分 (1x) のみ確保する。
+双方向用途 (blob_relay 等) はデフォルト `data_and_ack` のまま変更不要。
+
+limestone 側対応: 役割別 factory 関数
+(`make_rdma_data_sender` / `make_rdma_ack_sender` /
+`make_rdma_data_receiver` / `make_rdma_ack_receiver`) を導入し、
+各 instance の role に応じた kind を factory 内部で固定した。
+結果として side あたり実メモリ 4×region_size → 2×region_size (浪費なし) に改善。

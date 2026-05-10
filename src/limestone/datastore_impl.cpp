@@ -535,7 +535,7 @@ bool datastore_impl::maybe_finalize_rdma() {
 }
 
 bool datastore_impl::initialize_rdma_sender(uint32_t slot_count, uint64_t remote_dma_address) {
-    rdma_sender_ = make_rdma_sender(slot_count);
+    rdma_sender_ = make_rdma_data_sender(slot_count);
     auto result = rdma_sender_->initialize(remote_dma_address);
     if (! result.success) {
         rdma_sender_.reset();
@@ -570,7 +570,7 @@ std::optional<std::uint64_t> datastore_impl::initialize_rdma_ack_receiver(std::u
         return std::nullopt;
     }
 
-    ack_receiver_ = make_rdma_receiver(slot_count);
+    ack_receiver_ = make_rdma_ack_receiver(slot_count);
     auto result = ack_receiver_->initialize(
         // ACK frames are routed internally by the lib once finalize_channel_setup_with_sender
         // binds this receiver to the data sender; the user-supplied callback is unused.
