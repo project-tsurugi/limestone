@@ -37,3 +37,6 @@ HTML/
 
 # Codex local metadata
 .codex
+
+# Claude Code local settings
+.claude/
