@@ -1,5 +1,7 @@
-# Copilot instructions 
+# Copilot instructions
 .github/copilot-instructions.md
+/AGENTS.md
+/CLAUDE.md
 
 # CMake
 /build*
