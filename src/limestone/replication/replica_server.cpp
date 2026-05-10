@@ -291,7 +291,7 @@ void replica_server::handle_client(int client_fd) {
         }
         if (handler) {
             if (type == message_type_id::LOG_CHANNEL_CREATE) {
-                setup_log_channel_handler(*msg, handler, client_fd);
+                setup_log_channel_handler(*msg, handler);
             }
             handler->run(std::move(msg));
         } else {
@@ -315,8 +315,7 @@ void replica_server::handle_client(int client_fd) {
 
 void replica_server::setup_log_channel_handler(
         replication_message& msg,
-        std::shared_ptr<channel_handler_base> const& handler,
-        int client_fd) {
+        std::shared_ptr<channel_handler_base> const& handler) {
     // TODO: handle protocol errors below without fatal termination (return proper error).
     auto* create_msg = dynamic_cast<message_log_channel_create*>(&msg);
     if (create_msg == nullptr) {
@@ -332,20 +331,6 @@ void replica_server::setup_log_channel_handler(
         LOG_LP(FATAL) << "LOG_CHANNEL_CREATE handler is not log_channel_handler.";
     }
 
-    // Register RDMA ACK channel so receiver can validate and reply to RDMA frames.
-    if (rdma_receiver_) {
-        auto reg_result = rdma_receiver_->register_channel(
-            static_cast<std::uint16_t>(channel_id),
-            client_fd);
-        if (! reg_result.success) {
-            LOG_LP(FATAL) << "RDMA register_channel failed for id=" << channel_id
-                          << " error=" << reg_result.error_message;
-        }
-    } else {
-        // RDMA receiver not ready yet; store for deferred registration.
-        std::lock_guard<std::mutex> lock(pending_rdma_channels_mutex_);
-        pending_rdma_channels_.emplace_back(channel_id, client_fd);
-    }
     {
         auto channel_idx = static_cast<std::size_t>(channel_id);
         std::lock_guard<std::mutex> lock(log_channel_slot_mutexes_.at(channel_idx));
@@ -509,21 +494,6 @@ replica_server::rdma_init_result replica_server::initialize_rdma_receiver(uint32
     if (! dma_address.has_value()) {
         rdma_receiver_.reset();
         return rdma_init_result::failed;
-    }
-
-    // Drain any pending channel registrations queued before RDMA receiver was ready.
-    {
-        std::lock_guard<std::mutex> pending_lock(pending_rdma_channels_mutex_);
-        for (auto& entry : pending_rdma_channels_) {
-            auto reg_result = rdma_receiver_->register_channel(
-                static_cast<std::uint16_t>(entry.first),
-                entry.second);
-            if (! reg_result.success) {
-                LOG_LP(FATAL) << "RDMA deferred register_channel failed for id=" << entry.first
-                              << " error=" << reg_result.error_message;
-            }
-        }
-        pending_rdma_channels_.clear();
     }
 
     return rdma_init_result::success;

@@ -30,8 +30,8 @@ using rdma_receive_handler = std::function<void(rdma_receive_event const&)>;
 /**
  * @brief Abstract interface for an RDMA receiver.
  *
- * Wraps lifecycle management (initialize / shutdown / register_channel /
- * get_dma_address) independently of the rdma_comm library.
+ * Wraps lifecycle management (initialize / shutdown / get_dma_address)
+ * independently of the rdma_comm library.
  */
 class rdma_receiver_base {
 public:
@@ -64,17 +64,6 @@ public:
      * @return operation_result describing success or failure.
      */
     [[nodiscard]] virtual operation_result shutdown() noexcept = 0;
-
-    /**
-     * @brief Register an acknowledgement endpoint for the given logical channel.
-     * @param channel_id  Logical channel identifier.
-     * @param ack_socket  Borrowed socket file descriptor used to send acknowledgements.
-     *                    Implementations must duplicate it before taking ownership.
-     * @return operation_result describing success or failure.
-     */
-    [[nodiscard]] virtual operation_result register_channel(
-        std::uint16_t channel_id,
-        int           ack_socket) noexcept = 0;
 
     /**
      * @brief Retrieve the DMA address allocated for the shared receive buffer.

@@ -1079,11 +1079,8 @@ void datastore::wait_for_blob_file_garbace_collector_for_tests() const noexcept 
 
 
 void datastore::maybe_register_rdma_stream(log_channel& channel, std::size_t id) {
-    auto acquire_stream = [&](auto&& acquire_fn, int socket_fd) {
-        if (socket_fd < 0) {
-            LOG_LP(FATAL) << "Failed to obtain socket fd for RDMA acknowledgements.";
-        }
-        auto stream_result = acquire_fn(static_cast<std::uint16_t>(id), socket_fd);
+    auto acquire_stream = [&](auto&& acquire_fn) {
+        auto stream_result = acquire_fn(static_cast<std::uint16_t>(id));
         if (! stream_result.status.success || stream_result.stream == nullptr) {
             LOG_LP(FATAL) << "Failed to acquire RDMA send stream: "
                           << stream_result.status.error_message;
@@ -1096,9 +1093,7 @@ void datastore::maybe_register_rdma_stream(log_channel& channel, std::size_t id)
         if (factory == nullptr) {
             LOG_LP(FATAL) << "RDMA stream factory test hook missing.";
         }
-        auto socket_fd = impl_->rdma_ack_fd_for_test().value_or(
-            channel.get_impl()->get_replica_connector()->get_socket_fd());
-        acquire_stream(*factory, socket_fd);
+        acquire_stream(*factory);
         return;
     }
 
@@ -1109,14 +1104,9 @@ void datastore::maybe_register_rdma_stream(log_channel& channel, std::size_t id)
     if (id > std::numeric_limits<std::uint16_t>::max()) {
         LOG_LP(FATAL) << "RDMA channel_id overflow: id=" << id;
     }
-    auto* replica_connector = channel.get_impl()->get_replica_connector();
-    if (replica_connector == nullptr) {
-        LOG_LP(FATAL) << "replica_connector missing during RDMA stream registration.";
-    }
-    auto socket_fd = impl_->rdma_ack_fd_for_test().value_or(replica_connector->get_socket_fd());
-    acquire_stream([rdma_sender](std::uint16_t cid, int fd) {
-        return rdma_sender->get_send_stream(cid, fd);
-    }, socket_fd);
+    acquire_stream([rdma_sender](std::uint16_t cid) {
+        return rdma_sender->get_send_stream(cid);
+    });
 }
 
 } // namespace limestone::api

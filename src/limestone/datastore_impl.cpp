@@ -507,11 +507,11 @@ void datastore_impl::set_log_channel_connector_factory_for_test(
 }
 
 void datastore_impl::set_rdma_stream_factory_for_test(
-        std::function<rdma_sender_base::stream_acquire_result(std::uint16_t, int)> factory) noexcept {
+        std::function<rdma_sender_base::stream_acquire_result(std::uint16_t)> factory) noexcept {
     rdma_stream_factory_for_test_ = std::move(factory);
 }
 
-std::function<rdma_sender_base::stream_acquire_result(std::uint16_t, int)> const*
+std::function<rdma_sender_base::stream_acquire_result(std::uint16_t)> const*
 datastore_impl::get_rdma_stream_factory_for_test() const noexcept {
     if (rdma_stream_factory_for_test_) {
         return &rdma_stream_factory_for_test_;
@@ -519,16 +519,8 @@ datastore_impl::get_rdma_stream_factory_for_test() const noexcept {
     return nullptr;
 }
 
-void datastore_impl::set_rdma_ack_fd_for_test(int fd) noexcept {
-    rdma_ack_fd_for_test_ = fd;
-}
-
 bool datastore_impl::has_rdma_stream_factory_for_test() const noexcept {
     return static_cast<bool>(rdma_stream_factory_for_test_);
-}
-
-std::optional<int> datastore_impl::rdma_ack_fd_for_test() const noexcept {
-    return rdma_ack_fd_for_test_;
 }
 
 const std::optional<manifest::migration_info>& datastore_impl::get_migration_info() const noexcept {

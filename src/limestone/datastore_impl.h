@@ -262,20 +262,12 @@ public:
      * @note Test-only; do not use in production code.
      */
     void set_rdma_stream_factory_for_test(
-        std::function<rdma_sender_base::stream_acquire_result(std::uint16_t, int)> factory) noexcept;
+        std::function<rdma_sender_base::stream_acquire_result(std::uint16_t)> factory) noexcept;
 
-    [[nodiscard]] std::function<rdma_sender_base::stream_acquire_result(std::uint16_t, int)> const*
+    [[nodiscard]] std::function<rdma_sender_base::stream_acquire_result(std::uint16_t)> const*
     get_rdma_stream_factory_for_test() const noexcept;
 
-    /**
-     * @brief Test hook to override acknowledgement fd for RDMA stream registration.
-     * @param fd file descriptor to use; negative value triggers fatal in registration.
-     * @note Test-only; do not use in production code.
-     */
-    void set_rdma_ack_fd_for_test(int fd) noexcept;
-
     [[nodiscard]] bool has_rdma_stream_factory_for_test() const noexcept;
-    [[nodiscard]] std::optional<int> rdma_ack_fd_for_test() const noexcept;
 
 private:
     [[nodiscard]] limestone::internal::blob_file_resolver& require_blob_file_resolver() noexcept;
@@ -327,10 +319,7 @@ private:
     std::function<std::unique_ptr<replication::replica_connector>()> log_channel_connector_factory_for_test_{};
 
     // Test hook: factory to override RDMA stream acquisition.
-    std::function<rdma_sender_base::stream_acquire_result(std::uint16_t, int)> rdma_stream_factory_for_test_{};
-
-    // Test hook: override ack fd used for RDMA registration.
-    std::optional<int> rdma_ack_fd_for_test_{};
+    std::function<rdma_sender_base::stream_acquire_result(std::uint16_t)> rdma_stream_factory_for_test_{};
 
     // Resolver for local BLOB file paths. Owned by datastore_impl so internal
     // replication/restore paths can resolve paths without using public APIs.

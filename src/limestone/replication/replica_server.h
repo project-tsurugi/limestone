@@ -164,10 +164,6 @@ private:
     std::unordered_set<int> active_client_fds_;             ///< accepted client sockets currently handled
     std::mutex active_client_fds_mutex_;                    ///< protects active_client_fds_
 
-    // Pending RDMA registrations until rdma_receiver_ is initialized.
-    std::mutex pending_rdma_channels_mutex_{};
-    std::vector<std::pair<std::uint64_t, int>> pending_rdma_channels_;  ///< store raw fds; converted to unique_fd on registration
-
     enum class poll_result {
         shutdown_event,
         client_event,
@@ -200,17 +196,14 @@ private:
     /**
      * @brief Perform LOG_CHANNEL_CREATE specific setup for the newly created handler.
      *
-     * Validates the channel id, registers the RDMA ACK channel (or defers it),
-     * and stores the handler in the log_channel_handlers_ slot.
+     * Validates the channel id and stores the handler in the log_channel_handlers_ slot.
      *
      * @param msg  The received LOG_CHANNEL_CREATE message.
      * @param handler The handler created by the factory for this connection.
-     * @param client_fd The accepted client file descriptor.
      */
     void setup_log_channel_handler(
         replication_message& msg,
-        std::shared_ptr<channel_handler_base> const& handler,
-        int client_fd);
+        std::shared_ptr<channel_handler_base> const& handler);
 
     // Use fixed-size arrays to avoid reallocations and allow lock-per-slot access.
     std::array<std::shared_ptr<class log_channel_handler>, max_log_channel_slots>

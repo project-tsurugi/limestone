@@ -26,12 +26,6 @@ rdma_receiver_base::operation_result null_rdma_receiver::shutdown() noexcept {
     return {true, ""};
 }
 
-rdma_receiver_base::operation_result null_rdma_receiver::register_channel(
-        std::uint16_t /*channel_id*/,
-        int /*ack_socket*/) noexcept {
-    return {true, ""};
-}
-
 std::optional<std::uint64_t> null_rdma_receiver::get_dma_address() const noexcept {
     return std::nullopt;
 }
