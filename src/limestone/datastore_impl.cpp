@@ -45,6 +45,7 @@
 #include <replication/message_rdma_init.h>
 #include <replication/message_rdma_init_ack.h>
 #include <rdma/rdma_factory.h>
+#include <rdma/rdma_receive_event.h>
 #include <manifest.h>
 
 namespace limestone::api {
@@ -165,7 +166,14 @@ bool datastore_impl::maybe_initialize_rdma_sender() {
     }
 
     auto slot_count = static_cast<uint32_t>(slot_count_signed);
-    message_rdma_init rdma_init{slot_count};
+
+    auto leader_ack_dma_address = initialize_rdma_ack_receiver(slot_count);
+    if (! leader_ack_dma_address.has_value()) {
+        LOG_LP(ERROR) << "Failed to initialize RDMA ACK receiver.";
+        return false;
+    }
+
+    message_rdma_init rdma_init{slot_count, leader_ack_dma_address.value()};
     if (!control_channel_->send_message(rdma_init)) {
         LOG_LP(ERROR) << "Failed to send RDMA_INIT message.";
         return false;
@@ -494,6 +502,48 @@ bool datastore_impl::shutdown_rdma_sender() noexcept {
     }
 
     rdma_sender_.reset();
+    return true;
+}
+
+std::optional<std::uint64_t> datastore_impl::initialize_rdma_ack_receiver(std::uint32_t slot_count) {
+    if (ack_receiver_) {
+        LOG_LP(ERROR) << "ack_receiver already initialized.";
+        return std::nullopt;
+    }
+
+    ack_receiver_ = make_rdma_receiver(slot_count);
+    auto result = ack_receiver_->initialize(
+        // ACK frames are routed internally by the lib once finalize_channel_setup_with_sender
+        // binds this receiver to the data sender; the user-supplied callback is unused.
+        [](rdma_receive_event const&) {});
+    if (! result.success) {
+        LOG_LP(ERROR) << "ack_receiver::initialize() failed: " << result.error_message;
+        ack_receiver_.reset();
+        return std::nullopt;
+    }
+
+    auto dma_address = ack_receiver_->get_dma_address();
+    if (! dma_address.has_value()) {
+        LOG_LP(ERROR) << "ack_receiver::get_dma_address() returned no address.";
+        [[maybe_unused]] auto const shutdown_result = ack_receiver_->shutdown();
+        ack_receiver_.reset();
+        return std::nullopt;
+    }
+    return dma_address;
+}
+
+bool datastore_impl::shutdown_rdma_ack_receiver() noexcept {
+    if (! ack_receiver_) {
+        return true;
+    }
+
+    auto result = ack_receiver_->shutdown();
+    if (! result.success) {
+        LOG_LP(ERROR) << "ack_receiver::shutdown() failed: " << result.error_message;
+        return false;
+    }
+
+    ack_receiver_.reset();
     return true;
 }
 

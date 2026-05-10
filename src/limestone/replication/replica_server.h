@@ -28,6 +28,7 @@
 #include "limestone_exception_helper.h"
 #include <rdma/rdma_receiver_base.h>
 #include <rdma/rdma_receive_event.h>
+#include <rdma/rdma_sender_base.h>
 #include "log_channel_limits.h"
 
 
@@ -106,8 +107,16 @@ public:
     [[nodiscard]] bool mark_control_channel_created() noexcept;
 
     /**
-     * @brief Initialize RDMA receiver for replica side.
+     * @brief Initialize the replica-side RDMA stack.
+     *
+     * Creates the data receiver and the ACK sender, calling each instance's
+     * initialize() so the data receiver exposes its DMA address and the ACK
+     * sender targets the leader's ACK receive buffer. The pair is left in the
+     * SETUP phase; finalize_channel_setup_with_sender / finalize_channel_setup
+     * are not invoked here (handled in a later step).
+     *
      * @param slot_count requested RDMA slot count.
+     * @param leader_ack_dma_address DMA address of the leader's ACK receive buffer.
      * @return initialization result.
      */
     enum class rdma_init_result {
@@ -115,10 +124,11 @@ public:
         already_initialized,
         failed,
     };
-    [[nodiscard]] rdma_init_result initialize_rdma_receiver(uint32_t slot_count);
+    [[nodiscard]] rdma_init_result initialize_rdma(
+        uint32_t slot_count, std::uint64_t leader_ack_dma_address);
 
     /**
-     * @brief Get remote DMA address exposed by receiver.
+     * @brief Get DMA address exposed by the data receiver.
      * @return optional DMA address if available.
      */
     [[nodiscard]] std::optional<std::uint64_t> get_rdma_dma_address() const noexcept;
@@ -135,6 +145,18 @@ public:
      */
     void set_log_channel_handler_for_test(
         std::uint64_t id, std::shared_ptr<class log_channel_handler> handler);
+
+    /**
+     * @brief Test hook to inject the RDMA data receiver instance.
+     * @note Test-only; do not use in production code.
+     */
+    void set_rdma_receiver_for_test(std::unique_ptr<rdma_receiver_base> receiver) noexcept;
+
+    /**
+     * @brief Test hook to inject the RDMA ACK sender instance.
+     * @note Test-only; do not use in production code.
+     */
+    void set_ack_sender_for_test(std::unique_ptr<rdma_sender_base> sender) noexcept;
 
     /**
      * @brief RDMA receive handler entry point.
@@ -156,8 +178,9 @@ private:
     int event_fd_{-1};                                      ///< eventfd used to unblock poll()
     int sockfd_{-1};                                        ///< listening socket file descriptor
     std::atomic<bool> control_channel_created_{false};      ///< flag to indicate if control channel is created
-    std::unique_ptr<rdma_receiver_base> rdma_receiver_; ///< RDMA receiver owned for process lifetime
-    std::mutex rdma_init_mutex_{};                                      ///< Protect RDMA receiver initialization
+    std::unique_ptr<rdma_receiver_base> rdma_receiver_; ///< RDMA data receiver owned for process lifetime
+    std::unique_ptr<rdma_sender_base> ack_sender_;      ///< RDMA ACK sender targeting the leader's ACK buffer
+    std::mutex rdma_init_mutex_{};                      ///< Protect RDMA stack initialization
     
     std::vector<std::future<void>> client_futures_;         ///< futures for client handling threads
     std::mutex futures_mutex_;                              ///< mutex for thread-safe access to client_futures_

@@ -33,6 +33,7 @@
 #include "manifest.h"
 #include "replication/replica_connector.h"
 #include "replication/replication_endpoint.h"
+#include <rdma/rdma_receiver_base.h>
 #include <rdma/rdma_sender_base.h>
 
 namespace limestone::api {
@@ -218,6 +219,26 @@ public:
     bool initialize_rdma_sender(uint32_t slot_count, uint64_t remote_dma_address);
 
     /**
+     * @brief Initialize the RDMA ACK receiver.
+     *
+     * Creates the ACK receiver instance and calls initialize() so its DMA
+     * address can be exposed to the replica via RDMA_INIT. The ACK receiver
+     * stays in the SETUP phase here; binding to the data sender via
+     * finalize_channel_setup_with_sender is handled separately later.
+     *
+     * @param slot_count requested RDMA slot count.
+     * @return DMA address of the ACK receive buffer, or std::nullopt on failure.
+     */
+    [[nodiscard]] std::optional<std::uint64_t> initialize_rdma_ack_receiver(
+        std::uint32_t slot_count);
+
+    /**
+     * @brief Shut down the RDMA ACK receiver if initialized.
+     * @return true on success or when the receiver is absent; false on failure.
+     */
+    bool shutdown_rdma_ack_receiver() noexcept;
+
+    /**
      * @brief Establish control channel connection.
      * @return true on success.
      */
@@ -314,6 +335,9 @@ private:
 
     // RDMA sender owned by master for RDMA replication path.
     std::unique_ptr<rdma_sender_base> rdma_sender_{};
+
+    // RDMA receiver owned by master for receiving RDMA ACK frames from the replica.
+    std::unique_ptr<rdma_receiver_base> ack_receiver_{};
 
     // Test hook: factory to override log channel connector creation.
     std::function<std::unique_ptr<replication::replica_connector>()> log_channel_connector_factory_for_test_{};

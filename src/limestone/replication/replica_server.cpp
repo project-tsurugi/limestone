@@ -388,6 +388,12 @@ void replica_server::shutdown() {
             LOG_LP(ERROR) << "rdma_receiver::shutdown() failed: " << result.error_message;
         }
     }
+    if (ack_sender_) {
+        auto result = ack_sender_->shutdown();
+        if (! result.success) {
+            LOG_LP(ERROR) << "ack_sender::shutdown() failed: " << result.error_message;
+        }
+    }
 
     // Wait after waking the accept loop and active client sockets. Client handlers may
     // otherwise remain blocked in recv() while shutdown() waits for their futures.
@@ -436,6 +442,16 @@ void replica_server::set_log_channel_handler_for_test(
     log_channel_handlers_.at(id) = std::move(handler);
 }
 
+void replica_server::set_rdma_receiver_for_test(std::unique_ptr<rdma_receiver_base> receiver) noexcept {
+    std::lock_guard<std::mutex> lock(rdma_init_mutex_);
+    rdma_receiver_ = std::move(receiver);
+}
+
+void replica_server::set_ack_sender_for_test(std::unique_ptr<rdma_sender_base> sender) noexcept {
+    std::lock_guard<std::mutex> lock(rdma_init_mutex_);
+    ack_sender_ = std::move(sender);
+}
+
 void replica_server::on_rdma_receive(rdma_receive_event const& event) {
     if (auto const* err = std::get_if<rdma_error_event>(&event)) {
         LOG_LP(ERROR) << "RDMA receive error: " << err->error_message;
@@ -476,22 +492,45 @@ bool replica_server::mark_control_channel_created() noexcept {
     return ret;
 }
 
-replica_server::rdma_init_result replica_server::initialize_rdma_receiver(uint32_t slot_count) {
+replica_server::rdma_init_result replica_server::initialize_rdma(
+    uint32_t slot_count, std::uint64_t leader_ack_dma_address) {
     std::lock_guard<std::mutex> lock(rdma_init_mutex_);
-    if (rdma_receiver_) {
+    if (rdma_receiver_ && ack_sender_) {
         return rdma_init_result::already_initialized;
+    }
+    if (rdma_receiver_ || ack_sender_) {
+        // Partial state — unreachable under current failure-path invariants
+        // (every failure branch resets both members), but report as failure
+        // if it ever happens rather than masquerading as already_initialized.
+        LOG_LP(ERROR) << "Inconsistent RDMA state: receiver="
+                      << (rdma_receiver_ ? "set" : "null")
+                      << " ack_sender=" << (ack_sender_ ? "set" : "null");
+        return rdma_init_result::failed;
     }
 
     rdma_receiver_ = make_rdma_receiver(slot_count);
-    auto result = rdma_receiver_->initialize(
+    auto receiver_init = rdma_receiver_->initialize(
         [this](rdma_receive_event const& event) { this->on_rdma_receive(event); });
-    if (! result.success) {
+    if (! receiver_init.success) {
+        LOG_LP(ERROR) << "rdma_receiver::initialize() failed: " << receiver_init.error_message;
         rdma_receiver_.reset();
         return rdma_init_result::failed;
     }
 
     auto dma_address = rdma_receiver_->get_dma_address();
     if (! dma_address.has_value()) {
+        LOG_LP(ERROR) << "rdma_receiver::get_dma_address() returned no address";
+        [[maybe_unused]] auto const shutdown_result = rdma_receiver_->shutdown();
+        rdma_receiver_.reset();
+        return rdma_init_result::failed;
+    }
+
+    ack_sender_ = make_rdma_sender(slot_count);
+    auto sender_init = ack_sender_->initialize(leader_ack_dma_address);
+    if (! sender_init.success) {
+        LOG_LP(ERROR) << "ack_sender::initialize() failed: " << sender_init.error_message;
+        ack_sender_.reset();
+        [[maybe_unused]] auto const shutdown_result = rdma_receiver_->shutdown();
         rdma_receiver_.reset();
         return rdma_init_result::failed;
     }

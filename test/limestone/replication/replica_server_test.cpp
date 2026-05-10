@@ -24,6 +24,8 @@
 #include <future>
 #include <thread>
 
+#include "rdma/rdma_receiver_base.h"
+#include "rdma/rdma_sender_base.h"
 #include "replication/channel_handler_base.h"
 #include "replication/message_error.h"
 #include "replication/message_session_begin.h"
@@ -35,6 +37,47 @@
 namespace limestone::testing {
 
 using namespace limestone::replication;
+
+namespace {
+
+/**
+ * @brief Minimal rdma_receiver_base stand-in used by partial-state tests.
+ *
+ * Populates replica_server::rdma_receiver_ via the test hook so that
+ * initialize_rdma() observes an inconsistent state. The methods are never
+ * invoked because initialize_rdma() rejects the inconsistent state up front,
+ * so trivially-successful results are sufficient.
+ */
+class noop_rdma_receiver : public limestone::replication::rdma_receiver_base {
+public:
+    operation_result initialize(rdma_receive_handler /*handler*/) noexcept override {
+        return {true, {}};
+    }
+    operation_result shutdown() noexcept override { return {true, {}}; }
+    std::optional<std::uint64_t> get_dma_address() const noexcept override {
+        return std::nullopt;
+    }
+};
+
+/**
+ * @brief Minimal rdma_sender_base stand-in used by partial-state tests.
+ *
+ * Symmetric counterpart to noop_rdma_receiver. Populates
+ * replica_server::ack_sender_ via the test hook; methods are never invoked
+ * for the same reason described on noop_rdma_receiver.
+ */
+class noop_rdma_sender : public limestone::replication::rdma_sender_base {
+public:
+    operation_result initialize(std::uint64_t /*remote_dma_address*/) noexcept override {
+        return {true, {}};
+    }
+    stream_acquire_result get_send_stream(std::uint16_t /*channel_id*/) noexcept override {
+        return {{false, "unused in test"}, nullptr};
+    }
+    operation_result shutdown() noexcept override { return {true, {}}; }
+};
+
+}  // namespace
 
  class replica_server_test : public ::testing::Test {
  public:
@@ -333,15 +376,42 @@ TEST_F(replica_server_test, mark_control_channel_created_sets_flag) {
     EXPECT_TRUE(server.mark_control_channel_created());
 }
 
-#ifdef LIMESTONE_ENABLE_RDMA
-TEST_F(replica_server_test, initialize_rdma_receiver_success_then_already_initialized) {
+TEST_F(replica_server_test, initialize_rdma_with_only_receiver_set_returns_failed) {
     replication::replica_server server;
     server.initialize(location1);
 
-    auto first = server.initialize_rdma_receiver(4);
+    // Force a partial state: only the data receiver is set, ack_sender is null.
+    // initialize_rdma() must surface this as failed rather than already_initialized.
+    server.set_rdma_receiver_for_test(std::make_unique<noop_rdma_receiver>());
+
+    auto result = server.initialize_rdma(4, 0x1ULL);
+    EXPECT_EQ(result, replication::replica_server::rdma_init_result::failed);
+}
+
+TEST_F(replica_server_test, initialize_rdma_with_only_sender_set_returns_failed) {
+    replication::replica_server server;
+    server.initialize(location1);
+
+    // Symmetric to the previous test: only the ack_sender is set.
+    server.set_ack_sender_for_test(std::make_unique<noop_rdma_sender>());
+
+    auto result = server.initialize_rdma(4, 0x1ULL);
+    EXPECT_EQ(result, replication::replica_server::rdma_init_result::failed);
+}
+
+#ifdef LIMESTONE_ENABLE_RDMA
+TEST_F(replica_server_test, initialize_rdma_success_then_already_initialized) {
+    replication::replica_server server;
+    server.initialize(location1);
+
+    // Dummy DMA address; ack_sender->initialize() with a real RDMA stack would
+    // ultimately require a peer reachable at this address. The existing baseline
+    // tolerates this not working end-to-end at the §2 stage.
+    constexpr std::uint64_t dummy_leader_ack_dma_address = 0x1ULL;
+    auto first = server.initialize_rdma(4, dummy_leader_ack_dma_address);
     EXPECT_EQ(first, replication::replica_server::rdma_init_result::success);
 
-    auto second = server.initialize_rdma_receiver(4);
+    auto second = server.initialize_rdma(4, dummy_leader_ack_dma_address);
     EXPECT_EQ(second, replication::replica_server::rdma_init_result::already_initialized);
 }
 #endif // LIMESTONE_ENABLE_RDMA

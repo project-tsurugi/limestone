@@ -107,24 +107,100 @@ master へは未マージだが、新 I/F のヘッダ・ライブラリは `fin
 
 ### 2. ACK 用 buffer の確保と DMA address 交換
 
-- 現在の `MESSAGE_RDMA_INIT` 周辺の handshake は、replica (= 受信側) の data 受信
-  buffer の DMA address を leader (= 送信側) に伝える片方向交換になっている。
-  RDMA ACK では sender 側にも ACK 受信 buffer が必要となるため、
-  leader → replica 方向にも DMA address を渡す双方向交換へ拡張する。
-- buffer の 2x 確保 (前半 data 領域・後半 ACK 領域) は rdma-comm-lib が内部で行う。
-  limestone は config の `region_size_bytes` に data 領域サイズを渡せばよく、
-  サイズ計算上の追加責務はない。ただし実メモリ使用量は指定値の 2 倍になる点だけ
-  押さえておく。
-- `rdma_sender::initialize(remote_dma_address)` のシグネチャは現時点で 1 引数のままに
-  見えるため、ACK 受信 buffer の DMA address は別経路 (`rdma_receiver::get_dma_address`
-  相当の sender 側 API、または既存 `get_dma_address` の意味再定義) で取得する。
-  実 I/F を確認して、limestone 側の handshake message を最小拡張で済ませる方法を選ぶ。
-- `MESSAGE_RDMA_INIT` の wire format を変更する場合は、replication protocol version の
-  扱い (現状の数え方、互換性破棄の方針) と整合させる。RDMA replication は実機投入前
-  なので破壊的変更を許容する判断はあり得る。
+#### lib 仕様の再確認 (前提の訂正)
 
-この段階の完了条件: server / client それぞれが、自身の ACK 用 buffer DMA address を
-取得し、相手に伝えられる経路が成立している。データ転送はまだ動かなくてよい。
+ライブラリ実装 (`rdma-comm-lib` `feat/rdma-ack-over-rdma`) を読んで分かった事実:
+
+- **各 side で `rdma_sender` と `rdma_receiver` の両 instance が必要**。当初想定していた
+  「sender に ACK 受信 buffer accessor を生やす」「`get_dma_address` の意味を再定義する」
+  という方向は誤りだった。lib の構造上、ACK 受信は別 `rdma_receiver` instance、
+  ACK 送信は別 `rdma_sender` instance で担う:
+  - leader (data 送信側): `data_sender (rdma_sender)` + `ack_receiver (rdma_receiver)`
+  - replica (data 受信側): `data_receiver (rdma_receiver)` + `ack_sender (rdma_sender)`
+  - 同 side で `receiver.finalize_channel_setup_with_sender(sender)` を呼んで結線する。
+    receiver はこの sender 経由で ACK frame を送出 (`submit_ack_write`) し、
+    自分宛に届いた ACK frame を sender の send_stream へ配送
+    (`deliver_ack_to_send_stream`)。
+- **buffer の 2x 確保は base lib の挙動**で、`blob_relay` 拡張の話ではない。
+  `src/rdma_sender_detail.cpp` / `src/rdma_receiver_detail.cpp` の内部で
+  `2 * region_size_bytes` を確保する。
+- 各 instance が 2x 確保するため、片方向 RDMA Write しか使わない limestone では
+  side あたり実メモリ 4×region_size を消費し、有効利用は 2×region_size に留まる
+  (sender.local 上半分・receiver.shared 上半分が片方向用途では片方しか使われない)。
+
+  | side | sender.local (2x) | receiver.shared (2x) |
+  |---|---|---|
+  | leader | 下=data 送信源 ✓ / 上=未使用 | 下=未使用 / 上=ACK 受信先 ✓ |
+  | replica | 下=未使用 / 上=ACK 送信源 ✓ | 下=data 受信先 ✓ / 上=未使用 |
+
+  この浪費は lib 仕様起因なので「将来の lib 改善要望」として下記「積み残し」に転記する。
+  今回 §2 ではこのまま受け入れて進める。
+
+#### handshake 拡張内容
+
+- 現在の handshake は `RDMA_INIT (leader → replica): { slot_count }` →
+  `RDMA_INIT_ACK (replica → leader): { replica_data_dma_address }` の片方向交換。
+- §2 では `RDMA_INIT` を双方向化する (採択: 案 A):
+  ```
+  RDMA_INIT     (leader → replica): { slot_count, leader_ack_dma_address }
+  RDMA_INIT_ACK (replica → leader): { replica_data_dma_address }   // 既存維持
+  ```
+- 1 RTT で双方向のアドレス交換を完結させる。`replication protocol version` は
+  RDMA replication が実機投入前であることから据え置き (破壊的変更を許容)。
+- `slot_count` は §2 では現状維持 (master 側のみ参照する定数だが、replica が値を
+  受け取る経路は残す)。N=512 固定化に伴う構造削除は §3 で行う。
+
+#### handshake 順序 (timing 制約)
+
+ACK 用 instance の `initialize()` には対向の DMA address が必要。順序:
+
+1. leader: `ack_receiver_->initialize(no_op_handler)` → leader_ack_dma_address 取得
+2. leader → replica: `RDMA_INIT { slot_count, leader_ack_dma_address }`
+3. replica: `data_receiver_->initialize(on_rdma_receive)` → replica_data_dma_address 取得
+4. replica: `ack_sender_->initialize(leader_ack_dma_address)`
+5. replica → leader: `RDMA_INIT_ACK { replica_data_dma_address }`
+6. leader: `data_sender_->initialize(replica_data_dma_address)`
+
+§2 では (1)〜(6) の `initialize` までで完了とする。
+`finalize_channel_setup_with_sender` / `finalize_channel_setup` は §3。
+
+#### この順序で FIN なしに race が起きない理由
+
+一般に handshake の最後に FIN (両 side ready 確認) が無いと、A 側 init 完了直後の
+RDMA Write が B 側 callback 登録前に到着して drop される race が起き得る。
+本順序ではそれが構造的に起こらないことを 2 方向で確認しておく:
+
+- **leader → replica の data RDMA Write**: 物理的に発行可能になるのは step 6
+  (leader の `data_sender_->initialize`) 以降。replica の `data_receiver_->initialize`
+  (callback 登録) は step 3 で完了済みで、step 5 の TCP `RDMA_INIT_ACK` 返信は
+  step 4 の後 → leader が step 6 を実行できるのは step 5 受信後 → step 3 完了が
+  保証される。data callback drop は発生しない。
+- **replica → leader の ACK RDMA Write**: 物理的に発行可能になるのは step 4 以降。
+  leader の `ack_receiver_->initialize` は step 1 で完了済みなので、ACK 受信 buffer
+  は step 4 より前に登録済。callback drop は発生しない。
+  なお §2 では `finalize_channel_setup_with_sender` を呼ばないので lib 内部の
+  `submit_ack_write` 経路自体が遮断されており、ACK は実際には発行されない。
+
+要点: limestone は片方向 RDMA Write しか使わないので、「先に rx 側 init →
+次に opposite 側 tx init」の順を保てば race が構造的に消える。双方向 RDMA Write を
+使うアプリ (例: blob_relay) では同じ前提が成り立たないため別途 FIN が必要になる。
+
+#### 実装上の決定
+
+- 新設する ack_receiver / ack_sender は既存抽象 `rdma_receiver_base` /
+  `rdma_sender_base` を流用する。null impl と rdma_comm impl の両方にシグネチャを
+  揃え、CI (ENABLE_RDMA=OFF) でも null 経路でビルド可能にする。
+- leader 側 `ack_receiver` の receive callback は no-op で良い (届く RDMA frame は
+  すべて lib 内部で `deliver_ack_to_send_stream` に流れ、user callback は呼ばれない)。
+- §2 の段階では `finalize_channel_setup_with_sender` 等は呼ばないため、ack_receiver
+  に届いた ACK frame は捨てられる (lib 内部の `rdma_sender_` が未設定で
+  `send_acknowledgement` が拒否する)。実 transfer は §3 で動作するようになる。
+
+#### 完了条件
+
+server / client それぞれが、自身の ACK 用 instance を持ち、対向の ACK buffer
+DMA address を入手して `initialize()` まで到達している。
+データ転送・ACK 転送はまだ動かなくてよい。
 
 ### 3. SETUP / TRANSFER フェーズ移行の組み込み
 
@@ -139,6 +215,25 @@ master へは未マージだが、新 I/F のヘッダ・ライブラリは `fin
 - 512 を超える `LOG_CHANNEL_CREATE` 要求が来た場合は、limestone 側でエラーを返す。
   finalize 後に新規 channel が登録されようとした場合の拒否はライブラリ側にも仕掛けが
   あるが、limestone 側でも上位に伝えられるよう整える。
+
+#### finalize ordering と FIN 相当の確認
+
+§3 では §2 と異なり、finalize 完了の双方向確認 (FIN 相当の TCP message) が必要に
+なりそう。理由:
+
+- replica が `data_receiver_->finalize_channel_setup_with_sender(ack_sender_)` を
+  呼ぶ前に leader の data_sender が data RDMA Write を発行すると、replica は受信
+  自体はできるが ACK 経路 (`submit_ack_write`) が遮断されており ACK を返せない。
+  結果として leader の `flush()` が timeout する。
+- 一方 leader の `data_sender_->finalize_channel_setup()` は SETUP→TRANSFER 遷移で
+  あって、これより前から `get_send_stream()` も `send_bytes()` も成立してしまう
+  (lib の I/F コメント参照)。
+- ∴「**replica の finalize 完了 → leader の finalize 完了 → 実 transfer 開始**」の
+  順序を保証する仕掛けが必要。素直な実装は、replica が finalize 完了後に control
+  channel 経由で `RDMA_FINALIZE_ACK` (仮称) を leader に返し、leader はそれを
+  受信してから自身の finalize を実行する形。
+
+具体の wire format / message 種別は §3 着手時に確定する。本 TODO に論点として残す。
 
 この段階の完了条件: 初期化シーケンスが SETUP → finalize → TRANSFER の順で確定し、
 flush() が RDMA ACK で完了するようになる。
@@ -243,3 +338,20 @@ lib の自動 ACK によって leader 側 `flush()` が完了する。TCP replic
 - RDMA replication 系テストが通り、duplicate / stale / gap の挙動が確認できている。
 - `channel_handler_base::send_ack()` の責務が control channel の handshake に限定
   されている。
+
+## 積み残し (本 TODO の範囲外・将来の改善要望)
+
+### rdma-comm-lib への仕様改善要望: 片方向 RDMA Write 用途での buffer 浪費の解消
+
+`feat/rdma-ack-over-rdma` 現仕様では、各 side が `rdma_sender` と `rdma_receiver` を
+別 instance として new し、それぞれが独立に 2x buffer を確保する。`blob_relay` のよう
+に双方向 RDMA Write を行う用途では両半分とも有効活用できるが、limestone のように
+片方向 RDMA Write しか使わない用途では、各 instance の半分が常に未使用となる
+(side あたり実 4x、有効 2x)。
+
+要望内容: 片方向 RDMA Write 用途で 1 side = 1 instance / 1 buffer (2x) で済むよう、
+sender に「ACK 受信領域」、receiver に「ACK 送信領域」を同一 buffer 内へ集約できる
+モードを設ける (もしくは sender/receiver を統合した新 facade を提供する)。
+
+優先度: 低 (機能性ではなくメモリ効率の問題、機能完成後に lib 側で検討)。
+本 TODO の §2〜§6 の範囲では現仕様を受け入れて進める。
