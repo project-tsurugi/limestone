@@ -376,6 +376,66 @@ TEST_F(replica_server_test, initialize_rdma_success_then_already_initialized) {
 }
 #endif // LIMESTONE_ENABLE_RDMA
 
+TEST_F(replica_server_test, finalize_rdma_returns_not_initialized_before_initialize) {
+    replication::replica_server server;
+    server.initialize(location1);
+
+    auto result = server.finalize_rdma();
+    EXPECT_EQ(result, replication::replica_server::rdma_finalize_result::not_initialized);
+}
+
+TEST_F(replica_server_test, finalize_rdma_returns_success_after_initialize) {
+    replication::replica_server server;
+    server.initialize(location1);
+
+    server.set_rdma_receiver_factory_for_test(
+        [](std::uint32_t /*slot_count*/) -> std::unique_ptr<replication::rdma_receiver_base> {
+            return std::make_unique<noop_rdma_receiver>();
+        });
+    server.set_ack_sender_factory_for_test(
+        [](std::uint32_t /*slot_count*/) -> std::unique_ptr<replication::rdma_sender_base> {
+            return std::make_unique<noop_rdma_sender>();
+        });
+    ASSERT_EQ(server.initialize_rdma(4U, 0x1ULL),
+              replication::replica_server::rdma_init_result::success);
+
+    auto result = server.finalize_rdma();
+    EXPECT_EQ(result, replication::replica_server::rdma_finalize_result::success);
+}
+
+namespace {
+
+// Receiver stub whose finalize_channel_setup_with_sender deterministically fails,
+// exercising the rdma_finalize_result::failed branch of replica_server::finalize_rdma.
+class failing_finalize_rdma_receiver : public noop_rdma_receiver {
+public:
+    operation_result finalize_channel_setup_with_sender(
+            replication::rdma_sender_base* /*sender*/) noexcept override {
+        return {false, "stub finalize failure"};
+    }
+};
+
+}  // namespace
+
+TEST_F(replica_server_test, finalize_rdma_returns_failed_when_receiver_finalize_fails) {
+    replication::replica_server server;
+    server.initialize(location1);
+
+    server.set_rdma_receiver_factory_for_test(
+        [](std::uint32_t /*slot_count*/) -> std::unique_ptr<replication::rdma_receiver_base> {
+            return std::make_unique<failing_finalize_rdma_receiver>();
+        });
+    server.set_ack_sender_factory_for_test(
+        [](std::uint32_t /*slot_count*/) -> std::unique_ptr<replication::rdma_sender_base> {
+            return std::make_unique<noop_rdma_sender>();
+        });
+    ASSERT_EQ(server.initialize_rdma(4U, 0x1ULL),
+              replication::replica_server::rdma_init_result::success);
+
+    auto result = server.finalize_rdma();
+    EXPECT_EQ(result, replication::replica_server::rdma_finalize_result::failed);
+}
+
 TEST_F(replica_server_test, on_rdma_receive_invokes_handler_for_data_event) {
     replica_server server;
     server.initialize(location1);
