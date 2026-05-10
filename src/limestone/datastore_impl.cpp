@@ -512,6 +512,18 @@ bool datastore_impl::maybe_finalize_rdma() {
         return false;
     }
 
+    // Bind the ack_receiver to the data sender so that ACK frames received from the replica
+    // are routed to the data sender's send_streams (enabling flush() completion). Must happen
+    // before the data sender transitions to TRANSFER phase.
+    if (ack_receiver_) {
+        auto bind_result = ack_receiver_->finalize_channel_setup_with_sender(rdma_sender_.get());
+        if (! bind_result.success) {
+            LOG_LP(ERROR) << "ack_receiver::finalize_channel_setup_with_sender() failed: "
+                          << bind_result.error_message;
+            return false;
+        }
+    }
+
     auto result = rdma_sender_->finalize_channel_setup();
     if (! result.success) {
         LOG_LP(ERROR) << "rdma_sender::finalize_channel_setup() failed: " << result.error_message;
