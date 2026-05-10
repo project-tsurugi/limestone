@@ -278,34 +278,36 @@ lib の自動 ACK によって leader 側 `flush()` が完了する。TCP replic
 - `receive_handler_with_ack` への切替を後段で行う場合は、その時点で ACK body が
   送信側に届くことを確認するテストを追加する。
 
-### 6. RDMA replication における `log_channel` 責務整理
+### 6. RDMA replication における `log_channel` 責務整理 (本 TODO ではクローズ)
 
-§5 のテストで RDMA log replication が新 lib の自動 ACK で正しく動くことを確認した
-**後** に着手する。RDMA log channel は RDMA ACK 化により socket session 経由の ACK
-送受信が不要になるため、関連コードを段階的に削除していく。
+§1〜§5 完了後に再検討した結果、本 TODO の範囲ではクローズし、後日「将来の cleanup」
+として別 issue で扱う。理由は以下の通り。
 
-#### 6a. socket session を使った ACK 送受信コードの削除
+#### 6a. socket session を使った ACK 送受信コードの削除 — 残作業なし
 
-- log channel 用 socket session の作成自体は残しつつ、その session を使って ACK の
-  送受信を行っているコードのみを削除する。
-- 対象: `channel_handler_base::send_ack()` の RDMA log channel 経路から呼ばれる部分、
-  および leader 側で旧 TCP ACK を待っていた経路の残骸 (§4 で多くは消えている想定)。
-- この時点では socket session は作成されるが「使われない」状態。TCP replication 側の
-  経路は壊さない。
+- 当初の対象だった「`channel_handler_base::send_ack()` の RDMA log channel 経路から
+  呼ばれる部分」は、§4 (commit 54dc64b) の段階で `ack_enabled=false` gate により
+  既に呼ばれない状態。`message_log_entries::post_receive()` の per-message ACK は
+  RDMA path では発行されない。
+- master 側 `wait_for_replica_ack()` も `has_rdma_send_stream()` 分岐で TCP path 専用
+  となっており、RDMA path には残骸なし。
+- 現状 `send_ack()` を呼んでいるのは `log_channel_handler::send_initial_ack()` のみで、
+  これは LOG_CHANNEL_CREATE handshake 用 (§6b の範疇)。本節で削除すべきコードはない。
 
-#### 6b. RDMA ACK モードでは log channel そのものを作らない
+#### 6b. RDMA ACK モードでは log channel そのものを作らない — 動作上は不要
 
-- RDMA replication mode では `LOG_CHANNEL_CREATE` 由来の log channel session 構築自体を
-  スキップする。`log_channel_handler` の初期化、関連する server/client 側初期化手順を
-  見直す。
-- TCP replication 側ではこれまで通り log channel session を作る。
-- 影響範囲が広いため、TCP replication が壊れないことを確認しつつ段階的に進める。
+- 現状 RDMA mode でも LOG_CHANNEL_CREATE 由来の TCP socket session が 512 本作られ、
+  COMMON_ACK を返した後 idle hold される (使われない)。これを skip すれば idle socket
+  と thread を削減できる。
+- ただし scenario_test (rdma_1) を含む既存テストは現状の構成で動作しており、機能要件
+  としては不要。skip するには master 側 `create_log_channel_connector` の RDMA 分岐、
+  replica 側での `log_channel_handler` の bulk pre-create 機構、TCP/RDMA 経路の分岐
+  追加など、影響範囲が広い変更になる。
+- 本 TODO の主目的 (RDMA ACK over RDMA) は §1〜§5 で達成済み。§6b は別 issue で扱う。
 
 ## 実装順
 
-§1 → §2 → §3 → §4 → §5 → §6a → §6b の順で進める。各節の作業内容と完了条件は
-当該節に記載のとおり。§6 は §5 のテストで RDMA log replication の動作確認が
-取れてから着手する。
+§1 → §2 → §3 → §4 → §5 の順で完了。§6 は本 TODO ではクローズ (上記理由)。
 
 ## 注意点
 
@@ -323,8 +325,8 @@ lib の自動 ACK によって leader 側 `flush()` が完了する。TCP replic
 - buffer の 2x 確保は rdma-comm-lib が内部で行うため limestone 側はサイズ計算を意識
   する必要がないが、実メモリ使用量が指定 `region_size_bytes` の 2 倍になる点だけは
   押さえておく。
-- RDMA replication における `log_channel` の不要化は、影響範囲が広い。
-  責務の棚卸しと段階的削除方針を先に明確にする。
+- RDMA replication における `log_channel` の不要化 (§6b) は影響範囲が広い。
+  本 TODO ではクローズし、別 issue で扱う。
 - sequence の wrap-around と複数フレームをまたぐ 1 メッセージの ACK 粒度については、
   rdma-comm-lib 側の sequence/channel 取り扱いに従う前提で進める。
 
@@ -336,10 +338,20 @@ lib の自動 ACK によって leader 側 `flush()` が完了する。TCP replic
   channel 追加登録が拒否される。
 - 既存の TCP replication テストが通る。
 - RDMA replication 系テストが通り、duplicate / stale / gap の挙動が確認できている。
-- `channel_handler_base::send_ack()` の責務が control channel の handshake に限定
-  されている。
+- `channel_handler_base::send_ack()` の log channel データ面 (per-message ACK) からの
+  呼び出しが RDMA path で消えている (control channel handshake および LOG_CHANNEL_CREATE
+  handshake からの呼び出しは残る; 後者の撤去は §6b として別 issue 化)。
 
 ## 積み残し (本 TODO の範囲外・将来の改善要望)
+
+### RDMA mode での log channel TCP socket session 撤去 (旧 §6b)
+
+RDMA mode でも `LOG_CHANNEL_CREATE` 由来の TCP socket が 512 本作成され、handshake 後
+idle hold される。RDMA ACK over RDMA が完成した今、これらは機能的に不要。撤去には
+master 側 `create_log_channel_connector` の RDMA 分岐、replica 側 `log_channel_handler`
+の bulk pre-create、TCP/RDMA 経路の分岐などが必要で、影響範囲が広い。
+
+優先度: 低 (機能性ではなくリソース効率の問題)。本 TODO とは別 issue で扱う。
 
 ### rdma-comm-lib への仕様改善要望: 片方向 RDMA Write 用途での buffer 浪費の解消
 
