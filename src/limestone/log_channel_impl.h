@@ -17,6 +17,7 @@
 
 #include <memory>
 #include <mutex>
+#include <ostream>
 #include <string_view>
 #include <vector>
 #include <boost/asio.hpp>
@@ -38,6 +39,23 @@ class datastore;
 
 class log_channel_impl {
 public:
+    /**
+     * @brief Replication transport mode for this log channel.
+     *
+     * The mode is derived from the currently held transport handles:
+     * RDMA stream takes precedence over TCP connector.
+     */
+    enum class replica_mode {
+        none,  ///< no replica transport available
+        tcp,   ///< TCP-only path (replica_connector_)
+        rdma,  ///< RDMA path (rdma_send_stream_)
+    };
+
+    /**
+     * @brief Returns a short string representation of a replica_mode value.
+     */
+    [[nodiscard]] static std::string_view to_string_view(replica_mode mode) noexcept;
+
     log_channel_impl();
     ~log_channel_impl();
 
@@ -118,6 +136,12 @@ public:
     [[nodiscard]] bool has_rdma_send_stream() const noexcept;
 
     /**
+     * @brief Returns the current replica transport mode.
+     * @return current replica_mode value.
+     */
+    [[nodiscard]] replica_mode get_replica_mode() const noexcept;
+
+    /**
      * @brief Flush RDMA stream asynchronously using channel-local thread pool.
      * @return future representing completion of flush.
      */
@@ -139,6 +163,12 @@ private:
     mutable std::mutex mtx_replica_connector_;
 
     /**
+     * @brief Derive the replica transport mode from currently held handles.
+     *        Caller must hold mtx_replica_connector_.
+     */
+    [[nodiscard]] replica_mode get_replica_mode_locked() const noexcept;
+
+    /**
      * @brief Send all bytes currently accumulated in rdma_serializer_io_ via rdma_send_stream_.
      *        Resets the buffer on completion.
      *        Caller must hold mtx_replica_connector_.
@@ -152,5 +182,10 @@ private:
      */
     void send_rdma_bytes_locked(std::string const& payload);
 };
+
+/**
+ * @brief Stream insertion operator for log_channel_impl::replica_mode.
+ */
+std::ostream& operator<<(std::ostream& out, log_channel_impl::replica_mode mode);
 
 }  // namespace limestone::api

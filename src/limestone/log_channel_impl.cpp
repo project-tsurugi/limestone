@@ -30,6 +30,34 @@ log_channel_impl::log_channel_impl()
 }
 log_channel_impl::~log_channel_impl() = default;
 
+std::string_view log_channel_impl::to_string_view(replica_mode mode) noexcept {
+    switch (mode) {
+        case replica_mode::none: return "none";
+        case replica_mode::tcp: return "tcp";
+        case replica_mode::rdma: return "rdma";
+    }
+    return "unknown";
+}
+
+std::ostream& operator<<(std::ostream& out, log_channel_impl::replica_mode mode) {
+    return out << log_channel_impl::to_string_view(mode);
+}
+
+log_channel_impl::replica_mode log_channel_impl::get_replica_mode_locked() const noexcept {
+    if (rdma_send_stream_) {
+        return replica_mode::rdma;
+    }
+    if (replica_connector_) {
+        return replica_mode::tcp;
+    }
+    return replica_mode::none;
+}
+
+log_channel_impl::replica_mode log_channel_impl::get_replica_mode() const noexcept {
+    std::lock_guard<std::mutex> lock(mtx_replica_connector_);
+    return get_replica_mode_locked();
+}
+
 // The `message_log_entries` could be created by the caller after checking the validity of `replica_connector_`,
 // but doing so would require adding an `if` statement every time, which introduces redundancy and increases the risk of bugs.
 // Using a lambda allows us to encapsulate the validity check of `replica_connector_` within the function,
@@ -39,59 +67,64 @@ bool log_channel_impl::send_replica_message(
         uint64_t epoch_id,
         const std::function<void(replication::message_log_entries&)>& modifier) {
     std::lock_guard<std::mutex> lock(mtx_replica_connector_);
-    TRACE_START << "epoch=" << epoch_id;
+    auto mode = get_replica_mode_locked();
+    TRACE_START << "epoch=" << epoch_id << " mode=" << mode;
 
-    // If replica_connector_ is invalid, exit the function
-    if (!replica_connector_) {
-        TRACE_ABORT << "replica_connector_ is null";
+    if (mode == replica_mode::none) {
+        TRACE_ABORT << "no replica transport available";
         return false;
     }
-    // Create and modify the message
+
     replication::message_log_entries message{epoch_id};
     modifier(message);
 
-    if (rdma_send_stream_) {
-        if (message.has_any_blobs()) {
-            // BLOBs must be sent directly via RDMA without in-memory buffering.
-            // First flush any accumulated non-blob data, then send the blob message
-            // using rdma_replication_message_io which streams blob file data chunk-by-chunk.
-            if (! datastore_) {
-                LOG_LP(FATAL) << "datastore not set; cannot send blob via RDMA";
-            }
-            flush_rdma_serializer_io_locked();
-            replication::rdma_replication_message_io rdma_io(*rdma_send_stream_, *datastore_);
-            replication::replication_message::send(rdma_io, message);
-            // Flush any remaining non-blob serialized data left in the rdma_io buffer.
-            auto remaining = rdma_io.get_out_string();
-            if (! remaining.empty()) {
-                send_rdma_bytes_locked(remaining);
-            }
-            TRACE_END << "path=rdma blob";
-        } else {
-            // Accumulate non-blob messages in rdma_serializer_io_ and flush only when
-            // the buffer reaches rdma_send_buffer_threshold (batching optimization).
-            replication::replication_message::send(rdma_serializer_io_, message);
-            std::size_t buffered = rdma_serializer_io_.get_out_size();
-            TRACE << "RDMA path buffered_size=" << buffered;
-            if (buffered >= rdma_send_buffer_threshold) {
+    switch (mode) {
+        case replica_mode::rdma: {
+            if (message.has_any_blobs()) {
+                // BLOBs must be sent directly via RDMA without in-memory buffering.
+                // First flush any accumulated non-blob data, then send the blob message
+                // using rdma_replication_message_io which streams blob file data chunk-by-chunk.
+                if (! datastore_) {
+                    LOG_LP(FATAL) << "datastore not set; cannot send blob via RDMA";
+                }
                 flush_rdma_serializer_io_locked();
-                TRACE_END << "path=rdma flushed";
+                replication::rdma_replication_message_io rdma_io(*rdma_send_stream_, *datastore_);
+                replication::replication_message::send(rdma_io, message);
+                // Flush any remaining non-blob serialized data left in the rdma_io buffer.
+                auto remaining = rdma_io.get_out_string();
+                if (! remaining.empty()) {
+                    send_rdma_bytes_locked(remaining);
+                }
+                TRACE_END << "path=rdma blob";
             } else {
-                TRACE_END << "path=rdma buffered";
+                // Accumulate non-blob messages in rdma_serializer_io_ and flush only when
+                // the buffer reaches rdma_send_buffer_threshold (batching optimization).
+                replication::replication_message::send(rdma_serializer_io_, message);
+                std::size_t buffered = rdma_serializer_io_.get_out_size();
+                TRACE << "RDMA path buffered_size=" << buffered;
+                if (buffered >= rdma_send_buffer_threshold) {
+                    flush_rdma_serializer_io_locked();
+                    TRACE_END << "path=rdma flushed";
+                } else {
+                    TRACE_END << "path=rdma buffered";
+                }
             }
+            return true;
         }
-        return true;
+        case replica_mode::tcp: {
+            if (!replica_connector_->send_message(message)) {
+                LOG_LP(FATAL) << "Failed to send message to replica";
+                replica_connector_.reset();
+                return false;
+            }
+            TRACE_END << "path=tcp";
+            return true;
+        }
+        case replica_mode::none:
+            // unreachable: handled by the early return above.
+            break;
     }
-
-    TRACE << "TCP path";
-    // Send the message
-    if (!replica_connector_->send_message(message)) {
-        LOG_LP(FATAL) << "Failed to send message to replica";
-        replica_connector_.reset();
-        return false;
-    }
-    TRACE_END << "path=tcp";
-    return true;
+    return false;
 }
 
 void log_channel_impl::wait_for_replica_ack() {
@@ -110,7 +143,7 @@ void log_channel_impl::wait_for_replica_ack() {
 
 void log_channel_impl::flush_rdma_stream() {
     std::lock_guard<std::mutex> lock(mtx_replica_connector_);
-    if (! rdma_send_stream_) {
+    if (get_replica_mode_locked() != replica_mode::rdma) {
         LOG_LP(FATAL) << "RDMA flush requested without RDMA send stream.";
     }
     // Drain any data remaining in the serialization buffer before issuing the RDMA flush.
@@ -178,7 +211,7 @@ void log_channel_impl::set_rdma_send_stream(std::unique_ptr<rdma_send_stream_bas
 
 bool log_channel_impl::has_rdma_send_stream() const noexcept {
     std::lock_guard<std::mutex> lock(mtx_replica_connector_);
-    return rdma_send_stream_ != nullptr;
+    return get_replica_mode_locked() == replica_mode::rdma;
 }
 
 void log_channel_impl::set_replica_connector(std::unique_ptr<replication::replica_connector> connector) {
