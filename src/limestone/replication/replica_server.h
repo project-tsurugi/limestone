@@ -18,6 +18,8 @@
 #include <array>
 #include <functional>
 #include <memory>
+#include <ostream>
+#include <string_view>
 #include <unordered_map>
 #include <unordered_set>
 #include <mutex>
@@ -157,6 +159,31 @@ public:
         std::uint64_t id) const noexcept;
 
     /**
+     * @brief Register an RDMA-only log_channel_handler for the given channel id.
+     *
+     * Creates a replica-side log_channel via datastore::create_channel() and a
+     * matching log_channel_handler bound to it, then stores the handler in the
+     * channel_id slot so that incoming RDMA frames can be dispatched to it.
+     * Used by the RDMA_FINALIZE handler to register all log channels in bulk
+     * when the per-channel TCP LOG_CHANNEL_CREATE handshake is skipped.
+     *
+     * @param channel_id Channel id assigned by the leader.
+     * @return Registration result.
+     */
+    enum class register_rdma_handler_result {
+        success,
+        invalid_channel_id,
+        already_registered,
+    };
+
+    /**
+     * @brief Returns a short string representation of a register_rdma_handler_result value.
+     */
+    [[nodiscard]] static std::string_view to_string_view(register_rdma_handler_result result) noexcept;
+
+    register_rdma_handler_result register_rdma_log_channel_handler(std::uint64_t channel_id);
+
+    /**
      * @brief Test hook to set a log channel handler into a slot.
      * @note Intended for testing only.
      */
@@ -293,5 +320,10 @@ private:
         log_channel_handlers_{};
     mutable std::array<std::mutex, max_log_channel_slots> log_channel_slot_mutexes_{};
 };
+
+/**
+ * @brief Stream insertion operator for replica_server::register_rdma_handler_result.
+ */
+std::ostream& operator<<(std::ostream& out, replica_server::register_rdma_handler_result result);
 
 } // namespace limestone::replication

@@ -357,19 +357,29 @@ void datastore::ready() {
             if (impl_->open_control_channel()) {
                 LOG_LP(INFO) << "Replication control channel opened successfully.";
 
-                // Register RDMA send streams for existing log channels
-                // (RDMA sender is now initialized after open_control_channel)
+                // Register RDMA send streams for existing log channels and collect
+                // the channel ids that the FINALIZE handshake needs to register on
+                // the replica side. In RDMA mode no per-channel TCP connector is
+                // created, so the gate is the RDMA stream factory rather than the
+                // connector presence.
+                std::vector<std::uint64_t> finalize_channel_ids;
                 {
                     std::lock_guard<std::mutex> lock(mtx_channel_);
+                    finalize_channel_ids.reserve(log_channels_.size());
                     for (std::size_t id = 0; id < log_channels_.size(); ++id) {
                         auto* channel = log_channels_[id].get();
-                        if (channel != nullptr && channel->get_impl()->get_replica_connector() != nullptr) {
-                            maybe_register_rdma_stream(*channel, id);
+                        if (channel == nullptr) {
+                            continue;
                         }
+                        maybe_register_rdma_stream(*channel, id);
+                        if (! channel->get_impl()->has_rdma_send_stream()) {
+                            continue;
+                        }
+                        finalize_channel_ids.push_back(static_cast<std::uint64_t>(id));
                     }
                 }
 
-                if (! impl_->maybe_finalize_rdma()) {
+                if (! impl_->maybe_finalize_rdma(finalize_channel_ids)) {
                     LOG_LP(FATAL) << "Failed to finalize RDMA channel setup.";
                 }
             } else {
@@ -402,7 +412,12 @@ log_channel& datastore::create_channel() {
     log_channels_.emplace_back(std::unique_ptr<log_channel>(new log_channel(location_, id, *this)));  // constructor of log_channel is private
     auto* channel = log_channels_.back().get();
     
-    if (impl_->has_replica() && impl_->is_master()) {
+    // In RDMA mode the per-channel TCP socket is unnecessary: log_channel
+    // registration on the replica side is performed via RDMA_FINALIZE
+    // (carrying the list of channel ids), and replication data and ACKs both
+    // flow over RDMA. Skip opening a connector to avoid leaving an idle TCP
+    // session per log channel.
+    if (impl_->has_replica() && impl_->is_master() && ! impl_->is_rdma_enabled()) {
         auto connector = impl_->create_log_channel_connector(*this, id);
         if (connector) {
             channel->get_impl()->set_replica_connector(std::move(connector));

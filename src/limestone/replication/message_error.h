@@ -53,6 +53,7 @@ public:
     static constexpr uint16_t rdma_finalize_error_invalid_resources = 110;
     static constexpr uint16_t rdma_finalize_error_not_initialized = 111;
     static constexpr uint16_t rdma_finalize_error_finalize_failed = 112;
+    static constexpr uint16_t rdma_finalize_error_register_handler_failed = 113;
 
 private:
     // Register COMMON_ERROR in replication_message factory map.

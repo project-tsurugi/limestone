@@ -433,6 +433,42 @@ std::shared_ptr<log_channel_handler> replica_server::get_log_channel_handler(
     return log_channel_handlers_.at(id);
 }
 
+std::string_view replica_server::to_string_view(register_rdma_handler_result result) noexcept {
+    switch (result) {
+        case register_rdma_handler_result::success: return "success";
+        case register_rdma_handler_result::invalid_channel_id: return "invalid_channel_id";
+        case register_rdma_handler_result::already_registered: return "already_registered";
+    }
+    return "unknown";
+}
+
+std::ostream& operator<<(std::ostream& out, replica_server::register_rdma_handler_result result) {
+    return out << replica_server::to_string_view(result);
+}
+
+replica_server::register_rdma_handler_result
+replica_server::register_rdma_log_channel_handler(std::uint64_t channel_id) {
+    if (channel_id >= max_log_channel_slots) {
+        return register_rdma_handler_result::invalid_channel_id;
+    }
+    auto channel_idx = static_cast<std::size_t>(channel_id);
+
+    // create_channel() locks the datastore's channel mutex internally; do not
+    // hold the slot mutex while calling it.
+    auto& channel = datastore_->create_channel();
+
+    auto handler = std::make_shared<log_channel_handler>(
+        *this, log_channel_handler::rdma_only_tag{});
+    handler->bind_log_channel(channel);
+
+    std::lock_guard<std::mutex> lock(log_channel_slot_mutexes_.at(channel_idx));
+    if (log_channel_handlers_.at(channel_idx)) {
+        return register_rdma_handler_result::already_registered;
+    }
+    log_channel_handlers_.at(channel_idx) = std::move(handler);
+    return register_rdma_handler_result::success;
+}
+
 void replica_server::set_log_channel_handler_for_test(
     std::uint64_t id, std::shared_ptr<log_channel_handler> handler) {
     if (id >= max_log_channel_slots) {

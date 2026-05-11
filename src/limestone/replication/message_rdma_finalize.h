@@ -16,7 +16,10 @@
 
 #pragma once
 
+#include <cstdint>
 #include <memory>
+#include <utility>
+#include <vector>
 
 #include <replication/replication_message.h>
 
@@ -27,12 +30,21 @@ namespace limestone::replication {
  *
  * Sent by the leader after every required RDMA send stream has been acquired,
  * instructing the replica to bind its data receiver to the ACK sender via
- * finalize_channel_setup_with_sender(). The body is empty: the message acts as
- * a phase-transition signal between SETUP and TRANSFER.
+ * finalize_channel_setup_with_sender(). The body carries the list of log
+ * channel ids that the replica must register as RDMA-only handlers before the
+ * SETUP -> TRANSFER transition; the list may be empty when no log channel has
+ * been created yet (e.g., during tests or before the leader has any channels).
  */
 class message_rdma_finalize : public replication_message {
 public:
     message_rdma_finalize() = default;
+
+    /**
+     * @brief Construct with the list of log channel ids to be registered.
+     * @param channel_ids channel ids to register on the replica side.
+     */
+    explicit message_rdma_finalize(std::vector<std::uint64_t> channel_ids) noexcept
+        : channel_ids_(std::move(channel_ids)) {}
 
     [[nodiscard]] message_type_id get_message_type_id() const override;
     void send_body(replication_message_io& io) const override;
@@ -42,7 +54,13 @@ public:
 
     [[nodiscard]] static std::unique_ptr<replication_message> create();
 
+    [[nodiscard]] std::vector<std::uint64_t> const& get_channel_ids() const noexcept {
+        return channel_ids_;
+    }
+
 private:
+    std::vector<std::uint64_t> channel_ids_{};
+
     // NOLINTNEXTLINE(cert-err58-cpp)
     inline static const bool registered_ = []() {
         replication_message::register_message_type(

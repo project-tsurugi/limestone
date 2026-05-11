@@ -350,14 +350,44 @@ lib の自動 ACK によって leader 側 `flush()` が完了する。TCP replic
 
 ## 積み残し (本 TODO の範囲外・将来の改善要望)
 
-### RDMA mode での log channel TCP socket session 撤去 (旧 §6b)
+### RDMA mode での log channel TCP socket session 撤去 (旧 §6b) — 解消済み
 
-RDMA mode でも `LOG_CHANNEL_CREATE` 由来の TCP socket が 512 本作成され、handshake 後
-idle hold される。RDMA ACK over RDMA が完成した今、これらは機能的に不要。撤去には
-master 側 `create_log_channel_connector` の RDMA 分岐、replica 側 `log_channel_handler`
-の bulk pre-create、TCP/RDMA 経路の分岐などが必要で、影響範囲が広い。
+**[解消済み]**
 
-優先度: 低 (機能性ではなくリソース効率の問題)。本 TODO とは別 issue で扱う。
+RDMA mode で log_channel ごとに張られていた TCP socket session を撤去した。
+具体的には以下の変更を行った:
+
+- master 側 `datastore::create_channel()` で RDMA 有効時に
+  `create_log_channel_connector()` をスキップ。
+- `message_rdma_finalize` のボディに channel_id リストを追加し、master 側で
+  `maybe_finalize_rdma(channel_ids)` 経由で送信。
+- replica 側 `replica_server::register_rdma_log_channel_handler()` を新設し、
+  RDMA_FINALIZE 受信時に channel_id ごとに `log_channel_handler` を生成・登録。
+- `log_channel_handler` に RDMA-only 用コンストラクタ (`rdma_only_tag`) を追加。
+  ただし `channel_handler_base` が TCP 前提のため、ダミー io (`sentinel_io_`) を
+  所有する暫定対応とした (次項の TODO 参照)。
+
+結果として RDMA mode では log_channel 数ぶんの idle TCP socket が消え、replica 側で
+ブロックしていたスレッドも作られなくなった。
+
+### channel_handler_base の TCP 依存解消 (sentinel_io_ ワークアラウンド)
+
+RDMA-only mode の `log_channel_handler` を導入したコミットで `sentinel_io_` という
+ダミー `replication_message_io` を所有させる対応を入れた。これは `channel_handler_base`
+が "1 ハンドラ = 1 TCP 接続" を前提に `replication_message_io&` を必須メンバとして
+保持しているため、RDMA-only ハンドラでも参照を満足させる必要があったから。
+
+`channel_handler_base` のメソッド (`run`, `process_loop`, `send_ack`, `send_error`,
+`create_handler_resources`) はすべて TCP 専用で、RDMA-only ハンドラは一切呼ばない。
+したがって本来は継承する意味がなく、以下のいずれかの方向で整理するのが筋がよい:
+
+- 案 A: `log_channel_handler_base` を新設し、TCP 経路は `channel_handler_base` 経由・
+  RDMA 経路は base 直接継承の二系統に分離。
+- 案 B: `channel_handler_base::replication_message_io_` をポインタ化して null 許容に
+  し、`sentinel_io_` を撤去。
+- 案 C: 共通実装を CRTP / composition で抽出。
+
+優先度: 低 (動作はしている)。コードの可読性・型安全性の問題。別 issue で扱う。
 
 ### rdma-comm-lib への仕様改善要望: 片方向 RDMA Write 用途での buffer 浪費の解消 — 解消済み
 

@@ -26,6 +26,7 @@
 #include <sys/types.h>
 #include <cstdint>
 #include <functional>
+#include <vector>
 
 #include <boost/filesystem/path.hpp>
 
@@ -264,9 +265,11 @@ public:
      * from SETUP to TRANSFER phase. No-op when RDMA is not enabled or the
      * sender failed to initialize.
      *
+     * @param channel_ids log channel ids that the replica must register as
+     *        RDMA-only handlers as part of the FINALIZE handshake. May be empty.
      * @return true on success or skip; false on failure.
      */
-    bool maybe_finalize_rdma();
+    bool maybe_finalize_rdma(std::vector<std::uint64_t> const& channel_ids);
 
     /**
      * @brief Shut down RDMA sender if initialized.

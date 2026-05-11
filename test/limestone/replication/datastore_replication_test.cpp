@@ -214,8 +214,18 @@ TEST_P(datastore_replication_test, open_control_channel_via_datastore_ready) {
     EXPECT_NE(datastore_->get_impl()->get_control_channel(), nullptr);
     EXPECT_TRUE(datastore_->get_impl()->has_replica());
 
-    EXPECT_NE(lc0_->get_impl()->get_replica_connector(), nullptr);
-    EXPECT_NE(lc1_->get_impl()->get_replica_connector(), nullptr);
+    if (GetParam().rdma_slots.has_value()) {
+        // In RDMA mode no per-channel TCP connector is created; instead the
+        // RDMA send stream is attached during ready() via the FINALIZE
+        // handshake, and channel registration on the replica is done in bulk.
+        EXPECT_EQ(lc0_->get_impl()->get_replica_connector(), nullptr);
+        EXPECT_EQ(lc1_->get_impl()->get_replica_connector(), nullptr);
+        EXPECT_TRUE(lc0_->get_impl()->has_rdma_send_stream());
+        EXPECT_TRUE(lc1_->get_impl()->has_rdma_send_stream());
+    } else {
+        EXPECT_NE(lc0_->get_impl()->get_replica_connector(), nullptr);
+        EXPECT_NE(lc1_->get_impl()->get_replica_connector(), nullptr);
+    }
     datastore_->shutdown();
 }
 
@@ -246,6 +256,14 @@ TEST_P(datastore_replication_test, fail_open_control_channel_via_datastore_ready
 
 
 TEST_P(datastore_replication_test, replica_death_before_create_log_channel) {
+    if (GetParam().rdma_slots.has_value()) {
+        // In RDMA mode create_channel() does not open a per-channel TCP
+        // connector, so a dead replica does not fail at create_channel()
+        // time; the failure surfaces later in ready() instead. This
+        // scenario is therefore not applicable to the RDMA mode.
+        GTEST_SKIP() << "Not applicable in RDMA mode: no per-channel TCP "
+            "connector is created";
+    }
     stop_replica_server();
     EXPECT_DEATH({
         gen_datastore();

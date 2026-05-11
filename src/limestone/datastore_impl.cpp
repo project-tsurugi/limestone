@@ -477,13 +477,13 @@ void datastore_impl::initialize_rdma_slots() {
                  << " slots (4KB each)";
 }
 
-bool datastore_impl::maybe_finalize_rdma() {
+bool datastore_impl::maybe_finalize_rdma(std::vector<std::uint64_t> const& channel_ids) {
     if (! rdma_sender_) {
         // RDMA not enabled or sender initialization failed; nothing to finalize.
         return true;
     }
 
-    message_rdma_finalize finalize_msg{};
+    message_rdma_finalize finalize_msg{channel_ids};
     if (! control_channel_->send_message(finalize_msg)) {
         LOG_LP(ERROR) << "Failed to send RDMA_FINALIZE message.";
         return false;
