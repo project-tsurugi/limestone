@@ -24,7 +24,7 @@ namespace limestone::replication {
  *
  * initialize() returns a failure result and get_dma_address() returns std::nullopt
  * because RDMA is not available in this build configuration.
- * register_channel() and shutdown() succeed without performing any RDMA operations.
+ * shutdown() succeeds without performing any RDMA operations.
  */
 class null_rdma_receiver : public rdma_receiver_base {
 public:
@@ -38,8 +38,9 @@ public:
 
     [[nodiscard]] operation_result initialize(rdma_receive_handler handler) noexcept override;
     [[nodiscard]] operation_result shutdown() noexcept override;
-    [[nodiscard]] operation_result register_channel(std::uint16_t channel_id, int ack_socket) noexcept override;
     [[nodiscard]] std::optional<std::uint64_t> get_dma_address() const noexcept override;
+    [[nodiscard]] operation_result finalize_channel_setup_with_sender(
+        rdma_sender_base* sender) noexcept override;
 };
 
 } // namespace limestone::replication

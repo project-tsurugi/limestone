@@ -15,12 +15,9 @@
  */
 #include <rdma/rdma_comm_receiver.h>
 
-#include <cerrno>
-#include <cstring>
 #include <string>
-#include <unistd.h>
 
-#include <rdma_comm/unique_fd.h>
+#include <rdma/rdma_comm_sender.h>
 
 namespace limestone::replication {
 
@@ -75,22 +72,28 @@ rdma_receiver_base::operation_result rdma_comm_receiver::shutdown() noexcept {
     return {r.success, r.error_message};
 }
 
-rdma_receiver_base::operation_result rdma_comm_receiver::register_channel(
-        std::uint16_t channel_id,
-        int           ack_socket) noexcept {
-    int owned_ack_socket = ::dup(ack_socket);
-    if (owned_ack_socket < 0) {
-        return {false, std::string{"dup() failed for RDMA ACK socket: "} + std::strerror(errno)};
-    }
-
-    auto r = receiver_.register_channel(
-        channel_id,
-        rdma::communication::unique_fd{owned_ack_socket});
-    return {r.success, r.error_message};
-}
-
 std::optional<std::uint64_t> rdma_comm_receiver::get_dma_address() const noexcept {
     return receiver_.get_dma_address();
+}
+
+rdma_receiver_base::operation_result rdma_comm_receiver::finalize_channel_setup_with_sender(
+        rdma_sender_base* sender) noexcept {
+    if (sender == nullptr) {
+        return {false, "rdma_comm_receiver::finalize_channel_setup_with_sender: sender is null"};
+    }
+    // rdma_*_base abstractions exist solely as ENABLE_RDMA build-time toggles:
+    // null_* and rdma_comm_* implementations are never mixed within a single
+    // process (factory selects one based on build configuration). The dynamic_cast
+    // here is a cheap runtime guard for that invariant rather than a polymorphic
+    // dispatch over multiple coexisting sender kinds.
+    auto* comm_sender = dynamic_cast<rdma_comm_sender*>(sender);
+    if (comm_sender == nullptr) {
+        return {false,
+                "rdma_comm_receiver::finalize_channel_setup_with_sender: "
+                "sender is not an rdma_comm_sender instance"};
+    }
+    auto r = receiver_.finalize_channel_setup_with_sender(comm_sender->get_underlying_sender());
+    return {r.success, r.error_message};
 }
 
 } // namespace limestone::replication

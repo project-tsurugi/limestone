@@ -47,12 +47,27 @@ public:
     [[nodiscard]] operation_result initialize(std::uint64_t remote_dma_address) noexcept override;
 
     [[nodiscard]] stream_acquire_result get_send_stream(
-        std::uint16_t channel_id,
-        int           ack_fd) noexcept override;
+        std::uint16_t channel_id) noexcept override;
+
+    [[nodiscard]] operation_result finalize_channel_setup() noexcept override;
 
     [[nodiscard]] operation_result shutdown() noexcept override;
 
 private:
+    // rdma_comm_receiver needs access to the underlying rdma_sender to bind
+    // the RDMA ACK return path via finalize_channel_setup_with_sender().
+    friend class rdma_comm_receiver;
+
+    /**
+     * @brief Accessor for the underlying vendor rdma_sender.
+     * @return Pointer to the wrapped rdma::communication::rdma_sender instance.
+     * @note Reachable only through the rdma_comm_receiver friend declaration;
+     *       intended for binding the RDMA ACK return path during channel setup.
+     */
+    [[nodiscard]] rdma::communication::rdma_sender* get_underlying_sender() noexcept {
+        return &sender_;
+    }
+
     rdma::communication::rdma_sender sender_;
 };
 

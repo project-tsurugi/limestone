@@ -24,7 +24,14 @@
 namespace limestone::replication {
 
 /// @brief RDMA frame protocol version constant (mirrors rdma_comm::rdma_frame_protocol_version).
-inline constexpr std::uint8_t rdma_frame_current_version = 1U;
+///
+/// Version history:
+/// - 1: initial frame format (data frames only).
+/// - 2: ACK-over-RDMA support; ACK frames are carried on the same wire as data
+///      frames and identified by the rdma_frame_flag_ack (0x04) bit set by the
+///      lib internally. This constant is bumped in lockstep with the lib so that
+///      header.version values produced by rdma_comm match what limestone expects.
+inline constexpr std::uint8_t rdma_frame_current_version = 2U;
 
 /// @brief Flag indicating that a frame carries a partial payload (mirrors rdma_comm).
 inline constexpr std::uint8_t rdma_frame_flag_partial_payload = 0x02U;

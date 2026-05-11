@@ -1,5 +1,7 @@
-# Copilot instructions 
+# Copilot instructions
 .github/copilot-instructions.md
+/AGENTS.md
+/CLAUDE.md
 
 # CMake
 /build*
@@ -35,3 +37,9 @@ HTML/
 
 # Codex local metadata
 .codex
+
+# Claude Code local settings
+.claude/
+
+# Local working directory (not tracked)
+/_local/

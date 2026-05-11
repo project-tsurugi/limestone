@@ -18,26 +18,33 @@
 
 #include <cstdint>
 #include <memory>
+#include <utility>
+#include <vector>
 
 #include <replication/replication_message.h>
 
 namespace limestone::replication {
 
 /**
- * @brief RDMA initialization request message.
+ * @brief RDMA finalize request message (leader -> replica).
  *
- * Carries the leader's ACK receive buffer DMA address in addition to the
- * requested slot count. The replica uses this address to initialize its
- * ACK sender so that ACK frames can be RDMA-written back to the leader.
+ * Sent by the leader after every required RDMA send stream has been acquired,
+ * instructing the replica to bind its data receiver to the ACK sender via
+ * finalize_channel_setup_with_sender(). The body carries the list of log
+ * channel ids that the replica must register as RDMA-only handlers before the
+ * SETUP -> TRANSFER transition; the list may be empty when no log channel has
+ * been created yet (e.g., during tests or before the leader has any channels).
  */
-class message_rdma_init : public replication_message {
+class message_rdma_finalize : public replication_message {
 public:
+    message_rdma_finalize() = default;
+
     /**
-     * @brief Construct message with slot count and leader ACK DMA address.
-     * @param slot_count requested RDMA slot count.
-     * @param leader_ack_dma_address DMA address of the leader's ACK receive buffer.
+     * @brief Construct with the list of log channel ids to be registered.
+     * @param channel_ids channel ids to register on the replica side.
      */
-    message_rdma_init(uint32_t slot_count, uint64_t leader_ack_dma_address);
+    explicit message_rdma_finalize(std::vector<std::uint64_t> channel_ids) noexcept
+        : channel_ids_(std::move(channel_ids)) {}
 
     [[nodiscard]] message_type_id get_message_type_id() const override;
     void send_body(replication_message_io& io) const override;
@@ -47,20 +54,19 @@ public:
 
     [[nodiscard]] static std::unique_ptr<replication_message> create();
 
-    [[nodiscard]] uint32_t get_slot_count() const { return slot_count_; }
-
-    [[nodiscard]] uint64_t get_leader_ack_dma_address() const { return leader_ack_dma_address_; }
+    [[nodiscard]] std::vector<std::uint64_t> const& get_channel_ids() const noexcept {
+        return channel_ids_;
+    }
 
 private:
+    std::vector<std::uint64_t> channel_ids_{};
+
     // NOLINTNEXTLINE(cert-err58-cpp)
     inline static const bool registered_ = []() {
         replication_message::register_message_type(
-            message_type_id::RDMA_INIT, &message_rdma_init::create);
+            message_type_id::RDMA_FINALIZE, &message_rdma_finalize::create);
         return true;
     }();
-
-    uint32_t slot_count_{};
-    uint64_t leader_ack_dma_address_{};
 };
 
 }  // namespace limestone::replication

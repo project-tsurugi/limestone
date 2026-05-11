@@ -248,7 +248,7 @@ TEST_F(datastore_impl_test, altimeter_wal_shipped_log_failure_written) {
 class rdma_sender_test : public ::testing::Test {
 protected:
     void SetUp() override {
-        receiver_ = make_rdma_receiver(4U);
+        receiver_ = make_rdma_data_receiver(4U);
         auto result = receiver_->initialize([](replication::rdma_receive_event const&) {});
         ASSERT_TRUE(result.success) << "receiver init failed: " << result.error_message;
     }

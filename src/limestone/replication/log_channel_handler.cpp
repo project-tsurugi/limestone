@@ -35,6 +35,19 @@ namespace limestone::replication {
 log_channel_handler::log_channel_handler(replica_server &server, replication_message_io& io) noexcept
     : channel_handler_base(server, io){}
 
+log_channel_handler::log_channel_handler(replica_server& server, rdma_only_tag tag)
+    : log_channel_handler(server, tag,
+                          std::make_unique<replication_message_io>(std::string{})) {}
+
+log_channel_handler::log_channel_handler(replica_server& server, rdma_only_tag /*tag*/,
+                                         std::unique_ptr<replication_message_io> sentinel_io) noexcept
+    : channel_handler_base(server, *sentinel_io)
+    , sentinel_io_(std::move(sentinel_io)) {}
+
+void log_channel_handler::bind_log_channel(log_channel& channel) noexcept {
+    log_channel_ = &channel;
+}
+
 validation_result log_channel_handler::validate_initial(std::unique_ptr<replication_message> request) {
     if (request->get_message_type_id() != message_type_id::LOG_CHANNEL_CREATE) {
         std::ostringstream msg;

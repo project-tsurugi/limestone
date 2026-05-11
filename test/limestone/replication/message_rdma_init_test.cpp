@@ -30,18 +30,19 @@ namespace limestone::testing {
 using limestone::replication::handler_resources;
 using limestone::replication::replication_message_io;
 
-TEST(message_rdma_init_test, constructor_sets_slot_count) {
-    replication::message_rdma_init msg(128u);
+TEST(message_rdma_init_test, constructor_sets_fields) {
+    replication::message_rdma_init msg(128u, 0xdeadbeefcafebabeULL);
     EXPECT_EQ(msg.get_slot_count(), 128u);
+    EXPECT_EQ(msg.get_leader_ack_dma_address(), 0xdeadbeefcafebabeULL);
 }
 
 TEST(message_rdma_init_test, get_message_type_id) {
-    replication::message_rdma_init msg(0u);
+    replication::message_rdma_init msg(0u, 0u);
     EXPECT_EQ(msg.get_message_type_id(), replication::message_type_id::RDMA_INIT);
 }
 
 TEST(message_rdma_init_test, replication_message_round_trip) {
-    replication::message_rdma_init original(256u);
+    replication::message_rdma_init original(256u, 0x1122334455667788ULL);
 
     replication_message_io out("");
     replication::replication_message::send(out, original);
@@ -51,10 +52,11 @@ TEST(message_rdma_init_test, replication_message_round_trip) {
     auto received = dynamic_cast<replication::message_rdma_init*>(received_base.get());
     ASSERT_NE(received, nullptr);
     EXPECT_EQ(received->get_slot_count(), 256u);
+    EXPECT_EQ(received->get_leader_ack_dma_address(), 0x1122334455667788ULL);
 }
 
 TEST(message_rdma_init_test, post_receive_with_invalid_resources_returns_error) {
-    replication::message_rdma_init msg(1u);
+    replication::message_rdma_init msg(1u, 0u);
     replication_message_io io("");
     handler_resources resources{io};
 
@@ -79,7 +81,7 @@ TEST(message_rdma_init_test, post_receive_returns_ack_then_error_on_second_init)
     {
         replication_message_io io("");
         replication::control_channel_handler_resources resources(io, server, server.get_datastore());
-        replication::message_rdma_init msg(4u);
+        replication::message_rdma_init msg(4u, 0u);
         msg.post_receive(resources);
 
         replication_message_io reader(io.get_out_string());
@@ -92,7 +94,7 @@ TEST(message_rdma_init_test, post_receive_returns_ack_then_error_on_second_init)
     {
         replication_message_io io("");
         replication::control_channel_handler_resources resources(io, server, server.get_datastore());
-        replication::message_rdma_init msg(4u);
+        replication::message_rdma_init msg(4u, 0u);
         msg.post_receive(resources);
 
         replication_message_io reader(io.get_out_string());

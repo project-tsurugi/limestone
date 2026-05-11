@@ -19,11 +19,19 @@
 
 namespace limestone::replication {
 
-std::unique_ptr<rdma_sender_base> make_rdma_sender(std::uint32_t /*slot_count*/) {
+std::unique_ptr<rdma_sender_base> make_rdma_data_sender(std::uint32_t /*slot_count*/) {
     return std::make_unique<null_rdma_sender>();
 }
 
-std::unique_ptr<rdma_receiver_base> make_rdma_receiver(std::uint32_t /*slot_count*/) {
+std::unique_ptr<rdma_sender_base> make_rdma_ack_sender(std::uint32_t /*slot_count*/) {
+    return std::make_unique<null_rdma_sender>();
+}
+
+std::unique_ptr<rdma_receiver_base> make_rdma_data_receiver(std::uint32_t /*slot_count*/) {
+    return std::make_unique<null_rdma_receiver>();
+}
+
+std::unique_ptr<rdma_receiver_base> make_rdma_ack_receiver(std::uint32_t /*slot_count*/) {
     return std::make_unique<null_rdma_receiver>();
 }
 

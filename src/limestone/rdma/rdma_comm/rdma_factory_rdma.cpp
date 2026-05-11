@@ -21,29 +21,59 @@
 
 namespace limestone::replication {
 
-std::unique_ptr<rdma_sender_base> make_rdma_sender(std::uint32_t slot_count) {
+namespace {
+
+rdma::communication::rdma_config make_sender_config(
+    std::uint32_t slot_count,
+    rdma::communication::rdma_buffer_kind kind) {
     rdma::communication::rdma_config config{};
     auto capacity = static_cast<std::size_t>(slot_count);
     constexpr std::size_t chunk_size = 4096U;
     config.send_buffer.region_size_bytes = capacity * chunk_size;
     config.send_buffer.chunk_size_bytes = chunk_size;
     config.send_buffer.ring_capacity = capacity;
+    config.send_buffer.kind = kind;
     config.remote_buffer = config.send_buffer;
     config.completion_queue_depth = 1024U;
     config.write_log_mode = rdma::communication::rdma_write_log_mode::full;
-    return std::make_unique<rdma_comm_sender>(std::move(config));
+    return config;
 }
 
-std::unique_ptr<rdma_receiver_base> make_rdma_receiver(std::uint32_t slot_count) {
+rdma::communication::rdma_config make_receiver_config(
+    std::uint32_t slot_count,
+    rdma::communication::rdma_buffer_kind kind) {
     rdma::communication::rdma_config config{};
     auto capacity = static_cast<std::size_t>(slot_count);
     constexpr std::size_t chunk_size = 4096U;
     config.send_buffer.region_size_bytes = capacity * chunk_size;
     config.send_buffer.chunk_size_bytes = chunk_size;
     config.send_buffer.ring_capacity = capacity;
+    config.send_buffer.kind = kind;
     config.remote_buffer = config.send_buffer;
     config.completion_queue_depth = 1024U;
-    return std::make_unique<rdma_comm_receiver>(std::move(config));
+    return config;
+}
+
+} // namespace
+
+std::unique_ptr<rdma_sender_base> make_rdma_data_sender(std::uint32_t slot_count) {
+    return std::make_unique<rdma_comm_sender>(
+        make_sender_config(slot_count, rdma::communication::rdma_buffer_kind::data_only));
+}
+
+std::unique_ptr<rdma_sender_base> make_rdma_ack_sender(std::uint32_t slot_count) {
+    return std::make_unique<rdma_comm_sender>(
+        make_sender_config(slot_count, rdma::communication::rdma_buffer_kind::ack_only));
+}
+
+std::unique_ptr<rdma_receiver_base> make_rdma_data_receiver(std::uint32_t slot_count) {
+    return std::make_unique<rdma_comm_receiver>(
+        make_receiver_config(slot_count, rdma::communication::rdma_buffer_kind::data_only));
+}
+
+std::unique_ptr<rdma_receiver_base> make_rdma_ack_receiver(std::uint32_t slot_count) {
+    return std::make_unique<rdma_comm_receiver>(
+        make_receiver_config(slot_count, rdma::communication::rdma_buffer_kind::ack_only));
 }
 
 } // namespace limestone::replication

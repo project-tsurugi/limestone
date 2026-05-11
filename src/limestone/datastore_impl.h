@@ -26,6 +26,7 @@
 #include <sys/types.h>
 #include <cstdint>
 #include <functional>
+#include <vector>
 
 #include <boost/filesystem/path.hpp>
 
@@ -33,6 +34,7 @@
 #include "manifest.h"
 #include "replication/replica_connector.h"
 #include "replication/replication_endpoint.h"
+#include <rdma/rdma_receiver_base.h>
 #include <rdma/rdma_sender_base.h>
 
 namespace limestone::api {
@@ -218,6 +220,26 @@ public:
     bool initialize_rdma_sender(uint32_t slot_count, uint64_t remote_dma_address);
 
     /**
+     * @brief Initialize the RDMA ACK receiver.
+     *
+     * Creates the ACK receiver instance and calls initialize() so its DMA
+     * address can be exposed to the replica via RDMA_INIT. The ACK receiver
+     * stays in the SETUP phase here; binding to the data sender via
+     * finalize_channel_setup_with_sender is handled separately later.
+     *
+     * @param slot_count requested RDMA slot count.
+     * @return DMA address of the ACK receive buffer, or std::nullopt on failure.
+     */
+    [[nodiscard]] std::optional<std::uint64_t> initialize_rdma_ack_receiver(
+        std::uint32_t slot_count);
+
+    /**
+     * @brief Shut down the RDMA ACK receiver if initialized.
+     * @return true on success or when the receiver is absent; false on failure.
+     */
+    bool shutdown_rdma_ack_receiver() noexcept;
+
+    /**
      * @brief Establish control channel connection.
      * @return true on success.
      */
@@ -234,6 +256,20 @@ public:
      * @return true on success or skip; false on failure.
      */
     bool maybe_initialize_rdma_sender();
+
+    /**
+     * @brief Finalize the RDMA channel setup if the sender is active.
+     *
+     * Sends RDMA_FINALIZE to the replica, waits for RDMA_FINALIZE_ACK, and then
+     * calls rdma_sender_base::finalize_channel_setup() locally to transition
+     * from SETUP to TRANSFER phase. No-op when RDMA is not enabled or the
+     * sender failed to initialize.
+     *
+     * @param channel_ids log channel ids that the replica must register as
+     *        RDMA-only handlers as part of the FINALIZE handshake. May be empty.
+     * @return true on success or skip; false on failure.
+     */
+    bool maybe_finalize_rdma(std::vector<std::uint64_t> const& channel_ids);
 
     /**
      * @brief Shut down RDMA sender if initialized.
@@ -262,20 +298,12 @@ public:
      * @note Test-only; do not use in production code.
      */
     void set_rdma_stream_factory_for_test(
-        std::function<rdma_sender_base::stream_acquire_result(std::uint16_t, int)> factory) noexcept;
+        std::function<rdma_sender_base::stream_acquire_result(std::uint16_t)> factory) noexcept;
 
-    [[nodiscard]] std::function<rdma_sender_base::stream_acquire_result(std::uint16_t, int)> const*
+    [[nodiscard]] std::function<rdma_sender_base::stream_acquire_result(std::uint16_t)> const*
     get_rdma_stream_factory_for_test() const noexcept;
 
-    /**
-     * @brief Test hook to override acknowledgement fd for RDMA stream registration.
-     * @param fd file descriptor to use; negative value triggers fatal in registration.
-     * @note Test-only; do not use in production code.
-     */
-    void set_rdma_ack_fd_for_test(int fd) noexcept;
-
     [[nodiscard]] bool has_rdma_stream_factory_for_test() const noexcept;
-    [[nodiscard]] std::optional<int> rdma_ack_fd_for_test() const noexcept;
 
 private:
     [[nodiscard]] limestone::internal::blob_file_resolver& require_blob_file_resolver() noexcept;
@@ -323,14 +351,14 @@ private:
     // RDMA sender owned by master for RDMA replication path.
     std::unique_ptr<rdma_sender_base> rdma_sender_{};
 
+    // RDMA receiver owned by master for receiving RDMA ACK frames from the replica.
+    std::unique_ptr<rdma_receiver_base> ack_receiver_{};
+
     // Test hook: factory to override log channel connector creation.
     std::function<std::unique_ptr<replication::replica_connector>()> log_channel_connector_factory_for_test_{};
 
     // Test hook: factory to override RDMA stream acquisition.
-    std::function<rdma_sender_base::stream_acquire_result(std::uint16_t, int)> rdma_stream_factory_for_test_{};
-
-    // Test hook: override ack fd used for RDMA registration.
-    std::optional<int> rdma_ack_fd_for_test_{};
+    std::function<rdma_sender_base::stream_acquire_result(std::uint16_t)> rdma_stream_factory_for_test_{};
 
     // Resolver for local BLOB file paths. Owned by datastore_impl so internal
     // replication/restore paths can resolve paths without using public APIs.

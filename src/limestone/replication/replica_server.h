@@ -18,6 +18,8 @@
 #include <array>
 #include <functional>
 #include <memory>
+#include <ostream>
+#include <string_view>
 #include <unordered_map>
 #include <unordered_set>
 #include <mutex>
@@ -28,6 +30,7 @@
 #include "limestone_exception_helper.h"
 #include <rdma/rdma_receiver_base.h>
 #include <rdma/rdma_receive_event.h>
+#include <rdma/rdma_sender_base.h>
 #include "log_channel_limits.h"
 
 
@@ -106,8 +109,16 @@ public:
     [[nodiscard]] bool mark_control_channel_created() noexcept;
 
     /**
-     * @brief Initialize RDMA receiver for replica side.
+     * @brief Initialize the replica-side RDMA stack.
+     *
+     * Creates the data receiver and the ACK sender, calling each instance's
+     * initialize() so the data receiver exposes its DMA address and the ACK
+     * sender targets the leader's ACK receive buffer. The pair is left in the
+     * SETUP phase; finalize_channel_setup_with_sender / finalize_channel_setup
+     * are not invoked here (handled in a later step).
+     *
      * @param slot_count requested RDMA slot count.
+     * @param leader_ack_dma_address DMA address of the leader's ACK receive buffer.
      * @return initialization result.
      */
     enum class rdma_init_result {
@@ -115,10 +126,28 @@ public:
         already_initialized,
         failed,
     };
-    [[nodiscard]] rdma_init_result initialize_rdma_receiver(uint32_t slot_count);
+    [[nodiscard]] rdma_init_result initialize_rdma(
+        uint32_t slot_count, std::uint64_t leader_ack_dma_address);
 
     /**
-     * @brief Get remote DMA address exposed by receiver.
+     * @brief Finalize the replica-side RDMA stack.
+     *
+     * Binds the data receiver to the ACK sender via
+     * rdma_receiver_base::finalize_channel_setup_with_sender, transitioning the
+     * receiver into the TRANSFER phase so that incoming data frames can be
+     * acknowledged via RDMA.
+     *
+     * @return finalize result.
+     */
+    enum class rdma_finalize_result {
+        success,
+        not_initialized,
+        failed,
+    };
+    [[nodiscard]] rdma_finalize_result finalize_rdma();
+
+    /**
+     * @brief Get DMA address exposed by the data receiver.
      * @return optional DMA address if available.
      */
     [[nodiscard]] std::optional<std::uint64_t> get_rdma_dma_address() const noexcept;
@@ -130,11 +159,89 @@ public:
         std::uint64_t id) const noexcept;
 
     /**
+     * @brief Register an RDMA-only log_channel_handler for the given channel id.
+     *
+     * Creates a replica-side log_channel via datastore::create_channel() and a
+     * matching log_channel_handler bound to it, then stores the handler in the
+     * channel_id slot so that incoming RDMA frames can be dispatched to it.
+     * Used by the RDMA_FINALIZE handler to register all log channels in bulk
+     * when the per-channel TCP LOG_CHANNEL_CREATE handshake is skipped.
+     *
+     * @param channel_id Channel id assigned by the leader.
+     * @return Registration result.
+     */
+    enum class register_rdma_handler_result {
+        success,
+        invalid_channel_id,
+        already_registered,
+    };
+
+    /**
+     * @brief Returns a short string representation of a register_rdma_handler_result value.
+     */
+    [[nodiscard]] static std::string_view to_string_view(register_rdma_handler_result result) noexcept;
+
+    register_rdma_handler_result register_rdma_log_channel_handler(std::uint64_t channel_id);
+
+    /**
      * @brief Test hook to set a log channel handler into a slot.
      * @note Intended for testing only.
      */
     void set_log_channel_handler_for_test(
         std::uint64_t id, std::shared_ptr<class log_channel_handler> handler);
+
+    /**
+     * @brief Test hook to inject the RDMA data receiver instance.
+     * @note Test-only; do not use in production code.
+     */
+    void set_rdma_receiver_for_test(std::unique_ptr<rdma_receiver_base> receiver) noexcept;
+
+    /**
+     * @brief Test hook to inject the RDMA ACK sender instance.
+     * @note Test-only; do not use in production code.
+     */
+    void set_ack_sender_for_test(std::unique_ptr<rdma_sender_base> sender) noexcept;
+
+    /**
+     * @brief Factory function used by initialize_rdma() to create the data receiver.
+     *
+     * Tests can install a custom factory via set_rdma_receiver_factory_for_test() to
+     * substitute a stub instance for the real make_rdma_data_receiver() result.
+     *
+     * @param slot_count requested RDMA slot count, forwarded from initialize_rdma().
+     * @return Newly created rdma_receiver_base instance, transferred to the caller.
+     */
+    using rdma_receiver_factory =
+        std::function<std::unique_ptr<rdma_receiver_base>(std::uint32_t slot_count)>;
+
+    /**
+     * @brief Factory function used by initialize_rdma() to create the ACK sender.
+     *
+     * Tests can install a custom factory via set_ack_sender_factory_for_test() to
+     * substitute a stub instance for the real make_rdma_ack_sender() result.
+     *
+     * @param slot_count requested RDMA slot count, forwarded from initialize_rdma().
+     * @return Newly created rdma_sender_base instance, transferred to the caller.
+     */
+    using rdma_sender_factory =
+        std::function<std::unique_ptr<rdma_sender_base>(std::uint32_t slot_count)>;
+
+    /**
+     * @brief Test hook to override the factory used by initialize_rdma() for the data receiver.
+     *
+     * When unset, initialize_rdma() falls back to make_rdma_data_receiver(). Tests can install a
+     * factory that returns a stub instance to bypass the vendor RDMA mock — that mock is a
+     * process-wide singleton and conflicts when master and replica run in the same process.
+     *
+     * @note Test-only; do not use in production code.
+     */
+    void set_rdma_receiver_factory_for_test(rdma_receiver_factory factory) noexcept;
+
+    /**
+     * @brief Test hook to override the factory used by initialize_rdma() for the ACK sender.
+     * @note Test-only; do not use in production code. See set_rdma_receiver_factory_for_test.
+     */
+    void set_ack_sender_factory_for_test(rdma_sender_factory factory) noexcept;
 
     /**
      * @brief RDMA receive handler entry point.
@@ -156,17 +263,16 @@ private:
     int event_fd_{-1};                                      ///< eventfd used to unblock poll()
     int sockfd_{-1};                                        ///< listening socket file descriptor
     std::atomic<bool> control_channel_created_{false};      ///< flag to indicate if control channel is created
-    std::unique_ptr<rdma_receiver_base> rdma_receiver_; ///< RDMA receiver owned for process lifetime
-    std::mutex rdma_init_mutex_{};                                      ///< Protect RDMA receiver initialization
+    std::unique_ptr<rdma_receiver_base> rdma_receiver_; ///< RDMA data receiver owned for process lifetime
+    std::unique_ptr<rdma_sender_base> ack_sender_;      ///< RDMA ACK sender targeting the leader's ACK buffer
+    std::mutex rdma_init_mutex_{};                      ///< Protect RDMA stack initialization
+    rdma_receiver_factory rdma_receiver_factory_for_test_{}; ///< Optional test override for receiver creation
+    rdma_sender_factory ack_sender_factory_for_test_{};      ///< Optional test override for ACK sender creation
     
     std::vector<std::future<void>> client_futures_;         ///< futures for client handling threads
     std::mutex futures_mutex_;                              ///< mutex for thread-safe access to client_futures_
     std::unordered_set<int> active_client_fds_;             ///< accepted client sockets currently handled
     std::mutex active_client_fds_mutex_;                    ///< protects active_client_fds_
-
-    // Pending RDMA registrations until rdma_receiver_ is initialized.
-    std::mutex pending_rdma_channels_mutex_{};
-    std::vector<std::pair<std::uint64_t, int>> pending_rdma_channels_;  ///< store raw fds; converted to unique_fd on registration
 
     enum class poll_result {
         shutdown_event,
@@ -200,22 +306,24 @@ private:
     /**
      * @brief Perform LOG_CHANNEL_CREATE specific setup for the newly created handler.
      *
-     * Validates the channel id, registers the RDMA ACK channel (or defers it),
-     * and stores the handler in the log_channel_handlers_ slot.
+     * Validates the channel id and stores the handler in the log_channel_handlers_ slot.
      *
      * @param msg  The received LOG_CHANNEL_CREATE message.
      * @param handler The handler created by the factory for this connection.
-     * @param client_fd The accepted client file descriptor.
      */
     void setup_log_channel_handler(
         replication_message& msg,
-        std::shared_ptr<channel_handler_base> const& handler,
-        int client_fd);
+        std::shared_ptr<channel_handler_base> const& handler);
 
     // Use fixed-size arrays to avoid reallocations and allow lock-per-slot access.
     std::array<std::shared_ptr<class log_channel_handler>, max_log_channel_slots>
         log_channel_handlers_{};
     mutable std::array<std::mutex, max_log_channel_slots> log_channel_slot_mutexes_{};
 };
+
+/**
+ * @brief Stream insertion operator for replica_server::register_rdma_handler_result.
+ */
+std::ostream& operator<<(std::ostream& out, replica_server::register_rdma_handler_result result);
 
 } // namespace limestone::replication

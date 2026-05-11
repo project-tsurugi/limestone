@@ -16,7 +16,6 @@
 
 #pragma once
 
-#include <cstdint>
 #include <memory>
 
 #include <replication/replication_message.h>
@@ -24,43 +23,30 @@
 namespace limestone::replication {
 
 /**
- * @brief RDMA initialization request message.
+ * @brief RDMA finalize acknowledgement (replica -> leader).
  *
- * Carries the leader's ACK receive buffer DMA address in addition to the
- * requested slot count. The replica uses this address to initialize its
- * ACK sender so that ACK frames can be RDMA-written back to the leader.
+ * Sent by the replica after data_receiver finishes binding to the ack_sender
+ * via finalize_channel_setup_with_sender(). Carries no body; receipt by the
+ * leader signals that it is safe to call sender finalize_channel_setup() and
+ * begin the TRANSFER phase.
  */
-class message_rdma_init : public replication_message {
+class message_rdma_finalize_ack : public replication_message {
 public:
-    /**
-     * @brief Construct message with slot count and leader ACK DMA address.
-     * @param slot_count requested RDMA slot count.
-     * @param leader_ack_dma_address DMA address of the leader's ACK receive buffer.
-     */
-    message_rdma_init(uint32_t slot_count, uint64_t leader_ack_dma_address);
+    message_rdma_finalize_ack() = default;
 
     [[nodiscard]] message_type_id get_message_type_id() const override;
     void send_body(replication_message_io& io) const override;
     void receive_body(replication_message_io& io) override;
 
-    void post_receive(handler_resources& resources) override;
-
     [[nodiscard]] static std::unique_ptr<replication_message> create();
-
-    [[nodiscard]] uint32_t get_slot_count() const { return slot_count_; }
-
-    [[nodiscard]] uint64_t get_leader_ack_dma_address() const { return leader_ack_dma_address_; }
 
 private:
     // NOLINTNEXTLINE(cert-err58-cpp)
     inline static const bool registered_ = []() {
         replication_message::register_message_type(
-            message_type_id::RDMA_INIT, &message_rdma_init::create);
+            message_type_id::RDMA_FINALIZE_ACK, &message_rdma_finalize_ack::create);
         return true;
     }();
-
-    uint32_t slot_count_{};
-    uint64_t leader_ack_dma_address_{};
 };
 
 }  // namespace limestone::replication

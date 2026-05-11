@@ -23,7 +23,8 @@
 
 namespace limestone::replication {
 
-message_rdma_init::message_rdma_init(uint32_t slot_count) : slot_count_(slot_count) {}
+message_rdma_init::message_rdma_init(uint32_t slot_count, uint64_t leader_ack_dma_address)
+    : slot_count_(slot_count), leader_ack_dma_address_(leader_ack_dma_address) {}
 
 message_type_id message_rdma_init::get_message_type_id() const {
     return message_type_id::RDMA_INIT;
@@ -31,10 +32,12 @@ message_type_id message_rdma_init::get_message_type_id() const {
 
 void message_rdma_init::send_body(replication_message_io& io) const {
     io.send_uint32(slot_count_);
+    io.send_uint64(leader_ack_dma_address_);
 }
 
 void message_rdma_init::receive_body(replication_message_io& io) {
     slot_count_ = io.receive_uint32();
+    leader_ack_dma_address_ = io.receive_uint64();
 }
 
 void message_rdma_init::post_receive(handler_resources& resources) {
@@ -49,7 +52,7 @@ void message_rdma_init::post_receive(handler_resources& resources) {
     }
 
     auto& server = control_resources->get_server();
-    auto init_result = server.initialize_rdma_receiver(slot_count_);
+    auto init_result = server.initialize_rdma(slot_count_, leader_ack_dma_address_);
     if (init_result == replica_server::rdma_init_result::already_initialized) {
         message_error err;
         err.set_error(message_error::rdma_init_error_already_initialized,
@@ -83,7 +86,7 @@ void message_rdma_init::post_receive(handler_resources& resources) {
 }
 
 std::unique_ptr<replication_message> message_rdma_init::create() {
-    return std::make_unique<message_rdma_init>(0);
+    return std::make_unique<message_rdma_init>(0, 0);
 }
 
 }  // namespace limestone::replication

@@ -44,7 +44,10 @@
 #include <replication/message_error.h>
 #include <replication/message_rdma_init.h>
 #include <replication/message_rdma_init_ack.h>
+#include <replication/message_rdma_finalize.h>
+#include <replication/message_rdma_finalize_ack.h>
 #include <rdma/rdma_factory.h>
+#include <rdma/rdma_receive_event.h>
 #include <manifest.h>
 
 namespace limestone::api {
@@ -165,7 +168,14 @@ bool datastore_impl::maybe_initialize_rdma_sender() {
     }
 
     auto slot_count = static_cast<uint32_t>(slot_count_signed);
-    message_rdma_init rdma_init{slot_count};
+
+    auto leader_ack_dma_address = initialize_rdma_ack_receiver(slot_count);
+    if (! leader_ack_dma_address.has_value()) {
+        LOG_LP(ERROR) << "Failed to initialize RDMA ACK receiver.";
+        return false;
+    }
+
+    message_rdma_init rdma_init{slot_count, leader_ack_dma_address.value()};
     if (!control_channel_->send_message(rdma_init)) {
         LOG_LP(ERROR) << "Failed to send RDMA_INIT message.";
         return false;
@@ -467,8 +477,65 @@ void datastore_impl::initialize_rdma_slots() {
                  << " slots (4KB each)";
 }
 
+bool datastore_impl::maybe_finalize_rdma(std::vector<std::uint64_t> const& channel_ids) {
+    if (! rdma_sender_) {
+        // RDMA not enabled or sender initialization failed; nothing to finalize.
+        return true;
+    }
+
+    message_rdma_finalize finalize_msg{channel_ids};
+    if (! control_channel_->send_message(finalize_msg)) {
+        LOG_LP(ERROR) << "Failed to send RDMA_FINALIZE message.";
+        return false;
+    }
+
+    auto response = control_channel_->receive_message();
+    if (response == nullptr) {
+        LOG_LP(ERROR) << "Failed to receive RDMA_FINALIZE response.";
+        return false;
+    }
+
+    if (response->get_message_type_id() == message_type_id::COMMON_ERROR) {
+        auto* err = dynamic_cast<message_error*>(response.get());
+        if (err != nullptr) {
+            LOG_LP(ERROR) << "RDMA_FINALIZE failed: code=" << err->get_error_code()
+                          << " message=" << err->get_error_message();
+        } else {
+            LOG_LP(ERROR) << "RDMA_FINALIZE failed with unknown error response.";
+        }
+        return false;
+    }
+
+    if (response->get_message_type_id() != message_type_id::RDMA_FINALIZE_ACK) {
+        LOG_LP(ERROR) << "Unexpected RDMA_FINALIZE response type: "
+                      << static_cast<uint16_t>(response->get_message_type_id());
+        return false;
+    }
+
+    // Bind the ack_receiver to the data sender so that ACK frames received from the replica
+    // are routed to the data sender's send_streams (enabling flush() completion). Must happen
+    // before the data sender transitions to TRANSFER phase.
+    if (ack_receiver_) {
+        auto bind_result = ack_receiver_->finalize_channel_setup_with_sender(rdma_sender_.get());
+        if (! bind_result.success) {
+            LOG_LP(ERROR) << "ack_receiver::finalize_channel_setup_with_sender() failed: "
+                          << bind_result.error_message;
+            return false;
+        }
+    }
+
+    auto result = rdma_sender_->finalize_channel_setup();
+    if (! result.success) {
+        LOG_LP(ERROR) << "rdma_sender::finalize_channel_setup() failed: " << result.error_message;
+        return false;
+    }
+
+    LOG_LP(INFO) << "RDMA channel setup finalized; entering TRANSFER phase.";
+    return true;
+}
+
 bool datastore_impl::initialize_rdma_sender(uint32_t slot_count, uint64_t remote_dma_address) {
-    rdma_sender_ = make_rdma_sender(slot_count);
+    rdma_sender_ = make_rdma_data_sender(slot_count);
     auto result = rdma_sender_->initialize(remote_dma_address);
     if (! result.success) {
         rdma_sender_.reset();
@@ -497,6 +564,48 @@ bool datastore_impl::shutdown_rdma_sender() noexcept {
     return true;
 }
 
+std::optional<std::uint64_t> datastore_impl::initialize_rdma_ack_receiver(std::uint32_t slot_count) {
+    if (ack_receiver_) {
+        LOG_LP(ERROR) << "ack_receiver already initialized.";
+        return std::nullopt;
+    }
+
+    ack_receiver_ = make_rdma_ack_receiver(slot_count);
+    auto result = ack_receiver_->initialize(
+        // ACK frames are routed internally by the lib once finalize_channel_setup_with_sender
+        // binds this receiver to the data sender; the user-supplied callback is unused.
+        [](rdma_receive_event const&) {});
+    if (! result.success) {
+        LOG_LP(ERROR) << "ack_receiver::initialize() failed: " << result.error_message;
+        ack_receiver_.reset();
+        return std::nullopt;
+    }
+
+    auto dma_address = ack_receiver_->get_dma_address();
+    if (! dma_address.has_value()) {
+        LOG_LP(ERROR) << "ack_receiver::get_dma_address() returned no address.";
+        [[maybe_unused]] auto const shutdown_result = ack_receiver_->shutdown();
+        ack_receiver_.reset();
+        return std::nullopt;
+    }
+    return dma_address;
+}
+
+bool datastore_impl::shutdown_rdma_ack_receiver() noexcept {
+    if (! ack_receiver_) {
+        return true;
+    }
+
+    auto result = ack_receiver_->shutdown();
+    if (! result.success) {
+        LOG_LP(ERROR) << "ack_receiver::shutdown() failed: " << result.error_message;
+        return false;
+    }
+
+    ack_receiver_.reset();
+    return true;
+}
+
 void datastore_impl::set_rdma_sender_for_test(std::unique_ptr<rdma_sender_base> sender) noexcept {
     rdma_sender_ = std::move(sender);
 }
@@ -507,11 +616,11 @@ void datastore_impl::set_log_channel_connector_factory_for_test(
 }
 
 void datastore_impl::set_rdma_stream_factory_for_test(
-        std::function<rdma_sender_base::stream_acquire_result(std::uint16_t, int)> factory) noexcept {
+        std::function<rdma_sender_base::stream_acquire_result(std::uint16_t)> factory) noexcept {
     rdma_stream_factory_for_test_ = std::move(factory);
 }
 
-std::function<rdma_sender_base::stream_acquire_result(std::uint16_t, int)> const*
+std::function<rdma_sender_base::stream_acquire_result(std::uint16_t)> const*
 datastore_impl::get_rdma_stream_factory_for_test() const noexcept {
     if (rdma_stream_factory_for_test_) {
         return &rdma_stream_factory_for_test_;
@@ -519,16 +628,8 @@ datastore_impl::get_rdma_stream_factory_for_test() const noexcept {
     return nullptr;
 }
 
-void datastore_impl::set_rdma_ack_fd_for_test(int fd) noexcept {
-    rdma_ack_fd_for_test_ = fd;
-}
-
 bool datastore_impl::has_rdma_stream_factory_for_test() const noexcept {
     return static_cast<bool>(rdma_stream_factory_for_test_);
-}
-
-std::optional<int> datastore_impl::rdma_ack_fd_for_test() const noexcept {
-    return rdma_ack_fd_for_test_;
 }
 
 const std::optional<manifest::migration_info>& datastore_impl::get_migration_info() const noexcept {
