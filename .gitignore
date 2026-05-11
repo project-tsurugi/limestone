@@ -40,3 +40,6 @@ HTML/
 
 # Claude Code local settings
 .claude/
+
+# Local working directory (not tracked)
+/_local/
