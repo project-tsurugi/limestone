@@ -206,7 +206,7 @@ public:
      * @brief Factory function used by initialize_rdma() to create the data receiver.
      *
      * Tests can install a custom factory via set_rdma_receiver_factory_for_test() to
-     * substitute a stub instance for the real make_rdma_receiver() result.
+     * substitute a stub instance for the real make_rdma_data_receiver() result.
      *
      * @param slot_count requested RDMA slot count, forwarded from initialize_rdma().
      * @return Newly created rdma_receiver_base instance, transferred to the caller.
@@ -218,7 +218,7 @@ public:
      * @brief Factory function used by initialize_rdma() to create the ACK sender.
      *
      * Tests can install a custom factory via set_ack_sender_factory_for_test() to
-     * substitute a stub instance for the real make_rdma_sender() result.
+     * substitute a stub instance for the real make_rdma_ack_sender() result.
      *
      * @param slot_count requested RDMA slot count, forwarded from initialize_rdma().
      * @return Newly created rdma_sender_base instance, transferred to the caller.
@@ -229,9 +229,9 @@ public:
     /**
      * @brief Test hook to override the factory used by initialize_rdma() for the data receiver.
      *
-     * When unset, initialize_rdma() falls back to make_rdma_receiver(). Tests can install a
+     * When unset, initialize_rdma() falls back to make_rdma_data_receiver(). Tests can install a
      * factory that returns a stub instance to bypass the vendor RDMA mock — that mock is a
-     * process-wide singleton and conflicts when leader and replica run in the same process.
+     * process-wide singleton and conflicts when master and replica run in the same process.
      *
      * @note Test-only; do not use in production code.
      */

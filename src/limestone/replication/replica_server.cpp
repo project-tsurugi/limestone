@@ -453,6 +453,19 @@ replica_server::register_rdma_log_channel_handler(std::uint64_t channel_id) {
     }
     auto channel_idx = static_cast<std::size_t>(channel_id);
 
+    // Fast path: if the slot is already taken, return without creating an
+    // extra log_channel on the datastore side. This function is invoked
+    // once per channel id from message_rdma_finalize::post_receive (i.e.
+    // the RDMA_FINALIZE control message handler), so this keeps the
+    // function side-effect-free if that message carries duplicate ids or
+    // is delivered more than once.
+    {
+        std::lock_guard<std::mutex> lock(log_channel_slot_mutexes_.at(channel_idx));
+        if (log_channel_handlers_.at(channel_idx)) {
+            return register_rdma_handler_result::already_registered;
+        }
+    }
+
     // create_channel() locks the datastore's channel mutex internally; do not
     // hold the slot mutex while calling it.
     auto& channel = datastore_->create_channel();
@@ -461,11 +474,13 @@ replica_server::register_rdma_log_channel_handler(std::uint64_t channel_id) {
         *this, log_channel_handler::rdma_only_tag{});
     handler->bind_log_channel(channel);
 
-    std::lock_guard<std::mutex> lock(log_channel_slot_mutexes_.at(channel_idx));
-    if (log_channel_handlers_.at(channel_idx)) {
-        return register_rdma_handler_result::already_registered;
+    {
+        std::lock_guard<std::mutex> lock(log_channel_slot_mutexes_.at(channel_idx));
+        if (log_channel_handlers_.at(channel_idx)) {
+            return register_rdma_handler_result::already_registered;
+        }
+        log_channel_handlers_.at(channel_idx) = std::move(handler);
     }
-    log_channel_handlers_.at(channel_idx) = std::move(handler);
     return register_rdma_handler_result::success;
 }
 
