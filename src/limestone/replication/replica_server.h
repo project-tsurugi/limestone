@@ -86,7 +86,11 @@ public:
     void clear_handlers() noexcept;
 
     /**
-     * Signal the accept_loop() to exit and close the listening socket.
+     * @brief Shut down the server and release the datastore.
+     *
+     * Signal accept_loop() to exit, close the listening socket, and release the
+     * datastore (including its manifest lock). To run the server again
+     * afterwards, call initialize() before start_listener().
      */
     void shutdown();
 

@@ -303,7 +303,7 @@ TEST(rdma_log_entries_receiver_test, rejects_non_log_entry_message_type) {
 
     rdma_log_entries_receiver receiver{receiver_datastore};
     std::string bytes(1, static_cast<char>(message_type_id::COMMON_ACK));
-    EXPECT_THROW([[maybe_unused]] std::size_t consumed = receiver.consume(bytes), std::runtime_error);
+    EXPECT_THROW((void)receiver.consume(bytes), std::runtime_error);
     EXPECT_FALSE(receiver.has_message());
     EXPECT_FALSE(receiver.reading_message());
 
@@ -319,7 +319,7 @@ TEST(rdma_log_entries_receiver_test, take_message_without_completed_message_thro
     limestone::api::datastore_test receiver_datastore{receiver_conf};
 
     rdma_log_entries_receiver receiver{receiver_datastore};
-    EXPECT_THROW(receiver.take_message(), std::logic_error);
+    EXPECT_THROW((void)receiver.take_message(), std::logic_error);
 
     boost::filesystem::remove_all(receiver_location);
 }

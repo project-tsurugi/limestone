@@ -14,6 +14,7 @@
 #include "rdma/rdma_replication_message_io.h"
 #include "rdma/rdma_send_stream_base.h"
 #include <boost/filesystem.hpp>
+#include <algorithm>
 #include <chrono>
 #include <cerrno>
 #include <cstdint>

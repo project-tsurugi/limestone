@@ -298,6 +298,9 @@ TEST_F(replica_server_test, listener_restart_multiple_times) {
     server.shutdown();
     accept_thread.join();
 
+    // shutdown() releases the datastore, so re-initialize before restarting.
+    server.initialize(location1);
+
     // Restart listener for the second time
     ASSERT_TRUE(server.start_listener(addr));
 
