@@ -82,7 +82,7 @@ TEST_F(opened_blob_file_test, open_for_send_rejects_directory) {
     boost::filesystem::path path = blob.path();
     boost::filesystem::create_directories(path);
 
-    EXPECT_THROW(opened_blob_file::open_for_send(*datastore_, blob_id), std::runtime_error);
+    EXPECT_THROW((void)opened_blob_file::open_for_send(*datastore_, blob_id), std::runtime_error);
 }
 
 TEST_F(opened_blob_file_test, read_blob_chunk_reads_exact_bytes) {

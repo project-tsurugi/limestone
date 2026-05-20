@@ -200,12 +200,40 @@ write_version_type extract_write_version(const std::string_view& db_key) {
     return write_version_type{wv};
 }
 
+/**
+ * @brief Reconstruct a snapshot value from a sortdb key/value pair.
+ *
+ * Byte layouts:
+ *   db_key   = [ write_version (write_version_size bytes) ][ original key ]
+ *   db_value = [ entry_type (1 byte) ][ payload ]
+ *   result   = [ write_version (write_version_size bytes) ][ payload ]
+ *
+ * The write_version is copied from the head of db_key (byte-swapped), and the
+ * payload is db_value with its leading entry_type byte removed. The entry_type
+ * is consumed separately by the caller, so it is intentionally dropped here.
+ *
+ * @param db_key   sortdb key: write_version followed by the original key.
+ * @param db_value sortdb value: a 1-byte entry_type followed by the payload.
+ * @return snapshot value: write_version followed by the payload.
+ */
 [[maybe_unused]]
 std::string create_value_from_db_key_and_value(const std::string_view& db_key, const std::string_view& db_value) {
+    // Preconditions: db_key must contain a full write_version, and db_value must
+    // contain at least the entry_type byte. Violations indicate corrupted data.
+    if (db_key.size() < write_version_size) {
+        THROW_LIMESTONE_EXCEPTION("db_key is too short to contain write_version");
+    }
+    if (db_value.empty()) {
+        THROW_LIMESTONE_EXCEPTION("db_value is empty; entry_type byte is missing");
+    }
     std::string value(write_version_size + db_value.size() - 1, '\0');
     store_bswap64_value(&value[0], &db_key[0]);  // NOLINT(readability-container-data-pointer)
     store_bswap64_value(&value[8], &db_key[8]);
-    std::memcpy(&value[write_version_size], &db_value[1], db_value.size() - 1);
+    // remove_entry carries no payload (db_value is the entry_type byte only),
+    // so there is nothing to copy when db_value.size() == 1.
+    if (db_value.size() > 1) {
+        std::memcpy(&value[write_version_size], &db_value[1], db_value.size() - 1);
+    }
     return value;
 }
 
