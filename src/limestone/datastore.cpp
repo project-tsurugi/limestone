@@ -156,13 +156,16 @@ datastore::datastore(configuration const& conf) : location_(conf.data_location_)
         // multiple compacted files are ever registered, this check must be extended.
         {
             boost::filesystem::path compacted_file_path = location_ / compaction_catalog::get_compacted_filename();
-            // Use the error_code overload so that a filesystem error (permission, broken
-            // symlink, I/O error, ...) is funneled into a limestone_exception rather than
-            // escaping as a boost::filesystem::filesystem_error.
-            bool compacted_file_exists = boost::filesystem::exists(compacted_file_path, error);
-            if (error) {
+            // Use the error_code overload so that a genuine filesystem error (permission,
+            // broken symlink, I/O error, ...) is funneled into a limestone_exception rather
+            // than escaping as a boost::filesystem::filesystem_error. A non-existent file is
+            // the normal case: boost::filesystem::exists reports it via error_code as ENOENT,
+            // so that condition must be excluded and must not be treated as an error.
+            boost::system::error_code exists_error;
+            bool compacted_file_exists = boost::filesystem::exists(compacted_file_path, exists_error);
+            if (exists_error && exists_error != boost::system::errc::no_such_file_or_directory) {
                 std::string err_msg = "failed to check existence of the compacted file '"
-                    + compacted_file_path.string() + "': " + error.message();
+                    + compacted_file_path.string() + "': " + exists_error.message();
                 LOG(ERROR) << "/:limestone:config:datastore " << err_msg;
                 throw limestone_exception(exception_type::initialization_failure, err_msg);
             }
