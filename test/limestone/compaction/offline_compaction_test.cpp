@@ -40,6 +40,10 @@ using namespace limestone::internal;
 // (datastore -> shutdown -> offline compaction -> restart) can be exercised.
 class offline_compaction_test : public compaction_test {
 public:
+    // Use a dedicated directory so this suite does not collide with compaction_test,
+    // which shares the same fixture base; ctest runs the two suites in parallel.
+    offline_compaction_test() { location = "/tmp/offline_compaction_test"; }
+
     // Path to the offline compaction utility (tglogutil), relative to the test
     // executable's working directory. This matches the convention used by
     // dblogutil_compaction_test.
