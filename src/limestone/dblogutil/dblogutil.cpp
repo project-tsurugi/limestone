@@ -26,6 +26,7 @@
 #include "log_entry.h"
 #include "limestone_exception_helper.h"
 #include "manifest.h"
+#include "compaction_catalog.h"
 
 // NOLINTBEGIN(performance-avoid-endl)
 
@@ -181,6 +182,56 @@ boost::filesystem::path make_backup_dir_next_to(const boost::filesystem::path& t
     return make_tmp_dir_next_to(target_dir, ".backup_XXXXXX");
 }
 
+// Carry over the existing compaction catalog (and its backup) from from_dir into the
+// work directory tmp, then register the freshly produced compacted file. tmp will
+// replace from_dir, so carrying over the catalog preserves the high-water marks
+// recorded by previous compactions: update_catalog_file keeps max_blob_id
+// monotonically non-decreasing, so the freshly computed value (which reflects only
+// blobs still referenced by live entries) never lowers it and blob IDs are never
+// reused. If from_dir has no catalog (a directory that was never compacted), the empty
+// catalog created by setup_initial_logdir(tmp) is used instead.
+void carry_over_and_update_compaction_catalog(boost::filesystem::path const& from_dir, boost::filesystem::path const& tmp,
+                                              epoch_id_type ld_epoch, blob_id_type max_blob_id) {
+    auto copy_catalog_file = [&](const std::string& filename) {
+        boost::filesystem::path src = from_dir / filename;
+        boost::system::error_code ec;
+        bool present = boost::filesystem::exists(src, ec);
+        // A non-existent file is the normal case (boost reports it via ec as ENOENT).
+        // Any other error (permission, I/O, ...) must not be silently ignored: skipping
+        // the copy would drop the catalog carry-over and let later processing run on an
+        // inconsistent state.
+        if (ec && ec != boost::system::errc::no_such_file_or_directory) {
+            LOG_AND_THROW_IO_EXCEPTION("failed to check existence of compaction catalog file: " + src.string(), ec);
+        }
+        if (present) {
+            boost::filesystem::copy_file(src, tmp / filename, boost::filesystem::copy_options::overwrite_existing, ec);
+            if (ec) {
+                LOG_AND_THROW_IO_EXCEPTION("failed to copy compaction catalog file: " + src.string(), ec);
+            }
+        }
+    };
+    copy_catalog_file(compaction_catalog::get_catalog_filename());
+    copy_catalog_file(compaction_catalog::get_catalog_backup_filename());
+
+    VLOG_LP(log_info) << "updating compaction catalog in " << tmp;
+    // tmp always has a catalog here (setup_initial_logdir created an empty one, possibly
+    // overwritten by the carry-over above), so loading only fails when the carried-over
+    // catalog and its backup are both unreadable. In that case abort with a clear message
+    // rather than silently proceeding, which would lose the blob-id high-water mark.
+    compaction_catalog catalog = [&]() {
+        try {
+            return compaction_catalog::from_catalog_file(tmp);
+        } catch (const limestone_exception& ex) {
+            LOG_AND_THROW_EXCEPTION(
+                "the existing compaction catalog in " + from_dir.string() +
+                " is unreadable and could not be recovered; offline compaction was aborted to"
+                " avoid losing the blob-id high-water mark (cause: " + ex.what() + ")");
+        }
+    }();
+    compacted_file_info compacted_file{compaction_catalog::get_compacted_filename(), 1};
+    catalog.update_catalog_file(ld_epoch, max_blob_id, {compacted_file}, {});
+}
+
 void compaction(dblog_scan &ds, std::optional<epoch_id_type> epoch) {
     epoch_id_type ld_epoch{};
     if (epoch.has_value()) {
@@ -227,7 +278,7 @@ void compaction(dblog_scan &ds, std::optional<epoch_id_type> epoch) {
 
     VLOG_LP(log_info) << "making compact pwal file to " << tmp;
     compaction_options options{from_dir, tmp, FLAGS_thread_num};
-    create_compact_pwal_and_get_max_blob_id(options);
+    blob_id_type max_blob_id = create_compact_pwal_and_get_max_blob_id(options);
 
     // epoch file
     VLOG_LP(log_info) << "making compact epoch file to " << tmp;
@@ -246,6 +297,12 @@ void compaction(dblog_scan &ds, std::optional<epoch_id_type> epoch) {
     if (fclose(strm) != 0) {  // NOLINT(*-owning-memory)
         LOG_AND_THROW_IO_EXCEPTION("fclose failed", errno);
     }
+
+    // Update the compaction catalog so that the compacted file is registered.
+    // Without this, a subsequent startup treats the directory as if no compaction
+    // had been performed, and remove entries are dropped from the snapshot,
+    // resurrecting deleted records (see tsurugi-issues #1498).
+    carry_over_and_update_compaction_catalog(from_dir, tmp, ld_epoch, max_blob_id);
 
     if (FLAGS_dry_run) {
         std::cout << "compaction will be successfully completed (dry-run mode)" << std::endl;

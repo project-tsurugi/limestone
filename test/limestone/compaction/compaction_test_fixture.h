@@ -48,7 +48,13 @@ extern const std::string_view data_nondurable;
 
 class compaction_test : public ::testing::Test {
 public:
-    static constexpr const char* location = "/tmp/compaction_test";
+    compaction_test() = default;
+    // Derived fixtures pass a distinct directory through this constructor so that the
+    // dependent paths below are derived from the actual location. Sharing one directory
+    // across separate test suites causes a race when ctest runs them in parallel.
+    explicit compaction_test(const char* location) : location(location) {}
+
+    const char* location = "/tmp/compaction_test";
     const boost::filesystem::path manifest_path = boost::filesystem::path(location) / std::string(limestone::internal::manifest::file_name);
     const boost::filesystem::path compaction_catalog_path = boost::filesystem::path(location) / "compaction_catalog";
     const std::string compacted_filename = compaction_catalog::get_compacted_filename();

@@ -37,7 +37,7 @@ class dummy_server {};
 
 class log_channel_handler_test : public ::testing::Test {
 protected:
-    static constexpr const char* base_location = "/tmp/replica_server_test";
+    static constexpr const char* base_location = "/tmp/log_channel_handler_test";
 
     void SetUp() override {
         boost::filesystem::remove_all(base_location);
@@ -689,7 +689,7 @@ TEST_F(log_channel_handler_test, handle_rdma_data_event_with_blob_entry_writes_b
     set_non_blocking(ctx.read_fd);
 
     // Build a sender-side datastore in a separate directory to create the blob file.
-    constexpr const char* sender_dir = "/tmp/replica_server_test_sender";
+    constexpr const char* sender_dir = "/tmp/log_channel_handler_test_sender";
     boost::filesystem::remove_all(sender_dir);
     boost::filesystem::create_directories(sender_dir);
     limestone::api::configuration sender_conf{};
@@ -751,7 +751,7 @@ TEST_F(log_channel_handler_test,
     ASSERT_GE(ctx.write_fd, 0);
     set_non_blocking(ctx.read_fd);
 
-    constexpr const char* sender_dir = "/tmp/replica_server_test_sender";
+    constexpr const char* sender_dir = "/tmp/log_channel_handler_test_sender";
     boost::filesystem::remove_all(sender_dir);
     boost::filesystem::create_directories(sender_dir);
     limestone::api::configuration sender_conf{};
@@ -816,7 +816,7 @@ TEST_F(log_channel_handler_test,
     ASSERT_GE(ctx.write_fd, 0);
     set_non_blocking(ctx.read_fd);
 
-    constexpr const char* sender_dir = "/tmp/replica_server_test_sender";
+    constexpr const char* sender_dir = "/tmp/log_channel_handler_test_sender";
     boost::filesystem::remove_all(sender_dir);
     boost::filesystem::create_directories(sender_dir);
     limestone::api::configuration sender_conf{};
@@ -896,7 +896,7 @@ TEST_F(log_channel_handler_test,
     ASSERT_GE(ctx.write_fd, 0);
     set_non_blocking(ctx.read_fd);
 
-    constexpr const char* sender_dir = "/tmp/replica_server_test_sender";
+    constexpr const char* sender_dir = "/tmp/log_channel_handler_test_sender";
     boost::filesystem::remove_all(sender_dir);
     boost::filesystem::create_directories(sender_dir);
     limestone::api::configuration sender_conf{};
@@ -963,7 +963,7 @@ TEST_F(log_channel_handler_test,
 
 TEST_F(log_channel_handler_test,
        rdma_replication_message_io_send_blob_with_empty_staged_buffer_sends_blob_only) {
-    constexpr const char* sender_dir = "/tmp/replica_server_test_sender";
+    constexpr const char* sender_dir = "/tmp/log_channel_handler_test_sender";
     boost::filesystem::remove_all(sender_dir);
     boost::filesystem::create_directories(sender_dir);
     limestone::api::configuration sender_conf{};
@@ -998,7 +998,7 @@ TEST_F(log_channel_handler_test,
 
 TEST_F(log_channel_handler_test,
        rdma_replication_message_io_send_blob_sends_remaining_data_in_later_writes) {
-    constexpr const char* sender_dir = "/tmp/replica_server_test_sender";
+    constexpr const char* sender_dir = "/tmp/log_channel_handler_test_sender";
     boost::filesystem::remove_all(sender_dir);
     boost::filesystem::create_directories(sender_dir);
     limestone::api::configuration sender_conf{};

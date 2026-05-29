@@ -873,6 +873,31 @@ TEST_F(compaction_catalog_test, restore_from_backup_exceptions) {
         limestone_io_exception);
 }
 
+// Verifies that max_blob_id is a monotonically non-decreasing high-water mark:
+// update_catalog_file must never lower it (blob IDs must never be reused), while
+// max_epoch_id is set directly.
+TEST_F(compaction_catalog_test, max_blob_id_is_monotonically_non_decreasing) {
+    compaction_catalog catalog(test_dir);
+
+    catalog.update_catalog_file(10, 1000, {}, {});
+    EXPECT_EQ(catalog.get_max_blob_id(), 1000);
+    EXPECT_EQ(catalog.get_max_epoch_id(), 10);
+
+    // A smaller value must not lower the high-water mark.
+    catalog.update_catalog_file(20, 500, {}, {});
+    EXPECT_EQ(catalog.get_max_blob_id(), 1000);
+    EXPECT_EQ(catalog.get_max_epoch_id(), 20);  // epoch is set directly, not maxed
+
+    // A larger value updates it.
+    catalog.update_catalog_file(30, 2000, {}, {});
+    EXPECT_EQ(catalog.get_max_blob_id(), 2000);
+
+    // The preserved value survives a reload from the catalog file.
+    compaction_catalog reloaded = compaction_catalog::from_catalog_file(test_dir);
+    EXPECT_EQ(reloaded.get_max_blob_id(), 2000);
+    EXPECT_EQ(reloaded.get_max_epoch_id(), 30);
+}
+
 
 
 }  // namespace limestone::testing

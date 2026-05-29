@@ -46,7 +46,6 @@ TEST_F(compaction_test, no_pwals) {
 }
 
 TEST_F(compaction_test, scenario01) {
-    FLAGS_v = 50;
 
     gen_datastore();
     datastore_->switch_epoch(1);
@@ -624,7 +623,6 @@ TEST_F(compaction_test, scenario02) {
 
 // This test case verifies the correct behavior of `remove_entry`.
 TEST_F(compaction_test, scenario03) {
-    FLAGS_v = 50;  // set VLOG level to 50
 
     // 1. Create multiple PWALs using two different storage IDs
     gen_datastore();
@@ -774,7 +772,6 @@ TEST_F(compaction_test, scenario03) {
 
 // This test case verifies the correct behavior of `remove_storage`.
 TEST_F(compaction_test, scenario04) {
-    FLAGS_v = 50;  // set VLOG level to 50
 
     gen_datastore();
     datastore_->switch_epoch(1);
@@ -967,7 +964,6 @@ TEST_F(compaction_test, scenario04) {
 
 // This test case verifies the correct behavior of blob feature.
 TEST_F(compaction_test, scenario_blob) {
-    FLAGS_v = 50;  // set VLOG level to 50
 
     gen_datastore();
     datastore_->switch_epoch(1);

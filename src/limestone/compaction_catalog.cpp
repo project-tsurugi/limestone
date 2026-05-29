@@ -15,6 +15,7 @@
  */
 
 #include <glog/logging.h>
+#include <algorithm>
 #include <fstream>
 #include <stdexcept>
 #include <sstream>
@@ -180,9 +181,12 @@ void compaction_catalog::parse_catalog_entry(const std::string& line, bool& max_
 
 // Method to update the compaction catalog
 void compaction_catalog::update_catalog_file(epoch_id_type max_epoch_id, blob_id_type max_blob_id, const std::set<compacted_file_info>& compacted_files, const std::set<std::string>& detached_pwals) {
-    // Update internal state
+    // Update internal state. The maximum blob ID is a monotonically non-decreasing
+    // high-water mark: blob IDs must never be reused, so it must not drop below the
+    // value already recorded even when the caller passes a smaller value (e.g. a
+    // compaction that observed only the blobs still referenced by live entries).
     max_epoch_id_ = max_epoch_id;
-    max_blob_id_ = max_blob_id;
+    max_blob_id_ = std::max(max_blob_id, max_blob_id_);
     compacted_files_ = compacted_files;
     detached_pwals_ = detached_pwals;
 
