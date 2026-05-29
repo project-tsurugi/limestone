@@ -18,6 +18,7 @@
 #include <cerrno>
 #include <cstdio>
 #include <cstring>
+#include <fstream>
 #include <map>
 #include <set>
 #include <sstream>
@@ -189,6 +190,66 @@ TEST_F(offline_compaction_test, detects_inconsistent_compaction_catalog_at_start
     } catch (const std::exception& e) {
         FAIL() << "expected a limestone_exception, but a different exception was thrown: " << e.what();
     }
+}
+
+// Offline compaction must preserve the max_blob_id high-water mark recorded in the
+// existing catalog, even though the freshly computed value (no blobs here) is lower.
+// Lowering it could lead to blob-id reuse.
+TEST_F(offline_compaction_test, offline_compaction_preserves_blob_id_high_water_mark) {
+    gen_datastore();
+    datastore_->switch_epoch(1);
+    lc0_->begin_session();
+    lc0_->add_entry(1, "key1", "value1", {1, 0});  // no blob -> computed max_blob_id is 0
+    lc0_->end_session();
+    datastore_->switch_epoch(2);
+    datastore_->shutdown();
+    datastore_ = nullptr;
+
+    // Simulate a high-water mark left by earlier blob allocations / online compactions.
+    {
+        compaction_catalog catalog = compaction_catalog::from_catalog_file(location);
+        catalog.update_catalog_file(catalog.get_max_epoch_id(), 9999, {}, {});
+    }
+
+    run_offline_compaction();
+
+    // The high-water mark must survive offline compaction (not lowered to the computed 0).
+    compaction_catalog catalog = compaction_catalog::from_catalog_file(location);
+    EXPECT_EQ(catalog.get_max_blob_id(), 9999);
+}
+
+// Offline compaction must recover the existing catalog from its backup when the main
+// catalog file is unreadable, and still preserve the high-water mark.
+TEST_F(offline_compaction_test, offline_compaction_recovers_catalog_from_backup) {
+    gen_datastore();
+    datastore_->switch_epoch(1);
+    lc0_->begin_session();
+    lc0_->add_entry(1, "key1", "value1", {1, 0});
+    lc0_->end_session();
+    datastore_->switch_epoch(2);
+    datastore_->shutdown();
+    datastore_ = nullptr;
+
+    {
+        compaction_catalog catalog = compaction_catalog::from_catalog_file(location);
+        catalog.update_catalog_file(catalog.get_max_epoch_id(), 7777, {}, {});
+    }
+
+    // Leave the valid content only in the backup, then corrupt the main catalog file.
+    boost::filesystem::path dir{location};
+    boost::filesystem::path main_catalog = dir / compaction_catalog::get_catalog_filename();
+    boost::filesystem::path backup_catalog = dir / compaction_catalog::get_catalog_backup_filename();
+    boost::filesystem::copy_file(main_catalog, backup_catalog, boost::filesystem::copy_options::overwrite_existing);
+    {
+        std::ofstream ofs(main_catalog.string(), std::ios::trunc);
+        ofs << "GARBAGE";
+    }
+
+    run_offline_compaction();
+
+    // The catalog must have been recovered from the backup and the high-water mark kept.
+    compaction_catalog catalog = compaction_catalog::from_catalog_file(location);
+    EXPECT_EQ(catalog.get_max_blob_id(), 7777);
 }
 
 }  // namespace limestone::testing

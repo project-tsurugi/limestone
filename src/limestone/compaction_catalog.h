@@ -137,8 +137,15 @@ public:
      * This method updates the catalog with new compacted files, detached PWALs, the maximum epoch ID,
      * and the maximum blob ID, then writes the updated catalog to a file.
      * 
+     * The maximum blob ID is monotonically non-decreasing: the recorded value never
+     * drops below the value the catalog already holds, even if @p max_blob_id is
+     * smaller. Blob IDs must never be reused, so a compaction (online or offline)
+     * that observes only the blobs still referenced by live entries must not lower
+     * this high-water mark.
+     *
      * @param max_epoch_id The maximum epoch ID to be recorded in the catalog.
-     * @param max_blob_id The maximum blob ID to be recorded in the catalog.
+     * @param max_blob_id The candidate maximum blob ID; the recorded value is the
+     *                    maximum of this and the current value (see above).
      * @param compacted_files Set of compacted files to be included in the catalog.
      * @param detached_pwals Set of detached PWALs to be included in the catalog.
      */
@@ -179,6 +186,13 @@ public:
      * @return The filename of the compaction catalog.
      */
     [[nodiscard]] static inline std::string get_catalog_filename() { return COMPACTION_CATALOG_FILENAME; }
+
+    /**
+     * @brief Returns the filename of the compaction catalog backup.
+     *
+     * @return The filename of the compaction catalog backup.
+     */
+    [[nodiscard]] static inline std::string get_catalog_backup_filename() { return COMPACTION_CATALOG_BACKUP_FILENAME; }
 
     /**
      * @brief Retrieves the name of the compaction temporary directory.

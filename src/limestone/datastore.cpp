@@ -1014,9 +1014,11 @@ void datastore::compact_with_online() {
 
 
     // update compaction catalog
+    // update_catalog_file keeps max_blob_id monotonically non-decreasing, so the
+    // high-water mark recorded by previous compactions is preserved even though
+    // max_blob_id here reflects only the freshly compacted files.
     compacted_file_info compacted_file_info{compacted_file.filename().string(), 1};
     detached_pwals.erase(compacted_file.filename().string());
-    max_blob_id = std::max(max_blob_id, compaction_catalog_->get_max_blob_id());
     compaction_catalog_->update_catalog_file(result.get_epoch_id(), max_blob_id, {compacted_file_info}, detached_pwals);
     add_file(compacted_file);
 
