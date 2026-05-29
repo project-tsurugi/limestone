@@ -174,7 +174,7 @@ TEST_F(offline_compaction_test, detects_inconsistent_compaction_catalog_at_start
     // Startup must fail fast because the catalog is inconsistent. Verify both that a
     // limestone_exception is thrown and that its message is the intended one (so that an
     // unrelated failure that happens to throw the same type is not mistaken for success).
-    // TODO: replace this placeholder with the actual message once the detection is implemented.
+    // This substring must match the message produced by datastore startup.
     const std::string expected_message_substr = "compaction catalog is inconsistent";
     try {
         gen_datastore();

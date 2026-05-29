@@ -146,6 +146,44 @@ datastore::datastore(configuration const& conf) : location_(conf.data_location_)
         add_file(compaction_catalog_path);
         compaction_catalog_ = std::make_unique<compaction_catalog>(compaction_catalog::from_catalog_file(location_));
 
+        // Verify consistency between the compaction catalog and the WAL files.
+        // The compacted file is loaded at startup based purely on its presence on
+        // disk (see snapshot_impl). If it exists but is not registered in the
+        // catalog, the snapshot would be generated as if no compaction had been
+        // performed, dropping remove entries and resurrecting deleted records
+        // (see tsurugi-issues #1498). Fail fast instead of silently corrupting data.
+        // NOTE: only the single well-known compacted file is checked here. If
+        // multiple compacted files are ever registered, this check must be extended.
+        {
+            boost::filesystem::path compacted_file_path = location_ / compaction_catalog::get_compacted_filename();
+            // Use the error_code overload so that a filesystem error (permission, broken
+            // symlink, I/O error, ...) is funneled into a limestone_exception rather than
+            // escaping as a boost::filesystem::filesystem_error.
+            bool compacted_file_exists = boost::filesystem::exists(compacted_file_path, error);
+            if (error) {
+                std::string err_msg = "failed to check existence of the compacted file '"
+                    + compacted_file_path.string() + "': " + error.message();
+                LOG(ERROR) << "/:limestone:config:datastore " << err_msg;
+                throw limestone_exception(exception_type::initialization_failure, err_msg);
+            }
+            if (compacted_file_exists) {
+                bool registered = false;
+                for (auto const& info : compaction_catalog_->get_compacted_files()) {
+                    if (info.get_file_name() == compaction_catalog::get_compacted_filename()) {
+                        registered = true;
+                        break;
+                    }
+                }
+                if (!registered) {
+                    std::string err_msg = "compaction catalog is inconsistent: the compacted file '"
+                        + compaction_catalog::get_compacted_filename()
+                        + "' exists but is not registered in the catalog, log directory: " + location_.string();
+                    LOG(ERROR) << "/:limestone:config:datastore " << err_msg;
+                    throw limestone_exception(exception_type::initialization_failure, err_msg);
+                }
+            }
+        }
+
         epoch_file_path_ = location_ / std::string(limestone::internal::epoch_file_name);
         tmp_epoch_file_path_ = location_ / std::string(limestone::internal::tmp_epoch_file_name);
         const bool result = boost::filesystem::exists(epoch_file_path_, error);

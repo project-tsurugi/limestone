@@ -26,6 +26,7 @@
 #include "log_entry.h"
 #include "limestone_exception_helper.h"
 #include "manifest.h"
+#include "compaction_catalog.h"
 
 // NOLINTBEGIN(performance-avoid-endl)
 
@@ -227,7 +228,7 @@ void compaction(dblog_scan &ds, std::optional<epoch_id_type> epoch) {
 
     VLOG_LP(log_info) << "making compact pwal file to " << tmp;
     compaction_options options{from_dir, tmp, FLAGS_thread_num};
-    create_compact_pwal_and_get_max_blob_id(options);
+    blob_id_type max_blob_id = create_compact_pwal_and_get_max_blob_id(options);
 
     // epoch file
     VLOG_LP(log_info) << "making compact epoch file to " << tmp;
@@ -246,6 +247,15 @@ void compaction(dblog_scan &ds, std::optional<epoch_id_type> epoch) {
     if (fclose(strm) != 0) {  // NOLINT(*-owning-memory)
         LOG_AND_THROW_IO_EXCEPTION("fclose failed", errno);
     }
+
+    // Update the compaction catalog so that the compacted file is registered.
+    // Without this, a subsequent startup treats the directory as if no compaction
+    // had been performed, and remove entries are dropped from the snapshot,
+    // resurrecting deleted records (see tsurugi-issues #1498).
+    VLOG_LP(log_info) << "updating compaction catalog in " << tmp;
+    compaction_catalog catalog{tmp};
+    compacted_file_info compacted_file{compaction_catalog::get_compacted_filename(), 1};
+    catalog.update_catalog_file(ld_epoch, max_blob_id, {compacted_file}, {});
 
     if (FLAGS_dry_run) {
         std::cout << "compaction will be successfully completed (dry-run mode)" << std::endl;
