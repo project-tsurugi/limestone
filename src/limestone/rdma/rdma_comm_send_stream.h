@@ -58,9 +58,25 @@ public:
 
     [[nodiscard]] send_result send_with_writer(
         std::size_t   remaining_size,
-        buffer_writer writer) noexcept override;
+        buffer_writer writer,
+        std::size_t   min_capacity) noexcept override;
 
 private:
+    /**
+     * @brief Acquire one frame whose payload capacity is at least @p min_capacity.
+     *
+     * At a ring-wrap boundary the pool may grant fewer contiguous bytes than
+     * requested; this releases such an undersized frame and retries (bounded), so
+     * the returned frame can hold a header and its first chunk together. A zero
+     * @p min_capacity accepts any non-empty frame.
+     *
+     * @return A valid frame on success; an invalid frame (valid() == false) when the
+     *         pool is unavailable or the bounded retries are exhausted.
+     */
+    [[nodiscard]] rdma::communication::rdma_send_stream::frame_buffer acquire_frame_min_capacity(
+        std::size_t request_size,
+        std::size_t min_capacity) noexcept;
+
     std::unique_ptr<rdma::communication::rdma_send_stream> stream_;
 };
 

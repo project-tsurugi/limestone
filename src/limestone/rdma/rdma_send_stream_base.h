@@ -116,18 +116,29 @@ public:
      * @brief Acquire a single writable payload buffer, invoke @p writer once, and submit it.
      * @param remaining_size Remaining unsent bytes known to the caller at this point.
      * @param writer         Callback that fills the writable payload region.
+     * @param min_capacity   Minimum writable capacity the single frame must provide.
+     *                       When greater than zero, the implementation guarantees the
+     *                       callback is invoked with `capacity >= min_capacity`, which
+     *                       lets the caller co-locate a header and its first chunk in one
+     *                       frame (avoiding a header-only frame). Pass zero to impose no
+     *                       minimum (suitable for plain payload streaming). This parameter
+     *                       is mandatory so every caller states its framing intent
+     *                       explicitly. A value greater than @p remaining_size is clamped
+     *                       to @p remaining_size (a minimum larger than the whole payload
+     *                       is meaningless).
      * @return send_result describing status and the number of bytes written.
      *
      * @note When @p remaining_size is zero, the callback is not invoked and a
      *       successful result with bytes_written == 0 is returned.
      * @note On callback invocation, the provided capacity satisfies
-     *       `0 < capacity <= remaining_size`.
+     *       `max(1, min(min_capacity, remaining_size)) <= capacity <= remaining_size`.
      * @note When the callback reports failure, the buffer is released without
      *       submitting an RDMA write.
      */
     [[nodiscard]] virtual send_result send_with_writer(
         std::size_t   remaining_size,
-        buffer_writer writer) noexcept = 0;
+        buffer_writer writer,
+        std::size_t   min_capacity) noexcept = 0;
 };
 
 } // namespace limestone::replication

@@ -166,10 +166,18 @@ public:
 
     [[nodiscard]] send_result send_with_writer(
             std::size_t remaining_size,
-            buffer_writer writer) noexcept override {
+            buffer_writer writer,
+            std::size_t min_capacity) noexcept override {
+        auto const effective_min = std::min(min_capacity, remaining_size);
         auto const capacity = max_writer_capacity_ == 0U
             ? remaining_size
             : std::min(remaining_size, max_writer_capacity_);
+        // A real stream cannot grant a frame smaller than the caller's required minimum;
+        // with a fixed simulated cap it never will, so report failure instead of inventing
+        // a larger frame than max_writer_capacity_ permits.
+        if (capacity < effective_min) {
+            return {false, "simulated frame capacity below required minimum", 0U};
+        }
         std::vector<std::uint8_t> payload(capacity);
         auto fill_result = writer(payload.data(), payload.size());
         if (! fill_result.success) {

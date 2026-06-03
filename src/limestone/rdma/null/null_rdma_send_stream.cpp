@@ -38,7 +38,8 @@ rdma_send_stream_base::flush_result null_rdma_send_stream::flush(
 
 rdma_send_stream_base::send_result null_rdma_send_stream::send_with_writer(
         std::size_t   remaining_size,
-        buffer_writer /*writer*/) noexcept {
+        buffer_writer /*writer*/,
+        std::size_t   /*min_capacity*/) noexcept {
     return {true, "", remaining_size};
 }
 

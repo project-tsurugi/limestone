@@ -211,7 +211,8 @@ public:
 
     [[nodiscard]] send_result send_with_writer(
             std::size_t remaining_size,
-            buffer_writer writer) noexcept override {
+            buffer_writer writer,
+            std::size_t /*min_capacity*/) noexcept override {
         send_count_++;
         std::vector<std::uint8_t> payload(remaining_size);
         auto fill_result = writer(payload.data(), payload.size());
@@ -264,7 +265,8 @@ public:
 
     [[nodiscard]] send_result send_with_writer(
             std::size_t remaining_size,
-            buffer_writer writer) noexcept override {
+            buffer_writer writer,
+            std::size_t /*min_capacity*/) noexcept override {
         std::vector<std::uint8_t> payload(remaining_size);
         auto fill_result = writer(payload.data(), payload.size());
         if (! fill_result.success) {

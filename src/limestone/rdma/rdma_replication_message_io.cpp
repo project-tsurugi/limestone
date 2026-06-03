@@ -61,12 +61,19 @@ void rdma_replication_message_io::send_blob_header_and_first_chunk(
         std::uint32_t& remaining) {
     constexpr std::size_t blob_header_size = sizeof(std::uint64_t) + sizeof(std::uint32_t);
     auto const blob_size = remaining;
+    // Require the first frame to hold the blob header together with at least one byte
+    // of payload (when any payload exists), so the small-message common case never pays
+    // for a header-only frame. An empty blob needs only the header itself.
+    auto const min_capacity = blob_size > 0U
+        ? blob_header_size + 1U
+        : blob_header_size;
     // The writer callback receives the RDMA send buffer allocated by rdma-comm-lib.
     auto result = rdma_stream_.send_with_writer(
         blob_header_size + static_cast<std::size_t>(blob_size),
         [this, blob_id, blob_size, &blob](std::uint8_t* buffer, std::size_t capacity) {
             return fill_blob_header_and_first_chunk(blob_id, blob_size, blob, buffer, capacity);
-        });
+        },
+        min_capacity);
     if (! result.success || result.bytes_written < blob_header_size) {
         LOG_AND_THROW_IO_EXCEPTION(
             "RDMA send_with_writer failed for blob header and first chunk: " + result.error_message, EIO);
@@ -106,7 +113,8 @@ void rdma_replication_message_io::send_blob_data(
             remaining,
             [this, &blob](std::uint8_t* buffer, std::size_t capacity) {
                 return fill_blob_data_chunk(blob, buffer, capacity);
-            });
+            },
+            0);  // no minimum: blob data may be split across frames freely
         if (! result.success || result.bytes_written == 0) {
             LOG_AND_THROW_IO_EXCEPTION(
                 "RDMA send_with_writer failed for blob data: " + result.error_message, EIO);

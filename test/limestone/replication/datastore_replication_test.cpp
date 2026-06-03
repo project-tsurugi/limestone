@@ -59,7 +59,8 @@ public:
 
     [[nodiscard]] send_result send_with_writer(
             std::size_t remaining_size,
-            buffer_writer /*writer*/) noexcept override {
+            buffer_writer /*writer*/,
+            std::size_t /*min_capacity*/) noexcept override {
         return { true, "", remaining_size };
     }
 };
