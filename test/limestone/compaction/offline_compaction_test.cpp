@@ -559,9 +559,13 @@ TEST_F(offline_compaction_test, offline_compaction_fails_when_working_dir_is_on_
     std::string command = std::string(util_command) + " compaction --force --working_dir=" +
         working_dir.string() + " " + std::string(location) + " 2>&1";
     int rc = invoke(command, out);
+    // Compaction must fail: a cross-filesystem working directory cannot work, because both
+    // the carry-over of the log directory contents and the final rename(tmp, from_dir)
+    // require the same filesystem. We only assert the failure and that the original log
+    // directory is left intact, not a specific message: which cross-device operation trips
+    // first (carrying over the manifest, moving the blob directory, or the final rename)
+    // depends on the platform's copy/rename behavior.
     EXPECT_NE(rc, 0) << "compaction should fail on a cross-filesystem working directory";
-    EXPECT_NE(out.find("failed to move blob directory"), std::string::npos)
-        << "tglogutil output:\n" << out;
 
     // The failure must leave the original log directory untouched.
     EXPECT_TRUE(boost::filesystem::exists(blob_path));
