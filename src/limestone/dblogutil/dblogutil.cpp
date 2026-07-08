@@ -14,6 +14,8 @@
  * limitations under the License.
  */
 
+#include <sys/stat.h>
+
 #include <iostream>
 #include <stdlib.h>  // NOLINT(*-deprecated-headers): <cstdlib> does not provide std::mkdtemp
 #include <glog/logging.h>
@@ -182,6 +184,24 @@ boost::filesystem::path make_backup_dir_next_to(const boost::filesystem::path& t
     return make_tmp_dir_next_to(target_dir, ".backup_XXXXXX");
 }
 
+/**
+ * @brief tests whether two existing directories reside on the same filesystem.
+ * @param a a path to an existing directory
+ * @param b a path to an existing directory
+ * @return true if both are on the same filesystem (same st_dev), false otherwise
+ */
+bool on_same_filesystem(boost::filesystem::path const& a, boost::filesystem::path const& b) {
+    struct stat sa {};
+    struct stat sb {};
+    if (::stat(a.c_str(), &sa) != 0) {
+        LOG_AND_THROW_IO_EXCEPTION("stat failed: " + a.string(), errno);
+    }
+    if (::stat(b.c_str(), &sb) != 0) {
+        LOG_AND_THROW_IO_EXCEPTION("stat failed: " + b.string(), errno);
+    }
+    return sa.st_dev == sb.st_dev;
+}
+
 // Carry over the existing compaction catalog (and its backup) from from_dir into the
 // work directory tmp, then register the freshly produced compacted file. tmp will
 // replace from_dir, so carrying over the catalog preserves the high-water marks
@@ -232,6 +252,98 @@ void carry_over_and_update_compaction_catalog(boost::filesystem::path const& fro
     catalog.update_catalog_file(ld_epoch, max_blob_id, {compacted_file}, {});
 }
 
+/**
+ * @brief copies the manifest file from the original log directory to the working directory.
+ *
+ * setup_initial_logdir() creates a brand-new manifest in the working directory, which would
+ * replace the original instance_uuid with a freshly generated one. Overwrite it with the
+ * original manifest so that the instance identity survives offline compaction. The manifest
+ * in from_dir is guaranteed to exist and to be migrated to the current format version because
+ * main() calls manifest::acquire_lock() and check_and_migrate_logdir_format() beforehand.
+ * @param from_dir the original log directory
+ * @param tmp the working directory the compacted log is assembled in
+ */
+void carry_over_manifest_file(
+        boost::filesystem::path const& from_dir, boost::filesystem::path const& tmp) {
+    boost::filesystem::path src = from_dir / std::string(manifest::file_name);
+    boost::system::error_code ec;
+    bool present = boost::filesystem::exists(src, ec);
+    if (ec && ec != boost::system::errc::no_such_file_or_directory) {
+        LOG_AND_THROW_IO_EXCEPTION(
+                "failed to check existence of manifest file: " + src.string(), ec);
+    }
+    if (!present) {
+        // must not happen: main() has already acquired the lock on this file
+        LOG_AND_THROW_EXCEPTION("manifest file not found in dblogdir: " + src.string());
+    }
+    boost::filesystem::copy_file(src, tmp / std::string(manifest::file_name),
+                                 boost::filesystem::copy_options::overwrite_existing, ec);
+    if (ec) {
+        LOG_AND_THROW_IO_EXCEPTION("failed to copy manifest file: " + src.string(), ec);
+    }
+}
+
+/**
+ * @brief recursively copies a directory tree.
+ * @param src the source directory (must exist)
+ * @param dst the destination directory (created by this function)
+ */
+void copy_directory_recursively(
+        boost::filesystem::path const& src, boost::filesystem::path const& dst) {
+    boost::system::error_code ec;
+    boost::filesystem::create_directories(dst, ec);
+    if (ec) {
+        LOG_AND_THROW_IO_EXCEPTION("failed to create directory: " + dst.string(), ec);
+    }
+    boost::filesystem::copy(src, dst,
+            boost::filesystem::copy_options::recursive |
+            boost::filesystem::copy_options::overwrite_existing, ec);
+    if (ec) {
+        LOG_AND_THROW_IO_EXCEPTION("failed to copy directory: " + src.string(), ec);
+    }
+}
+
+/**
+ * @brief carries the blob directory over from the original log directory to the working directory.
+ *
+ * Without this step the blob data would be lost when from_dir is removed (or renamed away for
+ * backup) and replaced by the working directory. When make_backup is requested the blob
+ * directory is copied so that the backup keeps its own blob data; otherwise it is moved by
+ * rename. The move requires from_dir and tmp to be on the same filesystem; compaction()
+ * already rejects a cross-filesystem working directory up front, so the rename below is a
+ * defense-in-depth check that should not normally fail.
+ * @param from_dir the original log directory
+ * @param tmp the working directory the compacted log is assembled in
+ * @param make_backup true if from_dir is kept as a backup, so blob data must remain in it
+ */
+void carry_over_blob_directory(
+        boost::filesystem::path const& from_dir, boost::filesystem::path const& tmp,
+        bool make_backup) {
+    boost::filesystem::path src = from_dir / "blob";
+    boost::system::error_code ec;
+    bool present = boost::filesystem::exists(src, ec);
+    if (ec && ec != boost::system::errc::no_such_file_or_directory) {
+        LOG_AND_THROW_IO_EXCEPTION(
+                "failed to check existence of blob directory: " + src.string(), ec);
+    }
+    if (!present) {
+        return;  // no blob data; nothing to carry over
+    }
+    boost::filesystem::path dst = tmp / "blob";
+    if (make_backup) {
+        VLOG_LP(log_info) << "copying blob directory " << src << " to " << dst;
+        copy_directory_recursively(src, dst);
+        return;
+    }
+    VLOG_LP(log_info) << "moving blob directory " << src << " to " << dst;
+    boost::filesystem::rename(src, dst, ec);
+    if (ec) {
+        LOG_AND_THROW_IO_EXCEPTION(
+                "failed to move blob directory (the working directory must be on the same "
+                "filesystem as the dblogdir): " + src.string(), ec);
+    }
+}
+
 void compaction(dblog_scan &ds, std::optional<epoch_id_type> epoch) {
     epoch_id_type ld_epoch{};
     if (epoch.has_value()) {
@@ -263,6 +375,19 @@ void compaction(dblog_scan &ds, std::optional<epoch_id_type> epoch) {
     }
     std::cout << "working-directory: " << tmp << std::endl;
 
+    // The working directory must be on the same filesystem as the dblogdir. Compaction
+    // carries the log directory contents over into tmp and finally renames tmp onto
+    // from_dir; both the blob move and that final rename fail across filesystems. With
+    // --make_backup this would be especially harmful: from_dir is first renamed away to
+    // the backup, and only then does rename(tmp, from_dir) fail, leaving no from_dir
+    // restored. Reject a cross-filesystem working directory up front, before any
+    // destructive step, regardless of --make_backup.
+    if (!on_same_filesystem(from_dir, tmp)) {
+        LOG(ERROR) << "working directory must be on the same filesystem as the dblogdir: "
+                   << "dblogdir=" << from_dir << ", working-directory=" << tmp;
+        log_and_exit(64);
+    }
+
     if (!FLAGS_force) {
         // prompt
         char yn = 'N';
@@ -275,6 +400,10 @@ void compaction(dblog_scan &ds, std::optional<epoch_id_type> epoch) {
     }
 
     setup_initial_logdir(tmp);
+
+    // Carry over the original manifest so that the instance_uuid is preserved
+    // (see the offline compaction blob-loss issue).
+    carry_over_manifest_file(from_dir, tmp);
 
     VLOG_LP(log_info) << "making compact pwal file to " << tmp;
     compaction_options options{from_dir, tmp, FLAGS_thread_num};
@@ -310,6 +439,10 @@ void compaction(dblog_scan &ds, std::optional<epoch_id_type> epoch) {
         boost::filesystem::remove_all(tmp);
         return;
     }
+
+    // Carry over the blob data after the dry-run check so that a dry run never
+    // touches from_dir, and right before the directory swap below.
+    carry_over_blob_directory(from_dir, tmp, FLAGS_make_backup);
 
     if (FLAGS_make_backup) {
         auto bkdir = make_backup_dir_next_to(from_dir);
