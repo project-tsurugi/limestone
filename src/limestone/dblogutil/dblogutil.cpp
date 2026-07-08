@@ -14,6 +14,8 @@
  * limitations under the License.
  */
 
+#include <sys/stat.h>
+
 #include <iostream>
 #include <stdlib.h>  // NOLINT(*-deprecated-headers): <cstdlib> does not provide std::mkdtemp
 #include <glog/logging.h>
@@ -182,6 +184,24 @@ boost::filesystem::path make_backup_dir_next_to(const boost::filesystem::path& t
     return make_tmp_dir_next_to(target_dir, ".backup_XXXXXX");
 }
 
+/**
+ * @brief tests whether two existing directories reside on the same filesystem.
+ * @param a a path to an existing directory
+ * @param b a path to an existing directory
+ * @return true if both are on the same filesystem (same st_dev), false otherwise
+ */
+bool on_same_filesystem(boost::filesystem::path const& a, boost::filesystem::path const& b) {
+    struct stat sa {};
+    struct stat sb {};
+    if (::stat(a.c_str(), &sa) != 0) {
+        LOG_AND_THROW_IO_EXCEPTION("stat failed: " + a.string(), errno);
+    }
+    if (::stat(b.c_str(), &sb) != 0) {
+        LOG_AND_THROW_IO_EXCEPTION("stat failed: " + b.string(), errno);
+    }
+    return sa.st_dev == sb.st_dev;
+}
+
 // Carry over the existing compaction catalog (and its backup) from from_dir into the
 // work directory tmp, then register the freshly produced compacted file. tmp will
 // replace from_dir, so carrying over the catalog preserves the high-water marks
@@ -289,10 +309,9 @@ void copy_directory_recursively(
  * Without this step the blob data would be lost when from_dir is removed (or renamed away for
  * backup) and replaced by the working directory. When make_backup is requested the blob
  * directory is copied so that the backup keeps its own blob data; otherwise it is moved by
- * rename. The rename requires from_dir and tmp to be on the same filesystem; this holds for
- * the default working directory (created next to from_dir), and the final rename(tmp, from_dir)
- * in compaction() relies on the same condition, so a cross-filesystem working directory is
- * rejected here with a clear message rather than failing obscurely later.
+ * rename. The move requires from_dir and tmp to be on the same filesystem; compaction()
+ * already rejects a cross-filesystem working directory up front, so the rename below is a
+ * defense-in-depth check that should not normally fail.
  * @param from_dir the original log directory
  * @param tmp the working directory the compacted log is assembled in
  * @param make_backup true if from_dir is kept as a backup, so blob data must remain in it
@@ -355,6 +374,19 @@ void compaction(dblog_scan &ds, std::optional<epoch_id_type> epoch) {
         tmp = make_work_dir_next_to(from_dir);
     }
     std::cout << "working-directory: " << tmp << std::endl;
+
+    // The working directory must be on the same filesystem as the dblogdir. Compaction
+    // carries the log directory contents over into tmp and finally renames tmp onto
+    // from_dir; both the blob move and that final rename fail across filesystems. With
+    // --make_backup this would be especially harmful: from_dir is first renamed away to
+    // the backup, and only then does rename(tmp, from_dir) fail, leaving no from_dir
+    // restored. Reject a cross-filesystem working directory up front, before any
+    // destructive step, regardless of --make_backup.
+    if (!on_same_filesystem(from_dir, tmp)) {
+        LOG(ERROR) << "working directory must be on the same filesystem as the dblogdir: "
+                   << "dblogdir=" << from_dir << ", working-directory=" << tmp;
+        log_and_exit(64);
+    }
 
     if (!FLAGS_force) {
         // prompt

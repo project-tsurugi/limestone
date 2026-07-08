@@ -126,6 +126,64 @@ public:
         }
     }
 
+    // Shared driver for the cross-filesystem working-directory tests. Prepares a log
+    // directory with blob data, then runs offline compaction with --working_dir on a
+    // different filesystem (tmpfs under /dev/shm), optionally with --make_backup.
+    // Compaction must be rejected up front (before any destructive step) and must leave the
+    // original log directory fully intact. Skips when /dev/shm is unavailable or happens to
+    // be on the same filesystem as the location.
+    void run_cross_filesystem_working_dir_case(bool make_backup) {
+        if (!boost::filesystem::exists("/dev/shm")) {
+            GTEST_SKIP() << "/dev/shm is not available on this system";
+        }
+
+        gen_datastore();
+        datastore_->switch_epoch(1);
+        lc0_->begin_session();
+        lc0_->add_entry(1, "blob_key", "blob_value", {1, 0}, {1001});
+        lc0_->end_session();
+        create_dummy_blob_files(1001);
+        datastore_->set_next_blob_id(1002);
+        datastore_->switch_epoch(2);
+        datastore_->shutdown();
+        datastore_ = nullptr;
+
+        std::map<std::string, std::string> before = snapshot_tree(location);
+
+        // Prepare a working directory on another filesystem (tmpfs).
+        std::string wd_template = "/dev/shm/offline_compaction_wd_XXXXXX";
+        ASSERT_NE(::mkdtemp(wd_template.data()), nullptr) << strerror(errno);
+        boost::filesystem::path working_dir{wd_template};
+
+        // Skip when the test location happens to live on the same filesystem as /dev/shm
+        // (e.g. /tmp mounted on the same tmpfs); the cross-filesystem path is unreachable.
+        struct stat st_location {};
+        struct stat st_working_dir {};
+        ASSERT_EQ(::stat(location, &st_location), 0) << strerror(errno);
+        ASSERT_EQ(::stat(working_dir.c_str(), &st_working_dir), 0) << strerror(errno);
+        if (st_location.st_dev == st_working_dir.st_dev) {
+            boost::filesystem::remove_all(working_dir);
+            GTEST_SKIP() << "test location and /dev/shm are on the same filesystem";
+        }
+
+        std::string out;
+        std::string command = std::string(util_command) + " compaction --force" +
+            (make_backup ? " --make_backup" : "") + " --working_dir=" +
+            working_dir.string() + " " + std::string(location) + " 2>&1";
+        int rc = invoke(command, out);
+        EXPECT_NE(rc, 0) << "compaction should fail on a cross-filesystem working directory";
+        EXPECT_NE(out.find("working directory must be on the same filesystem as the dblogdir"),
+                  std::string::npos)
+            << "tglogutil output:\n" << out;
+
+        // The upfront rejection must leave the original log directory fully intact, and no
+        // backup directory must have been created.
+        EXPECT_EQ(snapshot_tree(location), before);
+        EXPECT_TRUE(find_backup_dirs().empty());
+
+        boost::filesystem::remove_all(working_dir);
+    }
+
     // Collect the set of top-level entry names (files and directories) directly under dir.
     static std::set<std::string> list_top_level_entries(boost::filesystem::path const& dir) {
         std::set<std::string> names;
@@ -519,58 +577,16 @@ TEST_F(offline_compaction_test, offline_compaction_backup_matches_pre_compaction
     remove_backup_dirs();
 }
 
-// When --working_dir points to a different filesystem, moving the blob directory by
-// rename cannot work (EXDEV), and neither can the final rename(tmp, from_dir); compaction
-// must fail fast with a clear message and leave the original log directory untouched.
+// A cross-filesystem --working_dir must be rejected up front (default / move mode).
 TEST_F(offline_compaction_test, offline_compaction_fails_when_working_dir_is_on_different_filesystem) {
-    if (!boost::filesystem::exists("/dev/shm")) {
-        GTEST_SKIP() << "/dev/shm is not available on this system";
-    }
+    run_cross_filesystem_working_dir_case(/*make_backup=*/false);
+}
 
-    gen_datastore();
-    datastore_->switch_epoch(1);
-    lc0_->begin_session();
-    lc0_->add_entry(1, "blob_key", "blob_value", {1, 0}, {1001});
-    lc0_->end_session();
-    boost::filesystem::path blob_path = create_dummy_blob_files(1001);
-    datastore_->set_next_blob_id(1002);
-    datastore_->switch_epoch(2);
-    datastore_->shutdown();
-    datastore_ = nullptr;
-
-    // Prepare a working directory on another filesystem (tmpfs).
-    std::string wd_template = "/dev/shm/offline_compaction_wd_XXXXXX";
-    ASSERT_NE(::mkdtemp(wd_template.data()), nullptr) << strerror(errno);
-    boost::filesystem::path working_dir{wd_template};
-
-    // Skip when the test location happens to live on the same filesystem as /dev/shm
-    // (e.g. /tmp mounted on the same tmpfs); rename would then succeed and the error
-    // path under test would not be reachable.
-    struct stat st_location {};
-    struct stat st_working_dir {};
-    ASSERT_EQ(::stat(location, &st_location), 0) << strerror(errno);
-    ASSERT_EQ(::stat(working_dir.c_str(), &st_working_dir), 0) << strerror(errno);
-    if (st_location.st_dev == st_working_dir.st_dev) {
-        boost::filesystem::remove_all(working_dir);
-        GTEST_SKIP() << "test location and /dev/shm are on the same filesystem";
-    }
-
-    std::string out;
-    std::string command = std::string(util_command) + " compaction --force --working_dir=" +
-        working_dir.string() + " " + std::string(location) + " 2>&1";
-    int rc = invoke(command, out);
-    // Compaction must fail: a cross-filesystem working directory cannot work, because both
-    // the carry-over of the log directory contents and the final rename(tmp, from_dir)
-    // require the same filesystem. We only assert the failure and that the original log
-    // directory is left intact, not a specific message: which cross-device operation trips
-    // first (carrying over the manifest, moving the blob directory, or the final rename)
-    // depends on the platform's copy/rename behavior.
-    EXPECT_NE(rc, 0) << "compaction should fail on a cross-filesystem working directory";
-
-    // The failure must leave the original log directory untouched.
-    EXPECT_TRUE(boost::filesystem::exists(blob_path));
-
-    boost::filesystem::remove_all(working_dir);
+// A cross-filesystem --working_dir must be rejected up front in --make_backup mode too.
+// Otherwise from_dir would be renamed away to the backup and the final rename(tmp, from_dir)
+// would fail, leaving no from_dir restored.
+TEST_F(offline_compaction_test, offline_compaction_with_backup_fails_when_working_dir_is_on_different_filesystem) {
+    run_cross_filesystem_working_dir_case(/*make_backup=*/true);
 }
 
 // When the blob directory contains a broken entry that cannot be copied, the backup-mode
