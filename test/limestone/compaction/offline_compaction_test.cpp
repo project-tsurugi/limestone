@@ -507,6 +507,41 @@ TEST_F(offline_compaction_test, offline_compaction_with_backup_copies_blob_direc
     remove_backup_dirs();
 }
 
+// With --make_backup, the backup destination is generated internally, so it must be
+// reported on stdout ("backup-directory: <path>") for the user to locate it. The
+// reported path must match the backup directory actually created.
+TEST_F(offline_compaction_test, offline_compaction_reports_backup_directory) {
+    remove_backup_dirs();  // clean up leftovers from an earlier aborted run
+
+    gen_datastore();
+    datastore_->switch_epoch(1);
+    lc0_->begin_session();
+    lc0_->add_entry(1, "key", "value", {1, 0});
+    lc0_->end_session();
+    datastore_->switch_epoch(2);
+    datastore_->shutdown();
+    datastore_ = nullptr;
+
+    std::string out;
+    std::string command = std::string(util_command) + " compaction --force --make_backup " +
+        std::string(location) + " 2>&1";
+    int rc = invoke(command, out);
+    ASSERT_EQ(rc, 0) << "invoke failed: " << out;
+
+    std::vector<boost::filesystem::path> backup_dirs = find_backup_dirs();
+    ASSERT_EQ(backup_dirs.size(), 1U);
+
+    // The backup directory must be reported on stdout with its actual path. The path is
+    // printed via boost::filesystem::path's operator<<, which quotes it, so build the
+    // expected string the same way.
+    std::ostringstream expected;
+    expected << "backup-directory: " << backup_dirs[0];
+    EXPECT_TRUE(out.find(expected.str()) != std::string::npos)
+        << "expected \"" << expected.str() << "\" in tglogutil output:\n" << out;
+
+    remove_backup_dirs();
+}
+
 // Offline compaction must not silently drop any file it is not explicitly expected to
 // consume. The purpose of this test is to detect the case where a future change adds a
 // new file to the log directory and compaction is not updated to carry it over: any

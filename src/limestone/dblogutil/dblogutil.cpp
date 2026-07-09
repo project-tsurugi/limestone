@@ -448,6 +448,9 @@ void compaction(dblog_scan &ds, std::optional<epoch_id_type> epoch) {
         auto bkdir = make_backup_dir_next_to(from_dir);
         VLOG_LP(log_info) << "renaming " << from_dir << " to " << bkdir << " for backup";
         boost::filesystem::rename(from_dir, bkdir);
+        // Report the backup destination so the user can locate it; the path is
+        // generated internally and otherwise only visible in verbose logs.
+        std::cout << "backup-directory: " << bkdir << std::endl;
     } else {
         VLOG_LP(log_info) << "deleting " << from_dir;
         boost::filesystem::remove_all(from_dir);
