@@ -476,6 +476,47 @@ TEST_F(offline_compaction_test, offline_compaction_preserves_manifest_file) {
     EXPECT_EQ(manifest_after, manifest_before);
 }
 
+// Dry run must not modify the log directory at all. The command reports whether
+// compaction would succeed, but leaves the original directory byte-for-byte
+// unchanged and creates no backup or leftover working directory. This covers the
+// whole directory (including the blob directory), not just the transaction log
+// files, so a regression that starts touching from_dir during a dry run is caught.
+TEST_F(offline_compaction_test, offline_compaction_dry_run_leaves_log_directory_intact) {
+    remove_backup_dirs();  // clean up leftovers from an earlier aborted run
+    remove_work_dirs();
+
+    gen_datastore();
+    datastore_->switch_epoch(1);
+    lc0_->begin_session();
+    lc0_->add_entry(1, "blob_key", "blob_value", {1, 0}, {1001});
+    lc0_->end_session();
+    create_dummy_blob_files(1001);
+    datastore_->set_next_blob_id(1002);
+    datastore_->switch_epoch(2);
+    datastore_->shutdown();
+    datastore_ = nullptr;
+
+    std::map<std::string, std::string> before = snapshot_tree(location);
+
+    std::string out;
+    std::string command = std::string(util_command) + " compaction --force --dry_run " +
+        std::string(location) + " 2>&1";
+    int rc = invoke(command, out);
+    ASSERT_EQ(rc, 0) << "invoke failed: " << out;
+    EXPECT_TRUE(out.find("compaction will be successfully completed (dry-run mode)") != std::string::npos)
+        << "tglogutil output:\n" << out;
+
+    // The log directory must be byte-for-byte identical to its pre-run state.
+    EXPECT_EQ(snapshot_tree(location), before);
+
+    // A dry run must not create a backup or leave a working directory behind.
+    EXPECT_TRUE(find_backup_dirs().empty());
+    EXPECT_TRUE(find_sibling_dirs(".work_").empty());
+
+    remove_backup_dirs();
+    remove_work_dirs();
+}
+
 // With --make_backup, the blob directory must be copied (not moved) so that both the
 // compacted log directory and the backup directory keep the blob data.
 TEST_F(offline_compaction_test, offline_compaction_with_backup_copies_blob_directory) {
