@@ -517,6 +517,42 @@ TEST_F(offline_compaction_test, offline_compaction_dry_run_leaves_log_directory_
     remove_work_dirs();
 }
 
+// The --epoch option is ignored by the compaction subcommand: it never restricts
+// which entries are kept. Even an --epoch far below the durable epoch must not drop
+// any durable data. If --epoch were honored as an upper limit on valid epochs,
+// entries at higher epochs would be discarded and the records would be lost.
+TEST_F(offline_compaction_test, offline_compaction_ignores_epoch_option) {
+    gen_datastore();
+    datastore_->switch_epoch(1);
+    lc0_->begin_session();
+    lc0_->add_entry(1, "A", "va", {1, 0});
+    lc0_->add_entry(1, "B", "vb", {1, 1});
+    lc0_->end_session();
+    datastore_->switch_epoch(2);
+    datastore_->shutdown();
+    datastore_ = nullptr;
+
+    // Compact with an --epoch well below the durable epoch. It must be ignored, so
+    // both records survive.
+    run_offline_compaction("--epoch=1");
+
+    // Reopen the datastore so restart_datastore_and_read_snapshot() (which shuts the
+    // current datastore down before reopening) has a live instance to work with.
+    gen_datastore();
+    std::vector<std::pair<std::string, std::string>> kv_list =
+        restart_datastore_and_read_snapshot();
+    std::map<std::string, std::string> kv;
+    for (const auto& [key, value] : kv_list) {
+        kv.emplace(key, value);
+    }
+
+    ASSERT_EQ(kv.size(), 2u);
+    ASSERT_EQ(kv.count("A"), 1u);
+    ASSERT_EQ(kv.count("B"), 1u);
+    EXPECT_EQ(kv["A"], "va");
+    EXPECT_EQ(kv["B"], "vb");
+}
+
 // With --make_backup, the blob directory must be copied (not moved) so that both the
 // compacted log directory and the backup directory keep the blob data.
 TEST_F(offline_compaction_test, offline_compaction_with_backup_copies_blob_directory) {

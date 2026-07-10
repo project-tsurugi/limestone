@@ -344,19 +344,19 @@ void carry_over_blob_directory(
     }
 }
 
-void compaction(dblog_scan &ds, std::optional<epoch_id_type> epoch) {
+void compaction(dblog_scan &ds) {
+    // The --epoch option is not meaningful for compaction: it never restricts the
+    // compacted data, so it is ignored here (consistent with other options that do
+    // not apply to a given subcommand). The durable epoch recorded in the log
+    // directory is always used.
     epoch_id_type ld_epoch{};
-    if (epoch.has_value()) {
-        ld_epoch = epoch.value();
-    } else {
-        try {
-            ld_epoch = ds.last_durable_epoch_in_dir();
-        } catch (limestone_exception& ex) {
-            LOG(ERROR) << "reading epoch file is failed: " << ex.what();
-            log_and_exit(64);
-        }
-        std::cout << "durable-epoch: " << ld_epoch << std::endl;
+    try {
+        ld_epoch = ds.last_durable_epoch_in_dir();
+    } catch (limestone_exception& ex) {
+        LOG(ERROR) << "reading epoch file is failed: " << ex.what();
+        log_and_exit(64);
     }
+    std::cout << "durable-epoch: " << ld_epoch << std::endl;
     auto from_dir = ds.get_dblogdir();
     {
         auto p = from_dir;  // make copy
@@ -505,7 +505,7 @@ int main(char *dir, subcommand mode) {  // NOLINT
         ds.set_thread_num(FLAGS_thread_num);
         if (mode == cmd_inspect) inspect(ds, opt_epoch);
         if (mode == cmd_repair) repair(ds, opt_epoch);
-        if (mode == cmd_compaction) compaction(ds, opt_epoch);
+        if (mode == cmd_compaction) compaction(ds);
         close(lock_fd);
     } catch (limestone_exception& e) {
         LOG(ERROR) << e.what();
