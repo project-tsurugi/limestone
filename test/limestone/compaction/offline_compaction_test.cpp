@@ -44,9 +44,30 @@ using namespace limestone::internal;
 // (datastore -> shutdown -> offline compaction -> restart) can be exercised.
 class offline_compaction_test : public compaction_test {
 public:
-    // Use a dedicated directory so this suite does not collide with compaction_test,
-    // which shares the same fixture base; ctest runs the two suites in parallel.
-    offline_compaction_test() : compaction_test("/tmp/offline_compaction_test") {}
+    // Place the log directory under a per-suite directory (rather than directly under
+    // /tmp) so that this suite does not collide with compaction_test, which shares the
+    // same fixture base and runs in parallel under ctest. Offline compaction creates its
+    // work/backup directories next to the log directory (see make_tmp_dir_next_to), so
+    // keeping the log directory one level down confines those siblings to test_root_ and
+    // keeps find_sibling_dirs from scanning /tmp itself, where unrelated processes churn
+    // temporary files.
+    static constexpr char const* test_root_ = "/tmp/offline_compaction_test";
+    offline_compaction_test() : compaction_test("/tmp/offline_compaction_test/log_dir") {}
+
+    // Recreate the per-suite root before each test and remove it afterwards. Wiping the
+    // whole root also removes any .work_XXXXXX / .backup_XXXXXX siblings, including ones
+    // left behind by a test that aborted before its own cleanup, so a later test can never
+    // observe a stale working or backup directory.
+    void SetUp() override {
+        boost::filesystem::remove_all(test_root_);
+        boost::filesystem::create_directories(test_root_);
+        compaction_test::SetUp();
+    }
+
+    void TearDown() override {
+        compaction_test::TearDown();
+        boost::filesystem::remove_all(test_root_);
+    }
 
     // Path to the offline compaction utility (tglogutil), relative to the test
     // executable's working directory. This matches the convention used by
@@ -482,9 +503,6 @@ TEST_F(offline_compaction_test, offline_compaction_preserves_manifest_file) {
 // whole directory (including the blob directory), not just the transaction log
 // files, so a regression that starts touching from_dir during a dry run is caught.
 TEST_F(offline_compaction_test, offline_compaction_dry_run_leaves_log_directory_intact) {
-    remove_backup_dirs();  // clean up leftovers from an earlier aborted run
-    remove_work_dirs();
-
     gen_datastore();
     datastore_->switch_epoch(1);
     lc0_->begin_session();
@@ -556,8 +574,6 @@ TEST_F(offline_compaction_test, offline_compaction_ignores_epoch_option) {
 // With --make_backup, the blob directory must be copied (not moved) so that both the
 // compacted log directory and the backup directory keep the blob data.
 TEST_F(offline_compaction_test, offline_compaction_with_backup_copies_blob_directory) {
-    remove_backup_dirs();  // clean up leftovers from an earlier aborted run
-
     gen_datastore();
     datastore_->switch_epoch(1);
     lc0_->begin_session();
@@ -588,8 +604,6 @@ TEST_F(offline_compaction_test, offline_compaction_with_backup_copies_blob_direc
 // reported on stdout ("backup-directory: <path>") for the user to locate it. The
 // reported path must match the backup directory actually created.
 TEST_F(offline_compaction_test, offline_compaction_reports_backup_directory) {
-    remove_backup_dirs();  // clean up leftovers from an earlier aborted run
-
     gen_datastore();
     datastore_->switch_epoch(1);
     lc0_->begin_session();
@@ -660,8 +674,6 @@ TEST_F(offline_compaction_test, offline_compaction_does_not_drop_unexpected_file
 // as it was right before compaction: same set of files, same contents. This ensures the
 // backup is a faithful, fully recoverable image of the pre-compaction state.
 TEST_F(offline_compaction_test, offline_compaction_backup_matches_pre_compaction_state) {
-    remove_backup_dirs();  // clean up leftovers from an earlier aborted run
-
     gen_datastore();
     datastore_->switch_epoch(1);
     lc0_->begin_session();
@@ -707,9 +719,6 @@ TEST_F(offline_compaction_test, offline_compaction_with_backup_fails_when_workin
 // follows it and fails with ENOENT regardless of the caller's privileges, so this exercises
 // the copy-failure path even when the test runs as root (as it does in CI).
 TEST_F(offline_compaction_test, offline_compaction_backup_fails_when_blob_directory_copy_fails) {
-    remove_backup_dirs();
-    remove_work_dirs();
-
     gen_datastore();
     datastore_->switch_epoch(1);
     lc0_->begin_session();
