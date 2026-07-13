@@ -14,9 +14,6 @@
  * limitations under the License.
  */
 
-#include <stdlib.h>  // NOLINT(*-deprecated-headers): <cstdlib> does not provide ::mkdtemp
-#include <sys/stat.h>
-
 #include <array>
 #include <cerrno>
 #include <cstdio>
@@ -44,9 +41,30 @@ using namespace limestone::internal;
 // (datastore -> shutdown -> offline compaction -> restart) can be exercised.
 class offline_compaction_test : public compaction_test {
 public:
-    // Use a dedicated directory so this suite does not collide with compaction_test,
-    // which shares the same fixture base; ctest runs the two suites in parallel.
-    offline_compaction_test() : compaction_test("/tmp/offline_compaction_test") {}
+    // Place the log directory under a per-suite directory (rather than directly under
+    // /tmp) so that this suite does not collide with compaction_test, which shares the
+    // same fixture base and runs in parallel under ctest. Offline compaction creates its
+    // work/backup directories next to the log directory (see make_tmp_dir_next_to), so
+    // keeping the log directory one level down confines those siblings to test_root_ and
+    // keeps find_sibling_dirs from scanning /tmp itself, where unrelated processes churn
+    // temporary files.
+    static constexpr char const* test_root_ = "/tmp/offline_compaction_test";
+    offline_compaction_test() : compaction_test("/tmp/offline_compaction_test/log_dir") {}
+
+    // Recreate the per-suite root before each test and remove it afterwards. Wiping the
+    // whole root also removes any .work_XXXXXX / .backup_XXXXXX siblings, including ones
+    // left behind by a test that aborted before its own cleanup, so a later test can never
+    // observe a stale working or backup directory.
+    void SetUp() override {
+        boost::filesystem::remove_all(test_root_);
+        boost::filesystem::create_directories(test_root_);
+        compaction_test::SetUp();
+    }
+
+    void TearDown() override {
+        compaction_test::TearDown();
+        boost::filesystem::remove_all(test_root_);
+    }
 
     // Path to the offline compaction utility (tglogutil), relative to the test
     // executable's working directory. This matches the convention used by
@@ -124,64 +142,6 @@ public:
         for (boost::filesystem::path const& dir : find_sibling_dirs(".work_")) {
             boost::filesystem::remove_all(dir);
         }
-    }
-
-    // Shared driver for the cross-filesystem working-directory tests. Prepares a log
-    // directory with blob data, then runs offline compaction with --working_dir on a
-    // different filesystem (tmpfs under /dev/shm), optionally with --make_backup.
-    // Compaction must be rejected up front (before any destructive step) and must leave the
-    // original log directory fully intact. Skips when /dev/shm is unavailable or happens to
-    // be on the same filesystem as the location.
-    void run_cross_filesystem_working_dir_case(bool make_backup) {
-        if (!boost::filesystem::exists("/dev/shm")) {
-            GTEST_SKIP() << "/dev/shm is not available on this system";
-        }
-
-        gen_datastore();
-        datastore_->switch_epoch(1);
-        lc0_->begin_session();
-        lc0_->add_entry(1, "blob_key", "blob_value", {1, 0}, {1001});
-        lc0_->end_session();
-        create_dummy_blob_files(1001);
-        datastore_->set_next_blob_id(1002);
-        datastore_->switch_epoch(2);
-        datastore_->shutdown();
-        datastore_ = nullptr;
-
-        std::map<std::string, std::string> before = snapshot_tree(location);
-
-        // Prepare a working directory on another filesystem (tmpfs).
-        std::string wd_template = "/dev/shm/offline_compaction_wd_XXXXXX";
-        ASSERT_NE(::mkdtemp(wd_template.data()), nullptr) << strerror(errno);
-        boost::filesystem::path working_dir{wd_template};
-
-        // Skip when the test location happens to live on the same filesystem as /dev/shm
-        // (e.g. /tmp mounted on the same tmpfs); the cross-filesystem path is unreachable.
-        struct stat st_location {};
-        struct stat st_working_dir {};
-        ASSERT_EQ(::stat(location, &st_location), 0) << strerror(errno);
-        ASSERT_EQ(::stat(working_dir.c_str(), &st_working_dir), 0) << strerror(errno);
-        if (st_location.st_dev == st_working_dir.st_dev) {
-            boost::filesystem::remove_all(working_dir);
-            GTEST_SKIP() << "test location and /dev/shm are on the same filesystem";
-        }
-
-        std::string out;
-        std::string command = std::string(util_command) + " compaction --force" +
-            (make_backup ? " --make_backup" : "") + " --working_dir=" +
-            working_dir.string() + " " + std::string(location) + " 2>&1";
-        int rc = invoke(command, out);
-        EXPECT_NE(rc, 0) << "compaction should fail on a cross-filesystem working directory";
-        EXPECT_NE(out.find("working directory must be on the same filesystem as the dblogdir"),
-                  std::string::npos)
-            << "tglogutil output:\n" << out;
-
-        // The upfront rejection must leave the original log directory fully intact, and no
-        // backup directory must have been created.
-        EXPECT_EQ(snapshot_tree(location), before);
-        EXPECT_TRUE(find_backup_dirs().empty());
-
-        boost::filesystem::remove_all(working_dir);
     }
 
     // Collect the set of top-level entry names (files and directories) directly under dir.
@@ -476,11 +436,112 @@ TEST_F(offline_compaction_test, offline_compaction_preserves_manifest_file) {
     EXPECT_EQ(manifest_after, manifest_before);
 }
 
+// Dry run must not modify the log directory at all. The command reports whether
+// compaction would succeed, but leaves the original directory byte-for-byte
+// unchanged and creates no backup or leftover working directory. This covers the
+// whole directory (including the blob directory), not just the transaction log
+// files, so a regression that starts touching from_dir during a dry run is caught.
+TEST_F(offline_compaction_test, offline_compaction_dry_run_leaves_log_directory_intact) {
+    gen_datastore();
+    datastore_->switch_epoch(1);
+    lc0_->begin_session();
+    lc0_->add_entry(1, "blob_key", "blob_value", {1, 0}, {1001});
+    lc0_->end_session();
+    create_dummy_blob_files(1001);
+    datastore_->set_next_blob_id(1002);
+    datastore_->switch_epoch(2);
+    datastore_->shutdown();
+    datastore_ = nullptr;
+
+    std::map<std::string, std::string> before = snapshot_tree(location);
+
+    std::string out;
+    std::string command = std::string(util_command) + " compaction --force --dry_run " +
+        std::string(location) + " 2>&1";
+    int rc = invoke(command, out);
+    ASSERT_EQ(rc, 0) << "invoke failed: " << out;
+    EXPECT_TRUE(out.find("compaction will be successfully completed (dry-run mode)") != std::string::npos)
+        << "tglogutil output:\n" << out;
+
+    // The log directory must be byte-for-byte identical to its pre-run state.
+    EXPECT_EQ(snapshot_tree(location), before);
+
+    // A dry run must not create a backup or leave a working directory behind.
+    EXPECT_TRUE(find_backup_dirs().empty());
+    EXPECT_TRUE(find_sibling_dirs(".work_").empty());
+
+    remove_backup_dirs();
+    remove_work_dirs();
+}
+
+// The --epoch option is ignored by the compaction subcommand: it never restricts
+// which entries are kept. Even an --epoch below the durable epoch must not drop
+// any durable data. Record "B" is written in epoch 2, above the specified
+// --epoch=1, so an implementation that honored --epoch as an upper limit on valid
+// epochs would discard it; the test fails against such an implementation.
+TEST_F(offline_compaction_test, offline_compaction_ignores_epoch_option) {
+    gen_datastore();
+    datastore_->switch_epoch(1);
+    lc0_->begin_session();
+    lc0_->add_entry(1, "A", "va", {1, 0});
+    lc0_->end_session();
+    datastore_->switch_epoch(2);
+    lc0_->begin_session();
+    lc0_->add_entry(1, "B", "vb", {2, 0});
+    lc0_->end_session();
+    datastore_->switch_epoch(3);
+    datastore_->shutdown();
+    datastore_ = nullptr;
+
+    // Compact with an --epoch below the epoch of record "B". It must be ignored, so
+    // both records survive.
+    run_offline_compaction("--epoch=1");
+
+    // Reopen the datastore so restart_datastore_and_read_snapshot() (which shuts the
+    // current datastore down before reopening) has a live instance to work with.
+    gen_datastore();
+    std::vector<std::pair<std::string, std::string>> kv_list =
+        restart_datastore_and_read_snapshot();
+    std::map<std::string, std::string> kv;
+    for (const auto& [key, value] : kv_list) {
+        kv.emplace(key, value);
+    }
+
+    ASSERT_EQ(kv.size(), 2u);
+    ASSERT_EQ(kv.count("A"), 1u);
+    ASSERT_EQ(kv.count("B"), 1u);
+    EXPECT_EQ(kv["A"], "va");
+    EXPECT_EQ(kv["B"], "vb");
+}
+
+// Options belonging to other subcommands are ignored without even being validated.
+// A malformed --epoch value must not make the compaction subcommand fail; only
+// inspect and repair parse the option.
+TEST_F(offline_compaction_test, offline_compaction_ignores_malformed_epoch_option) {
+    gen_datastore();
+    datastore_->switch_epoch(1);
+    lc0_->begin_session();
+    lc0_->add_entry(1, "A", "va", {1, 0});
+    lc0_->end_session();
+    datastore_->switch_epoch(2);
+    datastore_->shutdown();
+    datastore_ = nullptr;
+
+    // run_offline_compaction() asserts that the command exits with status 0; a
+    // malformed --epoch must not be rejected here.
+    run_offline_compaction("--epoch=invalid");
+
+    gen_datastore();
+    std::vector<std::pair<std::string, std::string>> kv_list =
+        restart_datastore_and_read_snapshot();
+    ASSERT_EQ(kv_list.size(), 1u);
+    EXPECT_EQ(kv_list[0].first, "A");
+    EXPECT_EQ(kv_list[0].second, "va");
+}
+
 // With --make_backup, the blob directory must be copied (not moved) so that both the
 // compacted log directory and the backup directory keep the blob data.
 TEST_F(offline_compaction_test, offline_compaction_with_backup_copies_blob_directory) {
-    remove_backup_dirs();  // clean up leftovers from an earlier aborted run
-
     gen_datastore();
     datastore_->switch_epoch(1);
     lc0_->begin_session();
@@ -503,6 +564,39 @@ TEST_F(offline_compaction_test, offline_compaction_with_backup_copies_blob_direc
     std::vector<boost::filesystem::path> backup_dirs = find_backup_dirs();
     ASSERT_EQ(backup_dirs.size(), 1U);
     EXPECT_TRUE(boost::filesystem::exists(backup_dirs[0] / blob_relative));
+
+    remove_backup_dirs();
+}
+
+// With --make_backup, the backup destination is generated internally, so it must be
+// reported on stdout ("backup-directory: <path>") for the user to locate it. The
+// reported path must match the backup directory actually created.
+TEST_F(offline_compaction_test, offline_compaction_reports_backup_directory) {
+    gen_datastore();
+    datastore_->switch_epoch(1);
+    lc0_->begin_session();
+    lc0_->add_entry(1, "key", "value", {1, 0});
+    lc0_->end_session();
+    datastore_->switch_epoch(2);
+    datastore_->shutdown();
+    datastore_ = nullptr;
+
+    std::string out;
+    std::string command = std::string(util_command) + " compaction --force --make_backup " +
+        std::string(location) + " 2>&1";
+    int rc = invoke(command, out);
+    ASSERT_EQ(rc, 0) << "invoke failed: " << out;
+
+    std::vector<boost::filesystem::path> backup_dirs = find_backup_dirs();
+    ASSERT_EQ(backup_dirs.size(), 1U);
+
+    // The backup directory must be reported on stdout with its actual path. The path is
+    // printed via boost::filesystem::path's operator<<, which quotes it, so build the
+    // expected string the same way.
+    std::ostringstream expected;
+    expected << "backup-directory: " << backup_dirs[0];
+    EXPECT_TRUE(out.find(expected.str()) != std::string::npos)
+        << "expected \"" << expected.str() << "\" in tglogutil output:\n" << out;
 
     remove_backup_dirs();
 }
@@ -548,8 +642,6 @@ TEST_F(offline_compaction_test, offline_compaction_does_not_drop_unexpected_file
 // as it was right before compaction: same set of files, same contents. This ensures the
 // backup is a faithful, fully recoverable image of the pre-compaction state.
 TEST_F(offline_compaction_test, offline_compaction_backup_matches_pre_compaction_state) {
-    remove_backup_dirs();  // clean up leftovers from an earlier aborted run
-
     gen_datastore();
     datastore_->switch_epoch(1);
     lc0_->begin_session();
@@ -577,27 +669,12 @@ TEST_F(offline_compaction_test, offline_compaction_backup_matches_pre_compaction
     remove_backup_dirs();
 }
 
-// A cross-filesystem --working_dir must be rejected up front (default / move mode).
-TEST_F(offline_compaction_test, offline_compaction_fails_when_working_dir_is_on_different_filesystem) {
-    run_cross_filesystem_working_dir_case(/*make_backup=*/false);
-}
-
-// A cross-filesystem --working_dir must be rejected up front in --make_backup mode too.
-// Otherwise from_dir would be renamed away to the backup and the final rename(tmp, from_dir)
-// would fail, leaving no from_dir restored.
-TEST_F(offline_compaction_test, offline_compaction_with_backup_fails_when_working_dir_is_on_different_filesystem) {
-    run_cross_filesystem_working_dir_case(/*make_backup=*/true);
-}
-
 // When the blob directory contains a broken entry that cannot be copied, the backup-mode
 // copy of the blob directory must fail with a clear message and leave the original log
 // directory untouched. A dangling symlink is used to force the failure: boost::filesystem
 // follows it and fails with ENOENT regardless of the caller's privileges, so this exercises
 // the copy-failure path even when the test runs as root (as it does in CI).
 TEST_F(offline_compaction_test, offline_compaction_backup_fails_when_blob_directory_copy_fails) {
-    remove_backup_dirs();
-    remove_work_dirs();
-
     gen_datastore();
     datastore_->switch_epoch(1);
     lc0_->begin_session();

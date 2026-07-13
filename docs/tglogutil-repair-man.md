@@ -13,6 +13,8 @@ $ tglogutil repair [options] <dblogdir>
 Repair the transaction log data specified by `<dblogdir>`.
 Specify the location set in the `log_location` parameter in the `[datastore]` section of the configuration file of Tsurugi server (`tsurugi.ini`).
 
+Options that are valid only for other subcommands are ignored if specified.
+
 Options:
 * `--thread-num=<number>`
     * Number (default `1`) of concurrent processing thread of repair

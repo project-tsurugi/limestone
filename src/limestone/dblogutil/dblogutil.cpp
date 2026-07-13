@@ -14,8 +14,6 @@
  * limitations under the License.
  */
 
-#include <sys/stat.h>
-
 #include <iostream>
 #include <stdlib.h>  // NOLINT(*-deprecated-headers): <cstdlib> does not provide std::mkdtemp
 #include <glog/logging.h>
@@ -49,7 +47,6 @@ DEFINE_string(output_format, "human-readable", "format of output (human-readable
 // compaction
 DEFINE_bool(force, false, "(subcommand compaction) skip start prompt");
 DEFINE_bool(dry_run, false, "(subcommand compaction) dry run");
-DEFINE_string(working_dir, "", "(subcommand compaction) working directory");
 DEFINE_bool(make_backup, false, "(subcommand compaction) make backup of target dblogdir");
 
 enum subcommand {
@@ -184,24 +181,6 @@ boost::filesystem::path make_backup_dir_next_to(const boost::filesystem::path& t
     return make_tmp_dir_next_to(target_dir, ".backup_XXXXXX");
 }
 
-/**
- * @brief tests whether two existing directories reside on the same filesystem.
- * @param a a path to an existing directory
- * @param b a path to an existing directory
- * @return true if both are on the same filesystem (same st_dev), false otherwise
- */
-bool on_same_filesystem(boost::filesystem::path const& a, boost::filesystem::path const& b) {
-    struct stat sa {};
-    struct stat sb {};
-    if (::stat(a.c_str(), &sa) != 0) {
-        LOG_AND_THROW_IO_EXCEPTION("stat failed: " + a.string(), errno);
-    }
-    if (::stat(b.c_str(), &sb) != 0) {
-        LOG_AND_THROW_IO_EXCEPTION("stat failed: " + b.string(), errno);
-    }
-    return sa.st_dev == sb.st_dev;
-}
-
 // Carry over the existing compaction catalog (and its backup) from from_dir into the
 // work directory tmp, then register the freshly produced compacted file. tmp will
 // replace from_dir, so carrying over the catalog preserves the high-water marks
@@ -309,8 +288,8 @@ void copy_directory_recursively(
  * Without this step the blob data would be lost when from_dir is removed (or renamed away for
  * backup) and replaced by the working directory. When make_backup is requested the blob
  * directory is copied so that the backup keeps its own blob data; otherwise it is moved by
- * rename. The move requires from_dir and tmp to be on the same filesystem; compaction()
- * already rejects a cross-filesystem working directory up front, so the rename below is a
+ * rename. The move requires from_dir and tmp to be on the same filesystem; the working
+ * directory is created next to from_dir, so this holds, and the rename below is a
  * defense-in-depth check that should not normally fail.
  * @param from_dir the original log directory
  * @param tmp the working directory the compacted log is assembled in
@@ -338,25 +317,23 @@ void carry_over_blob_directory(
     VLOG_LP(log_info) << "moving blob directory " << src << " to " << dst;
     boost::filesystem::rename(src, dst, ec);
     if (ec) {
-        LOG_AND_THROW_IO_EXCEPTION(
-                "failed to move blob directory (the working directory must be on the same "
-                "filesystem as the dblogdir): " + src.string(), ec);
+        LOG_AND_THROW_IO_EXCEPTION("failed to move blob directory: " + src.string(), ec);
     }
 }
 
-void compaction(dblog_scan &ds, std::optional<epoch_id_type> epoch) {
+void compaction(dblog_scan &ds) {
+    // The --epoch option is not meaningful for compaction: it never restricts the
+    // compacted data, so it is ignored here (consistent with other options that do
+    // not apply to a given subcommand). The durable epoch recorded in the log
+    // directory is always used.
     epoch_id_type ld_epoch{};
-    if (epoch.has_value()) {
-        ld_epoch = epoch.value();
-    } else {
-        try {
-            ld_epoch = ds.last_durable_epoch_in_dir();
-        } catch (limestone_exception& ex) {
-            LOG(ERROR) << "reading epoch file is failed: " << ex.what();
-            log_and_exit(64);
-        }
-        std::cout << "durable-epoch: " << ld_epoch << std::endl;
+    try {
+        ld_epoch = ds.last_durable_epoch_in_dir();
+    } catch (limestone_exception& ex) {
+        LOG(ERROR) << "reading epoch file is failed: " << ex.what();
+        log_and_exit(64);
     }
+    std::cout << "durable-epoch: " << ld_epoch << std::endl;
     auto from_dir = ds.get_dblogdir();
     {
         auto p = from_dir;  // make copy
@@ -366,27 +343,12 @@ void compaction(dblog_scan &ds, std::optional<epoch_id_type> epoch) {
             log_and_exit(64);
         }
     }
-    boost::filesystem::path tmp;
-    if (!FLAGS_working_dir.empty()) {
-        tmp = FLAGS_working_dir;
-        // TODO: check, error if exist and non-empty
-    } else {
-        tmp = make_work_dir_next_to(from_dir);
-    }
+    // The working directory is created next to from_dir, on the same filesystem, so the
+    // blob move and the final rename onto from_dir stay within one filesystem. It is a
+    // freshly created empty directory dedicated to this run, so it never clobbers the
+    // user's data.
+    boost::filesystem::path tmp = make_work_dir_next_to(from_dir);
     std::cout << "working-directory: " << tmp << std::endl;
-
-    // The working directory must be on the same filesystem as the dblogdir. Compaction
-    // carries the log directory contents over into tmp and finally renames tmp onto
-    // from_dir; both the blob move and that final rename fail across filesystems. With
-    // --make_backup this would be especially harmful: from_dir is first renamed away to
-    // the backup, and only then does rename(tmp, from_dir) fail, leaving no from_dir
-    // restored. Reject a cross-filesystem working directory up front, before any
-    // destructive step, regardless of --make_backup.
-    if (!on_same_filesystem(from_dir, tmp)) {
-        LOG(ERROR) << "working directory must be on the same filesystem as the dblogdir: "
-                   << "dblogdir=" << from_dir << ", working-directory=" << tmp;
-        log_and_exit(64);
-    }
 
     if (!FLAGS_force) {
         // prompt
@@ -448,6 +410,9 @@ void compaction(dblog_scan &ds, std::optional<epoch_id_type> epoch) {
         auto bkdir = make_backup_dir_next_to(from_dir);
         VLOG_LP(log_info) << "renaming " << from_dir << " to " << bkdir << " for backup";
         boost::filesystem::rename(from_dir, bkdir);
+        // Report the backup destination so the user can locate it; the path is
+        // generated internally and otherwise only visible in verbose logs.
+        std::cout << "backup-directory: " << bkdir << std::endl;
     } else {
         VLOG_LP(log_info) << "deleting " << from_dir;
         boost::filesystem::remove_all(from_dir);
@@ -468,8 +433,12 @@ int main(char *dir, subcommand mode) {  // NOLINT
             FLAGS_v = log_debug;
         }
     }
+    // --epoch is used only by the inspect and repair subcommands. For other
+    // subcommands it is ignored without even being validated, so that options
+    // belonging to other subcommands never affect the current one.
+    bool const uses_epoch = (mode == cmd_inspect || mode == cmd_repair);
     std::optional<epoch_id_type> opt_epoch;
-    if (FLAGS_epoch.empty()) {
+    if (!uses_epoch || FLAGS_epoch.empty()) {
         opt_epoch = std::nullopt;
     } else {
         std::size_t idx{};
@@ -502,7 +471,7 @@ int main(char *dir, subcommand mode) {  // NOLINT
         ds.set_thread_num(FLAGS_thread_num);
         if (mode == cmd_inspect) inspect(ds, opt_epoch);
         if (mode == cmd_repair) repair(ds, opt_epoch);
-        if (mode == cmd_compaction) compaction(ds, opt_epoch);
+        if (mode == cmd_compaction) compaction(ds);
         close(lock_fd);
     } catch (limestone_exception& e) {
         LOG(ERROR) << e.what();
