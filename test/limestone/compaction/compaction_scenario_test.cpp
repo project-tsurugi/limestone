@@ -667,4 +667,153 @@ TEST_P(compaction_scenario_test, unreferenced_blob_files) {
     EXPECT_TRUE(AssertLogEntry(log_entries[3], 1, "noblob_key2", "noblob_value2", 0, 0, {}, log_entry::entry_type::normal_entry));
 }
 
+// A compaction of a log directory that already holds a compacted file must read that file as an
+// input: the entries it holds have to survive, updates and removals written since then have to be
+// applied to them, and the blob ids they reference must keep the high-water mark up. This covers
+// running the compaction repeatedly on the same log directory, which is what happens in practice.
+TEST_P(compaction_scenario_test, compaction_of_already_compacted_directory) {
+    gen_datastore();
+    datastore_->switch_epoch(1);
+
+    // Entries the first compaction will fold into the compacted file: "keep" is never touched
+    // again, "update" and "remove" are modified after the first compaction.
+    lc0_->begin_session();
+    lc0_->add_entry(1, "keep", "keep_v1", {1, 0});
+    lc0_->add_entry(1, "update", "update_v1", {1, 1});
+    lc0_->add_entry(1, "remove", "remove_v1", {1, 2});
+    lc0_->end_session();
+
+    // An entry with a blob, so that the blob id high-water mark has to survive the second
+    // compaction as well.
+    lc1_->begin_session();
+    lc1_->add_entry(1, "blob", "blob_v1", {1, 3}, {5001});
+    lc1_->end_session();
+
+    datastore_->switch_epoch(2);
+    boost::filesystem::path blob_path = create_dummy_blob_files(5001);
+    datastore_->set_next_blob_id(5002);
+
+    ASSERT_NO_FATAL_FAILURE(run_compaction(3));
+
+    compaction_catalog catalog = compaction_catalog::from_catalog_file(location);
+    ASSERT_EQ(catalog.get_compacted_files().size(), 1);
+    EXPECT_EQ(catalog.get_max_blob_id(), 5001);
+
+    std::vector<log_entry> log_entries = read_log_file(compacted_filename, location);
+    ASSERT_EQ(log_entries.size(), 4);
+    EXPECT_TRUE(AssertLogEntry(log_entries[0], 1, "blob", "blob_v1", 0, 0, {5001}, log_entry::entry_type::normal_with_blob));
+    EXPECT_TRUE(AssertLogEntry(log_entries[1], 1, "keep", "keep_v1", 0, 0, {}, log_entry::entry_type::normal_entry));
+    EXPECT_TRUE(AssertLogEntry(log_entries[2], 1, "remove", "remove_v1", 0, 0, {}, log_entry::entry_type::normal_entry));
+    EXPECT_TRUE(AssertLogEntry(log_entries[3], 1, "update", "update_v1", 0, 0, {}, log_entry::entry_type::normal_entry));
+
+    // Update one entry and remove another, then compact again. The compacted file produced by the
+    // first run is now an input of the second one.
+    lc0_->begin_session();
+    lc0_->add_entry(1, "update", "update_v2", {3, 0});
+    lc0_->remove_entry(1, "remove", {3, 1});
+    lc0_->add_entry(1, "added", "added_v1", {3, 2});
+    lc0_->end_session();
+
+    datastore_->switch_epoch(4);
+
+    ASSERT_NO_FATAL_FAILURE(run_compaction(5));
+
+    // The second compaction must still register exactly one compacted file, and the blob id
+    // high-water mark must not be lowered even though the blob is only referenced by an entry
+    // that came from the previous compacted file.
+    catalog = compaction_catalog::from_catalog_file(location);
+    ASSERT_EQ(catalog.get_compacted_files().size(), 1);
+    ASSERT_PRED_FORMAT3(ContainsCompactedFileInfo, catalog.get_compacted_files(), compacted_filename, 1);
+    EXPECT_EQ(catalog.get_max_blob_id(), 5001);
+
+    // The entry that was never touched again survives, the updated one carries its new value, the
+    // removed one is gone, and the entry added after the first compaction is there.
+    log_entries = read_log_file(compacted_filename, location);
+    ASSERT_EQ(log_entries.size(), 4);
+    EXPECT_TRUE(AssertLogEntry(log_entries[0], 1, "added", "added_v1", 0, 0, {}, log_entry::entry_type::normal_entry));
+    EXPECT_TRUE(AssertLogEntry(log_entries[1], 1, "blob", "blob_v1", 0, 0, {5001}, log_entry::entry_type::normal_with_blob));
+    EXPECT_TRUE(AssertLogEntry(log_entries[2], 1, "keep", "keep_v1", 0, 0, {}, log_entry::entry_type::normal_entry));
+    EXPECT_TRUE(AssertLogEntry(log_entries[3], 1, "update", "update_v2", 0, 0, {}, log_entry::entry_type::normal_entry));
+
+    // The blob is still referenced, so it must not have been collected by either mode.
+    EXPECT_TRUE(boost::filesystem::exists(blob_path));
+
+    // The snapshot rebuilt at startup must agree with the compacted file.
+    std::vector<std::pair<std::string, std::string>> kv_list = restart_datastore_and_read_snapshot();
+    std::map<std::string, std::string> kv;
+    for (auto const& [key, value] : kv_list) {
+        kv.emplace(key, value);
+    }
+    ASSERT_EQ(kv.size(), 4);
+    EXPECT_EQ(kv.count("remove"), 0U);
+    EXPECT_EQ(kv["keep"], "keep_v1");
+    EXPECT_EQ(kv["update"], "update_v2");
+    EXPECT_EQ(kv["added"], "added_v1");
+    EXPECT_EQ(kv["blob"], "blob_v1");
+    EXPECT_TRUE(boost::filesystem::exists(blob_path));
+}
+
+// Compacting a log directory whose only transaction log is the compacted file itself, with no
+// pwal written since the previous compaction, must keep the data. The compacted file is an input
+// of the compaction, so a "nothing to compact" shortcut that also skipped a directory holding
+// only a compacted file would drop it: offline compaction rebuilds the log directory from
+// scratch, so a compacted file that is not produced again is simply gone.
+TEST_P(compaction_scenario_test, compaction_without_new_pwals_keeps_compacted_file) {
+    gen_datastore();
+    datastore_->switch_epoch(1);
+    lc0_->begin_session();
+    lc0_->add_entry(1, "key1", "value1", {1, 0});
+    lc0_->add_entry(1, "key2", "value2", {1, 1}, {6001});
+    lc0_->end_session();
+    datastore_->switch_epoch(2);
+    boost::filesystem::path blob_path = create_dummy_blob_files(6001);
+    datastore_->set_next_blob_id(6002);
+
+    ASSERT_NO_FATAL_FAILURE(run_compaction(3));
+
+    // Drop the detached pwals that online compaction leaves behind, so that in both modes the
+    // compacted file is the only transaction log left in the directory.
+    for (boost::filesystem::directory_iterator it{boost::filesystem::path(location)}, end;
+         it != end; ++it) {
+        std::string name = it->path().filename().string();
+        if (starts_with(name, "pwal_") && name != compacted_filename) {
+            boost::filesystem::remove(it->path());
+        }
+    }
+    {
+        // Drop the detached pwals from the catalog as well, so that it stays consistent with the
+        // files actually present. Load the catalog from its file: a default-constructed one would
+        // reset the epoch and blob id high-water marks.
+        compaction_catalog catalog = compaction_catalog::from_catalog_file(location);
+        catalog.update_catalog_file(catalog.get_max_epoch_id(), catalog.get_max_blob_id(),
+                                    {compacted_file_info{compacted_filename, 1}}, {});
+    }
+    ASSERT_TRUE(boost::filesystem::exists(boost::filesystem::path(location) / compacted_filename));
+
+    // Compact again without having written a single new entry.
+    ASSERT_NO_FATAL_FAILURE(run_compaction(4));
+
+    // The compacted file must still be there, still registered, and still hold the data.
+    ASSERT_TRUE(boost::filesystem::exists(boost::filesystem::path(location) / compacted_filename));
+    compaction_catalog catalog = compaction_catalog::from_catalog_file(location);
+    ASSERT_EQ(catalog.get_compacted_files().size(), 1);
+    ASSERT_PRED_FORMAT3(ContainsCompactedFileInfo, catalog.get_compacted_files(), compacted_filename, 1);
+    EXPECT_EQ(catalog.get_max_blob_id(), 6001);
+
+    std::vector<log_entry> log_entries = read_log_file(compacted_filename, location);
+    ASSERT_EQ(log_entries.size(), 2);
+    EXPECT_TRUE(AssertLogEntry(log_entries[0], 1, "key1", "value1", 0, 0, {}, log_entry::entry_type::normal_entry));
+    EXPECT_TRUE(AssertLogEntry(log_entries[1], 1, "key2", "value2", 0, 0, {6001}, log_entry::entry_type::normal_with_blob));
+    EXPECT_TRUE(boost::filesystem::exists(blob_path));
+
+    std::vector<std::pair<std::string, std::string>> kv_list = restart_datastore_and_read_snapshot();
+    std::map<std::string, std::string> kv;
+    for (auto const& [key, value] : kv_list) {
+        kv.emplace(key, value);
+    }
+    ASSERT_EQ(kv.size(), 2);
+    EXPECT_EQ(kv["key1"], "value1");
+    EXPECT_EQ(kv["key2"], "value2");
+}
+
 }  // namespace limestone::testing

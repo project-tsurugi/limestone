@@ -673,4 +673,117 @@ TEST_F(offline_compaction_test, offline_compaction_backup_fails_when_blob_direct
     remove_work_dirs();
 }
 
+// Run offline compaction in dry-run mode and check that it reports success.
+void run_offline_dry_run(std::string const& location, std::string& out) {
+    std::string command = std::string("../src/tglogutil") + " compaction --force --dry_run " +
+        location + " 2>&1";
+    int rc = offline_compaction_test::invoke(command, out);
+    ASSERT_EQ(rc, 0) << "invoke failed: " << out;
+    ASSERT_TRUE(out.find("compaction will be successfully completed (dry-run mode)") != std::string::npos)
+        << "tglogutil output:\n" << out;
+}
+
+// The startup preparation tglogutil performs is applied even in dry-run mode: a log directory in
+// an older supported format has its manifest migrated to the current format. This is the
+// documented exception to "dry-run leaves dblogdir unchanged" (see the compaction man page), so
+// pin it down: the manifest must be migrated, and nothing else in the directory may change.
+TEST_F(offline_compaction_test, offline_compaction_dry_run_migrates_old_manifest) {
+    // Build a log directory in the oldest supported format: a version 1 manifest, no compaction
+    // catalog (a catalog did not exist in that format), and one pwal file.
+    gen_datastore();
+    datastore_->switch_epoch(1);
+    lc0_->begin_session();
+    lc0_->add_entry(1, "key1", "value1", {1, 0});
+    lc0_->end_session();
+    datastore_->switch_epoch(2);
+    datastore_->shutdown();
+    datastore_ = nullptr;
+
+    boost::filesystem::path dir{location};
+    create_file(manifest_path, data_manifest(1));
+    boost::filesystem::remove(dir / compaction_catalog::get_catalog_filename());
+    boost::filesystem::remove(dir / compaction_catalog::get_catalog_backup_filename());
+
+    std::string manifest_before = read_file(manifest_path);
+    ASSERT_EQ(manifest::from_json_string(manifest_before).get_persistent_format_version(), 1);
+    std::map<std::string, std::string> before = snapshot_tree(location);
+
+    std::string out;
+    ASSERT_NO_FATAL_FAILURE(run_offline_dry_run(location, out));
+
+    // The manifest must have been migrated to the current format version.
+    std::string manifest_after = read_file(manifest_path);
+    EXPECT_NE(manifest_after, manifest_before);
+    EXPECT_EQ(manifest::from_json_string(manifest_after).get_persistent_format_version(),
+              manifest::default_persistent_format_version)
+        << "manifest was not migrated: " << manifest_after;
+
+    // Everything else must be untouched, apart from the compaction catalog the migration creates
+    // (checked by the test below) and the manifest backup the migration leaves behind.
+    std::map<std::string, std::string> after = snapshot_tree(location);
+    for (auto const& [name, content] : before) {
+        if (name == std::string(manifest::file_name)) {
+            continue;  // migrated, checked above
+        }
+        auto it = after.find(name);
+        ASSERT_NE(it, after.end()) << "entry lost during dry run: " << name;
+        EXPECT_EQ(it->second, content) << "entry modified during dry run: " << name;
+    }
+
+    // A dry run must not create a backup or leave a working directory behind.
+    EXPECT_TRUE(find_backup_dirs().empty());
+    EXPECT_TRUE(find_sibling_dirs(".work_").empty());
+
+    remove_backup_dirs();
+    remove_work_dirs();
+}
+
+// The startup preparation also creates the compaction catalog when it is missing, and this too
+// happens in dry-run mode. It can happen even for a directory that is already in the current
+// format, so drive it that way here. The created catalog must be empty: a dry run compacts
+// nothing, so it must not register a compacted file.
+TEST_F(offline_compaction_test, offline_compaction_dry_run_creates_missing_catalog) {
+    gen_datastore();
+    datastore_->switch_epoch(1);
+    lc0_->begin_session();
+    lc0_->add_entry(1, "key1", "value1", {1, 0});
+    lc0_->end_session();
+    datastore_->switch_epoch(2);
+    datastore_->shutdown();
+    datastore_ = nullptr;
+
+    // Remove the catalog while leaving the manifest at the current format version.
+    boost::filesystem::path dir{location};
+    boost::filesystem::path catalog_path = dir / compaction_catalog::get_catalog_filename();
+    boost::filesystem::remove(catalog_path);
+    boost::filesystem::remove(dir / compaction_catalog::get_catalog_backup_filename());
+    ASSERT_FALSE(boost::filesystem::exists(catalog_path));
+
+    std::string manifest_before = read_file(manifest_path);
+    std::string pwal_before = read_file(dir / "pwal_0000");
+
+    std::string out;
+    ASSERT_NO_FATAL_FAILURE(run_offline_dry_run(location, out));
+
+    // The catalog must have been created, and it must be empty: the dry run compacted nothing.
+    ASSERT_TRUE(boost::filesystem::exists(catalog_path));
+    compaction_catalog catalog = compaction_catalog::from_catalog_file(location);
+    EXPECT_EQ(catalog.get_max_epoch_id(), 0);
+    EXPECT_EQ(catalog.get_max_blob_id(), 0);
+    EXPECT_EQ(catalog.get_compacted_files().size(), 0);
+    EXPECT_EQ(catalog.get_detached_pwals().size(), 0);
+
+    // The dry run must not have compacted anything into the log directory, and must have left the
+    // manifest and the transaction log untouched.
+    EXPECT_FALSE(boost::filesystem::exists(dir / compacted_filename));
+    EXPECT_EQ(read_file(manifest_path), manifest_before);
+    EXPECT_EQ(read_file(dir / "pwal_0000"), pwal_before);
+
+    EXPECT_TRUE(find_backup_dirs().empty());
+    EXPECT_TRUE(find_sibling_dirs(".work_").empty());
+
+    remove_backup_dirs();
+    remove_work_dirs();
+}
+
 }  // namespace limestone::testing
