@@ -369,7 +369,21 @@ void compaction(dblog_scan &ds) {
     boost::filesystem::path tmp;
     if (!FLAGS_working_dir.empty()) {
         tmp = FLAGS_working_dir;
-        // TODO: check, error if exist and non-empty
+        // The working directory is consumed by the command: on a real run it is
+        // renamed onto from_dir, and on a dry run it is removed. Require an existing
+        // empty directory so that a mistaken --working-dir never destroys the user's
+        // files. A non-existent path or a non-empty directory is rejected before any
+        // destructive step.
+        boost::system::error_code ec;
+        if (!boost::filesystem::is_directory(tmp, ec)) {
+            LOG(ERROR) << "working directory must be an existing directory: "
+                       << "working-directory=" << tmp;
+            log_and_exit(64);
+        }
+        if (!boost::filesystem::is_empty(tmp, ec)) {
+            LOG(ERROR) << "working directory must be empty: working-directory=" << tmp;
+            log_and_exit(64);
+        }
     } else {
         tmp = make_work_dir_next_to(from_dir);
     }

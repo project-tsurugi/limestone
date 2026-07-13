@@ -600,6 +600,75 @@ TEST_F(offline_compaction_test, offline_compaction_ignores_malformed_epoch_optio
     EXPECT_EQ(kv_list[0].second, "va");
 }
 
+// --working-dir is consumed by the command (renamed onto dblogdir on a real run,
+// removed on a dry run), so pointing it at a non-empty directory would destroy the
+// user's data. Such a directory must be rejected up front, before any destructive
+// step, leaving the original log directory intact.
+TEST_F(offline_compaction_test, offline_compaction_rejects_non_empty_working_dir) {
+    gen_datastore();
+    datastore_->switch_epoch(1);
+    lc0_->begin_session();
+    lc0_->add_entry(1, "A", "va", {1, 0});
+    lc0_->end_session();
+    datastore_->switch_epoch(2);
+    datastore_->shutdown();
+    datastore_ = nullptr;
+
+    std::map<std::string, std::string> before = snapshot_tree(location);
+
+    // A non-empty working directory on the same filesystem as the log directory.
+    boost::filesystem::path working_dir =
+        boost::filesystem::path(test_root_) / "non_empty_wd";
+    boost::filesystem::create_directories(working_dir);
+    {
+        std::ofstream ofs((working_dir / "precious.txt").string());
+        ofs << "do not delete me";
+    }
+
+    std::string out;
+    std::string command = std::string(util_command) + " compaction --force --working_dir=" +
+        working_dir.string() + " " + std::string(location) + " 2>&1";
+    int rc = invoke(command, out);
+    EXPECT_NE(rc, 0) << "compaction should fail on a non-empty working directory";
+    EXPECT_NE(out.find("working directory must be empty"), std::string::npos)
+        << "tglogutil output:\n" << out;
+
+    // The rejection must leave both the log directory and the working directory intact.
+    EXPECT_EQ(snapshot_tree(location), before);
+    EXPECT_TRUE(boost::filesystem::exists(working_dir / "precious.txt"));
+
+    boost::filesystem::remove_all(working_dir);
+}
+
+// --working-dir must be an existing empty directory. A non-existent path is rejected
+// up front, leaving the original log directory intact.
+TEST_F(offline_compaction_test, offline_compaction_rejects_non_existent_working_dir) {
+    gen_datastore();
+    datastore_->switch_epoch(1);
+    lc0_->begin_session();
+    lc0_->add_entry(1, "A", "va", {1, 0});
+    lc0_->end_session();
+    datastore_->switch_epoch(2);
+    datastore_->shutdown();
+    datastore_ = nullptr;
+
+    std::map<std::string, std::string> before = snapshot_tree(location);
+
+    boost::filesystem::path working_dir =
+        boost::filesystem::path(test_root_) / "missing_wd";
+    ASSERT_FALSE(boost::filesystem::exists(working_dir));
+
+    std::string out;
+    std::string command = std::string(util_command) + " compaction --force --working_dir=" +
+        working_dir.string() + " " + std::string(location) + " 2>&1";
+    int rc = invoke(command, out);
+    EXPECT_NE(rc, 0) << "compaction should fail on a non-existent working directory";
+    EXPECT_NE(out.find("working directory must be an existing directory"), std::string::npos)
+        << "tglogutil output:\n" << out;
+
+    EXPECT_EQ(snapshot_tree(location), before);
+}
+
 // With --make_backup, the blob directory must be copied (not moved) so that both the
 // compacted log directory and the backup directory keep the blob data.
 TEST_F(offline_compaction_test, offline_compaction_with_backup_copies_blob_directory) {
