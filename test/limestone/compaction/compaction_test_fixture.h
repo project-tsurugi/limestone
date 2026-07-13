@@ -20,6 +20,10 @@
 #include <limestone/logging.h>
 #include <sys/stat.h>
 
+#include <array>
+#include <cstring>
+#include <sstream>
+
 #include <boost/filesystem.hpp>
 #include <thread>
 
@@ -93,6 +97,41 @@ public:
     static bool starts_with(std::string a, std::string b) { return a.substr(0, b.length()) == b; }
     static bool is_pwal(const boost::filesystem::path& p) { return starts_with(p.filename().string(), "pwal"); }
     static void ignore_entry(limestone::api::log_entry&) {}
+
+    // Path to the offline compaction utility (tglogutil), relative to the test
+    // executable's working directory. This matches the convention used by
+    // dblogutil_compaction_test.
+    static constexpr char const* util_command = "../src/tglogutil";
+
+    // Invoke an external command and capture its combined output.
+    static int invoke(const std::string& command, std::string& out) {
+        FILE* fp = popen(command.c_str(), "r");
+        if (fp == nullptr) {
+            out = std::string("popen failed: ") + strerror(errno);
+            return -1;
+        }
+        std::array<char, 4096> buf{};
+        std::ostringstream ss;
+        std::size_t rc = 0;
+        while ((rc = fread(buf.data(), 1, buf.size() - 1, fp)) > 0) {
+            ss.write(buf.data(), static_cast<std::streamsize>(rc));
+        }
+        out.assign(ss.str());
+        LOG(INFO) << "\n" << out;
+        return pclose(fp);
+    }
+
+    // Run offline compaction on the test location via the tglogutil binary.
+    // Extra command line options (e.g. "--make_backup") can be passed through.
+    void run_offline_compaction(std::string const& extra_options = "") {
+        std::string out;
+        std::string command = std::string(util_command) + " compaction --force " +
+            (extra_options.empty() ? "" : extra_options + " ") + std::string(location) + " 2>&1";
+        int rc = invoke(command, out);
+        ASSERT_EQ(rc, 0) << "invoke failed: " << out;
+        ASSERT_TRUE(out.find("compaction was successfully completed: ") != std::string::npos)
+            << "tglogutil output:\n" << out;
+    }
 
 protected:
     std::unique_ptr<limestone::api::datastore_test> datastore_{};

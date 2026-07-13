@@ -181,6 +181,30 @@ boost::filesystem::path make_backup_dir_next_to(const boost::filesystem::path& t
     return make_tmp_dir_next_to(target_dir, ".backup_XXXXXX");
 }
 
+/**
+ * @brief tells whether the log directory holds any pwal file to compact.
+ *
+ * A directory without any pwal file has nothing to compact. Online compaction returns early
+ * in that case, and offline compaction must do the same, so that an empty compacted file is
+ * never created and never registered in the catalog. Note that the compacted file itself is
+ * a pwal file, so a directory holding only a compacted file is still compacted: the compacted
+ * file is an input of the compaction and must be carried over into the rebuilt directory.
+ * @param dir the log directory
+ * @return true if dir holds at least one pwal file
+ */
+bool has_pwal_file(boost::filesystem::path const& dir) {
+    boost::system::error_code ec;
+    for (boost::filesystem::directory_iterator it(dir, ec), end; it != end && !ec; it.increment(ec)) {
+        if (dblog_scan::is_wal(it->path())) {
+            return true;
+        }
+    }
+    if (ec) {
+        LOG_AND_THROW_IO_EXCEPTION("failed to scan log directory: " + dir.string(), ec);
+    }
+    return false;
+}
+
 // Carry over the existing compaction catalog (and its backup) from from_dir into the
 // work directory tmp, then register the freshly produced compacted file. tmp will
 // replace from_dir, so carrying over the catalog preserves the high-water marks
@@ -189,8 +213,11 @@ boost::filesystem::path make_backup_dir_next_to(const boost::filesystem::path& t
 // blobs still referenced by live entries) never lowers it and blob IDs are never
 // reused. If from_dir has no catalog (a directory that was never compacted), the empty
 // catalog created by setup_initial_logdir(tmp) is used instead.
+// compacted_file_created tells whether a compacted file was produced: when there was
+// nothing to compact, none exists and none must be registered.
 void carry_over_and_update_compaction_catalog(boost::filesystem::path const& from_dir, boost::filesystem::path const& tmp,
-                                              epoch_id_type ld_epoch, blob_id_type max_blob_id) {
+                                              epoch_id_type ld_epoch, blob_id_type max_blob_id,
+                                              bool compacted_file_created) {
     auto copy_catalog_file = [&](const std::string& filename) {
         boost::filesystem::path src = from_dir / filename;
         boost::system::error_code ec;
@@ -227,8 +254,11 @@ void carry_over_and_update_compaction_catalog(boost::filesystem::path const& fro
                 " avoid losing the blob-id high-water mark (cause: " + ex.what() + ")");
         }
     }();
-    compacted_file_info compacted_file{compaction_catalog::get_compacted_filename(), 1};
-    catalog.update_catalog_file(ld_epoch, max_blob_id, {compacted_file}, {});
+    std::set<compacted_file_info> compacted_files{};
+    if (compacted_file_created) {
+        compacted_files.emplace(compaction_catalog::get_compacted_filename(), 1);
+    }
+    catalog.update_catalog_file(ld_epoch, max_blob_id, compacted_files, {});
 }
 
 /**
@@ -367,9 +397,18 @@ void compaction(dblog_scan &ds) {
     // (see the offline compaction blob-loss issue).
     carry_over_manifest_file(from_dir, tmp);
 
-    VLOG_LP(log_info) << "making compact pwal file to " << tmp;
-    compaction_options options{from_dir, tmp, FLAGS_thread_num};
-    blob_id_type max_blob_id = create_compact_pwal_and_get_max_blob_id(options);
+    // Nothing to compact when the log directory holds no pwal file: producing an (empty)
+    // compacted file and registering it in the catalog would only add a file that carries no
+    // data. Online compaction skips the compaction in this case as well.
+    bool const compacted_file_created = has_pwal_file(from_dir);
+    blob_id_type max_blob_id{};
+    if (compacted_file_created) {
+        VLOG_LP(log_info) << "making compact pwal file to " << tmp;
+        compaction_options options{from_dir, tmp, FLAGS_thread_num};
+        max_blob_id = create_compact_pwal_and_get_max_blob_id(options);
+    } else {
+        VLOG_LP(log_info) << "no pwal file to compact in " << from_dir;
+    }
 
     // epoch file
     VLOG_LP(log_info) << "making compact epoch file to " << tmp;
@@ -393,7 +432,7 @@ void compaction(dblog_scan &ds) {
     // Without this, a subsequent startup treats the directory as if no compaction
     // had been performed, and remove entries are dropped from the snapshot,
     // resurrecting deleted records (see tsurugi-issues #1498).
-    carry_over_and_update_compaction_catalog(from_dir, tmp, ld_epoch, max_blob_id);
+    carry_over_and_update_compaction_catalog(from_dir, tmp, ld_epoch, max_blob_id, compacted_file_created);
 
     if (FLAGS_dry_run) {
         std::cout << "compaction will be successfully completed (dry-run mode)" << std::endl;
