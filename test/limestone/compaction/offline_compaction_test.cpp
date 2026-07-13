@@ -669,6 +669,48 @@ TEST_F(offline_compaction_test, offline_compaction_rejects_non_existent_working_
     EXPECT_EQ(snapshot_tree(location), before);
 }
 
+// --working-dir must not be a symlink. A symlink to an empty directory would pass the
+// is_directory()/is_empty() checks, but a dry run would remove only the link (leaking
+// the created contents) and a real run would rename the link onto dblogdir, leaving it
+// a symlink. Such a working directory must be rejected up front, before any
+// destructive step, leaving the log directory and the link target intact.
+TEST_F(offline_compaction_test, offline_compaction_rejects_symlink_working_dir) {
+    gen_datastore();
+    datastore_->switch_epoch(1);
+    lc0_->begin_session();
+    lc0_->add_entry(1, "A", "va", {1, 0});
+    lc0_->end_session();
+    datastore_->switch_epoch(2);
+    datastore_->shutdown();
+    datastore_ = nullptr;
+
+    std::map<std::string, std::string> before = snapshot_tree(location);
+
+    // An empty target directory and a symlink pointing at it, both on the same
+    // filesystem as the log directory.
+    boost::filesystem::path target_dir =
+        boost::filesystem::path(test_root_) / "symlink_target_wd";
+    boost::filesystem::create_directories(target_dir);
+    boost::filesystem::path working_dir =
+        boost::filesystem::path(test_root_) / "symlink_wd";
+    boost::filesystem::create_directory_symlink(target_dir, working_dir);
+
+    std::string out;
+    std::string command = std::string(util_command) + " compaction --force --working_dir=" +
+        working_dir.string() + " " + std::string(location) + " 2>&1";
+    int rc = invoke(command, out);
+    EXPECT_NE(rc, 0) << "compaction should fail on a symlink working directory";
+    EXPECT_NE(out.find("working directory must not be a symlink"), std::string::npos)
+        << "tglogutil output:\n" << out;
+
+    // The rejection must leave the log directory intact and must not touch the target.
+    EXPECT_EQ(snapshot_tree(location), before);
+    EXPECT_TRUE(boost::filesystem::is_empty(target_dir));
+
+    boost::filesystem::remove(working_dir);
+    boost::filesystem::remove_all(target_dir);
+}
+
 // With --make_backup, the blob directory must be copied (not moved) so that both the
 // compacted log directory and the backup directory keep the blob data.
 TEST_F(offline_compaction_test, offline_compaction_with_backup_copies_blob_directory) {

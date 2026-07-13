@@ -372,8 +372,20 @@ void compaction(dblog_scan &ds) {
         // The working directory is consumed by the command: on a real run it is
         // renamed onto from_dir, and on a dry run it is removed. Require an existing
         // empty directory so that a mistaken --working-dir never destroys the user's
-        // files. A non-existent path or a non-empty directory is rejected before any
-        // destructive step.
+        // files. A symlink, a non-existent path, or a non-empty directory is rejected
+        // before any destructive step.
+        {
+            auto p = tmp;  // make copy
+            remove_trailing_dir_separators(p);
+            // Reject a symlink: is_directory()/is_empty() below would follow it, and a
+            // dry run would then delete only the link (leaking the created contents),
+            // while a real run would rename the link onto from_dir, leaving dblogdir a
+            // symlink, which is disallowed for the input directory too.
+            if (boost::filesystem::is_symlink(p)) {
+                LOG(ERROR) << "working directory must not be a symlink: working-directory=" << tmp;
+                log_and_exit(64);
+            }
+        }
         boost::system::error_code ec;
         if (!boost::filesystem::is_directory(tmp, ec)) {
             LOG(ERROR) << "working directory must be an existing directory: "
