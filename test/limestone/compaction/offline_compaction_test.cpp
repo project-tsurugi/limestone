@@ -14,9 +14,6 @@
  * limitations under the License.
  */
 
-#include <stdlib.h>  // NOLINT(*-deprecated-headers): <cstdlib> does not provide ::mkdtemp
-#include <sys/stat.h>
-
 #include <array>
 #include <cerrno>
 #include <cstdio>
@@ -145,64 +142,6 @@ public:
         for (boost::filesystem::path const& dir : find_sibling_dirs(".work_")) {
             boost::filesystem::remove_all(dir);
         }
-    }
-
-    // Shared driver for the cross-filesystem working-directory tests. Prepares a log
-    // directory with blob data, then runs offline compaction with --working_dir on a
-    // different filesystem (tmpfs under /dev/shm), optionally with --make_backup.
-    // Compaction must be rejected up front (before any destructive step) and must leave the
-    // original log directory fully intact. Skips when /dev/shm is unavailable or happens to
-    // be on the same filesystem as the location.
-    void run_cross_filesystem_working_dir_case(bool make_backup) {
-        if (!boost::filesystem::exists("/dev/shm")) {
-            GTEST_SKIP() << "/dev/shm is not available on this system";
-        }
-
-        gen_datastore();
-        datastore_->switch_epoch(1);
-        lc0_->begin_session();
-        lc0_->add_entry(1, "blob_key", "blob_value", {1, 0}, {1001});
-        lc0_->end_session();
-        create_dummy_blob_files(1001);
-        datastore_->set_next_blob_id(1002);
-        datastore_->switch_epoch(2);
-        datastore_->shutdown();
-        datastore_ = nullptr;
-
-        std::map<std::string, std::string> before = snapshot_tree(location);
-
-        // Prepare a working directory on another filesystem (tmpfs).
-        std::string wd_template = "/dev/shm/offline_compaction_wd_XXXXXX";
-        ASSERT_NE(::mkdtemp(wd_template.data()), nullptr) << strerror(errno);
-        boost::filesystem::path working_dir{wd_template};
-
-        // Skip when the test location happens to live on the same filesystem as /dev/shm
-        // (e.g. /tmp mounted on the same tmpfs); the cross-filesystem path is unreachable.
-        struct stat st_location {};
-        struct stat st_working_dir {};
-        ASSERT_EQ(::stat(location, &st_location), 0) << strerror(errno);
-        ASSERT_EQ(::stat(working_dir.c_str(), &st_working_dir), 0) << strerror(errno);
-        if (st_location.st_dev == st_working_dir.st_dev) {
-            boost::filesystem::remove_all(working_dir);
-            GTEST_SKIP() << "test location and /dev/shm are on the same filesystem";
-        }
-
-        std::string out;
-        std::string command = std::string(util_command) + " compaction --force" +
-            (make_backup ? " --make_backup" : "") + " --working_dir=" +
-            working_dir.string() + " " + std::string(location) + " 2>&1";
-        int rc = invoke(command, out);
-        EXPECT_NE(rc, 0) << "compaction should fail on a cross-filesystem working directory";
-        EXPECT_NE(out.find("working directory must be on the same filesystem as the dblogdir"),
-                  std::string::npos)
-            << "tglogutil output:\n" << out;
-
-        // The upfront rejection must leave the original log directory fully intact, and no
-        // backup directory must have been created.
-        EXPECT_EQ(snapshot_tree(location), before);
-        EXPECT_TRUE(find_backup_dirs().empty());
-
-        boost::filesystem::remove_all(working_dir);
     }
 
     // Collect the set of top-level entry names (files and directories) directly under dir.
@@ -600,117 +539,6 @@ TEST_F(offline_compaction_test, offline_compaction_ignores_malformed_epoch_optio
     EXPECT_EQ(kv_list[0].second, "va");
 }
 
-// --working-dir is consumed by the command (renamed onto dblogdir on a real run,
-// removed on a dry run), so pointing it at a non-empty directory would destroy the
-// user's data. Such a directory must be rejected up front, before any destructive
-// step, leaving the original log directory intact.
-TEST_F(offline_compaction_test, offline_compaction_rejects_non_empty_working_dir) {
-    gen_datastore();
-    datastore_->switch_epoch(1);
-    lc0_->begin_session();
-    lc0_->add_entry(1, "A", "va", {1, 0});
-    lc0_->end_session();
-    datastore_->switch_epoch(2);
-    datastore_->shutdown();
-    datastore_ = nullptr;
-
-    std::map<std::string, std::string> before = snapshot_tree(location);
-
-    // A non-empty working directory on the same filesystem as the log directory.
-    boost::filesystem::path working_dir =
-        boost::filesystem::path(test_root_) / "non_empty_wd";
-    boost::filesystem::create_directories(working_dir);
-    {
-        std::ofstream ofs((working_dir / "precious.txt").string());
-        ofs << "do not delete me";
-    }
-
-    std::string out;
-    std::string command = std::string(util_command) + " compaction --force --working_dir=" +
-        working_dir.string() + " " + std::string(location) + " 2>&1";
-    int rc = invoke(command, out);
-    EXPECT_NE(rc, 0) << "compaction should fail on a non-empty working directory";
-    EXPECT_NE(out.find("working directory must be empty"), std::string::npos)
-        << "tglogutil output:\n" << out;
-
-    // The rejection must leave both the log directory and the working directory intact.
-    EXPECT_EQ(snapshot_tree(location), before);
-    EXPECT_TRUE(boost::filesystem::exists(working_dir / "precious.txt"));
-
-    boost::filesystem::remove_all(working_dir);
-}
-
-// --working-dir must be an existing empty directory. A non-existent path is rejected
-// up front, leaving the original log directory intact.
-TEST_F(offline_compaction_test, offline_compaction_rejects_non_existent_working_dir) {
-    gen_datastore();
-    datastore_->switch_epoch(1);
-    lc0_->begin_session();
-    lc0_->add_entry(1, "A", "va", {1, 0});
-    lc0_->end_session();
-    datastore_->switch_epoch(2);
-    datastore_->shutdown();
-    datastore_ = nullptr;
-
-    std::map<std::string, std::string> before = snapshot_tree(location);
-
-    boost::filesystem::path working_dir =
-        boost::filesystem::path(test_root_) / "missing_wd";
-    ASSERT_FALSE(boost::filesystem::exists(working_dir));
-
-    std::string out;
-    std::string command = std::string(util_command) + " compaction --force --working_dir=" +
-        working_dir.string() + " " + std::string(location) + " 2>&1";
-    int rc = invoke(command, out);
-    EXPECT_NE(rc, 0) << "compaction should fail on a non-existent working directory";
-    EXPECT_NE(out.find("working directory must be an existing directory"), std::string::npos)
-        << "tglogutil output:\n" << out;
-
-    EXPECT_EQ(snapshot_tree(location), before);
-}
-
-// --working-dir must not be a symlink. A symlink to an empty directory would pass the
-// is_directory()/is_empty() checks, but a dry run would remove only the link (leaking
-// the created contents) and a real run would rename the link onto dblogdir, leaving it
-// a symlink. Such a working directory must be rejected up front, before any
-// destructive step, leaving the log directory and the link target intact.
-TEST_F(offline_compaction_test, offline_compaction_rejects_symlink_working_dir) {
-    gen_datastore();
-    datastore_->switch_epoch(1);
-    lc0_->begin_session();
-    lc0_->add_entry(1, "A", "va", {1, 0});
-    lc0_->end_session();
-    datastore_->switch_epoch(2);
-    datastore_->shutdown();
-    datastore_ = nullptr;
-
-    std::map<std::string, std::string> before = snapshot_tree(location);
-
-    // An empty target directory and a symlink pointing at it, both on the same
-    // filesystem as the log directory.
-    boost::filesystem::path target_dir =
-        boost::filesystem::path(test_root_) / "symlink_target_wd";
-    boost::filesystem::create_directories(target_dir);
-    boost::filesystem::path working_dir =
-        boost::filesystem::path(test_root_) / "symlink_wd";
-    boost::filesystem::create_directory_symlink(target_dir, working_dir);
-
-    std::string out;
-    std::string command = std::string(util_command) + " compaction --force --working_dir=" +
-        working_dir.string() + " " + std::string(location) + " 2>&1";
-    int rc = invoke(command, out);
-    EXPECT_NE(rc, 0) << "compaction should fail on a symlink working directory";
-    EXPECT_NE(out.find("working directory must not be a symlink"), std::string::npos)
-        << "tglogutil output:\n" << out;
-
-    // The rejection must leave the log directory intact and must not touch the target.
-    EXPECT_EQ(snapshot_tree(location), before);
-    EXPECT_TRUE(boost::filesystem::is_empty(target_dir));
-
-    boost::filesystem::remove(working_dir);
-    boost::filesystem::remove_all(target_dir);
-}
-
 // With --make_backup, the blob directory must be copied (not moved) so that both the
 // compacted log directory and the backup directory keep the blob data.
 TEST_F(offline_compaction_test, offline_compaction_with_backup_copies_blob_directory) {
@@ -839,18 +667,6 @@ TEST_F(offline_compaction_test, offline_compaction_backup_matches_pre_compaction
     EXPECT_EQ(backup, before);
 
     remove_backup_dirs();
-}
-
-// A cross-filesystem --working_dir must be rejected up front (default / move mode).
-TEST_F(offline_compaction_test, offline_compaction_fails_when_working_dir_is_on_different_filesystem) {
-    run_cross_filesystem_working_dir_case(/*make_backup=*/false);
-}
-
-// A cross-filesystem --working_dir must be rejected up front in --make_backup mode too.
-// Otherwise from_dir would be renamed away to the backup and the final rename(tmp, from_dir)
-// would fail, leaving no from_dir restored.
-TEST_F(offline_compaction_test, offline_compaction_with_backup_fails_when_working_dir_is_on_different_filesystem) {
-    run_cross_filesystem_working_dir_case(/*make_backup=*/true);
 }
 
 // When the blob directory contains a broken entry that cannot be copied, the backup-mode

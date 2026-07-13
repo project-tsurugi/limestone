@@ -24,10 +24,6 @@ Options:
     * Exception: the startup preparation that `tglogutil` performs is applied even in dry-run mode. Specifically, if `dblogdir` uses an older supported format its manifest file is migrated to the current format, and if the compaction catalog file is missing it is created (this can happen even for a current-format `dblogdir`). Everything else in `dblogdir` is left unchanged.
 * `--thread-num=<number>`
     * Number (default `1`) of concurrent processing thread of reading log files
-* `--working-dir=</path/to/working-dir>`
-    * Directory used as the working directory itself (not a parent under which one is created). By default a uniquely named directory is created next to `dblogdir`.
-    * Must be an existing empty directory dedicated to this command, and must not be a symlink. Its contents are consumed by the command: on a real run the directory is renamed onto `dblogdir` at the end, and on a dry run it is removed on completion. If the path does not exist, is not empty, or is a symlink, the command stops before any destructive operation and exits with status 64. Do not point it at a directory whose contents you want to keep.
-    * Must be on the same filesystem as `dblogdir`. If it is on a different filesystem, the command stops before any destructive operation and exits with status 64.
 * `--verbose=<bool>`
     * Verbose mode (default `false`)
 * `--make-backup=<bool>`
@@ -49,8 +45,6 @@ Options:
         * Specified a directory that is not the transaction log directory
         * Specified a transaction log directory of unsupported format version
         * `epoch` file does not exist
-    * `working-dir` does not exist, is not an empty directory, or is a symlink
-    * `working-dir` is on a different filesystem than `dblogdir`
     * files in `dblogdir` are damaged
 
 ## PRECAUTIONS FOR USE
