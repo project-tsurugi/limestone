@@ -536,21 +536,25 @@ TEST_F(offline_compaction_test, offline_compaction_dry_run_leaves_log_directory_
 }
 
 // The --epoch option is ignored by the compaction subcommand: it never restricts
-// which entries are kept. Even an --epoch far below the durable epoch must not drop
-// any durable data. If --epoch were honored as an upper limit on valid epochs,
-// entries at higher epochs would be discarded and the records would be lost.
+// which entries are kept. Even an --epoch below the durable epoch must not drop
+// any durable data. Record "B" is written in epoch 2, above the specified
+// --epoch=1, so an implementation that honored --epoch as an upper limit on valid
+// epochs would discard it; the test fails against such an implementation.
 TEST_F(offline_compaction_test, offline_compaction_ignores_epoch_option) {
     gen_datastore();
     datastore_->switch_epoch(1);
     lc0_->begin_session();
     lc0_->add_entry(1, "A", "va", {1, 0});
-    lc0_->add_entry(1, "B", "vb", {1, 1});
     lc0_->end_session();
     datastore_->switch_epoch(2);
+    lc0_->begin_session();
+    lc0_->add_entry(1, "B", "vb", {2, 0});
+    lc0_->end_session();
+    datastore_->switch_epoch(3);
     datastore_->shutdown();
     datastore_ = nullptr;
 
-    // Compact with an --epoch well below the durable epoch. It must be ignored, so
+    // Compact with an --epoch below the epoch of record "B". It must be ignored, so
     // both records survive.
     run_offline_compaction("--epoch=1");
 
@@ -569,6 +573,31 @@ TEST_F(offline_compaction_test, offline_compaction_ignores_epoch_option) {
     ASSERT_EQ(kv.count("B"), 1u);
     EXPECT_EQ(kv["A"], "va");
     EXPECT_EQ(kv["B"], "vb");
+}
+
+// Options belonging to other subcommands are ignored without even being validated.
+// A malformed --epoch value must not make the compaction subcommand fail; only
+// inspect and repair parse the option.
+TEST_F(offline_compaction_test, offline_compaction_ignores_malformed_epoch_option) {
+    gen_datastore();
+    datastore_->switch_epoch(1);
+    lc0_->begin_session();
+    lc0_->add_entry(1, "A", "va", {1, 0});
+    lc0_->end_session();
+    datastore_->switch_epoch(2);
+    datastore_->shutdown();
+    datastore_ = nullptr;
+
+    // run_offline_compaction() asserts that the command exits with status 0; a
+    // malformed --epoch must not be rejected here.
+    run_offline_compaction("--epoch=invalid");
+
+    gen_datastore();
+    std::vector<std::pair<std::string, std::string>> kv_list =
+        restart_datastore_and_read_snapshot();
+    ASSERT_EQ(kv_list.size(), 1u);
+    EXPECT_EQ(kv_list[0].first, "A");
+    EXPECT_EQ(kv_list[0].second, "va");
 }
 
 // With --make_backup, the blob directory must be copied (not moved) so that both the

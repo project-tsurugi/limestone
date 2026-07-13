@@ -471,8 +471,12 @@ int main(char *dir, subcommand mode) {  // NOLINT
             FLAGS_v = log_debug;
         }
     }
+    // --epoch is used only by the inspect and repair subcommands. For other
+    // subcommands it is ignored without even being validated, so that options
+    // belonging to other subcommands never affect the current one.
+    bool const uses_epoch = (mode == cmd_inspect || mode == cmd_repair);
     std::optional<epoch_id_type> opt_epoch;
-    if (FLAGS_epoch.empty()) {
+    if (!uses_epoch || FLAGS_epoch.empty()) {
         opt_epoch = std::nullopt;
     } else {
         std::size_t idx{};

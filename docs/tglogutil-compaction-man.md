@@ -21,6 +21,7 @@ Options:
 * `--dry-run=<bool>`
     * If `true`, run in dry-run mode: perform the compaction against a temporary directory to verify that it would succeed, but leave `dblogdir` unchanged (default `false`)
     * Even in dry-run mode the temporary directory is populated with the compacted pwal, so it requires free space comparable to a real run except for blob data, which is not copied in dry-run mode; the temporary directory is removed on completion.
+    * Exception: if `dblogdir` uses an older supported format, the format migration that `tglogutil` performs on startup is applied even in dry-run mode — the manifest file is updated and a missing compaction catalog file is created. Everything else in `dblogdir` is left unchanged.
 * `--thread-num=<number>`
     * Number (default `1`) of concurrent processing thread of reading log files
 * `--working-dir=</path/to/working-dir>`
