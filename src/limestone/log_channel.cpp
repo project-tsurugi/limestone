@@ -25,6 +25,7 @@
 #include <sstream>
 #include <thread>
 
+#include "epoch_trace.h"
 #include "internal.h"
 #include "datastore_impl.h"
 #include "limestone_exception_helper.h"
@@ -66,6 +67,9 @@ void log_channel::begin_session() {
             current_epoch_id_.store(envelope_.epoch_id_switched_.load());
             std::atomic_thread_fence(std::memory_order_acq_rel);
         } while (current_epoch_id_.load() != envelope_.epoch_id_switched_.load());
+        limestone::internal::epoch_trace("session_begin", file_.string(), current_epoch_id_.load(),
+                                         envelope_.epoch_id_switched_.load(),
+                                         envelope_.epoch_id_informed_.load());
         TRACE_START << "current_epoch_id_=" << current_epoch_id_.load();
 
         auto log_file = file_path();
@@ -103,6 +107,9 @@ void log_channel::finalize_session_file() {
     finished_epoch_id_.store(current_epoch_id_.load());
     envelope_.update_min_epoch_id();
     envelope_.on_end_session_current_epoch_id_store(); // for testing
+    limestone::internal::epoch_trace("session_end", file_.string(), current_epoch_id_.load(),
+                                     envelope_.epoch_id_switched_.load(),
+                                     envelope_.epoch_id_informed_.load());
     current_epoch_id_.store(UINT64_MAX);
 
     if (fclose(strm_) != 0) {  // NOLINT(*-owning-memory)

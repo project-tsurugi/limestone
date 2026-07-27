@@ -36,6 +36,7 @@
 #include "limestone_exception_helper.h"
 
 #include <limestone/api/datastore.h>
+#include "epoch_trace.h"
 #include "internal.h"
 #include "log_entry.h"
 #include "online_compaction.h"
@@ -482,10 +483,14 @@ void datastore::switch_epoch(epoch_id_type new_epoch_id) {
         }
 
         on_switch_epoch_epoch_id_switched_store();    // for testing
+        limestone::internal::epoch_trace("switch_begin", {}, neid,
+                                         epoch_id_switched_.load(), epoch_id_informed_.load());
         epoch_id_switched_.store(neid);
         if (state_ != state::not_ready) {
             update_min_epoch_id(true);
         }
+        limestone::internal::epoch_trace("switch_end", {}, neid,
+                                         epoch_id_switched_.load(), epoch_id_informed_.load());
     } catch (...) {
         TRACE_FINE_ABORT;
         HANDLE_EXCEPTION_AND_ABORT();
