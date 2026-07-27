@@ -543,8 +543,12 @@ void datastore::update_min_epoch_id(bool from_switch_epoch) {  // NOLINT(readabi
             if (to_be_epoch < epoch_id_to_be_recorded_.load()) {
                 break;
             }           
+            limestone::internal::epoch_trace("gc_record_begin", {}, to_be_epoch,
+                                             epoch_id_switched_.load(), epoch_id_informed_.load());
             write_epoch_callback_(static_cast<epoch_id_type>(to_be_epoch));
             epoch_id_record_finished_.store(to_be_epoch);
+            limestone::internal::epoch_trace("gc_record_end", {}, to_be_epoch,
+                                             epoch_id_switched_.load(), epoch_id_informed_.load());
             TRACE_FINE << "epoch_id_record_finished_ updated to " << to_be_epoch;
             break;
         }
@@ -579,7 +583,13 @@ void datastore::update_min_epoch_id(bool from_switch_epoch) {  // NOLINT(readabi
                 }
                 if (persistent_callback_) {
                     TRACE_FINE <<  "start calling persistent callback to " << to_be_epoch;
+                    limestone::internal::epoch_trace("gc_notify_begin", {}, to_be_epoch,
+                                                     epoch_id_switched_.load(),
+                                                     epoch_id_informed_.load());
                     persistent_callback_(to_be_epoch);
+                    limestone::internal::epoch_trace("gc_notify_end", {}, to_be_epoch,
+                                                     epoch_id_switched_.load(),
+                                                     epoch_id_informed_.load());
                     TRACE_FINE <<  "end calling persistent callback to " << to_be_epoch;
                 }
             }

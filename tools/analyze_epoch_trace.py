@@ -33,6 +33,15 @@ def main(paths):
     session_span_hist = Counter()  # (switched at end - session epoch) -> occurrences
     session_count = 0
     examples = []
+    # group-commit view: at each gc_record_end / gc_notify_end for epoch X,
+    # active sessions (all have epoch > X) are the ones running ahead of the
+    # group commit that just completed
+    gc_stats = {
+        "gc_record_end": {"count": 0, "with_active": 0, "max_precede": 0,
+                          "active_hist": Counter(), "examples": []},
+        "gc_notify_end": {"count": 0, "with_active": 0, "max_precede": 0,
+                          "active_hist": Counter(), "examples": []},
+    }
 
     for path in paths:
         with open(path, "r", errors="replace") as f:
@@ -64,7 +73,19 @@ def main(paths):
                             examples.append((epoch, informed, dict(spanning)))
                     lag = (epoch - 1) - informed
                     max_informed_lag = max(max_informed_lag, lag)
-                # switch_begin is not needed for the reconstruction
+                elif event in ("gc_record_end", "gc_notify_end"):
+                    st = gc_stats[event]
+                    st["count"] += 1
+                    ahead = {c: e for c, e in active.items() if e > epoch}
+                    st["active_hist"][len(ahead)] += 1
+                    if ahead:
+                        st["with_active"] += 1
+                        precede = max(ahead.values()) - epoch
+                        st["max_precede"] = max(st["max_precede"], precede)
+                        if len(st["examples"]) < 5:
+                            st["examples"].append((epoch, dict(ahead)))
+                # switch_begin / gc_record_begin / gc_notify_begin are not
+                # needed for the reconstruction
 
     print(f"switch_epoch completions          : {switch_count}")
     if switch_count > 0:
@@ -83,6 +104,21 @@ def main(paths):
         print("first spanning examples (switch epoch, informed, {channel: session epoch}):")
         for epoch, informed, spanning in examples:
             print(f"  switch={epoch} informed={informed} spanning={spanning}")
+
+    for event, label in (("gc_record_end", "group commit record (epoch file written)"),
+                         ("gc_notify_end", "group commit notify (persistent callback)")):
+        st = gc_stats[event]
+        print(f"{label}:")
+        print(f"  completions                     : {st['count']}")
+        if st["count"] > 0:
+            pct = 100.0 * st["with_active"] / st["count"]
+            print(f"  with sessions running ahead     : {st['with_active']} ({pct:.2f}%)")
+            print(f"  max precede (session - epoch)   : {st['max_precede']}")
+            print("  sessions-ahead histogram (count : occurrences):")
+            for n in sorted(st["active_hist"]):
+                print(f"    {n:6d} : {st['active_hist'][n]}")
+            for epoch, ahead in st["examples"]:
+                print(f"  example: committed={epoch} ahead={ahead}")
 
 
 if __name__ == "__main__":
