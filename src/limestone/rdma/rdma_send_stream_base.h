@@ -75,22 +75,18 @@ public:
      * @brief Acquire a writable frame buffer of at least @p min_capacity bytes.
      *
      * Blocks until the send ring can grant the slots, then returns a handle whose
-     * payload region the caller fills directly.  Implementations retry internally when
-     * a ring wrap would otherwise grant less than @p min_capacity, so callers never see
-     * an undersized frame.
+     * payload region the caller fills directly.
      *
-     * @param max_payload  Number of payload bytes the caller would write if it could.
+     * @param max_payload  Number of payload bytes the caller intends to write.
      * @param min_capacity Smallest capacity the caller can make progress with.  Must
-     *                     be at least 1 and at most @p max_payload.
-     * @return Acquired frame buffer, or nullptr when the ring could not grant the
-     *         slots (exhausted, timed out, or the stream is unusable).
+     *                     be at least 1, at most @p max_payload, and no larger than
+     *                     one send-ring slot's payload.
+     * @return Acquired frame buffer, or nullptr when the request is out of bounds or
+     *         the ring could not grant the slots.
      *
-     * @warning The granted capacity is only guaranteed to be at least @p min_capacity.
-     *          It may be smaller than @p max_payload (the transport caps a single RDMA
-     *          write, or the ring wrapped) and it may also be **larger**, because the
-     *          ring hands out whole slots and a small request rounds up.  Callers must
-     *          therefore write min(capacity(), what-they-actually-have) bytes, never
-     *          capacity() bytes on the assumption that it fits the request.
+     * @warning Only capacity() >= @p min_capacity is guaranteed; the granted capacity
+     *          may be smaller or larger than @p max_payload.  Callers must write
+     *          min(capacity(), bytes they actually have) bytes, never capacity() bytes.
      */
     [[nodiscard]] virtual std::unique_ptr<rdma_frame_buffer_base> acquire_frame_buffer(
         std::size_t max_payload,

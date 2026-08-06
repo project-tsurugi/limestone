@@ -15,23 +15,10 @@
  */
 #include <rdma/rdma_comm_send_stream.h>
 
-#include <thread>
-
 #include <logging_helper.h>
+#include <rdma/rdma_comm/rdma_comm_constants.h>
 
 namespace limestone::replication {
-
-namespace {
-
-/// @brief Bound on consecutive undersized-frame retries in acquire_frame_buffer().
-///
-/// A healthy ring resolves a wrap boundary in a single retry, because the next
-/// acquire starts from the ring head where a contiguous span is available. A higher
-/// cap tolerates transient contention while still failing instead of spinning forever
-/// on a ring that never yields a usable span.
-constexpr unsigned int max_undersized_retries = 16U;
-
-} // namespace
 
 rdma_comm_send_stream::rdma_comm_send_stream(
         std::unique_ptr<rdma::communication::rdma_send_stream> stream)
@@ -41,30 +28,24 @@ rdma_comm_send_stream::rdma_comm_send_stream(
 std::unique_ptr<rdma_frame_buffer_base> rdma_comm_send_stream::acquire_frame_buffer(
         std::size_t max_payload,
         std::size_t min_capacity) noexcept {
-    if (min_capacity == 0 || min_capacity > max_payload) {
+    if (min_capacity == 0 || min_capacity > max_payload || min_capacity > rdma_slot_payload_bytes) {
         LOG_LP(ERROR) << "invalid frame buffer request: min_capacity=" << min_capacity
-                      << " max_payload=" << max_payload;
+                      << " max_payload=" << max_payload
+                      << " rdma_slot_payload_bytes=" << rdma_slot_payload_bytes;
         return nullptr;
     }
-    for (unsigned int undersized_retries = 0; undersized_retries < max_undersized_retries;
-         ++undersized_retries) {
-        auto frame = stream_->acquire_frame_buffer(max_payload);
-        if (! frame.valid()) {
-            return nullptr;
-        }
-        if (frame.capacity >= min_capacity) {
-            return std::make_unique<rdma_comm_frame_buffer>(std::move(frame));
-        }
-        // The ring wrapped and granted a span too short to make progress with.
-        // Dropping the frame here (RAII) returns its slots, so the next acquire
-        // starts from the ring head where a contiguous span is available. Yield so
-        // the drain thread can advance rather than spinning on the CPU.
-        std::this_thread::yield();
+    auto frame = stream_->acquire_frame_buffer(max_payload);
+    if (! frame.valid()) {
+        return nullptr;
     }
-    LOG_LP(ERROR) << "repeatedly acquired undersized frame buffer: min_capacity=" << min_capacity
-                  << " max_payload=" << max_payload
-                  << " retries=" << max_undersized_retries;
-    return nullptr;
+    if (frame.capacity < min_capacity) {
+        // A valid frame spans at least one slot and min_capacity is capped to one
+        // slot's payload, so this indicates a broken transport contract.
+        LOG_LP(ERROR) << "acquired frame smaller than min_capacity: capacity=" << frame.capacity
+                      << " min_capacity=" << min_capacity;
+        return nullptr;
+    }
+    return std::make_unique<rdma_comm_frame_buffer>(std::move(frame));
 }
 
 rdma_send_stream_base::send_result rdma_comm_send_stream::submit_frame_buffer(

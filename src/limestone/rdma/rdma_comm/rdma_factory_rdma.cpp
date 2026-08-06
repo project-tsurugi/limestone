@@ -14,6 +14,7 @@
  * limitations under the License.
  */
 #include <rdma/rdma_factory.h>
+#include <rdma/rdma_comm/rdma_comm_constants.h>
 #include <rdma/rdma_comm_receiver.h>
 #include <rdma/rdma_comm_sender.h>
 
@@ -28,9 +29,8 @@ rdma::communication::rdma_config make_sender_config(
     rdma::communication::rdma_buffer_kind kind) {
     rdma::communication::rdma_config config{};
     auto capacity = static_cast<std::size_t>(slot_count);
-    constexpr std::size_t chunk_size = 4096U;
-    config.send_buffer.region_size_bytes = capacity * chunk_size;
-    config.send_buffer.chunk_size_bytes = chunk_size;
+    config.send_buffer.region_size_bytes = capacity * rdma_slot_size_bytes;
+    config.send_buffer.chunk_size_bytes = rdma_slot_size_bytes;
     config.send_buffer.ring_capacity = capacity;
     config.send_buffer.kind = kind;
     config.remote_buffer = config.send_buffer;
@@ -44,9 +44,8 @@ rdma::communication::rdma_config make_receiver_config(
     rdma::communication::rdma_buffer_kind kind) {
     rdma::communication::rdma_config config{};
     auto capacity = static_cast<std::size_t>(slot_count);
-    constexpr std::size_t chunk_size = 4096U;
-    config.send_buffer.region_size_bytes = capacity * chunk_size;
-    config.send_buffer.chunk_size_bytes = chunk_size;
+    config.send_buffer.region_size_bytes = capacity * rdma_slot_size_bytes;
+    config.send_buffer.chunk_size_bytes = rdma_slot_size_bytes;
     config.send_buffer.ring_capacity = capacity;
     config.send_buffer.kind = kind;
     config.remote_buffer = config.send_buffer;
