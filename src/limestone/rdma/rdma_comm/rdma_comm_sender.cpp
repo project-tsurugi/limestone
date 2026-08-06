@@ -21,7 +21,7 @@
 namespace limestone::replication {
 
 rdma_comm_sender::rdma_comm_sender(rdma::communication::rdma_config config)
-    : sender_(std::move(config))
+    : sender_(config)
 {}
 
 rdma_sender_base::operation_result rdma_comm_sender::initialize(
