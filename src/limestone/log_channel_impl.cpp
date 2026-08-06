@@ -1,8 +1,8 @@
 #include "log_channel_impl.h"
+#include <cerrno>
 #include <chrono>
+#include <cstddef>
 #include <string>
-#include <thread>
-#include <vector>
 
 #include "replication/replica_connector.h"
 #include "replication/message_log_entries.h"
@@ -11,6 +11,7 @@
 #include "rdma/rdma_replication_message_io.h"
 #include "limestone/api/datastore.h"
 #include "limestone/logging.h"
+#include "limestone_exception_helper.h"
 #include "logging_helper.h"
 
 namespace limestone::api {
@@ -165,25 +166,15 @@ void log_channel_impl::flush_rdma_serializer_io_locked() {
 }
 
 void log_channel_impl::send_rdma_bytes_locked(std::string const& payload) {
-    std::vector<std::uint8_t> bytes(payload.begin(), payload.end());
-    std::size_t offset = 0;
-    std::size_t consecutive_failures = 0;
-    while (offset < bytes.size()) {
-        auto result = rdma_send_stream_->send_bytes(bytes, offset, bytes.size() - offset);
-        if (! result.success) {
-            // send_bytes() is non-blocking and can fail with zero bytes written when the
-            // RDMA send buffer is temporarily full. Keep retrying because buffer space is
-            // expected to be released by ACK handling or by flush progress in another thread.
-            // This layer has no safe recovery action for a persistent send failure; warning
-            // logs let operators detect a stuck channel.
-            ++consecutive_failures;
-            LOG_LP(WARNING) << "RDMA send_bytes failed (consecutive failures="
-                            << consecutive_failures << "): " << result.error_message;
-            std::this_thread::sleep_for(std::chrono::seconds{1});
-        } else {
-            consecutive_failures = 0;
-        }
-        offset += result.bytes_written;
+    // No retry loop here: acquire_frame_buffer() already blocks while the send ring is full,
+    // so that is where backpressure is absorbed. A failure means the ring never drained
+    // within the transport's timeout, i.e. the replica is gone -- and this layer has no
+    // recovery action for that. Throwing lands in log_channel's catch(...) and aborts, the
+    // same outcome flush_rdma_stream() produces via LOG_LP(FATAL).
+    auto result = rdma_send_stream_->send_all_bytes(payload);
+    if (! result.success) {
+        LOG_AND_THROW_IO_EXCEPTION(
+            "failed to send bytes over RDMA: " + result.error_message, EIO);
     }
 }
 

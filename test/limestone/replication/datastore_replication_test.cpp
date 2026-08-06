@@ -1,7 +1,10 @@
+#include <algorithm>
 #include <chrono>
+#include <cstddef>
 #include <cstdlib>
 #include <fstream>
 #include <iomanip>
+#include <memory>
 #include <sstream>
 #include <string>
 #include <vector>
@@ -20,6 +23,7 @@
 #include "noop_rdma_mocks.h"
 #include "replication/replica_server.h"
 #include "replication_test_helper.h"
+#include "test_rdma_frame_buffer.h"
 #include "test_root.h"
 #include "rdma/rdma_send_stream_base.h"
 
@@ -45,22 +49,21 @@ inline std::ostream& operator<<(std::ostream& os, rdma_param const& param) {
 
 class fake_rdma_send_stream : public limestone::replication::rdma_send_stream_base {
 public:
-    [[nodiscard]] send_result send_bytes(std::vector<std::uint8_t> const&, std::size_t, std::size_t length) noexcept override {
-        return { true, "", length };
+    [[nodiscard]] std::unique_ptr<limestone::replication::rdma_frame_buffer_base> acquire_frame_buffer(
+            std::size_t max_payload,
+            std::size_t min_capacity) noexcept override {
+        return std::make_unique<limestone::testing::test_rdma_frame_buffer>(
+            std::max(limestone::testing::granted_frame_capacity(max_payload), min_capacity));
     }
 
-    [[nodiscard]] send_result send_all_bytes(std::vector<std::uint8_t> const&, std::size_t, std::size_t length) noexcept override {
-        return { true, "", length };
+    [[nodiscard]] send_result submit_frame_buffer(
+            limestone::replication::rdma_frame_buffer_base& /*frame*/,
+            std::size_t payload_size) override {
+        return { true, "", payload_size };
     }
 
     [[nodiscard]] flush_result flush(std::chrono::milliseconds) noexcept override {
         return { true, "" };
-    }
-
-    [[nodiscard]] send_result send_with_writer(
-            std::size_t remaining_size,
-            buffer_writer /*writer*/) noexcept override {
-        return { true, "", remaining_size };
     }
 };
 

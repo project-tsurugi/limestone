@@ -1,5 +1,5 @@
 /*
- * Copyright 2022-2025 Project Tsurugi.
+ * Copyright 2022-2026 Project Tsurugi.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -15,13 +15,53 @@
  */
 #pragma once
 
+#include <cstddef>
+#include <cstdint>
 #include <memory>
+#include <utility>
 
 #include <rdma_comm/rdma_sender.h>
 
+#include <rdma/rdma_frame_buffer_base.h>
 #include <rdma/rdma_send_stream_base.h>
 
 namespace limestone::replication {
+
+/**
+ * @brief rdma_frame_buffer_base implementation holding an rdma_comm frame_buffer.
+ *
+ * Owns the acquired frame for its whole lifetime: destroying this object without
+ * submitting it releases the send-buffer slots back to the pool, which is the
+ * release-on-drop contract rdma_frame_buffer_base promises.
+ */
+class rdma_comm_frame_buffer : public rdma_frame_buffer_base {
+public:
+    /**
+     * @brief Construct from a frame acquired via rdma_send_stream::acquire_frame_buffer().
+     * @param frame Acquired frame; ownership is transferred.
+     */
+    explicit rdma_comm_frame_buffer(
+            rdma::communication::rdma_send_stream::frame_buffer frame) noexcept
+        : frame_(std::move(frame))
+    {}
+
+    ~rdma_comm_frame_buffer() override = default;
+
+    rdma_comm_frame_buffer(rdma_comm_frame_buffer const&) = delete;
+    rdma_comm_frame_buffer& operator=(rdma_comm_frame_buffer const&) = delete;
+    rdma_comm_frame_buffer(rdma_comm_frame_buffer&&) = delete;
+    rdma_comm_frame_buffer& operator=(rdma_comm_frame_buffer&&) = delete;
+
+    [[nodiscard]] std::uint8_t* payload() noexcept override { return frame_.payload; }
+
+    [[nodiscard]] std::size_t capacity() const noexcept override { return frame_.capacity; }
+
+private:
+    // rdma_comm_send_stream unwraps this to reach the underlying frame on submit.
+    friend class rdma_comm_send_stream;
+
+    rdma::communication::rdma_send_stream::frame_buffer frame_;
+};
 
 /**
  * @brief rdma_send_stream_base implementation backed by rdma::communication::rdma_send_stream.
@@ -44,21 +84,15 @@ public:
     rdma_comm_send_stream(rdma_comm_send_stream&&) = delete;
     rdma_comm_send_stream& operator=(rdma_comm_send_stream&&) = delete;
 
-    [[nodiscard]] send_result send_bytes(
-        std::vector<std::uint8_t> const& payload,
-        std::size_t offset,
-        std::size_t length) noexcept override;
+    [[nodiscard]] std::unique_ptr<rdma_frame_buffer_base> acquire_frame_buffer(
+        std::size_t max_payload,
+        std::size_t min_capacity) noexcept override;
 
-    [[nodiscard]] send_result send_all_bytes(
-        std::vector<std::uint8_t> const& payload,
-        std::size_t offset,
-        std::size_t length) noexcept override;
+    [[nodiscard]] send_result submit_frame_buffer(
+        rdma_frame_buffer_base& frame,
+        std::size_t             payload_size) override;
 
     [[nodiscard]] flush_result flush(std::chrono::milliseconds timeout) noexcept override;
-
-    [[nodiscard]] send_result send_with_writer(
-        std::size_t   remaining_size,
-        buffer_writer writer) noexcept override;
 
 private:
     std::unique_ptr<rdma::communication::rdma_send_stream> stream_;

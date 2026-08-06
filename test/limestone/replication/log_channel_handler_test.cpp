@@ -26,6 +26,7 @@
 #include <vector>
 #include "test_message.h"
 #include "replication_test_helper.h"
+#include "test_rdma_frame_buffer.h"
 #include "test_root.h"
 #include <fcntl.h>
 #include <unistd.h>
@@ -143,50 +144,39 @@ void set_non_blocking(int fd) {
 
 class capturing_rdma_send_stream : public rdma_send_stream_base {
 public:
-    [[nodiscard]] send_result send_bytes(
-            std::vector<std::uint8_t> const& payload,
-            std::size_t offset,
-            std::size_t length) noexcept override {
-        calls_.emplace_back(
-            payload.begin() + static_cast<std::ptrdiff_t>(offset),
-            payload.begin() + static_cast<std::ptrdiff_t>(offset + length));
-        return {true, "", length};
+    [[nodiscard]] std::unique_ptr<rdma_frame_buffer_base> acquire_frame_buffer(
+            std::size_t max_payload,
+            std::size_t min_capacity) noexcept override {
+        auto capacity = granted_frame_capacity(max_payload);
+        if (max_frame_capacity_ != 0U) {
+            capacity = std::min(capacity, max_frame_capacity_);
+        }
+        // A real stream retries until it can grant min_capacity, so it never hands back an
+        // undersized frame. Honour that contract here too.
+        capacity = std::max(capacity, min_capacity);
+        return std::make_unique<test_rdma_frame_buffer>(capacity);
     }
 
-    [[nodiscard]] send_result send_all_bytes(
-            std::vector<std::uint8_t> const& payload,
-            std::size_t offset,
-            std::size_t length) noexcept override {
-        return send_bytes(payload, offset, length);
+    [[nodiscard]] send_result submit_frame_buffer(
+            rdma_frame_buffer_base& frame,
+            std::size_t             payload_size) override {
+        auto& test_frame = dynamic_cast<test_rdma_frame_buffer&>(frame);
+        calls_.emplace_back(test_frame.take_written(payload_size));
+        return {true, "", payload_size};
     }
 
     [[nodiscard]] flush_result flush(std::chrono::milliseconds) noexcept override {
         return {true, ""};
     }
 
-    [[nodiscard]] send_result send_with_writer(
-            std::size_t remaining_size,
-            buffer_writer writer) noexcept override {
-        auto const capacity = max_writer_capacity_ == 0U
-            ? remaining_size
-            : std::min(remaining_size, max_writer_capacity_);
-        std::vector<std::uint8_t> payload(capacity);
-        auto fill_result = writer(payload.data(), payload.size());
-        if (! fill_result.success) {
-            return {false, fill_result.error_message, 0U};
-        }
-        auto const bytes_written = payload.size();
-        calls_.emplace_back(std::move(payload));
-        return {true, "", bytes_written};
-    }
-
     /**
-     * @brief Maximum temporary buffer capacity passed to send_with_writer() callbacks.
+     * @brief Upper bound on the capacity granted by acquire_frame_buffer().
      *
-     * A value of 0 passes the requested remaining size as the buffer capacity.
-     * Any non-zero value limits the temporary buffer capacity.
+     * A value of 0 grants the full requested payload. A non-zero value caps the grant,
+     * forcing callers to split their payload across several frames as a real send ring
+     * would.
      */
-    std::size_t max_writer_capacity_{};
+    std::size_t max_frame_capacity_{};
     std::vector<std::vector<std::uint8_t>> calls_{};
 };
 
@@ -777,11 +767,7 @@ TEST_F(log_channel_handler_test,
     replication_message::send(sender_io, entries);
     auto remaining = sender_io.get_out_string();
     if (! remaining.empty()) {
-        std::vector<std::uint8_t> remaining_bytes(
-            remaining.begin(), remaining.end());
-        auto result = stream.send_all_bytes(
-            remaining_bytes, 0, remaining_bytes.size());
-        ASSERT_TRUE(result.success);
+        ASSERT_TRUE(stream.send_all_bytes(remaining).success);
     }
 
     ASSERT_GE(stream.calls_.size(), 2U)
@@ -833,7 +819,7 @@ TEST_F(log_channel_handler_test,
     }
 
     capturing_rdma_send_stream stream{};
-    stream.max_writer_capacity_ = 256U;
+    stream.max_frame_capacity_ = 256U;
     rdma_replication_message_io sender_io(stream, *sender_ds);
     message_log_entries entries(epoch_id_type{7});
     entries.set_session_begin_flag(true);
@@ -844,11 +830,7 @@ TEST_F(log_channel_handler_test,
     replication_message::send(sender_io, entries);
     auto remaining = sender_io.get_out_string();
     if (! remaining.empty()) {
-        std::vector<std::uint8_t> remaining_bytes(
-            remaining.begin(), remaining.end());
-        auto result = stream.send_all_bytes(
-            remaining_bytes, 0, remaining_bytes.size());
-        ASSERT_TRUE(result.success);
+        ASSERT_TRUE(stream.send_all_bytes(remaining).success);
     }
 
     ASSERT_GE(stream.calls_.size(), 2U);
@@ -915,7 +897,7 @@ TEST_F(log_channel_handler_test,
     }
 
     capturing_rdma_send_stream stream{};
-    stream.max_writer_capacity_ = 256U;
+    stream.max_frame_capacity_ = 256U;
     rdma_replication_message_io sender_io(stream, *sender_ds);
     message_log_entries entries(epoch_id_type{8});
     entries.set_session_begin_flag(true);
@@ -926,11 +908,7 @@ TEST_F(log_channel_handler_test,
     replication_message::send(sender_io, entries);
     auto remaining = sender_io.get_out_string();
     if (! remaining.empty()) {
-        std::vector<std::uint8_t> remaining_bytes(
-            remaining.begin(), remaining.end());
-        auto result = stream.send_all_bytes(
-            remaining_bytes, 0, remaining_bytes.size());
-        ASSERT_TRUE(result.success);
+        ASSERT_TRUE(stream.send_all_bytes(remaining).success);
     }
     ASSERT_GE(stream.calls_.size(), 2U);
 
@@ -1015,7 +993,7 @@ TEST_F(log_channel_handler_test,
     }
 
     capturing_rdma_send_stream stream{};
-    stream.max_writer_capacity_ = sizeof(std::uint64_t) + sizeof(std::uint32_t) + 5U;
+    stream.max_frame_capacity_ = sizeof(std::uint64_t) + sizeof(std::uint32_t) + 5U;
     rdma_replication_message_io sender_io(stream, *sender_ds);
 
     sender_io.send_blob(blob_id);

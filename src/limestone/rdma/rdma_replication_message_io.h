@@ -33,8 +33,8 @@ using limestone::api::blob_id_type;
  * @brief A replication_message_io subclass for the RDMA send path.
  *
  * Inherits all serialization methods from replication_message_io (used for non-blob data).
- * Overrides send_blob() to read the blob file in chunks and transmit each chunk
- * directly via rdma_send_stream_base::send_with_writer(), avoiding full in-memory buffering.
+ * Overrides send_blob() to read the blob file straight into RDMA send frames acquired
+ * from rdma_send_stream_base, avoiding full in-memory buffering.
  *
  * receive_blob() is not supported on this class (FATAL if called). RDMA receive
  * is handled by rdma_log_entries_receiver / rdma_log_entries_parser, not by
@@ -42,16 +42,11 @@ using limestone::api::blob_id_type;
  *
  * TODO: For very large BLOBs the send path still buffers the non-blob portion of
  * the message in the inherited replication_message_io output stream before flushing.  The blob
- * data itself is streamed in blob_buffer_size (64 KB) chunks and therefore does
- * not require full in-memory allocation.
+ * data itself is read straight into RDMA send frames, one acquire_frame_buffer() grant at
+ * a time, and therefore does not require full in-memory allocation.
  */
 class rdma_replication_message_io : public replication_message_io {
 public:
-    /**
-     * @brief Maximum BLOB payload chunk size used for RDMA send buffers, in bytes.
-     */
-    static constexpr std::size_t blob_buffer_size = 64UL * 1024UL;
-
     rdma_replication_message_io(const rdma_replication_message_io&) = delete;
     rdma_replication_message_io& operator=(const rdma_replication_message_io&) = delete;
     rdma_replication_message_io(rdma_replication_message_io&&) = delete;
@@ -70,9 +65,9 @@ public:
      * @brief Send a blob file via RDMA.
      *
      * First sends any accumulated non-blob data from the inherited output buffer,
-     * then fills RDMA send buffers directly from the blob file via
-     * rdma_send_stream_base::send_with_writer(). The wire format is identical to
-     * tcp_replication_message_io::send_blob(): [blob_id: 8B][size: 4B][data: size bytes].
+     * then reads the blob file straight into RDMA send frames acquired from the
+     * stream. The wire format is identical to tcp_replication_message_io::send_blob():
+     * [blob_id: 8B][size: 4B][data: size bytes].
      *
      * @param blob_id ID of the blob to send.
      * @throws limestone::api::limestone_io_exception if the BLOB file cannot be opened,
@@ -89,33 +84,19 @@ private:
 
     /**
      * @brief Send the BLOB header together with the first BLOB data chunk via RDMA.
+     *
+     * Acquires a frame large enough to hold the header plus at least one data byte,
+     * so the header is never split across frames.
+     *
      * @param blob_id ID of the blob being transmitted.
      * @param blob Opened BLOB file positioned at the beginning of the blob data.
      * @param[in,out] remaining Total bytes left to send; decremented by the first chunk size.
-     * @throws limestone::api::limestone_io_exception if sending the first RDMA buffer fails.
+     * @throws limestone::api::limestone_io_exception if sending the first RDMA frame fails.
      */
     void send_blob_header_and_first_chunk(
         blob_id_type blob_id,
         opened_blob_file& blob,
         std::uint32_t& remaining);
-
-    /**
-     * @brief Fill an RDMA send buffer with the BLOB header and first BLOB data chunk.
-     * @param blob_id ID of the blob being transmitted.
-     * @param blob_size Total BLOB size in bytes.
-     * @param blob Opened BLOB file positioned at the beginning of the blob data.
-     * @param buffer RDMA send buffer to fill.
-     * @param capacity Writable size of buffer in bytes.
-     * @return Result describing whether the buffer was filled successfully.
-     * @throws limestone::api::limestone_io_exception if the BLOB file cannot provide
-     *         enough bytes for the first data chunk.
-     */
-    rdma_send_stream_base::buffer_fill_result fill_blob_header_and_first_chunk(
-        blob_id_type blob_id,
-        std::uint32_t blob_size,
-        opened_blob_file& blob,
-        std::uint8_t* buffer,
-        std::size_t capacity);
 
     /**
      * @brief Read the blob file and send its remaining content in chunks via RDMA.
@@ -124,20 +105,6 @@ private:
      * @throws limestone::api::limestone_io_exception if sending a BLOB data chunk fails.
      */
     void send_blob_data(opened_blob_file& blob, std::uint32_t remaining);
-
-    /**
-     * @brief Fill an RDMA send buffer with BLOB data only.
-     * @param blob Opened BLOB file positioned at the next BLOB byte to send.
-     * @param buffer RDMA send buffer to fill.
-     * @param capacity Writable size of buffer in bytes.
-     * @return Result describing whether the buffer was filled successfully.
-     * @throws limestone::api::limestone_io_exception if the BLOB file cannot provide
-     *         enough bytes for the data chunk.
-     */
-    rdma_send_stream_base::buffer_fill_result fill_blob_data_chunk(
-        opened_blob_file& blob,
-        std::uint8_t* buffer,
-        std::size_t capacity);
 
     rdma_send_stream_base& rdma_stream_;
     datastore& datastore_;

@@ -29,11 +29,15 @@
 #include "replication/control_channel_handler.h"
 #include "replication/message_log_entries.h"
 #include "replication_test_helper.h"
+#include "test_rdma_frame_buffer.h"
 #include "test_root.h"
 #include "log_channel_impl.h"
 #include "replication/replication_message_io.h"
 #include "rdma/rdma_send_stream_base.h"
+#include <cstddef>
+#include <memory>
 #include <optional>
+#include <vector>
 
 namespace limestone::testing {
 
@@ -189,37 +193,29 @@ private:
 
 class fake_rdma_send_stream : public limestone::replication::rdma_send_stream_base {
 public:
-    [[nodiscard]] send_result send_bytes(std::vector<std::uint8_t> const& payload, std::size_t offset, std::size_t length) noexcept override {
-        send_count_++;
-        if (offset > payload.size() || offset + length > payload.size()) {
-            ADD_FAILURE() << "invalid offset/length for send_bytes: offset=" << offset
-                          << " length=" << length << " payload.size=" << payload.size();
-            return { false, "invalid offset/length", 0U };
-        }
-        last_payload_size_ = length;
-        return { true, "", length };
+    [[nodiscard]] std::unique_ptr<limestone::replication::rdma_frame_buffer_base> acquire_frame_buffer(
+            std::size_t max_payload,
+            std::size_t min_capacity) noexcept override {
+        return std::make_unique<test_rdma_frame_buffer>(
+            std::max(granted_frame_capacity(max_payload), min_capacity));
     }
 
-    [[nodiscard]] send_result send_all_bytes(std::vector<std::uint8_t> const& payload, std::size_t offset, std::size_t length) noexcept override {
-        return send_bytes(payload, offset, length);
+    [[nodiscard]] send_result submit_frame_buffer(
+            limestone::replication::rdma_frame_buffer_base& frame,
+            std::size_t payload_size) override {
+        send_count_++;
+        if (payload_size > frame.capacity()) {
+            ADD_FAILURE() << "payload_size exceeds frame capacity: payload_size=" << payload_size
+                          << " capacity=" << frame.capacity();
+            return { false, "payload_size exceeds frame capacity", 0U };
+        }
+        last_payload_size_ = payload_size;
+        return { true, "", payload_size };
     }
 
     [[nodiscard]] flush_result flush(std::chrono::milliseconds) noexcept override {
         flush_count_++;
         return { true, "" };
-    }
-
-    [[nodiscard]] send_result send_with_writer(
-            std::size_t remaining_size,
-            buffer_writer writer) noexcept override {
-        send_count_++;
-        std::vector<std::uint8_t> payload(remaining_size);
-        auto fill_result = writer(payload.data(), payload.size());
-        if (! fill_result.success) {
-            return {false, fill_result.error_message, 0U};
-        }
-        last_payload_size_ = remaining_size;
-        return { true, "", remaining_size };
     }
 
     std::size_t send_count_{};
@@ -228,53 +224,32 @@ public:
 };
 
 /**
- * @brief An rdma_send_stream that records every call to send_bytes / send_all_bytes
- *        with the transmitted data, enabling order and content verification in tests.
+ * @brief An rdma_send_stream that records the payload of every submitted frame,
+ *        enabling order and content verification in tests.
  */
 class capturing_rdma_send_stream : public limestone::replication::rdma_send_stream_base {
 public:
-    struct call_record {
-        std::string type;  // "send_bytes" or "send_all_bytes"
-        std::vector<std::uint8_t> data;
-    };
-
-    [[nodiscard]] send_result send_bytes(
-            std::vector<std::uint8_t> const& payload,
-            std::size_t offset, std::size_t length) noexcept override {
-        calls_.push_back({"send_bytes",
-            std::vector<std::uint8_t>(
-                payload.begin() + static_cast<std::ptrdiff_t>(offset),
-                payload.begin() + static_cast<std::ptrdiff_t>(offset + length))});
-        return {true, "", length};
+    [[nodiscard]] std::unique_ptr<limestone::replication::rdma_frame_buffer_base> acquire_frame_buffer(
+            std::size_t max_payload,
+            std::size_t min_capacity) noexcept override {
+        return std::make_unique<test_rdma_frame_buffer>(
+            std::max(granted_frame_capacity(max_payload), min_capacity));
     }
 
-    [[nodiscard]] send_result send_all_bytes(
-            std::vector<std::uint8_t> const& payload,
-            std::size_t offset, std::size_t length) noexcept override {
-        calls_.push_back({"send_all_bytes",
-            std::vector<std::uint8_t>(
-                payload.begin() + static_cast<std::ptrdiff_t>(offset),
-                payload.begin() + static_cast<std::ptrdiff_t>(offset + length))});
-        return {true, "", length};
+    [[nodiscard]] send_result submit_frame_buffer(
+            limestone::replication::rdma_frame_buffer_base& frame,
+            std::size_t payload_size) override {
+        auto& test_frame = dynamic_cast<test_rdma_frame_buffer&>(frame);
+        calls_.emplace_back(test_frame.take_written(payload_size));
+        return {true, "", payload_size};
     }
 
     [[nodiscard]] flush_result flush(std::chrono::milliseconds) noexcept override {
         return {true, ""};
     }
 
-    [[nodiscard]] send_result send_with_writer(
-            std::size_t remaining_size,
-            buffer_writer writer) noexcept override {
-        std::vector<std::uint8_t> payload(remaining_size);
-        auto fill_result = writer(payload.data(), payload.size());
-        if (! fill_result.success) {
-            return {false, fill_result.error_message, 0U};
-        }
-        calls_.push_back({"send_with_writer", std::move(payload)});
-        return {true, "", remaining_size};
-    }
-
-    std::vector<call_record> calls_;
+    /// @brief Payload of each submitted frame, in submission order.
+    std::vector<std::vector<std::uint8_t>> calls_;
 };
 
 TEST_P(log_channel_replication_test, replica_connector_setter_getter) {
@@ -581,30 +556,22 @@ TEST_P(log_channel_replication_test, rdma_send_blob_flushes_pending_buffer_first
             write_version_type{epoch_id_type{111}, 0U}, {blob_id});
     });
 
-    // First call must flush the pending non-blob buffer.
-    ASSERT_GE(ptr->calls_.size(), 2U);
-    EXPECT_EQ(ptr->calls_[0].type, "send_bytes");
-    // At least one additional RDMA send must follow for the BLOB payload.
-    bool found_send_all = std::any_of(
-        std::next(ptr->calls_.begin()), ptr->calls_.end(),
-        [](capturing_rdma_send_stream::call_record const& c) {
-            return c.type == "send_bytes"
-                || c.type == "send_all_bytes"
-                || c.type == "send_with_writer";
-        });
-    EXPECT_TRUE(found_send_all) << "No RDMA send found after non-blob flush";
-
     std::string const expected_ordering = "blob_ordering_test";
+
+    // The staged non-blob buffer must go out first, ahead of the BLOB payload, so the
+    // first frame cannot carry any of the BLOB content.
+    ASSERT_GE(ptr->calls_.size(), 2U) << "No RDMA send found after the non-blob flush";
+    auto const& first_frame = ptr->calls_.front();
+    EXPECT_EQ(
+        std::search(first_frame.begin(), first_frame.end(),
+            expected_ordering.begin(), expected_ordering.end()),
+        first_frame.end())
+        << "The first frame must flush the pending non-blob buffer, not the BLOB payload";
 
     // Verify that the RDMA stream actually contains the BLOB file content.
     std::vector<std::uint8_t> all_rdma_blob_bytes;
     for (auto const& call : ptr->calls_) {
-        if (call.type == "send_bytes"
-            || call.type == "send_all_bytes"
-            || call.type == "send_with_writer") {
-            all_rdma_blob_bytes.insert(
-                all_rdma_blob_bytes.end(), call.data.begin(), call.data.end());
-        }
+        all_rdma_blob_bytes.insert(all_rdma_blob_bytes.end(), call.begin(), call.end());
     }
     auto it = std::search(
         all_rdma_blob_bytes.begin(), all_rdma_blob_bytes.end(),
@@ -638,15 +605,11 @@ TEST_P(log_channel_replication_test, rdma_send_blob_data_content_is_transmitted)
             write_version_type{epoch_id_type{111}, 0U}, {blob_id});
     });
 
-    // The blob data is transmitted via RDMA send calls. Collect all bytes from
-    // those calls and use std::search for binary-safe content check.
+    // The blob data is transmitted across RDMA frames. Collect all bytes from those
+    // frames and use std::search for a binary-safe content check.
     std::vector<std::uint8_t> all_rdma_bytes;
     for (auto const& call : ptr->calls_) {
-        if (call.type == "send_bytes"
-            || call.type == "send_all_bytes"
-            || call.type == "send_with_writer") {
-            all_rdma_bytes.insert(all_rdma_bytes.end(), call.data.begin(), call.data.end());
-        }
+        all_rdma_bytes.insert(all_rdma_bytes.end(), call.begin(), call.end());
     }
     auto it = std::search(
         all_rdma_bytes.begin(), all_rdma_bytes.end(),

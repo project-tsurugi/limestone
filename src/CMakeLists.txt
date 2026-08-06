@@ -2,7 +2,7 @@ file(GLOB SOURCES
         "limestone/*.cpp"
         "limestone/replication/*.cpp"
         "limestone/partitioned_cursor/*.cpp"
-        "limestone/rdma/rdma_replication_message_io.cpp"
+        "limestone/rdma/*.cpp"
 )
 
 if(ENABLE_RDMA)
