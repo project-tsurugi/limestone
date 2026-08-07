@@ -1,5 +1,5 @@
 /*
- * Copyright 2022-2025 Project Tsurugi.
+ * Copyright 2022-2026 Project Tsurugi.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -15,9 +15,14 @@
  */
 #include <rdma/rdma_factory.h>
 #include <rdma/rdma_comm/rdma_comm_constants.h>
+#include <rdma/rdma_comm/rdma_comm_handshake_result_conversion.h>
+#include <rdma/rdma_comm_handshake_acceptor.h>
+#include <rdma/rdma_comm_handshake_connector.h>
 #include <rdma/rdma_comm_receiver.h>
 #include <rdma/rdma_comm_sender.h>
 
+#include <rdma_comm/handshake/handshake_acceptor.h>
+#include <rdma_comm/handshake/handshake_connector.h>
 #include <rdma_comm/rdma_config.h>
 
 namespace limestone::replication {
@@ -73,6 +78,40 @@ std::unique_ptr<rdma_receiver_base> make_rdma_data_receiver(std::uint32_t slot_c
 std::unique_ptr<rdma_receiver_base> make_rdma_ack_receiver(std::uint32_t slot_count) {
     return std::make_unique<rdma_comm_receiver>(
         make_receiver_config(slot_count, rdma::communication::rdma_buffer_kind::ack_only));
+}
+
+handshake_connector_create_result make_handshake_connector(
+        std::string const&        daemon_socket_path,
+        std::chrono::milliseconds operation_timeout) {
+    auto result = rdma::handshake::handshake_connector::create_connector(
+        daemon_socket_path, operation_timeout);
+    if (! result) {
+        auto status = to_operation_result(result.result());
+        if (status.success) {
+            status = {false, "create_connector returned no instance"};
+        }
+        return {std::move(status), nullptr};
+    }
+    return {
+        {true, {}},
+        std::make_unique<rdma_comm_handshake_connector>(result.acquire_instance())};
+}
+
+handshake_acceptor_create_result make_handshake_acceptor(
+        std::string const&        daemon_socket_path,
+        std::chrono::milliseconds operation_timeout) {
+    auto result = rdma::handshake::handshake_acceptor::create_acceptor(
+        daemon_socket_path, operation_timeout);
+    if (! result) {
+        auto status = to_operation_result(result.result());
+        if (status.success) {
+            status = {false, "create_acceptor returned no instance"};
+        }
+        return {std::move(status), nullptr};
+    }
+    return {
+        {true, {}},
+        std::make_unique<rdma_comm_handshake_acceptor>(result.acquire_instance())};
 }
 
 } // namespace limestone::replication
