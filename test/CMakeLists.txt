@@ -20,6 +20,14 @@ target_link_libraries(${test_target}
 if(ENABLE_RDMA)
     target_compile_definitions(${test_target} PRIVATE LIMESTONE_ENABLE_RDMA)
     target_link_libraries(${test_target} PRIVATE rdma_comm rdma_handshake)
+
+    find_program(RDMA_HANDSHAKED_EXECUTABLE rdma_handshaked
+        HINTS "${rdma_comm_RUNTIME_DIR}/../bin"
+        REQUIRED
+    )
+    target_compile_definitions(${test_target} PRIVATE
+        RDMA_HANDSHAKED_BIN="${RDMA_HANDSHAKED_EXECUTABLE}"
+    )
 endif()
 
 if (ENABLE_ALTIMETER)
