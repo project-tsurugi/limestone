@@ -17,6 +17,7 @@
 
 #include <array>
 #include <ios>
+#include <iterator>
 #include <limits>
 #include <string_view>
 
@@ -35,7 +36,7 @@ namespace {
 }
 
 void append_bytes(std::vector<std::uint8_t>& out, char const* data, std::size_t size) {
-    out.insert(out.end(), data, data + size);
+    out.insert(out.end(), data, std::next(data, static_cast<std::ptrdiff_t>(size)));
 }
 
 template <std::size_t Size>
