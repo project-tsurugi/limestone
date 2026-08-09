@@ -34,6 +34,7 @@
 #include "manifest.h"
 #include "replication/replica_connector.h"
 #include "replication/replication_endpoint.h"
+#include <replication/replication_config_loader.h>
 #include <rdma/rdma_receiver_base.h>
 #include <rdma/rdma_sender_base.h>
 
@@ -95,6 +96,14 @@ public:
      * @return true if a replication endpoint is defined via the environment variable, false otherwise.
      */
     [[nodiscard]] bool is_replication_configured() const noexcept;
+
+    /**
+     * @brief Returns the result of loading the replication configuration from
+     *        the environment variables.
+     * @return Load result carrying the configuration or the failure reason.
+     */
+    [[nodiscard]] replication::replication_config_parse_result const&
+    get_replication_config_result() const noexcept;
 
     [[nodiscard]] std::unique_ptr<replication::replica_connector> create_log_channel_connector(datastore &ds, std::uint64_t channel_id);
 
@@ -321,6 +330,10 @@ private:
 
     // Replication endpoint to retrieve connection info
     replication::replication_endpoint replication_endpoint_;
+
+    // Replication mode and RDMA handshake settings loaded from the environment
+    replication::replication_config_parse_result replication_config_result_{
+        replication::load_replication_config_from_environment()};
 
     // Environment variable flags
     bool async_session_close_enabled_;

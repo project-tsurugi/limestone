@@ -71,6 +71,7 @@ datastore_impl::datastore_impl()
     replica_exists_.store(has_replica, std::memory_order_release);
     LOG_LP(INFO) << "Replica " << (has_replica ? "enabled" : "disabled")
                     << "; endpoint valid: " << replication_endpoint_.is_valid();
+    LOG_LP(INFO) << "Replication mode: " << replication_config_result_.config.mode();
     
     // Generate HMAC secret key for BLOB reference tag generation
     generate_hmac_secret_key();
@@ -319,6 +320,11 @@ void datastore_impl::wait_for_propagated_group_commit_ack() {
 
 bool datastore_impl::is_replication_configured() const noexcept {
     return replication_endpoint_.env_defined();
+}
+
+replication::replication_config_parse_result const&
+datastore_impl::get_replication_config_result() const noexcept {
+    return replication_config_result_;
 }
 
 // Getter for control_channel_

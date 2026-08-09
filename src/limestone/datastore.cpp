@@ -100,6 +100,19 @@ datastore::datastore(configuration const& conf) : location_(conf.data_location_)
         impl_->set_instance_id(conf.instance_id_);
         impl_->set_db_name(conf.db_name_);
         impl_->set_pid(::getpid());
+        auto const& repl_result = impl_->get_replication_config_result();
+        if (!repl_result.ok) {
+            std::string err_msg = "invalid replication configuration: " + repl_result.error_message;
+            LOG_LP(ERROR) << err_msg;
+            throw limestone_exception(exception_type::initialization_failure, err_msg);
+        }
+        if (repl_result.config.mode() == replication::replication_mode::rdma
+            && !impl_->rdma_slot_count().has_value()) {
+            std::string err_msg =
+                "REPLICATION_RDMA_SLOTS must be set to a valid slot count in RDMA replication mode";
+            LOG_LP(ERROR) << err_msg;
+            throw limestone_exception(exception_type::initialization_failure, err_msg);
+        }
         LOG(INFO) << "/:limestone:config:datastore setting log location = " << location_.string();
         boost::system::error_code error;
         const bool result_check = boost::filesystem::exists(location_, error);
