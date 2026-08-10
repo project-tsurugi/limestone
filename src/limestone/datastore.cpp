@@ -379,7 +379,7 @@ blob_reference_tag_type datastore::generate_reference_tag(
     return impl_->generate_reference_tag(blob_id, transaction_id);
 }
 
-void datastore::ready() {
+void datastore::ready() {  // NOLINT(readability-function-cognitive-complexity)
     TRACE_START;
     try {
         blob_id_type max_blob_id =
@@ -408,7 +408,14 @@ void datastore::ready() {
 
         state_ = state::ready;
         if (impl_ ->is_replication_configured() && impl_->is_master()) {
-            if (impl_->open_control_channel()) {
+            if (impl_->get_replication_config_result().config.mode() == replication_mode::rdma) {
+                // RDMA mode: exchange DMA addresses via the handshake daemon; no TCP
+                // connection is made.
+                if (! impl_->establish_rdma_session()) {
+                    LOG_LP(FATAL) << "Failed to establish the RDMA replication session.";
+                }
+                LOG_LP(INFO) << "Replication RDMA session established successfully.";
+            } else if (impl_->open_control_channel()) {
                 LOG_LP(INFO) << "Replication control channel opened successfully.";
 
                 // Register RDMA send streams for existing log channels and collect
@@ -645,6 +652,9 @@ std::future<void> datastore::shutdown() noexcept {
         }
     }
 
+    // The send streams must be released before shutdown_rdma_sender() below
+    // destroys the sender that owns them.
+    impl_->release_rdma_send_streams();
     impl_->shutdown_rdma_sender();
     impl_->shutdown_rdma_ack_receiver();
 

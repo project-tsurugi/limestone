@@ -37,6 +37,7 @@
 #include "replication/replication_endpoint.h"
 #include <replication/replication_config_loader.h>
 #include <rdma/rdma_receiver_base.h>
+#include <rdma/rdma_send_stream_base.h>
 #include <rdma/rdma_sender_base.h>
 
 namespace limestone::api {
@@ -93,8 +94,8 @@ public:
     void wait_for_propagated_group_commit_ack();
 
     /**
-     * @brief Checks if the replication endpoint is configured.
-     * @return true if a replication endpoint is defined via the environment variable, false otherwise.
+     * @brief Checks if replication is configured.
+     * @return true if the loaded replication mode is not none, false otherwise.
      */
     [[nodiscard]] bool is_replication_configured() const noexcept;
 
@@ -311,6 +312,32 @@ public:
     bool maybe_finalize_rdma(std::vector<std::uint64_t> const& channel_ids);
 
     /**
+     * @brief Establishes the RDMA session with the replica via the handshake daemon.
+     *
+     * Initializes the RDMA ACK receiver, exchanges the session parameters and DMA
+     * addresses through the handshake, initializes the RDMA data sender, registers
+     * the send streams of every log channel and of the control channel, finalizes
+     * the channel setup, and completes the remaining handshake steps.
+     *
+     * Data channels take ids 0 .. N - 1 where N is the number of registered log
+     * channels, and the control channel takes id N.
+     *
+     * @return true on success; false on failure.
+     */
+    [[nodiscard]] bool establish_rdma_session();
+
+    /**
+     * @brief Returns the control channel send stream acquired at session establishment.
+     * @return Pointer to the stream, or nullptr when the RDMA session is not established.
+     */
+    [[nodiscard]] rdma_send_stream_base* get_rdma_control_send_stream() const noexcept;
+
+    /**
+     * @brief Releases the RDMA send streams distributed to the log channels.
+     */
+    void release_rdma_send_streams() noexcept;
+
+    /**
      * @brief Shut down RDMA sender if initialized.
      * @return true on success or when sender is absent; false if shutdown fails.
      */
@@ -401,6 +428,13 @@ private:
 
     // RDMA receiver owned by master for receiving RDMA ACK frames from the replica.
     std::unique_ptr<rdma_receiver_base> ack_receiver_{};
+
+    // Send stream of the control channel; acquired at session establishment and
+    // used once control messages move onto the RDMA control channel.
+    std::unique_ptr<rdma_send_stream_base> rdma_control_send_stream_{};
+
+    // One-shot guard for the group commit skip warning in RDMA mode.
+    std::atomic<bool> rdma_group_commit_skip_warned_{false};
 
     // Test hook: factory to override log channel connector creation.
     std::function<std::unique_ptr<replication::replica_connector>()> log_channel_connector_factory_for_test_{};

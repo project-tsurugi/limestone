@@ -16,6 +16,7 @@
 #include <datastore_impl.h>
 #include <limestone/logging.h>
 #include <logging_helper.h>
+#include <chrono>
 #include <cstdlib>
 #include <iostream>
 #include <cstring>
@@ -47,12 +48,22 @@
 #include <replication/message_rdma_init_ack.h>
 #include <replication/message_rdma_finalize.h>
 #include <replication/message_rdma_finalize_ack.h>
+#include <replication/replication_message.h>
 #include <rdma/rdma_factory.h>
+#include <rdma/rdma_handshake_payload.h>
 #include <rdma/rdma_receive_event.h>
 #include <log_channel_impl.h>
 #include <manifest.h>
 
 namespace limestone::api {
+
+namespace {
+
+// Upper bound each blocking handshake operation waits for its message exchange
+// with the handshake daemon. Not expected to fire in normal operation.
+constexpr std::chrono::milliseconds rdma_handshake_operation_timeout{10000};
+
+} // namespace
 
 // Default constructor initializes the backup counter to zero.
 datastore_impl::datastore_impl()
@@ -249,6 +260,16 @@ bool datastore_impl::propagate_group_commit(uint64_t epoch_id) {
     if (!is_master_) {
         return false;
     }
+    if (replication_config_result_.config.mode() == replication_mode::rdma) {
+        // Transitional behavior: in RDMA mode there is no TCP control channel, and
+        // the RDMA control channel that will carry GROUP_COMMIT is not introduced
+        // yet, so group commit propagation is skipped.
+        if (!rdma_group_commit_skip_warned_.exchange(true, std::memory_order_acq_rel)) {
+            LOG_LP(WARNING) << "Group commit propagation is skipped in RDMA replication "
+                << "mode until the RDMA control channel is introduced.";
+        }
+        return false;
+    }
     if (replica_exists_.load(std::memory_order_acquire)) {
         TRACE_START << "epoch_id=" << epoch_id;
         bool sent = false;
@@ -321,7 +342,7 @@ void datastore_impl::wait_for_propagated_group_commit_ack() {
 }
 
 bool datastore_impl::is_replication_configured() const noexcept {
-    return replication_endpoint_.env_defined();
+    return replication_config_result_.config.mode() != replication_mode::none;
 }
 
 replication::replication_config_parse_result const&
@@ -580,6 +601,149 @@ bool datastore_impl::maybe_finalize_rdma(std::vector<std::uint64_t> const& chann
     return true;
 }
 
+bool datastore_impl::establish_rdma_session() {
+    auto const& config = replication_config_result_.config;
+    if (config.mode() != replication_mode::rdma) {
+        LOG_LP(ERROR) << "RDMA session establishment requested but the replication mode is "
+            << config.mode() << ".";
+        return false;
+    }
+    // This branch should be unreachable because RDMA mode requires REPLICATION_RDMA_SLOTS
+    // at startup, but kept for defense.
+    if (!rdma_slot_count_.has_value() || rdma_slot_count_.value() <= 0) {
+        LOG_LP(ERROR) << "RDMA slot count is not configured.";
+        return false;
+    }
+    auto slot_count = static_cast<std::uint32_t>(rdma_slot_count_.value());
+
+    if (log_channels_.size() > std::numeric_limits<std::uint16_t>::max()) {
+        LOG_LP(ERROR) << "Too many log channels for RDMA replication: " << log_channels_.size();
+        return false;
+    }
+    auto channel_count = static_cast<std::uint16_t>(log_channels_.size());
+    // Data channels take ids 0 .. channel_count - 1; the control channel takes the
+    // next id. The value is carried in the payload, so the replica does not rely on
+    // this assignment rule.
+    auto control_channel_id = channel_count;
+
+    auto master_dma_address = initialize_rdma_ack_receiver(slot_count);
+    if (!master_dma_address.has_value()) {
+        LOG_LP(ERROR) << "Failed to initialize the RDMA ACK receiver.";
+        return false;
+    }
+
+    auto fail = [this]() {
+        // Streams must be released before the sender that owns them is shut down.
+        release_rdma_send_streams();
+        (void) shutdown_rdma_sender();
+        (void) shutdown_rdma_ack_receiver();
+        return false;
+    };
+
+    // configuration_id and epoch_number follow the TCP SESSION_BEGIN behavior, which
+    // sends the message default values (see send_session_begin()).
+    rdma_handshake_start_payload start_payload{};
+    start_payload.protocol_version = replication_protocol_version;
+    start_payload.slot_count = slot_count;
+    start_payload.master_dma_address = master_dma_address.value();
+    start_payload.channel_count = channel_count;
+    start_payload.control_channel_id = control_channel_id;
+
+    auto connector_result = make_handshake_connector(
+        config.handshake_socket_path(), rdma_handshake_operation_timeout);
+    if (!connector_result.status.success) {
+        LOG_LP(ERROR) << "Failed to create the handshake connector: "
+            << connector_result.status.error_message;
+        return fail();
+    }
+    auto connector = std::move(connector_result.instance);
+
+    auto start_result = connector->start(config.service_id(), encode(start_payload));
+    if (!start_result.success) {
+        LOG_LP(ERROR) << "Handshake start failed (is the replica already waiting on the "
+            << "handshake daemon?): " << start_result.error_message;
+        return fail();
+    }
+
+    auto response_result = connector->receive_response();
+    if (!response_result.success) {
+        LOG_LP(ERROR) << "Failed to receive the handshake response: "
+            << response_result.error_message;
+        return fail();
+    }
+    auto response = decode_response_payload(response_result.payload);
+    if (!response.has_value()) {
+        LOG_LP(ERROR) << "Received a malformed handshake response payload.";
+        return fail();
+    }
+    if (!response->accepted) {
+        LOG_LP(ERROR) << "Replica rejected the replication session: " << response->error_message;
+        return fail();
+    }
+
+    if (!initialize_rdma_sender(slot_count, response->replica_dma_address)) {
+        return fail();
+    }
+
+    for (std::size_t id = 0; id < log_channels_.size(); ++id) {
+        auto* channel = log_channels_[id].get();
+        if (channel == nullptr) {
+            continue;
+        }
+        maybe_register_rdma_stream(*channel, id);
+    }
+
+    auto stream_result = rdma_sender_->get_send_stream(control_channel_id);
+    if (!stream_result.status.success || stream_result.stream == nullptr) {
+        LOG_LP(ERROR) << "Failed to acquire the control channel send stream: "
+            << stream_result.status.error_message;
+        return fail();
+    }
+    rdma_control_send_stream_ = std::move(stream_result.stream);
+
+    // Bind the ack_receiver to the data sender so that ACK frames received from the replica
+    // are routed to the data sender's send_streams (enabling flush() completion). Must happen
+    // before the data sender transitions to TRANSFER phase.
+    auto bind_result = ack_receiver_->finalize_channel_setup_with_sender(rdma_sender_.get());
+    if (!bind_result.success) {
+        LOG_LP(ERROR) << "ack_receiver::finalize_channel_setup_with_sender() failed: "
+            << bind_result.error_message;
+        return fail();
+    }
+
+    auto finalize_result = rdma_sender_->finalize_channel_setup();
+    if (!finalize_result.success) {
+        LOG_LP(ERROR) << "rdma_sender::finalize_channel_setup() failed: "
+            << finalize_result.error_message;
+        return fail();
+    }
+
+    auto send_finalize_result = connector->send_finalize({});
+    if (!send_finalize_result.success) {
+        LOG_LP(ERROR) << "Handshake finalize failed: " << send_finalize_result.error_message;
+        return fail();
+    }
+    auto ready_result = connector->send_ready();
+    if (!ready_result.success) {
+        LOG_LP(ERROR) << "Handshake ready failed: " << ready_result.error_message;
+        return fail();
+    }
+    auto completion_result = connector->receive_completion();
+    if (!completion_result.success) {
+        LOG_LP(ERROR) << "Handshake completion failed: " << completion_result.error_message;
+        return fail();
+    }
+
+    replica_exists_.store(true, std::memory_order_release);
+    LOG_LP(INFO) << "RDMA session established: " << start_payload
+        << ", replica_dma_address=" << response->replica_dma_address;
+    return true;
+}
+
+rdma_send_stream_base* datastore_impl::get_rdma_control_send_stream() const noexcept {
+    return rdma_control_send_stream_.get();
+}
+
 bool datastore_impl::initialize_rdma_sender(uint32_t slot_count, uint64_t remote_dma_address) {
     rdma_sender_ = make_rdma_data_sender(slot_count);
     auto result = rdma_sender_->initialize(remote_dma_address);
@@ -595,7 +759,16 @@ rdma_sender_base* datastore_impl::get_rdma_sender() const noexcept {
     return rdma_sender_.get();
 }
 
+void datastore_impl::release_rdma_send_streams() noexcept {
+    for (auto const& channel : log_channels_) {
+        if (channel != nullptr) {
+            channel->get_impl()->set_rdma_send_stream(nullptr);
+        }
+    }
+}
+
 bool datastore_impl::shutdown_rdma_sender() noexcept {
+    rdma_control_send_stream_.reset();
     if (! rdma_sender_) {
         return true;
     }

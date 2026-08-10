@@ -633,6 +633,12 @@ RDMA のチャネルに載せ替えるだけである。
 6. master 側: RDMA モードで `control_channel_` (TCP `replica_connector`) を **生成しない**。
 7. replica 側: RDMA モードで `start_listener()` / `accept_loop()` を **起動しない**。
 8. `replica.cpp`: RDMA モードでは `TSURUGI_REPLICATION_ENDPOINT` を要求しない。
+9. `datastore::ready()` の TCP 側確立ブロック (`open_control_channel()` → ストリーム登録 →
+   `maybe_finalize_rdma()`) を `datastore_impl` の 1 関数に移し、RDMA 側の
+   `establish_rdma_session()` と対称にする (2026-08-10 合意)。`log_channels_` の pimpl 移行
+   により datastore 固有の依存は既にないが、フェーズ 3 でこのブロック自体が書き換わるため
+   移動はフェーズ 3 と同時に行う。エラー時の FATAL は impl ではなく呼び出し元 `ready()` が
+   出す流儀 (RDMA 側と同じ) に揃える。
 
 **完了条件**: RDMA モードの master / replica のプロセスが、TCP ソケットを 1 つも開かない
 (`ss -tp` / `lsof` で確認)。
@@ -853,3 +859,17 @@ RDMA モードを使うには、以下が満たされている必要がある。
 * 本番実装 (payload にリッチな制御メッセージを載せる例): `src/blob_relay/blob_relay_rdma_impl.cpp:546-948`
 * リングラップ時の frame 再取得: `src/blob_relay/blob_relay_rdma_impl.cpp:1248-1290`
 * 関連コミット: `ac84f14` (rdma-comm-lib 自身の制御チャネルの RDMA 化), `e2ea2e7` (handshake daemon 導入)
+
+---
+
+## 10. 本作業完了後の TODO
+
+* **TCP と RDMA で同等機能を持つものについて、両方の経路がテストされていることを確認し、
+  不足分のテストを追加する** (2026-08-10、フェーズ 2 ステップ 7 実装時に判明)。
+  本作業により多くの機能が TCP モードと RDMA モードの 2 経路を持つが、既存テストは
+  TCP モード (`TSURUGI_REPLICATION_ENDPOINT` 設定) で動くものが大半であり、同等機能が
+  RDMA モードでもテストされている保証がない。フェーズ 5 までの作業完了後、機能ごとに
+  TCP / RDMA 両経路のテストカバレッジを棚卸しし、欠けている側のテストを追加する。
+  * 判明している具体例: group commit。既存の GROUP_COMMIT 関連テストはすべて TCP モードで
+    あり、RDMA モードの master → replica 間で group commit が伝播し ACK フレームで完了同期
+    される経路 (§3.3) を end-to-end で検証するテストが存在しない。
