@@ -416,21 +416,21 @@ void datastore::ready() {
                 // the replica side. In RDMA mode no per-channel TCP connector is
                 // created, so the gate is the RDMA stream factory rather than the
                 // connector presence.
+                // Channel registration is limited to before ready, so the channel
+                // list is fixed here and read without locking.
                 std::vector<std::uint64_t> finalize_channel_ids;
-                {
-                    std::lock_guard<std::mutex> lock(mtx_channel_);
-                    finalize_channel_ids.reserve(log_channels_.size());
-                    for (std::size_t id = 0; id < log_channels_.size(); ++id) {
-                        auto* channel = log_channels_[id].get();
-                        if (channel == nullptr) {
-                            continue;
-                        }
-                        maybe_register_rdma_stream(*channel, id);
-                        if (! channel->get_impl()->has_rdma_send_stream()) {
-                            continue;
-                        }
-                        finalize_channel_ids.push_back(static_cast<std::uint64_t>(id));
+                auto const& channels = impl_->log_channels();
+                finalize_channel_ids.reserve(channels.size());
+                for (std::size_t id = 0; id < channels.size(); ++id) {
+                    auto* channel = channels[id].get();
+                    if (channel == nullptr) {
+                        continue;
                     }
+                    impl_->maybe_register_rdma_stream(*channel, id);
+                    if (! channel->get_impl()->has_rdma_send_stream()) {
+                        continue;
+                    }
+                    finalize_channel_ids.push_back(static_cast<std::uint64_t>(id));
                 }
 
                 if (! impl_->maybe_finalize_rdma(finalize_channel_ids)) {
@@ -459,13 +459,15 @@ std::shared_ptr<snapshot> datastore::shared_snapshot() const {
 log_channel& datastore::create_channel() {
     TRACE_START;
     check_before_ready(static_cast<const char*>(__func__));
-    
-    std::lock_guard<std::mutex> lock(mtx_channel_);
-    
-    auto id = log_channel_id_.fetch_add(1);
-    log_channels_.emplace_back(std::unique_ptr<log_channel>(new log_channel(location_, id, *this)));  // constructor of log_channel is private
-    auto* channel = log_channels_.back().get();
-    
+
+    std::uint64_t id{};
+    auto& channel = impl_->register_log_channel([this, &id](std::uint64_t assigned_id) {
+        id = assigned_id;
+        // The log_channel constructor is private; construction stays here because
+        // datastore is its only friend.
+        return std::unique_ptr<log_channel>(new log_channel(location_, assigned_id, *this));
+    });
+
     // In RDMA mode the per-channel TCP socket is unnecessary: log_channel
     // registration on the replica side is performed via RDMA_FINALIZE
     // (carrying the list of channel ids), and replication data and ACKs both
@@ -474,13 +476,13 @@ log_channel& datastore::create_channel() {
     if (impl_->has_replica() && impl_->is_master() && ! impl_->is_rdma_enabled()) {
         auto connector = impl_->create_log_channel_connector(*this, id);
         if (connector) {
-            channel->get_impl()->set_replica_connector(std::move(connector));
+            channel.get_impl()->set_replica_connector(std::move(connector));
         } else {
             LOG_LP(FATAL) << "Failed to create log channel connector.";
         }
     }
     TRACE_END << "id=" << id;
-    return *log_channels_.back();
+    return channel;
 }
 
 epoch_id_type datastore::last_epoch() const noexcept { return static_cast<epoch_id_type>(epoch_id_informed_.load()); }
@@ -518,7 +520,7 @@ void datastore::update_min_epoch_id(bool from_switch_epoch) {  // NOLINT(readabi
 
     epoch_id_type max_finished_epoch = 0;
 
-    for (const auto& e : log_channels_) {
+    for (const auto& e : impl_->log_channels()) {
         on_update_min_epoch_id_current_epoch_id_load(); // for testing
         auto working_epoch = e->current_epoch_id_.load();
         on_update_min_epoch_id_finished_epoch_id_load(); // for testing
@@ -636,7 +638,7 @@ std::future<void> datastore::shutdown() noexcept {
     }
 
     // shutdown log channels
-    for (auto& lc : log_channels_) {
+    for (auto const& lc : impl_->log_channels()) {
         auto replica_connector = lc->get_impl()->get_replica_connector();
         if (replica_connector) {
             replica_connector->close_session();
@@ -703,7 +705,7 @@ std::unique_ptr<backup_detail> datastore::begin_backup(backup_type btype) {  // 
         // calculate files_ minus active-files
         std::set<boost::filesystem::path> inactive_files(result.get_rotation_end_files());
         inactive_files.erase(epoch_file_path_);
-        for (const auto& lc : log_channels_) {
+        for (const auto& lc : impl_->log_channels()) {
             if (lc->registered_) {
                 inactive_files.erase(lc->file_path());
             }
@@ -817,7 +819,7 @@ rotation_result datastore::rotate_log_files() {
     }
     TRACE << "end waiting for epoch_id_informed_ to catch up";
     rotation_result result(epoch_id);
-    for (const auto& lc : log_channels_) {
+    for (const auto& lc : impl_->log_channels()) {
         boost::system::error_code error;
         bool ret = boost::filesystem::exists(lc->file_path(), error);
         if (!ret || error) {
@@ -1155,36 +1157,8 @@ void datastore::wait_for_blob_file_garbace_collector_for_tests() const noexcept 
     }
 }
 
-
-void datastore::maybe_register_rdma_stream(log_channel& channel, std::size_t id) {
-    auto acquire_stream = [&](auto&& acquire_fn) {
-        auto stream_result = acquire_fn(static_cast<std::uint16_t>(id));
-        if (! stream_result.status.success || stream_result.stream == nullptr) {
-            LOG_LP(FATAL) << "Failed to acquire RDMA send stream: "
-                          << stream_result.status.error_message;
-        }
-        channel.get_impl()->set_rdma_send_stream(std::move(stream_result.stream));
-    };
-
-    if (impl_->has_rdma_stream_factory_for_test()) {
-        auto const* factory = impl_->get_rdma_stream_factory_for_test();
-        if (factory == nullptr) {
-            LOG_LP(FATAL) << "RDMA stream factory test hook missing.";
-        }
-        acquire_stream(*factory);
-        return;
-    }
-
-    auto* rdma_sender = impl_->get_rdma_sender();
-    if (rdma_sender == nullptr || ! impl_->is_rdma_enabled()) {
-        return;
-    }
-    if (id > std::numeric_limits<std::uint16_t>::max()) {
-        LOG_LP(FATAL) << "RDMA channel_id overflow: id=" << id;
-    }
-    acquire_stream([rdma_sender](std::uint16_t cid) {
-        return rdma_sender->get_send_stream(cid);
-    });
+std::vector<std::unique_ptr<log_channel>> const& datastore::log_channels_for_tests() const noexcept {
+    return impl_->log_channels();
 }
 
 } // namespace limestone::api

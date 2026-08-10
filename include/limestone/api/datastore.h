@@ -368,7 +368,7 @@ public:
     virtual void persist_and_propagate_epoch_id(epoch_id_type epoch_id);
 
 protected:  // for tests
-    auto& log_channels_for_tests() const noexcept { return log_channels_; }
+    std::vector<std::unique_ptr<log_channel>> const& log_channels_for_tests() const noexcept;
     auto epoch_id_informed_for_tests() const noexcept { return epoch_id_informed_.load(); }
     auto epoch_id_to_be_recorded_for_tests() const noexcept { return epoch_id_to_be_recorded_.load(); }
     auto epoch_id_record_finished_for_tests() const noexcept { return epoch_id_record_finished_.load(); }
@@ -451,8 +451,6 @@ private:
         [this](epoch_id_type epoch) { this->persist_and_propagate_epoch_id(epoch); }
     };
 
-    std::vector<std::unique_ptr<log_channel>> log_channels_;
-
     boost::filesystem::path location_{};
 
     std::atomic_uint64_t epoch_id_switched_{};
@@ -474,8 +472,6 @@ private:
 
     tag_repository tag_repository_{};
 
-    std::atomic_uint64_t log_channel_id_{};
-
     std::future<void> online_compaction_worker_future_;
 
     std::mutex mtx_online_compaction_worker_{};
@@ -494,8 +490,6 @@ private:
     //   (old) full backup :   target is entire <files_>
     //   (new/prusik) backup : target is rotated files, i.e. <files_> minus active log files
     std::set<boost::filesystem::path> files_{};
-
-    std::mutex mtx_channel_{};
 
     std::mutex mtx_files_{};
 
@@ -521,8 +515,6 @@ private:
     void check_after_ready(std::string_view func) const noexcept;
 
     void check_before_ready(std::string_view func) const noexcept;
-
-    void maybe_register_rdma_stream(log_channel& channel, std::size_t id);
 
     /**
      * @brief Creates a snapshot of the current state and retrieves the maximum blob ID.

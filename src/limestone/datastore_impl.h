@@ -21,6 +21,7 @@
 #include <atomic>
 #include <array>
 #include <memory>
+#include <mutex>
 #include <optional>
 #include <string>
 #include <sys/types.h>
@@ -106,6 +107,35 @@ public:
     get_replication_config_result() const noexcept;
 
     [[nodiscard]] std::unique_ptr<replication::replica_connector> create_log_channel_connector(datastore &ds, std::uint64_t channel_id);
+
+    /**
+     * @brief Registers a newly created log channel.
+     *
+     * Assigns the next channel id and stores the channel under the internal lock.
+     * The factory receives the assigned id and returns the constructed channel.
+     *
+     * @param factory Callable that constructs the log channel for the given id.
+     * @return Reference to the registered log channel.
+     */
+    log_channel& register_log_channel(
+        std::function<std::unique_ptr<log_channel>(std::uint64_t)> const& factory);
+
+    /**
+     * @brief Returns the registered log channels.
+     * @return Channels indexed by their channel id.
+     */
+    [[nodiscard]] std::vector<std::unique_ptr<log_channel>> const& log_channels() const noexcept;
+
+    /**
+     * @brief Registers the RDMA send stream for the given log channel.
+     *
+     * No-op when RDMA is not enabled or the sender is absent, unless the test
+     * stream factory hook is set.
+     *
+     * @param channel Log channel that receives the stream.
+     * @param id Channel id used to acquire the stream.
+     */
+    void maybe_register_rdma_stream(log_channel& channel, std::size_t id);
 
     // Getter for the datastore role (master or replica)
     [[nodiscard]] bool is_master() const noexcept;
@@ -309,11 +339,6 @@ public:
     void set_rdma_stream_factory_for_test(
         std::function<rdma_sender_base::stream_acquire_result(std::uint16_t)> factory) noexcept;
 
-    [[nodiscard]] std::function<rdma_sender_base::stream_acquire_result(std::uint16_t)> const*
-    get_rdma_stream_factory_for_test() const noexcept;
-
-    [[nodiscard]] bool has_rdma_stream_factory_for_test() const noexcept;
-
 private:
     [[nodiscard]] limestone::internal::blob_file_resolver& require_blob_file_resolver() noexcept;
     [[nodiscard]] limestone::internal::blob_file_resolver const& require_blob_file_resolver() const noexcept;
@@ -327,6 +352,16 @@ private:
 
     // Private field to hold the control channel
     std::shared_ptr<replica_connector> control_channel_;
+
+    // Log channels registered via register_log_channel(). Registration happens only
+    // before the datastore becomes ready; afterwards the vector is read without locking.
+    std::vector<std::unique_ptr<log_channel>> log_channels_;
+
+    // Next log channel id to assign.
+    std::atomic_uint64_t log_channel_id_{};
+
+    // Guards log_channels_ and log_channel_id_ during registration.
+    std::mutex mtx_channel_{};
 
     // Replication endpoint to retrieve connection info
     replication::replication_endpoint replication_endpoint_;

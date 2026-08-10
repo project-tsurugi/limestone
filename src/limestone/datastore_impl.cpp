@@ -26,6 +26,7 @@
 #include <limits>
 #include <cerrno>
 #include <functional>
+#include <mutex>
 #include <openssl/hmac.h>
 #include <openssl/rand.h>
 #include <openssl/evp.h>
@@ -48,6 +49,7 @@
 #include <replication/message_rdma_finalize_ack.h>
 #include <rdma/rdma_factory.h>
 #include <rdma/rdma_receive_event.h>
+#include <log_channel_impl.h>
 #include <manifest.h>
 
 namespace limestone::api {
@@ -372,6 +374,44 @@ std::unique_ptr<replication::replica_connector> datastore_impl::create_log_chann
     return connector;
 }
 
+log_channel& datastore_impl::register_log_channel(
+    std::function<std::unique_ptr<log_channel>(std::uint64_t)> const& factory) {
+    std::lock_guard<std::mutex> lock(mtx_channel_);
+    auto id = log_channel_id_.fetch_add(1);
+    log_channels_.emplace_back(factory(id));
+    return *log_channels_.back();
+}
+
+std::vector<std::unique_ptr<log_channel>> const& datastore_impl::log_channels() const noexcept {
+    return log_channels_;
+}
+
+void datastore_impl::maybe_register_rdma_stream(log_channel& channel, std::size_t id) {
+    auto acquire_stream = [&](auto&& acquire_fn) {
+        auto stream_result = acquire_fn(static_cast<std::uint16_t>(id));
+        if (! stream_result.status.success || stream_result.stream == nullptr) {
+            LOG_LP(FATAL) << "Failed to acquire RDMA send stream: "
+                          << stream_result.status.error_message;
+        }
+        channel.get_impl()->set_rdma_send_stream(std::move(stream_result.stream));
+    };
+
+    if (rdma_stream_factory_for_test_) {
+        acquire_stream(rdma_stream_factory_for_test_);
+        return;
+    }
+
+    if (rdma_sender_ == nullptr || ! is_rdma_enabled()) {
+        return;
+    }
+    if (id > std::numeric_limits<std::uint16_t>::max()) {
+        LOG_LP(FATAL) << "RDMA channel_id overflow: id=" << id;
+    }
+    acquire_stream([this](std::uint16_t cid) {
+        return rdma_sender_->get_send_stream(cid);
+    });
+}
+
 void datastore_impl::set_replica_role() noexcept {
     is_master_ = false;
 }
@@ -624,18 +664,6 @@ void datastore_impl::set_log_channel_connector_factory_for_test(
 void datastore_impl::set_rdma_stream_factory_for_test(
         std::function<rdma_sender_base::stream_acquire_result(std::uint16_t)> factory) noexcept {
     rdma_stream_factory_for_test_ = std::move(factory);
-}
-
-std::function<rdma_sender_base::stream_acquire_result(std::uint16_t)> const*
-datastore_impl::get_rdma_stream_factory_for_test() const noexcept {
-    if (rdma_stream_factory_for_test_) {
-        return &rdma_stream_factory_for_test_;
-    }
-    return nullptr;
-}
-
-bool datastore_impl::has_rdma_stream_factory_for_test() const noexcept {
-    return static_cast<bool>(rdma_stream_factory_for_test_);
 }
 
 const std::optional<manifest::migration_info>& datastore_impl::get_migration_info() const noexcept {
