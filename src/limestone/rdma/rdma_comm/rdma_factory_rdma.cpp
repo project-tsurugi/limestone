@@ -13,6 +13,10 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
+#include <chrono>
+#include <optional>
+#include <string>
+
 #include <rdma/rdma_factory.h>
 #include <rdma/rdma_comm/rdma_comm_constants.h>
 #include <rdma/rdma_comm/rdma_comm_handshake_result_conversion.h>
@@ -99,9 +103,10 @@ handshake_connector_create_result make_handshake_connector(
 
 handshake_acceptor_create_result make_handshake_acceptor(
         std::string const&        daemon_socket_path,
-        std::chrono::milliseconds operation_timeout) {
+        std::chrono::milliseconds operation_timeout,
+        std::optional<std::chrono::milliseconds> start_wait_timeout) {
     auto result = rdma::handshake::handshake_acceptor::create_acceptor(
-        daemon_socket_path, operation_timeout);
+        daemon_socket_path, operation_timeout, start_wait_timeout);
     if (! result) {
         auto status = to_operation_result(result.result());
         if (status.success) {

@@ -18,6 +18,8 @@
 
 #include <arpa/inet.h>
 
+#include <chrono>
+
 #include <cstdint>
 #include <memory>
 #include <unordered_map>
@@ -65,6 +67,11 @@ enum class response_type : uint8_t {
 };
 
 constexpr uint64_t replication_protocol_version = 2;
+
+// Upper bound each blocking RDMA handshake operation waits for its message exchange
+// with the handshake daemon, shared by the master and replica sides. The accept-side
+// wait for the start is excluded (unbounded). Not expected to fire in normal operation.
+constexpr std::chrono::milliseconds rdma_handshake_operation_timeout{10000};
 
 // Abstract class representing a replication message
 class replication_message {

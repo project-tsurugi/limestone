@@ -873,3 +873,26 @@ RDMA モードを使うには、以下が満たされている必要がある。
   * 判明している具体例: group commit。既存の GROUP_COMMIT 関連テストはすべて TCP モードで
     あり、RDMA モードの master → replica 間で group commit が伝播し ACK フレームで完了同期
     される経路 (§3.3) を end-to-end で検証するテストが存在しない。
+
+* **replica 側 `establish_rdma_session()` の失敗時ロールバックを完全化する**
+  (2026-08-12、フェーズ 2 ステップ 8 の 3 モデルレビューで判明。Sonnet / Opus / Fable が
+  一致して指摘)。現状の実装は「失敗 = プロセス終了」(tgreplica が return 1) を前提とした
+  one-shot 契約であり (doxygen の `@note` に明記済み)、その前提の下では無害だが、
+  ロールバックは不完全である:
+  * `release_rdma_stack()` は RDMA receiver / ACK sender だけを解放し、
+    `register_rdma_log_channel_handler()` で登録済みの `log_channel_handlers_` スロットと、
+    その裏で `datastore::create_channel()` により作られた log channel は残る。失敗後は
+    「DMA アドレスは nullopt なのにハンドラは登録済み」という不整合状態になり、同一
+    インスタンスでの再確立は `already_registered` で必ず失敗する。
+  * `initialize_rdma()` の戻り値 `already_initialized` (再確立の兆候) が `failed` と
+    同一視され、拒否理由メッセージが実態と食い違う。
+  将来「確立失敗時にプロセスを終了させず、クリーンアップして生存させ再試行する」要求が
+  あるため、その際は次の対応が必要になる:
+  * 失敗パスで登録済みハンドラスロットをクリアする (または `already_registered` を
+    同一 id の再登録として成功扱いにする)。
+  * `create_channel()` で作られた datastore 側 log channel の回収手段。現状削除 API が
+    存在しないため設計が必要 (replica 側 datastore は ready() を呼ばない使い方なので、
+    チャネルの再利用で足りる可能性もある)。
+  * `already_initialized` を `failed` と区別して扱い、再確立の経路を定義する。
+  * one-shot 前提を外した上での `establish_rdma_session()` の再入可能化と、
+    doxygen 契約 (`@note One-shot`) の更新。

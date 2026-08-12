@@ -13,6 +13,10 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
+#include <chrono>
+#include <optional>
+#include <string>
+
 #include <rdma/rdma_factory.h>
 #include <rdma/null_handshake_acceptor.h>
 #include <rdma/null_handshake_connector.h>
@@ -45,7 +49,8 @@ handshake_connector_create_result make_handshake_connector(
 
 handshake_acceptor_create_result make_handshake_acceptor(
         std::string const& /*daemon_socket_path*/,
-        std::chrono::milliseconds /*operation_timeout*/) {
+        std::chrono::milliseconds /*operation_timeout*/,
+        std::optional<std::chrono::milliseconds> /*start_wait_timeout*/) {
     return {{true, {}}, std::make_unique<null_handshake_acceptor>()};
 }
 

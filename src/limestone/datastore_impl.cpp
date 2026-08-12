@@ -16,7 +16,6 @@
 #include <datastore_impl.h>
 #include <limestone/logging.h>
 #include <logging_helper.h>
-#include <chrono>
 #include <cstdlib>
 #include <iostream>
 #include <cstring>
@@ -56,14 +55,6 @@
 #include <manifest.h>
 
 namespace limestone::api {
-
-namespace {
-
-// Upper bound each blocking handshake operation waits for its message exchange
-// with the handshake daemon. Not expected to fire in normal operation.
-constexpr std::chrono::milliseconds rdma_handshake_operation_timeout{10000};
-
-} // namespace
 
 // Default constructor initializes the backup counter to zero.
 datastore_impl::datastore_impl()

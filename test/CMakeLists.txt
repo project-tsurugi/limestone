@@ -27,6 +27,7 @@ if(ENABLE_RDMA)
     )
     target_compile_definitions(${test_target} PRIVATE
         RDMA_HANDSHAKED_BIN="${RDMA_HANDSHAKED_EXECUTABLE}"
+        TGREPLICA_BIN="$<TARGET_FILE:replica>"
     )
 endif()
 

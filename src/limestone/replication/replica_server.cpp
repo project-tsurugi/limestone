@@ -16,17 +16,20 @@
 
 #include "replica_server.h"
 
+#include <chrono>
 #include <filesystem>
 #include <glog/logging.h>
 #include <limestone/logging.h>
 #include <netinet/tcp.h>
 #include <poll.h>
+#include <sstream>
 #include <sys/eventfd.h>
 #include <type_traits>
 #include <variant>
 #include <unistd.h>
 
 #include <rdma/rdma_factory.h>
+#include <rdma/rdma_handshake_payload.h>
 
 #include "channel_handler_base.h"
 #include "control_channel_handler.h"
@@ -626,6 +629,142 @@ std::optional<std::uint64_t> replica_server::get_rdma_dma_address() const noexce
         return std::nullopt;
     }
     return rdma_receiver_->get_dma_address();
+}
+
+bool replica_server::establish_rdma_session(
+    std::string const& handshake_socket_path, std::uint64_t service_id) {
+    auto acceptor_result = make_handshake_acceptor(
+        handshake_socket_path, rdma_handshake_operation_timeout);
+    if (! acceptor_result.status.success) {
+        LOG_LP(ERROR) << "Failed to create the handshake acceptor: "
+            << acceptor_result.status.error_message;
+        return false;
+    }
+    auto acceptor = std::move(acceptor_result.instance);
+
+    LOG_LP(INFO) << "Waiting for the master to start the RDMA handshake: service_id="
+        << service_id;
+    auto start_result = acceptor->wait_for_start(service_id);
+    if (! start_result.success) {
+        LOG_LP(ERROR) << "Failed to receive the handshake start: "
+            << start_result.error_message;
+        return false;
+    }
+
+    auto start_payload = decode_start_payload(start_result.payload);
+    if (! start_payload.has_value()) {
+        send_rdma_session_rejection(*acceptor, "malformed handshake start payload");
+        return false;
+    }
+    if (start_payload->protocol_version != replication_protocol_version) {
+        std::ostringstream reason;
+        reason << "unsupported replication protocol version: "
+            << start_payload->protocol_version
+            << " (expected " << replication_protocol_version << ")";
+        send_rdma_session_rejection(*acceptor, reason.str());
+        return false;
+    }
+    if (start_payload->channel_count == 0 || start_payload->channel_count > max_log_channel_slots) {
+        std::ostringstream reason;
+        reason << "channel_count out of range: " << start_payload->channel_count
+            << " (must be 1.." << max_log_channel_slots << ")";
+        send_rdma_session_rejection(*acceptor, reason.str());
+        return false;
+    }
+    if (start_payload->control_channel_id < start_payload->channel_count) {
+        std::ostringstream reason;
+        reason << "control_channel_id overlaps a data channel id: "
+            << start_payload->control_channel_id
+            << " < channel_count=" << start_payload->channel_count;
+        send_rdma_session_rejection(*acceptor, reason.str());
+        return false;
+    }
+
+    if (initialize_rdma(start_payload->slot_count, start_payload->master_dma_address)
+            != rdma_init_result::success) {
+        send_rdma_session_rejection(*acceptor, "failed to initialize the RDMA stack");
+        return false;
+    }
+    auto dma_address = get_rdma_dma_address();
+    if (! dma_address.has_value()) {
+        send_rdma_session_rejection(*acceptor, "replica DMA address is unavailable");
+        release_rdma_stack();
+        return false;
+    }
+
+    rdma_handshake_response_payload response{};
+    response.accepted = true;
+    response.replica_dma_address = dma_address.value();
+    auto response_result = acceptor->send_response(encode(response));
+    if (! response_result.success) {
+        LOG_LP(ERROR) << "Failed to send the handshake response: "
+            << response_result.error_message;
+        release_rdma_stack();
+        return false;
+    }
+
+    // Register each data channel handler before the receiver enters the TRANSFER
+    // phase, so that frames arriving right after the handshake can be dispatched.
+    for (std::uint16_t id = 0; id < start_payload->channel_count; ++id) {
+        auto reg_result = register_rdma_log_channel_handler(id);
+        if (reg_result != register_rdma_handler_result::success) {
+            LOG_LP(ERROR) << "Failed to register the RDMA log channel handler: id=" << id
+                << " result=" << reg_result;
+            release_rdma_stack();
+            return false;
+        }
+    }
+
+    if (finalize_rdma() != rdma_finalize_result::success) {
+        release_rdma_stack();
+        return false;
+    }
+
+    auto finalize_result = acceptor->receive_finalize();
+    if (! finalize_result.success) {
+        LOG_LP(ERROR) << "Failed to receive the handshake finalize: "
+            << finalize_result.error_message;
+        release_rdma_stack();
+        return false;
+    }
+    auto complete_result = acceptor->complete();
+    if (! complete_result.success) {
+        LOG_LP(ERROR) << "Failed to complete the handshake: "
+            << complete_result.error_message;
+        release_rdma_stack();
+        return false;
+    }
+
+    LOG_LP(INFO) << "RDMA replication session established: channel_count="
+        << start_payload->channel_count
+        << " control_channel_id=" << start_payload->control_channel_id;
+    return true;
+}
+
+void replica_server::send_rdma_session_rejection(
+    handshake_acceptor_base& acceptor, std::string const& reason) {
+    LOG_LP(ERROR) << "Rejecting the RDMA replication session: " << reason;
+    rdma_handshake_response_payload response{};
+    response.accepted = false;
+    response.error_message = reason;
+    auto result = acceptor.send_response(encode(response));
+    if (! result.success) {
+        LOG_LP(ERROR) << "Failed to send the rejection response: " << result.error_message;
+    }
+}
+
+void replica_server::release_rdma_stack() noexcept {
+    {
+        std::lock_guard<std::mutex> lock(rdma_init_mutex_);
+        if (rdma_receiver_) {
+            [[maybe_unused]] auto const result = rdma_receiver_->shutdown();
+            rdma_receiver_.reset();
+        }
+        if (ack_sender_) {
+            [[maybe_unused]] auto const result = ack_sender_->shutdown();
+            ack_sender_.reset();
+        }
+    }
 }
 
 } // namespace limestone::replication

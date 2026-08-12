@@ -14,9 +14,11 @@
  * limitations under the License.
  */
 
+#include <chrono>
 #include <iostream>
 #include <boost/filesystem.hpp>
 #include <string>
+#include <thread>
 #include <replication/replication_config_loader.h>
 #include "replication/replication_endpoint.h"
 #include "replication/replica_server.h"
@@ -67,8 +69,23 @@ int main(int argc, char* argv[]) {
     }
     limestone::replication::replication_config const& config = config_result.config;
     if (config.mode() == limestone::replication::replication_mode::rdma) {
-        std::cerr << "Error: RDMA replication mode is not yet supported by the replica server." << std::endl;
-        return 1;
+        limestone::replication::replica_server server{};
+        server.initialize(log_dir_path);
+
+        std::cout << "[replica] waiting for the master on the handshake daemon: "
+                  << config.handshake_socket_path() << std::endl;
+        if (!server.establish_rdma_session(config.handshake_socket_path(), config.service_id())) {
+            std::cerr << "Error: failed to establish the RDMA replication session." << std::endl;
+            return 1;
+        }
+        std::cout << "[replica] initialized and listening" << std::endl;
+
+        // Replication data arrives on the RDMA receive threads; the main thread only
+        // keeps the process alive until it is stopped by a signal. A clean shutdown
+        // path is deferred to the replica-side restructuring phase.
+        for (;;) {
+            std::this_thread::sleep_for(std::chrono::seconds(60));
+        }
     }
     if (config.mode() == limestone::replication::replication_mode::none) {
         std::cerr << "Error: TSURUGI_REPLICATION_ENDPOINT environment variable is not set." << std::endl;

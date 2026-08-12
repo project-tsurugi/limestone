@@ -18,6 +18,7 @@
 #include <chrono>
 #include <cstdint>
 #include <memory>
+#include <optional>
 #include <string>
 
 #include <rdma/handshake_client_base.h>
@@ -111,11 +112,15 @@ handshake_connector_create_result make_handshake_connector(
  *
  * @param daemon_socket_path Filesystem path of the daemon's UNIX domain socket.
  * @param operation_timeout Upper bound a blocking call on the created instance waits
- *        for its message exchange to complete.
+ *        for its message exchange to complete. wait_for_start's wait for the peer's
+ *        start is excluded and bounded by start_wait_timeout.
+ * @param start_wait_timeout Upper bound on how long wait_for_start waits for the
+ *        peer's start; std::nullopt (the default) waits indefinitely.
  * @return handshake_acceptor_create_result; instance is non-null on success.
  */
 handshake_acceptor_create_result make_handshake_acceptor(
     std::string const&        daemon_socket_path,
-    std::chrono::milliseconds operation_timeout);
+    std::chrono::milliseconds operation_timeout,
+    std::optional<std::chrono::milliseconds> start_wait_timeout = std::nullopt);
 
 } // namespace limestone::replication

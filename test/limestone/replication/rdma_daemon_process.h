@@ -41,8 +41,9 @@
 namespace limestone::testing {
 
 /**
- * @brief Forks and execs a real rdma_handshaked process, capturing its stderr so tests can
- *        wait for specific log lines (e.g. bring-up completion).
+ * @brief Forks and execs a child process (by default the real rdma_handshaked), capturing
+ *        its stdout/stderr so tests can wait for specific log lines (e.g. bring-up
+ *        completion).
  *
  * Mirrors the daemon_process helper in rdma-comm-lib's own
  * tests/src/handshake/rdma_handshaked_scenario_test.cpp: rdma_comm_handshake_connector and
@@ -53,13 +54,14 @@ class daemon_process {
 public:
     static constexpr std::chrono::milliseconds default_wait_timeout{5000};
 
-    explicit daemon_process(std::vector<std::string> const& args) {
+    explicit daemon_process(std::vector<std::string> const& args,
+        std::string const& binary_path = RDMA_HANDSHAKED_BIN) {
         ::setenv("GLOG_logtostderr", "1", 1);
         ::setenv("GLOG_v", "30", 1);
 
         std::vector<std::string> argv_storage;
         argv_storage.reserve(args.size() + 1);
-        argv_storage.emplace_back(RDMA_HANDSHAKED_BIN);
+        argv_storage.emplace_back(binary_path);
         for (auto const& arg : args) {
             argv_storage.push_back(arg);
         }
@@ -72,7 +74,7 @@ public:
 
         int pipe_fds[2]{};
         if (::pipe2(pipe_fds, O_CLOEXEC) != 0) {
-            ADD_FAILURE() << "pipe2() failed for the daemon stderr capture";
+            ADD_FAILURE() << "pipe2() failed for the child output capture";
             return;
         }
 
@@ -80,7 +82,7 @@ public:
         if (pid_ < 0) {
             ::close(pipe_fds[0]);
             ::close(pipe_fds[1]);
-            ADD_FAILURE() << "fork() failed to start the daemon binary";
+            ADD_FAILURE() << "fork() failed to start the child binary";
             return;
         }
 
@@ -90,8 +92,8 @@ public:
             ::close(pipe_fds[0]);
             ::close(pipe_fds[1]);
 
-            ::execv(RDMA_HANDSHAKED_BIN, argv.data());
-            ::perror("execv rdma_handshaked");
+            ::execv(argv_storage.front().c_str(), argv.data());
+            ::perror("execv child binary");
             ::_exit(127);
         }
 

@@ -19,6 +19,7 @@
 #include <functional>
 #include <memory>
 #include <ostream>
+#include <string>
 #include <string_view>
 #include <unordered_map>
 #include <unordered_set>
@@ -28,6 +29,7 @@
 #include "replication_message.h"
 #include <limestone/api/datastore.h>
 #include "limestone_exception_helper.h"
+#include <rdma/handshake_client_base.h>
 #include <rdma/rdma_receiver_base.h>
 #include <rdma/rdma_receive_event.h>
 #include <rdma/rdma_sender_base.h>
@@ -155,6 +157,25 @@ public:
      * @return optional DMA address if available.
      */
     [[nodiscard]] std::optional<std::uint64_t> get_rdma_dma_address() const noexcept;
+
+    /**
+     * @brief Establishes the RDMA replication session as the accept side.
+     *
+     * Registers on the handshake daemon and waits for the master's start,
+     * validates the start payload, initializes the RDMA stack, responds with
+     * the replica DMA address, registers a log channel handler for each data
+     * channel (ids 0 .. channel_count - 1), and completes the handshake.
+     * The control channel id is not registered as a log channel.
+     *
+     * @param handshake_socket_path Filesystem path of the handshake daemon socket.
+     * @param service_id Handshake service id shared with the master.
+     * @return true when the session is established; false on failure.
+     * @note One-shot: on failure, log channel handlers already registered during
+     *       this call are not rolled back, so this instance must not be reused
+     *       for a retry.
+     */
+    [[nodiscard]] bool establish_rdma_session(
+        std::string const& handshake_socket_path, std::uint64_t service_id);
 
     /**
      * @brief Accessor for log channel handler lookup.
@@ -286,6 +307,19 @@ private:
 
     poll_result poll_shutdown_event_or_client();
     void handle_shutdown_event();
+
+    /**
+     * @brief Sends a rejection response on the handshake and logs the reason.
+     * @param acceptor Acceptor whose handshake is being rejected.
+     * @param reason Rejection reason forwarded to the master.
+     */
+    void send_rdma_session_rejection(
+        handshake_acceptor_base& acceptor, std::string const& reason);
+
+    /**
+     * @brief Shuts down and releases the RDMA receiver and the ACK sender.
+     */
+    void release_rdma_stack() noexcept;
     void accept_new_client();
     void cleanup_completed_futures();
     void register_active_client(int fd);
