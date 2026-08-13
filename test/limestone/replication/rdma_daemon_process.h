@@ -126,6 +126,12 @@ public:
 
     [[nodiscard]] bool started() const noexcept { return pid_ > 0; }
 
+    /**
+     * @brief Returns the pid of the child process.
+     * @return The child pid once forked, or a negative value if the launch failed.
+     */
+    [[nodiscard]] pid_t pid() const noexcept { return pid_; }
+
     [[nodiscard]] bool wait_for_log(
             std::string const&        needle,
             std::chrono::milliseconds timeout = default_wait_timeout) {

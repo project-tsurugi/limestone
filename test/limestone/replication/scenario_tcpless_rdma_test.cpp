@@ -17,12 +17,22 @@
 
 #include <gtest/gtest.h>
 
+#include <cerrno>
 #include <chrono>
 #include <cstdlib>
+#include <cstring>
+#include <fstream>
 #include <memory>
+#include <set>
+#include <sstream>
 #include <string>
 #include <thread>
 #include <vector>
+
+#include <arpa/inet.h>
+#include <netinet/in.h>
+#include <sys/socket.h>
+#include <unistd.h>
 
 #include <boost/filesystem.hpp>
 
@@ -42,6 +52,141 @@ namespace {
 constexpr char const* base_location = "/tmp/scenario_tcpless_rdma_test";
 constexpr char const* master_location = "/tmp/scenario_tcpless_rdma_test/master";
 constexpr char const* replica_location = "/tmp/scenario_tcpless_rdma_test/replica";
+
+/**
+ * @brief Collects the inodes of all sockets held by the process from the
+ *        "socket:[<inode>]" symlink targets under /proc/<pid>/fd.
+ * @param pid Target process.
+ * @return Set of socket inodes; empty when the fd directory itself is unreadable.
+ */
+std::set<std::string> read_socket_inodes(pid_t pid) {
+    std::set<std::string> inodes;
+    boost::filesystem::path const fd_dir{"/proc/" + std::to_string(pid) + "/fd"};
+    boost::system::error_code iter_ec;
+    // Use the error_code overloads so racing with process exit does not abort
+    // the test (liveness checking is the caller's responsibility).
+    boost::filesystem::directory_iterator it{fd_dir, iter_ec};
+    for (; !iter_ec && it != boost::filesystem::directory_iterator{}; it.increment(iter_ec)) {
+        boost::system::error_code ec;
+        auto const target = boost::filesystem::read_symlink(it->path(), ec).string();
+        // Ignore fds that cannot be read due to close races etc.
+        if (ec) {
+            continue;
+        }
+        constexpr char const* prefix = "socket:[";
+        if (target.rfind(prefix, 0) == 0 && target.back() == ']') {
+            inodes.insert(target.substr(std::strlen(prefix),
+                target.size() - std::strlen(prefix) - 1));
+        }
+    }
+    return inodes;
+}
+
+/**
+ * @brief Returns whether /proc/<pid>/fd is readable and has at least one entry.
+ * @param pid Target process.
+ * @return true when at least one fd is visible.
+ */
+bool process_fds_visible(pid_t pid) {
+    boost::system::error_code ec;
+    boost::filesystem::directory_iterator const it{
+        boost::filesystem::path{"/proc/" + std::to_string(pid) + "/fd"}, ec};
+    return !ec && it != boost::filesystem::directory_iterator{};
+}
+
+/**
+ * @brief Collects the inodes of all TCP sockets in the network namespace from
+ *        /proc/<pid>/net/tcp and tcp6.
+ * @param pid Process that selects the namespace to inspect.
+ * @return Set of TCP socket inodes.
+ *
+ * After the header line each row reads
+ * "sl local rem st tx:rx tr:tm retrnsmt uid timeout inode ...", so the inode is
+ * the 10th field.
+ */
+std::set<std::string> read_tcp_inodes_in_namespace(pid_t pid) {
+    std::set<std::string> inodes;
+    for (char const* table : {"tcp", "tcp6"}) {
+        std::ifstream in{"/proc/" + std::to_string(pid) + "/net/" + table};
+        if (!in) {
+            // A silent open failure would turn the check into a vacuous PASS, so
+            // fail here; tcp6 is tolerated because it does not exist when IPv6
+            // is disabled.
+            if (std::string{table} == "tcp") {
+                ADD_FAILURE() << "failed to open /proc/" << pid << "/net/" << table;
+            }
+            continue;
+        }
+        std::string line;
+        std::getline(in, line);  // discard the header line
+        while (std::getline(in, line)) {
+            std::istringstream fields{line};
+            std::string field;
+            int read_count = 0;
+            while (read_count < 10 && (fields >> field)) {
+                ++read_count;
+            }
+            // Extraction failure at eof leaves field untouched, so accept only
+            // rows with 10 fields read (shorter rows would retain a previous
+            // column's value).
+            if (read_count == 10) {
+                inodes.insert(field);
+            }
+        }
+    }
+    return inodes;
+}
+
+/**
+ * @brief Returns the inodes of the TCP sockets held by the process.
+ * @param pid Target process.
+ * @return Set of TCP socket inodes owned by the process.
+ *
+ * /proc/<pid>/net/tcp is a namespace-wide table that cannot be filtered by pid,
+ * so ownership is determined by matching it against the socket inodes under
+ * /proc/<pid>/fd.
+ */
+std::set<std::string> tcp_sockets_owned_by(pid_t pid) {
+    auto const socket_inodes = read_socket_inodes(pid);
+    auto const tcp_inodes = read_tcp_inodes_in_namespace(pid);
+    std::set<std::string> owned;
+    for (auto const& inode : socket_inodes) {
+        if (tcp_inodes.find(inode) != tcp_inodes.end()) {
+            owned.insert(inode);
+        }
+    }
+    return owned;
+}
+
+/**
+ * @brief Verifies that the process has opened no TCP socket since the baseline
+ *        was taken.
+ * @param pid Process to verify.
+ * @param baseline TCP socket inodes owned when the measurement started.
+ * @param label Process name used in failure messages.
+ *
+ * Earlier tests in the same binary may leave sockets behind, and those are also
+ * inherited by the forked tgreplica, so the check uses the difference from the
+ * baseline instead of an absolute count of zero. An exited or zombie process
+ * exposes no fds and would make the check vacuously pass, so fd visibility is
+ * checked first.
+ */
+void expect_no_new_tcp_sockets(pid_t pid, std::set<std::string> const& baseline,
+        char const* label) {
+    if (!process_fds_visible(pid)) {
+        ADD_FAILURE() << label << " (pid " << pid
+            << ") has no visible fds; the process may have exited";
+        return;
+    }
+    std::vector<std::string> added;
+    for (auto const& inode : tcp_sockets_owned_by(pid)) {
+        if (baseline.find(inode) == baseline.end()) {
+            added.push_back(inode);
+        }
+    }
+    EXPECT_TRUE(added.empty()) << label << " (pid " << pid << ") opened "
+        << added.size() << " TCP socket(s); the RDMA replication mode must not open TCP";
+}
 
 } // namespace
 
@@ -159,7 +304,42 @@ protected:
     static constexpr char const* handshake_timeout_arg = "--handshake-timeout=2000";
 };
 
+// Verifies that tcp_sockets_owned_by() actually detects sockets rather than
+// always returning empty. Without this, the TCP-less check in
+// wal_data_flows_without_tcp could pass even with a broken parser. Earlier
+// tests in the same binary may leave sockets behind, so the check uses diffs.
+TEST_F(scenario_tcpless_rdma_test, tcp_socket_check_detects_listening_socket) {
+    auto const baseline = tcp_sockets_owned_by(::getpid());
+
+    int const fd = ::socket(AF_INET, SOCK_STREAM, 0);
+    ASSERT_GE(fd, 0);
+    struct sockaddr_in addr{};
+    addr.sin_family = AF_INET;
+    addr.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+    addr.sin_port = 0;  // let the kernel pick a free port
+    if (::bind(fd, reinterpret_cast<sockaddr*>(&addr), sizeof(addr)) != 0) {
+        int const bind_errno = errno;  // save errno before close() can overwrite it
+        ::close(fd);
+        FAIL() << "bind failed: " << strerror(bind_errno);
+    }
+    if (::listen(fd, 1) != 0) {
+        int const listen_errno = errno;  // save errno before close() can overwrite it
+        ::close(fd);
+        FAIL() << "listen failed: " << strerror(listen_errno);
+    }
+
+    EXPECT_EQ(tcp_sockets_owned_by(::getpid()).size(), baseline.size() + 1);
+
+    ::close(fd);
+    EXPECT_EQ(tcp_sockets_owned_by(::getpid()).size(), baseline.size());
+}
+
 TEST_F(scenario_tcpless_rdma_test, wal_data_flows_without_tcp) {
+    // Take the pre-test ownership so TCP opened by the replication path shows
+    // up as a diff. tgreplica is forked from this process, so inherited fds are
+    // covered by the same baseline.
+    auto const tcp_baseline = tcp_sockets_owned_by(::getpid());
+
     ASSERT_NO_FATAL_FAILURE(start_daemons());
     ASSERT_NO_FATAL_FAILURE(start_replica_process());
 
@@ -173,6 +353,10 @@ TEST_F(scenario_tcpless_rdma_test, wal_data_flows_without_tcp) {
     EXPECT_NE(ds_->get_impl()->get_rdma_control_send_stream(), nullptr);
     EXPECT_TRUE(lc0_->get_impl()->has_rdma_send_stream());
     EXPECT_TRUE(lc1_->get_impl()->has_rdma_send_stream());
+
+    // Verify that the session establishment opened no TCP connection
+    expect_no_new_tcp_sockets(::getpid(), tcp_baseline, "master");
+    expect_no_new_tcp_sockets(replica_->pid(), tcp_baseline, "tgreplica");
 
     ds_->switch_epoch(1);
 
@@ -215,6 +399,10 @@ TEST_F(scenario_tcpless_rdma_test, wal_data_flows_without_tcp) {
     ds_->switch_epoch(3);
     EXPECT_EQ(get_epoch(master_location), 2U);
     EXPECT_EQ(get_epoch(replica_location), 2U);
+
+    // Verify the processes are still TCP-less after WAL data and group commits
+    expect_no_new_tcp_sockets(::getpid(), tcp_baseline, "master");
+    expect_no_new_tcp_sockets(replica_->pid(), tcp_baseline, "tgreplica");
 }
 
 } // namespace limestone::testing
