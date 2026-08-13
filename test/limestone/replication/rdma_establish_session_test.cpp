@@ -35,8 +35,13 @@
 #include <rdma/handshake_client_base.h>
 #include <rdma/rdma_factory.h>
 #include <rdma/rdma_handshake_payload.h>
+#include <rdma/rdma_frame_buffer_base.h>
 #include <rdma/rdma_send_stream_base.h>
+#include <replication/message_group_commit.h>
 #include <replication/replication_message.h>
+#include <replication/replication_message_io.h>
+
+#include "test_rdma_frame_buffer.h"
 
 namespace limestone::testing {
 
@@ -58,6 +63,34 @@ constexpr std::uint32_t slot_count = 4U;
 // The vendor mock does not dereference the remote DMA address on the master side,
 // so the stub can hand out an arbitrary value in place of a real replica receiver.
 constexpr std::uint64_t stub_replica_dma_address = 0xBEEFU;
+
+/**
+ * @brief Fake control channel send stream recording submitted frames and flush calls.
+ */
+class capturing_control_send_stream : public limestone::replication::rdma_send_stream_base {
+public:
+    [[nodiscard]] std::unique_ptr<limestone::replication::rdma_frame_buffer_base>
+    acquire_frame_buffer(std::size_t max_payload, std::size_t min_capacity) noexcept override {
+        auto const capacity = std::max(granted_frame_capacity(max_payload), min_capacity);
+        return std::make_unique<test_rdma_frame_buffer>(capacity);
+    }
+
+    [[nodiscard]] send_result submit_frame_buffer(
+            limestone::replication::rdma_frame_buffer_base& frame,
+            std::size_t payload_size) override {
+        auto& test_frame = dynamic_cast<test_rdma_frame_buffer&>(frame);
+        submitted_.emplace_back(test_frame.take_written(payload_size));
+        return {true, "", payload_size};
+    }
+
+    [[nodiscard]] flush_result flush(std::chrono::milliseconds) noexcept override {
+        ++flush_count_;
+        return {true, ""};
+    }
+
+    std::vector<std::vector<std::uint8_t>> submitted_{};
+    std::size_t flush_count_{0};
+};
 
 } // namespace
 
@@ -235,6 +268,32 @@ TEST_F(rdma_establish_session_test, establish_succeeds_without_log_channels) {
     EXPECT_NE(impl.get_rdma_control_send_stream(), nullptr);
     EXPECT_TRUE(impl.has_replica());
 
+    // Group commit flow over the established session. Verified here rather than in a
+    // separate test because every establishment costs vendor-mock endpoint slots
+    // (pid-keyed, max 64 per shm epoch, never freed) via the two daemon processes.
+    // Swap the real control channel send stream for a capturing fake so that the
+    // serialized bytes can be inspected without a replica-side receiver.
+    auto stream = std::make_unique<capturing_control_send_stream>();
+    auto* captured = stream.get();
+    impl.set_rdma_control_send_stream_for_test(std::move(stream));
+
+    EXPECT_TRUE(impl.propagate_group_commit(42U));
+    ASSERT_EQ(captured->submitted_.size(), 1U);
+    std::string const payload(captured->submitted_[0].begin(), captured->submitted_[0].end());
+    limestone::replication::replication_message_io io{payload};
+    auto message = limestone::replication::replication_message::receive(io);
+    ASSERT_EQ(message->get_message_type_id(),
+        limestone::replication::message_type_id::GROUP_COMMIT);
+    auto* group_commit =
+        dynamic_cast<limestone::replication::message_group_commit*>(message.get());
+    ASSERT_NE(group_commit, nullptr);
+    EXPECT_EQ(group_commit->epoch_number(), 42U);
+
+    // The ACK wait maps onto flush(): not called by propagate, called once by wait.
+    EXPECT_EQ(captured->flush_count_, 0U);
+    impl.wait_for_propagated_group_commit_ack();
+    EXPECT_EQ(captured->flush_count_, 1U);
+
     EXPECT_TRUE(impl.shutdown_rdma_sender());
     EXPECT_TRUE(impl.shutdown_rdma_ack_receiver());
 }
@@ -294,13 +353,15 @@ TEST_F(rdma_establish_session_test, establish_fails_fast_without_acceptor) {
     EXPECT_FALSE(impl.has_replica());
 }
 
-TEST_F(rdma_establish_session_test, group_commit_propagation_skipped_in_rdma_mode) {
+TEST_F(rdma_establish_session_test, group_commit_not_sent_before_session_established) {
     datastore_impl impl{};
     EXPECT_TRUE(impl.is_replication_configured());
-    // Skipped (returns false = nothing sent) both on the first call, which logs the
-    // one-shot warning, and on subsequent calls.
+    auto stream = std::make_unique<capturing_control_send_stream>();
+    auto* captured = stream.get();
+    impl.set_rdma_control_send_stream_for_test(std::move(stream));
+    // No replica exists until the RDMA session is established, so nothing is sent.
     EXPECT_FALSE(impl.propagate_group_commit(1U));
-    EXPECT_FALSE(impl.propagate_group_commit(2U));
+    EXPECT_TRUE(captured->submitted_.empty());
 }
 
 } // namespace limestone::testing

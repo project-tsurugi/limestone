@@ -280,6 +280,12 @@ public:
      */
     void handle_rdma_data_event(rdma_data_event const& event);
 private:
+    /**
+     * @brief Handles a frame received on the RDMA control channel.
+     * @param event RDMA data event whose channel id equals the control channel id.
+     */
+    void handle_rdma_control_event(rdma_data_event const& event);
+
     boost::filesystem::path location_;                      ///< filesystem path for datastore
     std::unordered_map<message_type_id, std::function<std::shared_ptr<channel_handler_base>(replication_message_io&)>> handler_factories_;
                                                             ///< factories for creating handlers
@@ -293,6 +299,13 @@ private:
     std::mutex rdma_init_mutex_{};                      ///< Protect RDMA stack initialization
     rdma_receiver_factory rdma_receiver_factory_for_test_{}; ///< Optional test override for receiver creation
     rdma_sender_factory ack_sender_factory_for_test_{};      ///< Optional test override for ACK sender creation
+
+    // Control channel id taken from the handshake start payload; -1 until the RDMA
+    // session is established. Atomic because the transport's receive thread reads it
+    // while the establishment thread publishes it.
+    std::atomic<std::int32_t> rdma_control_channel_id_{-1};
+    std::uint16_t control_next_sequence_number_{0};     ///< Next expected control frame sequence number
+    std::mutex control_channel_mutex_{};                ///< Serializes control frame processing
     
     std::vector<std::future<void>> client_futures_;         ///< futures for client handling threads
     std::mutex futures_mutex_;                              ///< mutex for thread-safe access to client_futures_

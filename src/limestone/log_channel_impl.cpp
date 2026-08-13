@@ -16,13 +16,8 @@
 
 namespace limestone::api {
 
+using limestone::replication::rdma_flush_timeout;
 using limestone::replication::rdma_send_stream_base;
-
-namespace {
-
-constexpr auto rdma_flush_timeout = std::chrono::milliseconds{30000};
-
-} // namespace
 
 using limestone::replication::message_type_id;
 

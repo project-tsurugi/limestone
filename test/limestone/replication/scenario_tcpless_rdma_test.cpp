@@ -48,10 +48,8 @@ constexpr char const* replica_location = "/tmp/scenario_tcpless_rdma_test/replic
 /**
  * @brief End-to-end coverage of the TCP-less RDMA replication path: a master datastore
  *        and a real tgreplica process establish the session via two real rdma_handshaked
- *        daemons and WAL data flows over RDMA with no TCP connection between them.
- *
- * Group commit is not propagated in this transitional mode (replaced in phase 3), so the
- * test asserts data arrival only and leaves the replica epoch unverified.
+ *        daemons, and both the WAL data and the group commit epoch flow over RDMA with
+ *        no TCP connection between them.
  */
 class scenario_tcpless_rdma_test : public ::testing::Test {
 protected:
@@ -201,6 +199,22 @@ TEST_F(scenario_tcpless_rdma_test, wal_data_flows_without_tcp) {
     ASSERT_EQ(replica_entries1.size(), 1U);
     EXPECT_TRUE(AssertLogEntry(replica_entries1[0], 1, "k2", "v2", 1, 0, {},
         log_entry::entry_type::normal_entry));
+
+    // Epoch 1 becomes durable when the epoch switches away from it. The group commit
+    // flows over the RDMA control channel, and its ACK wait maps onto flush(), so the
+    // replica-side epoch is already persisted when switch_epoch() returns.
+    ds_->switch_epoch(2);
+    EXPECT_EQ(get_epoch(master_location), 1U);
+    EXPECT_EQ(get_epoch(replica_location), 1U);
+
+    // A second round exercises consecutive control frames (sequence numbers advance).
+    lc0_->begin_session();
+    lc0_->add_entry(1, "k3", "v3", {2, 0});
+    lc0_->end_session();
+
+    ds_->switch_epoch(3);
+    EXPECT_EQ(get_epoch(master_location), 2U);
+    EXPECT_EQ(get_epoch(replica_location), 2U);
 }
 
 } // namespace limestone::testing

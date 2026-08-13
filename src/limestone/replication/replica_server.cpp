@@ -36,6 +36,7 @@
 #include "log_channel_handler.h"
 #include "logging_helper.h"
 #include "message_error.h"
+#include "message_group_commit.h"
 #include "limestone_exception_helper.h"
 #include "tcp_replication_message_io.h"
 #include "datastore_impl.h"
@@ -529,6 +530,12 @@ void replica_server::on_rdma_receive(rdma_receive_event const& event) {
 
 void replica_server::handle_rdma_data_event(rdma_data_event const& event) {
     auto channel_id = event.header.channel_id;
+    auto const control_channel_id = rdma_control_channel_id_.load(std::memory_order_acquire);
+    if (control_channel_id >= 0
+            && channel_id == static_cast<std::uint16_t>(control_channel_id)) {
+        handle_rdma_control_event(event);
+        return;
+    }
     if (channel_id >= max_log_channel_slots) {
         LOG_LP(ERROR) << "RDMA channel id out of range: id=" << channel_id
                       << " max=" << max_log_channel_slots
@@ -548,6 +555,71 @@ void replica_server::handle_rdma_data_event(rdma_data_event const& event) {
     }
 
     handler->handle_rdma_data_event(event);
+}
+
+void replica_server::handle_rdma_control_event(rdma_data_event const& event) {
+    auto const& header = event.header;
+    TRACE_START << "seq=" << header.sequence_number << " size=" << header.payload_size;
+    if (header.version != rdma_frame_current_version) {
+        LOG_LP(FATAL) << "RDMA frame version mismatch: expected "
+                      << static_cast<int>(rdma_frame_current_version)
+                      << " got " << static_cast<int>(header.version);
+    }
+    if (header.payload_size != event.payload.size()) {
+        LOG_LP(FATAL) << "RDMA payload size mismatch: header=" << header.payload_size
+                      << " actual=" << event.payload.size();
+    }
+    if ((header.flags & rdma_frame_flag_partial_payload) != 0) {
+        // Control messages are tens of bytes and always fit in a single frame, so a
+        // partial control frame can only be a protocol violation.
+        LOG_LP(FATAL) << "Unexpected partial RDMA control frame: seq="
+                      << header.sequence_number;
+    }
+    {
+        std::lock_guard<std::mutex> lock(control_channel_mutex_);
+        if (header.sequence_number != control_next_sequence_number_) {
+            // rdma-comm-lib stamps per-channel sequence numbers so that receivers can
+            // detect reordering or frame loss, which the NIC stack guarantees against
+            // by specification but cannot fully rule out (hardware faults, bugs,
+            // overload) nor detect by itself. Once a mismatch is observed, ordered
+            // delivery can no longer be assumed, so the process terminates rather
+            // than dropping the frame and letting the master-side flush() report the
+            // epoch as persisted.
+            LOG_LP(FATAL) << "RDMA control frame sequence mismatch: expected="
+                          << control_next_sequence_number_
+                          << " received=" << header.sequence_number;
+        }
+        control_next_sequence_number_ =
+            static_cast<std::uint16_t>(control_next_sequence_number_ + 1);
+
+        // The transport sends the ACK frame for this event only after this handler
+        // returns, so exceptions must not escape to the receive thread; convert them
+        // to a diagnosable FATAL, as the WAL data path does.
+        try {
+            std::string const payload(event.payload.begin(), event.payload.end());
+            replication_message_io io{payload};
+            auto message = replication_message::receive(io);
+            if (message->get_message_type_id() != message_type_id::GROUP_COMMIT) {
+                LOG_LP(ERROR) << "Unexpected message type on the RDMA control channel: "
+                              << static_cast<uint16_t>(message->get_message_type_id())
+                              << " (TODO: return protocol error instead of drop).";
+                return;
+            }
+            auto* group_commit = dynamic_cast<message_group_commit*>(message.get());
+            if (group_commit == nullptr) {
+                LOG_LP(ERROR) << "Failed to cast the control message to message_group_commit.";
+                return;
+            }
+            // Runs on the transport's receive thread. The ACK frame for this event is
+            // sent only after this handler returns, so the completion of the
+            // master-side flush() implies the epoch has been persisted here. No
+            // response message is sent.
+            datastore_->persist_and_propagate_epoch_id(group_commit->epoch_number());
+        } catch (std::exception const& e) {
+            LOG_LP(FATAL) << "Failed to process the RDMA control frame: " << e.what();
+        }
+    }
+    TRACE_END;
 }
 
 bool replica_server::mark_control_channel_created() noexcept {
@@ -703,8 +775,11 @@ bool replica_server::establish_rdma_session(
         return false;
     }
 
-    // Register each data channel handler before the receiver enters the TRANSFER
-    // phase, so that frames arriving right after the handshake can be dispatched.
+    // Publish the control channel id and register each data channel handler before
+    // the receiver enters the TRANSFER phase, so that frames arriving right after
+    // the handshake can be dispatched.
+    rdma_control_channel_id_.store(start_payload->control_channel_id,
+        std::memory_order_release);
     for (std::uint16_t id = 0; id < start_payload->channel_count; ++id) {
         auto reg_result = register_rdma_log_channel_handler(id);
         if (reg_result != register_rdma_handler_result::success) {
@@ -764,6 +839,11 @@ void replica_server::release_rdma_stack() noexcept {
             [[maybe_unused]] auto const result = ack_sender_->shutdown();
             ack_sender_.reset();
         }
+    }
+    rdma_control_channel_id_.store(-1, std::memory_order_release);
+    {
+        std::lock_guard<std::mutex> lock(control_channel_mutex_);
+        control_next_sequence_number_ = 0;
     }
 }
 

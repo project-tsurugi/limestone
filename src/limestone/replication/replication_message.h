@@ -73,6 +73,11 @@ constexpr uint64_t replication_protocol_version = 2;
 // wait for the start is excluded (unbounded). Not expected to fire in normal operation.
 constexpr std::chrono::milliseconds rdma_handshake_operation_timeout{10000};
 
+// Upper bound a blocking RDMA flush waits for the ACK frames of the flushed channel,
+// shared by the WAL data channels and the control channel. Not expected to fire in
+// normal operation.
+constexpr std::chrono::milliseconds rdma_flush_timeout{30000};
+
 // Abstract class representing a replication message
 class replication_message {
 public:

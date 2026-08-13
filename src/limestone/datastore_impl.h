@@ -366,6 +366,14 @@ public:
     void set_rdma_stream_factory_for_test(
         std::function<rdma_sender_base::stream_acquire_result(std::uint16_t)> factory) noexcept;
 
+    /**
+     * @brief Test hook to inject the RDMA control channel send stream.
+     * @param stream Control channel send stream ownership to set for testing.
+     * @note Test-only; do not use in production code.
+     */
+    void set_rdma_control_send_stream_for_test(
+        std::unique_ptr<rdma_send_stream_base> stream) noexcept;
+
 private:
     [[nodiscard]] limestone::internal::blob_file_resolver& require_blob_file_resolver() noexcept;
     [[nodiscard]] limestone::internal::blob_file_resolver const& require_blob_file_resolver() const noexcept;
@@ -430,11 +438,16 @@ private:
     std::unique_ptr<rdma_receiver_base> ack_receiver_{};
 
     // Send stream of the control channel; acquired at session establishment and
-    // used once control messages move onto the RDMA control channel.
+    // carrying the GROUP_COMMIT messages in RDMA mode.
     std::unique_ptr<rdma_send_stream_base> rdma_control_send_stream_{};
 
-    // One-shot guard for the group commit skip warning in RDMA mode.
-    std::atomic<bool> rdma_group_commit_skip_warned_{false};
+    /**
+     * @brief Sends a group commit message over the RDMA control channel.
+     * @param epoch_id The epoch ID to send.
+     * @return true if the message was submitted; false when the control channel
+     *         send stream is not initialized.
+     */
+    [[nodiscard]] bool propagate_group_commit_rdma(uint64_t epoch_id);
 
     // Test hook: factory to override log channel connector creation.
     std::function<std::unique_ptr<replication::replica_connector>()> log_channel_connector_factory_for_test_{};

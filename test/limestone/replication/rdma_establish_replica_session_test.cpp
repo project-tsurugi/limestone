@@ -31,9 +31,15 @@
 #include <rdma/handshake_client_base.h>
 #include <rdma/rdma_factory.h>
 #include <rdma/rdma_handshake_payload.h>
+#include <rdma/rdma_receive_event.h>
 #include <replication/log_channel_limits.h>
+#include <replication/message_ack.h>
+#include <replication/message_group_commit.h>
 #include <replication/replica_server.h>
 #include <replication/replication_message.h>
+#include <replication/replication_message_io.h>
+
+#include "replication_test_helper.h"
 
 namespace limestone::testing {
 
@@ -65,6 +71,24 @@ constexpr std::uint64_t stub_master_dma_address = 0xCAFEU;
     payload.channel_count = channel_count;
     payload.control_channel_id = channel_count;
     return payload;
+}
+
+// Builds an RDMA data event carrying one serialized replication message, as the
+// master-side control channel send path would produce it.
+[[nodiscard]] limestone::replication::rdma_data_event make_control_frame(
+        std::uint16_t channel_id, std::uint16_t sequence_number,
+        limestone::replication::replication_message const& message) {
+    limestone::replication::replication_message_io io{std::string{}};
+    limestone::replication::replication_message::send(io, message);
+    auto const payload = io.get_out_string();
+    limestone::replication::rdma_data_event event{};
+    event.header.version = limestone::replication::rdma_frame_current_version;
+    event.header.flags = 0U;
+    event.header.sequence_number = sequence_number;
+    event.header.channel_id = channel_id;
+    event.header.payload_size = static_cast<std::uint32_t>(payload.size());
+    event.payload.assign(payload.begin(), payload.end());
+    return event;
 }
 
 } // namespace
@@ -253,6 +277,29 @@ TEST_F(rdma_establish_replica_session_test, establish_succeeds_and_registers_cha
     EXPECT_NE(server.get_log_channel_handler(0U), nullptr);
     EXPECT_NE(server.get_log_channel_handler(1U), nullptr);
     EXPECT_EQ(server.get_log_channel_handler(2U), nullptr);
+
+    // Control channel behavior over the established session. Verified here rather
+    // than in separate tests because every establishment costs vendor-mock endpoint
+    // slots (pid-keyed, max 64 per shm epoch, never freed) via the two daemon
+    // processes. channel_count=2 puts the control channel on id 2, and the handler
+    // runs on the calling thread, so the epoch is persisted when the call returns.
+    limestone::replication::message_group_commit first_commit{7U};
+    server.handle_rdma_data_event(make_control_frame(2U, 0U, first_commit));
+    EXPECT_EQ(get_epoch(boost::filesystem::path{log_dir_}), 7U);
+
+    limestone::replication::message_group_commit second_commit{9U};
+    server.handle_rdma_data_event(make_control_frame(2U, 1U, second_commit));
+    EXPECT_EQ(get_epoch(boost::filesystem::path{log_dir_}), 9U);
+
+    // A well-formed message of the wrong type is dropped without persisting, and the
+    // sequence number advances so a following GROUP_COMMIT is still accepted.
+    limestone::replication::message_ack ack{};
+    server.handle_rdma_data_event(make_control_frame(2U, 2U, ack));
+    EXPECT_EQ(get_epoch(boost::filesystem::path{log_dir_}), 9U);
+
+    limestone::replication::message_group_commit third_commit{11U};
+    server.handle_rdma_data_event(make_control_frame(2U, 3U, third_commit));
+    EXPECT_EQ(get_epoch(boost::filesystem::path{log_dir_}), 11U);
 }
 
 TEST_F(rdma_establish_replica_session_test, establish_rejects_unsupported_protocol_version) {

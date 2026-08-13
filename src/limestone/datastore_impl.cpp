@@ -48,6 +48,7 @@
 #include <replication/message_rdma_finalize.h>
 #include <replication/message_rdma_finalize_ack.h>
 #include <replication/replication_message.h>
+#include <replication/replication_message_io.h>
 #include <rdma/rdma_factory.h>
 #include <rdma/rdma_handshake_payload.h>
 #include <rdma/rdma_receive_event.h>
@@ -251,21 +252,13 @@ bool datastore_impl::propagate_group_commit(uint64_t epoch_id) {
     if (!is_master_) {
         return false;
     }
-    if (replication_config_result_.config.mode() == replication_mode::rdma) {
-        // Transitional behavior: in RDMA mode there is no TCP control channel, and
-        // the RDMA control channel that will carry GROUP_COMMIT is not introduced
-        // yet, so group commit propagation is skipped.
-        if (!rdma_group_commit_skip_warned_.exchange(true, std::memory_order_acq_rel)) {
-            LOG_LP(WARNING) << "Group commit propagation is skipped in RDMA replication "
-                << "mode until the RDMA control channel is introduced.";
-        }
-        return false;
-    }
     if (replica_exists_.load(std::memory_order_acquire)) {
         TRACE_START << "epoch_id=" << epoch_id;
         bool sent = false;
         if (group_commit_sender_for_tests_) {
             sent = group_commit_sender_for_tests_(epoch_id);
+        } else if (replication_config_result_.config.mode() == replication_mode::rdma) {
+            sent = propagate_group_commit_rdma(epoch_id);
         } else {
             if (!control_channel_) {
                 LOG_LP(ERROR) << "Control channel is not initialized.";
@@ -319,8 +312,58 @@ bool datastore_impl::propagate_group_commit(uint64_t epoch_id) {
     return false;
 }
 
+bool datastore_impl::propagate_group_commit_rdma(uint64_t epoch_id) {
+    if (!rdma_control_send_stream_) {
+        LOG_LP(ERROR) << "RDMA control channel send stream is not initialized.";
+        return false;
+    }
+    replication_message_io io{std::string{}};
+    message_group_commit message{epoch_id};
+    replication_message::send(io, message);
+    // rdma_send_stream is not thread-safe and no mutex is taken here: the caller is
+    // already serialized by the CAS in update_min_epoch_id() and runs inside the
+    // lock_guard of mtx_epoch_file_ (plus one pre-threading call in ready()). If that
+    // premise ever breaks, multiple threads would touch this stream concurrently.
+    auto result = rdma_control_send_stream_->send_all_bytes(io.get_out_string());
+    if (!result.success) {
+        // acquire_frame_buffer() absorbs backpressure by blocking, so a failure means
+        // the send ring never drained within the transport timeout, i.e. the replica
+        // is gone. Unlike the TCP path, dropping the replica and continuing is not an
+        // option: the send buffer ring is shared by every channel, so undrained control
+        // frames eventually stall the WAL data channels as well.
+        LOG_LP(FATAL) << "Failed to send the group commit message over the RDMA control "
+            << "channel: " << result.error_message;
+        return false;
+    }
+    return true;
+}
+
 void datastore_impl::wait_for_propagated_group_commit_ack() {
     TRACE_START;
+    if (group_commit_sender_for_tests_) {
+        // The test hook sends synchronously in propagate_group_commit(), so there is
+        // nothing to wait for; mirrors the hook-first branching on the send side.
+        TRACE_END;
+        return;
+    }
+    if (replication_config_result_.config.mode() == replication_mode::rdma) {
+        if (!rdma_control_send_stream_) {
+            LOG_LP(ERROR) << "RDMA control channel send stream is not initialized.";
+            TRACE_END << "No RDMA control channel send stream.";
+            return;
+        }
+        // The replica-side receive handler runs synchronously before the transport
+        // sends the ACK frame back, so the completion of flush() means the replica
+        // has finished persist_and_propagate_epoch_id() for every submitted frame.
+        auto flush_result = rdma_control_send_stream_->flush(rdma_flush_timeout);
+        if (!flush_result.success) {
+            // Fatal for the same shared-ring reason as in propagate_group_commit_rdma().
+            LOG_LP(FATAL) << "RDMA control channel flush failed: "
+                << flush_result.error_message;
+        }
+        TRACE_END;
+        return;
+    }
     auto response = control_channel_->receive_message();
     if (response == nullptr || response->get_message_type_id() != message_type_id::COMMON_ACK) {
         LOG_LP(ERROR) << "Failed to receive acknowledgment for switch epoch message.";
@@ -828,6 +871,11 @@ void datastore_impl::set_log_channel_connector_factory_for_test(
 void datastore_impl::set_rdma_stream_factory_for_test(
         std::function<rdma_sender_base::stream_acquire_result(std::uint16_t)> factory) noexcept {
     rdma_stream_factory_for_test_ = std::move(factory);
+}
+
+void datastore_impl::set_rdma_control_send_stream_for_test(
+        std::unique_ptr<rdma_send_stream_base> stream) noexcept {
+    rdma_control_send_stream_ = std::move(stream);
 }
 
 const std::optional<manifest::migration_info>& datastore_impl::get_migration_info() const noexcept {
