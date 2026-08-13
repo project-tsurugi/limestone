@@ -774,6 +774,39 @@ bool datastore_impl::establish_rdma_session() {
     return true;
 }
 
+bool datastore_impl::establish_tcp_control_channel() {
+    if (!open_control_channel()) {
+        return false;
+    }
+    LOG_LP(INFO) << "Replication control channel opened successfully.";
+
+    // Register RDMA send streams for existing log channels and collect the
+    // channel ids that the FINALIZE handshake needs to register on the
+    // replica side. In RDMA mode no per-channel TCP connector is created, so
+    // the gate is the RDMA stream factory rather than the connector presence.
+    // Channel registration is limited to before ready, so the channel list is
+    // fixed here and read without locking.
+    std::vector<std::uint64_t> finalize_channel_ids;
+    auto const& channels = log_channels();
+    finalize_channel_ids.reserve(channels.size());
+    for (std::size_t id = 0; id < channels.size(); ++id) {
+        auto* channel = channels[id].get();
+        if (channel == nullptr) {
+            continue;
+        }
+        maybe_register_rdma_stream(*channel, id);
+        if (!channel->get_impl()->has_rdma_send_stream()) {
+            continue;
+        }
+        finalize_channel_ids.push_back(static_cast<std::uint64_t>(id));
+    }
+
+    if (!maybe_finalize_rdma(finalize_channel_ids)) {
+        return false;
+    }
+    return true;
+}
+
 rdma_send_stream_base* datastore_impl::get_rdma_control_send_stream() const noexcept {
     return rdma_control_send_stream_.get();
 }

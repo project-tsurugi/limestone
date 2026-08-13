@@ -379,7 +379,7 @@ blob_reference_tag_type datastore::generate_reference_tag(
     return impl_->generate_reference_tag(blob_id, transaction_id);
 }
 
-void datastore::ready() {  // NOLINT(readability-function-cognitive-complexity)
+void datastore::ready() {
     TRACE_START;
     try {
         blob_id_type max_blob_id =
@@ -415,36 +415,10 @@ void datastore::ready() {  // NOLINT(readability-function-cognitive-complexity)
                     LOG_LP(FATAL) << "Failed to establish the RDMA replication session.";
                 }
                 LOG_LP(INFO) << "Replication RDMA session established successfully.";
-            } else if (impl_->open_control_channel()) {
-                LOG_LP(INFO) << "Replication control channel opened successfully.";
-
-                // Register RDMA send streams for existing log channels and collect
-                // the channel ids that the FINALIZE handshake needs to register on
-                // the replica side. In RDMA mode no per-channel TCP connector is
-                // created, so the gate is the RDMA stream factory rather than the
-                // connector presence.
-                // Channel registration is limited to before ready, so the channel
-                // list is fixed here and read without locking.
-                std::vector<std::uint64_t> finalize_channel_ids;
-                auto const& channels = impl_->log_channels();
-                finalize_channel_ids.reserve(channels.size());
-                for (std::size_t id = 0; id < channels.size(); ++id) {
-                    auto* channel = channels[id].get();
-                    if (channel == nullptr) {
-                        continue;
-                    }
-                    impl_->maybe_register_rdma_stream(*channel, id);
-                    if (! channel->get_impl()->has_rdma_send_stream()) {
-                        continue;
-                    }
-                    finalize_channel_ids.push_back(static_cast<std::uint64_t>(id));
-                }
-
-                if (! impl_->maybe_finalize_rdma(finalize_channel_ids)) {
-                    LOG_LP(FATAL) << "Failed to finalize RDMA channel setup.";
-                }
             } else {
-                LOG_LP(FATAL) << "Failed to open replication control channel.";
+                if (! impl_->establish_tcp_control_channel()) {
+                    LOG_LP(FATAL) << "Failed to establish the replication control channel.";
+                }
             }
         }
         TRACE_END;

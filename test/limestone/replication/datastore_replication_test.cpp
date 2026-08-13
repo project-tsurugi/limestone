@@ -254,7 +254,7 @@ TEST_P(datastore_replication_test, fail_open_control_channel_via_datastore_ready
     EXPECT_EQ(datastore_->get_impl()->get_control_channel(), nullptr);
     EXPECT_DEATH({
         datastore_->ready();
-    }, "Failed to open replication control channel.");
+    }, "Failed to establish the replication control channel.");
 }
 
 

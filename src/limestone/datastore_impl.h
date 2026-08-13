@@ -327,6 +327,18 @@ public:
     [[nodiscard]] bool establish_rdma_session();
 
     /**
+     * @brief レプリカとの TCP レプリケーション制御チャネルを確立する。
+     *
+     * 制御チャネルを接続し、RDMA が有効な場合は各ログチャネルの RDMA 送信
+     * ストリームを登録したうえで、ストリームを保持するチャネル id を
+     * FINALIZE ハンドシェイクでレプリカに通知する。RDMA が無効な場合、
+     * ストリーム登録と FINALIZE は何も行わない。
+     *
+     * @return 成功した場合 true、失敗した場合 false。
+     */
+    [[nodiscard]] bool establish_tcp_control_channel();
+
+    /**
      * @brief Returns the control channel send stream acquired at session establishment.
      * @return Pointer to the stream, or nullptr when the RDMA session is not established.
      */
