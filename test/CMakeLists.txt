@@ -37,6 +37,14 @@ if (ENABLE_ALTIMETER)
     )
 endif()
 
+# Create one ctest entry per test source file and run only that file's tests
+# via a gtest_filter. CMake never looks inside the files, so this selection
+# relies on the convention that the suite name (the first argument of the
+# TEST-family macros) equals the file name. The convention is verified
+# mechanically by the test_suite_naming_check entry (check_suite_names.sh).
+# Adding a new test directory also requires extending the GLOB below; a
+# forgotten entry leaves that directory's tests unregistered while everything
+# stays green.
 function (add_test_executable source_file)
     get_filename_component(test_name "${source_file}" NAME_WE)
     target_sources(${test_target}
@@ -73,4 +81,9 @@ foreach(file ${SRCS})
 
     add_test_executable(${file})
 endforeach()
+
+add_test(
+        NAME test_suite_naming_check
+        COMMAND "${CMAKE_CURRENT_SOURCE_DIR}/check_suite_names.sh"
+)
   
