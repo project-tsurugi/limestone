@@ -81,8 +81,10 @@ int main(int argc, char* argv[]) {
         std::cout << "[replica] initialized and listening" << std::endl;
 
         // Replication data arrives on the RDMA receive threads; the main thread only
-        // keeps the process alive until it is stopped by a signal. A clean shutdown
-        // path is deferred to the replica-side restructuring phase.
+        // keeps the process alive until it is stopped by a signal.
+        // A clean shutdown will be defined as part of the planned replica detach
+        // protocol (the replica requests detachment, the master detaches it and
+        // responds, and the master keeps running), which is a separate task.
         for (;;) {
             std::this_thread::sleep_for(std::chrono::seconds(60));
         }

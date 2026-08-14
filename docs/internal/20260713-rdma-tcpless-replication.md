@@ -518,15 +518,15 @@ TSURUGI_REPLICATION_ENDPOINT が設定されている
 | `src/limestone/rdma/handshake_client_base.h` | handshake connector / acceptor の抽象インターフェース |
 | `src/limestone/rdma/rdma_comm/rdma_comm_handshake_*.{h,cpp}` | rdma-comm-lib の handshake クライアントのラッパー |
 | `src/limestone/rdma/null/null_handshake_*.{h,cpp}` | ENABLE_RDMA=OFF 用の null 実装 |
-| `src/limestone/replication/rdma_control_channel.{h,cpp}` | 制御チャネルの送受信。master 側は acquire → submit → flush、replica 側は受信ハンドラ |
-| `src/limestone/replication/rdma_handshake_payload.{h,cpp}` | handshake payload のエンコード / デコード |
-| `src/limestone/replication/replication_config.{h,cpp}` | モード判定と設定パラメータの一元化 |
+| `src/limestone/replication/rdma_control_channel.{h,cpp}` | 制御チャネルの送受信。master 側は acquire → submit → flush、replica 側は受信ハンドラ *(実際には独立ファイルとせず、master 側は datastore_impl、replica 側は replica_server::handle_rdma_control_event() に実装した)* |
+| `src/limestone/replication/rdma_handshake_payload.{h,cpp}` | handshake payload のエンコード / デコード *(実際の配置は src/limestone/rdma/)* |
+| `src/limestone/replication/replication_config.{h,cpp}` | モード判定と設定パラメータの一元化 *(実際は replication_config.{h,cpp} と replication_config_loader.{h,cpp} の 2 層構成)* |
 
 ### 5.2 大幅な変更
 
 | ファイル | 変更内容 |
 |---|---|
-| `src/limestone/rdma/rdma_send_stream_base.h` | `send_bytes` / `send_all_bytes` / `send_with_writer` を削除し、`acquire_frame_buffer` / `submit_frame_buffer` を追加 (`submit_control_frame_buffer` / `take_ack_body` は使わないのでラップしない。§3.2, §3.3) |
+| `src/limestone/rdma/rdma_send_stream_base.h` | `send_bytes` / `send_all_bytes` / `send_with_writer` を削除し、`acquire_frame_buffer` / `submit_frame_buffer` を追加 (`submit_control_frame_buffer` / `take_ack_body` は使わないのでラップしない。§3.2, §3.3) *(実際には `send_all_bytes` は削除でなく、acquire / submit の定型ループを実装する基底の非仮想ヘルパとして再実装した)* |
 | `src/limestone/rdma/rdma_comm/rdma_comm_send_stream.{h,cpp}` | 新 API へのラッパーに書き換え。リングラップ時の再取得ループを実装 |
 | `src/limestone/rdma/rdma_factory.h` | handshake クライアントのファクトリを追加 |
 | `src/limestone/rdma/rdma_replication_message_io.cpp` | `send_bytes` / `send_with_writer` を acquire/submit に置換。BLOB のゼロコピー送信は `frame.payload` への直接 `read_chunk()` で実現 |
@@ -548,10 +548,16 @@ RDMA のチャネルに載せ替えるだけである。
 * `opened_blob_file` — トランスポート非依存
 * `replica_connector` / `tcp_replication_message_io` / `socket_streambuf` — TCP モード専用として残す
 * `channel_handler_base` / `control_channel_handler` / `log_channel_handler` の TCP 経路
+  *(その後フェーズ 4 で log_channel_handler は純 TCP 化し、RDMA 側の受信端は
+  rdma_log_channel_receiver として分離した)*
 
 ---
 
 ## 6. 実装フェーズ
+
+**実施状況 (2026-08-14 時点)**: フェーズ 1〜5 の実装は完了 (フェーズ 4 項目 3 は実施せず、
+replica 切り離しプロトコル (別タスク) へ移管)。未了はフェーズ 5 項目 7 (運用手順の文書化)
+のみ。各項目の詳細は各フェーズの注記を参照。
 
 各フェーズは単独でビルド・テストが通る状態を保つ。
 
@@ -662,11 +668,21 @@ RDMA のチャネルに載せ替えるだけである。
 1. `log_channel_handler` の `sentinel_io_` (RDMA-only モード用のダミー `replication_message_io`) を
    削除する。`log_channel_handler.h:160-174` の TODO が指摘するとおり、`channel_handler_base` が
    「1 handler == 1 TCP connection」を前提にしているのが原因。`log_channel_handler_base` を切り出す。
+   *(完了。実装は `log_channel_handler_base` の切り出し (多重継承) ではなく、
+   `rdma_log_channel_receiver` の新設による TCP / RDMA の完全分離とした。
+   `log_channel_handler` は純 TCP 化し、replica_server の台帳も TCP handler 用と
+   RDMA receiver 用に分離した)*
 2. `channel_handler_base::process_loop()` の無限ループ (正常終了パスなし) を、RDMA モードでは通らない
    ようにする。
+   *(完了。RDMA モードのデータ受信は `rdma_log_channel_receiver` 経路になり、
+   `process_loop()` を構造的に通らない)*
 3. RDMA モードのシャットダウンシーケンスを整理する。相手より先に終了しない制約を守る。
+   *(実施しない。replica 停止の最終仕様は「replica が master へ切り離しを要求し、master が
+   切り離して応答し、replica が畳む (master は動作継続)」という切り離しプロトコル (別タスク)
+   で定めるため、そちらへ移管した。現状の tgreplica はシグナルで即死するが、WAL は
+   `end_session()` で fsync 済み・flock は OS が解放するため実害はない)*
 
-**完了条件**: RDMA 経路のコードから TCP 由来のダミーオブジェクトが消える。
+**完了条件**: RDMA 経路のコードから TCP 由来のダミーオブジェクトが消える。(達成)
 
 ### フェーズ 5: テストとドキュメント
 
@@ -675,6 +691,8 @@ RDMA のチャネルに載せ替えるだけである。
      (server 側 `--export-conn-info` → conn_info を待つ → client 側 `--import-conn-info`)。
    * daemon が `"listening for local applications on <path>"` を出すまで待ってから
      master / replica を起動する。
+   *(完了。`scenario_tcpless_rdma_test.cpp` として実装。replica は実 tgreplica プロセスと
+   同一プロセス内 replica_server の 2 形態で実行する)*
 2. **RDMA バリアントの thread モードを検討する**。従来 RDMA バリアントが process モード限定
    だったのは、ベンダモックが `GnRdmaWrite` / `GnRdmaReceive` をプロセス単位シングルトンで返す
    ためだった (`scenario_test.cpp:488-495` のコメント)。**この制約は解消している**: モックライブラリ
@@ -682,15 +700,29 @@ RDMA のチャネルに載せ替えるだけである。
    `CreateGnRdmaReceiveInstance()` は非シングルトンである (v3.0.0 ヘッダに明記。実ドライバ v2.0.5 の
    `GetGnRdmaWriteInstance()` とは別物で、`green_nova_compat.h` が両者を吸収している)。
    TCP バリアントと同様に thread モードを追加できる。同コメントも更新する。
+   *(完了。`scenario_test` は `rdma_thread` / `rdma_process` の両モード、
+   `scenario_tcpless_rdma_test` にも thread 形態を追加。コメントも更新済み)*
 3. TCP を開いていないことをテストで検証する (`/proc/<pid>/net/tcp` の確認、または
    `ss` の出力パース)。
+   *(完了。`scenario_tcpless_rdma_test` が `/proc/<pid>/fd` のソケット inode と
+   `/proc/<pid>/net/tcp{,6}` の突き合わせで所有判定し、テスト開始時ベースラインとの
+   差分ゼロを master / replica の両方について検証する)*
 4. handshake クライアントのモックを用いた単体テストを追加する
    (`handshake_client_base` が純粋仮想なので差し替え可能)。
+   *(完了。`rdma_establish_session_mock_test.cpp`。datastore_impl のテスト用 factory フック
+   3 種 (connector / ACK receiver / data sender) により、daemon にも vendor mock にも
+   依存せず establish_rdma_session() の全失敗パスと成功パスを決定的に検証する)*
 5. `log_channel_replication_test` のコメントアウトされた RDMA バリアント
    (`log_channel_replication_test.cpp:658-665`) を復活させるか、TCP 専用テストとして整理する。
+   *(完了。TCP 専用テストとして確定した。ハイブリッド構成では per-channel TCP 接続が
+   作られず connector 前提のテストが成立しない (有効化実験で SEGV を実測)。RDMA 経路の
+   カバレッジは fake stream 注入テスト・rdma_log_channel_receiver_test・scenario テスト群が
+   担うため、単一値になったパラメタ化ごと撤去した)*
 6. 本ドキュメントと `rdma-abstraction-layer.md` を実装に合わせて更新する。
+   *(完了。本注記を含む更新で対応)*
 7. 運用手順 (handshake daemon の起動、conn_info の配布、service_id の割り当て) を README または
    運用ドキュメントに記述する。
+   *(残作業)*
 
 ---
 
@@ -880,15 +912,15 @@ RDMA モードを使うには、以下が満たされている必要がある。
   one-shot 契約であり (doxygen の `@note` に明記済み)、その前提の下では無害だが、
   ロールバックは不完全である:
   * `release_rdma_stack()` は RDMA receiver / ACK sender だけを解放し、
-    `register_rdma_log_channel_handler()` で登録済みの `log_channel_handlers_` スロットと、
+    `register_rdma_log_channel_receiver()` で登録済みの `rdma_log_channel_receivers_` スロットと、
     その裏で `datastore::create_channel()` により作られた log channel は残る。失敗後は
-    「DMA アドレスは nullopt なのにハンドラは登録済み」という不整合状態になり、同一
+    「DMA アドレスは nullopt なのに receiver は登録済み」という不整合状態になり、同一
     インスタンスでの再確立は `already_registered` で必ず失敗する。
   * `initialize_rdma()` の戻り値 `already_initialized` (再確立の兆候) が `failed` と
     同一視され、拒否理由メッセージが実態と食い違う。
   将来「確立失敗時にプロセスを終了させず、クリーンアップして生存させ再試行する」要求が
   あるため、その際は次の対応が必要になる:
-  * 失敗パスで登録済みハンドラスロットをクリアする (または `already_registered` を
+  * 失敗パスで登録済み receiver スロットをクリアする (または `already_registered` を
     同一 id の再登録として成功扱いにする)。
   * `create_channel()` で作られた datastore 側 log channel の回収手段。現状削除 API が
     存在しないため設計が必要 (replica 側 datastore は ready() を呼ばない使い方なので、
