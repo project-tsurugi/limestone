@@ -801,10 +801,7 @@ bool datastore_impl::establish_tcp_control_channel() {
         finalize_channel_ids.push_back(static_cast<std::uint64_t>(id));
     }
 
-    if (!maybe_finalize_rdma(finalize_channel_ids)) {
-        return false;
-    }
-    return true;
+    return maybe_finalize_rdma(finalize_channel_ids);
 }
 
 rdma_send_stream_base* datastore_impl::get_rdma_control_send_stream() const noexcept {
