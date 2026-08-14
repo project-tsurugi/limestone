@@ -664,12 +664,12 @@ TEST(replication_message_io_test, has_unread_data_after_consume) {
 
 // send_blob and receive_blob on the base replication_message_io must FATAL immediately
 // because blob handling requires a blob-capable subclass.
-TEST(replication_message_io_death_test, send_blob_on_base_class_is_fatal) {
+TEST(replication_message_io_test, send_blob_on_base_class_is_fatal) {
     replication_message_io io(std::string{});
     EXPECT_DEATH(io.send_blob(0U), "");
 }
 
-TEST(replication_message_io_death_test, receive_blob_on_base_class_is_fatal) {
+TEST(replication_message_io_test, receive_blob_on_base_class_is_fatal) {
     replication_message_io io(std::string{});
     EXPECT_DEATH(io.receive_blob(), "");
 }

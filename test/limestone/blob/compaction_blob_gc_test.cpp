@@ -21,9 +21,21 @@ namespace limestone::testing {
 using namespace std::literals;
 using namespace limestone::api;
 using namespace limestone::internal;
+
+// Suite name specific to this file, derived from the shared fixture
+// (compaction_test). ctest selects tests on the premise that the suite name
+// equals the file name, so using the shared fixture directly as the suite name
+// would sweep this file's tests into another entry. That other entry
+// (compaction_test) may run in parallel with this one, so pass a dedicated
+// location instead of sharing the base fixture's default directory (as the
+// fixture header requires).
+class compaction_blob_gc_test : public compaction_test {
+public:
+    compaction_blob_gc_test() : compaction_test("/tmp/compaction_blob_gc_test") {}
+};
   
 
-TEST_F(compaction_test, basic_blob_gc_test) {
+TEST_F(compaction_blob_gc_test, basic_blob_gc_test) {
     // Epoch 1: Prepare initial entries.
     gen_datastore();
     datastore_->switch_epoch(1);
@@ -154,7 +166,7 @@ TEST_F(compaction_test, basic_blob_gc_test) {
     EXPECT_TRUE(boost::filesystem::exists(path2002));
 }
 
-TEST_F(compaction_test, basic_blob_gc_reboot_test) {
+TEST_F(compaction_blob_gc_test, basic_blob_gc_reboot_test) {
     // Epoch 1: Prepare initial entries.
     gen_datastore();
     datastore_->switch_epoch(1);
@@ -247,7 +259,7 @@ TEST_F(compaction_test, basic_blob_gc_reboot_test) {
 }
 
 // Test that blob GC is executed when no backup is in progress.
-TEST_F(compaction_test, blob_gc_executes_without_backup_test) {
+TEST_F(compaction_blob_gc_test, blob_gc_executes_without_backup_test) {
     gen_datastore();
     prepare_blob_gc_test_data();
     FLAGS_v = 100;
@@ -271,7 +283,7 @@ TEST_F(compaction_test, blob_gc_executes_without_backup_test) {
 }
 
 // Test that blob GC is skipped during an old backup (using the backup API without arguments).
-TEST_F(compaction_test, blob_gc_skipped_during_old_backup_test) {
+TEST_F(compaction_blob_gc_test, blob_gc_skipped_during_old_backup_test) {
     gen_datastore();
     prepare_blob_gc_test_data();
     auto& backup = datastore_->begin_backup();  // old backup API
@@ -289,7 +301,7 @@ TEST_F(compaction_test, blob_gc_skipped_during_old_backup_test) {
 }
 
 // Test that blob GC is skipped during a new backup (using the backup API with arguments).
-TEST_F(compaction_test, blob_gc_skipped_during_new_backup_test) {
+TEST_F(compaction_blob_gc_test, blob_gc_skipped_during_new_backup_test) {
     gen_datastore();
     datastore_->switch_epoch(1);
     auto backup = begin_backup_with_epoch_switch(backup_type::transaction, 2);  // new backup API
@@ -309,7 +321,7 @@ TEST_F(compaction_test, blob_gc_skipped_during_new_backup_test) {
 }
 
 // Test that blob GC is executed after an old backup has ended (using the backup API without arguments).
-TEST_F(compaction_test, blob_gc_executes_after_old_backup_test) {
+TEST_F(compaction_blob_gc_test, blob_gc_executes_after_old_backup_test) {
     gen_datastore();
     prepare_blob_gc_test_data();
     FLAGS_v = 100;
@@ -327,7 +339,7 @@ TEST_F(compaction_test, blob_gc_executes_after_old_backup_test) {
 }
 
 // Test that blob GC is executed after a new backup has ended (using the backup API with arguments).
-TEST_F(compaction_test, blob_gc_executes_after_new_backup_test) {
+TEST_F(compaction_blob_gc_test, blob_gc_executes_after_new_backup_test) {
     gen_datastore();
     datastore_->switch_epoch(1);
     auto backup = begin_backup_with_epoch_switch(backup_type::transaction, 2);  // new backup API
