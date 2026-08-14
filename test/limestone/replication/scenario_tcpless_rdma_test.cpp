@@ -41,6 +41,7 @@
 #include <limestone/api/log_channel.h>
 #include <limestone/replication/rdma_daemon_process.h>
 #include <limestone/replication/replication_test_helper.h>
+#include <replication/replica_server.h>
 #include <test_root.h>
 
 namespace limestone::testing {
@@ -52,6 +53,8 @@ namespace {
 constexpr char const* base_location = "/tmp/scenario_tcpless_rdma_test";
 constexpr char const* master_location = "/tmp/scenario_tcpless_rdma_test/master";
 constexpr char const* replica_location = "/tmp/scenario_tcpless_rdma_test/replica";
+
+constexpr std::uint64_t service_id = 59U;
 
 /**
  * @brief Collects the inodes of all sockets held by the process from the
@@ -192,12 +195,16 @@ void expect_no_new_tcp_sockets(pid_t pid, std::set<std::string> const& baseline,
 
 /**
  * @brief End-to-end coverage of the TCP-less RDMA replication path: a master datastore
- *        and a real tgreplica process establish the session via two real rdma_handshaked
- *        daemons, and both the WAL data and the group commit epoch flow over RDMA with
- *        no TCP connection between them.
+ *        and a replica establish the session via two real rdma_handshaked daemons, and
+ *        both the WAL data and the group commit epoch flow over RDMA with no TCP
+ *        connection between them.
+ *
+ * The replica side runs in two forms: a real tgreplica process (process) and a
+ * replica_server built in this same process (thread).
  */
 class scenario_tcpless_rdma_test : public ::testing::Test {
 protected:
+    enum class replica_mode { process, thread };
     void SetUp() override {
         boost::filesystem::remove_all(base_location);
         boost::filesystem::create_directories(master_location);
@@ -206,13 +213,30 @@ protected:
         server_socket_path_ = std::string{base_location} + "/server.sock";
         client_socket_path_ = std::string{base_location} + "/client.sock";
 
-        ::setenv("TSURUGI_REPLICATION_SERVICE_ID", "59", 1);
+        ::setenv("TSURUGI_REPLICATION_SERVICE_ID", std::to_string(service_id).c_str(), 1);
         ::setenv("REPLICATION_RDMA_SLOTS", "1024", 1);
         ::unsetenv("TSURUGI_REPLICATION_ENDPOINT");
     }
 
     void TearDown() override {
+        // On the success path the thread was joined when the establishment completed;
+        // it is joinable here only after a mid-test failure. establish may wait
+        // indefinitely in wait_for_start, so terminate the daemons to unblock it.
+        // Stop the running thread before destroying any resources (ds_ onwards).
+        if (replica_thread_.joinable()) {
+            if (server_) {
+                server_->terminate();
+            }
+            if (client_) {
+                client_->terminate();
+            }
+            replica_thread_.join();
+        }
         ds_.reset();
+        if (server_impl_) {
+            server_impl_->shutdown();
+            server_impl_.reset();
+        }
         replica_.reset();
         client_.reset();
         server_.reset();
@@ -263,6 +287,54 @@ protected:
             << "replica registration did not reach the server daemon";
     }
 
+    // Brings up a replica_server in this process, starts the establishment on a worker
+    // thread, and waits until the replica is seated. The establishment itself completes
+    // as the master side (gen_datastore) progresses, so the caller checks the result
+    // with join_replica_thread() after the master is established.
+    // An ASSERT between the thread start and the join would regress into
+    // std::terminate with the thread still joinable on a fatal failure, so the
+    // seating result is returned instead. On a seating failure the daemons are
+    // terminated to unblock the indefinite wait_for_start before the join.
+    [[nodiscard]] bool start_replica_in_thread() {
+        // The replica-side datastore built by initialize() validates the replication
+        // settings from the environment, so set the handshake socket first, just as
+        // the process mode does before launching tgreplica. gen_datastore() later
+        // overwrites it with the client-side value for the master.
+        ::setenv("TSURUGI_REPLICATION_HANDSHAKE_SOCKET", server_socket_path_.c_str(), 1);
+        server_impl_ = std::make_unique<limestone::replication::replica_server>();
+        server_impl_->initialize(boost::filesystem::path{replica_location});
+        replica_thread_ = std::thread([this]() {
+            replica_established_ = server_impl_->establish_rdma_session(
+                server_socket_path_, service_id);
+        });
+        bool const seated =
+            server_->wait_for_log("registering session (a_await_start)");
+        if (!seated) {
+            server_->terminate();
+            client_->terminate();
+            replica_thread_.join();
+        }
+        return seated;
+    }
+
+    void join_replica_thread() {
+        replica_thread_.join();
+        ASSERT_TRUE(replica_established_) << "in-process replica failed to establish the session";
+    }
+
+    // Verifies that no TCP socket was opened since the baseline. Thread mode inspects
+    // only this process (where master and replica coexist); process mode inspects
+    // this process and tgreplica.
+    void expect_tcpless(replica_mode mode, std::set<std::string> const& baseline) {
+        expect_no_new_tcp_sockets(::getpid(), baseline,
+            mode == replica_mode::process ? "master" : "master+replica");
+        if (mode == replica_mode::process) {
+            expect_no_new_tcp_sockets(replica_->pid(), baseline, "tgreplica");
+        }
+    }
+
+    void run_wal_data_flow(replica_mode mode);
+
     void gen_datastore() {
         ::setenv("TSURUGI_REPLICATION_HANDSHAKE_SOCKET", client_socket_path_.c_str(), 1);
         limestone::api::configuration conf{};
@@ -296,6 +368,10 @@ protected:
     std::unique_ptr<daemon_process> server_;
     std::unique_ptr<daemon_process> client_;
     std::unique_ptr<daemon_process> replica_;
+
+    std::unique_ptr<limestone::replication::replica_server> server_impl_;
+    std::thread replica_thread_;
+    bool replica_established_{false};
 
     std::unique_ptr<limestone::api::datastore_test> ds_;
     log_channel* lc0_{};
@@ -334,20 +410,31 @@ TEST_F(scenario_tcpless_rdma_test, tcp_socket_check_detects_listening_socket) {
     EXPECT_EQ(tcp_sockets_owned_by(::getpid()).size(), baseline.size());
 }
 
-TEST_F(scenario_tcpless_rdma_test, wal_data_flows_without_tcp) {
+// Common body of wal_data_flows_without_tcp{,_thread_replica}; only the replica's
+// execution form differs.
+void scenario_tcpless_rdma_test::run_wal_data_flow(replica_mode mode) {
     // Take the pre-test ownership so TCP opened by the replication path shows
     // up as a diff. tgreplica is forked from this process, so inherited fds are
     // covered by the same baseline.
     auto const tcp_baseline = tcp_sockets_owned_by(::getpid());
 
     ASSERT_NO_FATAL_FAILURE(start_daemons());
-    ASSERT_NO_FATAL_FAILURE(start_replica_process());
+    if (mode == replica_mode::process) {
+        ASSERT_NO_FATAL_FAILURE(start_replica_process());
+    } else {
+        ASSERT_TRUE(start_replica_in_thread())
+            << "replica registration did not reach the server daemon";
+    }
 
     // ready() aborts via LOG_LP(FATAL) when the establishment fails, so returning
     // from gen_datastore() already implies the session is established.
     ASSERT_NO_FATAL_FAILURE(gen_datastore());
-    ASSERT_TRUE(replica_->wait_for_log("initialized and listening"))
-        << "tgreplica did not finish the session establishment in time";
+    if (mode == replica_mode::process) {
+        ASSERT_TRUE(replica_->wait_for_log("initialized and listening"))
+            << "tgreplica did not finish the session establishment in time";
+    } else {
+        ASSERT_NO_FATAL_FAILURE(join_replica_thread());
+    }
 
     EXPECT_TRUE(ds_->get_impl()->is_rdma_enabled());
     EXPECT_NE(ds_->get_impl()->get_rdma_control_send_stream(), nullptr);
@@ -355,8 +442,7 @@ TEST_F(scenario_tcpless_rdma_test, wal_data_flows_without_tcp) {
     EXPECT_TRUE(lc1_->get_impl()->has_rdma_send_stream());
 
     // Verify that the session establishment opened no TCP connection
-    expect_no_new_tcp_sockets(::getpid(), tcp_baseline, "master");
-    expect_no_new_tcp_sockets(replica_->pid(), tcp_baseline, "tgreplica");
+    expect_tcpless(mode, tcp_baseline);
 
     ds_->switch_epoch(1);
 
@@ -401,8 +487,15 @@ TEST_F(scenario_tcpless_rdma_test, wal_data_flows_without_tcp) {
     EXPECT_EQ(get_epoch(replica_location), 2U);
 
     // Verify the processes are still TCP-less after WAL data and group commits
-    expect_no_new_tcp_sockets(::getpid(), tcp_baseline, "master");
-    expect_no_new_tcp_sockets(replica_->pid(), tcp_baseline, "tgreplica");
+    expect_tcpless(mode, tcp_baseline);
+}
+
+TEST_F(scenario_tcpless_rdma_test, wal_data_flows_without_tcp) {
+    run_wal_data_flow(replica_mode::process);
+}
+
+TEST_F(scenario_tcpless_rdma_test, wal_data_flows_without_tcp_thread_replica) {
+    run_wal_data_flow(replica_mode::thread);
 }
 
 } // namespace limestone::testing
