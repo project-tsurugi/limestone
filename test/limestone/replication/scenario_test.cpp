@@ -485,14 +485,13 @@ TEST_P(scenario_test, blob_replication_end_to_end) {
     EXPECT_EQ(get_replica_epoch(), 1);
 }
 
-// TCP variant runs in both thread and process modes since either may surface
-// distinct bugs (e.g. process-only catches wire/handshake issues; thread-only
-// catches in-process replica_server lifecycle issues and provides a faster dev
-// loop). RDMA variant runs only in process mode because the vendor mock returns
-// process-wide singletons (one GnRdmaWrite / GnRdmaReceive instance per process),
-// so master and replica must live in different processes. If the vendor mock
-// drops the singleton constraint in the future, the RDMA variant can also be
-// extended to thread mode just like TCP.
+// Both thread and process modes run because either may surface distinct bugs
+// (process-only catches wire/handshake issues; thread-only catches in-process
+// replica_server lifecycle issues and provides a faster dev loop). The RDMA
+// variants also run in both modes: the vendor mock's GnRdmaWrite / GnRdmaReceive
+// instances are not process-wide singletons, so the master side (data send +
+// ACK receive) and the replica side (data receive + ACK send) — four instances
+// in total — can coexist in one process just like TCP.
 #ifdef LIMESTONE_ENABLE_RDMA
 INSTANTIATE_TEST_SUITE_P(
     variants,
@@ -500,7 +499,8 @@ INSTANTIATE_TEST_SUITE_P(
     ::testing::Values(
         scenario_param{"tcp_thread", std::nullopt, false},
         scenario_param{"tcp_process", std::nullopt, true},
-        scenario_param{"rdma_1", 1024U, true}),
+        scenario_param{"rdma_thread", 1024U, false},
+        scenario_param{"rdma_process", 1024U, true}),
     [](const ::testing::TestParamInfo<scenario_param>& info) {
         return info.param.name;
     });

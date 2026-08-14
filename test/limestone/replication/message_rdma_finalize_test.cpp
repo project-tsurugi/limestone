@@ -99,8 +99,10 @@ TEST(message_rdma_finalize_test, post_receive_returns_ack_when_initialized_and_f
     replication::replica_server server{};
     server.initialize(base_location);
 
-    // Inject noop RDMA stubs so the test runs without engaging the vendor RDMA mock
-    // (which is a process-wide singleton and unavailable when ENABLE_RDMA=OFF).
+    // Inject noop RDMA stubs so initialize_rdma() succeeds without bringing up
+    // a real RDMA backend instance. The stubs are needed in either build: with
+    // ENABLE_RDMA=OFF the null implementation's initialize() always fails, and
+    // with ENABLE_RDMA=ON the vendor mock grabs shm resources.
     server.set_rdma_receiver_factory_for_test(
         [](std::uint32_t /*slot_count*/) -> std::unique_ptr<replication::rdma_receiver_base> {
             return std::make_unique<noop_rdma_receiver>();

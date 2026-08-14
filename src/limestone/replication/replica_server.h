@@ -268,8 +268,7 @@ public:
      * @brief Test hook to override the factory used by initialize_rdma() for the data receiver.
      *
      * When unset, initialize_rdma() falls back to make_rdma_data_receiver(). Tests can install a
-     * factory that returns a stub instance to bypass the vendor RDMA mock — that mock is a
-     * process-wide singleton and conflicts when master and replica run in the same process.
+     * factory that returns a stub instance to bypass the vendor RDMA mock.
      *
      * @note Test-only; do not use in production code.
      */

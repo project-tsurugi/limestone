@@ -576,7 +576,7 @@ RDMA のチャネルに載せ替えるだけである。
    (`max_dma_write_bytes`, `write_log_mode`)。
 7. rdma-comm-lib のインストール先を master 最新に切り替え、ビルドを通す。
 
-**完了条件**: `scenario_test` の `rdma_1` バリアントが従来どおり (TCP コントロールチャネル込みで) 通る。
+**完了条件**: `scenario_test` の `rdma_process` バリアントが従来どおり (TCP コントロールチャネル込みで) 通る。
 
 **リスク**: `frame_buffer` の capacity 縮小に対する再取得ループは、WAL の 1 メッセージが
 複数フレームにまたがるケースでシーケンスの正しさに直結する。受信側の `rdma_log_entries_parser` は

@@ -30,9 +30,7 @@ namespace limestone::testing {
  *
  * Returns success on every lifecycle call and exposes a fixed dummy DMA
  * address. Useful when a test needs the replica-side RDMA stack to be
- * "present and well-behaved" without actually engaging the vendor mock
- * (which is a process-wide singleton and conflicts with the leader-side
- * stack when both run in the same process).
+ * "present and well-behaved" without actually engaging the vendor mock.
  */
 class noop_rdma_receiver : public limestone::replication::rdma_receiver_base {
 public:

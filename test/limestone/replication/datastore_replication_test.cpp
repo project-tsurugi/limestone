@@ -129,10 +129,10 @@ protected:
         // Start the replica server in a separate thread
         server_.initialize(boost::filesystem::path(replica));
 
-        // Replace the replica-side RDMA stack with stub instances so that the
-        // process-wide vendor RDMA mock is engaged only by the leader (running
-        // in this same process). The vendor mock is a singleton and crashes on
-        // teardown when leader and replica both bring up real RDMA stacks.
+        // Replace the replica-side RDMA stack with stub instances. This suite
+        // verifies session establishment over the control channel (including the
+        // send stream assignment in RDMA mode); actual data reception on the
+        // replica side is out of scope, so no real stack is needed.
         server_.set_rdma_receiver_factory_for_test(
             [](std::uint32_t /*slot_count*/) -> std::unique_ptr<replication::rdma_receiver_base> {
                 return std::make_unique<noop_rdma_receiver>();
