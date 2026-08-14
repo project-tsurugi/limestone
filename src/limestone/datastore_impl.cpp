@@ -683,8 +683,11 @@ bool datastore_impl::establish_rdma_session() {
     start_payload.channel_count = channel_count;
     start_payload.control_channel_id = control_channel_id;
 
-    auto connector_result = make_handshake_connector(
-        config.handshake_socket_path(), rdma_handshake_operation_timeout);
+    auto connector_result = handshake_connector_factory_for_test_
+        ? handshake_connector_factory_for_test_(
+              config.handshake_socket_path(), rdma_handshake_operation_timeout)
+        : make_handshake_connector(
+              config.handshake_socket_path(), rdma_handshake_operation_timeout);
     if (!connector_result.status.success) {
         LOG_LP(ERROR) << "Failed to create the handshake connector: "
             << connector_result.status.error_message;
@@ -809,7 +812,9 @@ rdma_send_stream_base* datastore_impl::get_rdma_control_send_stream() const noex
 }
 
 bool datastore_impl::initialize_rdma_sender(uint32_t slot_count, uint64_t remote_dma_address) {
-    rdma_sender_ = make_rdma_data_sender(slot_count);
+    rdma_sender_ = rdma_data_sender_factory_for_test_
+        ? rdma_data_sender_factory_for_test_(slot_count)
+        : make_rdma_data_sender(slot_count);
     auto result = rdma_sender_->initialize(remote_dma_address);
     if (! result.success) {
         rdma_sender_.reset();
@@ -853,7 +858,9 @@ std::optional<std::uint64_t> datastore_impl::initialize_rdma_ack_receiver(std::u
         return std::nullopt;
     }
 
-    ack_receiver_ = make_rdma_ack_receiver(slot_count);
+    ack_receiver_ = rdma_ack_receiver_factory_for_test_
+        ? rdma_ack_receiver_factory_for_test_(slot_count)
+        : make_rdma_ack_receiver(slot_count);
     auto result = ack_receiver_->initialize(
         // ACK frames are routed internally by the lib once finalize_channel_setup_with_sender
         // binds this receiver to the data sender; the user-supplied callback is unused.
@@ -906,6 +913,21 @@ void datastore_impl::set_rdma_stream_factory_for_test(
 void datastore_impl::set_rdma_control_send_stream_for_test(
         std::unique_ptr<rdma_send_stream_base> stream) noexcept {
     rdma_control_send_stream_ = std::move(stream);
+}
+
+void datastore_impl::set_handshake_connector_factory_for_test(
+        handshake_connector_factory factory) noexcept {
+    handshake_connector_factory_for_test_ = std::move(factory);
+}
+
+void datastore_impl::set_rdma_ack_receiver_factory_for_test(
+        rdma_ack_receiver_factory factory) noexcept {
+    rdma_ack_receiver_factory_for_test_ = std::move(factory);
+}
+
+void datastore_impl::set_rdma_data_sender_factory_for_test(
+        rdma_data_sender_factory factory) noexcept {
+    rdma_data_sender_factory_for_test_ = std::move(factory);
 }
 
 const std::optional<manifest::migration_info>& datastore_impl::get_migration_info() const noexcept {

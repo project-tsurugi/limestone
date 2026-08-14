@@ -36,6 +36,7 @@
 #include "replication/replica_connector.h"
 #include "replication/replication_endpoint.h"
 #include <replication/replication_config_loader.h>
+#include <rdma/rdma_factory.h>
 #include <rdma/rdma_receiver_base.h>
 #include <rdma/rdma_send_stream_base.h>
 #include <rdma/rdma_sender_base.h>
@@ -386,6 +387,74 @@ public:
     void set_rdma_control_send_stream_for_test(
         std::unique_ptr<rdma_send_stream_base> stream) noexcept;
 
+    /**
+     * @brief Factory function used by establish_rdma_session() to create the
+     *        handshake connector.
+     *
+     * @param daemon_socket_path Filesystem path of the daemon's UNIX domain socket,
+     *        forwarded from the replication configuration.
+     * @param operation_timeout Upper bound a blocking handshake call waits, forwarded
+     *        from establish_rdma_session().
+     * @return handshake_connector_create_result; instance is non-null on success.
+     */
+    using handshake_connector_factory =
+        std::function<handshake_connector_create_result(
+            std::string const& daemon_socket_path,
+            std::chrono::milliseconds operation_timeout)>;
+
+    /**
+     * @brief Factory function used by initialize_rdma_ack_receiver() to create the
+     *        ACK receiver.
+     *
+     * @param slot_count requested RDMA slot count, forwarded from the caller.
+     * @return Newly created rdma_receiver_base instance, transferred to the caller.
+     */
+    using rdma_ack_receiver_factory =
+        std::function<std::unique_ptr<rdma_receiver_base>(std::uint32_t slot_count)>;
+
+    /**
+     * @brief Factory function used by initialize_rdma_sender() to create the
+     *        data sender.
+     *
+     * @param slot_count requested RDMA slot count, forwarded from the caller.
+     * @return Newly created rdma_sender_base instance, transferred to the caller.
+     */
+    using rdma_data_sender_factory =
+        std::function<std::unique_ptr<rdma_sender_base>(std::uint32_t slot_count)>;
+
+    /**
+     * @brief Test hook to override the factory used by establish_rdma_session()
+     *        for the handshake connector.
+     *
+     * When unset, establish_rdma_session() falls back to make_handshake_connector().
+     *
+     * @note Test-only; do not use in production code.
+     */
+    void set_handshake_connector_factory_for_test(
+        handshake_connector_factory factory) noexcept;
+
+    /**
+     * @brief Test hook to override the factory used by initialize_rdma_ack_receiver()
+     *        for the ACK receiver.
+     *
+     * When unset, initialize_rdma_ack_receiver() falls back to make_rdma_ack_receiver().
+     *
+     * @note Test-only; do not use in production code.
+     */
+    void set_rdma_ack_receiver_factory_for_test(
+        rdma_ack_receiver_factory factory) noexcept;
+
+    /**
+     * @brief Test hook to override the factory used by initialize_rdma_sender()
+     *        for the data sender.
+     *
+     * When unset, initialize_rdma_sender() falls back to make_rdma_data_sender().
+     *
+     * @note Test-only; do not use in production code.
+     */
+    void set_rdma_data_sender_factory_for_test(
+        rdma_data_sender_factory factory) noexcept;
+
 private:
     [[nodiscard]] limestone::internal::blob_file_resolver& require_blob_file_resolver() noexcept;
     [[nodiscard]] limestone::internal::blob_file_resolver const& require_blob_file_resolver() const noexcept;
@@ -466,6 +535,15 @@ private:
 
     // Test hook: factory to override RDMA stream acquisition.
     std::function<rdma_sender_base::stream_acquire_result(std::uint16_t)> rdma_stream_factory_for_test_{};
+
+    // Test hook: factory to override handshake connector creation.
+    handshake_connector_factory handshake_connector_factory_for_test_{};
+
+    // Test hook: factory to override RDMA ACK receiver creation.
+    rdma_ack_receiver_factory rdma_ack_receiver_factory_for_test_{};
+
+    // Test hook: factory to override RDMA data sender creation.
+    rdma_data_sender_factory rdma_data_sender_factory_for_test_{};
 
     // Resolver for local BLOB file paths. Owned by datastore_impl so internal
     // replication/restore paths can resolve paths without using public APIs.
