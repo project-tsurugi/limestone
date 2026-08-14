@@ -37,6 +37,7 @@
 #include "logging_helper.h"
 #include "message_error.h"
 #include "message_group_commit.h"
+#include "rdma_log_channel_receiver.h"
 #include "limestone_exception_helper.h"
 #include "tcp_replication_message_io.h"
 #include "datastore_impl.h"
@@ -341,6 +342,12 @@ void replica_server::setup_log_channel_handler(
         if (log_channel_handlers_.at(channel_idx)) {
             LOG_LP(FATAL) << "Duplicate log channel id registration: id=" << channel_id;
         }
+        // A TCP handler and an RDMA receiver never coexist in one configuration;
+        // coexistence is a configuration inconsistency, so detect it immediately.
+        if (rdma_log_channel_receivers_.at(channel_idx)) {
+            LOG_LP(FATAL) << "Log channel id already registered as an RDMA receiver: id="
+                          << channel_id;
+        }
         log_channel_handlers_.at(channel_idx) = std::move(log_handler);
     }
 }
@@ -437,36 +444,37 @@ std::shared_ptr<log_channel_handler> replica_server::get_log_channel_handler(
     return log_channel_handlers_.at(id);
 }
 
-std::string_view replica_server::to_string_view(register_rdma_handler_result result) noexcept {
+std::string_view replica_server::to_string_view(register_rdma_receiver_result result) noexcept {
     switch (result) {
-        case register_rdma_handler_result::success: return "success";
-        case register_rdma_handler_result::invalid_channel_id: return "invalid_channel_id";
-        case register_rdma_handler_result::already_registered: return "already_registered";
+        case register_rdma_receiver_result::success: return "success";
+        case register_rdma_receiver_result::invalid_channel_id: return "invalid_channel_id";
+        case register_rdma_receiver_result::already_registered: return "already_registered";
     }
     return "unknown";
 }
 
-std::ostream& operator<<(std::ostream& out, replica_server::register_rdma_handler_result result) {
+std::ostream& operator<<(std::ostream& out, replica_server::register_rdma_receiver_result result) {
     return out << replica_server::to_string_view(result);
 }
 
-replica_server::register_rdma_handler_result
-replica_server::register_rdma_log_channel_handler(std::uint64_t channel_id) {
+replica_server::register_rdma_receiver_result
+replica_server::register_rdma_log_channel_receiver(std::uint64_t channel_id) {
     if (channel_id >= max_log_channel_slots) {
-        return register_rdma_handler_result::invalid_channel_id;
+        return register_rdma_receiver_result::invalid_channel_id;
     }
     auto channel_idx = static_cast<std::size_t>(channel_id);
 
-    // Fast path: if the slot is already taken, return without creating an
-    // extra log_channel on the datastore side. This function is invoked
-    // once per channel id from message_rdma_finalize::post_receive (i.e.
-    // the RDMA_FINALIZE control message handler), so this keeps the
-    // function side-effect-free if that message carries duplicate ids or
-    // is delivered more than once.
+    // Fast path: if the slot is already taken, return without creating an extra
+    // log_channel on the datastore side. This function is invoked once per
+    // channel id (the TCP-less establishment and the RDMA_FINALIZE handling),
+    // but stays side-effect-free against duplicate ids or redelivery. The TCP
+    // handler registry is also checked to reject TCP/RDMA coexistence on one id
+    // (a configuration inconsistency).
     {
         std::lock_guard<std::mutex> lock(log_channel_slot_mutexes_.at(channel_idx));
-        if (log_channel_handlers_.at(channel_idx)) {
-            return register_rdma_handler_result::already_registered;
+        if (rdma_log_channel_receivers_.at(channel_idx)
+            || log_channel_handlers_.at(channel_idx)) {
+            return register_rdma_receiver_result::already_registered;
         }
     }
 
@@ -474,27 +482,35 @@ replica_server::register_rdma_log_channel_handler(std::uint64_t channel_id) {
     // hold the slot mutex while calling it.
     auto& channel = datastore_->create_channel();
 
-    auto handler = std::make_shared<log_channel_handler>(
-        *this, log_channel_handler::rdma_only_tag{});
-    handler->bind_log_channel(channel);
+    auto receiver = std::make_shared<rdma_log_channel_receiver>(*datastore_, channel);
 
     {
         std::lock_guard<std::mutex> lock(log_channel_slot_mutexes_.at(channel_idx));
-        if (log_channel_handlers_.at(channel_idx)) {
-            return register_rdma_handler_result::already_registered;
+        if (rdma_log_channel_receivers_.at(channel_idx)
+            || log_channel_handlers_.at(channel_idx)) {
+            return register_rdma_receiver_result::already_registered;
         }
-        log_channel_handlers_.at(channel_idx) = std::move(handler);
+        rdma_log_channel_receivers_.at(channel_idx) = std::move(receiver);
     }
-    return register_rdma_handler_result::success;
+    return register_rdma_receiver_result::success;
 }
 
-void replica_server::set_log_channel_handler_for_test(
-    std::uint64_t id, std::shared_ptr<log_channel_handler> handler) {
+std::shared_ptr<rdma_log_channel_receiver> replica_server::get_rdma_log_channel_receiver(
+    std::uint64_t id) const noexcept {
+    if (id >= max_log_channel_slots) {
+        return {};
+    }
+    std::lock_guard<std::mutex> lock(log_channel_slot_mutexes_.at(id));
+    return rdma_log_channel_receivers_.at(id);
+}
+
+void replica_server::set_rdma_log_channel_receiver_for_test(
+    std::uint64_t id, std::shared_ptr<rdma_log_channel_receiver> receiver) {
     if (id >= max_log_channel_slots) {
         return;
     }
     std::lock_guard<std::mutex> lock(log_channel_slot_mutexes_.at(id));
-    log_channel_handlers_.at(id) = std::move(handler);
+    rdma_log_channel_receivers_.at(id) = std::move(receiver);
 }
 
 void replica_server::set_rdma_receiver_for_test(std::unique_ptr<rdma_receiver_base> receiver) noexcept {
@@ -544,17 +560,17 @@ void replica_server::handle_rdma_data_event(rdma_data_event const& event) {
     }
     auto channel_idx = static_cast<std::size_t>(channel_id);
 
-    std::shared_ptr<log_channel_handler> handler;
+    std::shared_ptr<rdma_log_channel_receiver> receiver;
     {
         std::lock_guard<std::mutex> lock(log_channel_slot_mutexes_.at(channel_idx));
-        handler = log_channel_handlers_.at(channel_idx);
+        receiver = rdma_log_channel_receivers_.at(channel_idx);
     }
-    if (! handler) {
-        LOG_LP(ERROR) << "RDMA handler missing for channel id: " << channel_id;
+    if (! receiver) {
+        LOG_LP(ERROR) << "RDMA receiver missing for channel id: " << channel_id;
         return;
     }
 
-    handler->handle_rdma_data_event(event);
+    receiver->handle_rdma_data_event(event);
 }
 
 void replica_server::handle_rdma_control_event(rdma_data_event const& event) {
@@ -775,15 +791,15 @@ bool replica_server::establish_rdma_session(
         return false;
     }
 
-    // Publish the control channel id and register each data channel handler before
+    // Publish the control channel id and register each data channel receiver before
     // the receiver enters the TRANSFER phase, so that frames arriving right after
     // the handshake can be dispatched.
     rdma_control_channel_id_.store(start_payload->control_channel_id,
         std::memory_order_release);
     for (std::uint16_t id = 0; id < start_payload->channel_count; ++id) {
-        auto reg_result = register_rdma_log_channel_handler(id);
-        if (reg_result != register_rdma_handler_result::success) {
-            LOG_LP(ERROR) << "Failed to register the RDMA log channel handler: id=" << id
+        auto reg_result = register_rdma_log_channel_receiver(id);
+        if (reg_result != register_rdma_receiver_result::success) {
+            LOG_LP(ERROR) << "Failed to register the RDMA log channel receiver: id=" << id
                 << " result=" << reg_result;
             release_rdma_stack();
             return false;

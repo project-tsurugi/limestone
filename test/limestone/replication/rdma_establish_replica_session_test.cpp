@@ -274,9 +274,9 @@ TEST_F(rdma_establish_replica_session_test, establish_succeeds_and_registers_cha
     ASSERT_TRUE(dma_address.has_value());
     EXPECT_EQ(response->replica_dma_address, dma_address.value());
 
-    EXPECT_NE(server.get_log_channel_handler(0U), nullptr);
-    EXPECT_NE(server.get_log_channel_handler(1U), nullptr);
-    EXPECT_EQ(server.get_log_channel_handler(2U), nullptr);
+    EXPECT_NE(server.get_rdma_log_channel_receiver(0U), nullptr);
+    EXPECT_NE(server.get_rdma_log_channel_receiver(1U), nullptr);
+    EXPECT_EQ(server.get_rdma_log_channel_receiver(2U), nullptr);
 
     // Control channel behavior over the established session. Verified here rather
     // than in separate tests because every establishment costs vendor-mock endpoint

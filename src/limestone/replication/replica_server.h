@@ -40,6 +40,7 @@ namespace limestone::replication {
 
 class channel_handler_base;
 class log_channel_handler;
+class rdma_log_channel_receiver;
 
 class replica_server {
 public:
@@ -163,14 +164,14 @@ public:
      *
      * Registers on the handshake daemon and waits for the master's start,
      * validates the start payload, initializes the RDMA stack, responds with
-     * the replica DMA address, registers a log channel handler for each data
+     * the replica DMA address, registers a log channel receiver for each data
      * channel (ids 0 .. channel_count - 1), and completes the handshake.
      * The control channel id is not registered as a log channel.
      *
      * @param handshake_socket_path Filesystem path of the handshake daemon socket.
      * @param service_id Handshake service id shared with the master.
      * @return true when the session is established; false on failure.
-     * @note One-shot: on failure, log channel handlers already registered during
+     * @note One-shot: on failure, log channel receivers already registered during
      *       this call are not rolled back, so this instance must not be reused
      *       for a retry.
      */
@@ -184,36 +185,48 @@ public:
         std::uint64_t id) const noexcept;
 
     /**
-     * @brief Register an RDMA-only log_channel_handler for the given channel id.
-     *
-     * Creates a replica-side log_channel via datastore::create_channel() and a
-     * matching log_channel_handler bound to it, then stores the handler in the
-     * channel_id slot so that incoming RDMA frames can be dispatched to it.
-     * Used by the RDMA_FINALIZE handler to register all log channels in bulk
-     * when the per-channel TCP LOG_CHANNEL_CREATE handshake is skipped.
-     *
-     * @param channel_id Channel id assigned by the leader.
-     * @return Registration result.
+     * @brief Registration result of an RDMA data frame receiving end
+     *        (rdma_log_channel_receiver).
      */
-    enum class register_rdma_handler_result {
+    enum class register_rdma_receiver_result {
         success,
         invalid_channel_id,
         already_registered,
     };
 
     /**
-     * @brief Returns a short string representation of a register_rdma_handler_result value.
+     * @brief Returns a short string representation of a register_rdma_receiver_result value.
      */
-    [[nodiscard]] static std::string_view to_string_view(register_rdma_handler_result result) noexcept;
-
-    register_rdma_handler_result register_rdma_log_channel_handler(std::uint64_t channel_id);
+    [[nodiscard]] static std::string_view to_string_view(register_rdma_receiver_result result) noexcept;
 
     /**
-     * @brief Test hook to set a log channel handler into a slot.
+     * @brief Registers an rdma_log_channel_receiver for the given channel id.
+     *
+     * Creates a replica-side log channel via datastore::create_channel() and
+     * stores an rdma_log_channel_receiver bound to it in the channel_id slot,
+     * so that subsequent RDMA frames for that id are dispatched to the
+     * receiver. Used by the RDMA modes that skip the TCP LOG_CHANNEL_CREATE
+     * handshake (the TCP-less establishment and the RDMA_FINALIZE handling).
+     *
+     * @param channel_id Channel id assigned by the master.
+     * @return Registration result.
+     */
+    register_rdma_receiver_result register_rdma_log_channel_receiver(std::uint64_t channel_id);
+
+    /**
+     * @brief Returns the rdma_log_channel_receiver for the given channel id.
+     * @param id Channel id.
+     * @return The registered receiver, or nullptr when unregistered or out of range.
+     */
+    [[nodiscard]] std::shared_ptr<rdma_log_channel_receiver> get_rdma_log_channel_receiver(
+        std::uint64_t id) const noexcept;
+
+    /**
+     * @brief Test hook to set an rdma_log_channel_receiver into a slot directly.
      * @note Intended for testing only.
      */
-    void set_log_channel_handler_for_test(
-        std::uint64_t id, std::shared_ptr<class log_channel_handler> handler);
+    void set_rdma_log_channel_receiver_for_test(
+        std::uint64_t id, std::shared_ptr<rdma_log_channel_receiver> receiver);
 
     /**
      * @brief Test hook to inject the RDMA data receiver instance.
@@ -367,14 +380,19 @@ private:
         std::shared_ptr<channel_handler_base> const& handler);
 
     // Use fixed-size arrays to avoid reallocations and allow lock-per-slot access.
+    // log_channel_handlers_ is the handler registry for the TCP mode and
+    // rdma_log_channel_receivers_ is the frame-dispatch registry for the RDMA
+    // modes; both are never populated in one configuration.
     std::array<std::shared_ptr<class log_channel_handler>, max_log_channel_slots>
         log_channel_handlers_{};
+    std::array<std::shared_ptr<rdma_log_channel_receiver>, max_log_channel_slots>
+        rdma_log_channel_receivers_{};
     mutable std::array<std::mutex, max_log_channel_slots> log_channel_slot_mutexes_{};
 };
 
 /**
- * @brief Stream insertion operator for replica_server::register_rdma_handler_result.
+ * @brief Stream insertion operator for replica_server::register_rdma_receiver_result.
  */
-std::ostream& operator<<(std::ostream& out, replica_server::register_rdma_handler_result result);
+std::ostream& operator<<(std::ostream& out, replica_server::register_rdma_receiver_result result);
 
 } // namespace limestone::replication

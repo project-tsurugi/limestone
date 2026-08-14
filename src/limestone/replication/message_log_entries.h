@@ -11,6 +11,10 @@
 #include "log_entry.h"
 #include "replication_message.h"
 
+namespace limestone::api {
+class log_channel;
+} // namespace limestone::api
+
 namespace limestone::replication {
 
     using limestone::api::storage_id_type;
@@ -116,6 +120,15 @@ public:
      * @param resources The resources needed to process the received message.
      */
     void post_receive(handler_resources& resources) override;
+
+    /**
+     * @brief Applies the held entries to a log channel.
+     * @param channel Log channel to apply the entries to.
+     *
+     * Also performs begin_session()/end_session() according to the
+     * SESSION_BEGIN/SESSION_END/FLUSH flags. Sends no response (ACK).
+     */
+    void apply_to(limestone::api::log_channel& channel) const;
 
 private:
     // Register LOG_ENTRY in replication_message factory map.

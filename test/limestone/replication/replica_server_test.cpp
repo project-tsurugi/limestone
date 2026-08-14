@@ -33,6 +33,7 @@
 #include "replication/replication_message_io.h"
 #include "replication/handler_resources.h"
 #include "replication/log_channel_handler.h"
+#include "replication/rdma_log_channel_receiver.h"
 #include "noop_rdma_mocks.h"
 #include "replication_test_helper.h"
 namespace limestone::testing {
@@ -79,10 +80,11 @@ public:
      std::promise<bool>& invoked_;
  };
 
-class fake_log_channel_handler : public log_channel_handler {
+class fake_rdma_log_channel_receiver : public replication::rdma_log_channel_receiver {
 public:
-    fake_log_channel_handler(replica_server& server, replication_message_io& io, bool& invoked) noexcept
-        : log_channel_handler(server, io),
+    fake_rdma_log_channel_receiver(limestone::api::datastore& ds,
+        limestone::api::log_channel& channel, bool& invoked) noexcept
+        : rdma_log_channel_receiver(ds, channel),
           invoked_(invoked) {}
 
     void handle_rdma_data_event(rdma_data_event const& /*event*/) override {
@@ -439,16 +441,15 @@ TEST_F(replica_server_test, finalize_rdma_returns_failed_when_receiver_finalize_
     EXPECT_EQ(result, replication::replica_server::rdma_finalize_result::failed);
 }
 
-TEST_F(replica_server_test, on_rdma_receive_invokes_handler_for_data_event) {
+TEST_F(replica_server_test, on_rdma_receive_invokes_receiver_for_data_event) {
     replica_server server;
     server.initialize(location1);
 
-    int pipefd[2];
-    ASSERT_EQ(::pipe(pipefd), 0);
-    replication_message_io io(pipefd[1]);
+    auto& ds = server.get_datastore();
+    auto& channel = ds.create_channel();
     bool invoked = false;
-    auto handler = std::make_shared<fake_log_channel_handler>(server, io, invoked);
-    server.set_log_channel_handler_for_test(1U, handler);
+    auto receiver = std::make_shared<fake_rdma_log_channel_receiver>(ds, channel, invoked);
+    server.set_rdma_log_channel_receiver_for_test(1U, receiver);
 
     rdma_data_event ev{};
     ev.header.version = rdma_frame_current_version;
@@ -459,30 +460,23 @@ TEST_F(replica_server_test, on_rdma_receive_invokes_handler_for_data_event) {
 
     server.on_rdma_receive(rdma_receive_event{ev});
     EXPECT_TRUE(invoked);
-
-    ::close(pipefd[0]);
-    ::close(pipefd[1]);
 }
 
-TEST_F(replica_server_test, on_rdma_receive_error_event_does_not_invoke_handler) {
+TEST_F(replica_server_test, on_rdma_receive_error_event_does_not_invoke_receiver) {
     replica_server server;
     server.initialize(location1);
 
-    int pipefd[2];
-    ASSERT_EQ(::pipe(pipefd), 0);
-    replication_message_io io(pipefd[1]);
+    auto& ds = server.get_datastore();
+    auto& channel = ds.create_channel();
     bool invoked = false;
-    auto handler = std::make_shared<fake_log_channel_handler>(server, io, invoked);
-    server.set_log_channel_handler_for_test(1U, handler);
+    auto receiver = std::make_shared<fake_rdma_log_channel_receiver>(ds, channel, invoked);
+    server.set_rdma_log_channel_receiver_for_test(1U, receiver);
 
     rdma_error_event err{};
     err.error_message = "test-error";
 
     server.on_rdma_receive(rdma_receive_event{err});
     EXPECT_FALSE(invoked);
-
-    ::close(pipefd[0]);
-    ::close(pipefd[1]);
 }
 
 }  // namespace limestone::testing

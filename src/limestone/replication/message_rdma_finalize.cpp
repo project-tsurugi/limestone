@@ -58,14 +58,14 @@ void message_rdma_finalize::post_receive(handler_resources& resources) {
 
     auto& server = control_resources->get_server();
 
-    // Register each requested log channel handler before flipping the RDMA stack
+    // Register each requested log channel receiver before flipping the RDMA stack
     // into TRANSFER phase, so that frames arriving immediately after FINALIZE_ACK
     // can be dispatched.
     for (auto channel_id : channel_ids_) {
-        auto reg_result = server.register_rdma_log_channel_handler(channel_id);
-        if (reg_result != replica_server::register_rdma_handler_result::success) {
+        auto reg_result = server.register_rdma_log_channel_receiver(channel_id);
+        if (reg_result != replica_server::register_rdma_receiver_result::success) {
             std::ostringstream msg;
-            msg << "Failed to register RDMA log channel handler: id=" << channel_id
+            msg << "Failed to register RDMA log channel receiver: id=" << channel_id
                 << " result=" << reg_result;
             message_error err;
             err.set_error(message_error::rdma_finalize_error_register_handler_failed,
