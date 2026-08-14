@@ -36,7 +36,6 @@
 #include "rdma/rdma_send_stream_base.h"
 #include <cstddef>
 #include <memory>
-#include <optional>
 #include <vector>
 
 namespace limestone::testing {
@@ -47,16 +46,6 @@ using namespace limestone::api;
 constexpr const char* base = "/tmp/log_channel_replication_test";
 constexpr const char* master = "/tmp/log_channel_replication_test/master";
 constexpr const char* replica = "/tmp/log_channel_replication_test/replica";
-
-struct rdma_param {
-    std::string name;
-    std::optional<uint32_t> rdma_slots;
-};
-
-inline std::ostream& operator<<(std::ostream& os, rdma_param const& param) {
-    return os << param.name;
-}
-
 
 class test_echo_log_channel_handler : public log_channel_handler {
 public:
@@ -70,9 +59,13 @@ protected:
     }
 };
 
-class log_channel_replication_test
-    : public ::testing::Test
-    , public ::testing::WithParamInterface<rdma_param> {
+// This suite presupposes the log channel's per-channel TCP connection (a hybrid
+// configuration does not create that connection at all, so the begin_session-based
+// tests cannot hold — observed as a SEGV). RDMA path coverage lives elsewhere: the
+// send sequence in this file's fake-stream injection tests, the receive side in
+// rdma_log_channel_receiver_test, and end-to-end in scenario_test /
+// scenario_tcpless_rdma_test on RDMA-enabled builds.
+class log_channel_replication_test : public ::testing::Test {
 protected:
     std::unique_ptr<api::datastore_test> datastore_;
 
@@ -93,12 +86,10 @@ protected:
             std::cerr << "Cannot create directory" << std::endl;
         }
 
-        auto param = GetParam();
-        if (param.rdma_slots.has_value()) {
-            setenv("REPLICATION_RDMA_SLOTS", std::to_string(param.rdma_slots.value()).c_str(), 1);
-        } else {
-            unsetenv("REPLICATION_RDMA_SLOTS");
-        }
+        // If another suite in this binary leaves this env set, the datastore turns
+        // into a hybrid configuration and the per-channel TCP connection premise
+        // breaks, so always unset it as a guard.
+        unsetenv("REPLICATION_RDMA_SLOTS");
 
         uint16_t port = get_free_port();
         start_replica_server(port);
@@ -252,7 +243,7 @@ public:
     std::vector<std::vector<std::uint8_t>> calls_;
 };
 
-TEST_P(log_channel_replication_test, replica_connector_setter_getter) {
+TEST_F(log_channel_replication_test, replica_connector_setter_getter) {
     unsetenv("TSURUGI_REPLICATION_ENDPOINT");
     gen_datastore();
     limestone::api::log_channel& channel = datastore_->create_channel();
@@ -265,7 +256,7 @@ TEST_P(log_channel_replication_test, replica_connector_setter_getter) {
     EXPECT_NE(channel.get_impl()->get_replica_connector(), nullptr);
 }
 
-TEST_P(log_channel_replication_test, replica_connector_disable) {
+TEST_F(log_channel_replication_test, replica_connector_disable) {
     unsetenv("TSURUGI_REPLICATION_ENDPOINT");
     gen_datastore();
     limestone::api::log_channel& channel = datastore_->create_channel();
@@ -279,14 +270,14 @@ TEST_P(log_channel_replication_test, replica_connector_disable) {
 }
 
 
-TEST_P(log_channel_replication_test, log_channel_begin_session)
+TEST_F(log_channel_replication_test, log_channel_begin_session)
 {
     auto connector = begin_session_and_get_connector();
 }
 
 // TODO: As a result of waiting for ACK at end_session, the test does not pass.
 // Since it cannot be easily fixed, it is marked as DISABLED.
-TEST_P(log_channel_replication_test, DISABLED_log_channel_end_session) {
+TEST_F(log_channel_replication_test, DISABLED_log_channel_end_session) {
     auto connector = begin_session_and_get_connector();
     log_channel_->end_session();
     auto msg = connector->receive_message();
@@ -299,7 +290,7 @@ TEST_P(log_channel_replication_test, DISABLED_log_channel_end_session) {
     EXPECT_EQ(log_entry->has_flush_flag(), true);
 }
 
-TEST_P(log_channel_replication_test, log_channel_add_entry) {
+TEST_F(log_channel_replication_test, log_channel_add_entry) {
     auto connector = begin_session_and_get_connector();
     storage_id_type storage_id = 123;
     std::string_view key = "test_key";
@@ -321,7 +312,7 @@ TEST_P(log_channel_replication_test, log_channel_add_entry) {
     EXPECT_EQ(log_entry->has_flush_flag(), false);
 }
 
-TEST_P(log_channel_replication_test, log_channel_add_entry_with_large_objects) {
+TEST_F(log_channel_replication_test, log_channel_add_entry_with_large_objects) {
     auto connector = begin_session_and_get_connector();
     storage_id_type storage_id = 123;
     std::string_view key = "test_key";
@@ -357,7 +348,7 @@ TEST_P(log_channel_replication_test, log_channel_add_entry_with_large_objects) {
     EXPECT_EQ(log_entry->get_entries()[0].blob_ids[1], 789);
 }
 
-TEST_P(log_channel_replication_test, log_channel_remove_entry) {
+TEST_F(log_channel_replication_test, log_channel_remove_entry) {
     auto connector = begin_session_and_get_connector();
     storage_id_type storage_id = 123;
     std::string_view key = "test_key";
@@ -377,7 +368,7 @@ TEST_P(log_channel_replication_test, log_channel_remove_entry) {
     EXPECT_EQ(log_entry->has_flush_flag(), false);
 }
 
-TEST_P(log_channel_replication_test, rdma_send_reuses_serializer_and_flushes) {
+TEST_F(log_channel_replication_test, rdma_send_reuses_serializer_and_flushes) {
     auto connector = begin_session_and_get_connector();
     auto* impl = log_channel_->get_impl();
 
@@ -404,7 +395,7 @@ TEST_P(log_channel_replication_test, rdma_send_reuses_serializer_and_flushes) {
     EXPECT_EQ(rdma_stream_ptr->flush_count_, 1U);
 }
 
-TEST_P(log_channel_replication_test, rdma_flush_async_executes) {
+TEST_F(log_channel_replication_test, rdma_flush_async_executes) {
     api::log_channel_impl impl;
 
     auto rdma_stream = std::make_unique<fake_rdma_send_stream>();
@@ -418,7 +409,7 @@ TEST_P(log_channel_replication_test, rdma_flush_async_executes) {
     EXPECT_EQ(rdma_stream_ptr->flush_count_, 1U);
 }
 
-TEST_P(log_channel_replication_test, rdma_send_triggers_flush_when_threshold_exceeded) {
+TEST_F(log_channel_replication_test, rdma_send_triggers_flush_when_threshold_exceeded) {
     auto connector = begin_session_and_get_connector();
     auto* impl = log_channel_->get_impl();
 
@@ -443,7 +434,7 @@ TEST_P(log_channel_replication_test, rdma_send_triggers_flush_when_threshold_exc
     EXPECT_GE(ptr->last_payload_size_, api::log_channel_impl::rdma_send_buffer_threshold);
 }
 
-TEST_P(log_channel_replication_test, rdma_send_buffer_resets_after_threshold_flush) {
+TEST_F(log_channel_replication_test, rdma_send_buffer_resets_after_threshold_flush) {
     auto connector = begin_session_and_get_connector();
     auto* impl = log_channel_->get_impl();
 
@@ -469,7 +460,7 @@ TEST_P(log_channel_replication_test, rdma_send_buffer_resets_after_threshold_flu
     EXPECT_EQ(ptr->send_count_, count_after_first_flush);
 }
 
-TEST_P(log_channel_replication_test, log_channel_add_storage) {
+TEST_F(log_channel_replication_test, log_channel_add_storage) {
     auto connector = begin_session_and_get_connector();
     storage_id_type storage_id = 123;
     write_version_type write_version(111, 1);  // Example version
@@ -487,7 +478,7 @@ TEST_P(log_channel_replication_test, log_channel_add_storage) {
     EXPECT_EQ(log_entry->has_flush_flag(), false);
 }
 
-TEST_P(log_channel_replication_test, log_channel_remove_storage) {
+TEST_F(log_channel_replication_test, log_channel_remove_storage) {
     auto connector = begin_session_and_get_connector();
     storage_id_type storage_id = 123;
     write_version_type write_version(111, 1);  // Example version
@@ -505,7 +496,7 @@ TEST_P(log_channel_replication_test, log_channel_remove_storage) {
     EXPECT_EQ(log_entry->has_flush_flag(), false);
 }
 
-TEST_P(log_channel_replication_test, log_channel_truncate_storage) {
+TEST_F(log_channel_replication_test, log_channel_truncate_storage) {
     auto connector = begin_session_and_get_connector();
     storage_id_type storage_id = 123;
     write_version_type write_version(111, 1);  // Example version
@@ -527,7 +518,7 @@ TEST_P(log_channel_replication_test, log_channel_truncate_storage) {
 // Verify that when a BLOB message is sent via RDMA, any non-BLOB data accumulated
 // in rdma_serializer_io_ is flushed before the BLOB payload is sent, preserving
 // message ordering.
-TEST_P(log_channel_replication_test, rdma_send_blob_flushes_pending_buffer_first) {
+TEST_F(log_channel_replication_test, rdma_send_blob_flushes_pending_buffer_first) {
     auto connector = begin_session_and_get_connector();
     auto* impl = log_channel_->get_impl();
 
@@ -582,7 +573,7 @@ TEST_P(log_channel_replication_test, rdma_send_blob_flushes_pending_buffer_first
 
 // Verify that the blob file content is correctly transmitted via RDMA. The raw
 // bytes sent through the RDMA stream must contain the verbatim blob data.
-TEST_P(log_channel_replication_test, rdma_send_blob_data_content_is_transmitted) {
+TEST_F(log_channel_replication_test, rdma_send_blob_data_content_is_transmitted) {
     auto connector = begin_session_and_get_connector();
     auto* impl = log_channel_->get_impl();
 
@@ -617,14 +608,5 @@ TEST_P(log_channel_replication_test, rdma_send_blob_data_content_is_transmitted)
     EXPECT_NE(it, all_rdma_bytes.end())
         << "BLOB content not found in RDMA-transmitted bytes";
 }
-
-INSTANTIATE_TEST_SUITE_P(
-    rdma_toggle,
-    log_channel_replication_test,
-    // ::testing::Values(rdma_param{"tcp", std::nullopt}, rdma_param{"rdma_1", 1U}),
-    ::testing::Values(rdma_param{"tcp", std::nullopt}),
-    [](const ::testing::TestParamInfo<rdma_param>& info) {
-        return info.param.name;
-    });
 
 } // namespace limestone::testing
