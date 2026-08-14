@@ -42,9 +42,13 @@ function (add_test_executable source_file)
     target_sources(${test_target}
             PRIVATE ${source_file}
             )
+    # Tests instantiated with a non-empty INSTANTIATE_TEST_SUITE_P prefix have full
+    # names of the form "<prefix>/<file name>.<test>/<param>", so match both the
+    # prefixed and the unprefixed forms (the latter alone matches zero tests and
+    # the entry passes vacuously).
     add_test(
             NAME ${test_name}
-            COMMAND ${test_target} --gtest_filter=${test_name}.* --gtest_output=xml:${test_name}_gtest_result.xml
+            COMMAND ${test_target} "--gtest_filter=${test_name}.*:*/${test_name}.*" --gtest_output=xml:${test_name}_gtest_result.xml
     )
 endfunction (add_test_executable)
 
