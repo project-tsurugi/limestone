@@ -555,9 +555,9 @@ RDMA のチャネルに載せ替えるだけである。
 
 ## 6. 実装フェーズ
 
-**実施状況 (2026-08-14 時点)**: フェーズ 1〜5 の実装は完了 (フェーズ 4 項目 3 は実施せず、
-replica 切り離しプロトコル (別タスク) へ移管)。未了はフェーズ 5 項目 7 (運用手順の文書化)
-のみ。各項目の詳細は各フェーズの注記を参照。
+**実施状況 (2026-08-15 時点)**: フェーズ 1〜5 は全項目クローズ済み (フェーズ 4 項目 3 は
+実施せず replica 切り離しプロトコル (別タスク) へ移管、フェーズ 5 項目 7 は製品レベルの
+文書整備の扱いとしてクローズ)。各項目の詳細は各フェーズの注記を参照。
 
 各フェーズは単独でビルド・テストが通る状態を保つ。
 
@@ -722,7 +722,13 @@ replica 切り離しプロトコル (別タスク) へ移管)。未了はフェ�
    *(完了。本注記を含む更新で対応)*
 7. 運用手順 (handshake daemon の起動、conn_info の配布、service_id の割り当て) を README または
    運用ドキュメントに記述する。
-   *(残作業)*
+   *(クローズ。limestone は tsurugidb のサブモジュールであり、運用者向け手順書を単体で持つ
+   位置づけにない。daemon 自体の導入・運用は rdma-comm-lib 側の正典
+   (`handshake-daemon-operation-guide.md`、§9 参照) が既にカバーしており、limestone 固有の
+   前提 (起動順序・パーミッション・service_id・環境変数) は §7.8 に記録済み。本作業で
+   気づいた運用・機能設計上の事項は nt-tsurugi-internal の
+   `docs/topics/replication-failover/09-notes/rdma-tcpless-carryover-notes.md` へ
+   申し送った)*
 
 ---
 
@@ -808,8 +814,10 @@ rdma-comm-lib の daemon は、**一度接続した相手 daemon との再接続
 **レプリケーション経路の恒久的な喪失**を意味し、daemon の再起動には運用者の介入 (接続情報ファイルの
 コピー) が必要になる。
 
-**方針**: limestone は daemon の生存を監視しない。daemon の復旧と、その後のレプリケーション再開手順は
-運用ドキュメントに記述する。
+**方針**: limestone は daemon の生存を監視しない。daemon の復旧手順そのものは rdma-comm-lib 側の
+正典 (`handshake-daemon-operation-guide.md`、§9 参照) の範囲であり、limestone 側の前提は §7.8 に
+記録する。運用者向けの手順書は limestone (tsurugidb のサブモジュール) 単体では持たず、
+製品レベルの文書整備で扱う。
 
 なお、ハンドシェイク成功後は daemon への接続 (UDS) を維持する必要はない。connector / acceptor の
 インスタンスを破棄してよく、RDMA 経路そのものは daemon とは独立に維持される。
@@ -858,7 +866,7 @@ RDMA モードを使うには、以下が満たされている必要がある。
 | daemon は再接続できない | 片方の daemon が停止したら両方を停止し、接続情報ファイルの再出力・再コピーから起動し直す必要がある | limestone は daemon を監視しない。復旧は運用手順 (7.7) |
 | **replica 喪失時に master が abort する** | RDMA の `flush()` 失敗は `LOG_LP(FATAL)` で master ごと落ちる (`log_channel_impl.cpp:153`)。TCP 版も `receive_message()` の FATAL で同じ (`replica_connector.cpp:121`)。`replica_exists_` による切り離しは事実上デッドコード | **本作業では挙動を変えない** (現状維持)。graceful degradation は TCP / RDMA 両経路にまたがる独立した課題 (7.7) |
 | socket のパーミッション | daemon は other ビットを落とす。同一ユーザ / 同一グループ + 適切な umask が必要 | 運用前提として記載 (7.8) |
-| conn_info ファイルの手動コピー | NIC ベンダ対応までの暫定運用 | limestone のスコープ外。運用ドキュメントに記載 |
+| conn_info ファイルの手動コピー | NIC ベンダ対応までの暫定運用 | limestone のスコープ外。前提は §7.8 に記録 |
 | daemon の常駐化 | daemon はフォアグラウンドで動き自ら終了しない。systemd 等での管理が必要 | 外部運用。テストは fork/exec |
 | `rdma_port()` の使い道 | handshake クライアントから取得できるが、コア API に渡す先がない | 現状は情報として取得できるのみ。将来 API が変わる可能性 |
 | 制御チャネルが送信バッファスロットを消費する | 送信バッファプールは全チャネル共有の単一リング (§3.2)。制御チャネルが 1 本増えるぶん、WAL データが使えるスロットが減る | **本番チューニングの領域**。slot_count は `REPLICATION_RDMA_SLOTS` で調整可能。実機・実負荷でなければ適正値は決まらないため、本作業では検証しない |
