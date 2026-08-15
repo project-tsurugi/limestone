@@ -229,6 +229,17 @@ public:
         std::uint64_t id, std::shared_ptr<rdma_log_channel_receiver> receiver);
 
     /**
+     * @brief Test hook to set the RDMA control channel id directly.
+     *
+     * In production the id is assigned by establish_rdma_session(); this hook
+     * lets unit tests drive handle_rdma_control_event() through
+     * on_rdma_receive() without a full session establishment.
+     *
+     * @note Test-only; do not use in production code.
+     */
+    void set_rdma_control_channel_id_for_test(std::int32_t id) noexcept;
+
+    /**
      * @brief Test hook to inject the RDMA data receiver instance.
      * @note Test-only; do not use in production code.
      */

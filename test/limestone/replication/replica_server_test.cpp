@@ -28,6 +28,7 @@
 #include "rdma/rdma_sender_base.h"
 #include "replication/channel_handler_base.h"
 #include "replication/message_error.h"
+#include "replication/message_group_commit.h"
 #include "replication/message_session_begin.h"
 #include "replication/replica_connector.h"
 #include "replication/replication_message_io.h"
@@ -477,6 +478,156 @@ TEST_F(replica_server_test, on_rdma_receive_error_event_does_not_invoke_receiver
 
     server.on_rdma_receive(rdma_receive_event{err});
     EXPECT_FALSE(invoked);
+}
+
+namespace {
+
+// Serializes a replication message into its wire form (a control frame payload).
+std::string serialize_control_message(replication_message const& msg) {
+    replication_message_io out("");
+    replication_message::send(out, msg);
+    return out.get_out_string();
+}
+
+// Builds a receive event for the control channel. The header defaults to valid
+// values; each test corrupts only the field under scrutiny.
+rdma_data_event make_control_event(std::uint16_t channel_id, std::uint16_t sequence_number,
+                                   std::string const& payload) {
+    rdma_data_event ev{};
+    ev.header.version = rdma_frame_current_version;
+    ev.header.channel_id = channel_id;
+    ev.header.sequence_number = sequence_number;
+    ev.header.payload_size = static_cast<std::uint32_t>(payload.size());
+    ev.payload.assign(payload.begin(), payload.end());
+    return ev;
+}
+
+constexpr std::uint16_t control_id = 5U;
+
+}  // namespace
+
+// Dispatch to the control channel id: a GROUP_COMMIT reaches the control handler
+// and persists the epoch, and the sequence number advances across consecutive frames.
+TEST_F(replica_server_test, on_rdma_receive_routes_control_event_and_persists_epoch) {
+    replica_server server;
+    server.initialize(location1);
+    server.set_rdma_control_channel_id_for_test(control_id);
+
+    auto ev1 = make_control_event(control_id, 0U, serialize_control_message(message_group_commit{7}));
+    server.on_rdma_receive(rdma_receive_event{ev1});
+    EXPECT_EQ(get_epoch(location1), 7U);
+
+    auto ev2 = make_control_event(control_id, 1U, serialize_control_message(message_group_commit{9}));
+    server.on_rdma_receive(rdma_receive_event{ev2});
+    EXPECT_EQ(get_epoch(location1), 9U);
+}
+
+TEST_F(replica_server_test, control_frame_version_mismatch_is_fatal) {
+    replica_server server;
+    server.initialize(location1);
+    server.set_rdma_control_channel_id_for_test(control_id);
+
+    auto ev = make_control_event(control_id, 0U, serialize_control_message(message_group_commit{7}));
+    ev.header.version = static_cast<std::uint8_t>(rdma_frame_current_version + 1U);
+    EXPECT_DEATH(server.on_rdma_receive(rdma_receive_event{ev}), "RDMA frame version mismatch");
+}
+
+TEST_F(replica_server_test, control_frame_payload_size_mismatch_is_fatal) {
+    replica_server server;
+    server.initialize(location1);
+    server.set_rdma_control_channel_id_for_test(control_id);
+
+    auto ev = make_control_event(control_id, 0U, serialize_control_message(message_group_commit{7}));
+    ev.header.payload_size += 1U;
+    EXPECT_DEATH(server.on_rdma_receive(rdma_receive_event{ev}), "RDMA payload size mismatch");
+}
+
+TEST_F(replica_server_test, control_frame_partial_flag_is_fatal) {
+    replica_server server;
+    server.initialize(location1);
+    server.set_rdma_control_channel_id_for_test(control_id);
+
+    auto ev = make_control_event(control_id, 0U, serialize_control_message(message_group_commit{7}));
+    ev.header.flags |= rdma_frame_flag_partial_payload;
+    EXPECT_DEATH(server.on_rdma_receive(rdma_receive_event{ev}), "partial RDMA control frame");
+}
+
+TEST_F(replica_server_test, control_frame_sequence_mismatch_is_fatal) {
+    replica_server server;
+    server.initialize(location1);
+    server.set_rdma_control_channel_id_for_test(control_id);
+
+    // The expected number is 0, so a frame starting at 1 is an ordering violation.
+    auto ev = make_control_event(control_id, 1U, serialize_control_message(message_group_commit{7}));
+    EXPECT_DEATH(server.on_rdma_receive(rdma_receive_event{ev}), "control frame sequence mismatch");
+}
+
+// An unexpected message type is dropped and the server keeps running. A drop
+// still consumes the sequence number, so the next well-formed frame is accepted
+// with the following number.
+TEST_F(replica_server_test, control_frame_unexpected_message_type_is_dropped) {
+    replica_server server;
+    server.initialize(location1);
+    server.set_rdma_control_channel_id_for_test(control_id);
+
+    auto const initial_epoch = get_epoch(location1);
+    auto ev1 = make_control_event(control_id, 0U, serialize_control_message(message_session_begin{}));
+    server.on_rdma_receive(rdma_receive_event{ev1});
+    EXPECT_EQ(get_epoch(location1), initial_epoch);
+
+    auto ev2 = make_control_event(control_id, 1U, serialize_control_message(message_group_commit{7}));
+    server.on_rdma_receive(rdma_receive_event{ev2});
+    EXPECT_EQ(get_epoch(location1), 7U);
+}
+
+// A payload carrying the GROUP_COMMIT type id with a truncated body is converted
+// to FATAL so the deserialization exception does not escape to the receive thread.
+TEST_F(replica_server_test, control_frame_malformed_payload_is_fatal) {
+    replica_server server;
+    server.initialize(location1);
+    server.set_rdma_control_channel_id_for_test(control_id);
+
+    auto payload = serialize_control_message(message_group_commit{7});
+    payload.resize(payload.size() / 2);
+    auto ev = make_control_event(control_id, 0U, payload);
+    EXPECT_DEATH(server.on_rdma_receive(rdma_receive_event{ev}),
+                 "Failed to process the RDMA control frame");
+}
+
+// A data event whose channel_id is at or above the slot limit is dropped and the
+// server keeps running.
+TEST_F(replica_server_test, data_event_out_of_range_channel_id_is_dropped) {
+    replica_server server;
+    server.initialize(location1);
+
+    auto& ds = server.get_datastore();
+    auto& channel = ds.create_channel();
+    bool invoked = false;
+    auto receiver = std::make_shared<fake_rdma_log_channel_receiver>(ds, channel, invoked);
+    server.set_rdma_log_channel_receiver_for_test(1U, receiver);
+
+    rdma_data_event ev{};
+    ev.header.version = rdma_frame_current_version;
+    ev.header.channel_id = static_cast<std::uint16_t>(replica_server::max_log_channel_slots);
+    ev.header.payload_size = 0U;
+
+    server.on_rdma_receive(rdma_receive_event{ev});
+    EXPECT_FALSE(invoked);
+}
+
+// A data event for a channel_id with no registered receiver is dropped and the
+// server keeps running.
+TEST_F(replica_server_test, data_event_without_registered_receiver_is_dropped) {
+    replica_server server;
+    server.initialize(location1);
+
+    rdma_data_event ev{};
+    ev.header.version = rdma_frame_current_version;
+    ev.header.channel_id = 2U;
+    ev.header.payload_size = 0U;
+
+    // Nothing is registered, so just verify the event is dropped without crashing.
+    server.on_rdma_receive(rdma_receive_event{ev});
 }
 
 }  // namespace limestone::testing

@@ -513,6 +513,10 @@ void replica_server::set_rdma_log_channel_receiver_for_test(
     rdma_log_channel_receivers_.at(id) = std::move(receiver);
 }
 
+void replica_server::set_rdma_control_channel_id_for_test(std::int32_t id) noexcept {
+    rdma_control_channel_id_.store(id, std::memory_order_release);
+}
+
 void replica_server::set_rdma_receiver_for_test(std::unique_ptr<rdma_receiver_base> receiver) noexcept {
     std::lock_guard<std::mutex> lock(rdma_init_mutex_);
     rdma_receiver_ = std::move(receiver);

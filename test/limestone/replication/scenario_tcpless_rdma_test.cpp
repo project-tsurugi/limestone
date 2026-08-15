@@ -36,6 +36,7 @@
 
 #include <boost/filesystem.hpp>
 
+#include <blob_file_resolver.h>
 #include <datastore_impl.h>
 #include <log_channel_impl.h>
 #include <limestone/api/log_channel.h>
@@ -496,6 +497,65 @@ TEST_F(scenario_tcpless_rdma_test, wal_data_flows_without_tcp) {
 
 TEST_F(scenario_tcpless_rdma_test, wal_data_flows_without_tcp_thread_replica) {
     run_wal_data_flow(replica_mode::thread);
+}
+
+// Verifies that a BLOB is replicated to the replica over the RDMA data channel
+// in the TCP-less configuration (real tgreplica process), down to the file content.
+TEST_F(scenario_tcpless_rdma_test, blob_flows_without_tcp) {
+    auto const tcp_baseline = tcp_sockets_owned_by(::getpid());
+
+    ASSERT_NO_FATAL_FAILURE(start_daemons());
+    ASSERT_NO_FATAL_FAILURE(start_replica_process());
+    ASSERT_NO_FATAL_FAILURE(gen_datastore());
+    ASSERT_TRUE(replica_->wait_for_log("initialized and listening"))
+        << "tgreplica did not finish the session establishment in time";
+
+    expect_tcpless(replica_mode::process, tcp_baseline);
+
+    constexpr limestone::api::blob_id_type blob_id = 9001U;
+    std::string blob_content(8192, '\0');
+    for (std::size_t i = 0; i < blob_content.size(); ++i) {
+        blob_content[i] = static_cast<char>('a' + (i % 26));
+    }
+
+    auto const master_blob_path = ds_->get_blob_file(blob_id).path();
+    boost::filesystem::create_directories(master_blob_path.parent_path());
+    {
+        std::ofstream ofs(master_blob_path.string(), std::ios::binary);
+        ofs.write(blob_content.data(), static_cast<std::streamsize>(blob_content.size()));
+    }
+
+    ds_->switch_epoch(1);
+
+    lc0_->begin_session();
+    lc0_->add_entry(1, "blob-key", "blob-value", {1, 0}, {blob_id});
+    lc0_->end_session();
+
+    wait_until([this]() { return read_replica_pwal00().size() == 1; });
+    auto const replica_entries = read_replica_pwal00();
+    ASSERT_EQ(replica_entries.size(), 1U);
+    EXPECT_TRUE(AssertLogEntry(replica_entries[0], 1, "blob-key", "blob-value", 1, 0,
+        {blob_id}, log_entry::entry_type::normal_with_blob));
+
+    limestone::internal::blob_file_resolver const replica_blob_resolver{
+        boost::filesystem::path(replica_location)};
+    auto const replica_blob_path = replica_blob_resolver.resolve_path(blob_id);
+    wait_until([&replica_blob_path]() {
+        return boost::filesystem::exists(replica_blob_path);
+    });
+    {
+        std::ifstream ifs(replica_blob_path.string(), std::ios::binary);
+        std::ostringstream oss;
+        oss << ifs.rdbuf();
+        EXPECT_EQ(oss.str(), blob_content);
+    }
+
+    ds_->switch_epoch(2);
+    EXPECT_EQ(get_epoch(master_location), 1U);
+    EXPECT_EQ(get_epoch(replica_location), 1U);
+
+    // Verify the processes are still TCP-less after the BLOB transfer
+    expect_tcpless(replica_mode::process, tcp_baseline);
 }
 
 } // namespace limestone::testing
