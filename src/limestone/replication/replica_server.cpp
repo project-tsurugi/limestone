@@ -466,10 +466,10 @@ replica_server::register_rdma_log_channel_receiver(std::uint64_t channel_id) {
 
     // Fast path: if the slot is already taken, return without creating an extra
     // log_channel on the datastore side. This function is invoked once per
-    // channel id (the TCP-less establishment and the RDMA_FINALIZE handling),
-    // but stays side-effect-free against duplicate ids or redelivery. The TCP
-    // handler registry is also checked to reject TCP/RDMA coexistence on one id
-    // (a configuration inconsistency).
+    // channel id by the TCP-less establishment, but stays side-effect-free
+    // against duplicate ids or redelivery. The TCP handler registry is also
+    // checked to reject TCP/RDMA coexistence on one id (a configuration
+    // inconsistency).
     {
         std::lock_guard<std::mutex> lock(log_channel_slot_mutexes_.at(channel_idx));
         if (rdma_log_channel_receivers_.at(channel_idx)

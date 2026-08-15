@@ -21,6 +21,7 @@
 #include <future>
 #include <cerrno>
 #include <cstdint>
+#include <cstdlib>
 #include <limits>
 
 #include <boost/filesystem/fstream.hpp>
@@ -110,6 +111,20 @@ datastore::datastore(configuration const& conf) : location_(conf.data_location_)
             && !impl_->rdma_slot_count().has_value()) {
             std::string err_msg =
                 "REPLICATION_RDMA_SLOTS must be set to a valid slot count in RDMA replication mode";
+            LOG_LP(ERROR) << err_msg;
+            throw limestone_exception(exception_type::initialization_failure, err_msg);
+        }
+        // The hybrid configuration (TCP control channel with RDMA data channels)
+        // is not provided as a product, so REPLICATION_RDMA_SLOTS set in TCP mode
+        // is rejected at startup as a misconfiguration (pure TCP or pure RDMA only).
+        // The check uses the presence of the env var, not the parsed value: an
+        // invalid value ("0", "abc", ...) is just as much a misconfiguration and
+        // must not silently start as pure TCP.
+        if (repl_result.config.mode() == replication::replication_mode::tcp
+            && std::getenv("REPLICATION_RDMA_SLOTS") != nullptr) {
+            std::string err_msg =
+                "REPLICATION_RDMA_SLOTS must not be set in TCP replication mode; "
+                "the hybrid configuration (TCP control channel with RDMA data channels) is not supported";
             LOG_LP(ERROR) << err_msg;
             throw limestone_exception(exception_type::initialization_failure, err_msg);
         }
@@ -450,10 +465,10 @@ log_channel& datastore::create_channel() {
     });
 
     // In RDMA mode the per-channel TCP socket is unnecessary: log_channel
-    // registration on the replica side is performed via RDMA_FINALIZE
-    // (carrying the list of channel ids), and replication data and ACKs both
-    // flow over RDMA. Skip opening a connector to avoid leaving an idle TCP
-    // session per log channel.
+    // registration on the replica side is done by the TCP-less establishment
+    // (establish_rdma_session), and replication data and ACKs both flow over
+    // RDMA. Skip opening a connector to avoid leaving an idle TCP session per
+    // log channel.
     if (impl_->has_replica() && impl_->is_master() && ! impl_->is_rdma_enabled()) {
         auto connector = impl_->create_log_channel_connector(*this, id);
         if (connector) {

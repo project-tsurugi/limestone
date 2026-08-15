@@ -89,6 +89,26 @@ TEST_F(replication_config_loader_test, datastore_construction_fails_on_invalid_c
     EXPECT_THROW(limestone::api::datastore_test ds{conf}, limestone::api::limestone_exception);
 }
 
+// The hybrid configuration (TCP control channel with RDMA data channels) is not
+// provided as a product, so setting REPLICATION_RDMA_SLOTS in TCP mode is a
+// startup error. The check does not depend on the build configuration
+// (ENABLE_RDMA ON/OFF).
+TEST_F(replication_config_loader_test, datastore_construction_fails_in_tcp_mode_with_slots) {
+    set_env("TSURUGI_REPLICATION_ENDPOINT", "tcp://localhost:12345");
+    set_env("REPLICATION_RDMA_SLOTS", "128");
+    auto conf = make_conf();
+    EXPECT_THROW(limestone::api::datastore_test ds{conf}, limestone::api::limestone_exception);
+}
+
+// The check is based on the presence of the env var, so an invalid value is
+// rejected at startup all the same (no silent start as pure TCP).
+TEST_F(replication_config_loader_test, datastore_construction_fails_in_tcp_mode_with_invalid_slots) {
+    set_env("TSURUGI_REPLICATION_ENDPOINT", "tcp://localhost:12345");
+    set_env("REPLICATION_RDMA_SLOTS", "abc");
+    auto conf = make_conf();
+    EXPECT_THROW(limestone::api::datastore_test ds{conf}, limestone::api::limestone_exception);
+}
+
 #ifdef LIMESTONE_ENABLE_RDMA
 
 TEST_F(replication_config_loader_test, socket_and_service_id_env_select_rdma_mode) {

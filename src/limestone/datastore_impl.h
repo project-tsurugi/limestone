@@ -264,9 +264,9 @@ public:
      * @brief Initialize the RDMA ACK receiver.
      *
      * Creates the ACK receiver instance and calls initialize() so its DMA
-     * address can be exposed to the replica via RDMA_INIT. The ACK receiver
-     * stays in the SETUP phase here; binding to the data sender via
-     * finalize_channel_setup_with_sender is handled separately later.
+     * address can be exposed to the replica via the handshake start payload.
+     * The ACK receiver stays in the SETUP phase here; binding to the data
+     * sender via finalize_channel_setup_with_sender is handled separately later.
      *
      * @param slot_count requested RDMA slot count.
      * @return DMA address of the ACK receive buffer, or std::nullopt on failure.
@@ -293,26 +293,6 @@ public:
     bool send_session_begin();
 
     /**
-     * @brief Initialize RDMA sender if RDMA is enabled.
-     * @return true on success or skip; false on failure.
-     */
-    bool maybe_initialize_rdma_sender();
-
-    /**
-     * @brief Finalize the RDMA channel setup if the sender is active.
-     *
-     * Sends RDMA_FINALIZE to the replica, waits for RDMA_FINALIZE_ACK, and then
-     * calls rdma_sender_base::finalize_channel_setup() locally to transition
-     * from SETUP to TRANSFER phase. No-op when RDMA is not enabled or the
-     * sender failed to initialize.
-     *
-     * @param channel_ids log channel ids that the replica must register as
-     *        RDMA-only handlers as part of the FINALIZE handshake. May be empty.
-     * @return true on success or skip; false on failure.
-     */
-    bool maybe_finalize_rdma(std::vector<std::uint64_t> const& channel_ids);
-
-    /**
      * @brief Establishes the RDMA session with the replica via the handshake daemon.
      *
      * Initializes the RDMA ACK receiver, exchanges the session parameters and DMA
@@ -328,14 +308,8 @@ public:
     [[nodiscard]] bool establish_rdma_session();
 
     /**
-     * @brief レプリカとの TCP レプリケーション制御チャネルを確立する。
-     *
-     * 制御チャネルを接続し、RDMA が有効な場合は各ログチャネルの RDMA 送信
-     * ストリームを登録したうえで、ストリームを保持するチャネル id を
-     * FINALIZE ハンドシェイクでレプリカに通知する。RDMA が無効な場合、
-     * ストリーム登録と FINALIZE は何も行わない。
-     *
-     * @return 成功した場合 true、失敗した場合 false。
+     * @brief Establishes the TCP replication control channel with the replica.
+     * @return true on success; false on failure.
      */
     [[nodiscard]] bool establish_tcp_control_channel();
 

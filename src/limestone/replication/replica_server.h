@@ -205,8 +205,8 @@ public:
      * Creates a replica-side log channel via datastore::create_channel() and
      * stores an rdma_log_channel_receiver bound to it in the channel_id slot,
      * so that subsequent RDMA frames for that id are dispatched to the
-     * receiver. Used by the RDMA modes that skip the TCP LOG_CHANNEL_CREATE
-     * handshake (the TCP-less establishment and the RDMA_FINALIZE handling).
+     * receiver. Used by the TCP-less establishment (establish_rdma_session),
+     * which skips the TCP LOG_CHANNEL_CREATE handshake.
      *
      * @param channel_id Channel id assigned by the master.
      * @return Registration result.

@@ -43,18 +43,6 @@ public:
     static constexpr uint16_t log_channel_error_invalid_type = 21;
     static constexpr uint16_t log_channel_error_bad_cast = 22;
 
-    // RDMA init error codes
-    static constexpr uint16_t rdma_init_error_invalid_resources = 100;
-    static constexpr uint16_t rdma_init_error_init_failed = 101;
-    static constexpr uint16_t rdma_init_error_no_dma_address = 102;
-    static constexpr uint16_t rdma_init_error_already_initialized = 103;
-
-    // RDMA finalize error codes
-    static constexpr uint16_t rdma_finalize_error_invalid_resources = 110;
-    static constexpr uint16_t rdma_finalize_error_not_initialized = 111;
-    static constexpr uint16_t rdma_finalize_error_finalize_failed = 112;
-    static constexpr uint16_t rdma_finalize_error_register_handler_failed = 113;
-
 private:
     // Register COMMON_ERROR in replication_message factory map.
     // The static initialization here is intentional. If an exception occurs,

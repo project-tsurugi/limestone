@@ -59,12 +59,11 @@ protected:
     }
 };
 
-// This suite presupposes the log channel's per-channel TCP connection (a hybrid
-// configuration does not create that connection at all, so the begin_session-based
-// tests cannot hold — observed as a SEGV). RDMA path coverage lives elsewhere: the
-// send sequence in this file's fake-stream injection tests, the receive side in
-// rdma_log_channel_receiver_test, and end-to-end in scenario_test /
-// scenario_tcpless_rdma_test on RDMA-enabled builds.
+// This suite presupposes the log channel's per-channel TCP connection, i.e. the
+// pure TCP mode. RDMA path coverage lives elsewhere: the send sequence in this
+// file's fake-stream injection tests, the receive side in
+// rdma_log_channel_receiver_test, and end-to-end in scenario_tcpless_rdma_test
+// on RDMA-enabled builds.
 class log_channel_replication_test : public ::testing::Test {
 protected:
     std::unique_ptr<api::datastore_test> datastore_;
@@ -86,9 +85,9 @@ protected:
             std::cerr << "Cannot create directory" << std::endl;
         }
 
-        // If another suite in this binary leaves this env set, the datastore turns
-        // into a hybrid configuration and the per-channel TCP connection premise
-        // breaks, so always unset it as a guard.
+        // If another suite in this binary leaves this env set, the datastore
+        // constructor rejects the TCP-mode-with-slots combination at startup,
+        // so always unset it as a guard.
         unsetenv("REPLICATION_RDMA_SLOTS");
 
         uint16_t port = get_free_port();

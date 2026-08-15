@@ -15,13 +15,10 @@
 #include <iterator>
 #include <memory>
 #include <mutex>
-#include <optional>
 #include <sstream>
 #include <thread>
 
 #include "gtest/gtest.h"
-#include <datastore_impl.h>
-#include <log_channel_impl.h>
 #include "blob_file_resolver.h"
 #include "internal.h"
 #include "replication/replica_server.h"
@@ -50,7 +47,6 @@ namespace {
 
 struct scenario_param {
     std::string name;
-    std::optional<uint32_t> rdma_slots;
     bool execute_as_process;
 };
 
@@ -86,12 +82,9 @@ protected:
         boost::filesystem::create_directories(replica_location);
 
         auto param = GetParam();
-        if (param.rdma_slots.has_value()) {
-            setenv("REPLICATION_RDMA_SLOTS", std::to_string(param.rdma_slots.value()).c_str(), 1);
-        } else {
-            unsetenv("REPLICATION_RDMA_SLOTS");
-        }
-        setenv("GLOG_vmodule", "rdma_sender_detail=50,send_buffer_pool=50,log_channel=50", 1);
+        // Setting REPLICATION_RDMA_SLOTS in TCP mode is a startup error; unset it
+        // explicitly so a leak from an earlier suite does not become a spurious FATAL.
+        unsetenv("REPLICATION_RDMA_SLOTS");
         setenv("GLOG_logtostderr", "1", 1);
         setenv("GLOG_logbufsecs", "0", 1);
 
@@ -110,7 +103,6 @@ protected:
         // cleanup environment variable
         unsetenv("TSURUGI_REPLICATION_ENDPOINT");
         unsetenv("REPLICATION_RDMA_SLOTS");
-        unsetenv("GLOG_vmodule");
         unsetenv("GLOG_logtostderr");
         unsetenv("GLOG_logbufsecs");
         // stop replica server
@@ -336,13 +328,6 @@ TEST_P(scenario_test, minimal_test) {
     // Start the master
     gen_datastore(master_location);
 
-    if (GetParam().rdma_slots.has_value()) {
-        EXPECT_TRUE(ds->get_impl()->is_rdma_enabled());
-        EXPECT_NE(ds->get_impl()->get_rdma_sender(), nullptr);
-        EXPECT_TRUE(lc0_->get_impl()->has_rdma_send_stream());
-    }
-
-
     ds->switch_epoch(1);
 
     // Verify that PWAL is transferred to the replica
@@ -400,9 +385,6 @@ TEST_P(scenario_test, minimal_test) {
 
     // Start the master without a replica
     unsetenv("TSURUGI_REPLICATION_ENDPOINT");
-    if (GetParam().rdma_slots.has_value()) {
-        unsetenv("REPLICATION_RDMA_SLOTS");
-    }
     gen_datastore(master_location);
 
     // Verify the snapshot
@@ -435,12 +417,6 @@ TEST_P(scenario_test, minimal_test) {
 
 TEST_P(scenario_test, blob_replication_end_to_end) {
     gen_datastore(master_location);
-
-    if (GetParam().rdma_slots.has_value()) {
-        EXPECT_TRUE(ds->get_impl()->is_rdma_enabled());
-        EXPECT_NE(ds->get_impl()->get_rdma_sender(), nullptr);
-        EXPECT_TRUE(lc0_->get_impl()->has_rdma_send_stream());
-    }
 
     constexpr blob_id_type blob_id = 9001U;
     std::string blob_content(8192, '\0');
@@ -488,32 +464,15 @@ TEST_P(scenario_test, blob_replication_end_to_end) {
 // Both thread and process modes run because either may surface distinct bugs
 // (process-only catches wire/handshake issues; thread-only catches in-process
 // replica_server lifecycle issues and provides a faster dev loop). The RDMA
-// variants also run in both modes: the vendor mock's GnRdmaWrite / GnRdmaReceive
-// instances are not process-wide singletons, so the master side (data send +
-// ACK receive) and the replica side (data receive + ACK send) — four instances
-// in total — can coexist in one process just like TCP.
-#ifdef LIMESTONE_ENABLE_RDMA
+// (TCP-less) counterpart of this scenario lives in scenario_tcpless_rdma_test.
 INSTANTIATE_TEST_SUITE_P(
     variants,
     scenario_test,
     ::testing::Values(
-        scenario_param{"tcp_thread", std::nullopt, false},
-        scenario_param{"tcp_process", std::nullopt, true},
-        scenario_param{"rdma_thread", 1024U, false},
-        scenario_param{"rdma_process", 1024U, true}),
+        scenario_param{"tcp_thread", false},
+        scenario_param{"tcp_process", true}),
     [](const ::testing::TestParamInfo<scenario_param>& info) {
         return info.param.name;
     });
-#else
-INSTANTIATE_TEST_SUITE_P(
-    variants,
-    scenario_test,
-    ::testing::Values(
-        scenario_param{"tcp_thread", std::nullopt, false},
-        scenario_param{"tcp_process", std::nullopt, true}),
-    [](const ::testing::TestParamInfo<scenario_param>& info) {
-        return info.param.name;
-    });
-#endif // LIMESTONE_ENABLE_RDMA
 
 }  // namespace limestone::testing
