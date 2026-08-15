@@ -133,6 +133,17 @@ rdma_frame_flag_control」。シーケンス管理・ACK・送信バッファプ
 3. rdma-comm-lib master 最新の API に追従する。
 4. 既存のレプリケーションのセマンティクス (WAL の順序、group commit の同期、BLOB の内容一致) を維持する。
 
+*(追記 2026-08-15: 上位計画の決定により、ハイブリッド構成 (TCP モード +
+`REPLICATION_RDMA_SLOTS` = 制御 TCP + データ RDMA) は**製品として提供しない**ことが
+確定した (純 TCP か純 RDMA の二択)。目標 2 の「現状のまま維持」は純 TCP 構成についてのみ
+適用する。これに伴い、ハイブリッド専用コード — `maybe_initialize_rdma_sender()` /
+`maybe_finalize_rdma()` と `RDMA_INIT` / `RDMA_INIT_ACK` / `RDMA_FINALIZE` /
+`RDMA_FINALIZE_ACK` メッセージ — を削除し、TCP モードで `REPLICATION_RDMA_SLOTS` が
+設定されていた場合は起動時エラー (initialization_failure) とした。ハイブリッド構成の
+テストも削除した。以降の本文でハイブリッド構成に触れる記述は、この決定以前の
+設計経緯の記録である。テストカバレッジへの影響と代替は
+[20260815-replication-test-coverage.md](20260815-replication-test-coverage.md) を参照)*
+
 ### 2.2 非目標 (本作業のスコープ外)
 
 1. BLOB 転送の `rdma_blob_relay` への移行。
@@ -904,12 +915,7 @@ RDMA モードを使うには、以下が満たされている必要がある。
 
 ## 10. 本作業完了後の TODO
 
-* **TCP と RDMA で同等機能を持つものについて、両方の経路がテストされていることを確認し、
-  不足分のテストを追加する** (2026-08-10、フェーズ 2 ステップ 7 実装時に判明)。
-  本作業により多くの機能が TCP モードと RDMA モードの 2 経路を持つが、既存テストは
-  TCP モード (`TSURUGI_REPLICATION_ENDPOINT` 設定) で動くものが大半であり、同等機能が
-  RDMA モードでもテストされている保証がない。フェーズ 5 までの作業完了後、機能ごとに
-  TCP / RDMA 両経路のテストカバレッジを棚卸しし、欠けている側のテストを追加する。
-  * 判明している具体例: group commit。既存の GROUP_COMMIT 関連テストはすべて TCP モードで
-    あり、RDMA モードの master → replica 間で group commit が伝播し ACK フレームで完了同期
-    される経路 (§3.3) を end-to-end で検証するテストが存在しない。
+(全項目消化済み。両経路のテストカバレッジ棚卸しは
+[20260815-replication-test-coverage.md](20260815-replication-test-coverage.md) として実施し、
+判明したギャップのテスト追加まで完了した。establish 失敗時ロールバックの完全化は
+nt-tsurugi-internal の rdma-tcpless-carryover-notes.md E 節へ移管した)
