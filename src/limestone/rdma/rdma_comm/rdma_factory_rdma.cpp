@@ -29,7 +29,17 @@
 #include <rdma_comm/handshake/handshake_connector.h>
 #include <rdma_comm/rdma_config.h>
 
+#include <replication/message_group_commit.h>
+
 namespace limestone::replication {
+
+// The control-channel receiver parses one message per frame. The sending side's
+// send_all_bytes() splits the payload across frames only when it exceeds the capacity
+// granted by acquire, and every valid grant holds at least one slot's payload.
+// A GROUP_COMMIT therefore goes out in a single frame as long as it fits in one slot
+// payload; this assert pins that premise down.
+static_assert(message_group_commit::wire_size <= rdma_slot_payload_bytes,
+    "a GROUP_COMMIT message must fit in a single RDMA ring slot payload");
 
 namespace {
 

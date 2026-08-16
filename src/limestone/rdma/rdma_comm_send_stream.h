@@ -56,10 +56,14 @@ public:
 
     [[nodiscard]] std::size_t capacity() const noexcept override { return frame_.capacity; }
 
-private:
-    // rdma_comm_send_stream unwraps this to reach the underlying frame on submit.
-    friend class rdma_comm_send_stream;
+    /**
+     * @brief Returns the wrapped frame_buffer handed to the underlying API on submit.
+     */
+    [[nodiscard]] rdma::communication::rdma_send_stream::frame_buffer& native_frame() noexcept {
+        return frame_;
+    }
 
+private:
     rdma::communication::rdma_send_stream::frame_buffer frame_;
 };
 

@@ -33,7 +33,6 @@
 #include <rdma/rdma_handshake_payload.h>
 #include <rdma/rdma_receive_event.h>
 #include <replication/log_channel_limits.h>
-#include <replication/message_ack.h>
 #include <replication/message_group_commit.h>
 #include <replication/replica_server.h>
 #include <replication/replication_message.h>
@@ -291,14 +290,12 @@ TEST_F(rdma_establish_replica_session_test, establish_succeeds_and_registers_cha
     server.handle_rdma_data_event(make_control_frame(2U, 1U, second_commit));
     EXPECT_EQ(get_epoch(boost::filesystem::path{log_dir_}), 9U);
 
-    // A well-formed message of the wrong type is dropped without persisting, and the
-    // sequence number advances so a following GROUP_COMMIT is still accepted.
-    limestone::replication::message_ack ack{};
-    server.handle_rdma_data_event(make_control_frame(2U, 2U, ack));
-    EXPECT_EQ(get_epoch(boost::filesystem::path{log_dir_}), 9U);
-
+    // An unexpected message type is now FATAL, so this test no longer exercises the
+    // former drop behaviour. The FATAL branch is covered by an EXPECT_DEATH in
+    // replica_server_test: every establishment consumes vendor-mock endpoint slots,
+    // so death cases belong on the daemon-free unit-test side.
     limestone::replication::message_group_commit third_commit{11U};
-    server.handle_rdma_data_event(make_control_frame(2U, 3U, third_commit));
+    server.handle_rdma_data_event(make_control_frame(2U, 2U, third_commit));
     EXPECT_EQ(get_epoch(boost::filesystem::path{log_dir_}), 11U);
 }
 

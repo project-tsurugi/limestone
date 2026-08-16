@@ -36,6 +36,9 @@ TEST_F(message_group_commit_test, round_trip) {
     message_group_commit original(123456789);
     replication_message_io out("");
     replication_message::send(out, original);
+    // Verify that the wire_size constant (the basis of the single-frame
+    // static_assert) matches the actual serialized length.
+    EXPECT_EQ(out.get_out_size(), message_group_commit::wire_size);
 
     replication_message_io in(out.get_out_string());
     auto received_base = replication_message::receive(in);

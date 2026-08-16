@@ -443,8 +443,13 @@ private:
     // Private field to hold the control channel
     std::shared_ptr<replica_connector> control_channel_;
 
-    // Log channels registered via register_log_channel(). Registration happens only
-    // before the datastore becomes ready; afterwards the vector is read without locking.
+    // Log channels registered via register_log_channel(). Registration is separated
+    // from the lock-free read scans (update_min_epoch_id(), rotation/backup, ...) as
+    // follows: on the master, registration completes before ready() and the scans run
+    // only afterwards. On a replica, registration also happens at runtime (TCP on a
+    // LOG_CHANNEL_CREATE, RDMA through create_channel() during establishment), but the
+    // scanning operations are either master-only or never reach the scan thanks to the
+    // early return in update_min_epoch_id() (epoch_id_switched_ stays 0 on a replica).
     std::vector<std::unique_ptr<log_channel>> log_channels_;
 
     // Next log channel id to assign.

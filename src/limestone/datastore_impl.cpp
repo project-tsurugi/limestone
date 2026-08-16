@@ -37,6 +37,7 @@
 #include <altimeter/logger.h>
 #endif
 
+#include <replication/log_channel_limits.h>
 #include <replication/replica_connector.h>
 #include <limestone_exception_helper.h>
 #include <replication/message_session_begin.h>
@@ -362,10 +363,12 @@ std::unique_ptr<replication::replica_connector> datastore_impl::create_log_chann
 
 log_channel& datastore_impl::register_log_channel(
     std::function<std::unique_ptr<log_channel>(std::uint64_t)> const& factory) {
-    std::lock_guard<std::mutex> lock(mtx_channel_);
-    auto id = log_channel_id_.fetch_add(1);
-    log_channels_.emplace_back(factory(id));
-    return *log_channels_.back();
+    {
+        std::lock_guard<std::mutex> lock(mtx_channel_);
+        auto id = log_channel_id_.fetch_add(1);
+        log_channels_.emplace_back(factory(id));
+        return *log_channels_.back();
+    }
 }
 
 std::vector<std::unique_ptr<log_channel>> const& datastore_impl::log_channels() const noexcept {
@@ -524,8 +527,13 @@ bool datastore_impl::establish_rdma_session() {
     }
     auto slot_count = static_cast<std::uint32_t>(rdma_slot_count_.value());
 
-    if (log_channels_.size() > std::numeric_limits<std::uint16_t>::max()) {
-        LOG_LP(ERROR) << "Too many log channels for RDMA replication: " << log_channels_.size();
+    // The replica rejects a channel_count of zero or above log_channel_slots_limit
+    // during establishment, so apply the same two-sided check on the master: sending
+    // an out-of-range count would only fail the establishment with the cause logged
+    // nowhere but on the replica.
+    if (log_channels_.empty() || log_channels_.size() > replication::log_channel_slots_limit) {
+        LOG_LP(ERROR) << "Invalid log channel count for RDMA replication: " << log_channels_.size()
+                      << " (valid range: 1-" << replication::log_channel_slots_limit << ")";
         return false;
     }
     auto channel_count = static_cast<std::uint16_t>(log_channels_.size());

@@ -440,8 +440,10 @@ std::shared_ptr<log_channel_handler> replica_server::get_log_channel_handler(
     if (id >= max_log_channel_slots) {
         return {};
     }
-    std::lock_guard<std::mutex> lock(log_channel_slot_mutexes_.at(id));
-    return log_channel_handlers_.at(id);
+    {
+        std::lock_guard<std::mutex> lock(log_channel_slot_mutexes_.at(id));
+        return log_channel_handlers_.at(id);
+    }
 }
 
 std::string_view replica_server::to_string_view(register_rdma_receiver_result result) noexcept {
@@ -500,8 +502,10 @@ std::shared_ptr<rdma_log_channel_receiver> replica_server::get_rdma_log_channel_
     if (id >= max_log_channel_slots) {
         return {};
     }
-    std::lock_guard<std::mutex> lock(log_channel_slot_mutexes_.at(id));
-    return rdma_log_channel_receivers_.at(id);
+    {
+        std::lock_guard<std::mutex> lock(log_channel_slot_mutexes_.at(id));
+        return rdma_log_channel_receivers_.at(id);
+    }
 }
 
 void replica_server::set_rdma_log_channel_receiver_for_test(
@@ -509,8 +513,10 @@ void replica_server::set_rdma_log_channel_receiver_for_test(
     if (id >= max_log_channel_slots) {
         return;
     }
-    std::lock_guard<std::mutex> lock(log_channel_slot_mutexes_.at(id));
-    rdma_log_channel_receivers_.at(id) = std::move(receiver);
+    {
+        std::lock_guard<std::mutex> lock(log_channel_slot_mutexes_.at(id));
+        rdma_log_channel_receivers_.at(id) = std::move(receiver);
+    }
 }
 
 void replica_server::set_rdma_control_channel_id_for_test(std::int32_t id) noexcept {
@@ -518,23 +524,31 @@ void replica_server::set_rdma_control_channel_id_for_test(std::int32_t id) noexc
 }
 
 void replica_server::set_rdma_receiver_for_test(std::unique_ptr<rdma_receiver_base> receiver) noexcept {
-    std::lock_guard<std::mutex> lock(rdma_init_mutex_);
-    rdma_receiver_ = std::move(receiver);
+    {
+        std::lock_guard<std::mutex> lock(rdma_init_mutex_);
+        rdma_receiver_ = std::move(receiver);
+    }
 }
 
 void replica_server::set_ack_sender_for_test(std::unique_ptr<rdma_sender_base> sender) noexcept {
-    std::lock_guard<std::mutex> lock(rdma_init_mutex_);
-    ack_sender_ = std::move(sender);
+    {
+        std::lock_guard<std::mutex> lock(rdma_init_mutex_);
+        ack_sender_ = std::move(sender);
+    }
 }
 
 void replica_server::set_rdma_receiver_factory_for_test(rdma_receiver_factory factory) noexcept {
-    std::lock_guard<std::mutex> lock(rdma_init_mutex_);
-    rdma_receiver_factory_for_test_ = std::move(factory);
+    {
+        std::lock_guard<std::mutex> lock(rdma_init_mutex_);
+        rdma_receiver_factory_for_test_ = std::move(factory);
+    }
 }
 
 void replica_server::set_ack_sender_factory_for_test(rdma_sender_factory factory) noexcept {
-    std::lock_guard<std::mutex> lock(rdma_init_mutex_);
-    ack_sender_factory_for_test_ = std::move(factory);
+    {
+        std::lock_guard<std::mutex> lock(rdma_init_mutex_);
+        ack_sender_factory_for_test_ = std::move(factory);
+    }
 }
 
 void replica_server::on_rdma_receive(rdma_receive_event const& event) {
@@ -605,15 +619,15 @@ void replica_server::handle_rdma_control_event(rdma_data_event const& event) {
             replication_message_io io{payload};
             auto message = replication_message::receive(io);
             if (message->get_message_type_id() != message_type_id::GROUP_COMMIT) {
-                LOG_LP(ERROR) << "Unexpected message type on the RDMA control channel: "
-                              << static_cast<uint16_t>(message->get_message_type_id())
-                              << " (TODO: return protocol error instead of drop).";
-                return;
+                // Dropping the frame and returning would send the transport ACK and let
+                // the master's flush() succeed while nothing was persisted, so stop
+                // with FATAL instead.
+                LOG_LP(FATAL) << "Unexpected message type on the RDMA control channel: "
+                              << static_cast<uint16_t>(message->get_message_type_id());
             }
             auto* group_commit = dynamic_cast<message_group_commit*>(message.get());
             if (group_commit == nullptr) {
-                LOG_LP(ERROR) << "Failed to cast the control message to message_group_commit.";
-                return;
+                LOG_LP(FATAL) << "Failed to cast the control message to message_group_commit.";
             }
             // Runs on the transport's receive thread. The ACK frame for this event is
             // sent only after this handler returns, so the completion of the

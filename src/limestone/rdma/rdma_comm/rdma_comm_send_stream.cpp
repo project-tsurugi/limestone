@@ -60,7 +60,7 @@ rdma_send_stream_base::send_result rdma_comm_send_stream::submit_frame_buffer(
         return {false, "rdma_comm_send_stream::submit_frame_buffer: frame is not an "
                        "rdma_comm_frame_buffer instance", 0};
     }
-    auto r = stream_->submit_frame_buffer(comm_frame->frame_, payload_size);
+    auto r = stream_->submit_frame_buffer(comm_frame->native_frame(), payload_size);
     return {r.success, r.error_message, r.bytes_written};
 }
 

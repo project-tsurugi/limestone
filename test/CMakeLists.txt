@@ -37,6 +37,20 @@ if (ENABLE_ALTIMETER)
     )
 endif()
 
+# Test suites that touch the real RDMA stack (GnMock / rdma_handshaked daemons).
+# Keep this set() above add_test_executable(), which reads it via IN_LIST: IN_LIST
+# silently treats an undefined variable as false, so placing it later would quietly
+# drop the RUN_SERIAL properties.
+set(rdma_stack_serial_tests
+        rdma_comm_handshake_test
+        rdma_comm_send_stream_test
+        rdma_establish_session_test
+        rdma_establish_replica_session_test
+        scenario_tcpless_rdma_test
+        rdma_sender_test
+        replica_server_test
+)
+
 # Create one ctest entry per test source file and run only that file's tests
 # via a gtest_filter. CMake never looks inside the files, so this selection
 # relies on the convention that the suite name (the first argument of the
@@ -58,6 +72,13 @@ function (add_test_executable source_file)
             NAME ${test_name}
             COMMAND ${test_target} "--gtest_filter=${test_name}.*:*/${test_name}.*" --gtest_output=xml:${test_name}_gtest_result.xml
     )
+    # Suites using the real GnMock stack (fixed-name shared memory) must run fully
+    # exclusive. limestone-test wipes the fixed-name shm segments at startup on RDMA
+    # builds, so another entry's process start overlapping one of these suites unlinks
+    # segments they have mapped and fails them spuriously (observed with ctest -j4).
+    if(test_name IN_LIST rdma_stack_serial_tests)
+        set_tests_properties(${test_name} PROPERTIES RUN_SERIAL TRUE)
+    endif()
 endfunction (add_test_executable)
 
 file(GLOB SRCS
@@ -76,6 +97,14 @@ file(GLOB SRCS
 foreach(file ${SRCS})
     if("${file}" MATCHES "limestone/replication/" AND NOT BUILD_REPLICATION_TESTS)
         message(STATUS "Skipping replication test: ${file}")
+        continue()
+    endif()
+
+    # replication_test_helper.cpp is a helper source without any test suite, so it is
+    # registered as a source only: an add_test entry for it would match zero tests in
+    # the gtest_filter and pass vacuously without running anything.
+    if("${file}" MATCHES "/replication_test_helper\\.cpp$")
+        target_sources(${test_target} PRIVATE ${file})
         continue()
     endif()
 

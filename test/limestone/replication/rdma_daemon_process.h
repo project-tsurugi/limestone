@@ -115,11 +115,15 @@ public:
             (void) ::waitpid(pid_, &status, 0);
             reaped_ = true;
         }
-        if (log_fd_ >= 0) {
-            ::close(log_fd_);
-        }
+        // The child has been terminated and reaped above, so the reader exits
+        // naturally on EOF. The reverse order (close then join) would close an fd
+        // another thread is blocked reading from -- undefined behaviour -- and risks
+        // read_loop reading on from an unrelated fd reusing the same number.
         if (reader_.joinable()) {
             reader_.join();
+        }
+        if (log_fd_ >= 0) {
+            ::close(log_fd_);
         }
         log_fd_ = -1;
     }

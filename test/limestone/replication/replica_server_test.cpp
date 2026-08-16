@@ -552,21 +552,16 @@ TEST_F(replica_server_test, control_frame_partial_flag_is_fatal) {
     EXPECT_DEATH(server.on_rdma_receive(rdma_receive_event{ev}), "partial RDMA control frame");
 }
 
-// An unexpected message type is dropped and the server keeps running: the next
-// well-formed frame is still accepted.
-TEST_F(replica_server_test, control_frame_unexpected_message_type_is_dropped) {
+// Dropping an unexpected message type and returning would send the ACK and let the
+// master's flush() succeed while nothing was persisted, so it stops with FATAL.
+TEST_F(replica_server_test, control_frame_unexpected_message_type_is_fatal) {
     replica_server server;
     server.initialize(location1);
     server.set_rdma_control_channel_id_for_test(control_id);
 
-    auto const initial_epoch = get_epoch(location1);
-    auto ev1 = make_control_event(control_id, 0U, serialize_control_message(message_session_begin{}));
-    server.on_rdma_receive(rdma_receive_event{ev1});
-    EXPECT_EQ(get_epoch(location1), initial_epoch);
-
-    auto ev2 = make_control_event(control_id, 1U, serialize_control_message(message_group_commit{7}));
-    server.on_rdma_receive(rdma_receive_event{ev2});
-    EXPECT_EQ(get_epoch(location1), 7U);
+    auto ev = make_control_event(control_id, 0U, serialize_control_message(message_session_begin{}));
+    EXPECT_DEATH(server.on_rdma_receive(rdma_receive_event{ev}),
+                 "Unexpected message type on the RDMA control channel");
 }
 
 // A payload carrying the GROUP_COMMIT type id with a truncated body is converted
