@@ -87,9 +87,12 @@ bool log_channel_impl::send_replica_message(
                 replication::rdma_replication_message_io rdma_io(*rdma_send_stream_, *datastore_);
                 replication::replication_message::send(rdma_io, message);
                 // Flush any remaining non-blob serialized data left in the rdma_io buffer.
-                auto remaining = rdma_io.get_out_string();
+                auto remaining = rdma_io.get_out_view();
                 if (! remaining.empty()) {
                     send_rdma_bytes_locked(remaining);
+                    // Drop the sent bytes so the destructor's flush() does not copy
+                    // them into the input stream needlessly.
+                    rdma_io.reset_output_buffer();
                 }
                 TRACE_END << "path=rdma blob";
             } else {
@@ -155,12 +158,11 @@ void log_channel_impl::flush_rdma_serializer_io_locked() {
     if (buffered == 0) {
         return;
     }
-    auto payload = rdma_serializer_io_.get_out_string();
-    send_rdma_bytes_locked(payload);
+    send_rdma_bytes_locked(rdma_serializer_io_.get_out_view());
     rdma_serializer_io_.reset_output_buffer();
 }
 
-void log_channel_impl::send_rdma_bytes_locked(std::string const& payload) {
+void log_channel_impl::send_rdma_bytes_locked(std::string_view payload) {
     // No retry loop here: acquire_frame_buffer() already blocks while the send ring is full,
     // so that is where backpressure is absorbed. A failure means the ring never drained
     // within the transport's timeout, i.e. the replica is gone -- and this layer has no

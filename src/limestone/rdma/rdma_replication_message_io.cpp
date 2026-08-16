@@ -50,7 +50,7 @@ void rdma_replication_message_io::send_blob(blob_id_type blob_id) {
 }
 
 void rdma_replication_message_io::push_staged_bytes() {
-    auto buffered = get_out_string();
+    auto buffered = get_out_view();
     if (buffered.empty()) {
         return;
     }

@@ -255,7 +255,7 @@ bool datastore_impl::propagate_group_commit_rdma(uint64_t epoch_id) {
     // already serialized by the CAS in update_min_epoch_id() and runs inside the
     // lock_guard of mtx_epoch_file_ (plus one pre-threading call in ready()). If that
     // premise ever breaks, multiple threads would touch this stream concurrently.
-    auto result = rdma_control_send_stream_->send_all_bytes(io.get_out_string());
+    auto result = rdma_control_send_stream_->send_all_bytes(io.get_out_view());
     if (!result.success) {
         // acquire_frame_buffer() absorbs backpressure by blocking, so a failure means
         // the send ring never drained within the transport timeout, i.e. the replica

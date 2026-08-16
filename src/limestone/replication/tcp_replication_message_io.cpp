@@ -31,9 +31,9 @@ void tcp_replication_message_io::send_blob(const blob_id_type blob_id) {
     while (remaining > 0) {
         std::size_t chunk = std::min(blob_buffer_size, static_cast<std::size_t>(remaining));
         std::size_t total_read = opened.read_chunk(buffer.data(), chunk);
-        get_out_stream().write(
+        write_out_bytes(
             reinterpret_cast<char const*>(buffer.data()),  // NOLINT(cppcoreguidelines-pro-type-reinterpret-cast)
-            static_cast<std::streamsize>(total_read));
+            total_read);
         remaining -= static_cast<uint32_t>(total_read);
     }
 
