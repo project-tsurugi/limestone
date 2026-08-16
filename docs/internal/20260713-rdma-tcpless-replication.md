@@ -198,7 +198,8 @@ flowchart LR
 accept 側 (replica) が先に `wait_for_start()` に入っている必要がある。受付側の先行を待ち合わせる
 仕組みは daemon 側に設けられていない。connect 側が先に `start()` すると成功せず、**再試行は
 `create_connector()` からやり直す** (失敗した `start()` を同じインスタンスで呼び直すのではない)。
-再試行の回数・時間は利用モジュールの方針で決める。master 側にリトライループを実装する。
+再試行するかどうかは利用モジュールの方針で決める。limestone はリトライを実装しない
+(2026-08-10 決定、§7.4 を参照)。
 
 **制約 2: SIGPIPE がプロセス全体で SIG_IGN にされる**
 `handshake_connector` / `handshake_acceptor` の生成時に、クライアントライブラリが
@@ -514,8 +515,15 @@ TSURUGI_REPLICATION_ENDPOINT が設定されている
     → 起動時エラー (曖昧な設定を許さない)
 ```
 
-現状 `REPLICATION_RDMA_SLOTS` は master でしか読まれず、replica 側の slot_count は master が
-`RDMA_INIT` で送ってきた値を使っている。この構造は維持し、handshake の start payload に slot_count を載せる。
+実効的な slot_count を決めるのは master の `REPLICATION_RDMA_SLOTS` であり、replica 側の
+slot_count は master が handshake の start payload に載せて送ってきた値を使う
+(当初記述の「`RDMA_INIT` で送る」はハイブリッド廃止に伴い start payload に置き換え済み)。
+ただし実装では、環境変数の検証 (datastore コンストラクタの `initialize_rdma_slots()`) が
+ロール設定より前に走るため、**replica プロセスにも `REPLICATION_RDMA_SLOTS` の設定が必要**
+(2026-08-16 更新)。replica 側の env 値は検証にのみ使われ、実効値は master 側が正
+(master と異なる値を設定しても無警告で無視される)。検証をロール判定後に移して replica 側の
+設定を不要にする変更は、設定を環境変数から設定ファイルへ移す将来タスクで対応する
+(nt-tsurugi-internal の rdma-tcpless-carryover-notes.md に申し送り)。
 
 ---
 
@@ -616,16 +624,16 @@ RDMA のチャネルに載せ替えるだけである。
    `TSURUGI_REPLICATION_SERVICE_ID` を読む。モード判定を一元化する。
 6. master 側: `datastore_impl` に `establish_rdma_session()` を追加し、handshake 経由で
    DMA アドレスを交換して sender / receiver を初期化する。`out_of_order` に対する
-   `create_connector` からのリトライループを実装する。
+   リトライループは実装しない (2026-08-10 の決定で当初計画から変更、§7.4 を参照)。
 7. replica 側: `replica_server` に handshake acceptor での待ち受けを追加する。
 
 **完了条件**: RDMA モードで handshake daemon 経由の接続が確立し、WAL データが RDMA で流れる。
 この時点で `SESSION_BEGIN` / `RDMA_INIT` / `RDMA_FINALIZE` の TCP 往復は不要になる
 (削除はフェーズ 3 で行う)。
 
-**リスク**: accept-before-connect の順序制約。replica の起動完了を master が待つ必要があるが、
-現状は TCP の `connect()` がリトライの役割を果たしている。handshake の `out_of_order` リトライで
-同等の待ち合わせが実現できることを、テストで確認する。
+**リスク**: accept-before-connect の順序制約。replica の起動完了を master が待つ必要がある。
+リトライなしの決定 (2026-08-10、§7.4) により、待ち合わせは「replica を先に起動する」という
+運用上の起動順序制約 (§7.8) で担保する。
 
 ### フェーズ 3: 制御メッセージの RDMA 化
 
@@ -795,9 +803,11 @@ handshake は accept 側が先に `wait_for_start()` に入っている必要が
 相手が listen していなければ即座に失敗し、リトライで待ち合わせができたが、handshake の
 `out_of_order` エラーはコネクタのソケットを閉じるため、`create_connector()` からやり直す必要がある。
 
-**方針**: master 側にリトライループ (deadline 付き) を実装する。rdma-comm-lib の
-`tests/tools/handshake_app_main.cpp` のリトライパターンを踏襲する。リトライのタイムアウトは
-設定可能にする。
+**方針 (2026-08-10 決定で「リトライなし」に変更)**: master 側にリトライループは実装しない。
+`out_of_order` は即失敗として FATAL に至る。replica が先に着席している (`wait_for_start()` に
+到達している) ことを運用上の起動順序制約とする (§7.8)。TCP モードの `connect()` も相手が
+listen していなければ失敗するだけであり、それと同等の振る舞いに揃える。リトライ用の
+タイムアウト環境変数も追加しない (操作タイムアウトは固定定数)。
 
 ### 7.5 ENABLE_RDMA=OFF ビルドでの扱い
 
