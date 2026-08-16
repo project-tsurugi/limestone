@@ -21,6 +21,7 @@
 #include <atomic>
 #include <array>
 #include <memory>
+#include <mutex>
 #include <optional>
 #include <string>
 #include <sys/types.h>
@@ -34,7 +35,10 @@
 #include "manifest.h"
 #include "replication/replica_connector.h"
 #include "replication/replication_endpoint.h"
+#include <replication/replication_config_loader.h>
+#include <rdma/rdma_factory.h>
 #include <rdma/rdma_receiver_base.h>
+#include <rdma/rdma_send_stream_base.h>
 #include <rdma/rdma_sender_base.h>
 
 namespace limestone::api {
@@ -91,12 +95,49 @@ public:
     void wait_for_propagated_group_commit_ack();
 
     /**
-     * @brief Checks if the replication endpoint is configured.
-     * @return true if a replication endpoint is defined via the environment variable, false otherwise.
+     * @brief Checks if replication is configured.
+     * @return true if the loaded replication mode is not none, false otherwise.
      */
     [[nodiscard]] bool is_replication_configured() const noexcept;
 
+    /**
+     * @brief Returns the result of loading the replication configuration from
+     *        the environment variables.
+     * @return Load result carrying the configuration or the failure reason.
+     */
+    [[nodiscard]] replication::replication_config_parse_result const&
+    get_replication_config_result() const noexcept;
+
     [[nodiscard]] std::unique_ptr<replication::replica_connector> create_log_channel_connector(datastore &ds, std::uint64_t channel_id);
+
+    /**
+     * @brief Registers a newly created log channel.
+     *
+     * Assigns the next channel id and stores the channel under the internal lock.
+     * The factory receives the assigned id and returns the constructed channel.
+     *
+     * @param factory Callable that constructs the log channel for the given id.
+     * @return Reference to the registered log channel.
+     */
+    log_channel& register_log_channel(
+        std::function<std::unique_ptr<log_channel>(std::uint64_t)> const& factory);
+
+    /**
+     * @brief Returns the registered log channels.
+     * @return Channels indexed by their channel id.
+     */
+    [[nodiscard]] std::vector<std::unique_ptr<log_channel>> const& log_channels() const noexcept;
+
+    /**
+     * @brief Registers the RDMA send stream for the given log channel.
+     *
+     * No-op when RDMA is not enabled or the sender is absent, unless the test
+     * stream factory hook is set.
+     *
+     * @param channel Log channel that receives the stream.
+     * @param id Channel id used to acquire the stream.
+     */
+    void maybe_register_rdma_stream(log_channel& channel, std::size_t id);
 
     // Getter for the datastore role (master or replica)
     [[nodiscard]] bool is_master() const noexcept;
@@ -223,9 +264,9 @@ public:
      * @brief Initialize the RDMA ACK receiver.
      *
      * Creates the ACK receiver instance and calls initialize() so its DMA
-     * address can be exposed to the replica via RDMA_INIT. The ACK receiver
-     * stays in the SETUP phase here; binding to the data sender via
-     * finalize_channel_setup_with_sender is handled separately later.
+     * address can be exposed to the replica via the handshake start payload.
+     * The ACK receiver stays in the SETUP phase here; binding to the data
+     * sender via finalize_channel_setup_with_sender is handled separately later.
      *
      * @param slot_count requested RDMA slot count.
      * @return DMA address of the ACK receive buffer, or std::nullopt on failure.
@@ -252,24 +293,36 @@ public:
     bool send_session_begin();
 
     /**
-     * @brief Initialize RDMA sender if RDMA is enabled.
-     * @return true on success or skip; false on failure.
+     * @brief Establishes the RDMA session with the replica via the handshake daemon.
+     *
+     * Initializes the RDMA ACK receiver, exchanges the session parameters and DMA
+     * addresses through the handshake, initializes the RDMA data sender, registers
+     * the send streams of every log channel and of the control channel, finalizes
+     * the channel setup, and completes the remaining handshake steps.
+     *
+     * Data channels take ids 0 .. N - 1 where N is the number of registered log
+     * channels, and the control channel takes id N.
+     *
+     * @return true on success; false on failure.
      */
-    bool maybe_initialize_rdma_sender();
+    [[nodiscard]] bool establish_rdma_session();
 
     /**
-     * @brief Finalize the RDMA channel setup if the sender is active.
-     *
-     * Sends RDMA_FINALIZE to the replica, waits for RDMA_FINALIZE_ACK, and then
-     * calls rdma_sender_base::finalize_channel_setup() locally to transition
-     * from SETUP to TRANSFER phase. No-op when RDMA is not enabled or the
-     * sender failed to initialize.
-     *
-     * @param channel_ids log channel ids that the replica must register as
-     *        RDMA-only handlers as part of the FINALIZE handshake. May be empty.
-     * @return true on success or skip; false on failure.
+     * @brief Establishes the TCP replication control channel with the replica.
+     * @return true on success; false on failure.
      */
-    bool maybe_finalize_rdma(std::vector<std::uint64_t> const& channel_ids);
+    [[nodiscard]] bool establish_tcp_control_channel();
+
+    /**
+     * @brief Returns the control channel send stream acquired at session establishment.
+     * @return Pointer to the stream, or nullptr when the RDMA session is not established.
+     */
+    [[nodiscard]] rdma_send_stream_base* get_rdma_control_send_stream() const noexcept;
+
+    /**
+     * @brief Releases the RDMA send streams distributed to the log channels.
+     */
+    void release_rdma_send_streams() noexcept;
 
     /**
      * @brief Shut down RDMA sender if initialized.
@@ -300,10 +353,81 @@ public:
     void set_rdma_stream_factory_for_test(
         std::function<rdma_sender_base::stream_acquire_result(std::uint16_t)> factory) noexcept;
 
-    [[nodiscard]] std::function<rdma_sender_base::stream_acquire_result(std::uint16_t)> const*
-    get_rdma_stream_factory_for_test() const noexcept;
+    /**
+     * @brief Test hook to inject the RDMA control channel send stream.
+     * @param stream Control channel send stream ownership to set for testing.
+     * @note Test-only; do not use in production code.
+     */
+    void set_rdma_control_send_stream_for_test(
+        std::unique_ptr<rdma_send_stream_base> stream) noexcept;
 
-    [[nodiscard]] bool has_rdma_stream_factory_for_test() const noexcept;
+    /**
+     * @brief Factory function used by establish_rdma_session() to create the
+     *        handshake connector.
+     *
+     * @param daemon_socket_path Filesystem path of the daemon's UNIX domain socket,
+     *        forwarded from the replication configuration.
+     * @param operation_timeout Upper bound a blocking handshake call waits, forwarded
+     *        from establish_rdma_session().
+     * @return handshake_connector_create_result; instance is non-null on success.
+     */
+    using handshake_connector_factory =
+        std::function<handshake_connector_create_result(
+            std::string const& daemon_socket_path,
+            std::chrono::milliseconds operation_timeout)>;
+
+    /**
+     * @brief Factory function used by initialize_rdma_ack_receiver() to create the
+     *        ACK receiver.
+     *
+     * @param slot_count requested RDMA slot count, forwarded from the caller.
+     * @return Newly created rdma_receiver_base instance, transferred to the caller.
+     */
+    using rdma_ack_receiver_factory =
+        std::function<std::unique_ptr<rdma_receiver_base>(std::uint32_t slot_count)>;
+
+    /**
+     * @brief Factory function used by initialize_rdma_sender() to create the
+     *        data sender.
+     *
+     * @param slot_count requested RDMA slot count, forwarded from the caller.
+     * @return Newly created rdma_sender_base instance, transferred to the caller.
+     */
+    using rdma_data_sender_factory =
+        std::function<std::unique_ptr<rdma_sender_base>(std::uint32_t slot_count)>;
+
+    /**
+     * @brief Test hook to override the factory used by establish_rdma_session()
+     *        for the handshake connector.
+     *
+     * When unset, establish_rdma_session() falls back to make_handshake_connector().
+     *
+     * @note Test-only; do not use in production code.
+     */
+    void set_handshake_connector_factory_for_test(
+        handshake_connector_factory factory) noexcept;
+
+    /**
+     * @brief Test hook to override the factory used by initialize_rdma_ack_receiver()
+     *        for the ACK receiver.
+     *
+     * When unset, initialize_rdma_ack_receiver() falls back to make_rdma_ack_receiver().
+     *
+     * @note Test-only; do not use in production code.
+     */
+    void set_rdma_ack_receiver_factory_for_test(
+        rdma_ack_receiver_factory factory) noexcept;
+
+    /**
+     * @brief Test hook to override the factory used by initialize_rdma_sender()
+     *        for the data sender.
+     *
+     * When unset, initialize_rdma_sender() falls back to make_rdma_data_sender().
+     *
+     * @note Test-only; do not use in production code.
+     */
+    void set_rdma_data_sender_factory_for_test(
+        rdma_data_sender_factory factory) noexcept;
 
 private:
     [[nodiscard]] limestone::internal::blob_file_resolver& require_blob_file_resolver() noexcept;
@@ -319,8 +443,27 @@ private:
     // Private field to hold the control channel
     std::shared_ptr<replica_connector> control_channel_;
 
+    // Log channels registered via register_log_channel(). Registration is separated
+    // from the lock-free read scans (update_min_epoch_id(), rotation/backup, ...) as
+    // follows: on the master, registration completes before ready() and the scans run
+    // only afterwards. On a replica, registration also happens at runtime (TCP on a
+    // LOG_CHANNEL_CREATE, RDMA through create_channel() during establishment), but the
+    // scanning operations are either master-only or never reach the scan thanks to the
+    // early return in update_min_epoch_id() (epoch_id_switched_ stays 0 on a replica).
+    std::vector<std::unique_ptr<log_channel>> log_channels_;
+
+    // Next log channel id to assign.
+    std::atomic_uint64_t log_channel_id_{};
+
+    // Guards log_channels_ and log_channel_id_ during registration.
+    std::mutex mtx_channel_{};
+
     // Replication endpoint to retrieve connection info
     replication::replication_endpoint replication_endpoint_;
+
+    // Replication mode and RDMA handshake settings loaded from the environment
+    replication::replication_config_parse_result replication_config_result_{
+        replication::load_replication_config_from_environment()};
 
     // Environment variable flags
     bool async_session_close_enabled_;
@@ -354,11 +497,32 @@ private:
     // RDMA receiver owned by master for receiving RDMA ACK frames from the replica.
     std::unique_ptr<rdma_receiver_base> ack_receiver_{};
 
+    // Send stream of the control channel; acquired at session establishment and
+    // carrying the GROUP_COMMIT messages in RDMA mode.
+    std::unique_ptr<rdma_send_stream_base> rdma_control_send_stream_{};
+
+    /**
+     * @brief Sends a group commit message over the RDMA control channel.
+     * @param epoch_id The epoch ID to send.
+     * @return true if the message was submitted; false when the control channel
+     *         send stream is not initialized.
+     */
+    [[nodiscard]] bool propagate_group_commit_rdma(uint64_t epoch_id);
+
     // Test hook: factory to override log channel connector creation.
     std::function<std::unique_ptr<replication::replica_connector>()> log_channel_connector_factory_for_test_{};
 
     // Test hook: factory to override RDMA stream acquisition.
     std::function<rdma_sender_base::stream_acquire_result(std::uint16_t)> rdma_stream_factory_for_test_{};
+
+    // Test hook: factory to override handshake connector creation.
+    handshake_connector_factory handshake_connector_factory_for_test_{};
+
+    // Test hook: factory to override RDMA ACK receiver creation.
+    rdma_ack_receiver_factory rdma_ack_receiver_factory_for_test_{};
+
+    // Test hook: factory to override RDMA data sender creation.
+    rdma_data_sender_factory rdma_data_sender_factory_for_test_{};
 
     // Resolver for local BLOB file paths. Owned by datastore_impl so internal
     // replication/restore paths can resolve paths without using public APIs.

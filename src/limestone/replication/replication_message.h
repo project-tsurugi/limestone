@@ -18,6 +18,8 @@
 
 #include <arpa/inet.h>
 
+#include <chrono>
+
 #include <cstdint>
 #include <memory>
 #include <unordered_map>
@@ -34,10 +36,6 @@ enum class message_type_id : uint8_t {
     SESSION_END = 0x02,
     GROUP_COMMIT = 0x03,
     GC_BOUNDARY_SWITCH = 0x04,
-    RDMA_INIT = 0x30,
-    RDMA_INIT_ACK = 0x31,
-    RDMA_FINALIZE = 0x32,
-    RDMA_FINALIZE_ACK = 0x33,
 
     // Log‑channel requests
     LOG_CHANNEL_CREATE = 0x10,
@@ -65,6 +63,16 @@ enum class response_type : uint8_t {
 };
 
 constexpr uint64_t replication_protocol_version = 2;
+
+// Upper bound each blocking RDMA handshake operation waits for its message exchange
+// with the handshake daemon, shared by the master and replica sides. The accept-side
+// wait for the start is excluded (unbounded). Not expected to fire in normal operation.
+constexpr std::chrono::milliseconds rdma_handshake_operation_timeout{10000};
+
+// Upper bound a blocking RDMA flush waits for the ACK frames of the flushed channel,
+// shared by the WAL data channels and the control channel. Not expected to fire in
+// normal operation.
+constexpr std::chrono::milliseconds rdma_flush_timeout{30000};
 
 // Abstract class representing a replication message
 class replication_message {

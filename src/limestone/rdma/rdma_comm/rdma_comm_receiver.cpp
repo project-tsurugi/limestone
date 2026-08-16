@@ -55,7 +55,7 @@ rdma_receive_event convert_event(rdma::communication::rdma_receive_event const& 
 } // namespace
 
 rdma_comm_receiver::rdma_comm_receiver(rdma::communication::rdma_config config)
-    : receiver_(std::move(config))
+    : receiver_(config)
 {}
 
 rdma_receiver_base::operation_result rdma_comm_receiver::initialize(

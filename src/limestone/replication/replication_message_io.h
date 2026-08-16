@@ -25,10 +25,10 @@
 #include <cstring>
 #include <iostream>
 #include <memory>
-#include <sstream>
 #include <stdexcept>
 #include <istream>
 #include <streambuf>
+#include <string>
 #include <string_view>
 
 #include "socket_streambuf.h"
@@ -98,6 +98,14 @@ public:
     [[nodiscard]] std::string get_out_string() const;
 
     /**
+     * @brief Returns a view of the output buffer without copying its contents.
+     *
+     * The view is invalidated by any subsequent send_*() call, flush(),
+     * reset_output_buffer(), or destruction of this object.
+     */
+    [[nodiscard]] std::string_view get_out_view() const noexcept;
+
+    /**
      * @brief Returns the current byte size of the output buffer without copying its contents.
      * @return Number of bytes currently accumulated in the output buffer.
      */
@@ -141,7 +149,8 @@ public:
     virtual blob_id_type receive_blob();
 
 protected:
-    [[nodiscard]] std::ostream& get_out_stream(); 
+    /// @brief Appends raw bytes to the output buffer.
+    void write_out_bytes(char const* data, std::size_t size);
     [[nodiscard]] std::istream& get_in_stream();
 private:
     [[nodiscard]] bool wait_for_writable() const;
@@ -161,7 +170,9 @@ private:
 
     std::unique_ptr<std::istream> in_stream_;
     std::unique_ptr<socket_streambuf> socket_buf_;
-    std::unique_ptr<std::ostringstream> out_stream_;
+    // Output buffer. A plain std::string so callers can view it without copying
+    // (get_out_view()) and reset_output_buffer() can retain the capacity.
+    std::string out_buffer_;
  };
  
  } // namespace limestone::replication

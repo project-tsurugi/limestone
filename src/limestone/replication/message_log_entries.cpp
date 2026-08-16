@@ -172,29 +172,38 @@ std::unique_ptr<replication_message> message_log_entries::create() {
 
 void message_log_entries::post_receive(handler_resources& resources) {
     auto& lch_resources = dynamic_cast<log_channel_handler_resources&>(resources);
-    auto& log_channel = lch_resources.get_log_channel();
+    apply_to(lch_resources.get_log_channel());
+    if (has_session_end_flag() || has_flush_flag()) {
+        message_ack ack;
+        replication_message_io& io = lch_resources.get_replication_message_io();
+        replication_message::send(io, ack);
+        io.flush();
+    }
+}
+
+void message_log_entries::apply_to(limestone::api::log_channel& channel) const {
     if (has_session_begin_flag()) {
-        log_channel.begin_session();
+        channel.begin_session();
     }
     for (const auto& entry : entries_) {
         switch (entry.type) {
             case log_entry::entry_type::normal_entry:
-                log_channel.add_entry(entry.storage_id, entry.key, entry.value, entry.write_version);
+                channel.add_entry(entry.storage_id, entry.key, entry.value, entry.write_version);
                 break;
             case log_entry::entry_type::normal_with_blob:
-                log_channel.add_entry(entry.storage_id, entry.key, entry.value, entry.write_version, entry.blob_ids);
+                channel.add_entry(entry.storage_id, entry.key, entry.value, entry.write_version, entry.blob_ids);
                 break;
             case log_entry::entry_type::remove_entry:
-                log_channel.remove_entry(entry.storage_id, entry.key, entry.write_version);
+                channel.remove_entry(entry.storage_id, entry.key, entry.write_version);
                 break;
             case log_entry::entry_type::clear_storage:
-                log_channel.truncate_storage(entry.storage_id, entry.write_version);
+                channel.truncate_storage(entry.storage_id, entry.write_version);
                 break;
             case log_entry::entry_type::add_storage:
-                log_channel.add_storage(entry.storage_id, entry.write_version);
+                channel.add_storage(entry.storage_id, entry.write_version);
                 break;
             case log_entry::entry_type::remove_storage:
-                log_channel.remove_storage(entry.storage_id, entry.write_version);
+                channel.remove_storage(entry.storage_id, entry.write_version);
                 break;
             case log_entry::entry_type::this_id_is_not_used:
             case log_entry::entry_type::marker_begin:
@@ -207,13 +216,7 @@ void message_log_entries::post_receive(handler_resources& resources) {
         }
     }
     if (has_session_end_flag() || has_flush_flag()) {
-        log_channel.end_session();
-        if (lch_resources.ack_enabled()) {
-            message_ack ack;
-            replication_message_io& io = lch_resources.get_replication_message_io();
-            replication_message::send(io, ack);
-            io.flush();
-        }
+        channel.end_session();
     }
 }
 

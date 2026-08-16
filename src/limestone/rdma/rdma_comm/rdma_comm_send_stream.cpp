@@ -1,5 +1,5 @@
 /*
- * Copyright 2022-2025 Project Tsurugi.
+ * Copyright 2022-2026 Project Tsurugi.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -15,6 +15,9 @@
  */
 #include <rdma/rdma_comm_send_stream.h>
 
+#include <logging_helper.h>
+#include <rdma/rdma_comm/rdma_comm_constants.h>
+
 namespace limestone::replication {
 
 rdma_comm_send_stream::rdma_comm_send_stream(
@@ -22,19 +25,42 @@ rdma_comm_send_stream::rdma_comm_send_stream(
     : stream_(std::move(stream))
 {}
 
-rdma_send_stream_base::send_result rdma_comm_send_stream::send_bytes(
-        std::vector<std::uint8_t> const& payload,
-        std::size_t offset,
-        std::size_t length) noexcept {
-    auto r = stream_->send_bytes(payload, offset, length);
-    return {r.success, r.error_message, r.bytes_written};
+std::unique_ptr<rdma_frame_buffer_base> rdma_comm_send_stream::acquire_frame_buffer(
+        std::size_t max_payload,
+        std::size_t min_capacity) noexcept {
+    if (min_capacity == 0 || min_capacity > max_payload || min_capacity > rdma_slot_payload_bytes) {
+        LOG_LP(ERROR) << "invalid frame buffer request: min_capacity=" << min_capacity
+                      << " max_payload=" << max_payload
+                      << " rdma_slot_payload_bytes=" << rdma_slot_payload_bytes;
+        return nullptr;
+    }
+    auto frame = stream_->acquire_frame_buffer(max_payload);
+    if (! frame.valid()) {
+        return nullptr;
+    }
+    if (frame.capacity < min_capacity) {
+        // A valid frame spans at least one slot and min_capacity is capped to one
+        // slot's payload, so this indicates a broken transport contract.
+        LOG_LP(ERROR) << "acquired frame smaller than min_capacity: capacity=" << frame.capacity
+                      << " min_capacity=" << min_capacity;
+        return nullptr;
+    }
+    return std::make_unique<rdma_comm_frame_buffer>(std::move(frame));
 }
 
-rdma_send_stream_base::send_result rdma_comm_send_stream::send_all_bytes(
-        std::vector<std::uint8_t> const& payload,
-        std::size_t offset,
-        std::size_t length) noexcept {
-    auto r = stream_->send_all_bytes(payload, offset, length);
+rdma_send_stream_base::send_result rdma_comm_send_stream::submit_frame_buffer(
+        rdma_frame_buffer_base& frame,
+        std::size_t             payload_size) {
+    // The rdma_*_base abstractions exist only as an ENABLE_RDMA build-time toggle:
+    // null_* and rdma_comm_* implementations never coexist in one process, and a frame
+    // is always submitted to the stream that acquired it. The cast is a cheap guard for
+    // that invariant, not a dispatch over several frame kinds.
+    auto* comm_frame = dynamic_cast<rdma_comm_frame_buffer*>(&frame);
+    if (comm_frame == nullptr) {
+        return {false, "rdma_comm_send_stream::submit_frame_buffer: frame is not an "
+                       "rdma_comm_frame_buffer instance", 0};
+    }
+    auto r = stream_->submit_frame_buffer(comm_frame->native_frame(), payload_size);
     return {r.success, r.error_message, r.bytes_written};
 }
 
@@ -42,19 +68,6 @@ rdma_send_stream_base::flush_result rdma_comm_send_stream::flush(
         std::chrono::milliseconds timeout) noexcept {
     auto r = stream_->flush(timeout);
     return {r.success, r.error_message};
-}
-
-rdma_send_stream_base::send_result rdma_comm_send_stream::send_with_writer(
-        std::size_t   remaining_size,
-        buffer_writer writer) noexcept {
-    auto rdma_writer = [&writer](
-            std::uint8_t* buffer,
-            std::size_t   capacity) -> rdma::communication::rdma_send_stream::buffer_fill_result {
-        auto r = writer(buffer, capacity);
-        return {r.success, r.error_message};
-    };
-    auto r = stream_->send_with_writer(remaining_size, rdma_writer);
-    return {r.success, r.error_message, r.bytes_written};
 }
 
 } // namespace limestone::replication

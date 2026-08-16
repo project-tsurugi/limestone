@@ -14,9 +14,12 @@
  * limitations under the License.
  */
 
+#include <chrono>
 #include <iostream>
 #include <boost/filesystem.hpp>
 #include <string>
+#include <thread>
+#include <replication/replication_config_loader.h>
 #include "replication/replication_endpoint.h"
 #include "replication/replica_server.h"
 
@@ -57,19 +60,48 @@ int main(int argc, char* argv[]) {
         return 1;
     }
 
-    limestone::replication::replication_endpoint endpoint{};
-    if (endpoint.env_defined()) {
-        std::cout << "Endpoint: " << endpoint.host() << ":" << endpoint.port() << std::endl;
-    } else {
+    auto const config_result = limestone::replication::load_replication_config_from_environment();
+    if (!config_result.ok) {
+        std::cerr << "Error: invalid replication configuration: " << config_result.error_message
+                  << std::endl;
+        show_usage(program_name);
+        return 1;
+    }
+    limestone::replication::replication_config const& config = config_result.config;
+    if (config.mode() == limestone::replication::replication_mode::rdma) {
+        limestone::replication::replica_server server{};
+        server.initialize(log_dir_path);
+
+        std::cout << "[replica] waiting for the master on the handshake daemon: "
+                  << config.handshake_socket_path() << std::endl;
+        if (!server.establish_rdma_session(config.handshake_socket_path(), config.service_id())) {
+            std::cerr << "Error: failed to establish the RDMA replication session." << std::endl;
+            return 1;
+        }
+        std::cout << "[replica] initialized and listening" << std::endl;
+
+        // Replication data arrives on the RDMA receive threads; the main thread only
+        // keeps the process alive until it is stopped by a signal.
+        // A clean shutdown will be defined as part of the planned replica detach
+        // protocol (the replica requests detachment, the master detaches it and
+        // responds, and the master keeps running), which is a separate task.
+        for (;;) {
+            std::this_thread::sleep_for(std::chrono::seconds(60));
+        }
+    }
+    if (config.mode() == limestone::replication::replication_mode::none) {
         std::cerr << "Error: TSURUGI_REPLICATION_ENDPOINT environment variable is not set." << std::endl;
         show_usage(program_name);
         return 1;
     }
+
+    limestone::replication::replication_endpoint endpoint{};
     if (!endpoint.is_valid()) {
         std::cerr << "Error: Invalid endpoint specified in TSURUGI_REPLICATION_ENDPOINT." << std::endl;
         show_usage(program_name);
         return 1;
     }
+    std::cout << "Endpoint: " << endpoint.host() << ":" << endpoint.port() << std::endl;
 
     limestone::replication::replica_server server{};
 

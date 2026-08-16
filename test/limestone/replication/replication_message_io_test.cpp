@@ -597,6 +597,38 @@ TEST(replication_message_io_test, reset_output_buffer_clears_content_and_reuse) 
     EXPECT_EQ(static_cast<unsigned char>(reused[0]), 0xAB);
 }
 
+// After moving a socket-mode object, destroying the moved-from object must not
+// close the fd (that would double-close the fd now owned by the moved-to
+// object). The moved-to object keeps working, and only its destruction closes
+// the fd.
+TEST(replication_message_io_test, moved_from_socket_object_does_not_close_fd) {
+    int fds[2]{-1, -1};
+    ASSERT_EQ(::socketpair(AF_UNIX, SOCK_STREAM, 0, fds), 0);
+
+    {
+        auto source = std::make_unique<replication_message_io>(fds[0]);
+        replication_message_io moved{std::move(*source)};
+
+        // Destroying the moved-from object first leaves the fd open
+        source.reset();
+        EXPECT_NE(::fcntl(fds[0], F_GETFD), -1);
+
+        // The moved-to object works: a sent byte arrives at the peer
+        moved.send_uint8(0x5A);
+        EXPECT_TRUE(moved.flush());
+        char received{};
+        ASSERT_EQ(::recv(fds[1], &received, 1, 0), 1);
+        EXPECT_EQ(static_cast<unsigned char>(received), 0x5AU);
+    }
+
+    // The moved-to object's destruction has closed the fd
+    errno = 0;
+    EXPECT_EQ(::fcntl(fds[0], F_GETFD), -1);
+    EXPECT_EQ(errno, EBADF);
+
+    ::close(fds[1]);
+}
+
 TEST(replication_message_io_test, reset_output_buffer_handles_moved_from_object) {
     replication_message_io io(std::string{});
     replication_message_io moved{std::move(io)};
@@ -612,12 +644,13 @@ TEST(replication_message_io_test, reset_output_buffer_handles_moved_from_object)
     EXPECT_EQ(static_cast<unsigned char>(payload[0]), 0x7F);
 }
 
-TEST(replication_message_io_test, reset_output_buffer_real_fd_mode_is_noop) {
+TEST(replication_message_io_test, reset_output_buffer_works_in_real_fd_mode) {
     int fds[2]{-1, -1};
     ASSERT_EQ(::socketpair(AF_UNIX, SOCK_STREAM, 0, fds), 0);
 
     replication_message_io io_real(fds[0]);
-    // In real file-descriptor mode, reset_output_buffer should be a no-op without throwing.
+    // reset_output_buffer clears the output buffer in real fd mode as well,
+    // without throwing.
     ASSERT_NO_THROW(io_real.reset_output_buffer());
 
     ::close(fds[1]);
@@ -664,12 +697,12 @@ TEST(replication_message_io_test, has_unread_data_after_consume) {
 
 // send_blob and receive_blob on the base replication_message_io must FATAL immediately
 // because blob handling requires a blob-capable subclass.
-TEST(replication_message_io_death_test, send_blob_on_base_class_is_fatal) {
+TEST(replication_message_io_test, send_blob_on_base_class_is_fatal) {
     replication_message_io io(std::string{});
     EXPECT_DEATH(io.send_blob(0U), "");
 }
 
-TEST(replication_message_io_death_test, receive_blob_on_base_class_is_fatal) {
+TEST(replication_message_io_test, receive_blob_on_base_class_is_fatal) {
     replication_message_io io(std::string{});
     EXPECT_DEATH(io.receive_blob(), "");
 }

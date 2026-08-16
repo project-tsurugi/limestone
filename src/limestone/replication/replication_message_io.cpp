@@ -47,8 +47,7 @@ namespace {
 replication_message_io::replication_message_io(int fd)
     : is_string_mode_(false),
       socket_fd_(fd),
-      socket_buf_(std::make_unique<socket_streambuf>(fd)),
-      out_stream_(std::make_unique<std::ostringstream>(std::ios_base::out))
+      socket_buf_(std::make_unique<socket_streambuf>(fd))
 {
     // Create std::istream using the raw pointer from socket_buf_.
     in_stream_ = std::make_unique<std::istream>(socket_buf_.get());
@@ -58,8 +57,7 @@ replication_message_io::replication_message_io(int fd)
 replication_message_io::replication_message_io(const std::string &initial)
     : is_string_mode_(true),
       socket_fd_(-1),
-      socket_buf_(nullptr),
-      out_stream_(std::make_unique<std::ostringstream>(std::ios_base::out))
+      socket_buf_(nullptr)
 {
     // Create std::istringstream from the initial string.
     in_stream_ = std::make_unique<std::istringstream>(initial);
@@ -119,27 +117,27 @@ bool replication_message_io::send_raw(const std::string &data) const {
 
 void replication_message_io::send_uint16(uint16_t value) {
     auto buffer = primitive_wire_codec::encode_uint16(value);
-    out_stream_->write(buffer.data(), buffer.size());
+    out_buffer_.append(buffer.data(), buffer.size());
 }
 
 void replication_message_io::send_uint32(uint32_t value) {
     auto buffer = primitive_wire_codec::encode_uint32(value);
-    out_stream_->write(buffer.data(), buffer.size());
+    out_buffer_.append(buffer.data(), buffer.size());
 }
 
 void replication_message_io::send_uint64(uint64_t value) {
     auto buffer = primitive_wire_codec::encode_uint64(value);
-    out_stream_->write(buffer.data(), buffer.size());
+    out_buffer_.append(buffer.data(), buffer.size());
 }
 
 void replication_message_io::send_uint8(uint8_t value) {
     auto buffer = primitive_wire_codec::encode_uint8(value);
-    out_stream_->write(buffer.data(), buffer.size());
+    out_buffer_.append(buffer.data(), buffer.size());
 }
 
 void replication_message_io::send_string(const std::string &value) {
     send_uint32(checked_string_size(value.size()));
-    out_stream_->write(value.data(), static_cast<std::streamsize>(value.size()));
+    out_buffer_.append(value.data(), value.size());
 }
 
 void replication_message_io::read_exact(char* buffer, std::streamsize size, std::string_view description) {
@@ -199,37 +197,28 @@ std::string replication_message_io::receive_string() {
 bool replication_message_io::flush() {
     TRACE_START;
     if (is_string_mode_) {
-        std::string data = out_stream_->str();
-        in_stream_ = std::make_unique<std::istringstream>(data);
+        in_stream_ = std::make_unique<std::istringstream>(out_buffer_);
         return true;
     }
-    std::string data = out_stream_->str();
-    if (data.empty()) {
+    if (out_buffer_.empty()) {
         return true;
     }
-    bool ret = send_raw(data);
-    out_stream_->str("");
-    out_stream_->clear();
+    bool ret = send_raw(out_buffer_);
+    out_buffer_.clear();
     TRACE_END << "ret = " << ret;
     return ret;
 }
 
 std::string replication_message_io::get_out_string() const {
-    if (! out_stream_) {
-        return std::string{};
-    }
-    return out_stream_->str();
+    return out_buffer_;
+}
+
+std::string_view replication_message_io::get_out_view() const noexcept {
+    return out_buffer_;
 }
 
 std::size_t replication_message_io::get_out_size() const {
-    if (! out_stream_) {
-        return 0;
-    }
-    std::ostream::pos_type pos = out_stream_->tellp();
-    if (pos == std::ostream::pos_type(-1)) {
-        return 0;
-    }
-    return static_cast<std::size_t>(pos);
+    return out_buffer_.size();
 }
 
 bool replication_message_io::has_unread_data() const {
@@ -243,15 +232,14 @@ bool replication_message_io::has_unread_data() const {
 }
 
 void replication_message_io::reset_output_buffer() {
-    if (! out_stream_) {
-        return;
-    }
-    out_stream_->str(std::string{});
-    out_stream_->clear();
+    out_buffer_.clear();
 }
 
 void replication_message_io::close() {
-    if (! out_stream_) {
+    // in_stream_ is null only on a moved-from object. Skip closing there: the
+    // default move copies socket_fd_ without resetting the source, so closing
+    // from both objects would double-close the descriptor.
+    if (! in_stream_) {
         return;
     }
     flush();
@@ -269,8 +257,8 @@ void replication_message_io::close() {
     }
 }
 
-std::ostream& replication_message_io::get_out_stream() {
-    return *out_stream_;
+void replication_message_io::write_out_bytes(char const* data, std::size_t size) {
+    out_buffer_.append(data, size);
 }
 
 std::istream& replication_message_io::get_in_stream() {

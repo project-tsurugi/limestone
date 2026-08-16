@@ -8,11 +8,6 @@
 #include <memory>
 #include <sstream>
 
-#ifdef LIMESTONE_ENABLE_RDMA
-#include <rdma/rdma_receiver_base.h>
-#include <rdma/rdma_factory.h>
-#endif
-
 #ifdef ENABLE_ALTIMETER
 #include <altimeter/configuration.h>
 #include <altimeter/event/constants.h>
@@ -241,52 +236,6 @@ TEST_F(datastore_impl_test, altimeter_wal_shipped_log_failure_written) {
 }
 #endif
 #ifdef LIMESTONE_ENABLE_RDMA
-// Helper that initializes the RDMA receiver before each RDMA sender test and
-// shuts it down afterwards.  libgnmock requires the receiver to be initialized
-// before the sender can Initialize(); without this the vendor mock returns
-// "[Sender] semaphores not ready; receiver must prepare."
-class rdma_sender_test : public ::testing::Test {
-protected:
-    void SetUp() override {
-        receiver_ = make_rdma_data_receiver(4U);
-        auto result = receiver_->initialize([](replication::rdma_receive_event const&) {});
-        ASSERT_TRUE(result.success) << "receiver init failed: " << result.error_message;
-    }
-
-    void TearDown() override {
-        if (receiver_) {
-            receiver_->shutdown();
-            receiver_.reset();
-        }
-    }
-
-private:
-    std::unique_ptr<replication::rdma_receiver_base> receiver_{};
-};
-
-TEST_F(rdma_sender_test, initialize_rdma_sender_success_sets_sender) {
-    datastore_impl datastore;
-
-    constexpr uint32_t test_slot_count = 4U;
-    constexpr uint64_t test_dma_address = 0x1234U;
-
-    EXPECT_TRUE(datastore.initialize_rdma_sender(test_slot_count, test_dma_address));
-    EXPECT_NE(datastore.get_rdma_sender(), nullptr);
-}
-
-TEST_F(rdma_sender_test, shutdown_rdma_sender_after_initialize_clears_sender) {
-    datastore_impl datastore;
-
-    constexpr uint32_t test_slot_count = 4U;
-    constexpr uint64_t test_dma_address = 0x1234U;
-
-    ASSERT_TRUE(datastore.initialize_rdma_sender(test_slot_count, test_dma_address));
-    ASSERT_NE(datastore.get_rdma_sender(), nullptr);
-
-    EXPECT_TRUE(datastore.shutdown_rdma_sender());
-    EXPECT_EQ(datastore.get_rdma_sender(), nullptr);
-}
-
 TEST_F(datastore_impl_test, shutdown_rdma_sender_without_initialize_is_noop) {
     datastore_impl datastore;
 

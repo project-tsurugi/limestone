@@ -19,7 +19,7 @@ using limestone::api::write_version_type;
 
 static const std::string tmp_file_path = "/tmp/test_log_entry.tmp";
 
-class partitioned_cursor_test : public ::testing::Test {
+class partitioned_cursor_impl_test : public ::testing::Test {
 protected:
     void SetUp() override {}
     void TearDown() override {
@@ -66,7 +66,7 @@ protected:
     }
 };
 
-TEST_F(partitioned_cursor_test, single_entry_and_end_marker) {
+TEST_F(partitioned_cursor_impl_test, single_entry_and_end_marker) {
     auto queue = std::make_shared<cursor_entry_queue>(8);
     partitioned_cursor_impl cursor(queue);
 
@@ -92,7 +92,7 @@ TEST_F(partitioned_cursor_test, single_entry_and_end_marker) {
     EXPECT_FALSE(cursor.next());
 }
 
-TEST_F(partitioned_cursor_test, next_returns_false_after_cursor_closed) {
+TEST_F(partitioned_cursor_impl_test, next_returns_false_after_cursor_closed) {
     auto queue = std::make_shared<cursor_entry_queue>(8);
     partitioned_cursor_impl cursor(queue);
 
@@ -104,7 +104,7 @@ TEST_F(partitioned_cursor_test, next_returns_false_after_cursor_closed) {
     EXPECT_FALSE(cursor.next());
 }
 
-TEST_F(partitioned_cursor_test, current_returns_last_entry_after_next) {
+TEST_F(partitioned_cursor_impl_test, current_returns_last_entry_after_next) {
     auto queue = std::make_shared<cursor_entry_queue>(8);
     partitioned_cursor_impl cursor(queue);
 
@@ -135,7 +135,7 @@ TEST_F(partitioned_cursor_test, current_returns_last_entry_after_next) {
     EXPECT_FALSE(cursor.next());
 }
 
-TEST_F(partitioned_cursor_test, create_cursor_returns_valid_cursor) {
+TEST_F(partitioned_cursor_impl_test, create_cursor_returns_valid_cursor) {
     auto queue = std::make_shared<cursor_entry_queue>(8);
 
     // Use create_cursor to create a wrapped API cursor
@@ -158,7 +158,7 @@ TEST_F(partitioned_cursor_test, create_cursor_returns_valid_cursor) {
     EXPECT_FALSE(cursor->next());
 }
 
-TEST_F(partitioned_cursor_test, batch_with_multiple_entries_is_iterated) {
+TEST_F(partitioned_cursor_impl_test, batch_with_multiple_entries_is_iterated) {
     auto queue = std::make_shared<cursor_entry_queue>(8);
     partitioned_cursor_impl cursor(queue);
 
@@ -191,7 +191,7 @@ TEST_F(partitioned_cursor_test, batch_with_multiple_entries_is_iterated) {
 
 }
 
-TEST_F(partitioned_cursor_test, multiple_batches_are_processed_in_sequence) {
+TEST_F(partitioned_cursor_impl_test, multiple_batches_are_processed_in_sequence) {
     auto queue = std::make_shared<cursor_entry_queue>(8);
     partitioned_cursor_impl cursor(queue);
 
@@ -229,7 +229,7 @@ TEST_F(partitioned_cursor_test, multiple_batches_are_processed_in_sequence) {
     EXPECT_FALSE(cursor.next());  // Reached end_marker
 }
 
-TEST_F(partitioned_cursor_test, empty_batch_is_ignored) {
+TEST_F(partitioned_cursor_impl_test, empty_batch_is_ignored) {
     auto queue = std::make_shared<cursor_entry_queue>(8);
     partitioned_cursor_impl cursor(queue);
 

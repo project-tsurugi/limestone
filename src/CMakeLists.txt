@@ -2,7 +2,7 @@ file(GLOB SOURCES
         "limestone/*.cpp"
         "limestone/replication/*.cpp"
         "limestone/partitioned_cursor/*.cpp"
-        "limestone/rdma/rdma_replication_message_io.cpp"
+        "limestone/rdma/*.cpp"
 )
 
 if(ENABLE_RDMA)
@@ -48,7 +48,7 @@ target_link_libraries(${package_name}
 
 if(ENABLE_RDMA)
     target_compile_definitions(${package_name} PRIVATE LIMESTONE_ENABLE_RDMA)
-    target_link_libraries(${package_name} PRIVATE rdma_comm)
+    target_link_libraries(${package_name} PRIVATE rdma_comm rdma_handshake)
 endif()
 
 if (ENABLE_ALTIMETER)
@@ -107,7 +107,7 @@ target_link_libraries(limestone-impl
 
 if(ENABLE_RDMA)
     target_compile_definitions(limestone-impl INTERFACE LIMESTONE_ENABLE_RDMA)
-    target_link_libraries(limestone-impl INTERFACE rdma_comm)
+    target_link_libraries(limestone-impl INTERFACE rdma_comm rdma_handshake)
 endif()
 
 # utils

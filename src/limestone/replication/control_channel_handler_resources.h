@@ -29,9 +29,8 @@ public:
     control_channel_handler_resources(
         replication_message_io& io,
         replica_server& server,
-        datastore& ds,
-        bool ack_enabled = true)
-        : handler_resources(io, ack_enabled)
+        datastore& ds)
+        : handler_resources(io)
         , server_(server)
         , datastore_(ds) {}
 

@@ -21,9 +21,8 @@ namespace limestone::replication {
 
 class handler_resources {
 public:
-    explicit handler_resources(replication_message_io& io, bool ack_enabled = true)
-        : replication_message_io_(io)
-        , ack_enabled_(ack_enabled) {}
+    explicit handler_resources(replication_message_io& io)
+        : replication_message_io_(io) {}
     virtual ~handler_resources() = default;
 
     handler_resources(const handler_resources&) = delete;
@@ -32,11 +31,9 @@ public:
     handler_resources& operator=(handler_resources&&) = delete;
 
     [[nodiscard]] replication_message_io& get_replication_message_io() const { return replication_message_io_; }
-    [[nodiscard]] bool ack_enabled() const noexcept { return ack_enabled_; }
 
 private:
     replication_message_io& replication_message_io_;
-    bool ack_enabled_{true};
 };
 
 }  // namespace limestone::replication

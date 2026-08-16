@@ -27,9 +27,8 @@ class log_channel_handler_resources : public handler_resources {
 public:
     log_channel_handler_resources(
         replication_message_io& io,
-        log_channel& channel,
-        bool ack_enabled = true)
-        : handler_resources(io, ack_enabled)
+        log_channel& channel)
+        : handler_resources(io)
         , channel_(channel) {}
 
     [[nodiscard]] log_channel& get_log_channel() const { return channel_; }

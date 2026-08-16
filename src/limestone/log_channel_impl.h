@@ -180,7 +180,7 @@ private:
      *        Caller must hold mtx_replica_connector_.
      * @param payload Serialized byte payload to transmit.
      */
-    void send_rdma_bytes_locked(std::string const& payload);
+    void send_rdma_bytes_locked(std::string_view payload);
 };
 
 /**

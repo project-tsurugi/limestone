@@ -17,12 +17,24 @@
 
 #pragma once
 
+#include <cstddef>
+#include <cstdint>
+
 #include "replication_message.h"
 
 namespace limestone::replication {
 
 class message_group_commit : public replication_message {
 public:
+    /**
+     * @brief Serialized wire size in bytes.
+     *
+     * The fixed-length sum of the type id (uint8) written by
+     * replication_message::send() and the epoch number (uint64) written by
+     * send_body(). Update this value together with any serialization change.
+     */
+    static constexpr std::size_t wire_size = sizeof(std::uint8_t) + sizeof(std::uint64_t);
+
     explicit message_group_commit(uint64_t epoch_number = 0);
 
     [[nodiscard]] message_type_id get_message_type_id() const override;
