@@ -507,7 +507,7 @@ constexpr std::uint16_t control_id = 5U;
 }  // namespace
 
 // Dispatch to the control channel id: a GROUP_COMMIT reaches the control handler
-// and persists the epoch, and the sequence number advances across consecutive frames.
+// and persists the epoch, across consecutive frames.
 TEST_F(replica_server_test, on_rdma_receive_routes_control_event_and_persists_epoch) {
     replica_server server;
     server.initialize(location1);
@@ -552,19 +552,8 @@ TEST_F(replica_server_test, control_frame_partial_flag_is_fatal) {
     EXPECT_DEATH(server.on_rdma_receive(rdma_receive_event{ev}), "partial RDMA control frame");
 }
 
-TEST_F(replica_server_test, control_frame_sequence_mismatch_is_fatal) {
-    replica_server server;
-    server.initialize(location1);
-    server.set_rdma_control_channel_id_for_test(control_id);
-
-    // The expected number is 0, so a frame starting at 1 is an ordering violation.
-    auto ev = make_control_event(control_id, 1U, serialize_control_message(message_group_commit{7}));
-    EXPECT_DEATH(server.on_rdma_receive(rdma_receive_event{ev}), "control frame sequence mismatch");
-}
-
-// An unexpected message type is dropped and the server keeps running. A drop
-// still consumes the sequence number, so the next well-formed frame is accepted
-// with the following number.
+// An unexpected message type is dropped and the server keeps running: the next
+// well-formed frame is still accepted.
 TEST_F(replica_server_test, control_frame_unexpected_message_type_is_dropped) {
     replica_server server;
     server.initialize(location1);

@@ -327,7 +327,6 @@ private:
     // session is established. Atomic because the transport's receive thread reads it
     // while the establishment thread publishes it.
     std::atomic<std::int32_t> rdma_control_channel_id_{-1};
-    std::uint16_t control_next_sequence_number_{0};     ///< Next expected control frame sequence number
     std::mutex control_channel_mutex_{};                ///< Serializes control frame processing
     
     std::vector<std::future<void>> client_futures_;         ///< futures for client handling threads

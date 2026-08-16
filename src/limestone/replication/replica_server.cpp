@@ -597,21 +597,6 @@ void replica_server::handle_rdma_control_event(rdma_data_event const& event) {
     }
     {
         std::lock_guard<std::mutex> lock(control_channel_mutex_);
-        if (header.sequence_number != control_next_sequence_number_) {
-            // rdma-comm-lib stamps per-channel sequence numbers so that receivers can
-            // detect reordering or frame loss, which the NIC stack guarantees against
-            // by specification but cannot fully rule out (hardware faults, bugs,
-            // overload) nor detect by itself. Once a mismatch is observed, ordered
-            // delivery can no longer be assumed, so the process terminates rather
-            // than dropping the frame and letting the master-side flush() report the
-            // epoch as persisted.
-            LOG_LP(FATAL) << "RDMA control frame sequence mismatch: expected="
-                          << control_next_sequence_number_
-                          << " received=" << header.sequence_number;
-        }
-        control_next_sequence_number_ =
-            static_cast<std::uint16_t>(control_next_sequence_number_ + 1);
-
         // The transport sends the ACK frame for this event only after this handler
         // returns, so exceptions must not escape to the receive thread; convert them
         // to a diagnosable FATAL, as the WAL data path does.
@@ -861,10 +846,6 @@ void replica_server::release_rdma_stack() noexcept {
         }
     }
     rdma_control_channel_id_.store(-1, std::memory_order_release);
-    {
-        std::lock_guard<std::mutex> lock(control_channel_mutex_);
-        control_next_sequence_number_ = 0;
-    }
 }
 
 } // namespace limestone::replication

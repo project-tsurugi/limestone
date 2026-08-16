@@ -64,8 +64,8 @@ scenario_tcpless_rdma_test (process / thread 両形態、TCP ソケット 0 本�
 | 8 | BLOB 送信 | ✅ 単体+E2E: tcp_replication_message_io_test (6) + scenario_test tcp (blob 実ファイル内容一致) | ✅ 単体+C+E2E: parser の blob ストリーミング (ゼロ長/複数/部分到着/サイズ不一致) + log_channel_replication_test (pending 先行 flush + 内容伝送) + scenario_tcpless (blob_flows_without_tcp、実ファイル内容一致) | **[G4]** 対応済み (単位 J2)。旧ハイブリッド blob E2E の代替 |
 | 9 | セッション begin/end と完了同期 | ✅ E2E: log_channel_replication_test (`wait_for_replica_ack()` = COMMON_ACK) | ✅ C+E2E: 同 (flush / 非同期 flush) + scenario_tcpless (end_session 復帰 = replica 書き込み済みの durability) | async フラグ (`REPLICATION_ASYNC_*`) のパースは replication_flag_test で担保 |
 | 10 | group commit 伝播と完了同期 | ✅ 単体+E2E: message_group_commit_test (post_receive で epoch 永続) + scenario_test (epoch 一致) + datastore_impl_test (master フラグ/フック) | ✅ E2E: scenario_tcpless (RDMA 制御チャネル経由、flush=ACK 写像、連続制御フレームのシーケンス進行、master/replica epoch 一致) | 失敗系は #13 参照 |
-| 11 | RDMA 制御チャネルのフレーム検証 (version / payload_size / partial フラグ / シーケンス不一致 → FATAL、型違い / キャスト失敗 → drop) | N/A (TCP はストリームでフレームなし) | ✅ C: replica_server_test (FATAL 4 分岐の EXPECT_DEATH + 型違い drop 後の継続 + malformed payload FATAL + 正常ルーティングで epoch 永続) + E2E: scenario_tcpless の連続フレーム | **[G6]** 対応済み (単位 J3)。キャスト失敗分岐は factory 経由で到達不能な防御コードのため対象外 |
-| 12 | RDMA データチャネルのフレーム検証 | N/A | ✅ C: rdma_log_channel_receiver_test (シーケンスギャップ drop / 重複 drop / version・size FATAL / 部分フレーム完結) | |
+| 11 | RDMA 制御チャネルのフレーム検証 (version / payload_size / partial フラグ → FATAL、型違い / キャスト失敗 → drop) | N/A (TCP はストリームでフレームなし) | ✅ C: replica_server_test (FATAL 3 分岐の EXPECT_DEATH + 型違い drop 後の継続 + malformed payload FATAL + 正常ルーティングで epoch 永続) + E2E: scenario_tcpless の連続フレーム | **[G6]** 対応済み (単位 J3)。シーケンス不一致の検査は 2026-08-16 に削除 (順序保証は rdma-comm-lib が担い、不一致は lib 側で FATAL)。キャスト失敗分岐は factory 経由で到達不能な防御コードのため対象外 |
+| 12 | RDMA データチャネルのフレーム検証 | N/A | ✅ C: rdma_log_channel_receiver_test (version・size FATAL / 部分フレーム完結) | シーケンスギャップ/重複の drop 検査は 2026-08-16 に削除 (順序保証は rdma-comm-lib が担い、不一致は lib 側で FATAL) |
 | 13 | 失敗時挙動の経路差 (group commit) | ❌ 送信失敗 = ERROR + 継続、ACK 待ち失敗 = `close_session()` + `replica_exists_=false` (replica 切り離しで master 続行) が未テスト | ❌ 送信/flush 失敗 = FATAL (death test なし) | **[G5]** テスト追加はしない (2026-08-15 ユーザー判断)。RDMA の FATAL は仕様 (送信リング全チャネル共有のため切り離し不能) |
 | 14 | RDMA チャネル id ディスパッチ (制御 id 振り分け / 範囲外 drop / 未登録 drop) | N/A (1 接続 = 1 チャネル) | ✅ C: replica_server_test (data event → receiver 呼び出し、error event は呼ばない、範囲外 id drop、未登録 receiver drop、制御 id 振り分け) | **[G7]** 対応済み (単位 J3) |
 | 15 | シャットダウン / リソース解放 | ✅ C+E2E: replica_server_test (listener/accept/受信ブロック中の shutdown 等) + 全 E2E の teardown | ✅ C+E2E: datastore_impl_test / rdma_sender_test (initialize/shutdown 対) + establish 失敗ロールバック (mock_test のデストラクタ計数、replica 側は master 死亡時解放) | replica の clean shutdown (RDMA) は機能未実装 — 切り離しプロトコル (別タスク) のスコープ |
@@ -110,8 +110,11 @@ scenario_tcpless_rdma_test (process / thread 両形態、TCP ソケット 0 本�
   そのテストは存在するが、src 内に送信側の呼び出し箇所が一切なく、TCP/RDMA どちらの
   経路にも組み込まれていない。
 * `log_channel::abort_session()` は両経路とも `std::abort()` の未実装スタブ。
-* データチャネルの `pending_frames_` はイベント受領直後に必ず全消費されるため、
-  並べ替えバッファとしては本番経路で機能していない (シーケンスギャップは drop)。
+* (2026-08-16 解消) データチャネルの `pending_frames_` はイベント受領直後に必ず全消費されるため、
+  並べ替えバッファとしては本番経路で機能していなかった。シーケンス番号は rdma-comm-lib が
+  付与・検査の両方を担い (不一致は lib 側で FATAL)、limestone に届くフレームは連続性が
+  保証されると確認できたため、limestone 層のシーケンス検査 (データ/制御とも) と
+  `pending_frames_` は削除した。
 * §10 に「判明している具体例」とあった group commit の RDMA E2E 欠如は、起票 (2026-08-10)
   より後のフェーズ 3〜5 の作業 (scenario_tcpless_rdma_test) で解消済み。
 

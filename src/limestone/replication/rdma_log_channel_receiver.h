@@ -33,10 +33,12 @@ namespace limestone::replication {
 /**
  * @brief Replica-side receiving end of the RDMA data frames for one log channel.
  *
- * Validates the frame ordering, reassembles the frames, and applies the
- * completed LOG_ENTRY messages to the bound log_channel. Independent of the
- * TCP channel handlers: it depends on neither a TCP connection nor a
- * replication_message_io.
+ * Validates the frame integrity (version and payload size), feeds the payloads
+ * to the streaming parser, and applies the completed LOG_ENTRY messages to the
+ * bound log_channel. In-order, gap-free frame arrival is a precondition
+ * guaranteed by the transport (rdma-comm-lib), so this class performs no
+ * ordering validation. Independent of the TCP channel handlers: it depends on
+ * neither a TCP connection nor a replication_message_io.
  */
 class rdma_log_channel_receiver {
 public:
@@ -69,13 +71,6 @@ public:
 
 protected:
     /**
-     * @brief Processes the pending RDMA frames in sequence-number order.
-     *
-     * This assumes the caller already holds mutex_.
-     */
-    void process_pending_frames_locked();
-
-    /**
      * @brief Feeds one validated frame payload to the streaming receiver.
      *
      * The payload may contain a partial LOG_ENTRY message, one complete
@@ -84,23 +79,15 @@ protected:
      * This assumes the caller already holds mutex_.
      *
      * @param payload Validated RDMA frame payload bytes.
-     * @param last_header Header of the frame that carried the payload.
+     * @param header Header of the frame that carried the payload.
      */
     void process_payload_locked(std::vector<std::uint8_t> const& payload,
-        rdma_frame_header const& last_header);
-
-    /**
-     * @brief Test helper to enqueue a pending RDMA frame directly.
-     * @param event RDMA frame to enqueue.
-     */
-    void push_pending_frame_for_test(rdma_data_event const& event);
+        rdma_frame_header const& header);
 
 private:
     limestone::api::datastore& datastore_;
     limestone::api::log_channel& channel_;
-    std::uint16_t next_sequence_number_{0};  ///< Expected next sequence number (wraps at 16 bits).
     std::mutex mutex_;
-    std::vector<rdma_data_event> pending_frames_;
     std::unique_ptr<rdma_log_entries_receiver> entries_receiver_{};
 };
 

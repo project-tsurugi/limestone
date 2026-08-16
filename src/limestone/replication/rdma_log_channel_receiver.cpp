@@ -34,12 +34,6 @@ void rdma_log_channel_receiver::handle_rdma_data_event(rdma_data_event const& ev
     {
         std::lock_guard<std::mutex> lock(mutex_);
         auto const& header = event.header;
-        TRACE_START << "seq=" << header.sequence_number
-                    << " size=" << header.payload_size
-                    << " partial=" << ((header.flags
-                                        & rdma_frame_flag_partial_payload) != 0)
-                    << " pending=" << pending_frames_.size()
-                    << " next_expected=" << next_sequence_number_;
         if (header.version != rdma_frame_current_version) {
             LOG_LP(FATAL) << "RDMA frame version mismatch: expected "
                           << static_cast<int>(rdma_frame_current_version)
@@ -51,42 +45,17 @@ void rdma_log_channel_receiver::handle_rdma_data_event(rdma_data_event const& ev
                           << " actual=" << event.payload.size();
         }
 
-        if (header.sequence_number < next_sequence_number_) {
-            LOG_LP(INFO) << "RDMA duplicate or stale frame: expected="
-                         << next_sequence_number_ << " received=" << header.sequence_number;
-            TRACE_ABORT << "stale frame";
-            return;
-        }
-
-        if (header.sequence_number > next_sequence_number_) {
-            LOG_LP(INFO) << "RDMA sequence gap: expected=" << next_sequence_number_
-                         << " received=" << header.sequence_number;
-            TRACE_ABORT << "sequence gap, dropped";
-            return;
-        }
-        pending_frames_.push_back(event);
-        next_sequence_number_ = static_cast<std::uint16_t>(next_sequence_number_ + 1);
-        process_pending_frames_locked();
-    }
-}
-
-void rdma_log_channel_receiver::process_pending_frames_locked() {
-    while (true) {
-        if (pending_frames_.empty()) {
-            return;
-        }
-
-        auto event = std::move(pending_frames_.front());
-        pending_frames_.erase(pending_frames_.begin());
-        process_payload_locked(event.payload, event.header);
+        process_payload_locked(event.payload, header);
     }
 }
 
 void rdma_log_channel_receiver::process_payload_locked(
     std::vector<std::uint8_t> const& payload,
-    rdma_frame_header const& last_header) {
-    TRACE_START << "seq=" << last_header.sequence_number
-                << " payload_size=" << payload.size();
+    rdma_frame_header const& header) {
+    TRACE_START << "seq=" << header.sequence_number
+                << " payload_size=" << payload.size()
+                << " partial=" << ((header.flags
+                                    & rdma_frame_flag_partial_payload) != 0);
     if (!entries_receiver_) {
         entries_receiver_ = std::make_unique<rdma_log_entries_receiver>(datastore_);
     }
@@ -109,13 +78,6 @@ void rdma_log_channel_receiver::process_payload_locked(
     }
 
     TRACE_END;
-}
-
-void rdma_log_channel_receiver::push_pending_frame_for_test(rdma_data_event const& event) {
-    {
-        std::lock_guard<std::mutex> lock(mutex_);
-        pending_frames_.push_back(event);
-    }
 }
 
 limestone::api::log_channel& rdma_log_channel_receiver::get_log_channel() noexcept {

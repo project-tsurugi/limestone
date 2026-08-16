@@ -66,9 +66,7 @@ constexpr epoch_id_type entry_epoch{3};    // carried by the entries' write_vers
 class testable_receiver : public rdma_log_channel_receiver {
 public:
     using rdma_log_channel_receiver::rdma_log_channel_receiver;
-    using rdma_log_channel_receiver::process_pending_frames_locked;
     using rdma_log_channel_receiver::process_payload_locked;
-    using rdma_log_channel_receiver::push_pending_frame_for_test;
 };
 
 struct receiver_context {
@@ -206,39 +204,6 @@ TEST_F(rdma_log_channel_receiver_test, handle_rdma_data_event_applies_entries) {
                                log_entry::entry_type::normal_entry));
 }
 
-TEST_F(rdma_log_channel_receiver_test, handle_rdma_data_event_sequence_gap_drops_frame) {
-    auto ctx = make_receiver_with_channel(base_location);
-    ASSERT_NE(ctx.receiver, nullptr);
-
-    ctx.server->get_datastore().switch_epoch(session_epoch);
-
-    message_log_entries gap(message_epoch);
-    gap.set_session_begin_flag(true);
-    gap.add_normal_entry(1U, "k_gap", "v_gap", write_version_type{entry_epoch, 0U});
-    auto gap_ev = make_rdma_event_from_message(gap, 1U);  // seq 0 is expected
-
-    ctx.receiver->handle_rdma_data_event(gap_ev);
-
-    // The gap frame is dropped and the expected sequence does not advance,
-    // so seq 0 is still accepted here.
-    message_log_entries in_order(message_epoch);
-    in_order.set_session_begin_flag(true);
-    in_order.set_session_end_flag(true);
-    in_order.add_normal_entry(1U, "k", "v", write_version_type{entry_epoch, 0U});
-    auto in_order_ev = make_rdma_event_from_message(in_order, 0U);
-
-    ctx.receiver->handle_rdma_data_event(in_order_ev);
-
-    auto& channel = ctx.receiver->get_log_channel();
-    EXPECT_EQ(channel.finished_epoch_id(), session_epoch);
-    // Verify that the gap message's entry (k_gap) never reaches the WAL and
-    // only the in-order entry remains.
-    auto replica_entries = read_log_file(base_location, "pwal_0000");
-    ASSERT_EQ(replica_entries.size(), 1U);
-    EXPECT_TRUE(AssertLogEntry(replica_entries[0], 1U, "k", "v", entry_epoch, 0U, {},
-                               log_entry::entry_type::normal_entry));
-}
-
 TEST_F(rdma_log_channel_receiver_test, handle_rdma_data_event_payload_size_mismatch_fatals) {
     auto ctx = make_receiver_with_channel(base_location);
     ASSERT_NE(ctx.receiver, nullptr);
@@ -268,6 +233,12 @@ TEST_F(rdma_log_channel_receiver_test, handle_rdma_data_event_partial_then_compl
     auto& channel = ctx.receiver->get_log_channel();
 
     ctx.receiver->handle_rdma_data_event(events.first);
+    // Nothing is applied to the WAL while only the partial frame has arrived.
+    auto replica_pwal_path = boost::filesystem::path(base_location) / "pwal_0000";
+    if (boost::filesystem::exists(replica_pwal_path)) {
+        EXPECT_TRUE(read_log_file(base_location, "pwal_0000").empty());
+    }
+
     ctx.receiver->handle_rdma_data_event(events.second);
 
     EXPECT_EQ(channel.finished_epoch_id(), session_epoch);
@@ -293,35 +264,6 @@ TEST_F(rdma_log_channel_receiver_test, handle_rdma_data_event_version_mismatch_f
     bad.header.version = static_cast<std::uint8_t>(events.second.header.version + 1U);
     EXPECT_DEATH({ ctx.receiver->handle_rdma_data_event(bad); },
                  "RDMA frame version mismatch");
-}
-
-TEST_F(rdma_log_channel_receiver_test, process_pending_frames_locked_waits_for_completion) {
-    auto ctx = make_receiver_with_channel(base_location);
-    ASSERT_NE(ctx.receiver, nullptr);
-    ctx.server->get_datastore().switch_epoch(session_epoch);
-
-    message_log_entries entries(message_epoch);
-    entries.set_session_begin_flag(true);
-    entries.set_session_end_flag(true);
-    entries.add_normal_entry(1U, "k", "v", write_version_type{entry_epoch, 0U});
-    auto events = make_split_events(entries, 0U);
-
-    ctx.receiver->handle_rdma_data_event(events.first);
-    // Already processed inside handle, but ensure an explicit call still does
-    // not apply the partial payload.
-    ctx.receiver->process_pending_frames_locked();
-    auto replica_pwal_path = boost::filesystem::path(base_location) / "pwal_0000";
-    if (boost::filesystem::exists(replica_pwal_path)) {
-        EXPECT_TRUE(read_log_file(base_location, "pwal_0000").empty());
-    }
-
-    // The message is applied only after the remaining frame arrives.
-    ctx.receiver->handle_rdma_data_event(events.second);
-    EXPECT_EQ(ctx.receiver->get_log_channel().finished_epoch_id(), session_epoch);
-    auto replica_entries = read_log_file(base_location, "pwal_0000");
-    ASSERT_EQ(replica_entries.size(), 1U);
-    EXPECT_TRUE(AssertLogEntry(replica_entries[0], 1U, "k", "v", entry_epoch, 0U, {},
-                               log_entry::entry_type::normal_entry));
 }
 
 TEST_F(rdma_log_channel_receiver_test, process_payload_locked_processes_single_message) {
@@ -356,39 +298,6 @@ TEST_F(rdma_log_channel_receiver_test, process_payload_locked_processes_single_m
                                log_entry::entry_type::normal_entry));
 }
 
-TEST_F(rdma_log_channel_receiver_test, process_pending_frames_locked_processes_multiple_messages) {
-    auto ctx = make_receiver_with_channel(base_location);
-    ASSERT_NE(ctx.receiver, nullptr);
-
-    ctx.server->get_datastore().switch_epoch(session_epoch);
-
-    message_log_entries first(message_epoch);
-    first.set_session_begin_flag(true);
-    first.add_normal_entry(1U, "k1", "v1", write_version_type{entry_epoch, 0U});
-    message_log_entries second(message_epoch);
-    second.set_session_end_flag(true);
-    second.add_normal_entry(2U, "k2", "v2", write_version_type{entry_epoch, 0U});
-
-    auto ev1 = make_rdma_event_from_message(first, 0U);
-    auto ev2 = make_rdma_event_from_message(second, 1U);
-
-    ctx.receiver->push_pending_frame_for_test(ev1);
-    ctx.receiver->push_pending_frame_for_test(ev2);
-
-    ctx.receiver->process_pending_frames_locked();
-
-    auto& channel = ctx.receiver->get_log_channel();
-    EXPECT_EQ(channel.finished_epoch_id(), session_epoch);
-    // Verify through the WAL content that the second message's entry was
-    // applied as well.
-    auto replica_entries = read_log_file(base_location, "pwal_0000");
-    ASSERT_EQ(replica_entries.size(), 2U);
-    EXPECT_TRUE(AssertLogEntry(replica_entries[0], 1U, "k1", "v1", entry_epoch, 0U, {},
-                               log_entry::entry_type::normal_entry));
-    EXPECT_TRUE(AssertLogEntry(replica_entries[1], 2U, "k2", "v2", entry_epoch, 0U, {},
-                               log_entry::entry_type::normal_entry));
-}
-
 TEST_F(rdma_log_channel_receiver_test,
        handle_rdma_data_event_processes_sequential_messages) {
     auto ctx = make_receiver_with_channel(base_location);
@@ -416,42 +325,6 @@ TEST_F(rdma_log_channel_receiver_test,
     EXPECT_TRUE(AssertLogEntry(replica_entries[0], 1U, "k1", "v1", entry_epoch, 0U, {},
                                log_entry::entry_type::normal_entry));
     EXPECT_TRUE(AssertLogEntry(replica_entries[1], 2U, "k2", "v2", entry_epoch, 0U, {},
-                               log_entry::entry_type::normal_entry));
-}
-
-TEST_F(rdma_log_channel_receiver_test,
-       handle_rdma_data_event_drops_future_frames_and_processes_contiguous_frames) {
-    auto ctx = make_receiver_with_channel(base_location);
-    ASSERT_NE(ctx.receiver, nullptr);
-
-    ctx.server->get_datastore().switch_epoch(session_epoch);
-
-    message_log_entries first(message_epoch);
-    first.set_session_begin_flag(true);
-    first.set_session_end_flag(true);
-    first.add_normal_entry(1U, "k1", "v1", write_version_type{entry_epoch, 0U});
-    message_log_entries second(message_epoch);
-    // The begin flag makes a broken drop FAIL on the entry count instead of
-    // writing to a closed WAL (undefined behaviour) if second ever gets applied.
-    second.set_session_begin_flag(true);
-    second.add_normal_entry(2U, "k2", "v2", write_version_type{entry_epoch, 0U});
-
-    auto second_events = make_split_events(second, 2U);  // seq 2 (partial), 3 (final)
-    auto first_events = make_split_events(first, 0U);    // seq 0 (partial), 1 (final)
-
-    auto& channel = ctx.receiver->get_log_channel();
-
-    ctx.receiver->handle_rdma_data_event(second_events.first);
-    ctx.receiver->handle_rdma_data_event(second_events.second);
-    ctx.receiver->handle_rdma_data_event(first_events.first);
-    ctx.receiver->handle_rdma_data_event(first_events.second);
-
-    EXPECT_EQ(channel.finished_epoch_id(), session_epoch);
-    // Verify that the future frames that arrived first (second) were dropped
-    // and only the contiguous first message's entry reached the WAL.
-    auto replica_entries = read_log_file(base_location, "pwal_0000");
-    ASSERT_EQ(replica_entries.size(), 1U);
-    EXPECT_TRUE(AssertLogEntry(replica_entries[0], 1U, "k1", "v1", entry_epoch, 0U, {},
                                log_entry::entry_type::normal_entry));
 }
 
