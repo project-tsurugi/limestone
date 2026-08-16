@@ -42,11 +42,16 @@ void remove_vendor_mock_shm() {
     if (! std::filesystem::exists(shm_path, ec)) {
         return;
     }
-    for (auto const& entry : std::filesystem::directory_iterator{shm_path, ec}) {
-        auto const filename = entry.path().filename().string();
-        if (filename.rfind("GnMock_", 0) == 0 || filename.rfind("sem.GnMock_", 0) == 0) {
-            std::filesystem::remove(entry.path(), ec);
+    try {
+        for (auto const& entry : std::filesystem::directory_iterator{shm_path, ec}) {
+            auto const filename = entry.path().filename().string();
+            if (filename.rfind("GnMock_", 0) == 0 || filename.rfind("sem.GnMock_", 0) == 0) {
+                std::filesystem::remove(entry.path(), ec);
+            }
         }
+    } catch (std::filesystem::filesystem_error const&) {
+        // The error_code constructor does not cover operator++, which throws on
+        // iteration errors; the wipe stays best-effort, so leave the residue in place.
     }
 }
 
