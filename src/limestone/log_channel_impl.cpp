@@ -56,6 +56,22 @@ void log_channel_impl::begin_session_at(epoch_id_type epoch) {
     }
 }
 
+void log_channel_impl::end_session_at(epoch_id_type epoch) {
+    try {
+        auto session_epoch = channel_->current_epoch_id_.load();
+        if (session_epoch == UINT64_MAX) {
+            LOG_AND_THROW_EXCEPTION("session end received while no session is open on this channel");
+        }
+        if (session_epoch != epoch) {
+            LOG_AND_THROW_EXCEPTION("session end epoch mismatch: the message carries "
+                + std::to_string(epoch) + " but the session was begun at " + std::to_string(session_epoch));
+        }
+        channel_->end_session();
+    } catch (...) {
+        HANDLE_EXCEPTION_AND_ABORT();
+    }
+}
+
 std::string_view log_channel_impl::to_string_view(replica_mode mode) noexcept {
     switch (mode) {
         case replica_mode::none: return "none";

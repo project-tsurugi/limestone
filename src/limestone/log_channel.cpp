@@ -101,7 +101,9 @@ void log_channel::end_session() {
     try {
         TRACE_START << "current_epoch_id_=" << current_epoch_id_.load();
         if (envelope_.impl_->is_async_session_close_enabled()) {
-            bool sent = impl_->send_replica_message(finished_epoch_id_.load(), [&](replication::message_log_entries &msg) {
+            // finished_epoch_id_ is not updated until finalize_session_file(), so the
+            // session's epoch must be read from current_epoch_id_ here.
+            bool sent = impl_->send_replica_message(current_epoch_id_.load(), [&](replication::message_log_entries &msg) {
                 msg.set_session_end_flag(true);
                 msg.set_flush_flag(true);
             });

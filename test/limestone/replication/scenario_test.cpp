@@ -103,6 +103,7 @@ protected:
         // cleanup environment variable
         unsetenv("TSURUGI_REPLICATION_ENDPOINT");
         unsetenv("REPLICATION_RDMA_SLOTS");
+        unsetenv("REPLICATION_ASYNC_SESSION_CLOSE");
         unsetenv("GLOG_logtostderr");
         unsetenv("GLOG_logbufsecs");
         // stop replica server
@@ -430,6 +431,35 @@ TEST_P(scenario_test, minimal_test) {
         EXPECT_EQ(snapshot_entries[1].key, "k2");
         EXPECT_EQ(snapshot_entries[1].value, "v2");
         EXPECT_EQ(snapshot_entries[1].storage_id, 1);
+    }
+}
+
+// The async session close sends the SESSION_END message before finalize_session_file()
+// updates finished_epoch_id_, so its epoch must be read from current_epoch_id_; the
+// replica rejects an END whose epoch differs from the one the session was begun at.
+TEST_P(scenario_test, async_session_close_replicates_session_epoch) {
+    setenv("REPLICATION_ASYNC_SESSION_CLOSE", "1", 1);
+    gen_datastore(master_location);
+
+    ds->switch_epoch(1);
+    lc0_->begin_session();
+    lc0_->add_entry(1, "k1", "v1", {1, 0});
+    lc0_->end_session();
+
+    ds->switch_epoch(2);
+    EXPECT_EQ(get_master_epoch(), 1);
+    EXPECT_EQ(get_replica_epoch(), 1);
+
+    {
+        std::vector<session_marker> expected_markers{
+            {log_entry::entry_type::marker_begin, 1},
+            {log_entry::entry_type::marker_end, 1},
+        };
+        boost::filesystem::path const master_pwal = boost::filesystem::path{master_location} / "pwal_0000";
+        boost::filesystem::path const replica_pwal = boost::filesystem::path{replica_location} / "pwal_0000";
+        EXPECT_EQ(read_session_markers(master_pwal), expected_markers);
+        EXPECT_EQ(read_session_markers(replica_pwal), expected_markers);
+        expect_files_byte_identical(master_pwal, replica_pwal);
     }
 }
 

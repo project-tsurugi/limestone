@@ -219,7 +219,7 @@ void message_log_entries::apply_to(limestone::api::log_channel& channel) const {
         }
     }
     if (has_session_end_flag() || has_flush_flag()) {
-        channel.end_session();
+        channel.get_impl()->end_session_at(epoch_id_);
     }
 }
 

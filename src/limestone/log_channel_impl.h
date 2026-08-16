@@ -150,6 +150,16 @@ public:
     void begin_session_at(epoch_id_type epoch);
 
     /**
+     * @brief Ends the session on the owning channel after verifying the given epoch.
+     * @param epoch the session's epoch carried by the replicated message
+     * @attention not thread-safe.
+     * @note When no session is open or the given epoch differs from the epoch the
+     *       session was begun at, this logs the error and aborts the process,
+     *       matching begin_session_at().
+     */
+    void end_session_at(epoch_id_type epoch);
+
+    /**
      * @brief Checks whether RDMA send stream is available.
      * @return true if RDMA stream is set.
      */

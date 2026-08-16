@@ -266,6 +266,26 @@ TEST_F(rdma_log_channel_receiver_test, handle_rdma_data_event_version_mismatch_f
                  "RDMA frame version mismatch");
 }
 
+TEST_F(rdma_log_channel_receiver_test, session_end_epoch_mismatch_fatals) {
+    auto ctx = make_receiver_with_channel(base_location);
+    ASSERT_NE(ctx.receiver, nullptr);
+    ctx.server->get_datastore().switch_epoch(switched_epoch);
+
+    message_log_entries begin(message_epoch);
+    begin.set_session_begin_flag(true);
+    auto begin_ev = make_rdma_event_from_message(begin, 0U);
+    ctx.receiver->handle_rdma_data_event(begin_ev);
+
+    // Every message of a session carries the session's epoch, so an END carrying a
+    // different one is a protocol violation and must not be applied.
+    message_log_entries end(message_epoch + 1);
+    end.set_session_end_flag(true);
+    end.set_flush_flag(true);
+    auto end_ev = make_rdma_event_from_message(end, 1U);
+    EXPECT_DEATH({ ctx.receiver->handle_rdma_data_event(end_ev); },
+                 "session end epoch mismatch");
+}
+
 TEST_F(rdma_log_channel_receiver_test, process_payload_locked_processes_single_message) {
     auto ctx = make_receiver_with_channel(base_location);
     ASSERT_NE(ctx.receiver, nullptr);
