@@ -1,7 +1,11 @@
 #include "replication_test_helper.h"
+#include <algorithm>
 #include <netinet/in.h>
+#include <optional>
+#include <sstream>
 #include <sys/socket.h>
 #include <unistd.h>
+#include <boost/filesystem/fstream.hpp>
 #include "dblog_scan.h"
 #include "internal.h"
 #include "log_entry.h"
@@ -125,6 +129,66 @@ void print_log_entry(const log_entry& entry) {
 std::vector<log_entry> read_log_file(boost::filesystem::path dir_path, const std::string& filename) {
     boost::filesystem::path log_path = dir_path / filename;
     return read_log_file(log_path);
+}
+
+std::vector<log_entry> read_raw_log_file(boost::filesystem::path const& log_path) {
+    std::vector<log_entry> entries;
+    boost::filesystem::ifstream strm(log_path, std::ios_base::in | std::ios_base::binary);
+    if (!strm) {
+        ADD_FAILURE() << "cannot open log file: " << log_path.string();
+        return entries;
+    }
+    while (true) {
+        // A fresh instance per entry: read() only overwrites the fields its entry
+        // type uses, so reusing one would leak fields between entries.
+        log_entry entry;
+        if (!entry.read(strm)) {
+            break;
+        }
+        entries.push_back(std::move(entry));
+    }
+    return entries;
+}
+
+std::vector<session_marker> read_session_markers(boost::filesystem::path const& log_path) {
+    std::vector<session_marker> markers;
+    for (const auto& entry : read_raw_log_file(log_path)) {
+        auto type = entry.type();
+        if (type == log_entry::entry_type::marker_begin || type == log_entry::entry_type::marker_end) {
+            markers.push_back(session_marker{type, entry.epoch_id()});
+        }
+    }
+    return markers;
+}
+
+void expect_files_byte_identical(boost::filesystem::path const& expected_path, boost::filesystem::path const& actual_path) {
+    auto read_all = [](boost::filesystem::path const& path) -> std::optional<std::string> {
+        boost::filesystem::ifstream strm(path, std::ios_base::in | std::ios_base::binary);
+        if (!strm) {
+            return std::nullopt;
+        }
+        std::ostringstream buffer;
+        buffer << strm.rdbuf();
+        return buffer.str();
+    };
+    auto expected = read_all(expected_path);
+    auto actual = read_all(actual_path);
+    if (!expected.has_value()) {
+        ADD_FAILURE() << "cannot open file: " << expected_path.string();
+        return;
+    }
+    if (!actual.has_value()) {
+        ADD_FAILURE() << "cannot open file: " << actual_path.string();
+        return;
+    }
+    if (*expected == *actual) {
+        return;
+    }
+    auto mismatch = std::mismatch(expected->begin(), expected->end(), actual->begin(), actual->end());
+    auto offset = std::distance(expected->begin(), mismatch.first);
+    ADD_FAILURE() << "files differ: " << expected_path.string() << " (" << expected->size() << " bytes) vs "
+                  << actual_path.string() << " (" << actual->size() << " bytes), first difference at byte offset "
+                  << offset;
 }
 
 std::vector<log_entry> read_log_file(boost::filesystem::path log_path) {

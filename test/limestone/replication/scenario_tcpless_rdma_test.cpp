@@ -487,6 +487,34 @@ void scenario_tcpless_rdma_test::run_wal_data_flow(replica_mode mode) {
     EXPECT_EQ(get_epoch(master_location), 2U);
     EXPECT_EQ(get_epoch(replica_location), 2U);
 
+    // Verify the session markers, which read_log_file() cannot observe: both
+    // sides must record the master's session epochs (issue #140).
+    {
+        boost::filesystem::path const master_pwal0 = boost::filesystem::path{master_location} / "pwal_0000";
+        boost::filesystem::path const replica_pwal0 = boost::filesystem::path{replica_location} / "pwal_0000";
+        std::vector<session_marker> expected_markers0{
+            {log_entry::entry_type::marker_begin, 1},
+            {log_entry::entry_type::marker_end, 1},
+            {log_entry::entry_type::marker_begin, 2},
+            {log_entry::entry_type::marker_end, 2},
+        };
+        EXPECT_EQ(read_session_markers(master_pwal0), expected_markers0);
+        EXPECT_EQ(read_session_markers(replica_pwal0), expected_markers0);
+
+        boost::filesystem::path const master_pwal1 = boost::filesystem::path{master_location} / "pwal_0001";
+        boost::filesystem::path const replica_pwal1 = boost::filesystem::path{replica_location} / "pwal_0001";
+        std::vector<session_marker> expected_markers1{
+            {log_entry::entry_type::marker_begin, 1},
+            {log_entry::entry_type::marker_end, 1},
+        };
+        EXPECT_EQ(read_session_markers(master_pwal1), expected_markers1);
+        EXPECT_EQ(read_session_markers(replica_pwal1), expected_markers1);
+
+        // The replica's WAL must be byte-identical to the master's.
+        expect_files_byte_identical(master_pwal0, replica_pwal0);
+        expect_files_byte_identical(master_pwal1, replica_pwal1);
+    }
+
     // Verify the processes are still TCP-less after WAL data and group commits
     expect_tcpless(mode, tcp_baseline);
 }

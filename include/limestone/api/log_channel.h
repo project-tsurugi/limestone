@@ -53,7 +53,7 @@ public:
      *       Therefore, callers of this API must handle the exception properly as per the original design.
      * @note the current epoch is the last epoch specified by datastore::switch_epoch()
      * @note datastore::switch_epoch() and this function can be called simultaneously.
-     * If these functions are invoked at the same time, the result will be as if one of them was called first, 
+     * If these functions are invoked at the same time, the result will be as if one of them was called first,
      * but it is indeterminate which one will take precedence.
      */
     void begin_session();
@@ -179,6 +179,10 @@ public:
 
     [[nodiscard]] log_channel_impl* get_impl() const noexcept;
 private:
+    // Registers the session file with the datastore on the first session; the
+    // datastore side (add_file) is private and reachable only from log_channel.
+    void register_session_file(boost::filesystem::path const& log_file);
+
     void finalize_session_file();
 
     datastore& envelope_;
@@ -207,6 +211,9 @@ protected: // Protected to allow testing with derived classes
  
     friend class datastore;
     friend class rotation_task;
+    // The impl is this class's private half (its header is not installed); new
+    // implementation goes there instead of growing this public class.
+    friend class log_channel_impl;
 };
 
 } // namespace limestone::api

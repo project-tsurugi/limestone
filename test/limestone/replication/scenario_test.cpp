@@ -377,6 +377,24 @@ TEST_P(scenario_test, minimal_test) {
     EXPECT_EQ(get_master_epoch(), 2);
     EXPECT_EQ(get_replica_epoch(), 2);
 
+    // Verify the session markers, which read_log_file() cannot observe: both
+    // sides must record the master's session epochs (issue #140).
+    {
+        std::vector<session_marker> expected_markers{
+            {log_entry::entry_type::marker_begin, 1},
+            {log_entry::entry_type::marker_end, 1},
+            {log_entry::entry_type::marker_begin, 2},
+            {log_entry::entry_type::marker_end, 2},
+        };
+        boost::filesystem::path const master_pwal = boost::filesystem::path{master_location} / "pwal_0000";
+        boost::filesystem::path const replica_pwal = boost::filesystem::path{replica_location} / "pwal_0000";
+        EXPECT_EQ(read_session_markers(master_pwal), expected_markers);
+        EXPECT_EQ(read_session_markers(replica_pwal), expected_markers);
+
+        // The replica's WAL must be byte-identical to the master's.
+        expect_files_byte_identical(master_pwal, replica_pwal);
+    }
+
     // Stop the master
     ds.reset();
 

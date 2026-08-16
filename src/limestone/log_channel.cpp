@@ -42,51 +42,38 @@ log_channel::log_channel(boost::filesystem::path location, std::size_t id, datas
     file_ = ss.str();
     impl_ = std::make_unique<log_channel_impl>();
     impl_->set_datastore(envelope);
+    impl_->set_log_channel(*this);
 }
 
 void log_channel::begin_session() {
-    try {
-        // Synchronize `current_epoch_id_` with `epoch_id_switched_`.
-        // This loop is necessary to prevent inconsistencies in `current_epoch_id_`
-        // that could occur if `epoch_id_switched_` changes at a specific timing.
-        //
-        // Case where inconsistency occurs:
-        // 1. This thread (L) loads `epoch_id_switched_` and reads 10.
-        // 2. Another thread (S) immediately updates `epoch_id_switched_` to 11.
-        // 3. If the other thread (S) reads `current_epoch_id_` at this point,
-        //    it expects `current_epoch_id_` to be consistent with the latest
-        //    `epoch_id_switched_` value (11), but `current_epoch_id_` may still
-        //    hold the outdated value, causing an inconsistency.
-        //
-        // This loop detects such inconsistencies and repeats until `current_epoch_id_`
-        // matches the latest value of `epoch_id_switched_`, ensuring consistency.
-        // NOLINTNEXTLINE(cppcoreguidelines-avoid-do-while)
-        do {
-            envelope_.on_begin_session_current_epoch_id_store(); // for testing
-            current_epoch_id_.store(envelope_.epoch_id_switched_.load());
-            std::atomic_thread_fence(std::memory_order_acq_rel);
-        } while (current_epoch_id_.load() != envelope_.epoch_id_switched_.load());
-        TRACE_START << "current_epoch_id_=" << current_epoch_id_.load();
+    // Synchronize `current_epoch_id_` with `epoch_id_switched_`.
+    // This loop is necessary to prevent inconsistencies in `current_epoch_id_`
+    // that could occur if `epoch_id_switched_` changes at a specific timing.
+    //
+    // Case where inconsistency occurs:
+    // 1. This thread (L) loads `epoch_id_switched_` and reads 10.
+    // 2. Another thread (S) immediately updates `epoch_id_switched_` to 11.
+    // 3. If the other thread (S) reads `current_epoch_id_` at this point,
+    //    it expects `current_epoch_id_` to be consistent with the latest
+    //    `epoch_id_switched_` value (11), but `current_epoch_id_` may still
+    //    hold the outdated value, causing an inconsistency.
+    //
+    // This loop detects such inconsistencies and repeats until `current_epoch_id_`
+    // matches the latest value of `epoch_id_switched_`, ensuring consistency.
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-do-while)
+    do {
+        envelope_.on_begin_session_current_epoch_id_store(); // for testing
+        current_epoch_id_.store(envelope_.epoch_id_switched_.load());
+        std::atomic_thread_fence(std::memory_order_acq_rel);
+    } while (current_epoch_id_.load() != envelope_.epoch_id_switched_.load());
 
-        auto log_file = file_path();
-        strm_ = fopen(log_file.c_str(), "a");  // NOLINT(*-owning-memory)
-        if (!strm_) {
-            LOG_AND_THROW_IO_EXCEPTION("cannot make file on " + location_.string(), errno);
-        }
-        setvbuf(strm_, nullptr, _IOFBF, 128L * 1024L);  // NOLINT, NB. glibc may ignore size when _IOFBF and buffer=NULL
-        if (!registered_) {
-            envelope_.add_file(log_file);
-            registered_ = true;
-        }
-        uint64_t epoch_id = current_epoch_id_.load();
-        log_entry::begin_session(strm_, static_cast<epoch_id_type>(epoch_id));
-        impl_->send_replica_message(epoch_id, [&](replication::message_log_entries &msg) {
-            msg.set_session_begin_flag(true);
-        });
-        TRACE_END;
-    } catch (...) {
-        TRACE_ABORT;
-        HANDLE_EXCEPTION_AND_ABORT();
+    impl_->begin_session_at(static_cast<epoch_id_type>(current_epoch_id_.load()));
+}
+
+void log_channel::register_session_file(boost::filesystem::path const& log_file) {
+    if (!registered_) {
+        envelope_.add_file(log_file);
+        registered_ = true;
     }
 }
 
