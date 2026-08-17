@@ -1,10 +1,12 @@
 #pragma once
 
 #include <cstdint>
+#include <optional>
 #include <ostream>
 #include <string>
 #include <vector>
 #include <netinet/in.h>
+#include <boost/filesystem/path.hpp>
 #include "log_entry.h"
 #include <gtest/gtest.h>
 #include <limestone/api/storage_id_type.h>
