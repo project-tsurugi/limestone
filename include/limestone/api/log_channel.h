@@ -49,6 +49,11 @@ public:
      */
     virtual ~log_channel() = default;
 
+    log_channel(log_channel const& other) = delete;
+    log_channel& operator=(log_channel const& other) = delete;
+    log_channel(log_channel&& other) noexcept = delete;
+    log_channel& operator=(log_channel&& other) noexcept = delete;
+
    /**
      * @brief join a persistence session for the current epoch in this channel
      * @attention this function is not thread-safe.
