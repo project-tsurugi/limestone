@@ -6,6 +6,7 @@
 #include "limestone_exception_helper.h"
 #include "replication_message_io.h"
 #include "log_channel_handler_resources.h"
+#include "log_channel_impl.h"
 #include "limestone/api/log_channel.h"
 #include "message_ack.h"
 #include "message_log_entries_wire_codec.h"
@@ -183,7 +184,9 @@ void message_log_entries::post_receive(handler_resources& resources) {
 
 void message_log_entries::apply_to(limestone::api::log_channel& channel) const {
     if (has_session_begin_flag()) {
-        channel.begin_session();
+        // The session must join the epoch the master began it at, not the local
+        // datastore's current epoch, which does not advance on a replica.
+        channel.get_impl()->begin_session_at(epoch_id_);
     }
     for (const auto& entry : entries_) {
         switch (entry.type) {
@@ -216,7 +219,7 @@ void message_log_entries::apply_to(limestone::api::log_channel& channel) const {
         }
     }
     if (has_session_end_flag() || has_flush_flag()) {
-        channel.end_session();
+        channel.get_impl()->end_session_at(epoch_id_);
     }
 }
 

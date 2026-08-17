@@ -26,6 +26,7 @@
 #include <vector>
 
 #include <datastore_impl.h>
+#include <log_channel_impl.h>
 #include <rdma/handshake_client_base.h>
 #include <rdma/rdma_factory.h>
 #include <rdma/rdma_frame_buffer_base.h>
@@ -76,6 +77,11 @@ struct fake_rdma_stack_state {
     rdma_receiver_base::operation_result receiver_bind_result{true, {}};
     rdma_sender_base::operation_result sender_initialize_result{true, {}};
     rdma_sender_base::operation_result stream_acquire_status{true, {}};
+    // Number of leading get_send_stream() calls that succeed even when
+    // stream_acquire_status scripts a failure. Data-channel acquisition failures
+    // are fatal by design, so a scripted failure must be aimed past them at the
+    // control channel's acquisition.
+    std::size_t stream_acquire_ok_calls{0};
     rdma_sender_base::operation_result sender_finalize_result{true, {}};
 
     // Factory call record.
@@ -171,7 +177,8 @@ public:
 
     [[nodiscard]] stream_acquire_result get_send_stream(std::uint16_t channel_id) noexcept override {
         state_.acquired_stream_ids.push_back(channel_id);
-        if (!state_.stream_acquire_status.success) {
+        if (!state_.stream_acquire_status.success
+            && state_.acquired_stream_ids.size() > state_.stream_acquire_ok_calls) {
             return {state_.stream_acquire_status, nullptr};
         }
         return {{true, {}}, std::make_unique<fake_send_stream>()};
@@ -189,6 +196,16 @@ public:
 
 private:
     fake_rdma_stack_state& state_;
+};
+
+/**
+ * @brief Gives the tests access to log_channel's protected constructor.
+ */
+class test_log_channel : public limestone::api::log_channel {
+public:
+    test_log_channel(boost::filesystem::path location, std::size_t id,
+                     limestone::api::datastore& envelope) noexcept
+        : log_channel(std::move(location), id, envelope) {}
 };
 
 } // namespace
@@ -264,6 +281,16 @@ protected:
         install_fake_rdma_stack(impl);
     }
 
+    // establish_rdma_session() rejects a channel count of zero, so give the impl
+    // under test one log channel. The channel never begins a session here, so it
+    // performs no file I/O.
+    void register_one_channel(datastore_impl& impl) {
+        impl.register_log_channel([this](std::uint64_t id) {
+            return std::unique_ptr<limestone::api::log_channel>(
+                new test_log_channel("/tmp/rdma_establish_session_mock_test", id, envelope_));
+        });
+    }
+
     [[nodiscard]] static std::vector<std::uint8_t> accepted_response() {
         rdma_handshake_response_payload response{};
         response.accepted = true;
@@ -284,12 +311,14 @@ protected:
 
     mock_handshake_connector_script script_{};
     fake_rdma_stack_state state_{};
+    limestone::api::datastore envelope_{};
 };
 
 TEST_F(rdma_establish_session_mock_test, establish_fails_when_replication_mode_is_not_rdma) {
     ::unsetenv("TSURUGI_REPLICATION_HANDSHAKE_SOCKET");
     ::unsetenv("TSURUGI_REPLICATION_SERVICE_ID");
     datastore_impl impl{};
+    register_one_channel(impl);
     install_all(impl);
 
     EXPECT_FALSE(impl.establish_rdma_session());
@@ -304,6 +333,7 @@ TEST_F(rdma_establish_session_mock_test, establish_fails_when_slot_count_is_not_
     // slot count reaches the defensive guard behind the mode check.
     ::unsetenv("REPLICATION_RDMA_SLOTS");
     datastore_impl impl{};
+    register_one_channel(impl);
     install_all(impl);
 
     EXPECT_FALSE(impl.establish_rdma_session());
@@ -316,6 +346,7 @@ TEST_F(rdma_establish_session_mock_test, establish_fails_when_slot_count_is_not_
 TEST_F(rdma_establish_session_mock_test, establish_fails_when_ack_receiver_initialize_fails) {
     state_.receiver_initialize_result = {false, "scripted receiver initialize failure"};
     datastore_impl impl{};
+    register_one_channel(impl);
     install_all(impl);
 
     EXPECT_FALSE(impl.establish_rdma_session());
@@ -331,6 +362,7 @@ TEST_F(rdma_establish_session_mock_test, establish_fails_when_ack_receiver_initi
 TEST_F(rdma_establish_session_mock_test, establish_fails_when_ack_receiver_dma_address_is_unavailable) {
     state_.dma_address_available = false;
     datastore_impl impl{};
+    register_one_channel(impl);
     install_all(impl);
 
     EXPECT_FALSE(impl.establish_rdma_session());
@@ -343,6 +375,7 @@ TEST_F(rdma_establish_session_mock_test, establish_fails_when_ack_receiver_dma_a
 
 TEST_F(rdma_establish_session_mock_test, establish_fails_when_connector_creation_fails) {
     datastore_impl impl{};
+    register_one_channel(impl);
     install_failing_connector_factory(impl);
     install_fake_rdma_stack(impl);
 
@@ -358,6 +391,7 @@ TEST_F(rdma_establish_session_mock_test, establish_fails_when_connector_creation
 TEST_F(rdma_establish_session_mock_test, establish_fails_when_handshake_start_fails) {
     script_.start_result = {false, "scripted start failure"};
     datastore_impl impl{};
+    register_one_channel(impl);
     install_all(impl);
 
     EXPECT_FALSE(impl.establish_rdma_session());
@@ -372,6 +406,7 @@ TEST_F(rdma_establish_session_mock_test, establish_fails_when_handshake_start_fa
 TEST_F(rdma_establish_session_mock_test, establish_fails_when_response_receive_fails) {
     script_.response_result = {false, "scripted response failure", {}};
     datastore_impl impl{};
+    register_one_channel(impl);
     install_all(impl);
 
     EXPECT_FALSE(impl.establish_rdma_session());
@@ -386,6 +421,7 @@ TEST_F(rdma_establish_session_mock_test, establish_fails_when_response_receive_f
 TEST_F(rdma_establish_session_mock_test, establish_fails_on_malformed_response_payload) {
     script_.response_result = {true, {}, {0x01U, 0x02U, 0x03U}};
     datastore_impl impl{};
+    register_one_channel(impl);
     install_all(impl);
 
     EXPECT_FALSE(impl.establish_rdma_session());
@@ -403,6 +439,7 @@ TEST_F(rdma_establish_session_mock_test, establish_fails_when_replica_rejects_se
     rejection.error_message = "scripted rejection";
     script_.response_result = {true, {}, encode(rejection)};
     datastore_impl impl{};
+    register_one_channel(impl);
     install_all(impl);
 
     EXPECT_FALSE(impl.establish_rdma_session());
@@ -418,6 +455,7 @@ TEST_F(rdma_establish_session_mock_test, establish_fails_when_sender_initialize_
     script_.response_result = {true, {}, accepted_response()};
     state_.sender_initialize_result = {false, "scripted sender initialize failure"};
     datastore_impl impl{};
+    register_one_channel(impl);
     install_all(impl);
 
     EXPECT_FALSE(impl.establish_rdma_session());
@@ -434,14 +472,16 @@ TEST_F(rdma_establish_session_mock_test, establish_fails_when_sender_initialize_
 TEST_F(rdma_establish_session_mock_test, establish_fails_when_control_stream_acquisition_fails) {
     script_.response_result = {true, {}, accepted_response()};
     state_.stream_acquire_status = {false, "scripted stream acquisition failure"};
+    state_.stream_acquire_ok_calls = 1;  // data channel 0 succeeds; the control channel fails
     datastore_impl impl{};
+    register_one_channel(impl);
     install_all(impl);
 
     EXPECT_FALSE(impl.establish_rdma_session());
 
-    // With no log channels registered, the only stream requested is the control
-    // channel's, which takes id 0.
-    EXPECT_EQ(state_.acquired_stream_ids, (std::vector<std::uint16_t>{0U}));
+    // Data channel 0's stream is acquired first; the control channel's (id 1)
+    // acquisition fails.
+    EXPECT_EQ(state_.acquired_stream_ids, (std::vector<std::uint16_t>{0U, 1U}));
     EXPECT_EQ(state_.sender_shutdown_calls, 1);
     EXPECT_EQ(state_.receiver_shutdown_calls, 1);
     EXPECT_EQ(script_.send_finalize_calls, 0);
@@ -452,6 +492,7 @@ TEST_F(rdma_establish_session_mock_test, establish_fails_when_ack_receiver_bind_
     script_.response_result = {true, {}, accepted_response()};
     state_.receiver_bind_result = {false, "scripted bind failure"};
     datastore_impl impl{};
+    register_one_channel(impl);
     install_all(impl);
 
     EXPECT_FALSE(impl.establish_rdma_session());
@@ -467,6 +508,7 @@ TEST_F(rdma_establish_session_mock_test, establish_fails_when_sender_finalize_fa
     script_.response_result = {true, {}, accepted_response()};
     state_.sender_finalize_result = {false, "scripted sender finalize failure"};
     datastore_impl impl{};
+    register_one_channel(impl);
     install_all(impl);
 
     EXPECT_FALSE(impl.establish_rdma_session());
@@ -482,6 +524,7 @@ TEST_F(rdma_establish_session_mock_test, establish_fails_when_handshake_finalize
     script_.response_result = {true, {}, accepted_response()};
     script_.finalize_result = {false, "scripted finalize failure"};
     datastore_impl impl{};
+    register_one_channel(impl);
     install_all(impl);
 
     EXPECT_FALSE(impl.establish_rdma_session());
@@ -498,6 +541,7 @@ TEST_F(rdma_establish_session_mock_test, establish_fails_when_handshake_ready_fa
     script_.response_result = {true, {}, accepted_response()};
     script_.ready_result = {false, "scripted ready failure"};
     datastore_impl impl{};
+    register_one_channel(impl);
     install_all(impl);
 
     EXPECT_FALSE(impl.establish_rdma_session());
@@ -513,6 +557,7 @@ TEST_F(rdma_establish_session_mock_test, establish_fails_when_handshake_completi
     script_.response_result = {true, {}, accepted_response()};
     script_.completion_result = {false, "scripted completion failure"};
     datastore_impl impl{};
+    register_one_channel(impl);
     install_all(impl);
 
     EXPECT_FALSE(impl.establish_rdma_session());
@@ -526,6 +571,7 @@ TEST_F(rdma_establish_session_mock_test, establish_fails_when_handshake_completi
 TEST_F(rdma_establish_session_mock_test, establish_succeeds_with_mocked_handshake_and_stack) {
     script_.response_result = {true, {}, accepted_response()};
     datastore_impl impl{};
+    register_one_channel(impl);
     install_all(impl);
 
     EXPECT_TRUE(impl.establish_rdma_session());
@@ -551,8 +597,8 @@ TEST_F(rdma_establish_session_mock_test, establish_succeeds_with_mocked_handshak
     EXPECT_EQ(start->epoch_number, 0U);
     EXPECT_EQ(start->slot_count, slot_count);
     EXPECT_EQ(start->master_dma_address, fake_master_dma_address);
-    EXPECT_EQ(start->channel_count, 0U);
-    EXPECT_EQ(start->control_channel_id, 0U);
+    EXPECT_EQ(start->channel_count, 1U);
+    EXPECT_EQ(start->control_channel_id, 1U);
 
     // The fake stack got the configured slot count and the replica's DMA address,
     // and was driven through bind and finalize exactly once.
@@ -561,7 +607,8 @@ TEST_F(rdma_establish_session_mock_test, establish_succeeds_with_mocked_handshak
     EXPECT_EQ(state_.receiver_slot_count, slot_count);
     EXPECT_EQ(state_.sender_slot_count, slot_count);
     EXPECT_EQ(state_.sender_remote_dma_address, fake_replica_dma_address);
-    EXPECT_EQ(state_.acquired_stream_ids, (std::vector<std::uint16_t>{0U}));
+    // Data channel 0 first, then the control channel (id 1).
+    EXPECT_EQ(state_.acquired_stream_ids, (std::vector<std::uint16_t>{0U, 1U}));
     EXPECT_EQ(state_.receiver_bind_calls, 1);
     EXPECT_EQ(state_.sender_finalize_calls, 1);
 

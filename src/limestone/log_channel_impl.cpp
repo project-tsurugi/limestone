@@ -10,8 +10,10 @@
 #include "replication/replication_message_io.h"
 #include "rdma/rdma_replication_message_io.h"
 #include "limestone/api/datastore.h"
+#include "limestone/api/log_channel.h"
 #include "limestone/logging.h"
 #include "limestone_exception_helper.h"
+#include "log_entry.h"
 #include "logging_helper.h"
 
 namespace limestone::api {
@@ -25,6 +27,50 @@ log_channel_impl::log_channel_impl()
     : rdma_serializer_io_(std::string{}) {
 }
 log_channel_impl::~log_channel_impl() = default;
+
+void log_channel_impl::set_log_channel(log_channel& channel) noexcept {
+    channel_ = &channel;
+}
+
+void log_channel_impl::begin_session_at(epoch_id_type epoch) {
+    try {
+        auto& channel = *channel_;
+        channel.current_epoch_id_.store(epoch);
+        TRACE_START << "current_epoch_id_=" << epoch;
+
+        auto log_file = channel.file_path();
+        channel.strm_ = fopen(log_file.c_str(), "a");  // NOLINT(*-owning-memory)
+        if (!channel.strm_) {
+            LOG_AND_THROW_IO_EXCEPTION("cannot make file on " + channel.location_.string(), errno);
+        }
+        setvbuf(channel.strm_, nullptr, _IOFBF, 128L * 1024L);  // NOLINT, NB. glibc may ignore size when _IOFBF and buffer=NULL
+        channel.register_session_file(log_file);
+        log_entry::begin_session(channel.strm_, epoch);
+        send_replica_message(static_cast<uint64_t>(epoch), [](replication::message_log_entries &msg) {
+            msg.set_session_begin_flag(true);
+        });
+        TRACE_END;
+    } catch (...) {
+        TRACE_ABORT;
+        HANDLE_EXCEPTION_AND_ABORT();
+    }
+}
+
+void log_channel_impl::end_session_at(epoch_id_type epoch) {
+    try {
+        auto session_epoch = channel_->current_epoch_id_.load();
+        if (session_epoch == UINT64_MAX) {
+            LOG_AND_THROW_EXCEPTION("session end received while no session is open on this channel");
+        }
+        if (session_epoch != epoch) {
+            LOG_AND_THROW_EXCEPTION("session end epoch mismatch: the message carries "
+                + std::to_string(epoch) + " but the session was begun at " + std::to_string(session_epoch));
+        }
+        channel_->end_session();
+    } catch (...) {
+        HANDLE_EXCEPTION_AND_ABORT();
+    }
+}
 
 std::string_view log_channel_impl::to_string_view(replica_mode mode) noexcept {
     switch (mode) {

@@ -26,6 +26,7 @@
 #include <boost/filesystem.hpp>
 
 #include "limestone/api/blob_id_type.h"
+#include "limestone/api/epoch_id_type.h"
 #include "limestone/api/storage_id_type.h"
 #include "limestone/api/write_version_type.h"
 #include "limestone/status.h"
@@ -36,6 +37,7 @@
 namespace limestone::api {
 
 class datastore;
+class log_channel;
 
 class log_channel_impl {
 public:
@@ -130,6 +132,34 @@ public:
     void set_datastore(datastore& ds) noexcept;
 
     /**
+     * @brief Sets the owning log_channel; called once from the log_channel constructor.
+     * @param channel Reference to the owning log_channel.
+     */
+    void set_log_channel(log_channel& channel) noexcept;
+
+    /**
+     * @brief Joins a persistence session for the given epoch on the owning channel.
+     * @param epoch the epoch the session belongs to
+     * @attention not thread-safe. Unlike log_channel::begin_session(), this does not
+     *            synchronize with datastore::switch_epoch(); the caller must guarantee
+     *            the session's epoch. On a replica this is the epoch carried by the
+     *            replicated message.
+     * @note On I/O error this logs the error and aborts the process, matching
+     *       log_channel::begin_session().
+     */
+    void begin_session_at(epoch_id_type epoch);
+
+    /**
+     * @brief Ends the session on the owning channel after verifying the given epoch.
+     * @param epoch the session's epoch carried by the replicated message
+     * @attention not thread-safe.
+     * @note When no session is open or the given epoch differs from the epoch the
+     *       session was begun at, this logs the error and aborts the process,
+     *       matching begin_session_at().
+     */
+    void end_session_at(epoch_id_type epoch);
+
+    /**
      * @brief Checks whether RDMA send stream is available.
      * @return true if RDMA stream is set.
      */
@@ -158,6 +188,7 @@ private:
     std::unique_ptr<replication::rdma_send_stream_base> rdma_send_stream_;
     replication::replication_message_io rdma_serializer_io_;
     datastore* datastore_{nullptr};
+    log_channel* channel_{nullptr};
     std::unique_ptr<boost::asio::thread_pool> ack_thread_pool_;
     std::once_flag ack_thread_pool_once_;
     mutable std::mutex mtx_replica_connector_;

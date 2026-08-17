@@ -229,73 +229,14 @@ protected:
     static constexpr char const* handshake_timeout_arg = "--handshake-timeout=2000";
 };
 
-TEST_F(rdma_establish_session_test, establish_succeeds_without_log_channels) {
-    ASSERT_NO_FATAL_FAILURE(start_daemons());
-
-    // No ASSERT is allowed between here and the join below: a fatal assertion would
-    // return with the thread still joinable and std::terminate the whole binary.
-    stub_results stub{};
-    auto acceptor_thread = spawn_acceptor_stub(stub);
-
-    bool const seated = wait_acceptor_seated();
+TEST_F(rdma_establish_session_test, establish_fails_without_log_channels) {
+    // A channel count of zero is rejected before the handshake starts, so no
+    // daemon is involved.
     datastore_impl impl{};
-    bool established = false;
-    if (seated) {
-        established = impl.establish_rdma_session();
-    }
-    if (!seated || !established) {
-        unblock_stub();
-    }
-    acceptor_thread.join();
-
-    ASSERT_TRUE(seated) << "acceptor registration did not reach the server daemon";
-    ASSERT_TRUE(established);
-    ASSERT_TRUE(stub.start.success) << stub.start.error_message;
-    ASSERT_TRUE(stub.response.success) << stub.response.error_message;
-    ASSERT_TRUE(stub.finalize.success) << stub.finalize.error_message;
-    ASSERT_TRUE(stub.complete.success) << stub.complete.error_message;
-
-    auto const start = decode_start_payload(stub.start.payload);
-    ASSERT_TRUE(start.has_value()) << "stub received a malformed start payload";
-    EXPECT_EQ(start->protocol_version, replication_protocol_version);
-    EXPECT_TRUE(start->configuration_id.empty());
-    EXPECT_EQ(start->epoch_number, 0U);
-    EXPECT_EQ(start->slot_count, slot_count);
-    EXPECT_EQ(start->channel_count, 0U);
-    EXPECT_EQ(start->control_channel_id, 0U);
-    EXPECT_TRUE(stub.finalize.payload.empty());
-
-    EXPECT_NE(impl.get_rdma_control_send_stream(), nullptr);
-    EXPECT_TRUE(impl.has_replica());
-
-    // Group commit flow over the established session. Verified here rather than in a
-    // separate test because every establishment costs vendor-mock endpoint slots
-    // (pid-keyed, max 64 per shm epoch, never freed) via the two daemon processes.
-    // Swap the real control channel send stream for a capturing fake so that the
-    // serialized bytes can be inspected without a replica-side receiver.
-    auto stream = std::make_unique<capturing_control_send_stream>();
-    auto* captured = stream.get();
-    impl.set_rdma_control_send_stream_for_test(std::move(stream));
-
-    EXPECT_TRUE(impl.propagate_group_commit(42U));
-    ASSERT_EQ(captured->submitted_.size(), 1U);
-    std::string const payload(captured->submitted_[0].begin(), captured->submitted_[0].end());
-    limestone::replication::replication_message_io io{payload};
-    auto message = limestone::replication::replication_message::receive(io);
-    ASSERT_EQ(message->get_message_type_id(),
-        limestone::replication::message_type_id::GROUP_COMMIT);
-    auto* group_commit =
-        dynamic_cast<limestone::replication::message_group_commit*>(message.get());
-    ASSERT_NE(group_commit, nullptr);
-    EXPECT_EQ(group_commit->epoch_number(), 42U);
-
-    // The ACK wait maps onto flush(): not called by propagate, called once by wait.
-    EXPECT_EQ(captured->flush_count_, 0U);
-    impl.wait_for_propagated_group_commit_ack();
-    EXPECT_EQ(captured->flush_count_, 1U);
-
-    EXPECT_TRUE(impl.shutdown_rdma_sender());
-    EXPECT_TRUE(impl.shutdown_rdma_ack_receiver());
+    EXPECT_FALSE(impl.establish_rdma_session());
+    EXPECT_EQ(impl.get_rdma_sender(), nullptr);
+    EXPECT_EQ(impl.get_rdma_control_send_stream(), nullptr);
+    EXPECT_FALSE(impl.has_replica());
 }
 
 TEST_F(rdma_establish_session_test, ready_establishes_session_with_log_channels) {
@@ -337,6 +278,32 @@ TEST_F(rdma_establish_session_test, ready_establishes_session_with_log_channels)
     EXPECT_TRUE(impl->has_replica());
     EXPECT_TRUE(channel0.get_impl()->has_rdma_send_stream());
     EXPECT_TRUE(channel1.get_impl()->has_rdma_send_stream());
+
+    // Group commit flow over the established session. Verified here rather than in a
+    // separate test because every establishment costs vendor-mock endpoint slots
+    // (pid-keyed, max 64 per shm epoch, never freed) via the two daemon processes.
+    // Swap the real control channel send stream for a capturing fake so that the
+    // serialized bytes can be inspected without a replica-side receiver.
+    auto stream = std::make_unique<capturing_control_send_stream>();
+    auto* captured = stream.get();
+    impl->set_rdma_control_send_stream_for_test(std::move(stream));
+
+    EXPECT_TRUE(impl->propagate_group_commit(42U));
+    ASSERT_EQ(captured->submitted_.size(), 1U);
+    std::string const payload(captured->submitted_[0].begin(), captured->submitted_[0].end());
+    limestone::replication::replication_message_io io{payload};
+    auto message = limestone::replication::replication_message::receive(io);
+    ASSERT_EQ(message->get_message_type_id(),
+        limestone::replication::message_type_id::GROUP_COMMIT);
+    auto* group_commit =
+        dynamic_cast<limestone::replication::message_group_commit*>(message.get());
+    ASSERT_NE(group_commit, nullptr);
+    EXPECT_EQ(group_commit->epoch_number(), 42U);
+
+    // The ACK wait maps onto flush(): not called by propagate, called once by wait.
+    EXPECT_EQ(captured->flush_count_, 0U);
+    impl->wait_for_propagated_group_commit_ack();
+    EXPECT_EQ(captured->flush_count_, 1U);
 
     ds->shutdown().wait();
 }

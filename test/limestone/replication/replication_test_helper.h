@@ -1,8 +1,12 @@
 #pragma once
 
 #include <cstdint>
+#include <optional>
+#include <ostream>
+#include <string>
 #include <vector>
 #include <netinet/in.h>
+#include <boost/filesystem/path.hpp>
 #include "log_entry.h"
 #include <gtest/gtest.h>
 #include <limestone/api/storage_id_type.h>
@@ -33,5 +37,33 @@ void print_log_entry(const log_entry& entry);
     const std::optional<std::string>& expected_value, const std::optional<epoch_id_type>& expected_epoch_number,
     const std::optional<std::uint64_t>& expected_minor_version, const std::vector<blob_id_type>& expected_blob_ids,
     log_entry::entry_type expected_type);
-   
+
+// A session marker (marker_begin/marker_end) read from a pwal file.
+// read_log_file() cannot observe markers: its dblog_scan consumes them
+// internally as scan context and never hands them to the entry callback.
+struct session_marker {
+    log_entry::entry_type type{};
+    epoch_id_type epoch{};
+
+    friend bool operator==(session_marker const& a, session_marker const& b) {
+        return a.type == b.type && a.epoch == b.epoch;
+    }
+    friend std::ostream& operator<<(std::ostream& os, session_marker const& m) {
+        return os << (m.type == log_entry::entry_type::marker_begin ? "begin"
+                      : m.type == log_entry::entry_type::marker_end ? "end"
+                      : "type#" + std::to_string(static_cast<int>(m.type)))
+                  << "(" << m.epoch << ")";
+    }
+};
+
+// Every log entry in the file in file order, session markers included.
+std::vector<log_entry> read_raw_log_file(boost::filesystem::path const& log_path);
+
+// The (type, epoch) sequence of the session markers in the file, in file order.
+std::vector<session_marker> read_session_markers(boost::filesystem::path const& log_path);
+
+// EXPECTs that the two files hold exactly the same bytes; on mismatch, reports
+// the sizes and the offset of the first differing byte.
+void expect_files_byte_identical(boost::filesystem::path const& expected_path, boost::filesystem::path const& actual_path);
+
 }

@@ -59,9 +59,9 @@ namespace {
 // The session epoch is verified through finished_epoch_id() because
 // current_epoch_id() reverts to UINT64_MAX on end_session(), which is needed
 // to flush the WAL.
-constexpr epoch_id_type session_epoch{5};  // passed to the datastore's switch_epoch()
-constexpr epoch_id_type message_epoch{7};  // carried by the message (never read by the receiver)
-constexpr epoch_id_type entry_epoch{3};    // carried by the entries' write_version
+constexpr epoch_id_type switched_epoch{5};  // passed to the datastore's switch_epoch(); must not leak into the session
+constexpr epoch_id_type message_epoch{7};   // carried by the message; the session joins this epoch
+constexpr epoch_id_type entry_epoch{3};     // carried by the entries' write_version
 
 class testable_receiver : public rdma_log_channel_receiver {
 public:
@@ -186,7 +186,7 @@ rdma_data_event make_rdma_event_from_payload(
 TEST_F(rdma_log_channel_receiver_test, handle_rdma_data_event_applies_entries) {
     auto ctx = make_receiver_with_channel(base_location);
     ASSERT_NE(ctx.receiver, nullptr);
-    ctx.server->get_datastore().switch_epoch(session_epoch);
+    ctx.server->get_datastore().switch_epoch(switched_epoch);
 
     message_log_entries entries(message_epoch);
     entries.set_session_begin_flag(true);
@@ -197,7 +197,7 @@ TEST_F(rdma_log_channel_receiver_test, handle_rdma_data_event_applies_entries) {
     ctx.receiver->handle_rdma_data_event(ev);
 
     auto& channel = ctx.receiver->get_log_channel();
-    EXPECT_EQ(channel.finished_epoch_id(), session_epoch);
+    EXPECT_EQ(channel.finished_epoch_id(), message_epoch);
     auto replica_entries = read_log_file(base_location, "pwal_0000");
     ASSERT_EQ(replica_entries.size(), 1U);
     EXPECT_TRUE(AssertLogEntry(replica_entries[0], 1U, "k", "v", entry_epoch, 0U, {},
@@ -222,7 +222,7 @@ TEST_F(rdma_log_channel_receiver_test, handle_rdma_data_event_payload_size_misma
 TEST_F(rdma_log_channel_receiver_test, handle_rdma_data_event_partial_then_complete_applies_once) {
     auto ctx = make_receiver_with_channel(base_location);
     ASSERT_NE(ctx.receiver, nullptr);
-    ctx.server->get_datastore().switch_epoch(session_epoch);
+    ctx.server->get_datastore().switch_epoch(switched_epoch);
 
     message_log_entries entries(message_epoch);
     entries.set_session_begin_flag(true);
@@ -241,7 +241,7 @@ TEST_F(rdma_log_channel_receiver_test, handle_rdma_data_event_partial_then_compl
 
     ctx.receiver->handle_rdma_data_event(events.second);
 
-    EXPECT_EQ(channel.finished_epoch_id(), session_epoch);
+    EXPECT_EQ(channel.finished_epoch_id(), message_epoch);
     // Verify through the WAL entry count that the message was applied exactly
     // once (0 would mean not applied, 2 would mean applied twice).
     auto replica_entries = read_log_file(base_location, "pwal_0000");
@@ -266,10 +266,30 @@ TEST_F(rdma_log_channel_receiver_test, handle_rdma_data_event_version_mismatch_f
                  "RDMA frame version mismatch");
 }
 
+TEST_F(rdma_log_channel_receiver_test, session_end_epoch_mismatch_fatals) {
+    auto ctx = make_receiver_with_channel(base_location);
+    ASSERT_NE(ctx.receiver, nullptr);
+    ctx.server->get_datastore().switch_epoch(switched_epoch);
+
+    message_log_entries begin(message_epoch);
+    begin.set_session_begin_flag(true);
+    auto begin_ev = make_rdma_event_from_message(begin, 0U);
+    ctx.receiver->handle_rdma_data_event(begin_ev);
+
+    // Every message of a session carries the session's epoch, so an END carrying a
+    // different one is a protocol violation and must not be applied.
+    message_log_entries end(message_epoch + 1);
+    end.set_session_end_flag(true);
+    end.set_flush_flag(true);
+    auto end_ev = make_rdma_event_from_message(end, 1U);
+    EXPECT_DEATH({ ctx.receiver->handle_rdma_data_event(end_ev); },
+                 "session end epoch mismatch");
+}
+
 TEST_F(rdma_log_channel_receiver_test, process_payload_locked_processes_single_message) {
     auto ctx = make_receiver_with_channel(base_location);
     ASSERT_NE(ctx.receiver, nullptr);
-    ctx.server->get_datastore().switch_epoch(session_epoch);
+    ctx.server->get_datastore().switch_epoch(switched_epoch);
 
     message_log_entries entries(message_epoch);
     entries.set_session_begin_flag(true);
@@ -291,7 +311,7 @@ TEST_F(rdma_log_channel_receiver_test, process_payload_locked_processes_single_m
     ctx.receiver->process_payload_locked(aggregated, header);
 
     auto& channel = ctx.receiver->get_log_channel();
-    EXPECT_EQ(channel.finished_epoch_id(), session_epoch);
+    EXPECT_EQ(channel.finished_epoch_id(), message_epoch);
     auto replica_entries = read_log_file(base_location, "pwal_0000");
     ASSERT_EQ(replica_entries.size(), 1U);
     EXPECT_TRUE(AssertLogEntry(replica_entries[0], 1U, "k", "v", entry_epoch, 0U, {},
@@ -303,7 +323,7 @@ TEST_F(rdma_log_channel_receiver_test,
     auto ctx = make_receiver_with_channel(base_location);
     ASSERT_NE(ctx.receiver, nullptr);
 
-    ctx.server->get_datastore().switch_epoch(session_epoch);
+    ctx.server->get_datastore().switch_epoch(switched_epoch);
 
     message_log_entries first(message_epoch);
     first.set_session_begin_flag(true);
@@ -319,7 +339,7 @@ TEST_F(rdma_log_channel_receiver_test,
     ctx.receiver->handle_rdma_data_event(ev2);
 
     auto& channel = ctx.receiver->get_log_channel();
-    EXPECT_EQ(channel.finished_epoch_id(), session_epoch);
+    EXPECT_EQ(channel.finished_epoch_id(), message_epoch);
     auto replica_entries = read_log_file(base_location, "pwal_0000");
     ASSERT_EQ(replica_entries.size(), 2U);
     EXPECT_TRUE(AssertLogEntry(replica_entries[0], 1U, "k1", "v1", entry_epoch, 0U, {},
