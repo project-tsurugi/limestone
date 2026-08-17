@@ -44,6 +44,11 @@ class log_channel_impl;
 class log_channel {
 
 public:
+    /**
+     * @brief destruct the object
+     */
+    virtual ~log_channel() = default;
+
    /**
      * @brief join a persistence session for the current epoch in this channel
      * @attention this function is not thread-safe.

@@ -200,8 +200,6 @@ private:
 
 /**
  * @brief Gives the tests access to log_channel's protected constructor.
- * @note Must stay member-less: instances are destroyed through
- *       unique_ptr<log_channel> and the base destructor is not virtual.
  */
 class test_log_channel : public limestone::api::log_channel {
 public:
