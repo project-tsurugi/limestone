@@ -45,8 +45,9 @@ private:
     // A set of file paths managed by the datastore at the end of this rotation.
     std::set<boost::filesystem::path> rotation_end_files;
 
-    // The epoch ID at the time of the rotation. Any WAL entries with an epoch ID
-    // equal to or greater than this are guaranteed not to be present in the rotated files.
+    // The rotation boundary epoch ID. All WAL entries with an epoch ID less than
+    // or equal to this value are guaranteed to be contained in the rotated files.
+    // Entries with a greater epoch ID may also be present in them.
     epoch_id_type epoch_id_;
 };
 
