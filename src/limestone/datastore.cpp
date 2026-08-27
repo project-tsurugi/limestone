@@ -722,14 +722,15 @@ std::unique_ptr<backup_detail> datastore::begin_backup(backup_type btype) {  // 
                         // "pwal"
                         // pwal files are type:logfile, detached
 
-                        // skip an "inactive" file with the name of active file,
-                        // it will cause some trouble if a file (that has the name of mutable files) is saved as immutable file.
-                        // but, by skip, backup files may be imcomplete.
-                        if (filename.length() == 9) {  // FIXME: too adohoc check
+                        // Skip a file whose name matches the unrotated pwal naming rule: its
+                        // log channel may still open and append to it, so it cannot be saved
+                        // as an immutable backup entry. As a result, the backup may be
+                        // incomplete.
+                        if (internal::is_unrotated_pwal_name(filename)) {
                             boost::system::error_code error;
                             bool result = boost::filesystem::is_empty(ent, error);
                             if (!error && !result) {
-                                LOG_LP(ERROR) << "skip the file with the name like active files: " << filename;
+                                LOG_LP(ERROR) << "skip the file with an unrotated pwal name: " << filename;
                             }
                             continue;
                         }

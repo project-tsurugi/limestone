@@ -35,6 +35,12 @@ void remove_trailing_dir_separators(boost::filesystem::path& p) {
     }
 }
 
+bool is_unrotated_pwal_name(std::string_view filename) noexcept {
+    constexpr std::size_t unrotated_pwal_name_length = 9;  // "pwal_NNNN"
+    return filename.length() == unrotated_pwal_name_length &&
+           filename.rfind(log_channel_prefix, 0) == 0;
+}
+
 boost::filesystem::path make_tmp_dir_next_to(const boost::filesystem::path& target_dir, const char* suffix) {
     auto canonicalpath = boost::filesystem::canonical(target_dir);
     // some versions of boost::filesystem::canonical do not remove trailing directory-separators ('/')

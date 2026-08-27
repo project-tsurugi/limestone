@@ -45,6 +45,15 @@ static constexpr const std::string_view tmp_epoch_file_name = ".epoch.tmp";
 static constexpr const std::string_view log_channel_prefix = "pwal_";
 
 /**
+ * @brief tells whether the file name matches the naming rule of a pre-rotation
+ *        (unrotated) pwal (`pwal_NNNN`, 9 characters)
+ * @note this check is dedicated to pwal files; epoch files etc. are out of scope
+ * @param filename the file name to check (must not contain a directory part)
+ * @return true if the name matches
+ */
+bool is_unrotated_pwal_name(std::string_view filename) noexcept;
+
+/**
  * @brief The maximum number of entries allowed in an epoch file.
  *
  * This constant defines the upper limit for the number of entries that can be stored

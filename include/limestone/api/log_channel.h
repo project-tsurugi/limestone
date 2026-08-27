@@ -220,7 +220,6 @@ protected: // Protected to allow testing with derived classes
     log_channel(boost::filesystem::path location, std::size_t id, datastore& envelope) noexcept;
  
     friend class datastore;
-    friend class rotation_task;
     // The impl is this class's private half (its header is not installed); new
     // implementation goes there instead of growing this public class.
     friend class log_channel_impl;

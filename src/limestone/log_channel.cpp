@@ -242,12 +242,30 @@ boost::filesystem::path log_channel::file_path() const noexcept {
 // DO rotate without condition check.
 //  use this after your check
 std::string log_channel::do_rotate_file(epoch_id_type epoch) {
-    std::stringstream ss;
-    ss << file_.string() << "."
-       << std::setw(14) << std::setfill('0') << envelope_.current_unix_epoch_in_millis()
-       << "." << epoch;
-    std::string new_name = ss.str();
-    boost::filesystem::path new_file = location_ / new_name;
+    // Rename-target collision handling: to avoid overwriting an existing rotated
+    // file on a second rename of the same channel within the same millisecond (or
+    // after a clock rollback), re-fetch the wall clock until the target is free.
+    // The time is re-fetched rather than incremented so that the timestamp part
+    // of the file name always stays the actual wall-clock time.
+    std::string new_name;
+    boost::filesystem::path new_file;
+    while (true) {
+        std::stringstream ss;
+        ss << file_.string() << "."
+           << std::setw(14) << std::setfill('0') << envelope_.current_unix_epoch_in_millis()
+           << "." << epoch;
+        new_name = ss.str();
+        new_file = location_ / new_name;
+        boost::system::error_code exists_ec;
+        bool dest_exists = boost::filesystem::exists(new_file, exists_ec);
+        if (exists_ec && exists_ec != boost::system::errc::no_such_file_or_directory) {
+            LOG_AND_THROW_IO_EXCEPTION("failed to check existence of " + new_file.string(), exists_ec);
+        }
+        if (!dest_exists) {
+            break;
+        }
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
     boost::system::error_code ec;
     boost::filesystem::rename(file_path(), new_file, ec);
     if (ec) {
