@@ -404,18 +404,18 @@ blob_id_type create_compact_pwal_and_get_max_blob_id(compaction_options &options
         LOG_AND_THROW_IO_EXCEPTION("cannot create snapshot file (" + snapshot_file.string() + ")", errno);
     }
     setvbuf(ostrm, nullptr, _IOFBF, 128L * 1024L);  // NOLINT, NB. glibc may ignore size when _IOFBF and buffer=NULL
-    bool rewind = true;  // TODO: change by flag
-    epoch_id_type epoch = rewind ? 0 : max_appeared_epoch;
+    bool write_version_reset = true;  // TODO: change by flag
+    epoch_id_type epoch = write_version_reset ? 0 : max_appeared_epoch;
     log_entry::begin_session(ostrm, epoch);
 
-    auto write_snapshot_entry = [&ostrm, rewind](
+    auto write_snapshot_entry = [&ostrm, write_version_reset](
         log_entry::entry_type entry_type, 
         std::string_view key_sid, 
         std::string_view value_etc, 
                                                         std::string_view blob_ids) {
         switch (entry_type) {
             case log_entry::entry_type::normal_entry:
-                if (rewind) {
+                if (write_version_reset) {
                     static std::string value{};
                     value = value_etc;
                     std::memset(value.data(), 0, 16);
@@ -425,7 +425,7 @@ blob_id_type create_compact_pwal_and_get_max_blob_id(compaction_options &options
                 }
                 break;
             case log_entry::entry_type::normal_with_blob:
-                if (rewind) {
+                if (write_version_reset) {
                     static std::string value{};
                     value = value_etc;
                     std::memset(value.data(), 0, 16);
