@@ -11,6 +11,7 @@
 #include "rdma/rdma_replication_message_io.h"
 #include "limestone/api/datastore.h"
 #include "limestone/api/log_channel.h"
+#include "datastore_impl.h"
 #include "limestone/logging.h"
 #include "limestone_exception_helper.h"
 #include "log_entry.h"
@@ -38,6 +39,10 @@ void log_channel_impl::begin_session_at(epoch_id_type epoch) {
         channel.current_epoch_id_.store(epoch);
         TRACE_START << "current_epoch_id_=" << epoch;
 
+        // Rotation mechanism: consume a requested rotation before the fopen and
+        // raise the session active flag.
+        activate_session_and_consume_rotation_request();
+
         auto log_file = channel.file_path();
         channel.strm_ = fopen(log_file.c_str(), "a");  // NOLINT(*-owning-memory)
         if (!channel.strm_) {
@@ -53,6 +58,61 @@ void log_channel_impl::begin_session_at(epoch_id_type epoch) {
     } catch (...) {
         TRACE_ABORT;
         HANDLE_EXCEPTION_AND_ABORT();
+    }
+}
+
+bool log_channel_impl::is_session_active_locked() const noexcept {
+    return session_active_;
+}
+
+void log_channel_impl::set_rotation_requested_locked() noexcept {
+    rotation_status_ = rotation_status::requested;
+}
+
+void log_channel_impl::clear_rotation_requested_locked() noexcept {
+    rotation_status_ = rotation_status::none;
+}
+
+void log_channel_impl::activate_session_and_consume_rotation_request() {
+    auto& rotation_state = datastore_->get_impl()->get_rotation_state();
+    {
+        std::lock_guard<std::mutex> lock(rotation_state.mutex);
+        if (rotation_status_ == rotation_status::requested) {
+            // Unreachable path in theory: a requested status is consumed by the
+            // previous session's end_session, so it can never survive until
+            // begin_session (defensive handling).
+            LOG_LP(WARNING) << "rotation request is still pending at begin_session; consuming it now: "
+                            << channel_->file_path().string();
+            consume_rotation_request_locked();
+        }
+        session_active_ = true;
+    }
+}
+
+void log_channel_impl::deactivate_session_and_consume_rotation_request() {
+    auto& rotation_state = datastore_->get_impl()->get_rotation_state();
+    {
+        std::lock_guard<std::mutex> lock(rotation_state.mutex);
+        session_active_ = false;
+        if (rotation_status_ == rotation_status::requested) {
+            consume_rotation_request_locked();
+        }
+    }
+}
+
+void log_channel_impl::consume_rotation_request_locked() {
+    std::string renamed = channel_->do_rotate_file();
+    rotation_status_ = rotation_status::none;
+    auto& rotation_state = datastore_->get_impl()->get_rotation_state();
+    // Record the renamed file and notify the completion only when this channel
+    // was a target of the in-flight rotation request (= present in the
+    // rename-waiting set), so that a consumption on the defensive path never
+    // leaks into the request's result.
+    if (rotation_state.pending_channels.erase(channel_) > 0) {
+        rotation_state.renamed_files.push_back(renamed);
+        if (rotation_state.pending_channels.empty()) {
+            rotation_state.pending_cv.notify_all();
+        }
     }
 }
 

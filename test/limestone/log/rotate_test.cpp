@@ -281,10 +281,15 @@ TEST_F(rotate_test, inactive_files_are_also_backed_up) { // NOLINT
         datastore_->switch_epoch(45);
         datastore_->shutdown();
     }
+    // Rotation is rejected on a shut-down datastore, so simulate the server
+    // restart (scenario step d) before taking the backup.
+    regen_datastore();
+    datastore_->ready();
+    datastore_->switch_epoch(46);  // rotation requires epoch_id > 0
 
     // setup done
 
-    std::unique_ptr<backup_detail> bd = run_backup_with_epoch_switch(backup_type::standard,46);
+    std::unique_ptr<backup_detail> bd = run_backup_with_epoch_switch(backup_type::standard,47);
     auto entries = bd->entries();
 
     {  // result check
@@ -336,13 +341,14 @@ TEST_F(rotate_test, inactive_files_are_also_backed_up) { // NOLINT
 
 }
 
-TEST_F(rotate_test, backup_skips_files_with_unrotated_pwal_names) { // NOLINT
+TEST_F(rotate_test, backup_includes_rotated_orphan_pwals) { // NOLINT
     using namespace limestone::api;
-    // Create a pwal with an unrotated name bound to no log channel (an orphan
-    // file): write with 2 channels, then restart with 1 channel, so pwal_0001
-    // becomes an orphan. The current rotation walks the channels, so the orphan
-    // is not renamed and shows up in the backup enumeration with its unrotated
-    // name, hitting the skip check.
+    // Create pwals with unrotated names bound to no log channel (orphan files):
+    // write with 2 channels, then restart with 1 channel, so pwal_0001 becomes
+    // an orphan. The rotation renames orphans too, so they are included in the
+    // backup under their rotated names (the backup is no longer incomplete) and
+    // no unrotated name appears among the entries; the skip check remains as a
+    // defense for files that appear between the rotation and the enumeration.
     {
         log_channel& channel0 = datastore_->create_channel();  // pwal_0000
         log_channel& channel1 = datastore_->create_channel();  // pwal_0001
@@ -373,18 +379,28 @@ TEST_F(rotate_test, backup_skips_files_with_unrotated_pwal_names) { // NOLINT
 
     std::unique_ptr<backup_detail> bd = run_backup_with_epoch_switch(backup_type::standard, 46);
 
-    // The files with unrotated names (the orphans pwal_0001 and pwal_0099) must
-    // not be included in the backup entries, while the rotated pwal_0000 must be.
+    // No unrotated name appears among the entries, and the orphans are included
+    // under their rotated names together with the rotated pwal_0000.
     bool found_rotated_pwal = false;
-    for (const auto& e : bd->entries()) {
+    bool found_rotated_orphan1 = false;
+    bool found_rotated_orphan99 = false;
+    for (auto const& e : bd->entries()) {
         std::string name = e.destination_path().string();
         EXPECT_NE(name, "pwal_0001");
         EXPECT_NE(name, "pwal_0099");
         if (starts_with(name, "pwal_0000.")) {
             found_rotated_pwal = true;
         }
+        if (starts_with(name, "pwal_0001.")) {
+            found_rotated_orphan1 = true;
+        }
+        if (starts_with(name, "pwal_0099.")) {
+            found_rotated_orphan99 = true;
+        }
     }
     EXPECT_TRUE(found_rotated_pwal);
+    EXPECT_TRUE(found_rotated_orphan1);
+    EXPECT_TRUE(found_rotated_orphan99);
 }
 
 TEST_F(rotate_test, rotate_does_not_overwrite_existing_rotated_file) { // NOLINT
@@ -710,9 +726,14 @@ TEST_F(rotate_test, restore_file_set_entries_with_blob) {
         datastore_->switch_epoch(45);
         datastore_->shutdown();
     }
+    // Rotation is rejected on a shut-down datastore, so simulate the server
+    // restart before taking the backup.
+    regen_datastore();
+    datastore_->ready();
+    datastore_->switch_epoch(46);  // rotation requires epoch_id > 0
 
     // Step 3: Perform backup (rotate and backup) using run_backup_with_epoch_switch.
-    std::unique_ptr<backup_detail> bd = run_backup_with_epoch_switch(backup_type::standard, 46);
+    std::unique_ptr<backup_detail> bd = run_backup_with_epoch_switch(backup_type::standard, 47);
     auto backup_entries = bd->entries();
 
     // Step 4: Manually create the expected backup state for validation.

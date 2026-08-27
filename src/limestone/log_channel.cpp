@@ -19,11 +19,9 @@
 #include <limestone/api/log_channel.h>
 #include <limestone/logging.h>
 
-#include <chrono>
 #include <future>
 #include <iomanip>
 #include <sstream>
-#include <thread>
 
 #include "internal.h"
 #include "datastore_impl.h"
@@ -95,6 +93,12 @@ void log_channel::finalize_session_file() {
     if (fclose(strm_) != 0) {  // NOLINT(*-owning-memory)
         LOG_AND_THROW_IO_EXCEPTION("fclose failed", errno);
     }
+
+    // Rotation mechanism: lower the session active flag and consume a requested
+    // rotation (rename) if any. This runs right after the fclose and before the
+    // replica ACK wait, so that the rotation completion never depends on the
+    // replica's response time.
+    impl_->deactivate_session_and_consume_rotation_request();
 }
 
 void log_channel::end_session() {
@@ -242,42 +246,13 @@ boost::filesystem::path log_channel::file_path() const noexcept {
 // DO rotate without condition check.
 //  use this after your check
 std::string log_channel::do_rotate_file(epoch_id_type epoch) {
-    // Rename-target collision handling: to avoid overwriting an existing rotated
-    // file on a second rename of the same channel within the same millisecond (or
-    // after a clock rollback), re-fetch the wall clock until the target is free.
-    // The time is re-fetched rather than incremented so that the timestamp part
-    // of the file name always stays the actual wall-clock time.
-    std::string new_name;
-    boost::filesystem::path new_file;
-    while (true) {
-        std::stringstream ss;
-        ss << file_.string() << "."
-           << std::setw(14) << std::setfill('0') << envelope_.current_unix_epoch_in_millis()
-           << "." << epoch;
-        new_name = ss.str();
-        new_file = location_ / new_name;
-        boost::system::error_code exists_ec;
-        bool dest_exists = boost::filesystem::exists(new_file, exists_ec);
-        if (exists_ec && exists_ec != boost::system::errc::no_such_file_or_directory) {
-            LOG_AND_THROW_IO_EXCEPTION("failed to check existence of " + new_file.string(), exists_ec);
-        }
-        if (!dest_exists) {
-            break;
-        }
-        std::this_thread::sleep_for(std::chrono::milliseconds(1));
-    }
-    boost::system::error_code ec;
-    boost::filesystem::rename(file_path(), new_file, ec);
-    if (ec) {
-        std::string err_msg = "Failed to rename file from " + file_path().string() + " to " + new_file.string() + ". Error: " + ec.message();
-        LOG_AND_THROW_IO_EXCEPTION(err_msg, ec);
-    }
+    boost::filesystem::path new_file = internal::rotate_pwal_file(file_path(), epoch);
     envelope_.add_file(new_file);
 
     registered_ = false;
     envelope_.subtract_file(location_ / file_);
 
-    return new_name;
+    return new_file.filename().string();
 }
 
 

@@ -16,6 +16,12 @@
 
 #include <glog/logging.h>
 #include <limestone/logging.h>
+
+#include <chrono>
+#include <iomanip>
+#include <sstream>
+#include <thread>
+
 #include "logging_helper.h"
 #include "limestone_exception_helper.h"
 #include "internal.h"
@@ -39,6 +45,40 @@ bool is_unrotated_pwal_name(std::string_view filename) noexcept {
     constexpr std::size_t unrotated_pwal_name_length = 9;  // "pwal_NNNN"
     return filename.length() == unrotated_pwal_name_length &&
            filename.rfind(log_channel_prefix, 0) == 0;
+}
+
+boost::filesystem::path rotate_pwal_file(boost::filesystem::path const& file, epoch_id_type epoch) {
+    // Rename-target collision handling: to avoid overwriting an existing rotated
+    // file on a second rename of the same file within the same millisecond (or
+    // after a clock rollback), re-fetch the wall clock until the target is free.
+    // The time is re-fetched rather than incremented so that the timestamp part
+    // of the file name always stays the actual wall-clock time.
+    boost::filesystem::path new_file;
+    while (true) {
+        auto millis = std::chrono::duration_cast<std::chrono::milliseconds>(
+            std::chrono::system_clock::now().time_since_epoch()).count();
+        std::stringstream ss;
+        ss << file.filename().string() << "."
+           << std::setw(14) << std::setfill('0') << millis
+           << "." << epoch;
+        new_file = file.parent_path() / ss.str();
+        boost::system::error_code exists_ec;
+        bool dest_exists = boost::filesystem::exists(new_file, exists_ec);
+        if (exists_ec && exists_ec != boost::system::errc::no_such_file_or_directory) {
+            LOG_AND_THROW_IO_EXCEPTION("failed to check existence of " + new_file.string(), exists_ec);
+        }
+        if (!dest_exists) {
+            break;
+        }
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
+    boost::system::error_code ec;
+    boost::filesystem::rename(file, new_file, ec);
+    if (ec) {
+        std::string err_msg = "Failed to rename file from " + file.string() + " to " + new_file.string() + ". Error: " + ec.message();
+        LOG_AND_THROW_IO_EXCEPTION(err_msg, ec);
+    }
+    return new_file;
 }
 
 boost::filesystem::path make_tmp_dir_next_to(const boost::filesystem::path& target_dir, const char* suffix) {

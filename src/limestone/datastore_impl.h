@@ -20,9 +20,11 @@
 
 #include <atomic>
 #include <array>
+#include <condition_variable>
 #include <memory>
 #include <mutex>
 #include <optional>
+#include <set>
 #include <string>
 #include <sys/types.h>
 #include <cstdint>
@@ -61,6 +63,35 @@ public:
     datastore_impl &operator=(const datastore_impl &) = delete;
     datastore_impl(datastore_impl &&) = delete;
     datastore_impl &operator=(datastore_impl &&) = delete;
+
+    /**
+     * @brief shared state of the WAL rotation mechanism.
+     *        The mutex is the single mutex that guards the session active flag
+     *        and the rotation status of every channel and the rename-waiting
+     *        set. rotate_mutex must not be acquired while holding this mutex.
+     */
+    struct rotation_state {
+        std::mutex mutex;
+        std::condition_variable pending_cv;              ///< notified when the rename-waiting set becomes empty
+        std::set<log_channel*> pending_channels;         ///< channels waiting for their rename
+        std::vector<std::string> renamed_files;          ///< files renamed by channel-side consumption during the current request
+        std::atomic<bool> shutdown_requested{false};     ///< tells the rotation waits to give up on shutdown
+    };
+
+    /// @brief returns the shared state of the WAL rotation mechanism
+    [[nodiscard]] rotation_state& get_rotation_state() noexcept;
+
+    /// @brief sets the test hook fired between the decision and an immediate rename (test-only)
+    void set_on_rotate_before_rename_for_test(std::function<void()> hook) noexcept;
+
+    /// @brief sets the test hook fired just before the completion wait starts (test-only)
+    void set_on_rotate_before_wait_for_test(std::function<void()> hook) noexcept;
+
+    /// @brief test hook fired on the rotation thread between the decision and an immediate rename (inside the single mutex)
+    void on_rotate_before_rename() const;
+
+    /// @brief test hook fired on the rotation thread just before the completion wait starts (inside the single mutex)
+    void on_rotate_before_wait() const;
 
     // Increments the backup counter.
     void increment_backup_counter() noexcept;
@@ -432,6 +463,13 @@ public:
 private:
     [[nodiscard]] limestone::internal::blob_file_resolver& require_blob_file_resolver() noexcept;
     [[nodiscard]] limestone::internal::blob_file_resolver const& require_blob_file_resolver() const noexcept;
+
+    // Shared state of the WAL rotation mechanism.
+    rotation_state rotation_state_;
+
+    // Test hooks of the rotation mechanism (no-op when unset).
+    std::function<void()> on_rotate_before_rename_;
+    std::function<void()> on_rotate_before_wait_;
 
     // Atomic counter for tracking active backup operations.
     std::atomic<int> backup_counter_;

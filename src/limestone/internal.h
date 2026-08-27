@@ -54,6 +54,19 @@ static constexpr const std::string_view log_channel_prefix = "pwal_";
 bool is_unrotated_pwal_name(std::string_view filename) noexcept;
 
 /**
+ * @brief renames the given pwal file to its rotated name
+ *        (`<original name>.<unixtime_millis:14 digits>.<epoch>`), re-fetching
+ *        the wall clock until the target name is free when it already exists
+ * @note concurrent calls on the same file are not allowed; the caller must
+ *       hold the exclusion (the single mutex of the rotation mechanism)
+ * @param file the pwal file to rename
+ * @param epoch the epoch part of the rotated name
+ * @return the path of the renamed file
+ * @throws limestone_io_exception if the rename or the existence check fails
+ */
+boost::filesystem::path rotate_pwal_file(boost::filesystem::path const& file, epoch_id_type epoch);
+
+/**
  * @brief The maximum number of entries allowed in an epoch file.
  *
  * This constant defines the upper limit for the number of entries that can be stored

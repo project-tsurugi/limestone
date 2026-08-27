@@ -34,16 +34,21 @@ using namespace std::literals;
 using namespace limestone::api;
 using namespace limestone::internal;
 
-// Tests for the race between online compaction and a log-channel session that is still
-// in flight when rotate_log_files() renames the pwal files.
+// Tests for the race between online compaction and a log-channel session that is in
+// flight when rotate_log_files() is requested.
 //
-// Such a session keeps appending to the rotated file through its already-open FILE*, and
-// its epoch is necessarily larger than the rotation epoch, so the compaction scan treats
-// its epoch snippet as non-durable. The scan then invalidates the snippet header in place
-// (when the snippet is already visible on disk) and registers the file as a detached pwal,
-// excluding it from every future snapshot. The session nevertheless completes normally and
-// its epoch is reported durable to the upper layer, so the entries written by the session
-// are silently lost on the next restart.
+// With the WAL rotation mechanism (issue #139, design doc 03) in place, the rotation no
+// longer renames a file that an in-flight session keeps open: it waits until the session
+// reaches end_session(), and the rename happens at the session boundary. The rotated file
+// therefore always holds the session's complete snippet, whose epoch is necessarily larger
+// than the rotation boundary epoch.
+//
+// The REMAINING bug (until the compaction redesign of design doc 04 lands) is on the
+// compaction side: the scan treats that boundary-exceeding snippet as non-durable,
+// physically overwrites its marker_begin with marker_invalidated_begin (repair_by_mark)
+// and registers the file as a detached pwal, excluding it from every future snapshot. The
+// session's epoch is nevertheless reported durable to the upper layer, so the entries
+// written by the session are silently lost on the next restart.
 //
 // These tests reproduce that data loss deterministically and verify the traces the bug
 // leaves behind (the invalidated snippet header, the detached-pwal registration and the
@@ -58,12 +63,17 @@ public:
 protected:
     // Runs compact_with_online() on a background thread and executes in_window on this
     // thread while the compaction thread is stopped inside rotate_log_files(), after it
-    // has read the rotation epoch but before it waits for epoch_id_informed_ and renames
-    // the pwal files. switch_epoch(next_epoch) is issued first so that the wait for
+    // has read the rotation epoch but before it waits for epoch_id_informed_ and selects
+    // the rotation targets. switch_epoch(next_epoch) is issued first so that the wait for
     // epoch_id_informed_ can complete; a session started by in_window therefore belongs
     // to next_epoch, which is larger than the rotation epoch.
+    //
+    // The rotation waits until the in-flight session reaches end_session(), so after the
+    // compaction thread is released, after_release must complete the session (typically by
+    // calling end_session()); this helper then waits for the compaction to finish.
     void run_compact_with_inflight_session(epoch_id_type next_epoch,
-                                           std::function<void()> const& in_window) {
+                                           std::function<void()> const& in_window,
+                                           std::function<void()> const& after_release) {
         auto* test_datastore = dynamic_cast<datastore_test*>(datastore_.get());
         ASSERT_NE(test_datastore, nullptr);
 
@@ -95,6 +105,7 @@ protected:
             released = true;
             cv.notify_all();
         }
+        after_release();
         future.get();
         test_datastore->on_rotate_log_files_callback = nullptr;
     }
@@ -147,12 +158,11 @@ protected:
     }
 };
 
-// Route A-2: the in-flight session has written so little that everything, including the
-// begin_session marker, still sits in the stdio buffer when the compaction scan runs. The
-// scan sees an empty file, so it leaves the file content untouched (no repair_by_mark
-// trace appears in this route), but it still registers the file as a detached pwal.
-// end_session() then flushes the complete, valid snippet into a file that no restart will
-// ever read again.
+// Write-side variant 1: the in-flight session has written so little that everything,
+// including the begin_session marker, still sits in the stdio buffer when the rotation is
+// requested; the complete snippet reaches the disk only at end_session(), just before the
+// session-boundary rename. The compaction scan then sees the complete epoch-3 snippet in
+// the rotated file, invalidates its header and registers the file as a detached pwal.
 TEST_F(online_compaction_inflight_session_test, unflushed_inflight_session_detached_and_lost) {
     gen_datastore();
     datastore_->switch_epoch(1);
@@ -164,33 +174,35 @@ TEST_F(online_compaction_inflight_session_test, unflushed_inflight_session_detac
     datastore_->switch_epoch(2);
 
     // Start a session on lc1 inside the rotation window; it belongs to epoch 3, which is
-    // larger than the rotation epoch 2, so the rotation does not wait for it. The entry
-    // stays in the stdio buffer and is not yet visible on disk.
-    run_compact_with_inflight_session(3, [this] {
-        lc1_->begin_session();
-        lc1_->add_entry(1, "k2", "v2", {3, 0});
-    });
+    // larger than the rotation epoch 2. The rotation waits for this session, so the
+    // session is completed (end_session) after the compaction thread is released; the
+    // rename then happens at the session boundary and the compaction proceeds.
+    run_compact_with_inflight_session(3,
+        [this] {
+            lc1_->begin_session();
+            lc1_->add_entry(1, "k2", "v2", {3, 0});
+        },
+        [this] { lc1_->end_session(); });
 
-    // The session completes normally and its snippet is flushed and fsynced into the
-    // rotated file; epoch 3 is then reported durable to the upper layer.
-    lc1_->end_session();
+    // Epoch 3 is reported durable to the upper layer.
     datastore_->switch_epoch(4);
     EXPECT_GE(datastore_->last_epoch(), 3);
 
-    // Direct check of the WAL file: the rotated pwal holds the complete, valid snippet of
-    // epoch 3. Nothing in the file itself hints that it has been discarded.
+    // BUG TRACE: the rotated pwal holds the complete snippet of epoch 3, but the
+    // compaction scan treated it as non-durable and physically overwrote its marker_begin
+    // with marker_invalidated_begin.
     boost::filesystem::path rotated = find_rotated_pwal("pwal_0001.");
     ASSERT_FALSE(rotated.empty());
     std::vector<log_entry> entries = read_raw_entries(rotated);
     ASSERT_EQ(entries.size(), 3);
-    EXPECT_EQ(entries[0].type(), log_entry::entry_type::marker_begin);
+    EXPECT_EQ(entries[0].type(), log_entry::entry_type::marker_invalidated_begin);
     EXPECT_EQ(entries[0].epoch_id(), 3);
     EXPECT_EQ(entries[1].type(), log_entry::entry_type::normal_entry);
     EXPECT_TRUE(contains_normal_entry_with_key(entries, "k2"));
     EXPECT_EQ(entries[2].type(), log_entry::entry_type::marker_end);
 
-    // BUG TRACE: the file was registered as a detached pwal while the session was still
-    // in flight, so the durable snippet above is permanently excluded from snapshot input.
+    // BUG TRACE: the file was registered as a detached pwal, so the durable snippet above
+    // is permanently excluded from snapshot input.
     compaction_catalog catalog = compaction_catalog::from_catalog_file(location);
     EXPECT_EQ(catalog.get_detached_pwals().count(rotated.filename().string()), 1);
 
@@ -202,11 +214,11 @@ TEST_F(online_compaction_inflight_session_test, unflushed_inflight_session_detac
     EXPECT_EQ(kv_list.size(), 1);
 }
 
-// Route A-1: the in-flight session has written more than the 128KiB stdio buffer, so the
-// begin_session marker and a prefix of the entries are visible on disk when the compaction
-// scan runs. The scan treats the snippet as non-durable and physically overwrites its
-// marker_begin with marker_invalidated_begin (repair_by_mark) while the session is still
-// appending to the same file, and additionally registers the file as a detached pwal.
+// Write-side variant 2: the in-flight session has written more than the 128KiB stdio
+// buffer, so the begin_session marker and a prefix of the entries are already visible on
+// disk when the rotation is requested. The rename still happens only at the session
+// boundary, so the compaction scan sees the same complete epoch-3 snippet as variant 1 and
+// leaves the same traces.
 TEST_F(online_compaction_inflight_session_test, partially_flushed_inflight_session_marked_invalid_and_lost) {
     constexpr int filler_count = 256;  // 256 entries x 1KiB values > 128KiB stdio buffer
 
@@ -219,18 +231,19 @@ TEST_F(online_compaction_inflight_session_test, partially_flushed_inflight_sessi
     datastore_->switch_epoch(2);
 
     std::string const large_value(1024, 'x');
-    run_compact_with_inflight_session(3, [&] {
-        lc1_->begin_session();
-        lc1_->add_entry(1, "k2", "v2", {3, 0});
-        for (int i = 0; i < filler_count; i++) {
-            std::ostringstream key;
-            key << "fill_" << std::setw(4) << std::setfill('0') << i;
-            lc1_->add_entry(1, key.str(), large_value, {3, static_cast<std::uint64_t>(i) + 1});
-        }
-    });
+    run_compact_with_inflight_session(3,
+        [&] {
+            lc1_->begin_session();
+            lc1_->add_entry(1, "k2", "v2", {3, 0});
+            for (int i = 0; i < filler_count; i++) {
+                std::ostringstream key;
+                key << "fill_" << std::setw(4) << std::setfill('0') << i;
+                lc1_->add_entry(1, key.str(), large_value, {3, static_cast<std::uint64_t>(i) + 1});
+            }
+        },
+        [this] { lc1_->end_session(); });
 
-    // The session completes normally; epoch 3 is reported durable to the upper layer.
-    lc1_->end_session();
+    // Epoch 3 is reported durable to the upper layer.
     datastore_->switch_epoch(4);
     EXPECT_GE(datastore_->last_epoch(), 3);
 
