@@ -1156,7 +1156,12 @@ void datastore::compact_with_online() {
     // max_blob_id here reflects only the freshly compacted files.
     compacted_file_info compacted_file_info{compacted_file.filename().string(), 1};
     detached_pwals.erase(compacted_file.filename().string());
-    compaction_catalog_->update_catalog_file(result.get_epoch_id(), max_blob_id, {compacted_file_info}, detached_pwals);
+    // Incrementing the generation number and recording a carry file are introduced
+    // together with the switch of the compaction outputs to generation-suffixed names.
+    // Until then, keep the current values so that the behavior does not change.
+    compaction_catalog_->update_catalog_file(result.get_epoch_id(), max_blob_id,
+                                             compaction_catalog_->get_generation(),
+                                             {compacted_file_info}, std::nullopt, detached_pwals);
     add_file(compacted_file);
 
     // remove pwal_0000.compacted.prev

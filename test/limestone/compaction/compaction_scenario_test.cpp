@@ -86,7 +86,7 @@ TEST_P(compaction_scenario_test, no_pwals) {
 
     // A blob id high-water mark left by earlier allocations must survive a compaction that has
     // nothing to compact: lowering it would let blob ids be reused.
-    catalog.update_catalog_file(0, 123, {}, {});
+    catalog.update_catalog_file(0, 123, 0, {}, std::nullopt, {});
     catalog = compaction_catalog::from_catalog_file(location);
     ASSERT_EQ(catalog.get_max_blob_id(), 123);
 
@@ -466,7 +466,7 @@ TEST_P(compaction_scenario_test, blob_semantics) {
 
     // Simulate a high-water mark left by earlier blob allocations. A compaction must never
     // lower it, otherwise blob ids would be reused.
-    catalog.update_catalog_file(0, 123, {}, {});
+    catalog.update_catalog_file(0, 123, 0, {}, std::nullopt, {});
     catalog = compaction_catalog::from_catalog_file(location);
     EXPECT_EQ(catalog.get_max_blob_id(), 123);
 
@@ -785,8 +785,8 @@ TEST_P(compaction_scenario_test, compaction_without_new_pwals_keeps_compacted_fi
         // files actually present. Load the catalog from its file: a default-constructed one would
         // reset the epoch and blob id high-water marks.
         compaction_catalog catalog = compaction_catalog::from_catalog_file(location);
-        catalog.update_catalog_file(catalog.get_max_epoch_id(), catalog.get_max_blob_id(),
-                                    {compacted_file_info{compacted_filename, 1}}, {});
+        catalog.update_catalog_file(catalog.get_max_epoch_id(), catalog.get_max_blob_id(), catalog.get_generation(),
+                                    {compacted_file_info{compacted_filename, 1}}, std::nullopt, {});
     }
     ASSERT_TRUE(boost::filesystem::exists(boost::filesystem::path(location) / compacted_filename));
 

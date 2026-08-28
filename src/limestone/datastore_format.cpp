@@ -58,7 +58,7 @@ void ensure_compaction_catalog(const boost::filesystem::path& logdir) {
     boost::filesystem::path catalog_path = logdir / compaction_catalog::get_catalog_filename();
     if (!boost::filesystem::exists(catalog_path)) {
         compaction_catalog catalog(logdir);
-        catalog.update_catalog_file(0, 0, {}, {});
+        catalog.update_catalog_file(0, 0, 0, {}, std::nullopt, {});
     }
 }
 

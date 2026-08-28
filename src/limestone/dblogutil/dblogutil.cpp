@@ -258,7 +258,10 @@ void carry_over_and_update_compaction_catalog(boost::filesystem::path const& fro
     if (compacted_file_created) {
         compacted_files.emplace(compaction_catalog::get_compacted_filename(), 1);
     }
-    catalog.update_catalog_file(ld_epoch, max_blob_id, compacted_files, {});
+    // Incrementing the generation number and recording a carry file are introduced
+    // together with the switch of the compaction outputs to generation-suffixed names.
+    // Until then, keep the current values so that the behavior does not change.
+    catalog.update_catalog_file(ld_epoch, max_blob_id, catalog.get_generation(), compacted_files, std::nullopt, {});
 }
 
 /**

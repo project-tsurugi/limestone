@@ -258,7 +258,7 @@ TEST_F(offline_compaction_test, detects_inconsistent_compaction_catalog_at_start
     // compacted file itself remains on disk.
     {
         compaction_catalog catalog{location};
-        catalog.update_catalog_file(0, 0, {}, {});
+        catalog.update_catalog_file(0, 0, 0, {}, std::nullopt, {});
     }
     ASSERT_TRUE(boost::filesystem::exists(compacted_path));
 
@@ -294,7 +294,7 @@ TEST_F(offline_compaction_test, offline_compaction_preserves_blob_id_high_water_
     // Simulate a high-water mark left by earlier blob allocations / online compactions.
     {
         compaction_catalog catalog = compaction_catalog::from_catalog_file(location);
-        catalog.update_catalog_file(catalog.get_max_epoch_id(), 9999, {}, {});
+        catalog.update_catalog_file(catalog.get_max_epoch_id(), 9999, catalog.get_generation(), {}, std::nullopt, {});
     }
 
     run_offline_compaction();
@@ -318,7 +318,7 @@ TEST_F(offline_compaction_test, offline_compaction_recovers_catalog_from_backup)
 
     {
         compaction_catalog catalog = compaction_catalog::from_catalog_file(location);
-        catalog.update_catalog_file(catalog.get_max_epoch_id(), 7777, {}, {});
+        catalog.update_catalog_file(catalog.get_max_epoch_id(), 7777, catalog.get_generation(), {}, std::nullopt, {});
     }
 
     // Leave the valid content only in the backup, then corrupt the main catalog file.
