@@ -86,5 +86,18 @@
      EXPECT_FALSE(options.is_gc_enabled());
  }
  
+ // The boundary epoch is unset by default (= the durable epoch serves as the
+ // boundary) and can be set with the setter.
+ TEST_F(compaction_options_test, boundary_epoch_is_unset_by_default_and_settable) {
+     std::set<std::string> file_names = {"file1"};
+     compaction_options options(from_dir_, to_dir_, num_workers_, file_names);
+ 
+     EXPECT_FALSE(options.get_boundary_epoch().has_value());
+ 
+     options.set_boundary_epoch(42);
+     ASSERT_TRUE(options.get_boundary_epoch().has_value());
+     EXPECT_EQ(options.get_boundary_epoch().value(), 42);
+ }
+ 
  }  // namespace limestone::testing
  

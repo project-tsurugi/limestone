@@ -2677,4 +2677,67 @@ TEST_F(dblog_scan_test, scan_one_pwal_file_repairc_valid_snippet_followed_by_mar
 }
 
 
+// Scan for the compaction path: entries of the snippets beyond the boundary do not
+// reach add_entry, and the input file is not modified (no invalidation).
+TEST_F(dblog_scan_test, scan_for_compaction_ignores_snippets_beyond_boundary) {
+    auto p = boost::filesystem::path(location) / "pwal_0000";
+    // A snippet of epoch 0x100 (one entry) followed by one of epoch 0x101 (one entry).
+    create_file(p, data_marker_end_followed_by_marker_begin);
+    std::string original = read_entire_file(p);
+
+    dblog_scan ds{boost::filesystem::path(location)};
+    ds.set_thread_num(1);
+    std::vector<log_entry> entries;
+    epoch_id_type max_epoch = ds.scan_pwal_files_for_compaction(0x100, [&entries](log_entry& e) {
+        entries.push_back(e);
+    });
+
+    // Only the entry at or below the boundary (0x100) is passed.
+    ASSERT_EQ(entries.size(), 1);
+    EXPECT_EQ(entries[0].type(), log_entry::entry_type::normal_entry);
+
+    // The return value is the max epoch of the whole file, including the snippet
+    // beyond the boundary.
+    EXPECT_EQ(max_epoch, 0x101);
+
+    // The input file is not modified.
+    EXPECT_EQ(read_entire_file(p), original);
+}
+
+// Scan for the compaction path: when the boundary is at or above the max epoch of
+// the file, every entry is passed.
+TEST_F(dblog_scan_test, scan_for_compaction_passes_all_entries_within_boundary) {
+    auto p = boost::filesystem::path(location) / "pwal_0000";
+    create_file(p, data_marker_end_followed_by_marker_begin);
+
+    dblog_scan ds{boost::filesystem::path(location)};
+    ds.set_thread_num(1);
+    std::vector<log_entry> entries;
+    epoch_id_type max_epoch = ds.scan_pwal_files_for_compaction(0x101, [&entries](log_entry& e) {
+        entries.push_back(e);
+    });
+
+    ASSERT_EQ(entries.size(), 2);
+    EXPECT_EQ(max_epoch, 0x101);
+}
+
+// The scan records the max epoch of each file.
+TEST_F(dblog_scan_test, scan_records_max_epoch_per_file) {
+    auto p1 = boost::filesystem::path(location) / "pwal_0000";
+    auto p2 = boost::filesystem::path(location) / "pwal_0001";
+    create_file(p1, data_marker_end_followed_by_marker_begin);  // max epoch 0x101
+    create_file(p2, data_marker_end_only);                      // max epoch 0x100
+
+    dblog_scan ds{boost::filesystem::path(location)};
+    ds.set_thread_num(1);
+    ds.scan_pwal_files_for_compaction(0x100, [](log_entry&) {});
+
+    const auto& max_epochs = ds.get_max_epoch_per_file();
+    ASSERT_EQ(max_epochs.size(), 2);
+    ASSERT_NE(max_epochs.find(p1), max_epochs.end());
+    ASSERT_NE(max_epochs.find(p2), max_epochs.end());
+    EXPECT_EQ(max_epochs.at(p1), 0x101);
+    EXPECT_EQ(max_epochs.at(p2), 0x100);
+}
+
 }  // namespace limestone::testing

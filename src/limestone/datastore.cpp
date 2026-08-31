@@ -1169,6 +1169,11 @@ void datastore::compact_with_online() {
         }
         return compaction_options{location_, compaction_temp_dir, recover_max_parallelism_, need_compaction_filenames};
     }();
+    // The compaction boundary is the rotation boundary (the epoch of rotation_result).
+    // The durable epoch cannot serve as the boundary here: the inputs are only the
+    // rotated files, so "every entry at or below the boundary is in the inputs" would
+    // not hold for it.
+    options.set_boundary_epoch(result.get_epoch_id());
 
     // create a compacted file
     blob_id_type max_blob_id = create_compact_pwal_and_get_max_blob_id(options);

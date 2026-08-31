@@ -138,8 +138,6 @@ std::pair<epoch_id_type, sorting_context> create_sorted_from_wals(compaction_opt
 #endif
     dblog_scan logscan = file_names.empty() ? dblog_scan{from_dir} : dblog_scan{from_dir, options};
 
-    epoch_id_type ld_epoch = logscan.last_durable_epoch_in_dir();
-
 #if defined SORT_METHOD_PUT_ONLY
     const auto add_entry_to_point = insert_twisted_entry;
     bool works_with_multi_thread = true;
@@ -178,9 +176,26 @@ std::pair<epoch_id_type, sorting_context> create_sorted_from_wals(compaction_opt
         LOG(INFO) << "/:limestone:config:datastore this sort method does not work correctly with multi-thread, so force the number of recover process thread = 1";
         num_worker = 1;
     }
+    // With no boundary epoch given, the boundary is the durable epoch: the inputs are
+    // the whole directory, so "every entry at or below the boundary is in the inputs"
+    // holds for it. It is read outside the try block so that an exception caused by
+    // the epoch file is not flattened into "dblogdir is corrupted" by the catch below.
+    epoch_id_type ld_epoch = 0;
+    if (!options.get_boundary_epoch().has_value()) {
+        ld_epoch = logscan.last_durable_epoch_in_dir();
+    }
     logscan.set_thread_num(num_worker);
     try {
-        epoch_id_type max_appeared_epoch = logscan.scan_pwal_files_throws(ld_epoch, add_entry);
+        epoch_id_type max_appeared_epoch = 0;
+        if (options.get_boundary_epoch().has_value()) {
+            // Online compaction: the boundary is the rotation boundary; the preceding
+            // rotation guarantees that every entry at or below it is in the inputs.
+            // Snippets beyond the boundary are skipped, never invalidated (a separate
+            // pass carries them over).
+            max_appeared_epoch = logscan.scan_pwal_files_for_compaction(options.get_boundary_epoch().value(), add_entry);
+        } else {
+            max_appeared_epoch = logscan.scan_pwal_files_throws(ld_epoch, add_entry);
+        }
         return {max_appeared_epoch, std::move(sctx)};
     } catch (limestone_exception& e) {
         VLOG_LP(log_info) << "failed to scan pwal files: " << e.what();
@@ -404,6 +419,10 @@ blob_id_type create_compact_pwal_and_get_max_blob_id(compaction_options &options
         LOG_AND_THROW_IO_EXCEPTION("cannot create snapshot file (" + snapshot_file.string() + ")", errno);
     }
     setvbuf(ostrm, nullptr, _IOFBF, 128L * 1024L);  // NOLINT, NB. glibc may ignore size when _IOFBF and buffer=NULL
+    // NOTE: the header epoch of the compacted file must not exceed the compaction
+    // boundary (0 is the safest). max_appeared_epoch includes the epochs of the
+    // snippets beyond the boundary, so using it as the header would make the next
+    // scan skip the whole compacted file as a snippet beyond the boundary.
     bool write_version_reset = true;  // TODO: change by flag
     epoch_id_type epoch = write_version_reset ? 0 : max_appeared_epoch;
     log_entry::begin_session(ostrm, epoch);

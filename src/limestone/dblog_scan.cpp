@@ -15,6 +15,8 @@
  */
 
 #include <iomanip>
+#include <map>
+#include <mutex>
 #include <set>
 #include <boost/filesystem.hpp>
 
@@ -139,6 +141,8 @@ epoch_id_type dblog_scan::scan_pwal_files(  // NOLINT(readability-function-cogni
     std::atomic<epoch_id_type> max_appeared_epoch{ld_epoch};
     if (max_parse_error_value) { *max_parse_error_value = dblog_scan::parse_error::failed; }
     std::atomic<dblog_scan::parse_error::code> max_error_value{dblog_scan::parse_error::code::ok};
+    std::map<boost::filesystem::path, epoch_id_type> max_epoch_per_file;
+    std::mutex max_epoch_per_file_mtx;
     auto process_file = [&](const boost::filesystem::path& p) {  // NOLINT(readability-function-cognitive-complexity)
         if (is_wal(p)) {
             parse_error ec;
@@ -199,6 +203,10 @@ epoch_id_type dblog_scan::scan_pwal_files(  // NOLINT(readability-function-cogni
                    && !max_appeared_epoch.compare_exchange_weak(t, max_epoch_of_file)) {
                 /* nop */
             }
+            {
+                std::lock_guard<std::mutex> lock(max_epoch_per_file_mtx);
+                max_epoch_per_file[p] = max_epoch_of_file;
+            }
         }
     };
 
@@ -248,6 +256,7 @@ epoch_id_type dblog_scan::scan_pwal_files(  // NOLINT(readability-function-cogni
     if (ex_ptr) {
         std::rethrow_exception(ex_ptr);
     }
+    max_epoch_per_file_ = std::move(max_epoch_per_file);
     if (max_parse_error_value) { *max_parse_error_value = max_error_value; }
     return max_appeared_epoch;
 }
@@ -260,6 +269,18 @@ epoch_id_type dblog_scan::scan_pwal_files_throws(epoch_id_type ld_epoch, const s
     set_process_at_truncated_epoch_snippet(process_at_truncated::report);
     set_process_at_damaged_epoch_snippet(process_at_damaged::report);
     return scan_pwal_files(ld_epoch, add_entry, log_error_and_throw);
+}
+
+// called from the online compaction path
+// Snippets beyond the boundary are skipped in the ignore mode (files stay unmodified).
+// The parser treats such a snippet as valid = false, so none of its entries reaches
+// add_entry.
+epoch_id_type dblog_scan::scan_pwal_files_for_compaction(epoch_id_type boundary_epoch, const std::function<void(log_entry&)>& add_entry) {
+    set_fail_fast(true);
+    set_process_at_nondurable_epoch_snippet(process_at_nondurable::ignore);
+    set_process_at_truncated_epoch_snippet(process_at_truncated::report);
+    set_process_at_damaged_epoch_snippet(process_at_damaged::report);
+    return scan_pwal_files(boundary_epoch, add_entry, log_error_and_throw);
 }
 
 void dblog_scan::rescan_directory_paths() {

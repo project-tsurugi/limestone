@@ -16,11 +16,13 @@
 
  #pragma once
 
+ #include <optional>
  #include <set>
  #include <string>
  #include <functional> // std::reference_wrapper
  #include <boost/filesystem.hpp>
  #include "blob_file_gc_snapshot.h"
+ #include "limestone/api/epoch_id_type.h"
  #include "limestone/api/write_version_type.h"
  
  namespace limestone::internal {
@@ -103,6 +105,14 @@
      // Returns true if a file set is configured.
      [[nodiscard]] bool has_file_set() const { return has_file_set_; }
 
+     // Sets the compaction boundary epoch. Online compaction passes the rotation
+     // boundary here. When it is not set, the scan uses the last durable epoch in
+     // the directory as the boundary (the offline compaction path).
+     void set_boundary_epoch(limestone::api::epoch_id_type boundary_epoch) { boundary_epoch_ = boundary_epoch; }
+
+     // Getter for boundary_epoch.
+     [[nodiscard]] std::optional<limestone::api::epoch_id_type> get_boundary_epoch() const { return boundary_epoch_; }
+
      // Check if GC is enabled.
      [[nodiscard]] bool is_gc_enabled() const { return static_cast<bool>(gc_snapshot_); }
 
@@ -127,6 +137,9 @@
 
      // Garbage collection settings.
      std::unique_ptr<blob_file_gc_snapshot> gc_snapshot_;
+
+     // Compaction boundary epoch (nullopt = the durable epoch serves as the boundary).
+     std::optional<limestone::api::epoch_id_type> boundary_epoch_{};
  };
 
  }  // namespace limestone::internal
