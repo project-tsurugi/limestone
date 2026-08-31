@@ -278,6 +278,83 @@ TEST_F(offline_compaction_test, detects_inconsistent_compaction_catalog_at_start
     }
 }
 
+// A cursor obtained right after an online compaction commits, without a restart, must
+// read the new compacted file. A cursor opens the compacted file named by the catalog
+// rather than by its presence on disk, so a key that lives only in the compacted file
+// becomes invisible unless the synchronized copy held by the impl is refreshed on
+// commit.
+TEST_F(offline_compaction_test, cursor_after_online_compaction_reads_compacted) {
+    gen_datastore();
+    datastore_->switch_epoch(1);
+    lc0_->begin_session();
+    lc0_->add_entry(1, "compacted_only", "v1", {1, 0});
+    lc0_->end_session();
+    datastore_->switch_epoch(2);
+
+    run_compact_with_epoch_switch(3);
+
+    // After compaction the key lives only in the compacted file; the pwal is detached.
+    ASSERT_TRUE(boost::filesystem::exists(boost::filesystem::path(location) / compacted_filename));
+
+    // Take a snapshot without restarting.
+    std::unique_ptr<limestone::api::snapshot> snapshot = datastore_->get_snapshot();
+    std::unique_ptr<limestone::api::cursor> cursor = snapshot->get_cursor();
+
+    std::vector<std::pair<std::string, std::string>> kv_list;
+    while (cursor->next()) {
+        std::string key;
+        std::string value;
+        cursor->key(key);
+        cursor->value(value);
+        kv_list.emplace_back(key, value);
+    }
+
+    EXPECT_EQ(kv_list.size(), 1);
+    ASSERT_FALSE(kv_list.empty());
+    EXPECT_EQ(kv_list[0].first, "compacted_only");
+    EXPECT_EQ(kv_list[0].second, "v1");
+}
+
+// Startup must fail fast when the catalog records a compacted file that does not exist.
+// A cursor opens the compacted file named by the catalog rather than falling back on its
+// presence on disk, so letting this state through would leave the cursor unable to open
+// the file.
+TEST_F(offline_compaction_test, detects_missing_registered_compacted_file_at_startup) {
+
+    // Produce a sound compacted file and catalog with an online compaction.
+    gen_datastore();
+    datastore_->switch_epoch(1);
+    lc0_->begin_session();
+    lc0_->add_entry(1, "A", "va", {1, 0});
+    lc0_->end_session();
+    datastore_->switch_epoch(2);
+    run_compact_with_epoch_switch(3);
+
+    boost::filesystem::path compacted_path = boost::filesystem::path(location) / compacted_filename;
+    ASSERT_TRUE(boost::filesystem::exists(compacted_path));
+
+    datastore_->shutdown();
+    datastore_ = nullptr;
+
+    // Remove only the compacted file, leaving the catalog record in place.
+    boost::filesystem::remove(compacted_path);
+    {
+        compaction_catalog catalog = compaction_catalog::from_catalog_file(location);
+        ASSERT_EQ(catalog.get_compacted_files().size(), 1);
+    }
+
+    const std::string expected_message_substr = "is registered in the catalog but does not exist";
+    try {
+        gen_datastore();
+        FAIL() << "expected a limestone_exception to be thrown, but nothing was thrown";
+    } catch (const limestone_exception& e) {
+        EXPECT_NE(std::string(e.what()).find(expected_message_substr), std::string::npos)
+            << "unexpected exception message: " << e.what();
+    } catch (const std::exception& e) {
+        FAIL() << "expected a limestone_exception, but a different exception was thrown: " << e.what();
+    }
+}
+
 // Offline compaction must preserve the max_blob_id high-water mark recorded in the
 // existing catalog, even though the freshly computed value (no blobs here) is lower.
 // Lowering it could lead to blob-id reuse.

@@ -189,6 +189,17 @@ public:
     [[nodiscard]] const std::set<std::string> &get_detached_pwals() const;
 
     /**
+     * @brief Gets the name of the current compacted file.
+     *
+     * Returns the first record if more than one is present; that at most one is
+     * recorded is verified when the catalog is loaded.
+     *
+     * @return The compacted file name recorded in the catalog, or std::nullopt if
+     *         there is no record.
+     */
+    [[nodiscard]] std::optional<std::string> get_current_compacted_file_name() const;
+
+    /**
      * @brief Gets the compaction generation number.
      *
      * @return The generation number of the current generation; 0 for old-format

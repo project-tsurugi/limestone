@@ -988,6 +988,35 @@ TEST_F(compaction_catalog_test, old_catalog_without_generation_defaults_to_gener
     EXPECT_EQ(loaded.get_detached_pwals().size(), 2);
 }
 
+// The three branches of get_current_compacted_file_name. It returns the first record
+// when more than one is present because the startup check in datastore guarantees that
+// at most one is recorded.
+TEST_F(compaction_catalog_test, get_current_compacted_file_name_variants) {
+    // No record.
+    {
+        compaction_catalog catalog(test_dir);
+        EXPECT_FALSE(catalog.get_current_compacted_file_name().has_value());
+    }
+
+    // A single record.
+    {
+        compaction_catalog catalog(test_dir);
+        catalog.update_catalog_file(1, 0, 0, {{"pwal_0000.compacted", 1}}, std::nullopt, {});
+        ASSERT_TRUE(catalog.get_current_compacted_file_name().has_value());
+        EXPECT_EQ(catalog.get_current_compacted_file_name().value(), "pwal_0000.compacted");
+    }
+
+    // With more than one record, the first one in set order is returned; no throw.
+    {
+        compaction_catalog catalog(test_dir);
+        catalog.update_catalog_file(1, 0, 0,
+                                    {{"pwal_0000.compacted.1", 1}, {"pwal_0000.compacted.2", 1}},
+                                    std::nullopt, {});
+        ASSERT_TRUE(catalog.get_current_compacted_file_name().has_value());
+        EXPECT_EQ(catalog.get_current_compacted_file_name().value(), "pwal_0000.compacted.1");
+    }
+}
+
 TEST_F(compaction_catalog_test, parse_generation_and_carry_file_entries) {
     // Valid GENERATION line.
     {

@@ -350,6 +350,13 @@ const std::set<std::string>& compaction_catalog::get_detached_pwals() const {
     return detached_pwals_;
 }
 
+std::optional<std::string> compaction_catalog::get_current_compacted_file_name() const {
+    if (compacted_files_.empty()) {
+        return std::nullopt;
+    }
+    return compacted_files_.begin()->get_file_name();
+}
+
 std::uint64_t compaction_catalog::get_generation() const {
     return generation_;
 }

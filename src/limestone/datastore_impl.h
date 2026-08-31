@@ -93,6 +93,12 @@ public:
     /// @brief test hook fired on the rotation thread just before the completion wait starts (inside the single mutex)
     void on_rotate_before_wait() const;
 
+    /// @brief returns the name of the current compacted file; std::nullopt if there is none
+    [[nodiscard]] std::optional<std::string> get_current_compacted_file_name() const;
+
+    /// @brief sets the name of the current compacted file
+    void set_current_compacted_file_name(std::optional<std::string> file_name);
+
     // Increments the backup counter.
     void increment_backup_counter() noexcept;
 
@@ -470,6 +476,13 @@ private:
     // Test hooks of the rotation mechanism (no-op when unset).
     std::function<void()> on_rotate_before_rename_;
     std::function<void()> on_rotate_before_wait_;
+
+    // Synchronized copy of the current compacted file name. The in-memory state of the
+    // compaction catalog is not thread-safe, so only this value, which is read across
+    // threads, is kept as a copy. It is updated after the catalog is loaded at startup
+    // and right after a compaction commits.
+    mutable std::mutex current_compacted_file_name_mutex_;
+    std::optional<std::string> current_compacted_file_name_{};
 
     // Atomic counter for tracking active backup operations.
     std::atomic<int> backup_counter_;

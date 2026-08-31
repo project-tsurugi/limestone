@@ -78,7 +78,7 @@ TEST_F(snapshot_impl_test, get_partitioned_cursors_returns_all_entries) {
     create_log_file("data/snapshot", entries);
 
     // テスト対象：snapshot_impl 経由で partitioned_cursors を取得
-    limestone::internal::snapshot_impl snapshot(location, {});
+    limestone::internal::snapshot_impl snapshot(location, {}, std::nullopt);
     auto cursors = snapshot.get_partitioned_cursors(2);
 
     // 各カーソルから全エントリを収集
@@ -102,7 +102,7 @@ TEST_F(snapshot_impl_test, get_partitioned_cursors_returns_all_entries) {
 }
 
 TEST_F(snapshot_impl_test, get_partitioned_cursors_throws_on_zero_partition) {
-    limestone::internal::snapshot_impl snapshot(location, {});
+    limestone::internal::snapshot_impl snapshot(location, {}, std::nullopt);
     EXPECT_THROW(snapshot.get_partitioned_cursors(0), std::invalid_argument);
 }
 
@@ -113,7 +113,7 @@ TEST_F(snapshot_impl_test, get_partitioned_cursors_throws_on_second_call) {
     };
     create_log_file("data/snapshot", entries);
 
-    limestone::internal::snapshot_impl snapshot(location, {});
+    limestone::internal::snapshot_impl snapshot(location, {}, std::nullopt);
     auto cursors = snapshot.get_partitioned_cursors(1);
 
     // 2回目の呼び出しで例外が投げられることを確認
@@ -121,7 +121,7 @@ TEST_F(snapshot_impl_test, get_partitioned_cursors_throws_on_second_call) {
 }
 
 
-TEST_F(snapshot_impl_test, get_partitioned_cursors_reads_compacted_file_if_exists) {
+TEST_F(snapshot_impl_test, get_partitioned_cursors_reads_compacted_file_when_named) {
     // snapshot 側のエントリ
     create_log_file("data/snapshot", {
         {1, "key2", "value2", {1, 1}},
@@ -135,7 +135,9 @@ TEST_F(snapshot_impl_test, get_partitioned_cursors_reads_compacted_file_if_exist
     EXPECT_TRUE(boost::filesystem::exists(location + std::string("/data/snapshot")));
     EXPECT_TRUE(boost::filesystem::exists(location + std::string("/pwal_0000.compacted")));
 
-    limestone::internal::snapshot_impl snapshot(location, {});
+    // Reading the compacted file is decided by the name passed in, which comes from the
+    // catalog, not by its presence on disk.
+    limestone::internal::snapshot_impl snapshot(location, {}, std::string("pwal_0000.compacted"));
     auto cursors = snapshot.get_partitioned_cursors(2);
 
     std::vector<std::pair<std::string, std::string>> actual;
@@ -156,13 +158,43 @@ TEST_F(snapshot_impl_test, get_partitioned_cursors_reads_compacted_file_if_exist
     EXPECT_EQ(actual_set, expected_set);
 }
 
+// Confirm on the get_partitioned_cursors side the same property as for get_cursor.
+TEST_F(snapshot_impl_test, get_partitioned_cursors_ignores_compacted_when_not_named) {
+    create_log_file("data/snapshot", {
+        {1, "key2", "value2", {1, 1}},
+    });
+
+    create_log_file("pwal_0000.compacted", {
+        {1, "key1", "value1", {1, 0}},
+    });
+    EXPECT_TRUE(boost::filesystem::exists(location + std::string("/pwal_0000.compacted")));
+
+    limestone::internal::snapshot_impl snapshot(location, {}, std::nullopt);
+    auto cursors = snapshot.get_partitioned_cursors(2);
+
+    std::vector<std::pair<std::string, std::string>> actual;
+    for (auto& cursor : cursors) {
+        while (cursor->next()) {
+            std::string key, value;
+            cursor->key(key);
+            cursor->value(value);
+            actual.emplace_back(key, value);
+        }
+    }
+
+    std::set<std::pair<std::string, std::string>> expected = {
+        {"key2", "value2"},
+    };
+    EXPECT_EQ(std::set(actual.begin(), actual.end()), expected);
+}
+
 TEST_F(snapshot_impl_test, get_cursor_returns_entries_from_snapshot_only) {
     create_log_file("data/snapshot", {
         {1, "key1", "value1", {1, 1}},
         {1, "key2", "value2", {1, 2}},
     });
 
-    limestone::internal::snapshot_impl snapshot(location, {});
+    limestone::internal::snapshot_impl snapshot(location, {}, std::nullopt);
     auto cursor = snapshot.get_cursor();
 
     std::vector<std::pair<std::string, std::string>> actual;
@@ -180,7 +212,36 @@ TEST_F(snapshot_impl_test, get_cursor_returns_entries_from_snapshot_only) {
     EXPECT_EQ(std::set(actual.begin(), actual.end()), expected);
 }
 
-TEST_F(snapshot_impl_test, get_cursor_reads_compacted_if_exists) {
+// A compacted file present on disk is not read unless its name is passed in, confirming
+// that there is no implicit fallback on its presence.
+TEST_F(snapshot_impl_test, get_cursor_ignores_compacted_when_not_named) {
+    create_log_file("data/snapshot", {
+        {1, "key2", "value2", {1, 1}},
+    });
+
+    create_log_file("pwal_0000.compacted", {
+        {1, "key1", "value1", {1, 0}},
+    });
+    EXPECT_TRUE(boost::filesystem::exists(location + std::string("/pwal_0000.compacted")));
+
+    limestone::internal::snapshot_impl snapshot(location, {}, std::nullopt);
+    auto cursor = snapshot.get_cursor();
+
+    std::vector<std::pair<std::string, std::string>> actual;
+    while (cursor->next()) {
+        std::string key, value;
+        cursor->key(key);
+        cursor->value(value);
+        actual.emplace_back(key, value);
+    }
+
+    std::set<std::pair<std::string, std::string>> expected = {
+        {"key2", "value2"},
+    };
+    EXPECT_EQ(std::set(actual.begin(), actual.end()), expected);
+}
+
+TEST_F(snapshot_impl_test, get_cursor_reads_compacted_when_named) {
     // snapshot 側
     create_log_file("data/snapshot", {
         {1, "key2", "value2", {1, 1}},
@@ -191,7 +252,7 @@ TEST_F(snapshot_impl_test, get_cursor_reads_compacted_if_exists) {
         {1, "key1", "value1", {1, 0}},
     });
 
-    limestone::internal::snapshot_impl snapshot(location, {});
+    limestone::internal::snapshot_impl snapshot(location, {}, std::string("pwal_0000.compacted"));
     auto cursor = snapshot.get_cursor();
 
     std::vector<std::pair<std::string, std::string>> actual;

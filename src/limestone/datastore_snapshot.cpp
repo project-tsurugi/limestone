@@ -458,6 +458,13 @@ std::set<std::string> assemble_snapshot_input_filenames(
     const boost::filesystem::path& location,
     file_operations& file_ops) {
     std::set<std::string> detached_pwals = compaction_catalog->get_detached_pwals();
+    // The compacted files excluded from the snapshot input are those recorded in the
+    // catalog, not a well-known name; a cursor reads them directly. A compacted file
+    // absent from the catalog is rejected by the startup consistency check.
+    std::set<std::string> compacted_filenames;
+    for (auto const& info : compaction_catalog->get_compacted_files()) {
+        compacted_filenames.insert(info.get_file_name());
+    }
     std::set<std::string> filename_set;
     boost::system::error_code error;
     boost::filesystem::directory_iterator it(location, error);
@@ -473,9 +480,9 @@ std::set<std::string> assemble_snapshot_input_filenames(
         }
         if (boost::filesystem::is_regular_file(it->path())) {
             std::string filename = it->path().filename().string();
-            if (detached_pwals.find(filename) == detached_pwals.end() 
+            if (detached_pwals.find(filename) == detached_pwals.end()
                 && filename != compaction_catalog::get_catalog_filename()
-                && filename != compaction_catalog::get_compacted_filename()) {
+                && compacted_filenames.find(filename) == compacted_filenames.end()) {
                 filename_set.insert(filename);
             }
         }

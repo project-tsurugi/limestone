@@ -176,14 +176,19 @@ datastore::datastore(configuration const& conf) : location_(conf.data_location_)
         compaction_catalog_ = std::make_unique<compaction_catalog>(compaction_catalog::from_catalog_file(location_));
 
         // Verify consistency between the compaction catalog and the WAL files.
-        // The compacted file is loaded at startup based purely on its presence on
-        // disk (see snapshot_impl). If it exists but is not registered in the
-        // catalog, the snapshot would be generated as if no compaction had been
-        // performed, dropping remove entries and resurrecting deleted records
-        // (see tsurugi-issues #1498). Fail fast instead of silently corrupting data.
-        // NOTE: only the single well-known compacted file is checked here. If
-        // multiple compacted files are ever registered, this check must be extended.
+        // A cursor opens the compacted file named by the catalog, and the compacted
+        // file is excluded from the snapshot input by the same catalog record
+        // (see snapshot_impl and assemble_snapshot_input_filenames). Therefore a
+        // compacted file that exists on disk but is not registered in the catalog
+        // is fed to the snapshot input as an ordinary WAL, and remove entries are
+        // not written, resurrecting deleted records (see tsurugi-issues #1498).
+        // Conversely, a file registered in the catalog but missing from disk cannot
+        // be opened by a cursor. Fail fast on either instead of corrupting data
+        // silently.
         {
+            // The compacted file exists on disk but is not registered in the catalog.
+            // NOTE: only the single well-known compacted file is checked here. If
+            // multiple compacted files are ever registered, this check must be extended.
             boost::filesystem::path compacted_file_path = location_ / compaction_catalog::get_compacted_filename();
             // Use the error_code overload so that a genuine filesystem error (permission,
             // broken symlink, I/O error, ...) is funneled into a limestone_exception rather
@@ -214,7 +219,42 @@ datastore::datastore(configuration const& conf) : location_(conf.data_location_)
                     throw limestone_exception(exception_type::initialization_failure, err_msg);
                 }
             }
+
+            // At most one compacted file may be registered.
+            // get_current_compacted_file_name() relies on this check and returns the
+            // first record.
+            if (compaction_catalog_->get_compacted_files().size() > 1) {
+                std::string err_msg = "compaction catalog is inconsistent: multiple compacted files are recorded, log directory: "
+                    + location_.string();
+                LOG(ERROR) << "/:limestone:config:datastore " << err_msg;
+                throw limestone_exception(exception_type::initialization_failure, err_msg);
+            }
+
+            // Every compacted file registered in the catalog must exist on disk.
+            // A cursor opens the compacted file named by the catalog rather than
+            // falling back implicitly on its presence, so a missing file must be
+            // rejected here.
+            for (auto const& info : compaction_catalog_->get_compacted_files()) {
+                boost::filesystem::path recorded_path = location_ / info.get_file_name();
+                boost::system::error_code recorded_exists_error;
+                bool recorded_exists = boost::filesystem::exists(recorded_path, recorded_exists_error);
+                if (recorded_exists_error && recorded_exists_error != boost::system::errc::no_such_file_or_directory) {
+                    std::string err_msg = "failed to check existence of the compacted file '"
+                        + recorded_path.string() + "': " + recorded_exists_error.message();
+                    LOG(ERROR) << "/:limestone:config:datastore " << err_msg;
+                    throw limestone_exception(exception_type::initialization_failure, err_msg);
+                }
+                if (!recorded_exists) {
+                    std::string err_msg = "compaction catalog is inconsistent: the compacted file '"
+                        + info.get_file_name()
+                        + "' is registered in the catalog but does not exist, log directory: " + location_.string();
+                    LOG(ERROR) << "/:limestone:config:datastore " << err_msg;
+                    throw limestone_exception(exception_type::initialization_failure, err_msg);
+                }
+            }
         }
+
+        impl_->set_current_compacted_file_name(compaction_catalog_->get_current_compacted_file_name());
 
         epoch_file_path_ = location_ / std::string(limestone::internal::epoch_file_name);
         tmp_epoch_file_path_ = location_ / std::string(limestone::internal::tmp_epoch_file_name);
@@ -403,7 +443,12 @@ void datastore::ready() {
         blob_file_garbage_collector_ = std::make_unique<blob_file_garbage_collector>(impl_->blob_file_resolver());
         blob_file_garbage_collector_->scan_blob_files(max_blob_id);
 
-        boost::filesystem::path compacted_file = location_ / limestone::internal::compaction_catalog::get_compacted_filename();
+        // Build the compacted path from the catalog record. With no record, pass the
+        // well-known name that the migration rule assigns to generation 0; the startup
+        // consistency check guarantees that no file by that name exists in that case.
+        std::optional<std::string> compacted_file_name = impl_->get_current_compacted_file_name();
+        boost::filesystem::path compacted_file =
+            location_ / compacted_file_name.value_or(compaction_catalog::get_compacted_filename());
         boost::filesystem::path snapshot_file = location_ / std::string(snapshot::subdirectory_name_) / std::string(snapshot::file_name_);
         blob_file_garbage_collector_->scan_snapshot(snapshot_file, compacted_file);
 
@@ -445,12 +490,12 @@ void datastore::ready() {
 
 std::unique_ptr<snapshot> datastore::get_snapshot() const {
     check_after_ready(static_cast<const char*>(__func__));
-    return std::unique_ptr<snapshot>(new snapshot(location_, clear_storage));
+    return std::unique_ptr<snapshot>(new snapshot(location_, clear_storage, impl_->get_current_compacted_file_name()));
 }
 
 std::shared_ptr<snapshot> datastore::shared_snapshot() const {
     check_after_ready(static_cast<const char*>(__func__));
-    return std::shared_ptr<snapshot>(new snapshot(location_, clear_storage));
+    return std::shared_ptr<snapshot>(new snapshot(location_, clear_storage, impl_->get_current_compacted_file_name()));
 }
 
 log_channel& datastore::create_channel() {
@@ -1096,9 +1141,12 @@ void datastore::compact_with_online() {
 
 
     std::set<std::string> need_compaction_filenames = select_files_for_compaction(result.get_rotation_end_files(), detached_pwals);
+    // Skip compaction when the only input is the current compacted file named by the
+    // catalog.
+    std::optional<std::string> current_compacted_file_name = impl_->get_current_compacted_file_name();
     if (need_compaction_filenames.empty() ||
-        (need_compaction_filenames.size() == 1 &&
-         need_compaction_filenames.find(compaction_catalog::get_compacted_filename()) != need_compaction_filenames.end())) {
+        (need_compaction_filenames.size() == 1 && current_compacted_file_name.has_value() &&
+         need_compaction_filenames.find(current_compacted_file_name.value()) != need_compaction_filenames.end())) {
         VLOG_LP(log_debug) << "no files to compact";
         TRACE_END << "return compact_with_online() without compaction";
         return;
@@ -1162,6 +1210,8 @@ void datastore::compact_with_online() {
     compaction_catalog_->update_catalog_file(result.get_epoch_id(), max_blob_id,
                                              compaction_catalog_->get_generation(),
                                              {compacted_file_info}, std::nullopt, detached_pwals);
+    // Refresh the synchronized copy of the compacted file name right after the commit.
+    impl_->set_current_compacted_file_name(compaction_catalog_->get_current_compacted_file_name());
     add_file(compacted_file);
 
     // remove pwal_0000.compacted.prev

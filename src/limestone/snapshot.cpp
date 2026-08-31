@@ -17,7 +17,6 @@
 #include <map>
 #include <glog/logging.h>
 #include <limestone/logging.h>
-#include "compaction_catalog.h"
 #include "logging_helper.h"
 #include "snapshot_impl.h"
 #include "limestone_exception_helper.h"
@@ -26,9 +25,10 @@ namespace limestone::api {  // FIXME fill implementation
 
 using limestone::internal::snapshot_impl;
 
-snapshot::snapshot(boost::filesystem::path location, 
-                   std::map<storage_id_type, write_version_type> clear_storage) noexcept
-    : pimpl(std::make_unique<snapshot_impl>(std::move(location), std::move(clear_storage))) {
+snapshot::snapshot(boost::filesystem::path location,
+                   std::map<storage_id_type, write_version_type> clear_storage,
+                   std::optional<std::string> compacted_file_name) noexcept
+    : pimpl(std::make_unique<snapshot_impl>(std::move(location), std::move(clear_storage), std::move(compacted_file_name))) {
 
 }
 
