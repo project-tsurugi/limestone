@@ -636,6 +636,12 @@ TEST_P(compaction_scenario_test, blob_semantics) {
 // itself, whereas the tglogutil command carries the whole blob directory over untouched and the
 // collection only happens when the datastore is started again on the compacted directory.
 TEST_P(compaction_scenario_test, unreferenced_blob_files) {
+    // issue #144: blob GC at online compaction is disabled until the fundamental fix
+    // of #144, so the online variant, which relies on that GC running, is skipped.
+    // Restore it together with the fix.
+    if (GetParam() == compaction_mode::online) {
+        GTEST_SKIP() << "online blob GC is disabled until issue #144 is resolved";
+    }
     gen_datastore();
     prepare_blob_gc_test_data();
 

@@ -1116,13 +1116,12 @@ void datastore::compact_with_online() {
         boundary_version_copy = available_boundary_version_;
     }
 
-    // check blob file garbage collection runnable
+    // Blob GC at online compaction is disabled: its exemption list is built only from
+    // the scan of the compaction inputs, so it would delete a live blob whose entry
+    // has not appeared in those inputs yet (issue #144). Blob files are collected only
+    // by the GC at startup, until the fundamental fix of #144 re-enables this.
     bool blob_file_gc_runnable = false;
     bool is_active = blob_file_garbage_collector_->is_active();
-    if (boundary_version_copy.get_major() > compaction_catalog_->get_max_epoch_id() && !is_active) {
-        blob_file_gc_runnable = true;
-        blob_file_garbage_collector_->shutdown();
-    }
     VLOG_LP(log_info) << "boundary_version_copy.get_major(): " << boundary_version_copy.get_major()
                             << ", compaction_catalog_->get_max_epoch_id(): " << compaction_catalog_->get_max_epoch_id()
                             << ", blob_file_garbage_collector_->is_active(): " << is_active
