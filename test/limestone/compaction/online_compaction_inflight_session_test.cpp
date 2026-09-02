@@ -43,18 +43,14 @@ using namespace limestone::internal;
 // therefore always holds the session's complete snippet, whose epoch is necessarily larger
 // than the rotation boundary epoch.
 //
-// The REMAINING bug (until the carry output of the compaction redesign lands) is on the
-// compaction side: the scan now skips the boundary-exceeding snippet
-// without touching it (no invalidation), but nothing preserves the skipped snippet yet,
-// and the file is registered as a detached pwal, excluding it from every future snapshot.
-// The session's epoch is nevertheless reported durable to the upper layer, so the entries
-// written by the session are silently lost on the next restart.
+// With the carry output of the compaction redesign in place, the compaction preserves
+// that boundary-exceeding snippet: the scan skips it without touching it (no
+// invalidation), and a separate pass copies its raw bytes into the carry file, which is
+// recorded in the catalog and fed to the snapshot input at the next startup. The source
+// file is registered as a detached pwal only after its content is preserved this way.
 //
-// These tests reproduce that data loss deterministically and verify the traces the bug
-// leaves behind (the untouched snippet header, the detached-pwal registration and the
-// entries missing from the snapshot). The assertions therefore encode the CURRENT BUGGY
-// behavior and pass as long as the bug is present; they must be inverted when the bug is
-// fixed.
+// These tests verify that fix deterministically: the snippet header stays untouched, the
+// carry file holds the snippet, and the entries of the session survive a restart.
 class online_compaction_inflight_session_test : public compaction_test {
 public:
     online_compaction_inflight_session_test()
@@ -162,9 +158,9 @@ protected:
 // including the begin_session marker, still sits in the stdio buffer when the rotation is
 // requested; the complete snippet reaches the disk only at end_session(), just before the
 // session-boundary rename. The compaction scan reads the rotated file with the rotation
-// boundary epoch and skips the complete epoch-3 snippet without touching it, but the file
-// is registered as a detached pwal, so the snippet is excluded from the snapshot input.
-TEST_F(online_compaction_inflight_session_test, unflushed_inflight_session_detached_and_lost) {
+// boundary epoch, skips the complete epoch-3 snippet without touching it, and the carry
+// pass preserves the snippet before the file is registered as a detached pwal.
+TEST_F(online_compaction_inflight_session_test, unflushed_inflight_session_preserved_via_carry) {
     gen_datastore();
     datastore_->switch_epoch(1);
 
@@ -201,17 +197,28 @@ TEST_F(online_compaction_inflight_session_test, unflushed_inflight_session_detac
     EXPECT_TRUE(contains_normal_entry_with_key(entries, "k2"));
     EXPECT_EQ(entries[2].type(), log_entry::entry_type::marker_end);
 
-    // BUG TRACE: the file was registered as a detached pwal, so the durable snippet above
-    // is permanently excluded from snapshot input.
+    // The file is registered as a detached pwal, and the boundary-exceeding snippet is
+    // preserved in the carry file recorded by the catalog.
     compaction_catalog catalog = compaction_catalog::from_catalog_file(location);
     EXPECT_EQ(catalog.get_detached_pwals().count(rotated.filename().string()), 1);
+    ASSERT_TRUE(catalog.get_carry_file().has_value());
+    boost::filesystem::path carry = boost::filesystem::path(location) / catalog.get_carry_file().value();
+    ASSERT_TRUE(boost::filesystem::exists(carry));
+    // The carry file does not enter detached_pwals: it has to be selected as an input
+    // of the next compaction and of the scan at startup.
+    EXPECT_EQ(catalog.get_detached_pwals().count(catalog.get_carry_file().value()), 0);
+    std::vector<log_entry> carry_entries = read_raw_entries(carry);
+    ASSERT_FALSE(carry_entries.empty());
+    EXPECT_EQ(carry_entries[0].type(), log_entry::entry_type::marker_begin);
+    EXPECT_EQ(carry_entries[0].epoch_id(), 3);
+    EXPECT_TRUE(contains_normal_entry_with_key(carry_entries, "k2"));
 
-    // Consequence (indirect check): the entries of the durable epoch 3 are lost after a
-    // restart, although the WAL file still holds them.
+    // The entries of the durable epoch 3 survive a restart: the carry file is part of
+    // the snapshot input.
     std::vector<std::pair<std::string, std::string>> kv_list = restart_datastore_and_read_snapshot();
     EXPECT_TRUE(contains(kv_list, "k1", "v1"));
-    EXPECT_FALSE(contains(kv_list, "k2", "v2"));
-    EXPECT_EQ(kv_list.size(), 1);
+    EXPECT_TRUE(contains(kv_list, "k2", "v2"));
+    EXPECT_EQ(kv_list.size(), 2);
 }
 
 // Write-side variant 2: the in-flight session has written more than the 128KiB stdio
@@ -219,7 +226,7 @@ TEST_F(online_compaction_inflight_session_test, unflushed_inflight_session_detac
 // disk when the rotation is requested. The rename still happens only at the session
 // boundary, so the compaction scan sees the same complete epoch-3 snippet as variant 1 and
 // leaves the same traces.
-TEST_F(online_compaction_inflight_session_test, partially_flushed_inflight_session_detached_and_lost) {
+TEST_F(online_compaction_inflight_session_test, partially_flushed_inflight_session_preserved_via_carry) {
     constexpr int filler_count = 256;  // 256 entries x 1KiB values > 128KiB stdio buffer
 
     gen_datastore();
@@ -258,16 +265,129 @@ TEST_F(online_compaction_inflight_session_test, partially_flushed_inflight_sessi
     EXPECT_TRUE(contains_normal_entry_with_key(entries, "k2"));
     EXPECT_EQ(entries.back().type(), log_entry::entry_type::marker_end);
 
-    // BUG TRACE: the file was also registered as a detached pwal.
+    // The file is registered as a detached pwal, and the snippet is preserved in the
+    // carry file.
     compaction_catalog catalog = compaction_catalog::from_catalog_file(location);
     EXPECT_EQ(catalog.get_detached_pwals().count(rotated.filename().string()), 1);
+    ASSERT_TRUE(catalog.get_carry_file().has_value());
+    ASSERT_TRUE(boost::filesystem::exists(boost::filesystem::path(location) / catalog.get_carry_file().value()));
 
-    // Consequence (indirect check): the entries of the durable epoch 3 are lost after a
-    // restart.
+    // All entries of the durable epoch 3 survive a restart.
     std::vector<std::pair<std::string, std::string>> kv_list = restart_datastore_and_read_snapshot();
     EXPECT_TRUE(contains(kv_list, "k1", "v1"));
-    EXPECT_FALSE(contains(kv_list, "k2", "v2"));
-    EXPECT_EQ(kv_list.size(), 1);
+    EXPECT_TRUE(contains(kv_list, "k2", "v2"));
+    EXPECT_EQ(kv_list.size(), 2 + filler_count);
+}
+
+// The carry file is absorbed by the next compaction: once the rotation boundary has
+// advanced past the carried epoch, its snippets are merged into the new compacted file
+// and no new carry is produced. The old carry file is deleted with the old generation.
+TEST_F(online_compaction_inflight_session_test, carry_is_absorbed_by_the_next_compaction) {
+    gen_datastore();
+    datastore_->switch_epoch(1);
+
+    lc0_->begin_session();
+    lc0_->add_entry(1, "k1", "v1", {1, 0});
+    lc0_->end_session();
+    datastore_->switch_epoch(2);
+
+    run_compact_with_inflight_session(3,
+        [this] {
+            lc1_->begin_session();
+            lc1_->add_entry(1, "k2", "v2", {3, 0});
+        },
+        [this] { lc1_->end_session(); });
+    datastore_->switch_epoch(4);
+
+    compaction_catalog catalog_after_first = compaction_catalog::from_catalog_file(location);
+    ASSERT_TRUE(catalog_after_first.get_carry_file().has_value());
+    std::string first_carry_name = catalog_after_first.get_carry_file().value();
+    std::uint64_t first_generation = catalog_after_first.get_generation();
+
+    // Write more data and compact again; the boundary has advanced past epoch 3, so the
+    // carried snippet is merged into the new compacted file.
+    lc0_->begin_session();
+    lc0_->add_entry(1, "k3", "v3", {4, 0});
+    lc0_->end_session();
+    datastore_->switch_epoch(5);
+    run_compact_with_epoch_switch(6);
+
+    compaction_catalog catalog_after_second = compaction_catalog::from_catalog_file(location);
+    EXPECT_EQ(catalog_after_second.get_generation(), first_generation + 1);
+    EXPECT_FALSE(catalog_after_second.get_carry_file().has_value());
+    EXPECT_FALSE(boost::filesystem::exists(boost::filesystem::path(location) / first_carry_name));
+
+    // All entries, including the carried one, survive a restart.
+    std::vector<std::pair<std::string, std::string>> kv_list = restart_datastore_and_read_snapshot();
+    EXPECT_TRUE(contains(kv_list, "k1", "v1"));
+    EXPECT_TRUE(contains(kv_list, "k2", "v2"));
+    EXPECT_TRUE(contains(kv_list, "k3", "v3"));
+    EXPECT_EQ(kv_list.size(), 3);
+}
+
+// When the snippets beyond the boundary are spread over several channels, the carry
+// file is a single file concatenating the snippets of each source file. This verifies
+// end to end that the scan at startup reads such a concatenated carry file and restores
+// the entries of every channel.
+TEST_F(online_compaction_inflight_session_test, carry_from_multiple_channels_is_read_at_startup) {
+    gen_datastore();
+    datastore_->switch_epoch(1);
+
+    lc0_->begin_session();
+    lc0_->add_entry(1, "k1", "v1", {1, 0});
+    lc0_->end_session();
+    datastore_->switch_epoch(2);
+
+    // Open a session on both lc1 and lc2 inside the rotation window. Both belong to
+    // epoch 3, so a snippet beyond the boundary (epoch 2) arises in two files.
+    run_compact_with_inflight_session(3,
+        [this] {
+            lc1_->begin_session();
+            lc1_->add_entry(1, "k2", "v2", {3, 0});
+            lc2_->begin_session();
+            lc2_->add_entry(1, "k3", "v3", {3, 1});
+        },
+        [this] {
+            lc1_->end_session();
+            lc2_->end_session();
+        });
+
+    datastore_->switch_epoch(4);
+    EXPECT_GE(datastore_->last_epoch(), 3);
+
+    // The carry file is a single file holding the snippets of both channels, so it has
+    // two snippet headers.
+    compaction_catalog catalog = compaction_catalog::from_catalog_file(location);
+    ASSERT_TRUE(catalog.get_carry_file().has_value());
+    boost::filesystem::path carry = boost::filesystem::path(location) / catalog.get_carry_file().value();
+    ASSERT_TRUE(boost::filesystem::exists(carry));
+    std::vector<log_entry> carry_entries = read_raw_entries(carry);
+    EXPECT_TRUE(contains_normal_entry_with_key(carry_entries, "k2"));
+    EXPECT_TRUE(contains_normal_entry_with_key(carry_entries, "k3"));
+    int marker_begin_count = 0;
+    for (log_entry const& e : carry_entries) {
+        if (e.type() == log_entry::entry_type::marker_begin) {
+            EXPECT_EQ(e.epoch_id(), 3);
+            marker_begin_count++;
+        }
+    }
+    EXPECT_EQ(marker_begin_count, 2);
+
+    // The source files of both channels are registered as detached pwals.
+    boost::filesystem::path rotated1 = find_rotated_pwal("pwal_0001.");
+    boost::filesystem::path rotated2 = find_rotated_pwal("pwal_0002.");
+    ASSERT_FALSE(rotated1.empty());
+    ASSERT_FALSE(rotated2.empty());
+    EXPECT_EQ(catalog.get_detached_pwals().count(rotated1.filename().string()), 1);
+    EXPECT_EQ(catalog.get_detached_pwals().count(rotated2.filename().string()), 1);
+
+    // The scan at startup reads the concatenated carry file and the entries of both
+    // channels are restored.
+    std::vector<std::pair<std::string, std::string>> kv_list = restart_datastore_and_read_snapshot();
+    EXPECT_TRUE(contains(kv_list, "k1", "v1"));
+    EXPECT_TRUE(contains(kv_list, "k2", "v2"));
+    EXPECT_TRUE(contains(kv_list, "k3", "v3"));
+    EXPECT_EQ(kv_list.size(), 3);
 }
 
 } // namespace limestone::testing

@@ -61,7 +61,12 @@ public:
     const char* location = "/tmp/compaction_test";
     const boost::filesystem::path manifest_path = boost::filesystem::path(location) / std::string(limestone::internal::manifest::file_name);
     const boost::filesystem::path compaction_catalog_path = boost::filesystem::path(location) / "compaction_catalog";
-    const std::string compacted_filename = compaction_catalog::get_compacted_filename();
+    // The compacted file name of the current generation as recorded by the catalog
+    // (an empty string when there is no record).
+    [[nodiscard]] std::string compacted_filename() const {
+        compaction_catalog catalog = compaction_catalog::from_catalog_file(boost::filesystem::path(location));
+        return catalog.get_current_compacted_file_name().value_or("");
+    }
 
     void SetUp() {
         if (boost::filesystem::exists(location)) {

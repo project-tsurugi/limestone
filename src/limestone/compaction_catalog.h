@@ -244,11 +244,21 @@ public:
     [[nodiscard]] static inline std::string get_compacted_filename() { return COMPACTED_FILENAME; }
 
     /**
-     * @brief Retrieves the filename of the compacted file's backup.
+     * @brief Returns the compacted file name of the given generation.
      *
-     * @return A string containing the filename of the compacted file's backup.
+     * @param generation The generation number.
+     * @return The unnamed form (no suffix) for generation 0 by the migration rule,
+     *         otherwise the name suffixed with the generation number.
      */
-    [[nodiscard]] static inline std::string get_compacted_backup_filename() { return COMPACTED_BACKUP_FILENAME; }
+    [[nodiscard]] static std::string get_compacted_filename_for_generation(std::uint64_t generation);
+
+    /**
+     * @brief Returns the carry file name of the given generation.
+     *
+     * @param generation The generation number.
+     * @return The carry file name suffixed with the generation number.
+     */
+    [[nodiscard]] static std::string get_carry_filename_for_generation(std::uint64_t generation);
 
 private:
     // Constants
@@ -263,8 +273,8 @@ private:
     static constexpr const char *GENERATION_KEY = "GENERATION";                                   ///< Key for the generation number (absence means generation 0, for old-format compatibility)
     static constexpr const char *CARRY_FILE_KEY = "CARRY_FILE";                                   ///< Key for the carry file name (absence means no carry)
     static constexpr const char *COMPACTION_TEMP_DIRNAME = "compaction_temp";                     ///< Name of the temporary directory for compaction
-    static constexpr const char *COMPACTED_FILENAME = "pwal_0000.compacted";                      ///< Prefix for temporary compaction files
-    static constexpr const char *COMPACTED_BACKUP_FILENAME = "pwal_0000.compacted.prev";          ///< Extension for temporary compaction files
+    static constexpr const char *COMPACTED_FILENAME = "pwal_0000.compacted";                      ///< Base name of the compacted file (generation 0 uses it as-is)
+    static constexpr const char *CARRY_FILENAME_BASE = "pwal_0000.carry";                         ///< Base name of the carry file
 
     // Member variables
     std::set<compacted_file_info> compacted_files_{};  ///< Set of compacted files

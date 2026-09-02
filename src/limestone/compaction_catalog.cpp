@@ -145,7 +145,7 @@ void compaction_catalog::load_catalog_file(const boost::filesystem::path& path) 
 
 
 // Helper method to parse a catalog entry
-void compaction_catalog::parse_catalog_entry(const std::string& line, bool& max_epoch_id_found) {
+void compaction_catalog::parse_catalog_entry(const std::string& line, bool& max_epoch_id_found) {  // NOLINT(readability-function-cognitive-complexity)
     std::istringstream iss(line);
     std::string type;
     if (!(iss >> type)) {
@@ -355,6 +355,18 @@ std::optional<std::string> compaction_catalog::get_current_compacted_file_name()
         return std::nullopt;
     }
     return compacted_files_.begin()->get_file_name();
+}
+
+std::string compaction_catalog::get_compacted_filename_for_generation(std::uint64_t generation) {
+    if (generation == 0) {
+        // Migration rule: generation 0 is the unnamed file of an existing deployment
+        return COMPACTED_FILENAME;
+    }
+    return std::string(COMPACTED_FILENAME) + "." + std::to_string(generation);
+}
+
+std::string compaction_catalog::get_carry_filename_for_generation(std::uint64_t generation) {
+    return std::string(CARRY_FILENAME_BASE) + "." + std::to_string(generation);
 }
 
 std::uint64_t compaction_catalog::get_generation() const {

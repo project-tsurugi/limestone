@@ -61,18 +61,6 @@ std::set<std::string> select_files_for_compaction(const std::set<boost::filesyst
 void ensure_directory_exists(const boost::filesystem::path& dir);
 
 /**
- * @brief Handles an existing compacted file by renaming it if necessary.
- * 
- * This function checks for the existence of a compacted file in a specified location. If a compacted
- * file already exists and a backup file does not, the function renames the compacted file to a backup
- * name. If both files exist, it logs an error and throws an exception.
- * 
- * @param location The directory path where the compacted file is located.
- * @throws limestone_exception if both the compacted file and backup file already exist.
- */
-void handle_existing_compacted_file(const boost::filesystem::path& location);
-
-/**
  * @brief Retrieves a list of all regular files in a specified directory.
  * 
  * This function iterates over all entries in a given directory and returns a set containing

@@ -233,9 +233,19 @@ datastore::datastore(configuration const& conf) : location_(conf.data_location_)
             // Every compacted file registered in the catalog must exist on disk.
             // A cursor opens the compacted file named by the catalog rather than
             // falling back implicitly on its presence, so a missing file must be
-            // rejected here.
+            // rejected here. The carry file recorded by the catalog is verified to
+            // exist in the same way: it is part of the snapshot input at startup, so a
+            // missing carry would silently lose the snippets beyond the boundary.
+            std::vector<std::string> recorded_files;
             for (auto const& info : compaction_catalog_->get_compacted_files()) {
-                boost::filesystem::path recorded_path = location_ / info.get_file_name();
+                recorded_files.push_back(info.get_file_name());
+            }
+            const std::optional<std::string>& carry_file = compaction_catalog_->get_carry_file();
+            if (carry_file.has_value()) {
+                recorded_files.push_back(carry_file.value());
+            }
+            for (auto const& recorded_file : recorded_files) {
+                boost::filesystem::path recorded_path = location_ / recorded_file;
                 boost::system::error_code recorded_exists_error;
                 bool recorded_exists = boost::filesystem::exists(recorded_path, recorded_exists_error);
                 if (recorded_exists_error && recorded_exists_error != boost::system::errc::no_such_file_or_directory) {
@@ -245,8 +255,8 @@ datastore::datastore(configuration const& conf) : location_(conf.data_location_)
                     throw limestone_exception(exception_type::initialization_failure, err_msg);
                 }
                 if (!recorded_exists) {
-                    std::string err_msg = "compaction catalog is inconsistent: the compacted file '"
-                        + info.get_file_name()
+                    std::string err_msg = "compaction catalog is inconsistent: the file '"
+                        + recorded_file
                         + "' is registered in the catalog but does not exist, log directory: " + location_.string();
                     LOG(ERROR) << "/:limestone:config:datastore " << err_msg;
                     throw limestone_exception(exception_type::initialization_failure, err_msg);
@@ -1104,9 +1114,18 @@ void datastore::stop_online_compaction_worker() {
     cv_online_compaction_worker_.notify_all();
 }
 
-void datastore::compact_with_online() {
+void datastore::compact_with_online() {  // NOLINT(readability-function-cognitive-complexity)
     TRACE_START;
     check_after_ready(static_cast<const char*>(__func__));
+
+    // Mutual exclusion with a backup: if the removal of the old generation ran between
+    // the enumeration and the copy of a backup, the copy of an enumerated file would
+    // fail. Compaction is therefore not run during a backup (as blob GC is not).
+    if (impl_->is_backup_in_progress()) {
+        LOG_LP(INFO) << "online compaction skipped because a backup is in progress";
+        TRACE_END << "return compact_with_online() without compaction (backup in progress)";
+        return;
+    }
 
     // get a copy of next_blob_id and boundary_version before rotation
     blob_id_type next_blob_id_copy = next_blob_id_.load(std::memory_order_acquire);
@@ -1174,52 +1193,124 @@ void datastore::compact_with_online() {
     // not hold for it.
     options.set_boundary_epoch(result.get_epoch_id());
 
-    // create a compacted file
-    blob_id_type max_blob_id = create_compact_pwal_and_get_max_blob_id(options);
+    // Determine the file names of the new generation. The generation number increases
+    // monotonically across online and offline compactions.
+    std::uint64_t new_generation = compaction_catalog_->get_generation() + 1;
+    std::string compacted_file_name = compaction_catalog::get_compacted_filename_for_generation(new_generation);
+    std::string carry_file_name = compaction_catalog::get_carry_filename_for_generation(new_generation);
+    options.set_output_file_names(compacted_file_name, carry_file_name);
 
+    // Keep the file names of the old generation; they are removed after the commit
+    // (the old generation leaves by removal, not by becoming a detached pwal).
+    std::optional<std::string> old_compacted_file_name = compaction_catalog_->get_current_compacted_file_name();
+    std::optional<std::string> old_carry_file_name = compaction_catalog_->get_carry_file();
 
-    // handle existing compacted file
-    handle_existing_compacted_file(location_);
-
-    // move pwal_0000.compacted from the temp directory to the log directory
-    boost::filesystem::path compacted_file = location_ / compaction_catalog::get_compacted_filename();
-    boost::filesystem::path temp_compacted_file = compaction_temp_dir / compaction_catalog::get_compacted_filename();
-    safe_rename(temp_compacted_file, compacted_file);
-
-    // get a set of all files in the location_ directory
-    std::set<std::string> files_in_location = get_files_in_directory(location_);
-    
-    // check if detached_pwals exist in location_
-    for (auto it = detached_pwals.begin(); it != detached_pwals.end();) {
-        if (files_in_location.find(*it) == files_in_location.end()) {
-            VLOG_LP(log_debug) << "File " << *it << " does not exist in the directory and will be removed from detached_pwals.";
-            auto p = location_ / *it;
-            subtract_file(p);
-            it = detached_pwals.erase(it);  // Erase and move to the next iterator
-        } else {
-            ++it;  // Move to the next iterator
+    // Write phase: write the compacted file (and, if there are snippets beyond the
+    // boundary, the carry file) into the temporary directory. An I/O error (a full disk,
+    // for instance) has no visible effect because nothing is published yet, so the
+    // temporary files are removed and the retry is left to the next compaction request.
+    // A parse error (corrupted input) is unrecoverable and terminates the process.
+    compaction_output_result output{};
+    try {
+        output = create_compaction_output(options);
+    } catch (const limestone_io_exception& e) {
+        LOG_LP(ERROR) << "online compaction failed while writing the temporary files"
+                      << " (will be retried on the next compaction request): " << e.what();
+        for (const std::string& name : {compacted_file_name, carry_file_name}) {
+            boost::system::error_code remove_error;
+            boost::filesystem::remove(compaction_temp_dir / name, remove_error);
+            if (remove_error) {
+                LOG_LP(FATAL) << "failed to remove the temporary compaction file '"
+                              << (compaction_temp_dir / name).string() << "': " << remove_error.message();
+            }
         }
+        TRACE_END << "return compact_with_online() after a temporary-file write failure";
+        return;
+    } catch (const limestone_exception& e) {
+        LOG_LP(FATAL) << "online compaction failed: the input files are corrupted: " << e.what();
+    } catch (const std::exception& e) {
+        LOG_LP(FATAL) << "online compaction failed while writing the temporary files: " << e.what();
     }
+    blob_id_type max_blob_id = output.max_blob_id;
 
+    // Publish, commit, then remove the old generation. A failure from here on is
+    // unrecoverable and terminates the process: continuing would leave a generation file
+    // that the catalog does not record, and the retry would republish under the same
+    // generation name. The recovery completes with the orphan removal at the next startup
+    // and the restoration of the catalog from its backup.
+    boost::filesystem::path compacted_file = location_ / compacted_file_name;
+    try {
+        // Publish: rename from the temporary directory into the log directory (the
+        // generation-suffixed name is unique, so nothing is overwritten).
+        safe_rename(compaction_temp_dir / compacted_file_name, compacted_file);
+        if (output.carry_written) {
+            safe_rename(compaction_temp_dir / carry_file_name, location_ / carry_file_name);
+        }
 
-    // update compaction catalog
-    // update_catalog_file keeps max_blob_id monotonically non-decreasing, so the
-    // high-water mark recorded by previous compactions is preserved even though
-    // max_blob_id here reflects only the freshly compacted files.
-    compacted_file_info compacted_file_info{compacted_file.filename().string(), 1};
-    detached_pwals.erase(compacted_file.filename().string());
-    // Incrementing the generation number and recording a carry file are introduced
-    // together with the switch of the compaction outputs to generation-suffixed names.
-    // Until then, keep the current values so that the behavior does not change.
-    compaction_catalog_->update_catalog_file(result.get_epoch_id(), max_blob_id,
-                                             compaction_catalog_->get_generation(),
-                                             {compacted_file_info}, std::nullopt, detached_pwals);
-    // Refresh the synchronized copy of the compacted file name right after the commit.
-    impl_->set_current_compacted_file_name(compaction_catalog_->get_current_compacted_file_name());
-    add_file(compacted_file);
+        // get a set of all files in the location_ directory
+        std::set<std::string> files_in_location = get_files_in_directory(location_);
 
-    // remove pwal_0000.compacted.prev
-    remove_file_safely(location_ / compaction_catalog::get_compacted_backup_filename());
+        // check if detached_pwals exist in location_
+        for (auto it = detached_pwals.begin(); it != detached_pwals.end();) {
+            if (files_in_location.find(*it) == files_in_location.end()) {
+                VLOG_LP(log_debug) << "File " << *it << " does not exist in the directory and will be removed from detached_pwals.";
+                auto p = location_ / *it;
+                subtract_file(p);
+                it = detached_pwals.erase(it);  // Erase and move to the next iterator
+            } else {
+                ++it;  // Move to the next iterator
+            }
+        }
+
+        // The compacted and carry files of the old generation have been selected as
+        // inputs (so they are in detached_pwals), but they leave by removal rather than
+        // as detached pwals, so they are taken out of the set.
+        if (old_compacted_file_name.has_value()) {
+            detached_pwals.erase(old_compacted_file_name.value());
+        }
+        if (old_carry_file_name.has_value()) {
+            detached_pwals.erase(old_carry_file_name.value());
+        }
+
+        // Commit: the catalog update is the only atomic commit point.
+        // update_catalog_file keeps max_blob_id monotonically non-decreasing, so the
+        // high-water mark recorded by previous compactions is preserved even though
+        // max_blob_id here reflects only the freshly compacted files.
+        compacted_file_info compacted_file_info{compacted_file_name, 1};
+        compaction_catalog_->update_catalog_file(result.get_epoch_id(), max_blob_id, new_generation,
+                                                 {compacted_file_info},
+                                                 output.carry_written ? std::optional<std::string>(carry_file_name)
+                                                                      : std::nullopt,
+                                                 detached_pwals);
+        // Refresh the synchronized copy of the compacted file name right after the commit.
+        impl_->set_current_compacted_file_name(compaction_catalog_->get_current_compacted_file_name());
+        add_file(compacted_file);
+        if (output.carry_written) {
+            add_file(location_ / carry_file_name);
+        }
+        VLOG_LP(log_info) << "compaction generation " << new_generation
+                          << " committed (carry: " << (output.carry_written ? "yes" : "no") << ")";
+
+        // Removal of the old generation: the commit is already done, so continuing
+        // after a failure would let the old compacted file be selected as an input of
+        // the next compaction by the shape of its name, which could merge two baseline
+        // generations.
+        for (const std::optional<std::string>& old_name : {old_compacted_file_name, old_carry_file_name}) {
+            if (!old_name.has_value()) {
+                continue;
+            }
+            boost::filesystem::path old_path = location_ / old_name.value();
+            boost::system::error_code remove_error;
+            boost::filesystem::remove(old_path, remove_error);
+            if (remove_error) {
+                LOG_LP(FATAL) << "failed to remove the old-generation compaction file '"
+                              << old_path.string() << "': " << remove_error.message();
+            }
+            subtract_file(old_path);
+        }
+    } catch (const std::exception& e) {
+        LOG_LP(FATAL) << "online compaction failed at the publish/commit/delete phase: " << e.what();
+    }
 
     LOG_LP(INFO) << "compaction finished";
 

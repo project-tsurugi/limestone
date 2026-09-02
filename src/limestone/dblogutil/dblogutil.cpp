@@ -258,9 +258,9 @@ void carry_over_and_update_compaction_catalog(boost::filesystem::path const& fro
     if (compacted_file_created) {
         compacted_files.emplace(compaction_catalog::get_compacted_filename(), 1);
     }
-    // Incrementing the generation number and recording a carry file are introduced
-    // together with the switch of the compaction outputs to generation-suffixed names.
-    // Until then, keep the current values so that the behavior does not change.
+    // Offline compaction writes the output with the fixed name and does not advance
+    // the generation (nor does it produce a carry file). Generation-suffixed names for
+    // the offline output are introduced together with the orphan removal at startup.
     catalog.update_catalog_file(ld_epoch, max_blob_id, catalog.get_generation(), compacted_files, std::nullopt, {});
 }
 
@@ -408,7 +408,7 @@ void compaction(dblog_scan &ds) {
     if (compacted_file_created) {
         VLOG_LP(log_info) << "making compact pwal file to " << tmp;
         compaction_options options{from_dir, tmp, FLAGS_thread_num};
-        max_blob_id = create_compact_pwal_and_get_max_blob_id(options);
+        max_blob_id = create_compaction_output(options).max_blob_id;
     } else {
         VLOG_LP(log_info) << "no pwal file to compact in " << from_dir;
     }

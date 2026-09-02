@@ -53,14 +53,14 @@ TEST_F(compaction_test, scenario01) {
     catalog = compaction_catalog::from_catalog_file(location);
     // EXPECT_EQ(catalog.get_max_epoch_id(), 0);
     EXPECT_EQ(catalog.get_compacted_files().size(), 1);
-    ASSERT_PRED_FORMAT3(ContainsCompactedFileInfo, catalog.get_compacted_files(), compacted_filename, 1);
+    ASSERT_PRED_FORMAT3(ContainsCompactedFileInfo, catalog.get_compacted_files(), compacted_filename(), 1);
     EXPECT_EQ(catalog.get_detached_pwals().size(), 2);
     ASSERT_PRED_FORMAT3(ContainsPrefix, catalog.get_detached_pwals(), "pwal_0000.", 1);
     ASSERT_PRED_FORMAT3(ContainsPrefix, catalog.get_detached_pwals(), "pwal_0001.", 1);
 
     pwals = extract_pwal_files_from_datastore();
     EXPECT_EQ(pwals.size(), 3);
-    ASSERT_PRED_FORMAT2(ContainsString, pwals, "pwal_0000.compacted");
+    ASSERT_PRED_FORMAT2(ContainsString, pwals, compacted_filename());
     ASSERT_PRED_FORMAT3(ContainsPrefix, pwals, "pwal_0000.", 2);  // pwal_0000.xxx and pwal_0000.compacted
     ASSERT_PRED_FORMAT3(ContainsPrefix, pwals, "pwal_0001.", 1);
 
@@ -73,7 +73,7 @@ TEST_F(compaction_test, scenario01) {
 
     pwals = extract_pwal_files_from_datastore();
     EXPECT_EQ(pwals.size(), 3);
-    ASSERT_PRED_FORMAT2(ContainsString, pwals, "pwal_0000.compacted");
+    ASSERT_PRED_FORMAT2(ContainsString, pwals, compacted_filename());
     ASSERT_PRED_FORMAT3(ContainsPrefix, pwals, "pwal_0000.", 2);  // pwal_0000.xxx and pwal_0000.compacted
     ASSERT_PRED_FORMAT3(ContainsPrefix, pwals, "pwal_0001.", 1);
 
@@ -83,7 +83,7 @@ TEST_F(compaction_test, scenario01) {
     catalog = compaction_catalog::from_catalog_file(location);
     EXPECT_EQ(catalog.get_max_epoch_id(), 1);
     EXPECT_EQ(catalog.get_compacted_files().size(), 1);
-    ASSERT_PRED_FORMAT3(ContainsCompactedFileInfo, catalog.get_compacted_files(), compacted_filename, 1);
+    ASSERT_PRED_FORMAT3(ContainsCompactedFileInfo, catalog.get_compacted_files(), compacted_filename(), 1);
     EXPECT_EQ(catalog.get_detached_pwals().size(), 2);
     ASSERT_PRED_FORMAT3(ContainsPrefix, catalog.get_detached_pwals(), "pwal_0000.", 1);
     ASSERT_PRED_FORMAT3(ContainsPrefix, catalog.get_detached_pwals(), "pwal_0001.", 1);
@@ -117,21 +117,21 @@ TEST_F(compaction_test, scenario01) {
 
     pwals = extract_pwal_files_from_datastore();
     EXPECT_EQ(pwals.size(), 1);
-    ASSERT_PRED_FORMAT2(ContainsString, pwals, "pwal_0000.compacted");
+    ASSERT_PRED_FORMAT2(ContainsString, pwals, compacted_filename());
 
     run_compact_with_epoch_switch(4);
 
     catalog = compaction_catalog::from_catalog_file(location);
     EXPECT_EQ(catalog.get_max_epoch_id(), 1);
     EXPECT_EQ(catalog.get_compacted_files().size(), 1);
-    ASSERT_PRED_FORMAT3(ContainsCompactedFileInfo, catalog.get_compacted_files(), compacted_filename, 1);
+    ASSERT_PRED_FORMAT3(ContainsCompactedFileInfo, catalog.get_compacted_files(), compacted_filename(), 1);
     EXPECT_EQ(catalog.get_detached_pwals().size(), 2);
     ASSERT_PRED_FORMAT3(ContainsPrefix, catalog.get_detached_pwals(), "pwal_0000.", 1);
     ASSERT_PRED_FORMAT3(ContainsPrefix, catalog.get_detached_pwals(), "pwal_0001.", 1);
 
     pwals = extract_pwal_files_from_datastore();
     EXPECT_EQ(pwals.size(), 1);
-    ASSERT_PRED_FORMAT2(ContainsString, pwals, "pwal_0000.compacted");
+    ASSERT_PRED_FORMAT2(ContainsString, pwals, compacted_filename());
 
     kv_list = restart_datastore_and_read_snapshot();
     ASSERT_EQ(kv_list.size(), 2);
@@ -142,7 +142,7 @@ TEST_F(compaction_test, scenario01) {
 
     pwals = extract_pwal_files_from_datastore();
     EXPECT_EQ(pwals.size(), 1);
-    ASSERT_PRED_FORMAT2(ContainsString, pwals, "pwal_0000.compacted");
+    ASSERT_PRED_FORMAT2(ContainsString, pwals, compacted_filename());
 
     // Add a new PWALs.
     lc0_->begin_session();
@@ -157,7 +157,7 @@ TEST_F(compaction_test, scenario01) {
 
     pwals = extract_pwal_files_from_datastore();
     EXPECT_EQ(pwals.size(), 4);
-    ASSERT_PRED_FORMAT2(ContainsString, pwals, "pwal_0000.compacted");
+    ASSERT_PRED_FORMAT2(ContainsString, pwals, compacted_filename());
     ASSERT_PRED_FORMAT2(ContainsString, pwals, "pwal_0000");
     ASSERT_PRED_FORMAT2(ContainsString, pwals, "pwal_0001");
     ASSERT_PRED_FORMAT2(ContainsString, pwals, "pwal_0002");
@@ -166,7 +166,7 @@ TEST_F(compaction_test, scenario01) {
     catalog = compaction_catalog::from_catalog_file(location);
     EXPECT_EQ(catalog.get_max_epoch_id(), 1);
     EXPECT_EQ(catalog.get_compacted_files().size(), 1);
-    ASSERT_PRED_FORMAT3(ContainsCompactedFileInfo, catalog.get_compacted_files(), compacted_filename, 1);
+    ASSERT_PRED_FORMAT3(ContainsCompactedFileInfo, catalog.get_compacted_files(), compacted_filename(), 1);
     EXPECT_EQ(catalog.get_detached_pwals().size(), 3);
     ASSERT_PRED_FORMAT3(ContainsPrefix, catalog.get_detached_pwals(), "pwal_0000.", 1);
     ASSERT_PRED_FORMAT3(ContainsPrefix, catalog.get_detached_pwals(), "pwal_0001.", 1);
@@ -174,7 +174,7 @@ TEST_F(compaction_test, scenario01) {
 
     pwals = extract_pwal_files_from_datastore();
     EXPECT_EQ(pwals.size(), 4);
-    ASSERT_PRED_FORMAT2(ContainsString, pwals, "pwal_0000.compacted");
+    ASSERT_PRED_FORMAT2(ContainsString, pwals, compacted_filename());
     ASSERT_PRED_FORMAT3(ContainsPrefix, pwals, "pwal_0000.", 2);
     ASSERT_PRED_FORMAT3(ContainsPrefix, pwals, "pwal_0001.", 1);
     ASSERT_PRED_FORMAT3(ContainsPrefix, pwals, "pwal_0002.", 1);
@@ -190,7 +190,7 @@ TEST_F(compaction_test, scenario01) {
 
     pwals = extract_pwal_files_from_datastore();
     EXPECT_EQ(pwals.size(), 4);
-    ASSERT_PRED_FORMAT2(ContainsString, pwals, "pwal_0000.compacted");
+    ASSERT_PRED_FORMAT2(ContainsString, pwals, compacted_filename());
     ASSERT_PRED_FORMAT3(ContainsPrefix, pwals, "pwal_0000.", 2);
     ASSERT_PRED_FORMAT3(ContainsPrefix, pwals, "pwal_0001.", 1);
     ASSERT_PRED_FORMAT3(ContainsPrefix, pwals, "pwal_0002.", 1);
@@ -200,7 +200,7 @@ TEST_F(compaction_test, scenario01) {
 
     pwals = extract_pwal_files_from_datastore();
     EXPECT_EQ(pwals.size(), 4);
-    ASSERT_PRED_FORMAT2(ContainsString, pwals, "pwal_0000.compacted");
+    ASSERT_PRED_FORMAT2(ContainsString, pwals, compacted_filename());
     ASSERT_PRED_FORMAT3(ContainsPrefix, pwals, "pwal_0000.", 2);
     ASSERT_PRED_FORMAT3(ContainsPrefix, pwals, "pwal_0001.", 1);
     ASSERT_PRED_FORMAT3(ContainsPrefix, pwals, "pwal_0002.", 1);
@@ -216,7 +216,7 @@ TEST_F(compaction_test, scenario01) {
 
     pwals = extract_pwal_files_from_datastore();
     EXPECT_EQ(pwals.size(), 2);
-    ASSERT_PRED_FORMAT2(ContainsString, pwals, "pwal_0000.compacted");
+    ASSERT_PRED_FORMAT2(ContainsString, pwals, compacted_filename());
     ASSERT_PRED_FORMAT3(ContainsPrefix, pwals, "pwal_0000.", 2);
 
     // Some PWALs are newly created.
@@ -226,7 +226,7 @@ TEST_F(compaction_test, scenario01) {
 
     pwals = extract_pwal_files_from_datastore();
     EXPECT_EQ(pwals.size(), 3);
-    ASSERT_PRED_FORMAT2(ContainsString, pwals, "pwal_0000.compacted");
+    ASSERT_PRED_FORMAT2(ContainsString, pwals, compacted_filename());
     ASSERT_PRED_FORMAT2(ContainsString, pwals, "pwal_0000");
     ASSERT_PRED_FORMAT3(ContainsPrefix, pwals, "pwal_0000.", 2);
 
@@ -242,7 +242,7 @@ TEST_F(compaction_test, scenario01) {
 
     pwals = extract_pwal_files_from_datastore();
     EXPECT_EQ(pwals.size(), 3);
-    ASSERT_PRED_FORMAT2(ContainsString, pwals, "pwal_0000.compacted");
+    ASSERT_PRED_FORMAT2(ContainsString, pwals, compacted_filename());
     ASSERT_PRED_FORMAT2(ContainsString, pwals, "pwal_0000");
     ASSERT_PRED_FORMAT3(ContainsPrefix, pwals, "pwal_0000.", 2);
 
@@ -252,13 +252,13 @@ TEST_F(compaction_test, scenario01) {
     catalog = compaction_catalog::from_catalog_file(location);
     EXPECT_EQ(catalog.get_max_epoch_id(), 1);
     EXPECT_EQ(catalog.get_compacted_files().size(), 1);
-    ASSERT_PRED_FORMAT3(ContainsCompactedFileInfo, catalog.get_compacted_files(), compacted_filename, 1);
+    ASSERT_PRED_FORMAT3(ContainsCompactedFileInfo, catalog.get_compacted_files(), compacted_filename(), 1);
     EXPECT_EQ(catalog.get_detached_pwals().size(), 2);
     ASSERT_PRED_FORMAT3(ContainsPrefix, catalog.get_detached_pwals(), "pwal_0000.", 2);
 
     pwals = extract_pwal_files_from_datastore();
     EXPECT_EQ(pwals.size(), 3);
-    ASSERT_PRED_FORMAT2(ContainsString, pwals, "pwal_0000.compacted");
+    ASSERT_PRED_FORMAT2(ContainsString, pwals, compacted_filename());
     ASSERT_PRED_FORMAT3(ContainsPrefix, pwals, "pwal_0000.", 3);
 
     kv_list = restart_datastore_and_read_snapshot();
@@ -272,7 +272,7 @@ TEST_F(compaction_test, scenario01) {
 
     pwals = extract_pwal_files_from_datastore();
     EXPECT_EQ(pwals.size(), 3);
-    ASSERT_PRED_FORMAT2(ContainsString, pwals, "pwal_0000.compacted");
+    ASSERT_PRED_FORMAT2(ContainsString, pwals, compacted_filename());
     ASSERT_PRED_FORMAT3(ContainsPrefix, pwals, "pwal_0000.", 3);
 
     // Some PWALs are newly created or updated.
@@ -286,7 +286,7 @@ TEST_F(compaction_test, scenario01) {
 
     pwals = extract_pwal_files_from_datastore();
     EXPECT_EQ(pwals.size(), 5);
-    ASSERT_PRED_FORMAT2(ContainsString, pwals, "pwal_0000.compacted");
+    ASSERT_PRED_FORMAT2(ContainsString, pwals, compacted_filename());
     ASSERT_PRED_FORMAT3(ContainsPrefix, pwals, "pwal_0000.", 3);
     ASSERT_PRED_FORMAT2(ContainsString, pwals, "pwal_0000");
     ASSERT_PRED_FORMAT2(ContainsString, pwals, "pwal_0001");
@@ -297,14 +297,14 @@ TEST_F(compaction_test, scenario01) {
     catalog = compaction_catalog::from_catalog_file(location);
     EXPECT_EQ(catalog.get_max_epoch_id(), 7);
     EXPECT_EQ(catalog.get_compacted_files().size(), 1);
-    ASSERT_PRED_FORMAT3(ContainsCompactedFileInfo, catalog.get_compacted_files(), compacted_filename, 1);
+    ASSERT_PRED_FORMAT3(ContainsCompactedFileInfo, catalog.get_compacted_files(), compacted_filename(), 1);
     EXPECT_EQ(catalog.get_detached_pwals().size(), 4);
     ASSERT_PRED_FORMAT3(ContainsPrefix, catalog.get_detached_pwals(), "pwal_0000.", 3);
     ASSERT_PRED_FORMAT3(ContainsPrefix, catalog.get_detached_pwals(), "pwal_0001.", 1);
 
     pwals = extract_pwal_files_from_datastore();
     EXPECT_EQ(pwals.size(), 5);
-    ASSERT_PRED_FORMAT2(ContainsString, pwals, "pwal_0000.compacted");
+    ASSERT_PRED_FORMAT2(ContainsString, pwals, compacted_filename());
     ASSERT_PRED_FORMAT3(ContainsPrefix, pwals, "pwal_0000.", 4);
     ASSERT_PRED_FORMAT3(ContainsPrefix, pwals, "pwal_0001.", 1);
 
@@ -319,7 +319,7 @@ TEST_F(compaction_test, scenario01) {
 
     pwals = extract_pwal_files_from_datastore();
     EXPECT_EQ(pwals.size(), 7);
-    ASSERT_PRED_FORMAT2(ContainsString, pwals, "pwal_0000.compacted");
+    ASSERT_PRED_FORMAT2(ContainsString, pwals, compacted_filename());
     ASSERT_PRED_FORMAT3(ContainsPrefix, pwals, "pwal_0000.", 4);
     ASSERT_PRED_FORMAT3(ContainsPrefix, pwals, "pwal_0001.", 1);
     ASSERT_PRED_FORMAT2(ContainsString, pwals, "pwal_0001");
@@ -330,7 +330,7 @@ TEST_F(compaction_test, scenario01) {
     catalog = compaction_catalog::from_catalog_file(location);
     EXPECT_EQ(catalog.get_max_epoch_id(), 8);
     EXPECT_EQ(catalog.get_compacted_files().size(), 1);
-    ASSERT_PRED_FORMAT3(ContainsCompactedFileInfo, catalog.get_compacted_files(), compacted_filename, 1);
+    ASSERT_PRED_FORMAT3(ContainsCompactedFileInfo, catalog.get_compacted_files(), compacted_filename(), 1);
     EXPECT_EQ(catalog.get_detached_pwals().size(), 6);
     ASSERT_PRED_FORMAT3(ContainsPrefix, catalog.get_detached_pwals(), "pwal_0000.", 3);
     ASSERT_PRED_FORMAT3(ContainsPrefix, catalog.get_detached_pwals(), "pwal_0001.", 2);
@@ -338,7 +338,7 @@ TEST_F(compaction_test, scenario01) {
 
     pwals = extract_pwal_files_from_datastore();
     EXPECT_EQ(pwals.size(), 7);
-    ASSERT_PRED_FORMAT2(ContainsString, pwals, "pwal_0000.compacted");
+    ASSERT_PRED_FORMAT2(ContainsString, pwals, compacted_filename());
     ASSERT_PRED_FORMAT3(ContainsPrefix, pwals, "pwal_0000.", 4);
     ASSERT_PRED_FORMAT3(ContainsPrefix, pwals, "pwal_0001.", 2);
     ASSERT_PRED_FORMAT3(ContainsPrefix, pwals, "pwal_0002.", 1);
@@ -356,7 +356,7 @@ TEST_F(compaction_test, scenario01) {
 
     pwals = extract_pwal_files_from_datastore();
     EXPECT_EQ(pwals.size(), 7);
-    ASSERT_PRED_FORMAT2(ContainsString, pwals, "pwal_0000.compacted");
+    ASSERT_PRED_FORMAT2(ContainsString, pwals, compacted_filename());
     ASSERT_PRED_FORMAT3(ContainsPrefix, pwals, "pwal_0000.", 4);
     ASSERT_PRED_FORMAT3(ContainsPrefix, pwals, "pwal_0001.", 2);
     ASSERT_PRED_FORMAT3(ContainsPrefix, pwals, "pwal_0002.", 1);
@@ -400,14 +400,14 @@ TEST_F(compaction_test, scenario02) {
     catalog = compaction_catalog::from_catalog_file(location);
     EXPECT_EQ(catalog.get_max_epoch_id(), 1);
     EXPECT_EQ(catalog.get_compacted_files().size(), 1);
-    ASSERT_PRED_FORMAT3(ContainsCompactedFileInfo, catalog.get_compacted_files(), compacted_filename, 1);
+    ASSERT_PRED_FORMAT3(ContainsCompactedFileInfo, catalog.get_compacted_files(), compacted_filename(), 1);
     EXPECT_EQ(catalog.get_detached_pwals().size(), 2);
     ASSERT_PRED_FORMAT3(ContainsPrefix, catalog.get_detached_pwals(), "pwal_0000.", 1);
     ASSERT_PRED_FORMAT3(ContainsPrefix, catalog.get_detached_pwals(), "pwal_0001.", 1);
 
     pwals = extract_pwal_files_from_datastore();
     EXPECT_EQ(pwals.size(), 3);
-    ASSERT_PRED_FORMAT2(ContainsString, pwals, "pwal_0000.compacted");
+    ASSERT_PRED_FORMAT2(ContainsString, pwals, compacted_filename());
     ASSERT_PRED_FORMAT3(ContainsPrefix, pwals, "pwal_0000.", 2);  // pwal_0000.xxx and pwal_0000.compacted
     ASSERT_PRED_FORMAT3(ContainsPrefix, pwals, "pwal_0001.", 1);
 
@@ -417,7 +417,7 @@ TEST_F(compaction_test, scenario02) {
     catalog = compaction_catalog::from_catalog_file(location);
     EXPECT_EQ(catalog.get_max_epoch_id(), 1);
     EXPECT_EQ(catalog.get_compacted_files().size(), 1);
-    ASSERT_PRED_FORMAT3(ContainsCompactedFileInfo, catalog.get_compacted_files(), compacted_filename, 1);
+    ASSERT_PRED_FORMAT3(ContainsCompactedFileInfo, catalog.get_compacted_files(), compacted_filename(), 1);
     EXPECT_EQ(catalog.get_detached_pwals().size(), 2);
     ASSERT_PRED_FORMAT3(ContainsPrefix, catalog.get_detached_pwals(), "pwal_0000.", 1);
     ASSERT_PRED_FORMAT3(ContainsPrefix, catalog.get_detached_pwals(), "pwal_0001.", 1);
@@ -440,7 +440,7 @@ TEST_F(compaction_test, scenario02) {
     catalog = compaction_catalog::from_catalog_file(location);
     EXPECT_EQ(catalog.get_max_epoch_id(), 1);
     EXPECT_EQ(catalog.get_compacted_files().size(), 1);
-    ASSERT_PRED_FORMAT3(ContainsCompactedFileInfo, catalog.get_compacted_files(), compacted_filename, 1);
+    ASSERT_PRED_FORMAT3(ContainsCompactedFileInfo, catalog.get_compacted_files(), compacted_filename(), 1);
     EXPECT_EQ(catalog.get_detached_pwals().size(), 2);
     ASSERT_PRED_FORMAT3(ContainsPrefix, catalog.get_detached_pwals(), "pwal_0000.", 1);
     ASSERT_PRED_FORMAT3(ContainsPrefix, catalog.get_detached_pwals(), "pwal_0001.", 1);
@@ -462,7 +462,7 @@ TEST_F(compaction_test, scenario02) {
 
     pwals = extract_pwal_files_from_datastore();
     EXPECT_EQ(pwals.size(), 6);  // Not yet detected that it has been deleted
-    ASSERT_PRED_FORMAT2(ContainsString, pwals, "pwal_0000.compacted");
+    ASSERT_PRED_FORMAT2(ContainsString, pwals, compacted_filename());
     ASSERT_PRED_FORMAT2(ContainsString, pwals, "pwal_0000");
     ASSERT_PRED_FORMAT2(ContainsString, pwals, "pwal_0001");
     ASSERT_PRED_FORMAT2(ContainsString, pwals, "pwal_0002");
@@ -473,7 +473,7 @@ TEST_F(compaction_test, scenario02) {
     catalog = compaction_catalog::from_catalog_file(location);
     EXPECT_EQ(catalog.get_max_epoch_id(), 4);
     EXPECT_EQ(catalog.get_compacted_files().size(), 1);
-    ASSERT_PRED_FORMAT3(ContainsCompactedFileInfo, catalog.get_compacted_files(), compacted_filename, 1);
+    ASSERT_PRED_FORMAT3(ContainsCompactedFileInfo, catalog.get_compacted_files(), compacted_filename(), 1);
     EXPECT_EQ(catalog.get_detached_pwals().size(), 3);
     ASSERT_PRED_FORMAT3(ContainsPrefix, catalog.get_detached_pwals(), "pwal_0000.", 1);
     ASSERT_PRED_FORMAT3(ContainsPrefix, catalog.get_detached_pwals(), "pwal_0001.", 1);
@@ -481,7 +481,7 @@ TEST_F(compaction_test, scenario02) {
 
     pwals = extract_pwal_files_from_datastore();
     EXPECT_EQ(pwals.size(), 4);  // Detected that it has been deleted
-    ASSERT_PRED_FORMAT2(ContainsString, pwals, "pwal_0000.compacted");
+    ASSERT_PRED_FORMAT2(ContainsString, pwals, compacted_filename());
     ASSERT_PRED_FORMAT3(ContainsPrefix, pwals, "pwal_0000.", 2);
     ASSERT_PRED_FORMAT3(ContainsPrefix, pwals, "pwal_0001.", 1);
     ASSERT_PRED_FORMAT3(ContainsPrefix, pwals, "pwal_0002.", 1);
@@ -491,7 +491,7 @@ TEST_F(compaction_test, scenario02) {
 
     pwals = extract_pwal_files_from_datastore();
     EXPECT_EQ(pwals.size(), 4);  // Not yet detected that it has been deleted
-    ASSERT_PRED_FORMAT2(ContainsString, pwals, "pwal_0000.compacted");
+    ASSERT_PRED_FORMAT2(ContainsString, pwals, compacted_filename());
     ASSERT_PRED_FORMAT3(ContainsPrefix, pwals, "pwal_0000.", 2);
     ASSERT_PRED_FORMAT3(ContainsPrefix, pwals, "pwal_0001.", 1);
     ASSERT_PRED_FORMAT3(ContainsPrefix, pwals, "pwal_0002.", 1);
@@ -503,7 +503,7 @@ TEST_F(compaction_test, scenario02) {
 
     pwals = extract_pwal_files_from_datastore();
     EXPECT_EQ(pwals.size(), 5);  // Not yet detected that it has been deleted
-    ASSERT_PRED_FORMAT2(ContainsString, pwals, "pwal_0000.compacted");
+    ASSERT_PRED_FORMAT2(ContainsString, pwals, compacted_filename());
     ASSERT_PRED_FORMAT2(ContainsString, pwals, "pwal_0000");
     ASSERT_PRED_FORMAT3(ContainsPrefix, pwals, "pwal_0000.", 2);
     ASSERT_PRED_FORMAT3(ContainsPrefix, pwals, "pwal_0001.", 1);
@@ -515,13 +515,13 @@ TEST_F(compaction_test, scenario02) {
     catalog = compaction_catalog::from_catalog_file(location);
     EXPECT_EQ(catalog.get_max_epoch_id(), 5);
     EXPECT_EQ(catalog.get_compacted_files().size(), 1);
-    ASSERT_PRED_FORMAT3(ContainsCompactedFileInfo, catalog.get_compacted_files(), compacted_filename, 1);
+    ASSERT_PRED_FORMAT3(ContainsCompactedFileInfo, catalog.get_compacted_files(), compacted_filename(), 1);
     EXPECT_EQ(catalog.get_detached_pwals().size(), 2);
     ASSERT_PRED_FORMAT3(ContainsPrefix, catalog.get_detached_pwals(), "pwal_0000.", 2);
 
     pwals = extract_pwal_files_from_datastore();
     EXPECT_EQ(pwals.size(), 3);  // Detected that it has been deleted
-    ASSERT_PRED_FORMAT2(ContainsString, pwals, "pwal_0000.compacted");
+    ASSERT_PRED_FORMAT2(ContainsString, pwals, compacted_filename());
     ASSERT_PRED_FORMAT3(ContainsPrefix, pwals, "pwal_0000.", 3);
 
     // Some PWALs are newly created or updated.
@@ -535,7 +535,7 @@ TEST_F(compaction_test, scenario02) {
 
     pwals = extract_pwal_files_from_datastore();
     EXPECT_EQ(pwals.size(), 5);
-    ASSERT_PRED_FORMAT2(ContainsString, pwals, "pwal_0000.compacted");
+    ASSERT_PRED_FORMAT2(ContainsString, pwals, compacted_filename());
     ASSERT_PRED_FORMAT3(ContainsPrefix, pwals, "pwal_0000.", 3);
     ASSERT_PRED_FORMAT2(ContainsString, pwals, "pwal_0000");
     ASSERT_PRED_FORMAT2(ContainsString, pwals, "pwal_0001");
@@ -546,14 +546,14 @@ TEST_F(compaction_test, scenario02) {
     catalog = compaction_catalog::from_catalog_file(location);
     EXPECT_EQ(catalog.get_max_epoch_id(), 7);
     EXPECT_EQ(catalog.get_compacted_files().size(), 1);
-    ASSERT_PRED_FORMAT3(ContainsCompactedFileInfo, catalog.get_compacted_files(), compacted_filename, 1);
+    ASSERT_PRED_FORMAT3(ContainsCompactedFileInfo, catalog.get_compacted_files(), compacted_filename(), 1);
     EXPECT_EQ(catalog.get_detached_pwals().size(), 4);
     ASSERT_PRED_FORMAT3(ContainsPrefix, catalog.get_detached_pwals(), "pwal_0000.", 3);
     ASSERT_PRED_FORMAT3(ContainsPrefix, catalog.get_detached_pwals(), "pwal_0001.", 1);
 
     pwals = extract_pwal_files_from_datastore();
     EXPECT_EQ(pwals.size(), 5);
-    ASSERT_PRED_FORMAT2(ContainsString, pwals, "pwal_0000.compacted");
+    ASSERT_PRED_FORMAT2(ContainsString, pwals, compacted_filename());
     ASSERT_PRED_FORMAT3(ContainsPrefix, pwals, "pwal_0000.", 4);
     ASSERT_PRED_FORMAT3(ContainsPrefix, pwals, "pwal_0001.", 1);
 
@@ -567,7 +567,7 @@ TEST_F(compaction_test, scenario02) {
 
     pwals = extract_pwal_files_from_datastore();
     EXPECT_EQ(pwals.size(), 7);
-    ASSERT_PRED_FORMAT2(ContainsString, pwals, "pwal_0000.compacted");
+    ASSERT_PRED_FORMAT2(ContainsString, pwals, compacted_filename());
     ASSERT_PRED_FORMAT3(ContainsPrefix, pwals, "pwal_0000.", 4);
     ASSERT_PRED_FORMAT3(ContainsPrefix, pwals, "pwal_0001.", 1);
     ASSERT_PRED_FORMAT2(ContainsString, pwals, "pwal_0001");
@@ -578,7 +578,7 @@ TEST_F(compaction_test, scenario02) {
     catalog = compaction_catalog::from_catalog_file(location);
     EXPECT_EQ(catalog.get_max_epoch_id(), 8);
     EXPECT_EQ(catalog.get_compacted_files().size(), 1);
-    ASSERT_PRED_FORMAT3(ContainsCompactedFileInfo, catalog.get_compacted_files(), compacted_filename, 1);
+    ASSERT_PRED_FORMAT3(ContainsCompactedFileInfo, catalog.get_compacted_files(), compacted_filename(), 1);
     EXPECT_EQ(catalog.get_detached_pwals().size(), 6);
     ASSERT_PRED_FORMAT3(ContainsPrefix, catalog.get_detached_pwals(), "pwal_0000.", 3);
     ASSERT_PRED_FORMAT3(ContainsPrefix, catalog.get_detached_pwals(), "pwal_0001.", 2);
@@ -586,14 +586,14 @@ TEST_F(compaction_test, scenario02) {
 
     pwals = extract_pwal_files_from_datastore();
     EXPECT_EQ(pwals.size(), 7);
-    ASSERT_PRED_FORMAT2(ContainsString, pwals, "pwal_0000.compacted");
+    ASSERT_PRED_FORMAT2(ContainsString, pwals, compacted_filename());
     ASSERT_PRED_FORMAT3(ContainsPrefix, pwals, "pwal_0000.", 4);
     ASSERT_PRED_FORMAT3(ContainsPrefix, pwals, "pwal_0001.", 2);
     ASSERT_PRED_FORMAT3(ContainsPrefix, pwals, "pwal_0002.", 1);
 
     pwals = extract_pwal_files_from_datastore();
     EXPECT_EQ(pwals.size(), 7);
-    ASSERT_PRED_FORMAT2(ContainsString, pwals, "pwal_0000.compacted");
+    ASSERT_PRED_FORMAT2(ContainsString, pwals, compacted_filename());
     ASSERT_PRED_FORMAT3(ContainsPrefix, pwals, "pwal_0000.", 4);
     ASSERT_PRED_FORMAT3(ContainsPrefix, pwals, "pwal_0001.", 2);
     ASSERT_PRED_FORMAT3(ContainsPrefix, pwals, "pwal_0002.", 1);
@@ -689,34 +689,6 @@ TEST_F(compaction_test, ensure_directory_exists_throws_exception) {
 TEST_F(compaction_test, ensure_directory_exists_parent_directory_missing) {
     boost::filesystem::path dir = boost::filesystem::path(location) / "nonexistent_parent/test_dir";
     ASSERT_THROW(ensure_directory_exists(dir), std::runtime_error);
-}
-
-TEST_F(compaction_test, handle_existing_compacted_file_no_existing_files) {
-    boost::filesystem::path location_path = boost::filesystem::path(location);
-
-    ASSERT_NO_THROW(handle_existing_compacted_file(location_path));
-}
-
-TEST_F(compaction_test, handle_existing_compacted_file_with_existing_file) {
-    boost::filesystem::path location_path = boost::filesystem::path(location);
-    boost::filesystem::path compacted_file = location_path / "pwal_0000.compacted";
-    boost::filesystem::ofstream ofs(compacted_file);
-    ofs.close();
-
-    ASSERT_NO_THROW(handle_existing_compacted_file(location_path));
-    ASSERT_TRUE(boost::filesystem::exists(location_path / "pwal_0000.compacted.prev"));
-}
-
-TEST_F(compaction_test, handle_existing_compacted_file_throws_exception) {
-    boost::filesystem::path location_path = boost::filesystem::path(location);
-    boost::filesystem::path compacted_file = location_path / "pwal_0000.compacted";
-    boost::filesystem::path compacted_prev_file = location_path / "pwal_0000.compacted.prev";
-    boost::filesystem::ofstream ofs1(compacted_file);
-    ofs1.close();
-    boost::filesystem::ofstream ofs2(compacted_prev_file);
-    ofs2.close();
-
-    ASSERT_THROW(handle_existing_compacted_file(location_path), std::runtime_error);
 }
 
 TEST_F(compaction_test, get_files_in_directory) {

@@ -141,9 +141,9 @@ public:
             || name == "ctrl") {
             return true;
         }
-        // pwal files other than the compacted ones are merged into pwal_0000.compacted
+        // pwal files other than the compacted one are merged into the compacted file
         if (starts_with(name, "pwal_")) {
-            return name != compacted_filename && name != (compacted_filename + ".prev");
+            return name != compacted_filename();
         }
         return false;
     }
@@ -199,11 +199,11 @@ TEST_F(offline_compaction_test, preserves_remove_entries_after_restart) {
         EXPECT_EQ(compacted_files.size(), 1);
         if (!compacted_files.empty()) {
             const compacted_file_info& info = *compacted_files.begin();
-            EXPECT_EQ(info.get_file_name(), compacted_filename);
+            EXPECT_EQ(info.get_file_name(), compacted_filename());
             EXPECT_EQ(info.get_version(), 1);
         }
     }
-    ASSERT_TRUE(boost::filesystem::exists(boost::filesystem::path(location) / compacted_filename));
+    ASSERT_TRUE(boost::filesystem::exists(boost::filesystem::path(location) / compacted_filename()));
 
     // 3. Restart, delete record "B" (emits a remove entry), and shut down.
     gen_datastore();
@@ -244,7 +244,7 @@ TEST_F(offline_compaction_test, detects_inconsistent_compaction_catalog_at_start
     datastore_->switch_epoch(2);
     run_compact_with_epoch_switch(3);
 
-    boost::filesystem::path compacted_path = boost::filesystem::path(location) / compacted_filename;
+    boost::filesystem::path compacted_path = boost::filesystem::path(location) / compacted_filename();
     ASSERT_TRUE(boost::filesystem::exists(compacted_path));
     {
         compaction_catalog catalog = compaction_catalog::from_catalog_file(location);
@@ -254,13 +254,17 @@ TEST_F(offline_compaction_test, detects_inconsistent_compaction_catalog_at_start
     datastore_->shutdown();
     datastore_ = nullptr;
 
-    // Corrupt the catalog: drop the compacted-file registration while the
-    // compacted file itself remains on disk.
+    // Corrupt the catalog: drop the compacted-file registration while a compacted
+    // file with the well-known (generation 0) name remains on disk. The startup
+    // consistency check covers only the well-known name; unregistered
+    // generation-suffixed files are handled by the orphan deletion at startup.
+    boost::filesystem::rename(compacted_path,
+                              boost::filesystem::path(location) / compaction_catalog::get_compacted_filename());
     {
         compaction_catalog catalog{location};
         catalog.update_catalog_file(0, 0, 0, {}, std::nullopt, {});
     }
-    ASSERT_TRUE(boost::filesystem::exists(compacted_path));
+    ASSERT_TRUE(boost::filesystem::exists(boost::filesystem::path(location) / compaction_catalog::get_compacted_filename()));
 
     // Startup must fail fast because the catalog is inconsistent. Verify both that a
     // limestone_exception is thrown and that its message is the intended one (so that an
@@ -294,7 +298,7 @@ TEST_F(offline_compaction_test, cursor_after_online_compaction_reads_compacted) 
     run_compact_with_epoch_switch(3);
 
     // After compaction the key lives only in the compacted file; the pwal is detached.
-    ASSERT_TRUE(boost::filesystem::exists(boost::filesystem::path(location) / compacted_filename));
+    ASSERT_TRUE(boost::filesystem::exists(boost::filesystem::path(location) / compacted_filename()));
 
     // Take a snapshot without restarting.
     std::unique_ptr<limestone::api::snapshot> snapshot = datastore_->get_snapshot();
@@ -330,7 +334,7 @@ TEST_F(offline_compaction_test, detects_missing_registered_compacted_file_at_sta
     datastore_->switch_epoch(2);
     run_compact_with_epoch_switch(3);
 
-    boost::filesystem::path compacted_path = boost::filesystem::path(location) / compacted_filename;
+    boost::filesystem::path compacted_path = boost::filesystem::path(location) / compacted_filename();
     ASSERT_TRUE(boost::filesystem::exists(compacted_path));
 
     datastore_->shutdown();
@@ -342,6 +346,43 @@ TEST_F(offline_compaction_test, detects_missing_registered_compacted_file_at_sta
         compaction_catalog catalog = compaction_catalog::from_catalog_file(location);
         ASSERT_EQ(catalog.get_compacted_files().size(), 1);
     }
+
+    const std::string expected_message_substr = "is registered in the catalog but does not exist";
+    try {
+        gen_datastore();
+        FAIL() << "expected a limestone_exception to be thrown, but nothing was thrown";
+    } catch (const limestone_exception& e) {
+        EXPECT_NE(std::string(e.what()).find(expected_message_substr), std::string::npos)
+            << "unexpected exception message: " << e.what();
+    } catch (const std::exception& e) {
+        FAIL() << "expected a limestone_exception, but a different exception was thrown: " << e.what();
+    }
+}
+
+// Startup must fail fast when the catalog records a carry file that does not exist:
+// the carry file is part of the snapshot input, and losing it silently would drop the
+// boundary-exceeding snippets it preserves.
+TEST_F(offline_compaction_test, detects_missing_registered_carry_file_at_startup) {
+    gen_datastore();
+    datastore_->switch_epoch(1);
+    lc0_->begin_session();
+    lc0_->add_entry(1, "A", "va", {1, 0});
+    lc0_->end_session();
+    datastore_->switch_epoch(2);
+    run_compact_with_epoch_switch(3);
+
+    datastore_->shutdown();
+    datastore_ = nullptr;
+
+    // Leave only the carry record in the catalog, without placing the actual file.
+    {
+        compaction_catalog catalog = compaction_catalog::from_catalog_file(location);
+        compaction_catalog rewritten{location};
+        rewritten.update_catalog_file(catalog.get_max_epoch_id(), catalog.get_max_blob_id(),
+                                      catalog.get_generation(), catalog.get_compacted_files(),
+                                      "pwal_0000.carry.1", catalog.get_detached_pwals());
+    }
+    ASSERT_FALSE(boost::filesystem::exists(boost::filesystem::path(location) / "pwal_0000.carry.1"));
 
     const std::string expected_message_substr = "is registered in the catalog but does not exist";
     try {
@@ -852,7 +893,7 @@ TEST_F(offline_compaction_test, offline_compaction_dry_run_creates_missing_catal
 
     // The dry run must not have compacted anything into the log directory, and must have left the
     // manifest and the transaction log untouched.
-    EXPECT_FALSE(boost::filesystem::exists(dir / compacted_filename));
+    EXPECT_FALSE(boost::filesystem::exists(dir / compaction_catalog::get_compacted_filename()));
     EXPECT_EQ(read_file(manifest_path), manifest_before);
     EXPECT_EQ(read_file(dir / "pwal_0000"), pwal_before);
 

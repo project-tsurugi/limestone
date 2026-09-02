@@ -113,6 +113,20 @@
      // Getter for boundary_epoch.
      [[nodiscard]] std::optional<limestone::api::epoch_id_type> get_boundary_epoch() const { return boundary_epoch_; }
 
+     // Sets the file names of the compaction output (compacted and carry).
+     // When unset, the compacted file is written with the fixed name of the
+     // migration rule and no carry file is written.
+     void set_output_file_names(std::string compacted_file_name, std::string carry_file_name) {
+         compacted_file_name_ = std::move(compacted_file_name);
+         carry_file_name_ = std::move(carry_file_name);
+     }
+
+     // Getter for compacted_file_name.
+     [[nodiscard]] const std::optional<std::string>& get_compacted_file_name() const { return compacted_file_name_; }
+
+     // Getter for carry_file_name.
+     [[nodiscard]] const std::optional<std::string>& get_carry_file_name() const { return carry_file_name_; }
+
      // Check if GC is enabled.
      [[nodiscard]] bool is_gc_enabled() const { return static_cast<bool>(gc_snapshot_); }
 
@@ -140,6 +154,10 @@
 
      // Compaction boundary epoch (nullopt = the durable epoch serves as the boundary).
      std::optional<limestone::api::epoch_id_type> boundary_epoch_{};
+
+     // File names of the compaction output (nullopt = fixed name for compacted, no carry)
+     std::optional<std::string> compacted_file_name_{};
+     std::optional<std::string> carry_file_name_{};
  };
 
  }  // namespace limestone::internal

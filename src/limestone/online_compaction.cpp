@@ -73,18 +73,6 @@ void ensure_directory_exists(const boost::filesystem::path& dir) {
     }
 }
 
-void handle_existing_compacted_file(const boost::filesystem::path& location) {
-    boost::filesystem::path compacted_file = location / compaction_catalog::get_compacted_filename();
-    boost::filesystem::path compacted_prev_file = location / compaction_catalog::get_compacted_backup_filename();
-
-    if (boost::filesystem::exists(compacted_file)) {
-        if (boost::filesystem::exists(compacted_prev_file)) {
-            LOG_AND_THROW_EXCEPTION("the file already exists: " + compacted_prev_file.string());
-        }
-        safe_rename(compacted_file, compacted_prev_file);
-    }
-}
-
 std::set<std::string> get_files_in_directory(const boost::filesystem::path& directory) {
     std::set<std::string> files;
     boost::system::error_code error; 

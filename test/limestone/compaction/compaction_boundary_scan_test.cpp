@@ -36,7 +36,7 @@ using limestone::api::log_entry;
 using limestone::internal::compaction_options;
 
 // Verifies the boundary behavior of the compaction scan (its first pass) by calling
-// create_compact_pwal_and_get_max_blob_id directly with the boundary epoch set on
+// create_compaction_output directly with the boundary epoch set on
 // compaction_options: entries of the snippets beyond the boundary must not reach the
 // compacted file (the sortdb).
 class compaction_boundary_scan_test : public ::testing::Test {
@@ -105,7 +105,7 @@ TEST_F(compaction_boundary_scan_test, compacted_excludes_entries_beyond_boundary
 
     compaction_options options(from_dir(), to_dir(), 1, {"pwal_0000.rotated"});
     options.set_boundary_epoch(0x100);
-    limestone::internal::create_compact_pwal_and_get_max_blob_id(options);
+    limestone::internal::create_compaction_output(options);
 
     auto compacted = to_dir() / "pwal_0000.compacted";
     ASSERT_TRUE(boost::filesystem::exists(compacted));
@@ -126,7 +126,7 @@ TEST_F(compaction_boundary_scan_test, compacted_includes_all_entries_within_boun
 
     compaction_options options(from_dir(), to_dir(), 1, {"pwal_0000.rotated"});
     options.set_boundary_epoch(0x101);
-    limestone::internal::create_compact_pwal_and_get_max_blob_id(options);
+    limestone::internal::create_compaction_output(options);
 
     auto compacted = to_dir() / "pwal_0000.compacted";
     ASSERT_TRUE(boost::filesystem::exists(compacted));

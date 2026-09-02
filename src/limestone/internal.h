@@ -106,17 +106,24 @@ status purge_dir(const boost::filesystem::path& dir);
 // from datastore_snapshot.cpp
 
 /**
- * @brief Creates a compacted PWAL (Persistent Write-Ahead Log) and retrieves the maximum blob ID.
- *
- * This function performs log compaction using the given compaction options. 
- * It processes the specified input directory, compacts the logs, and stores 
- * the result in the target directory.
- *
- * @param options The compaction options that specify source and destination directories, 
- *                number of workers, file set, and garbage collection settings.
- * @return The maximum blob ID found during the compaction process.
+ * @brief The result of producing the compaction output (the files written to the output directory).
  */
-limestone::api::blob_id_type create_compact_pwal_and_get_max_blob_id(compaction_options &options);
+struct compaction_output_result {
+    limestone::api::blob_id_type max_blob_id{};
+    bool carry_written{};
+};
+
+/**
+ * @brief Writes the compacted file into the output directory of options, then fsyncs
+ *        and closes it. When both the boundary epoch and the carry output name are set,
+ *        a carry file is also written if there is any snippet beyond the boundary.
+ *
+ * @param options The compaction options holding the input and output directories, the
+ *                number of workers, the set of input files, the boundary epoch, the
+ *                output file names and the GC settings.
+ * @return The maximum blob ID and whether a carry file was written.
+ */
+compaction_output_result create_compaction_output(compaction_options &options);
 
 
 std::set<boost::filesystem::path> filter_epoch_files(const boost::filesystem::path& directory);

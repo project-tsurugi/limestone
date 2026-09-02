@@ -101,8 +101,11 @@ TEST_F(compaction_blob_gc_test, DISABLED_basic_blob_gc_test) {
     EXPECT_EQ(catalog.get_max_blob_id(), 2002);
 
     // Verify the content of the compacted PWAL.
-    // Assuming the compacted file is named "pwal_0000.compacted".
-    log_entries = read_log_file("pwal_0000.compacted", location);
+    // Read the compacted file of the current generation as recorded by the catalog.
+    {
+        compaction_catalog catalog_after = compaction_catalog::from_catalog_file(location);
+        log_entries = read_log_file(catalog_after.get_current_compacted_file_name().value(), location);
+    }
     // Expected effective state:
     // - "blob_key1": effective value from epoch 2 ("blob_value1_epoch2") with blob IDs {2001,2002}.
     // - "blob_key2": remains from epoch 1.
@@ -288,41 +291,55 @@ TEST_F(compaction_blob_gc_test, DISABLED_blob_gc_executes_without_backup_test) {
     EXPECT_TRUE(boost::filesystem::exists(path2002_));
 }
 
-// Test that blob GC is skipped during an old backup (using the backup API without arguments).
+// During a backup (the old API) the compaction itself returns early when it is
+// requested, because the removal of the old generation would make the copy of a file
+// already enumerated by the backup fail. The blob GC is therefore not run either.
 TEST_F(compaction_blob_gc_test, blob_gc_skipped_during_old_backup_test) {
     gen_datastore();
     prepare_blob_gc_test_data();
     auto& backup = datastore_->begin_backup();  // old backup API
-    
-    run_compact_with_epoch_switch(5);
-    
-    // Verify that GC was skipped because old backup is in progress.
+
+    // The early return means no rotation runs, so no help with the epoch switch is needed.
+    datastore_->compact_with_online();
+
+    // The compaction has not run (the catalog stays at the initial generation).
+    compaction_catalog catalog = compaction_catalog::from_catalog_file(boost::filesystem::path(location));
+    EXPECT_EQ(catalog.get_generation(), 0);
+    EXPECT_TRUE(catalog.get_compacted_files().empty());
+
+    // The blob GC has not run either.
     EXPECT_TRUE(boost::filesystem::exists(path1001_));
     EXPECT_TRUE(boost::filesystem::exists(path1002_));
     EXPECT_TRUE(boost::filesystem::exists(path1003_));
     EXPECT_TRUE(boost::filesystem::exists(path2001_));
     EXPECT_TRUE(boost::filesystem::exists(path2002_));
-    
+
     backup.notify_end_backup();
 }
 
-// Test that blob GC is skipped during a new backup (using the backup API with arguments).
+// During a backup (the new API) the compaction itself returns early when it is requested.
 TEST_F(compaction_blob_gc_test, blob_gc_skipped_during_new_backup_test) {
     gen_datastore();
     datastore_->switch_epoch(1);
     auto backup = begin_backup_with_epoch_switch(backup_type::transaction, 2);  // new backup API
 
     prepare_blob_gc_test_data();
-    
-    run_compact_with_epoch_switch(5);
-    
-    // Verify that GC was skipped because new backup is in progress.
+
+    // The early return means no rotation runs, so no help with the epoch switch is needed.
+    datastore_->compact_with_online();
+
+    // The compaction has not run (the catalog stays at the initial generation).
+    compaction_catalog catalog = compaction_catalog::from_catalog_file(boost::filesystem::path(location));
+    EXPECT_EQ(catalog.get_generation(), 0);
+    EXPECT_TRUE(catalog.get_compacted_files().empty());
+
+    // The blob GC has not run either.
     EXPECT_TRUE(boost::filesystem::exists(path1001_));
     EXPECT_TRUE(boost::filesystem::exists(path1002_));
     EXPECT_TRUE(boost::filesystem::exists(path1003_));
     EXPECT_TRUE(boost::filesystem::exists(path2001_));
     EXPECT_TRUE(boost::filesystem::exists(path2002_));
-    
+
     // backup->notify_end_backup();
 }
 

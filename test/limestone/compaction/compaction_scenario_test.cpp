@@ -165,18 +165,18 @@ TEST_P(compaction_scenario_test, remove_entry_semantics) {
     compaction_catalog catalog = compaction_catalog::from_catalog_file(location);
     EXPECT_EQ(catalog.get_max_epoch_id(), records_rotation_epoch() ? 2 : 1);
     EXPECT_EQ(catalog.get_compacted_files().size(), 1);
-    ASSERT_PRED_FORMAT3(ContainsCompactedFileInfo, catalog.get_compacted_files(), compacted_filename, 1);
+    ASSERT_PRED_FORMAT3(ContainsCompactedFileInfo, catalog.get_compacted_files(), compacted_filename(), 1);
     EXPECT_EQ(catalog.get_detached_pwals().size(), retains_detached_pwals() ? 3 : 0);
 
     pwals = extract_pwal_files_from_datastore();
-    ASSERT_PRED_FORMAT2(ContainsString, pwals, compacted_filename);
+    ASSERT_PRED_FORMAT2(ContainsString, pwals, compacted_filename());
     // Online compaction leaves the three rotated pwal files next to the compacted file;
     // offline compaction rebuilds the directory and keeps the compacted file only.
     EXPECT_EQ(pwals.size(), retains_detached_pwals() ? 4 : 1);
 
     // The compacted file itself must be identical in both modes: only the effective entries
     // survive, and their write version is reset.
-    log_entries = read_log_file(compacted_filename, location);
+    log_entries = read_log_file(compacted_filename(), location);
     ASSERT_EQ(log_entries.size(), 2);
     EXPECT_TRUE(AssertLogEntry(log_entries[0], 1, "key3", "value3", 0, 0, {}, log_entry::entry_type::normal_entry));  // write version changed to 0
     EXPECT_TRUE(AssertLogEntry(log_entries[1], 2, "key2", "value2", 0, 0, {}, log_entry::entry_type::normal_entry));  // write version changed to 0
@@ -211,7 +211,7 @@ TEST_P(compaction_scenario_test, remove_entry_semantics) {
     // compacted one; online compaction also left the rotated source files behind.
     pwals = extract_pwal_files_from_datastore();
     EXPECT_EQ(pwals.size(), retains_detached_pwals() ? 7 : 4);
-    ASSERT_PRED_FORMAT2(ContainsString, pwals, compacted_filename);
+    ASSERT_PRED_FORMAT2(ContainsString, pwals, compacted_filename());
     ASSERT_PRED_FORMAT2(ContainsString, pwals, "pwal_0000");
     ASSERT_PRED_FORMAT2(ContainsString, pwals, "pwal_0001");
     ASSERT_PRED_FORMAT2(ContainsString, pwals, "pwal_0002");
@@ -233,7 +233,7 @@ TEST_P(compaction_scenario_test, remove_entry_semantics) {
     std::vector<std::pair<std::string, std::string>> kv_list = restart_datastore_and_read_snapshot();
 
     // 5. Check the compacted file and the snapshot created at boot time
-    log_entries = read_log_file(compacted_filename, location);
+    log_entries = read_log_file(compacted_filename(), location);
     ASSERT_EQ(log_entries.size(), 2);
     EXPECT_TRUE(AssertLogEntry(log_entries[0], 1, "key3", "value3", 0, 0, {}, log_entry::entry_type::normal_entry));
     EXPECT_TRUE(AssertLogEntry(log_entries[1], 2, "key2", "value2", 0, 0, {}, log_entry::entry_type::normal_entry));
@@ -329,7 +329,7 @@ TEST_P(compaction_scenario_test, remove_storage_semantics) {
     ASSERT_NO_FATAL_FAILURE(run_compaction(4));
 
     pwals = extract_pwal_files_from_datastore();
-    ASSERT_PRED_FORMAT2(ContainsString, pwals, compacted_filename);
+    ASSERT_PRED_FORMAT2(ContainsString, pwals, compacted_filename());
     EXPECT_EQ(pwals.size(), retains_detached_pwals() ? 4 : 1);
     if (retains_detached_pwals()) {
         // the rotated file of each channel, next to the compacted file
@@ -338,7 +338,7 @@ TEST_P(compaction_scenario_test, remove_storage_semantics) {
         ASSERT_PRED_FORMAT3(ContainsPrefix, pwals, "pwal_0002.", 1);
     }
 
-    log_entries = read_log_file(compacted_filename, location);
+    log_entries = read_log_file(compacted_filename(), location);
     ASSERT_EQ(log_entries.size(), 6);
     EXPECT_TRUE(AssertLogEntry(log_entries[0], 1, "key1", "value1", 0, 0, {}, log_entry::entry_type::normal_entry));
     EXPECT_TRUE(AssertLogEntry(log_entries[1], 1, "key2", "value2", 0, 0, {}, log_entry::entry_type::normal_entry));
@@ -391,7 +391,7 @@ TEST_P(compaction_scenario_test, remove_storage_semantics) {
     // Check the newly created PWAL files
     pwals = extract_pwal_files_from_datastore();
     EXPECT_EQ(pwals.size(), retains_detached_pwals() ? 7 : 4);
-    ASSERT_PRED_FORMAT2(ContainsString, pwals, compacted_filename);
+    ASSERT_PRED_FORMAT2(ContainsString, pwals, compacted_filename());
     if (retains_detached_pwals()) {
         ASSERT_PRED_FORMAT3(ContainsPrefix, pwals, "pwal_0000.", 2);
         ASSERT_PRED_FORMAT3(ContainsPrefix, pwals, "pwal_0001.", 1);
@@ -420,7 +420,7 @@ TEST_P(compaction_scenario_test, remove_storage_semantics) {
     std::vector<std::pair<std::string, std::string>> kv_list = restart_datastore_and_read_snapshot();
 
     // The compacted file must be unchanged by the restart.
-    log_entries = read_log_file(compacted_filename, location);
+    log_entries = read_log_file(compacted_filename(), location);
     ASSERT_EQ(log_entries.size(), 6);
     EXPECT_TRUE(AssertLogEntry(log_entries[0], 1, "key1", "value1", 0, 0, {}, log_entry::entry_type::normal_entry));
     EXPECT_TRUE(AssertLogEntry(log_entries[1], 1, "key2", "value2", 0, 0, {}, log_entry::entry_type::normal_entry));
@@ -514,7 +514,7 @@ TEST_P(compaction_scenario_test, blob_semantics) {
     EXPECT_EQ(catalog.get_max_epoch_id(), records_rotation_epoch() ? 2 : 1);
     EXPECT_EQ(catalog.get_max_blob_id(), 1006);
     ASSERT_EQ(catalog.get_compacted_files().size(), 1);
-    ASSERT_PRED_FORMAT3(ContainsCompactedFileInfo, catalog.get_compacted_files(), compacted_filename, 1);
+    ASSERT_PRED_FORMAT3(ContainsCompactedFileInfo, catalog.get_compacted_files(), compacted_filename(), 1);
     ASSERT_EQ(catalog.get_detached_pwals().size(), retains_detached_pwals() ? 2 : 0);
     if (retains_detached_pwals()) {
         // the detached pwals are the rotated source files, one per channel that wrote
@@ -523,7 +523,7 @@ TEST_P(compaction_scenario_test, blob_semantics) {
     }
 
     pwals = extract_pwal_files_from_datastore();
-    ASSERT_PRED_FORMAT2(ContainsString, pwals, compacted_filename);
+    ASSERT_PRED_FORMAT2(ContainsString, pwals, compacted_filename());
     EXPECT_EQ(pwals.size(), retains_detached_pwals() ? 3 : 1);
     if (retains_detached_pwals()) {
         ASSERT_PRED_FORMAT3(ContainsPrefix, pwals, "pwal_0000.", 2);  // pwal_0000.xxx and pwal_0000.compacted
@@ -531,7 +531,7 @@ TEST_P(compaction_scenario_test, blob_semantics) {
     }
 
     // The compacted file must keep the blob ids of the surviving entries.
-    log_entries = read_log_file(compacted_filename, location);
+    log_entries = read_log_file(compacted_filename(), location);
     ASSERT_EQ(log_entries.size(), 3);
     EXPECT_TRUE(AssertLogEntry(log_entries[0], 1, "key1", "value1", 0, 0, {1001, 1002}, log_entry::entry_type::normal_with_blob));
     EXPECT_TRUE(AssertLogEntry(log_entries[1], 1, "key2", "value2", 0, 0, {1003, 1004}, log_entry::entry_type::normal_with_blob));
@@ -559,20 +559,20 @@ TEST_P(compaction_scenario_test, blob_semantics) {
     EXPECT_EQ(catalog.get_max_epoch_id(), 3);
     EXPECT_EQ(catalog.get_max_blob_id(), 1006);
     ASSERT_EQ(catalog.get_compacted_files().size(), 1);
-    ASSERT_PRED_FORMAT3(ContainsCompactedFileInfo, catalog.get_compacted_files(), compacted_filename, 1);
+    ASSERT_PRED_FORMAT3(ContainsCompactedFileInfo, catalog.get_compacted_files(), compacted_filename(), 1);
     ASSERT_EQ(catalog.get_detached_pwals().size(), retains_detached_pwals() ? 3 : 0);
     if (retains_detached_pwals()) {
         EXPECT_TRUE(get_sorted_list(catalog.get_detached_pwals())[2].find("pwal_0002.") == 0);
     }
 
     pwals = extract_pwal_files_from_datastore();
-    ASSERT_PRED_FORMAT2(ContainsString, pwals, compacted_filename);
+    ASSERT_PRED_FORMAT2(ContainsString, pwals, compacted_filename());
     EXPECT_EQ(pwals.size(), retains_detached_pwals() ? 4 : 1);
     if (retains_detached_pwals()) {
         ASSERT_PRED_FORMAT3(ContainsPrefix, pwals, "pwal_0002.", 1);
     }
 
-    log_entries = read_log_file(compacted_filename, location);
+    log_entries = read_log_file(compacted_filename(), location);
     ASSERT_EQ(log_entries.size(), 5);
     EXPECT_TRUE(AssertLogEntry(log_entries[0], 1, "key1", "value1", 0, 0, {1001, 1002}, log_entry::entry_type::normal_with_blob));
     EXPECT_TRUE(AssertLogEntry(log_entries[1], 1, "key15", "value5", 0, 0, {}, log_entry::entry_type::normal_entry));
@@ -594,7 +594,7 @@ TEST_P(compaction_scenario_test, blob_semantics) {
     EXPECT_EQ(catalog.get_max_epoch_id(), 4);
     EXPECT_EQ(catalog.get_max_blob_id(), 1006);
     ASSERT_EQ(catalog.get_compacted_files().size(), 1);
-    ASSERT_PRED_FORMAT3(ContainsCompactedFileInfo, catalog.get_compacted_files(), compacted_filename, 1);
+    ASSERT_PRED_FORMAT3(ContainsCompactedFileInfo, catalog.get_compacted_files(), compacted_filename(), 1);
     ASSERT_EQ(catalog.get_detached_pwals().size(), retains_detached_pwals() ? 4 : 0);
     if (retains_detached_pwals()) {
         // lc2_ wrote and was rotated twice, so it contributes two detached pwals
@@ -605,7 +605,7 @@ TEST_P(compaction_scenario_test, blob_semantics) {
     }
 
     pwals = extract_pwal_files_from_datastore();
-    ASSERT_PRED_FORMAT2(ContainsString, pwals, compacted_filename);
+    ASSERT_PRED_FORMAT2(ContainsString, pwals, compacted_filename());
     EXPECT_EQ(pwals.size(), retains_detached_pwals() ? 5 : 1);
     if (retains_detached_pwals()) {
         ASSERT_PRED_FORMAT3(ContainsPrefix, pwals, "pwal_0000.", 2);  // pwal_0000.xxx and pwal_0000.compacted
@@ -613,7 +613,7 @@ TEST_P(compaction_scenario_test, blob_semantics) {
         ASSERT_PRED_FORMAT3(ContainsPrefix, pwals, "pwal_0002.", 2);
     }
 
-    log_entries = read_log_file(compacted_filename, location);
+    log_entries = read_log_file(compacted_filename(), location);
     ASSERT_EQ(log_entries.size(), 6);
     EXPECT_TRUE(AssertLogEntry(log_entries[0], 1, "key1", "value1", 0, 0, {1001, 1002}, log_entry::entry_type::normal_with_blob));
     EXPECT_TRUE(AssertLogEntry(log_entries[1], 1, "key15", "value5", 0, 0, {}, log_entry::entry_type::normal_entry));
@@ -665,7 +665,7 @@ TEST_P(compaction_scenario_test, unreferenced_blob_files) {
     EXPECT_TRUE(boost::filesystem::exists(path2002_));
 
     // The surviving entries and their blob references must be identical in both modes.
-    std::vector<log_entry> log_entries = read_log_file(compacted_filename, location);
+    std::vector<log_entry> log_entries = read_log_file(compacted_filename(), location);
     ASSERT_EQ(log_entries.size(), 4);
     EXPECT_TRUE(AssertLogEntry(log_entries[0], 1, "blob_key1", "blob_value1_epoch2", 0, 0, {2001, 2002}, log_entry::entry_type::normal_with_blob));
     EXPECT_TRUE(AssertLogEntry(log_entries[1], 1, "blob_key2", "blob_value2", 0, 0, {1003}, log_entry::entry_type::normal_with_blob));
@@ -705,7 +705,7 @@ TEST_P(compaction_scenario_test, compaction_of_already_compacted_directory) {
     ASSERT_EQ(catalog.get_compacted_files().size(), 1);
     EXPECT_EQ(catalog.get_max_blob_id(), 5001);
 
-    std::vector<log_entry> log_entries = read_log_file(compacted_filename, location);
+    std::vector<log_entry> log_entries = read_log_file(compacted_filename(), location);
     ASSERT_EQ(log_entries.size(), 4);
     EXPECT_TRUE(AssertLogEntry(log_entries[0], 1, "blob", "blob_v1", 0, 0, {5001}, log_entry::entry_type::normal_with_blob));
     EXPECT_TRUE(AssertLogEntry(log_entries[1], 1, "keep", "keep_v1", 0, 0, {}, log_entry::entry_type::normal_entry));
@@ -729,12 +729,12 @@ TEST_P(compaction_scenario_test, compaction_of_already_compacted_directory) {
     // that came from the previous compacted file.
     catalog = compaction_catalog::from_catalog_file(location);
     ASSERT_EQ(catalog.get_compacted_files().size(), 1);
-    ASSERT_PRED_FORMAT3(ContainsCompactedFileInfo, catalog.get_compacted_files(), compacted_filename, 1);
+    ASSERT_PRED_FORMAT3(ContainsCompactedFileInfo, catalog.get_compacted_files(), compacted_filename(), 1);
     EXPECT_EQ(catalog.get_max_blob_id(), 5001);
 
     // The entry that was never touched again survives, the updated one carries its new value, the
     // removed one is gone, and the entry added after the first compaction is there.
-    log_entries = read_log_file(compacted_filename, location);
+    log_entries = read_log_file(compacted_filename(), location);
     ASSERT_EQ(log_entries.size(), 4);
     EXPECT_TRUE(AssertLogEntry(log_entries[0], 1, "added", "added_v1", 0, 0, {}, log_entry::entry_type::normal_entry));
     EXPECT_TRUE(AssertLogEntry(log_entries[1], 1, "blob", "blob_v1", 0, 0, {5001}, log_entry::entry_type::normal_with_blob));
@@ -782,7 +782,7 @@ TEST_P(compaction_scenario_test, compaction_without_new_pwals_keeps_compacted_fi
     for (boost::filesystem::directory_iterator it{boost::filesystem::path(location)}, end;
          it != end; ++it) {
         std::string name = it->path().filename().string();
-        if (starts_with(name, "pwal_") && name != compacted_filename) {
+        if (starts_with(name, "pwal_") && name != compacted_filename()) {
             boost::filesystem::remove(it->path());
         }
     }
@@ -792,21 +792,21 @@ TEST_P(compaction_scenario_test, compaction_without_new_pwals_keeps_compacted_fi
         // reset the epoch and blob id high-water marks.
         compaction_catalog catalog = compaction_catalog::from_catalog_file(location);
         catalog.update_catalog_file(catalog.get_max_epoch_id(), catalog.get_max_blob_id(), catalog.get_generation(),
-                                    {compacted_file_info{compacted_filename, 1}}, std::nullopt, {});
+                                    {compacted_file_info{compacted_filename(), 1}}, std::nullopt, {});
     }
-    ASSERT_TRUE(boost::filesystem::exists(boost::filesystem::path(location) / compacted_filename));
+    ASSERT_TRUE(boost::filesystem::exists(boost::filesystem::path(location) / compacted_filename()));
 
     // Compact again without having written a single new entry.
     ASSERT_NO_FATAL_FAILURE(run_compaction(4));
 
     // The compacted file must still be there, still registered, and still hold the data.
-    ASSERT_TRUE(boost::filesystem::exists(boost::filesystem::path(location) / compacted_filename));
+    ASSERT_TRUE(boost::filesystem::exists(boost::filesystem::path(location) / compacted_filename()));
     compaction_catalog catalog = compaction_catalog::from_catalog_file(location);
     ASSERT_EQ(catalog.get_compacted_files().size(), 1);
-    ASSERT_PRED_FORMAT3(ContainsCompactedFileInfo, catalog.get_compacted_files(), compacted_filename, 1);
+    ASSERT_PRED_FORMAT3(ContainsCompactedFileInfo, catalog.get_compacted_files(), compacted_filename(), 1);
     EXPECT_EQ(catalog.get_max_blob_id(), 6001);
 
-    std::vector<log_entry> log_entries = read_log_file(compacted_filename, location);
+    std::vector<log_entry> log_entries = read_log_file(compacted_filename(), location);
     ASSERT_EQ(log_entries.size(), 2);
     EXPECT_TRUE(AssertLogEntry(log_entries[0], 1, "key1", "value1", 0, 0, {}, log_entry::entry_type::normal_entry));
     EXPECT_TRUE(AssertLogEntry(log_entries[1], 1, "key2", "value2", 0, 0, {6001}, log_entry::entry_type::normal_with_blob));
