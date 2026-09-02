@@ -93,6 +93,18 @@ public:
     /// @brief test hook fired on the rotation thread just before the completion wait starts (inside the single mutex)
     void on_rotate_before_wait() const;
 
+    /// @brief sets the test hook fired after the publish renames and before the catalog commit (test-only)
+    void set_on_compaction_after_publish_for_test(std::function<void()> hook) noexcept;
+
+    /// @brief sets the test hook fired after the catalog commit and before the old-generation removal (test-only)
+    void set_on_compaction_after_commit_for_test(std::function<void()> hook) noexcept;
+
+    /// @brief test hook fired on the compaction thread after the publish renames and before the catalog commit
+    void on_compaction_after_publish() const;
+
+    /// @brief test hook fired on the compaction thread after the catalog commit and before the old-generation removal
+    void on_compaction_after_commit() const;
+
     /// @brief returns the name of the current compacted file; std::nullopt if there is none
     [[nodiscard]] std::optional<std::string> get_current_compacted_file_name() const;
 
@@ -476,6 +488,10 @@ private:
     // Test hooks of the rotation mechanism (no-op when unset).
     std::function<void()> on_rotate_before_rename_;
     std::function<void()> on_rotate_before_wait_;
+
+    // Test hooks at the phase boundaries of the online compaction (no-op when unset).
+    std::function<void()> on_compaction_after_publish_;
+    std::function<void()> on_compaction_after_commit_;
 
     // Synchronized copy of the current compacted file name. The in-memory state of the
     // compaction catalog is not thread-safe, so only this value, which is read across

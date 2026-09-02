@@ -182,43 +182,26 @@ boost::filesystem::path make_backup_dir_next_to(const boost::filesystem::path& t
 }
 
 /**
- * @brief tells whether the log directory holds any pwal file to compact.
+ * @brief Carries over the existing compaction catalog (and its backup) from from_dir
+ *        into the work directory tmp and loads it from there.
  *
- * A directory without any pwal file has nothing to compact. Online compaction returns early
- * in that case, and offline compaction must do the same, so that an empty compacted file is
- * never created and never registered in the catalog. Note that the compacted file itself is
- * a pwal file, so a directory holding only a compacted file is still compacted: the compacted
- * file is an input of the compaction and must be carried over into the rebuilt directory.
- * @param dir the log directory
- * @return true if dir holds at least one pwal file
+ * If from_dir has no catalog (a directory that was never compacted), the empty catalog
+ * created by setup_initial_logdir(tmp) is used instead.
+ *
+ * @param from_dir the original log directory
+ * @param tmp the working directory, already initialized by setup_initial_logdir
+ * @return the catalog loaded in tmp
+ * @throws limestone_exception when the catalog cannot be read nor recovered from its backup
  */
-bool has_pwal_file(boost::filesystem::path const& dir) {
-    boost::system::error_code ec;
-    for (boost::filesystem::directory_iterator it(dir, ec), end; it != end && !ec; it.increment(ec)) {
-        if (dblog_scan::is_wal(it->path())) {
-            return true;
-        }
-    }
-    if (ec) {
-        LOG_AND_THROW_IO_EXCEPTION("failed to scan log directory: " + dir.string(), ec);
-    }
-    return false;
-}
-
-// Carry over the existing compaction catalog (and its backup) from from_dir into the
-// work directory tmp, then register the freshly produced compacted file. tmp will
-// replace from_dir, so carrying over the catalog preserves the high-water marks
-// recorded by previous compactions: update_catalog_file keeps max_blob_id
-// monotonically non-decreasing, so the freshly computed value (which reflects only
-// blobs still referenced by live entries) never lowers it and blob IDs are never
-// reused. If from_dir has no catalog (a directory that was never compacted), the empty
-// catalog created by setup_initial_logdir(tmp) is used instead.
-// compacted_file_created tells whether a compacted file was produced: when there was
-// nothing to compact, none exists and none must be registered.
-void carry_over_and_update_compaction_catalog(boost::filesystem::path const& from_dir, boost::filesystem::path const& tmp,
-                                              epoch_id_type ld_epoch, blob_id_type max_blob_id,
-                                              bool compacted_file_created) {
-    auto copy_catalog_file = [&](const std::string& filename) {
+compaction_catalog carry_over_compaction_catalog(boost::filesystem::path const& from_dir, boost::filesystem::path const& tmp) {
+    // tmp eventually replaces from_dir, so carrying over the catalog preserves the
+    // high-water marks recorded by previous compactions: update_catalog_file keeps
+    // max_blob_id monotonically non-decreasing, so the freshly computed value (which
+    // reflects only blobs still referenced by live entries) never lowers it and blob
+    // IDs are never reused. Loading happens on the copy in tmp rather than on from_dir
+    // because a recovery from the backup catalog renames files; keeping from_dir
+    // untouched also preserves the invariance of a dry run.
+    auto copy_catalog_file = [&](const std::string& filename) -> bool {
         boost::filesystem::path src = from_dir / filename;
         boost::system::error_code ec;
         bool present = boost::filesystem::exists(src, ec);
@@ -235,33 +218,38 @@ void carry_over_and_update_compaction_catalog(boost::filesystem::path const& fro
                 LOG_AND_THROW_IO_EXCEPTION("failed to copy compaction catalog file: " + src.string(), ec);
             }
         }
+        return present;
     };
-    copy_catalog_file(compaction_catalog::get_catalog_filename());
-    copy_catalog_file(compaction_catalog::get_catalog_backup_filename());
+    bool const catalog_copied = copy_catalog_file(compaction_catalog::get_catalog_filename());
+    bool const backup_copied = copy_catalog_file(compaction_catalog::get_catalog_backup_filename());
+    // "No catalog, backup present" is the window of a crash in the middle of a catalog
+    // update. In that case, if the empty catalog that setup_initial_logdir created in
+    // tmp remained, from_catalog_file would read it successfully and the recovery from
+    // the backup would not fire. Remove the empty catalog so that the recovery path
+    // (restore_from_backup) takes over.
+    if (!catalog_copied && backup_copied) {
+        boost::system::error_code remove_ec;
+        boost::filesystem::remove(tmp / compaction_catalog::get_catalog_filename(), remove_ec);
+        if (remove_ec) {
+            LOG_AND_THROW_IO_EXCEPTION(
+                "failed to remove the initial compaction catalog in the working directory: " +
+                (tmp / compaction_catalog::get_catalog_filename()).string(), remove_ec);
+        }
+    }
 
-    VLOG_LP(log_info) << "updating compaction catalog in " << tmp;
+    VLOG_LP(log_info) << "loading the carried-over compaction catalog in " << tmp;
     // tmp always has a catalog here (setup_initial_logdir created an empty one, possibly
     // overwritten by the carry-over above), so loading only fails when the carried-over
     // catalog and its backup are both unreadable. In that case abort with a clear message
     // rather than silently proceeding, which would lose the blob-id high-water mark.
-    compaction_catalog catalog = [&]() {
-        try {
-            return compaction_catalog::from_catalog_file(tmp);
-        } catch (const limestone_exception& ex) {
-            LOG_AND_THROW_EXCEPTION(
-                "the existing compaction catalog in " + from_dir.string() +
-                " is unreadable and could not be recovered; offline compaction was aborted to"
-                " avoid losing the blob-id high-water mark (cause: " + ex.what() + ")");
-        }
-    }();
-    std::set<compacted_file_info> compacted_files{};
-    if (compacted_file_created) {
-        compacted_files.emplace(compaction_catalog::get_compacted_filename(), 1);
+    try {
+        return compaction_catalog::from_catalog_file(tmp);
+    } catch (const limestone_exception& ex) {
+        LOG_AND_THROW_EXCEPTION(
+            "the existing compaction catalog in " + from_dir.string() +
+            " is unreadable and could not be recovered; offline compaction was aborted to"
+            " avoid losing the blob-id high-water mark (cause: " + ex.what() + ")");
     }
-    // Offline compaction writes the output with the fixed name and does not advance
-    // the generation (nor does it produce a carry file). Generation-suffixed names for
-    // the offline output are introduced together with the orphan removal at startup.
-    catalog.update_catalog_file(ld_epoch, max_blob_id, catalog.get_generation(), compacted_files, std::nullopt, {});
 }
 
 /**
@@ -400,14 +388,52 @@ void compaction(dblog_scan &ds) {
     // (see the offline compaction blob-loss issue).
     carry_over_manifest_file(from_dir, tmp);
 
-    // Nothing to compact when the log directory holds no pwal file: producing an (empty)
-    // compacted file and registering it in the catalog would only add a file that carries no
-    // data. Online compaction skips the compaction in this case as well.
-    bool const compacted_file_created = has_pwal_file(from_dir);
+    // Carry over and load the catalog before the scan: it names the current generation,
+    // which the orphan exclusion and the output naming below depend on.
+    compaction_catalog catalog = carry_over_compaction_catalog(from_dir, tmp);
+
+    // Input selection with the orphan rule of the startup path: a compaction output that
+    // the catalog does not record is a crash remnant, and reading it as an ordinary WAL
+    // could resurrect an old value through a tie of zero write versions. dblogutil does
+    // not pass through the startup orphan removal (datastore::ready), so the same rule is
+    // applied here by excluding orphans from the input; the rebuild of the log directory
+    // then drops them physically (and leaves from_dir untouched under --dry_run).
+    std::set<std::string> input_file_names;
+    boost::system::error_code list_ec;
+    for (boost::filesystem::directory_iterator it(from_dir, list_ec), end; it != end && !list_ec; it.increment(list_ec)) {
+        if (!dblog_scan::is_wal(it->path())) {
+            continue;
+        }
+        std::string filename = it->path().filename().string();
+        if (catalog.is_orphan_compaction_file(filename)) {
+            LOG_LP(INFO) << "excluding the orphan compaction file (not recorded by the compaction catalog)"
+                            " from the compaction input: " << it->path().string();
+            continue;
+        }
+        input_file_names.insert(filename);
+    }
+    if (list_ec) {
+        LOG_AND_THROW_IO_EXCEPTION("failed to scan log directory: " + from_dir.string(), list_ec);
+    }
+
+    // Nothing to compact when the log directory holds no input pwal file: producing an
+    // (empty) compacted file and registering it in the catalog would only add a file that
+    // carries no data. Online compaction skips the compaction in this case as well. Note
+    // that the compacted file itself is a pwal file, so a directory holding only a
+    // compacted file is still compacted: the compacted file is an input of the compaction
+    // and must be carried over into the rebuilt directory.
+    bool const compacted_file_created = !input_file_names.empty();
+    // The offline output takes the next generation name, with the same numbering as the
+    // online compaction. No carry file is produced: the boundary of the offline
+    // compaction is the durable epoch, and without a boundary epoch in the options the
+    // carry pass does not run.
+    std::uint64_t const new_generation = catalog.get_generation() + 1;
     blob_id_type max_blob_id{};
     if (compacted_file_created) {
         VLOG_LP(log_info) << "making compact pwal file to " << tmp;
-        compaction_options options{from_dir, tmp, FLAGS_thread_num};
+        compaction_options options{from_dir, tmp, FLAGS_thread_num, input_file_names};
+        options.set_output_file_names(compaction_catalog::get_compacted_filename_for_generation(new_generation),
+                                      compaction_catalog::get_carry_filename_for_generation(new_generation));
         max_blob_id = create_compaction_output(options).max_blob_id;
     } else {
         VLOG_LP(log_info) << "no pwal file to compact in " << from_dir;
@@ -431,11 +457,19 @@ void compaction(dblog_scan &ds) {
         LOG_AND_THROW_IO_EXCEPTION("fclose failed", errno);
     }
 
-    // Update the compaction catalog so that the compacted file is registered.
-    // Without this, a subsequent startup treats the directory as if no compaction
-    // had been performed, and remove entries are dropped from the snapshot,
-    // resurrecting deleted records (see tsurugi-issues #1498).
-    carry_over_and_update_compaction_catalog(from_dir, tmp, ld_epoch, max_blob_id, compacted_file_created);
+    // Update the carried-over catalog (kept in tmp) so that the compacted file is
+    // registered. Without this, a subsequent startup treats the directory as if no
+    // compaction had been performed, and remove entries are dropped from the snapshot,
+    // resurrecting deleted records. The generation advances only when a new compacted
+    // file was produced; no carry file is recorded.
+    VLOG_LP(log_info) << "updating compaction catalog in " << tmp;
+    std::set<compacted_file_info> compacted_files{};
+    if (compacted_file_created) {
+        compacted_files.emplace(compaction_catalog::get_compacted_filename_for_generation(new_generation), 1);
+    }
+    catalog.update_catalog_file(ld_epoch, max_blob_id,
+                                compacted_file_created ? new_generation : catalog.get_generation(),
+                                compacted_files, std::nullopt, {});
 
     if (FLAGS_dry_run) {
         std::cout << "compaction will be successfully completed (dry-run mode)" << std::endl;

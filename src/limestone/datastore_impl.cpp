@@ -106,6 +106,26 @@ void datastore_impl::on_rotate_before_wait() const {
     }
 }
 
+void datastore_impl::set_on_compaction_after_publish_for_test(std::function<void()> hook) noexcept {
+    on_compaction_after_publish_ = std::move(hook);
+}
+
+void datastore_impl::set_on_compaction_after_commit_for_test(std::function<void()> hook) noexcept {
+    on_compaction_after_commit_ = std::move(hook);
+}
+
+void datastore_impl::on_compaction_after_publish() const {
+    if (on_compaction_after_publish_) {
+        on_compaction_after_publish_();
+    }
+}
+
+void datastore_impl::on_compaction_after_commit() const {
+    if (on_compaction_after_commit_) {
+        on_compaction_after_commit_();
+    }
+}
+
 std::optional<std::string> datastore_impl::get_current_compacted_file_name() const {
     {
         std::lock_guard<std::mutex> lock(current_compacted_file_name_mutex_);

@@ -16,6 +16,7 @@
 
 #include <glog/logging.h>
 #include <algorithm>
+#include <cctype>
 #include <fstream>
 #include <stdexcept>
 #include <sstream>
@@ -371,6 +372,37 @@ std::string compaction_catalog::get_carry_filename_for_generation(std::uint64_t 
 
 std::uint64_t compaction_catalog::get_generation() const {
     return generation_;
+}
+
+bool compaction_catalog::is_compaction_output_filename(const std::string& filename) {
+    const std::string compacted_base{COMPACTED_FILENAME};
+    const std::string carry_base{CARRY_FILENAME_BASE};
+    if (filename == compacted_base) {
+        return true;  // the unnamed generation-0 form of the migration rule
+    }
+    if (filename == RETIRED_COMPACTED_BACKUP_FILENAME) {
+        return true;  // remnant of the retired backup scheme; never recorded by a catalog
+    }
+    auto is_generation_suffixed = [](const std::string& name, const std::string& base) {
+        if (name.size() <= base.size() + 1 || name.compare(0, base.size(), base) != 0 || name[base.size()] != '.') {
+            return false;
+        }
+        return std::all_of(name.begin() + static_cast<std::ptrdiff_t>(base.size()) + 1, name.end(),
+                           [](unsigned char c) { return std::isdigit(c) != 0; });
+    };
+    return is_generation_suffixed(filename, compacted_base) || is_generation_suffixed(filename, carry_base);
+}
+
+bool compaction_catalog::is_orphan_compaction_file(const std::string& filename) const {
+    if (!is_compaction_output_filename(filename)) {
+        return false;
+    }
+    for (const compacted_file_info& info : compacted_files_) {
+        if (info.get_file_name() == filename) {
+            return false;
+        }
+    }
+    return !(carry_file_.has_value() && carry_file_.value() == filename);
 }
 
 const std::optional<std::string>& compaction_catalog::get_carry_file() const {

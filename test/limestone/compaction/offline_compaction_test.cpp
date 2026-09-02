@@ -66,14 +66,6 @@ public:
         boost::filesystem::remove_all(test_root_);
     }
 
-    // Read a whole file into a string (byte-exact, for content comparison).
-    static std::string read_file(boost::filesystem::path const& path) {
-        std::ifstream ifs(path.string(), std::ios::binary);
-        std::ostringstream ss;
-        ss << ifs.rdbuf();
-        return ss.str();
-    }
-
     // Enumerate sibling directories of the test location whose name is
     // "<location><marker>XXXXXX" (tglogutil creates ".work_" / ".backup_" directories
     // next to the target directory).
@@ -158,7 +150,7 @@ public:
             if (boost::filesystem::is_directory(it->status())) {
                 tree.emplace(rel, std::string{});
             } else {
-                tree.emplace(rel, read_file(it->path()));
+                tree.emplace(rel, read_file_bytes(it->path()));
             }
         }
         return tree;
@@ -230,10 +222,13 @@ TEST_F(offline_compaction_test, preserves_remove_entries_after_restart) {
     EXPECT_EQ(kv["C"], "vc");
 }
 
-// Verifies that startup fails fast when the compaction catalog is inconsistent
-// with the WAL files: the compacted file exists on disk but is not registered in
-// the catalog (the broken state produced by the #1498 bug).
-TEST_F(offline_compaction_test, detects_inconsistent_compaction_catalog_at_startup) {
+// An unnamed (generation 0) compacted file that the catalog does not register is
+// removed by the orphan removal at startup, and the startup succeeds. The old
+// implementation rejected this broken state fast at startup; the single orphan rule
+// resolves it by removal instead: an unregistered compacted file is then never read as
+// an ordinary WAL, so the resurrection of deleted records cannot happen structurally.
+// The data is restored from the un-detached originals.
+TEST_F(offline_compaction_test, unregistered_fixed_name_compacted_is_removed_at_startup) {
 
     // Produce a valid compacted file and catalog via online compaction.
     gen_datastore();
@@ -254,32 +249,26 @@ TEST_F(offline_compaction_test, detects_inconsistent_compaction_catalog_at_start
     datastore_->shutdown();
     datastore_ = nullptr;
 
-    // Corrupt the catalog: drop the compacted-file registration while a compacted
-    // file with the well-known (generation 0) name remains on disk. The startup
-    // consistency check covers only the well-known name; unregistered
-    // generation-suffixed files are handled by the orphan deletion at startup.
-    boost::filesystem::rename(compacted_path,
-                              boost::filesystem::path(location) / compaction_catalog::get_compacted_filename());
+    // Build the broken state: a catalog that lost the compacted registration, alongside
+    // an unnamed (generation 0) compacted file. The detached records are lost as well,
+    // so the original pwal becomes a live input again.
+    boost::filesystem::path unnamed_path = boost::filesystem::path(location) / compaction_catalog::get_compacted_filename();
+    boost::filesystem::rename(compacted_path, unnamed_path);
     {
         compaction_catalog catalog{location};
         catalog.update_catalog_file(0, 0, 0, {}, std::nullopt, {});
     }
-    ASSERT_TRUE(boost::filesystem::exists(boost::filesystem::path(location) / compaction_catalog::get_compacted_filename()));
+    ASSERT_TRUE(boost::filesystem::exists(unnamed_path));
 
-    // Startup must fail fast because the catalog is inconsistent. Verify both that a
-    // limestone_exception is thrown and that its message is the intended one (so that an
-    // unrelated failure that happens to throw the same type is not mistaken for success).
-    // This substring must match the message produced by datastore startup.
-    const std::string expected_message_substr = "compaction catalog is inconsistent";
-    try {
-        gen_datastore();
-        FAIL() << "expected a limestone_exception to be thrown, but nothing was thrown";
-    } catch (const limestone_exception& e) {
-        EXPECT_NE(std::string(e.what()).find(expected_message_substr), std::string::npos)
-            << "unexpected exception message: " << e.what();
-    } catch (const std::exception& e) {
-        FAIL() << "expected a limestone_exception, but a different exception was thrown: " << e.what();
-    }
+    // The startup succeeds, the unregistered unnamed compacted file is removed as an
+    // orphan, and the data is readable from the original.
+    gen_datastore();
+    EXPECT_FALSE(boost::filesystem::exists(unnamed_path));
+
+    std::vector<std::pair<std::string, std::string>> kv_list = restart_datastore_and_read_snapshot();
+    ASSERT_EQ(kv_list.size(), 1);
+    EXPECT_EQ(kv_list[0].first, "A");
+    EXPECT_EQ(kv_list[0].second, "va");
 }
 
 // A cursor obtained right after an online compaction commits, without a restart, must
@@ -508,14 +497,14 @@ TEST_F(offline_compaction_test, offline_compaction_preserves_manifest_file) {
     datastore_->shutdown();
     datastore_ = nullptr;
 
-    std::string manifest_before = read_file(manifest_path);
+    std::string manifest_before = read_file_bytes(manifest_path);
     ASSERT_FALSE(manifest_before.empty());
     ASSERT_NE(manifest_before.find("instance_uuid"), std::string::npos);
 
     run_offline_compaction();
 
     // The manifest must be carried over byte-exact (same instance_uuid, same versions).
-    std::string manifest_after = read_file(manifest_path);
+    std::string manifest_after = read_file_bytes(manifest_path);
     EXPECT_EQ(manifest_after, manifest_before);
 }
 
@@ -822,7 +811,7 @@ TEST_F(offline_compaction_test, offline_compaction_dry_run_migrates_old_manifest
     boost::filesystem::remove(dir / compaction_catalog::get_catalog_filename());
     boost::filesystem::remove(dir / compaction_catalog::get_catalog_backup_filename());
 
-    std::string manifest_before = read_file(manifest_path);
+    std::string manifest_before = read_file_bytes(manifest_path);
     ASSERT_EQ(manifest::from_json_string(manifest_before).get_persistent_format_version(), 1);
     std::map<std::string, std::string> before = snapshot_tree(location);
 
@@ -830,7 +819,7 @@ TEST_F(offline_compaction_test, offline_compaction_dry_run_migrates_old_manifest
     ASSERT_NO_FATAL_FAILURE(run_offline_dry_run(location, out));
 
     // The manifest must have been migrated to the current format version.
-    std::string manifest_after = read_file(manifest_path);
+    std::string manifest_after = read_file_bytes(manifest_path);
     EXPECT_NE(manifest_after, manifest_before);
     EXPECT_EQ(manifest::from_json_string(manifest_after).get_persistent_format_version(),
               manifest::default_persistent_format_version)
@@ -877,8 +866,8 @@ TEST_F(offline_compaction_test, offline_compaction_dry_run_creates_missing_catal
     boost::filesystem::remove(dir / compaction_catalog::get_catalog_backup_filename());
     ASSERT_FALSE(boost::filesystem::exists(catalog_path));
 
-    std::string manifest_before = read_file(manifest_path);
-    std::string pwal_before = read_file(dir / "pwal_0000");
+    std::string manifest_before = read_file_bytes(manifest_path);
+    std::string pwal_before = read_file_bytes(dir / "pwal_0000");
 
     std::string out;
     ASSERT_NO_FATAL_FAILURE(run_offline_dry_run(location, out));
@@ -894,11 +883,188 @@ TEST_F(offline_compaction_test, offline_compaction_dry_run_creates_missing_catal
     // The dry run must not have compacted anything into the log directory, and must have left the
     // manifest and the transaction log untouched.
     EXPECT_FALSE(boost::filesystem::exists(dir / compaction_catalog::get_compacted_filename()));
-    EXPECT_EQ(read_file(manifest_path), manifest_before);
-    EXPECT_EQ(read_file(dir / "pwal_0000"), pwal_before);
+    EXPECT_EQ(read_file_bytes(manifest_path), manifest_before);
+    EXPECT_EQ(read_file_bytes(dir / "pwal_0000"), pwal_before);
 
     EXPECT_TRUE(find_backup_dirs().empty());
     EXPECT_TRUE(find_sibling_dirs(".work_").empty());
+
+    remove_backup_dirs();
+    remove_work_dirs();
+}
+
+// The offline compaction writes its output under a generation-suffixed name (gen+1,
+// with the same numbering as the online compaction), and the catalog records the new
+// generation and "no carry".
+TEST_F(offline_compaction_test, offline_compaction_outputs_generation_suffixed_name) {
+    gen_datastore();
+    datastore_->switch_epoch(1);
+    lc0_->begin_session();
+    lc0_->add_entry(1, "A", "va", {1, 0});
+    lc0_->end_session();
+    datastore_->switch_epoch(2);
+    run_compact_with_epoch_switch(3);  // generation 1
+
+    lc0_->begin_session();
+    lc0_->add_entry(1, "B", "vb", {3, 0});
+    lc0_->end_session();
+    datastore_->switch_epoch(4);
+    datastore_->shutdown();
+    datastore_ = nullptr;
+
+    run_offline_compaction();
+    gen_datastore();  // restart_datastore_and_read_snapshot needs a live datastore
+
+    boost::filesystem::path dir{location};
+    {
+        compaction_catalog catalog = compaction_catalog::from_catalog_file(dir);
+        EXPECT_EQ(catalog.get_generation(), 2);
+        ASSERT_TRUE(catalog.get_current_compacted_file_name().has_value());
+        EXPECT_EQ(catalog.get_current_compacted_file_name().value(), "pwal_0000.compacted.2");
+        EXPECT_FALSE(catalog.get_carry_file().has_value());
+    }
+    EXPECT_TRUE(boost::filesystem::exists(dir / "pwal_0000.compacted.2"));
+    EXPECT_FALSE(boost::filesystem::exists(dir / "pwal_0000.compacted.1"));
+    EXPECT_FALSE(boost::filesystem::exists(dir / compaction_catalog::get_compacted_filename()));
+
+    std::vector<std::pair<std::string, std::string>> kv_list = restart_datastore_and_read_snapshot();
+    std::map<std::string, std::string> kv(kv_list.begin(), kv_list.end());
+    EXPECT_EQ(kv.size(), 2);
+    EXPECT_EQ(kv["A"], "va");
+    EXPECT_EQ(kv["B"], "vb");
+}
+
+// A generation file that the catalog does not record (an orphan) and a ".prev" remnant
+// are excluded from the input of the offline compaction, and the rebuild drops them
+// physically. This pins that an orphan reaching the input could silently resurrect an
+// old value: the same key would tie at write version zero on both sides.
+TEST_F(offline_compaction_test, offline_compaction_excludes_orphan_compaction_files) {
+    gen_datastore();
+    datastore_->switch_epoch(1);
+    lc0_->begin_session();
+    lc0_->add_entry(1, "K", "v1", {1, 0});
+    lc0_->end_session();
+    datastore_->switch_epoch(2);
+    run_compact_with_epoch_switch(3);  // generation 1: K=v1 (WV 0)
+
+    // Keep the content of the generation-1 compacted file (to place it back later as an orphan).
+    boost::filesystem::path dir{location};
+    std::string old_generation_bytes = read_file_bytes(dir / "pwal_0000.compacted.1");
+
+    lc0_->begin_session();
+    lc0_->add_entry(1, "K", "v2", {3, 0});
+    lc0_->end_session();
+    datastore_->switch_epoch(4);
+    run_compact_with_epoch_switch(5);  // generation 2: K=v2 (WV 0); generation 1 is removed
+
+    datastore_->shutdown();
+    datastore_ = nullptr;
+
+    // Mimic crash remnants: place an unregistered generation file holding the old value
+    // K=v1 (WV 0) and a ".prev" file.
+    auto write_bytes = [](const boost::filesystem::path& path, const std::string& bytes) {
+        std::ofstream ofs(path.string(), std::ios::binary);
+        ofs << bytes;
+    };
+    write_bytes(dir / "pwal_0000.compacted.1", old_generation_bytes);
+    write_bytes(dir / (compaction_catalog::get_compacted_filename() + ".prev"), old_generation_bytes);
+
+    run_offline_compaction();
+
+    // The orphans are excluded from the input and absent from the rebuilt directory.
+    // Verify before the orphan removal at startup runs: verifying after a startup would
+    // mask an exclusion missed by the offline side.
+    EXPECT_FALSE(boost::filesystem::exists(dir / "pwal_0000.compacted.1"));
+    EXPECT_FALSE(boost::filesystem::exists(dir / (compaction_catalog::get_compacted_filename() + ".prev")));
+    {
+        compaction_catalog catalog = compaction_catalog::from_catalog_file(dir);
+        EXPECT_EQ(catalog.get_generation(), 3);
+    }
+    gen_datastore();  // restart_datastore_and_read_snapshot needs a live datastore
+
+    // The old value is not resurrected.
+    std::vector<std::pair<std::string, std::string>> kv_list = restart_datastore_and_read_snapshot();
+    ASSERT_EQ(kv_list.size(), 1);
+    EXPECT_EQ(kv_list[0].first, "K");
+    EXPECT_EQ(kv_list[0].second, "v2");
+}
+
+// Offline compaction on a directory in the crash window of a catalog update (no
+// catalog, backup present) recovers the catalog from the backup, and the recorded
+// compacted file is not excluded from the input as an orphan. This pins the hole where
+// an ignored backup would exclude the compacted file against an empty catalog and the
+// rebuilt directory would lose the data permanently. The existing
+// offline_compaction_recovers_catalog_from_backup covers a corrupted catalog; this one
+// covers a missing catalog, whose recovery has to avoid reading the fresh initial
+// catalog placed in tmp.
+TEST_F(offline_compaction_test, offline_compaction_recovers_catalog_from_backup_when_catalog_is_missing) {
+    gen_datastore();
+    datastore_->switch_epoch(1);
+    lc0_->begin_session();
+    lc0_->add_entry(1, "A", "va", {1, 0});
+    lc0_->end_session();
+    datastore_->switch_epoch(2);
+    run_compact_with_epoch_switch(3);  // generation 1: A lives only in compacted.1
+    datastore_->shutdown();
+    datastore_ = nullptr;
+
+    // Build the crash window of a catalog update: the state right after the catalog
+    // was renamed to the backup.
+    boost::filesystem::path dir{location};
+    boost::filesystem::rename(dir / compaction_catalog::get_catalog_filename(),
+                              dir / compaction_catalog::get_catalog_backup_filename());
+
+    run_offline_compaction();
+
+    // Generation 2 is written, carrying over the recovered catalog's generation (1);
+    // with the backup ignored, generation 1 would be written and compacted.1 would be
+    // excluded from the input as an orphan.
+    {
+        compaction_catalog catalog = compaction_catalog::from_catalog_file(dir);
+        EXPECT_EQ(catalog.get_generation(), 2);
+        ASSERT_TRUE(catalog.get_current_compacted_file_name().has_value());
+        EXPECT_EQ(catalog.get_current_compacted_file_name().value(), "pwal_0000.compacted.2");
+    }
+
+    // The data of compacted.1 is not lost.
+    gen_datastore();  // restart_datastore_and_read_snapshot needs a live datastore
+    std::vector<std::pair<std::string, std::string>> kv_list = restart_datastore_and_read_snapshot();
+    ASSERT_EQ(kv_list.size(), 1);
+    EXPECT_EQ(kv_list[0].first, "A");
+    EXPECT_EQ(kv_list[0].second, "va");
+}
+
+// A dry run leaves the log directory untouched even when orphans are present: the
+// orphan rule is implemented as an exclusion from the input rather than an actual
+// removal, so the invariance of a dry run is preserved.
+TEST_F(offline_compaction_test, offline_compaction_dry_run_keeps_orphan_files) {
+    gen_datastore();
+    datastore_->switch_epoch(1);
+    lc0_->begin_session();
+    lc0_->add_entry(1, "A", "va", {1, 0});
+    lc0_->end_session();
+    datastore_->switch_epoch(2);
+    run_compact_with_epoch_switch(3);  // generation 1
+    datastore_->shutdown();
+    datastore_ = nullptr;
+
+    // Place an unregistered generation file (an orphan).
+    boost::filesystem::path dir{location};
+    boost::filesystem::copy_file(dir / "pwal_0000.compacted.1", dir / "pwal_0000.compacted.9");
+
+    std::map<std::string, std::string> before = snapshot_tree(location);
+
+    std::string out;
+    std::string command = std::string(util_command) + " compaction --force --dry_run " +
+        std::string(location) + " 2>&1";
+    int rc = invoke(command, out);
+    ASSERT_EQ(rc, 0) << "invoke failed: " << out;
+    EXPECT_TRUE(out.find("compaction will be successfully completed (dry-run mode)") != std::string::npos)
+        << "tglogutil output:\n" << out;
+
+    // The directory, including the orphan, is byte-for-byte unchanged.
+    EXPECT_EQ(snapshot_tree(location), before);
+    EXPECT_TRUE(boost::filesystem::exists(dir / "pwal_0000.compacted.9"));
 
     remove_backup_dirs();
     remove_work_dirs();

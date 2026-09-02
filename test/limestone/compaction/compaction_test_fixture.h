@@ -22,6 +22,7 @@
 
 #include <array>
 #include <cstring>
+#include <fstream>
 #include <sstream>
 
 #include <boost/filesystem.hpp>
@@ -124,6 +125,27 @@ public:
         out.assign(ss.str());
         LOG(INFO) << "\n" << out;
         return pclose(fp);
+    }
+
+    // Read a whole file into a string (byte-exact, for content comparison).
+    static std::string read_file_bytes(boost::filesystem::path const& path) {
+        std::ifstream ifs(path.string(), std::ios::binary);
+        std::ostringstream ss;
+        ss << ifs.rdbuf();
+        return ss.str();
+    }
+
+    // Copy a directory tree (used to capture a crash-equivalent state of the log directory).
+    static void copy_dir_recursive(const boost::filesystem::path& src, const boost::filesystem::path& dst) {
+        boost::filesystem::create_directories(dst);
+        for (boost::filesystem::recursive_directory_iterator it{src}, end; it != end; ++it) {
+            boost::filesystem::path rel = boost::filesystem::relative(it->path(), src);
+            if (boost::filesystem::is_directory(it->status())) {
+                boost::filesystem::create_directories(dst / rel);
+            } else {
+                boost::filesystem::copy_file(it->path(), dst / rel);
+            }
+        }
     }
 
     // Run offline compaction on the test location via the tglogutil binary.

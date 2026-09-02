@@ -15,6 +15,7 @@
  */
 
 #include <algorithm>
+#include <cctype>
 #include <condition_variable>
 #include <fstream>
 #include <functional>
@@ -107,13 +108,16 @@ protected:
     }
 
     // Returns the rotated file of the given pwal (e.g. "pwal_0001." matches
-    // "pwal_0001.<unixtime>.<epoch>"), or an empty path if none exists.
+    // "pwal_0001.<unixtime>.<epoch>"), or an empty path if none exists. The character
+    // after the prefix must be a digit, so that "pwal_0000." never matches the
+    // compaction outputs ("pwal_0000.compacted.<gen>" / "pwal_0000.carry.<gen>").
     [[nodiscard]] boost::filesystem::path find_rotated_pwal(std::string const& prefix) const {
         boost::filesystem::directory_iterator end;
         for (boost::filesystem::directory_iterator it{boost::filesystem::path(location)};
              it != end; ++it) {
             std::string name = it->path().filename().string();
-            if (name.rfind(prefix, 0) == 0) {
+            if (name.rfind(prefix, 0) == 0 && name.size() > prefix.size() &&
+                std::isdigit(static_cast<unsigned char>(name[prefix.size()])) != 0) {
                 return it->path();
             }
         }
@@ -388,6 +392,206 @@ TEST_F(online_compaction_inflight_session_test, carry_from_multiple_channels_is_
     EXPECT_TRUE(contains(kv_list, "k2", "v2"));
     EXPECT_TRUE(contains(kv_list, "k3", "v3"));
     EXPECT_EQ(kv_list.size(), 3);
+}
+
+// Immutability of rotated files: the content of a compaction input file is
+// byte-for-byte identical right after the rename and after the compaction. Both a file
+// at or below the boundary (pass 1 only) and a file holding a snippet beyond the
+// boundary (pass 1 plus the carry re-read of pass 2) are covered.
+TEST_F(online_compaction_inflight_session_test, input_files_are_unchanged_by_compaction) {
+    gen_datastore();
+    datastore_->switch_epoch(1);
+
+    lc0_->begin_session();
+    lc0_->add_entry(1, "k1", "v1", {1, 0});
+    lc0_->end_session();
+    datastore_->switch_epoch(2);
+
+    // The file at or below the boundary: a rename does not change the content, so the
+    // pre-rotation content serves as the reference.
+    std::string pwal0_before = read_file_bytes(boost::filesystem::path(location) / "pwal_0000");
+
+    // The file beyond the boundary: end_session performs the rename at the session
+    // boundary, so the content right after end_session (= right after the rename) is
+    // captured as the reference.
+    std::string pwal1_after_rename;
+    boost::filesystem::path rotated_at_rename;
+    run_compact_with_inflight_session(3,
+        [this] {
+            lc1_->begin_session();
+            lc1_->add_entry(1, "k2", "v2", {3, 0});
+        },
+        [&] {
+            lc1_->end_session();
+            rotated_at_rename = find_rotated_pwal("pwal_0001.");
+            if (!rotated_at_rename.empty()) {
+                pwal1_after_rename = read_file_bytes(rotated_at_rename);
+            }
+        });
+    // An ASSERT inside the lambda would only leave the lambda, so the check is done in the test body.
+    ASSERT_FALSE(rotated_at_rename.empty());
+    datastore_->switch_epoch(4);
+
+    // Both input files remain unchanged.
+    boost::filesystem::path rotated0 = find_rotated_pwal("pwal_0000.");
+    boost::filesystem::path rotated1 = find_rotated_pwal("pwal_0001.");
+    ASSERT_FALSE(rotated0.empty());
+    ASSERT_FALSE(rotated1.empty());
+    EXPECT_EQ(read_file_bytes(rotated0), pwal0_before);
+    EXPECT_EQ(read_file_bytes(rotated1), pwal1_after_rename);
+
+    // The carry file is a verbatim copy of the snippets beyond the boundary (this file
+    // is entirely beyond the boundary, so the whole content matches).
+    compaction_catalog catalog = compaction_catalog::from_catalog_file(location);
+    ASSERT_TRUE(catalog.get_carry_file().has_value());
+    EXPECT_EQ(read_file_bytes(boost::filesystem::path(location) / catalog.get_carry_file().value()),
+              pwal1_after_rename);
+}
+
+// Consistency with the write-version reset: an entry in the carry file keeps its real
+// write version, so on the merge of the next compaction it wins over the same key of
+// the baseline, whose write version has been reset to zero.
+TEST_F(online_compaction_inflight_session_test, carried_entry_wins_over_reset_baseline_on_merge) {
+    gen_datastore();
+    datastore_->switch_epoch(1);
+
+    lc0_->begin_session();
+    lc0_->add_entry(1, "k1", "v1", {1, 0});
+    lc0_->end_session();
+    datastore_->switch_epoch(2);
+    run_compact_with_epoch_switch(3);  // generation 1: k1=v1 (write version reset to 0)
+
+    // Update the same key in an in-flight session, so that it is saved into the carry
+    // file with its real write version {4,0}.
+    run_compact_with_inflight_session(4,
+        [this] {
+            lc1_->begin_session();
+            lc1_->add_entry(1, "k1", "v2", {4, 0});
+        },
+        [this] { lc1_->end_session(); });
+    datastore_->switch_epoch(5);
+    {
+        compaction_catalog catalog = compaction_catalog::from_catalog_file(location);
+        ASSERT_TRUE(catalog.get_carry_file().has_value());
+    }
+
+    // The next compaction absorbs the carry. On the merge of the baseline k1=v1 (WV 0)
+    // and the carried k1=v2 (real WV), the real write version has to win.
+    run_compact_with_epoch_switch(6);
+    {
+        compaction_catalog catalog = compaction_catalog::from_catalog_file(location);
+        EXPECT_FALSE(catalog.get_carry_file().has_value());
+    }
+
+    std::vector<std::pair<std::string, std::string>> kv_list = restart_datastore_and_read_snapshot();
+    ASSERT_EQ(kv_list.size(), 1);
+    EXPECT_EQ(kv_list[0].first, "k1");
+    EXPECT_EQ(kv_list[0].second, "v2");
+}
+
+// Startup invalidation of the carry: when the epoch of a carried snippet (E') is not
+// durable at a restart, the snippet is invalidated by the startup processing and does
+// not appear in the snapshot. (A durable E' is treated as ordinary WAL entries; that
+// side is covered by the other tests.)
+TEST_F(online_compaction_inflight_session_test, non_durable_carry_snippet_is_invalidated_at_startup) {
+    boost::filesystem::path crash_copy{std::string(location) + "_crash"};
+    boost::filesystem::remove_all(crash_copy);
+
+    gen_datastore();
+    datastore_->switch_epoch(1);
+
+    lc0_->begin_session();
+    lc0_->add_entry(1, "k1", "v1", {1, 0});
+    lc0_->end_session();
+    datastore_->switch_epoch(2);
+
+    run_compact_with_inflight_session(3,
+        [this] {
+            lc1_->begin_session();
+            lc1_->add_entry(1, "k2", "v2", {3, 0});
+        },
+        [this] { lc1_->end_session(); });
+
+    // Without making epoch 3 durable (no switch_epoch(4)), copy the log directory at
+    // this point as the crash state. The durable epoch stays at 2.
+    copy_dir_recursive(boost::filesystem::path(location), crash_copy);
+    datastore_->shutdown();
+    datastore_ = nullptr;
+    boost::filesystem::remove_all(boost::filesystem::path(location));
+    copy_dir_recursive(crash_copy, boost::filesystem::path(location));
+    boost::filesystem::remove_all(crash_copy);
+
+    gen_datastore();
+
+    // The epoch-3 snippet in the carry file is invalidated because it is not durable.
+    compaction_catalog catalog = compaction_catalog::from_catalog_file(location);
+    ASSERT_TRUE(catalog.get_carry_file().has_value());
+    boost::filesystem::path carry = boost::filesystem::path(location) / catalog.get_carry_file().value();
+    ASSERT_TRUE(boost::filesystem::exists(carry));
+    std::vector<log_entry> carry_entries = read_raw_entries(carry);
+    ASSERT_FALSE(carry_entries.empty());
+    EXPECT_EQ(carry_entries[0].type(), log_entry::entry_type::marker_invalidated_begin);
+
+    // k2 does not appear in the snapshot; only the durable k1 is readable.
+    std::unique_ptr<snapshot> snapshot = datastore_->get_snapshot();
+    std::unique_ptr<cursor> cursor = snapshot->get_cursor();
+    std::vector<std::pair<std::string, std::string>> kv_list;
+    while (cursor->next()) {
+        std::string key;
+        std::string value;
+        cursor->key(key);
+        cursor->value(value);
+        kv_list.emplace_back(key, value);
+    }
+    ASSERT_EQ(kv_list.size(), 1);
+    EXPECT_EQ(kv_list[0].first, "k1");
+    EXPECT_EQ(kv_list[0].second, "v1");
+}
+
+// Offline compaction on a directory holding a durable carry file: the carry is
+// absorbed as an input (the boundary is the durable epoch, so nothing beyond the
+// boundary is carried over), and the catalog records the new generation with no carry.
+TEST_F(online_compaction_inflight_session_test, offline_compaction_absorbs_durable_carry) {
+    gen_datastore();
+    datastore_->switch_epoch(1);
+
+    lc0_->begin_session();
+    lc0_->add_entry(1, "k1", "v1", {1, 0});
+    lc0_->end_session();
+    datastore_->switch_epoch(2);
+
+    run_compact_with_inflight_session(3,
+        [this] {
+            lc1_->begin_session();
+            lc1_->add_entry(1, "k2", "v2", {3, 0});
+        },
+        [this] { lc1_->end_session(); });
+    datastore_->switch_epoch(4);  // make epoch 3 durable
+
+    compaction_catalog catalog_before = compaction_catalog::from_catalog_file(location);
+    ASSERT_TRUE(catalog_before.get_carry_file().has_value());
+    std::string carry_name = catalog_before.get_carry_file().value();
+    std::uint64_t generation_before = catalog_before.get_generation();
+
+    datastore_->shutdown();
+    datastore_ = nullptr;
+
+    run_offline_compaction();
+
+    // The carry is absorbed and gone; the catalog holds the new generation with no carry.
+    EXPECT_FALSE(boost::filesystem::exists(boost::filesystem::path(location) / carry_name));
+    {
+        compaction_catalog catalog = compaction_catalog::from_catalog_file(location);
+        EXPECT_EQ(catalog.get_generation(), generation_before + 1);
+        EXPECT_FALSE(catalog.get_carry_file().has_value());
+    }
+
+    // All data, including the carried entry, is readable.
+    gen_datastore();  // restart_datastore_and_read_snapshot needs a live datastore
+    std::vector<std::pair<std::string, std::string>> kv_list = restart_datastore_and_read_snapshot();
+    EXPECT_TRUE(contains(kv_list, "k1", "v1"));
+    EXPECT_TRUE(contains(kv_list, "k2", "v2"));
+    EXPECT_EQ(kv_list.size(), 2);
 }
 
 } // namespace limestone::testing

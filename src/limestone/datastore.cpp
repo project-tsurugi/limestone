@@ -175,51 +175,40 @@ datastore::datastore(configuration const& conf) : location_(conf.data_location_)
         add_file(compaction_catalog_path);
         compaction_catalog_ = std::make_unique<compaction_catalog>(compaction_catalog::from_catalog_file(location_));
 
-        // Verify consistency between the compaction catalog and the WAL files.
-        // A cursor opens the compacted file named by the catalog, and the compacted
-        // file is excluded from the snapshot input by the same catalog record
-        // (see snapshot_impl and assemble_snapshot_input_filenames). Therefore a
-        // compacted file that exists on disk but is not registered in the catalog
-        // is fed to the snapshot input as an ordinary WAL, and remove entries are
-        // not written, resurrecting deleted records (see tsurugi-issues #1498).
-        // Conversely, a file registered in the catalog but missing from disk cannot
-        // be opened by a cursor. Fail fast on either instead of corrupting data
-        // silently.
-        {
-            // The compacted file exists on disk but is not registered in the catalog.
-            // NOTE: only the single well-known compacted file is checked here. If
-            // multiple compacted files are ever registered, this check must be extended.
-            boost::filesystem::path compacted_file_path = location_ / compaction_catalog::get_compacted_filename();
-            // Use the error_code overload so that a genuine filesystem error (permission,
-            // broken symlink, I/O error, ...) is funneled into a limestone_exception rather
-            // than escaping as a boost::filesystem::filesystem_error. A non-existent file is
-            // the normal case: boost::filesystem::exists reports it via error_code as ENOENT,
-            // so that condition must be excluded and must not be treated as an error.
-            boost::system::error_code exists_error;
-            bool compacted_file_exists = boost::filesystem::exists(compacted_file_path, exists_error);
-            if (exists_error && exists_error != boost::system::errc::no_such_file_or_directory) {
-                std::string err_msg = "failed to check existence of the compacted file '"
-                    + compacted_file_path.string() + "': " + exists_error.message();
-                LOG(ERROR) << "/:limestone:config:datastore " << err_msg;
-                throw limestone_exception(exception_type::initialization_failure, err_msg);
-            }
-            if (compacted_file_exists) {
-                bool registered = false;
-                for (auto const& info : compaction_catalog_->get_compacted_files()) {
-                    if (info.get_file_name() == compaction_catalog::get_compacted_filename()) {
-                        registered = true;
-                        break;
-                    }
-                }
-                if (!registered) {
-                    std::string err_msg = "compaction catalog is inconsistent: the compacted file '"
-                        + compaction_catalog::get_compacted_filename()
-                        + "' exists but is not registered in the catalog, log directory: " + location_.string();
-                    LOG(ERROR) << "/:limestone:config:datastore " << err_msg;
-                    throw limestone_exception(exception_type::initialization_failure, err_msg);
-                }
-            }
+        // Orphan removal: a compaction output that the catalog does not record (the
+        // compacted and carry files of any generation, including the unnamed
+        // generation-0 form, and a ".prev" remnant of the retired backup scheme) is an
+        // orphan and is removed. A crash between the publish and the commit leaves the
+        // new generation as orphans, and a crash between the commit and the removal
+        // leaves the old generation as orphans; both resolve uniquely here. If an
+        // orphan reached the snapshot input, an unrecorded compacted file would be read
+        // as an ordinary WAL and, having no remove entries, would resurrect deleted
+        // records. The removal therefore has to precede the scan and the snapshot
+        // construction.
+        for (const boost::filesystem::path& removed_orphan :
+             internal::remove_orphan_compaction_files(location_, *compaction_catalog_)) {
+            subtract_file(removed_orphan);
+        }
 
+        // Clean up the outputs a crash during the write phase left in the temporary
+        // directory. Its content is by definition unpublished (not recorded by the
+        // catalog) and never appears directly under the log directory, so it cannot
+        // affect the data. A failure therefore does not stop the startup (leaving the
+        // remnants only leaks disk space).
+        boost::system::error_code temp_cleanup_error;
+        boost::filesystem::remove_all(location_ / compaction_catalog::get_compaction_temp_dirname(), temp_cleanup_error);
+        if (temp_cleanup_error) {
+            LOG_LP(WARNING) << "failed to clean up the compaction temporary directory '"
+                            << (location_ / compaction_catalog::get_compaction_temp_dirname()).string()
+                            << "': " << temp_cleanup_error.message();
+        }
+
+        // Verify consistency between the compaction catalog and the WAL files.
+        // A file registered in the catalog but missing from disk cannot be opened
+        // by a cursor. Fail fast instead of corrupting data silently.
+        // (The converse case, a compaction output on disk that the catalog does not
+        // record, is resolved by the orphan removal above.)
+        {
             // At most one compacted file may be registered.
             // get_current_compacted_file_name() relies on this check and returns the
             // first record.
@@ -454,8 +443,9 @@ void datastore::ready() {
         blob_file_garbage_collector_->scan_blob_files(max_blob_id);
 
         // Build the compacted path from the catalog record. With no record, pass the
-        // well-known name that the migration rule assigns to generation 0; the startup
-        // consistency check guarantees that no file by that name exists in that case.
+        // well-known name that the migration rule assigns to generation 0; the orphan
+        // removal at startup guarantees that no unregistered file by that name remains
+        // in that case.
         std::optional<std::string> compacted_file_name = impl_->get_current_compacted_file_name();
         boost::filesystem::path compacted_file =
             location_ / compacted_file_name.value_or(compaction_catalog::get_compacted_filename());
@@ -1246,6 +1236,7 @@ void datastore::compact_with_online() {  // NOLINT(readability-function-cognitiv
         if (output.carry_written) {
             safe_rename(compaction_temp_dir / carry_file_name, location_ / carry_file_name);
         }
+        impl_->on_compaction_after_publish();  // for testing
 
         // get a set of all files in the location_ directory
         std::set<std::string> files_in_location = get_files_in_directory(location_);
@@ -1290,6 +1281,7 @@ void datastore::compact_with_online() {  // NOLINT(readability-function-cognitiv
         }
         VLOG_LP(log_info) << "compaction generation " << new_generation
                           << " committed (carry: " << (output.carry_written ? "yes" : "no") << ")";
+        impl_->on_compaction_after_commit();  // for testing
 
         // Removal of the old generation: the commit is already done, so continuing
         // after a failure would let the old compacted file be selected as an input of

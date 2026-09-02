@@ -530,8 +530,8 @@ std::set<std::string> assemble_snapshot_input_filenames(
     file_operations& file_ops) {
     std::set<std::string> detached_pwals = compaction_catalog->get_detached_pwals();
     // The compacted files excluded from the snapshot input are those recorded in the
-    // catalog, not a well-known name; a cursor reads them directly. A compacted file
-    // absent from the catalog is rejected by the startup consistency check.
+    // catalog, not a well-known name; a cursor reads them directly. A compaction output
+    // absent from the catalog has been removed by the orphan removal at startup.
     std::set<std::string> compacted_filenames;
     for (auto const& info : compaction_catalog->get_compacted_files()) {
         compacted_filenames.insert(info.get_file_name());

@@ -260,7 +260,32 @@ public:
      */
     [[nodiscard]] static std::string get_carry_filename_for_generation(std::uint64_t generation);
 
+    /**
+     * @brief Tells whether the file is an orphan compaction output under this catalog.
+     *
+     * A file whose name has the form of a compaction output (the compacted file of any
+     * generation, including the unnamed generation-0 form, a carry file of any
+     * generation, or a ".prev" remnant of the retired backup scheme) and that this
+     * catalog does not record is an orphan.
+     *
+     * @param filename The file name (no directory part).
+     * @return true when the file is a compaction-output name not recorded by this catalog.
+     */
+    [[nodiscard]] bool is_orphan_compaction_file(const std::string& filename) const;
+
 private:
+    /**
+     * @brief Tells whether the name has the form of a compaction output.
+     *
+     * Matches the compacted file of any generation (including the unnamed generation-0
+     * form), a carry file of any generation, and the ".prev" remnant of the retired
+     * backup scheme.
+     *
+     * @param filename The file name (no directory part).
+     * @return true when the name has the form of a compaction output.
+     */
+    [[nodiscard]] static bool is_compaction_output_filename(const std::string& filename);
+
     // Constants
     static constexpr const char *COMPACTION_CATALOG_FILENAME = "compaction_catalog";              ///< Name of the catalog file
     static constexpr const char *COMPACTION_CATALOG_BACKUP_FILENAME = "compaction_catalog.back";  ///< Name of the backup catalog file
@@ -275,6 +300,7 @@ private:
     static constexpr const char *COMPACTION_TEMP_DIRNAME = "compaction_temp";                     ///< Name of the temporary directory for compaction
     static constexpr const char *COMPACTED_FILENAME = "pwal_0000.compacted";                      ///< Base name of the compacted file (generation 0 uses it as-is)
     static constexpr const char *CARRY_FILENAME_BASE = "pwal_0000.carry";                         ///< Base name of the carry file
+    static constexpr const char *RETIRED_COMPACTED_BACKUP_FILENAME = "pwal_0000.compacted.prev";  ///< Backup file name of the retired backup scheme (matched only to remove remnants)
 
     // Member variables
     std::set<compacted_file_info> compacted_files_{};  ///< Set of compacted files
