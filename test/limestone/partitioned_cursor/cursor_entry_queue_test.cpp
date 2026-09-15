@@ -17,7 +17,7 @@ using limestone::internal::cursor_entry_queue;
 using limestone::internal::cursor_entry_type;
 
 
-static const std::string tmp_file_path = "/tmp/test_log_entry.tmp";
+static const std::string tmp_file_path = "/tmp/cursor_entry_queue_test_log_entry.tmp";
 
 // Generate a test log_entry (using only storage_id as the identifier)
 log_entry create_log_entry(std::uint64_t storage_id) {
