@@ -82,6 +82,64 @@ datastore_impl::datastore_impl()
 // Default destructor.
 datastore_impl::~datastore_impl() = default;
 
+datastore_impl::rotation_state& datastore_impl::get_rotation_state() noexcept {
+    return rotation_state_;
+}
+
+void datastore_impl::set_on_rotate_before_rename_for_test(std::function<void()> hook) noexcept {
+    on_rotate_before_rename_ = std::move(hook);
+}
+
+void datastore_impl::set_on_rotate_before_wait_for_test(std::function<void()> hook) noexcept {
+    on_rotate_before_wait_ = std::move(hook);
+}
+
+void datastore_impl::on_rotate_before_rename() const {
+    if (on_rotate_before_rename_) {
+        on_rotate_before_rename_();
+    }
+}
+
+void datastore_impl::on_rotate_before_wait() const {
+    if (on_rotate_before_wait_) {
+        on_rotate_before_wait_();
+    }
+}
+
+void datastore_impl::set_on_compaction_after_publish_for_test(std::function<void()> hook) noexcept {
+    on_compaction_after_publish_ = std::move(hook);
+}
+
+void datastore_impl::set_on_compaction_after_commit_for_test(std::function<void()> hook) noexcept {
+    on_compaction_after_commit_ = std::move(hook);
+}
+
+void datastore_impl::on_compaction_after_publish() const {
+    if (on_compaction_after_publish_) {
+        on_compaction_after_publish_();
+    }
+}
+
+void datastore_impl::on_compaction_after_commit() const {
+    if (on_compaction_after_commit_) {
+        on_compaction_after_commit_();
+    }
+}
+
+std::optional<std::string> datastore_impl::get_current_compacted_file_name() const {
+    {
+        std::lock_guard<std::mutex> lock(current_compacted_file_name_mutex_);
+        return current_compacted_file_name_;
+    }
+}
+
+void datastore_impl::set_current_compacted_file_name(std::optional<std::string> file_name) {
+    {
+        std::lock_guard<std::mutex> lock(current_compacted_file_name_mutex_);
+        current_compacted_file_name_ = std::move(file_name);
+    }
+}
+
 // Increments the backup counter.
 void datastore_impl::increment_backup_counter() noexcept {
     backup_counter_.fetch_add(1, std::memory_order_acq_rel);

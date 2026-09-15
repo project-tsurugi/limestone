@@ -16,6 +16,8 @@
 #pragma once
 
 #include <memory>
+#include <optional>
+#include <string>
 #include <string_view>
 #include <map>
 #include <boost/filesystem.hpp>
@@ -123,7 +125,8 @@ public:
 private:
     std::unique_ptr<internal::snapshot_impl> pimpl;
 
-    explicit snapshot(boost::filesystem::path location, std::map<storage_id_type, write_version_type> clear_storage) noexcept;
+    explicit snapshot(boost::filesystem::path location, std::map<storage_id_type, write_version_type> clear_storage,
+                      std::optional<std::string> compacted_file_name) noexcept;
 
     friend class datastore;
 };

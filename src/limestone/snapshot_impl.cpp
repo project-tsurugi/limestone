@@ -21,7 +21,6 @@
 
 #include <map>
 
-#include "compaction_catalog.h"
 #include "cursor_impl.h"
 #include "limestone_exception_helper.h"
 #include "logging_helper.h"
@@ -32,19 +31,25 @@
 
 namespace limestone::internal {
 
-snapshot_impl::snapshot_impl(boost::filesystem::path location, 
-                             std::map<storage_id_type, write_version_type> clear_storage) noexcept
-    : location_(std::move(location)), clear_storage(std::move(clear_storage)) {
+snapshot_impl::snapshot_impl(boost::filesystem::path location,
+                             std::map<storage_id_type, write_version_type> clear_storage,
+                             std::optional<std::string> compacted_file_name) noexcept
+    : location_(std::move(location)), clear_storage(std::move(clear_storage)),
+      compacted_file_name_(std::move(compacted_file_name)) {
 }
 
 std::unique_ptr<cursor> snapshot_impl::get_cursor() const {
-    boost::filesystem::path compacted_file = location_ / limestone::internal::compaction_catalog::get_compacted_filename();
-    boost::filesystem::path snapshot_file = location_ / std::string(snapshot::subdirectory_name_) / std::string(snapshot::file_name_);
+    namespace la = limestone::api;
+    boost::filesystem::path snapshot_file = location_ / std::string(la::snapshot::subdirectory_name_) / std::string(la::snapshot::file_name_);
 
-    if (boost::filesystem::exists(compacted_file)) {
+    // Whether a compacted file is present is decided by the catalog record passed to
+    // the constructor, never by an implicit fallback on its presence on disk. A record
+    // whose file is missing is detected by the startup consistency check.
+    if (compacted_file_name_.has_value()) {
+        boost::filesystem::path compacted_file = location_ / compacted_file_name_.value();
         return cursor_impl::create_cursor(snapshot_file, compacted_file, clear_storage);
     }
-    return cursor_impl::create_cursor(snapshot_file, clear_storage);  
+    return cursor_impl::create_cursor(snapshot_file, clear_storage);
 }
 
 std::vector<std::unique_ptr<limestone::api::cursor>> snapshot_impl::get_partitioned_cursors(std::size_t n) {
@@ -68,10 +73,11 @@ std::vector<std::unique_ptr<limestone::api::cursor>> snapshot_impl::get_partitio
     }
 
     boost::filesystem::path snapshot_file = location_ / std::string(la::snapshot::subdirectory_name_) / std::string(la::snapshot::file_name_);
-    boost::filesystem::path compacted_file = location_ / li::compaction_catalog::get_compacted_filename();
 
+    // As in get_cursor(), the catalog record decides whether a compacted file is present.
     std::unique_ptr<li::cursor_impl_base> base_cursor;
-    if (boost::filesystem::exists(compacted_file)) {
+    if (compacted_file_name_.has_value()) {
+        boost::filesystem::path compacted_file = location_ / compacted_file_name_.value();
         base_cursor = std::make_unique<li::cursor_impl>(snapshot_file, compacted_file, clear_storage);
     } else {
         base_cursor = std::make_unique<li::cursor_impl>(snapshot_file, clear_storage);

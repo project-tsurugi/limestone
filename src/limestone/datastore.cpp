@@ -23,6 +23,7 @@
 #include <cstdint>
 #include <cstdlib>
 #include <limits>
+#include <map>
 
 #include <boost/filesystem/fstream.hpp>
 
@@ -174,46 +175,85 @@ datastore::datastore(configuration const& conf) : location_(conf.data_location_)
         add_file(compaction_catalog_path);
         compaction_catalog_ = std::make_unique<compaction_catalog>(compaction_catalog::from_catalog_file(location_));
 
+        // Orphan removal: a compaction output that the catalog does not record (the
+        // compacted and carry files of any generation, including the unnamed
+        // generation-0 form, and a ".prev" remnant of the retired backup scheme) is an
+        // orphan and is removed. A crash between the publish and the commit leaves the
+        // new generation as orphans, and a crash between the commit and the removal
+        // leaves the old generation as orphans; both resolve uniquely here. If an
+        // orphan reached the snapshot input, an unrecorded compacted file would be read
+        // as an ordinary WAL and, having no remove entries, would resurrect deleted
+        // records. The removal therefore has to precede the scan and the snapshot
+        // construction.
+        for (const boost::filesystem::path& removed_orphan :
+             internal::remove_orphan_compaction_files(location_, *compaction_catalog_)) {
+            subtract_file(removed_orphan);
+        }
+
+        // Clean up the outputs a crash during the write phase left in the temporary
+        // directory. Its content is by definition unpublished (not recorded by the
+        // catalog) and never appears directly under the log directory, so it cannot
+        // affect the data. A failure therefore does not stop the startup (leaving the
+        // remnants only leaks disk space).
+        boost::system::error_code temp_cleanup_error;
+        boost::filesystem::remove_all(location_ / compaction_catalog::get_compaction_temp_dirname(), temp_cleanup_error);
+        if (temp_cleanup_error) {
+            LOG_LP(WARNING) << "failed to clean up the compaction temporary directory '"
+                            << (location_ / compaction_catalog::get_compaction_temp_dirname()).string()
+                            << "': " << temp_cleanup_error.message();
+        }
+
         // Verify consistency between the compaction catalog and the WAL files.
-        // The compacted file is loaded at startup based purely on its presence on
-        // disk (see snapshot_impl). If it exists but is not registered in the
-        // catalog, the snapshot would be generated as if no compaction had been
-        // performed, dropping remove entries and resurrecting deleted records
-        // (see tsurugi-issues #1498). Fail fast instead of silently corrupting data.
-        // NOTE: only the single well-known compacted file is checked here. If
-        // multiple compacted files are ever registered, this check must be extended.
+        // A file registered in the catalog but missing from disk cannot be opened
+        // by a cursor. Fail fast instead of corrupting data silently.
+        // (The converse case, a compaction output on disk that the catalog does not
+        // record, is resolved by the orphan removal above.)
         {
-            boost::filesystem::path compacted_file_path = location_ / compaction_catalog::get_compacted_filename();
-            // Use the error_code overload so that a genuine filesystem error (permission,
-            // broken symlink, I/O error, ...) is funneled into a limestone_exception rather
-            // than escaping as a boost::filesystem::filesystem_error. A non-existent file is
-            // the normal case: boost::filesystem::exists reports it via error_code as ENOENT,
-            // so that condition must be excluded and must not be treated as an error.
-            boost::system::error_code exists_error;
-            bool compacted_file_exists = boost::filesystem::exists(compacted_file_path, exists_error);
-            if (exists_error && exists_error != boost::system::errc::no_such_file_or_directory) {
-                std::string err_msg = "failed to check existence of the compacted file '"
-                    + compacted_file_path.string() + "': " + exists_error.message();
+            // At most one compacted file may be registered.
+            // get_current_compacted_file_name() relies on this check and returns the
+            // first record.
+            if (compaction_catalog_->get_compacted_files().size() > 1) {
+                std::string err_msg = "compaction catalog is inconsistent: multiple compacted files are recorded, log directory: "
+                    + location_.string();
                 LOG(ERROR) << "/:limestone:config:datastore " << err_msg;
                 throw limestone_exception(exception_type::initialization_failure, err_msg);
             }
-            if (compacted_file_exists) {
-                bool registered = false;
-                for (auto const& info : compaction_catalog_->get_compacted_files()) {
-                    if (info.get_file_name() == compaction_catalog::get_compacted_filename()) {
-                        registered = true;
-                        break;
-                    }
+
+            // Every compacted file registered in the catalog must exist on disk.
+            // A cursor opens the compacted file named by the catalog rather than
+            // falling back implicitly on its presence, so a missing file must be
+            // rejected here. The carry file recorded by the catalog is verified to
+            // exist in the same way: it is part of the snapshot input at startup, so a
+            // missing carry would silently lose the snippets beyond the boundary.
+            std::vector<std::string> recorded_files;
+            for (auto const& info : compaction_catalog_->get_compacted_files()) {
+                recorded_files.push_back(info.get_file_name());
+            }
+            const std::optional<std::string>& carry_file = compaction_catalog_->get_carry_file();
+            if (carry_file.has_value()) {
+                recorded_files.push_back(carry_file.value());
+            }
+            for (auto const& recorded_file : recorded_files) {
+                boost::filesystem::path recorded_path = location_ / recorded_file;
+                boost::system::error_code recorded_exists_error;
+                bool recorded_exists = boost::filesystem::exists(recorded_path, recorded_exists_error);
+                if (recorded_exists_error && recorded_exists_error != boost::system::errc::no_such_file_or_directory) {
+                    std::string err_msg = "failed to check existence of the compacted file '"
+                        + recorded_path.string() + "': " + recorded_exists_error.message();
+                    LOG(ERROR) << "/:limestone:config:datastore " << err_msg;
+                    throw limestone_exception(exception_type::initialization_failure, err_msg);
                 }
-                if (!registered) {
-                    std::string err_msg = "compaction catalog is inconsistent: the compacted file '"
-                        + compaction_catalog::get_compacted_filename()
-                        + "' exists but is not registered in the catalog, log directory: " + location_.string();
+                if (!recorded_exists) {
+                    std::string err_msg = "compaction catalog is inconsistent: the file '"
+                        + recorded_file
+                        + "' is registered in the catalog but does not exist, log directory: " + location_.string();
                     LOG(ERROR) << "/:limestone:config:datastore " << err_msg;
                     throw limestone_exception(exception_type::initialization_failure, err_msg);
                 }
             }
         }
+
+        impl_->set_current_compacted_file_name(compaction_catalog_->get_current_compacted_file_name());
 
         epoch_file_path_ = location_ / std::string(limestone::internal::epoch_file_name);
         tmp_epoch_file_path_ = location_ / std::string(limestone::internal::tmp_epoch_file_name);
@@ -402,7 +442,13 @@ void datastore::ready() {
         blob_file_garbage_collector_ = std::make_unique<blob_file_garbage_collector>(impl_->blob_file_resolver());
         blob_file_garbage_collector_->scan_blob_files(max_blob_id);
 
-        boost::filesystem::path compacted_file = location_ / limestone::internal::compaction_catalog::get_compacted_filename();
+        // Build the compacted path from the catalog record. With no record, pass the
+        // well-known name that the migration rule assigns to generation 0; the orphan
+        // removal at startup guarantees that no unregistered file by that name remains
+        // in that case.
+        std::optional<std::string> compacted_file_name = impl_->get_current_compacted_file_name();
+        boost::filesystem::path compacted_file =
+            location_ / compacted_file_name.value_or(compaction_catalog::get_compacted_filename());
         boost::filesystem::path snapshot_file = location_ / std::string(snapshot::subdirectory_name_) / std::string(snapshot::file_name_);
         blob_file_garbage_collector_->scan_snapshot(snapshot_file, compacted_file);
 
@@ -444,12 +490,12 @@ void datastore::ready() {
 
 std::unique_ptr<snapshot> datastore::get_snapshot() const {
     check_after_ready(static_cast<const char*>(__func__));
-    return std::unique_ptr<snapshot>(new snapshot(location_, clear_storage));
+    return std::unique_ptr<snapshot>(new snapshot(location_, clear_storage, impl_->get_current_compacted_file_name()));
 }
 
 std::shared_ptr<snapshot> datastore::shared_snapshot() const {
     check_after_ready(static_cast<const char*>(__func__));
-    return std::shared_ptr<snapshot>(new snapshot(location_, clear_storage));
+    return std::shared_ptr<snapshot>(new snapshot(location_, clear_storage, impl_->get_current_compacted_file_name()));
 }
 
 log_channel& datastore::create_channel() {
@@ -651,6 +697,23 @@ std::future<void> datastore::shutdown() noexcept {
         blob_file_garbage_collector_->shutdown();
     }
 
+    // Make an in-flight rotation request give up: once shirakami stops on
+    // shutdown, neither epoch progression nor end_session arrives, so the
+    // rotation waits can no longer be satisfied. Files not renamed yet simply
+    // stay unrotated and are handled by a request after the next startup.
+    {
+        auto& rotation_state = impl_->get_rotation_state();
+        rotation_state.shutdown_requested.store(true);
+        {
+            std::lock_guard<std::mutex> lock(informed_mutex);
+            cv_epoch_informed.notify_all();
+        }
+        {
+            std::lock_guard<std::mutex> lock(rotation_state.mutex);
+            rotation_state.pending_cv.notify_all();
+        }
+    }
+
     stop_online_compaction_worker();
     if (!online_compaction_worker_future_.valid()) {
         VLOG(log_info) << "/:limestone:datastore:shutdown compaction task is not running. skipping task shutdown.";
@@ -722,14 +785,15 @@ std::unique_ptr<backup_detail> datastore::begin_backup(backup_type btype) {  // 
                         // "pwal"
                         // pwal files are type:logfile, detached
 
-                        // skip an "inactive" file with the name of active file,
-                        // it will cause some trouble if a file (that has the name of mutable files) is saved as immutable file.
-                        // but, by skip, backup files may be imcomplete.
-                        if (filename.length() == 9) {  // FIXME: too adohoc check
+                        // Skip a file whose name matches the unrotated pwal naming rule: its
+                        // log channel may still open and append to it, so it cannot be saved
+                        // as an immutable backup entry. As a result, the backup may be
+                        // incomplete.
+                        if (internal::is_unrotated_pwal_name(filename)) {
                             boost::system::error_code error;
                             bool result = boost::filesystem::is_empty(ent, error);
                             if (!error && !result) {
-                                LOG_LP(ERROR) << "skip the file with the name like active files: " << filename;
+                                LOG_LP(ERROR) << "skip the file with an unrotated pwal name: " << filename;
                             }
                             continue;
                         }
@@ -799,7 +863,7 @@ void datastore::recover([[maybe_unused]] const epoch_tag& tag) const noexcept {
     check_before_ready(static_cast<const char*>(__func__));
 }
 
-rotation_result datastore::rotate_log_files() {
+rotation_result datastore::rotate_log_files() {  // NOLINT(readability-function-cognitive-complexity)
     TRACE_START;
     std::lock_guard<std::mutex> lock(rotate_mutex); 
     TRACE << "start rotate_log_files() critical section";
@@ -808,24 +872,119 @@ rotation_result datastore::rotate_log_files() {
         LOG_AND_THROW_EXCEPTION("rotation requires epoch_id > 0, but got epoch_id = 0");
     }
     TRACE << "epoch_id = " << epoch_id;
+    auto& rotation_state = impl_->get_rotation_state();
     {
         on_rotate_log_files(); // for testing
         // Wait until epoch_id_informed_ is less than rotated_epoch_id to ensure safe rotation.
         std::unique_lock<std::mutex> ul(informed_mutex);
-        while (epoch_id_informed_.load() < epoch_id) {
-            cv_epoch_informed.wait(ul);  
+        while (epoch_id_informed_.load() < epoch_id && !rotation_state.shutdown_requested.load()) {
+            cv_epoch_informed.wait(ul);
         }
     }
+    // No rotation is performed in the stop-preparation state (after shirakami
+    // stops, neither epoch progression nor end_session arrives, so the waits
+    // can never be satisfied). See the comment on the give-up path at the end
+    // of this function for how the exception is handled.
+    if (rotation_state.shutdown_requested.load()) {
+        LOG_AND_THROW_EXCEPTION("rotation request aborted: shutdown requested");
+    }
     TRACE << "end waiting for epoch_id_informed_ to catch up";
+    VLOG_LP(log_info) << "rotation request started: boundary epoch = " << epoch_id;
     rotation_result result(epoch_id);
-    for (const auto& lc : impl_->log_channels()) {
-        boost::system::error_code error;
-        bool ret = boost::filesystem::exists(lc->file_path(), error);
-        if (!ret || error) {
-            continue;  // skip if not exists
+    bool aborted_by_shutdown = false;
+    try {
+        // Rotation target selection: scan the directory and enumerate the pwal
+        // files with unrotated names (walking the channels would miss orphan
+        // files bound to no channel).
+        std::vector<boost::filesystem::path> targets;
+        for (auto const& entry : boost::filesystem::directory_iterator(location_)) {
+            if (!boost::filesystem::is_directory(entry.path()) &&
+                internal::is_unrotated_pwal_name(entry.path().filename().string())) {
+                targets.emplace_back(entry.path());
+            }
         }
-        std::string rotated_file = lc->do_rotate_file();
-        result.add_rotated_file(rotated_file);
+
+        // Lookup table (file name -> channel). The channel set is immutable
+        // after registration completes, so this can be built outside the mutex.
+        std::map<std::string, log_channel*> channel_by_filename;
+        for (auto const& lc : impl_->log_channels()) {
+            channel_by_filename.emplace(lc->file_path().filename().string(), lc.get());
+        }
+
+        std::size_t waited_channels = 0;
+        std::chrono::steady_clock::time_point wait_begin{};
+        {
+            std::unique_lock<std::mutex> ul(rotation_state.mutex);
+            rotation_state.renamed_files.clear();
+            for (auto const& target : targets) {
+                log_channel* channel = nullptr;
+                if (auto it = channel_by_filename.find(target.filename().string()); it != channel_by_filename.end()) {
+                    channel = it->second;
+                }
+                if (channel == nullptr) {
+                    // Orphan file: nobody has it open, so it can be renamed on the spot.
+                    impl_->on_rotate_before_rename();  // for testing
+                    boost::filesystem::path renamed = internal::rotate_pwal_file(target, 0);
+                    add_file(renamed);
+                    subtract_file(target);
+                    result.add_rotated_file(renamed.filename().string());
+                    VLOG_LP(log_info) << "rotated an orphan pwal file: " << target.filename().string()
+                                      << " -> " << renamed.filename().string();
+                } else if (!channel->get_impl()->is_session_active_locked()) {
+                    // Inactive channel: rename on the spot.
+                    impl_->on_rotate_before_rename();  // for testing
+                    result.add_rotated_file(channel->do_rotate_file());
+                } else {
+                    // Active channel: delegate the rename to the channel itself and wait for it.
+                    channel->get_impl()->set_rotation_requested_locked();
+                    rotation_state.pending_channels.insert(channel);
+                }
+            }
+            waited_channels = rotation_state.pending_channels.size();
+            impl_->on_rotate_before_wait();  // for testing
+            wait_begin = std::chrono::steady_clock::now();
+            rotation_state.pending_cv.wait(ul, [&rotation_state] {
+                return rotation_state.pending_channels.empty() || rotation_state.shutdown_requested.load();
+            });
+            if (!rotation_state.pending_channels.empty()) {
+                // Give-up on shutdown: roll the requested statuses back. Files
+                // renamed before the give-up stay valid as rotated files; files
+                // not renamed yet stay unrotated and are handled by a request
+                // after the next startup.
+                for (log_channel* channel : rotation_state.pending_channels) {
+                    channel->get_impl()->clear_rotation_requested_locked();
+                }
+                rotation_state.pending_channels.clear();
+                rotation_state.renamed_files.clear();
+                aborted_by_shutdown = true;
+            } else {
+                for (auto const& renamed : rotation_state.renamed_files) {
+                    result.add_rotated_file(renamed);
+                }
+                rotation_state.renamed_files.clear();
+            }
+        }
+        if (!aborted_by_shutdown) {
+            auto wait_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+                std::chrono::steady_clock::now() - wait_begin).count();
+            VLOG_LP(log_info) << "rotation request completed: boundary epoch = " << epoch_id
+                              << ", waited channels = " << waited_channels
+                              << ", wait time = " << wait_ms << " ms";
+        }
+    } catch (...) {
+        // A failure of the directory scan or a rename is unrecoverable (FATAL +
+        // process exit); never leave the process running with a failed rename.
+        HANDLE_EXCEPTION_AND_ABORT();
+        throw; // Unreachable, but required to satisfy the compiler
+    }
+    if (aborted_by_shutdown) {
+        // A give-up on shutdown is not an unrecoverable error, so it is thrown
+        // here, outside the catch above (which turns errors into FATAL), and
+        // returned to the caller as an exception. The online compaction worker
+        // catches it and leaves its loop, letting the shutdown complete. Via
+        // begin_backup it becomes FATAL through the existing error handling (a
+        // backup during shutdown is an anomaly).
+        LOG_AND_THROW_EXCEPTION("rotation request aborted: shutdown requested while waiting for in-flight sessions");
     }
     result.set_rotation_end_files(get_files());
     TRACE_END;
@@ -908,23 +1067,32 @@ void datastore::online_compaction_worker() {
         } 
     }
 
-    std::unique_lock<std::mutex> lock(mtx_online_compaction_worker_);
-
     while (!stop_online_compaction_worker_.load()) {
         if (boost::filesystem::exists(start_file)) {
             if (!boost::filesystem::remove(start_file)) {
                 LOG_LP(ERROR) << "failed to remove file: " << start_file.string();
                 return;
             }
+            // Do not hold the mutex during the compaction (including the
+            // rotation waits); otherwise stop_online_compaction_worker() cannot
+            // set the stop flag and shutdown() blocks behind the rotation wait.
             try {
                 compact_with_online();
             } catch (const limestone_exception& e) {
-                LOG_LP(ERROR) << "failed to compact with online: " << e.what();
+                if (stop_online_compaction_worker_.load()) {
+                    // A rotation given up by a normal shutdown is not an anomaly.
+                    LOG_LP(INFO) << "online compaction aborted by shutdown: " << e.what();
+                } else {
+                    LOG_LP(ERROR) << "failed to compact with online: " << e.what();
+                }
             }
         }
-        cv_online_compaction_worker_.wait_for(lock, std::chrono::seconds(1), [this]() {
-            return stop_online_compaction_worker_.load();
-        });
+        {
+            std::unique_lock<std::mutex> lock(mtx_online_compaction_worker_);
+            cv_online_compaction_worker_.wait_for(lock, std::chrono::seconds(1), [this]() {
+                return stop_online_compaction_worker_.load();
+            });
+        }
     }
 }
 
@@ -936,9 +1104,18 @@ void datastore::stop_online_compaction_worker() {
     cv_online_compaction_worker_.notify_all();
 }
 
-void datastore::compact_with_online() {
+void datastore::compact_with_online() {  // NOLINT(readability-function-cognitive-complexity)
     TRACE_START;
     check_after_ready(static_cast<const char*>(__func__));
+
+    // Mutual exclusion with a backup: if the removal of the old generation ran between
+    // the enumeration and the copy of a backup, the copy of an enumerated file would
+    // fail. Compaction is therefore not run during a backup (as blob GC is not).
+    if (impl_->is_backup_in_progress()) {
+        LOG_LP(INFO) << "online compaction skipped because a backup is in progress";
+        TRACE_END << "return compact_with_online() without compaction (backup in progress)";
+        return;
+    }
 
     // get a copy of next_blob_id and boundary_version before rotation
     blob_id_type next_blob_id_copy = next_blob_id_.load(std::memory_order_acquire);
@@ -948,13 +1125,12 @@ void datastore::compact_with_online() {
         boundary_version_copy = available_boundary_version_;
     }
 
-    // check blob file garbage collection runnable
+    // Blob GC at online compaction is disabled: its exemption list is built only from
+    // the scan of the compaction inputs, so it would delete a live blob whose entry
+    // has not appeared in those inputs yet (issue #144). Blob files are collected only
+    // by the GC at startup, until the fundamental fix of #144 re-enables this.
     bool blob_file_gc_runnable = false;
     bool is_active = blob_file_garbage_collector_->is_active();
-    if (boundary_version_copy.get_major() > compaction_catalog_->get_max_epoch_id() && !is_active) {
-        blob_file_gc_runnable = true;
-        blob_file_garbage_collector_->shutdown();
-    }
     VLOG_LP(log_info) << "boundary_version_copy.get_major(): " << boundary_version_copy.get_major()
                             << ", compaction_catalog_->get_max_epoch_id(): " << compaction_catalog_->get_max_epoch_id()
                             << ", blob_file_garbage_collector_->is_active(): " << is_active
@@ -973,9 +1149,12 @@ void datastore::compact_with_online() {
 
 
     std::set<std::string> need_compaction_filenames = select_files_for_compaction(result.get_rotation_end_files(), detached_pwals);
+    // Skip compaction when the only input is the current compacted file named by the
+    // catalog.
+    std::optional<std::string> current_compacted_file_name = impl_->get_current_compacted_file_name();
     if (need_compaction_filenames.empty() ||
-        (need_compaction_filenames.size() == 1 &&
-         need_compaction_filenames.find(compaction_catalog::get_compacted_filename()) != need_compaction_filenames.end())) {
+        (need_compaction_filenames.size() == 1 && current_compacted_file_name.has_value() &&
+         need_compaction_filenames.find(current_compacted_file_name.value()) != need_compaction_filenames.end())) {
         VLOG_LP(log_debug) << "no files to compact";
         TRACE_END << "return compact_with_online() without compaction";
         return;
@@ -998,46 +1177,132 @@ void datastore::compact_with_online() {
         }
         return compaction_options{location_, compaction_temp_dir, recover_max_parallelism_, need_compaction_filenames};
     }();
+    // The compaction boundary is the rotation boundary (the epoch of rotation_result).
+    // The durable epoch cannot serve as the boundary here: the inputs are only the
+    // rotated files, so "every entry at or below the boundary is in the inputs" would
+    // not hold for it.
+    options.set_boundary_epoch(result.get_epoch_id());
 
-    // create a compacted file
-    blob_id_type max_blob_id = create_compact_pwal_and_get_max_blob_id(options);
+    // Determine the file names of the new generation. The generation number increases
+    // monotonically across online and offline compactions.
+    std::uint64_t new_generation = compaction_catalog_->get_generation() + 1;
+    std::string compacted_file_name = compaction_catalog::get_compacted_filename_for_generation(new_generation);
+    std::string carry_file_name = compaction_catalog::get_carry_filename_for_generation(new_generation);
+    options.set_output_file_names(compacted_file_name, carry_file_name);
 
+    // Keep the file names of the old generation; they are removed after the commit
+    // (the old generation leaves by removal, not by becoming a detached pwal).
+    std::optional<std::string> old_compacted_file_name = compaction_catalog_->get_current_compacted_file_name();
+    std::optional<std::string> old_carry_file_name = compaction_catalog_->get_carry_file();
 
-    // handle existing compacted file
-    handle_existing_compacted_file(location_);
-
-    // move pwal_0000.compacted from the temp directory to the log directory
-    boost::filesystem::path compacted_file = location_ / compaction_catalog::get_compacted_filename();
-    boost::filesystem::path temp_compacted_file = compaction_temp_dir / compaction_catalog::get_compacted_filename();
-    safe_rename(temp_compacted_file, compacted_file);
-
-    // get a set of all files in the location_ directory
-    std::set<std::string> files_in_location = get_files_in_directory(location_);
-    
-    // check if detached_pwals exist in location_
-    for (auto it = detached_pwals.begin(); it != detached_pwals.end();) {
-        if (files_in_location.find(*it) == files_in_location.end()) {
-            VLOG_LP(log_debug) << "File " << *it << " does not exist in the directory and will be removed from detached_pwals.";
-            auto p = location_ / *it;
-            subtract_file(p);
-            it = detached_pwals.erase(it);  // Erase and move to the next iterator
-        } else {
-            ++it;  // Move to the next iterator
+    // Write phase: write the compacted file (and, if there are snippets beyond the
+    // boundary, the carry file) into the temporary directory. An I/O error (a full disk,
+    // for instance) has no visible effect because nothing is published yet, so the
+    // temporary files are removed and the retry is left to the next compaction request.
+    // A parse error (corrupted input) is unrecoverable and terminates the process.
+    compaction_output_result output{};
+    try {
+        output = create_compaction_output(options);
+    } catch (const limestone_io_exception& e) {
+        LOG_LP(ERROR) << "online compaction failed while writing the temporary files"
+                      << " (will be retried on the next compaction request): " << e.what();
+        for (const std::string& name : {compacted_file_name, carry_file_name}) {
+            boost::system::error_code remove_error;
+            boost::filesystem::remove(compaction_temp_dir / name, remove_error);
+            if (remove_error) {
+                LOG_LP(FATAL) << "failed to remove the temporary compaction file '"
+                              << (compaction_temp_dir / name).string() << "': " << remove_error.message();
+            }
         }
+        TRACE_END << "return compact_with_online() after a temporary-file write failure";
+        return;
+    } catch (const limestone_exception& e) {
+        LOG_LP(FATAL) << "online compaction failed: the input files are corrupted: " << e.what();
+    } catch (const std::exception& e) {
+        LOG_LP(FATAL) << "online compaction failed while writing the temporary files: " << e.what();
     }
+    blob_id_type max_blob_id = output.max_blob_id;
 
+    // Publish, commit, then remove the old generation. A failure from here on is
+    // unrecoverable and terminates the process: continuing would leave a generation file
+    // that the catalog does not record, and the retry would republish under the same
+    // generation name. The recovery completes with the orphan removal at the next startup
+    // and the restoration of the catalog from its backup.
+    boost::filesystem::path compacted_file = location_ / compacted_file_name;
+    try {
+        // Publish: rename from the temporary directory into the log directory (the
+        // generation-suffixed name is unique, so nothing is overwritten).
+        safe_rename(compaction_temp_dir / compacted_file_name, compacted_file);
+        if (output.carry_written) {
+            safe_rename(compaction_temp_dir / carry_file_name, location_ / carry_file_name);
+        }
+        impl_->on_compaction_after_publish();  // for testing
 
-    // update compaction catalog
-    // update_catalog_file keeps max_blob_id monotonically non-decreasing, so the
-    // high-water mark recorded by previous compactions is preserved even though
-    // max_blob_id here reflects only the freshly compacted files.
-    compacted_file_info compacted_file_info{compacted_file.filename().string(), 1};
-    detached_pwals.erase(compacted_file.filename().string());
-    compaction_catalog_->update_catalog_file(result.get_epoch_id(), max_blob_id, {compacted_file_info}, detached_pwals);
-    add_file(compacted_file);
+        // get a set of all files in the location_ directory
+        std::set<std::string> files_in_location = get_files_in_directory(location_);
 
-    // remove pwal_0000.compacted.prev
-    remove_file_safely(location_ / compaction_catalog::get_compacted_backup_filename());
+        // check if detached_pwals exist in location_
+        for (auto it = detached_pwals.begin(); it != detached_pwals.end();) {
+            if (files_in_location.find(*it) == files_in_location.end()) {
+                VLOG_LP(log_debug) << "File " << *it << " does not exist in the directory and will be removed from detached_pwals.";
+                auto p = location_ / *it;
+                subtract_file(p);
+                it = detached_pwals.erase(it);  // Erase and move to the next iterator
+            } else {
+                ++it;  // Move to the next iterator
+            }
+        }
+
+        // The compacted and carry files of the old generation have been selected as
+        // inputs (so they are in detached_pwals), but they leave by removal rather than
+        // as detached pwals, so they are taken out of the set.
+        if (old_compacted_file_name.has_value()) {
+            detached_pwals.erase(old_compacted_file_name.value());
+        }
+        if (old_carry_file_name.has_value()) {
+            detached_pwals.erase(old_carry_file_name.value());
+        }
+
+        // Commit: the catalog update is the only atomic commit point.
+        // update_catalog_file keeps max_blob_id monotonically non-decreasing, so the
+        // high-water mark recorded by previous compactions is preserved even though
+        // max_blob_id here reflects only the freshly compacted files.
+        compacted_file_info compacted_file_info{compacted_file_name, 1};
+        compaction_catalog_->update_catalog_file(result.get_epoch_id(), max_blob_id, new_generation,
+                                                 {compacted_file_info},
+                                                 output.carry_written ? std::optional<std::string>(carry_file_name)
+                                                                      : std::nullopt,
+                                                 detached_pwals);
+        // Refresh the synchronized copy of the compacted file name right after the commit.
+        impl_->set_current_compacted_file_name(compaction_catalog_->get_current_compacted_file_name());
+        add_file(compacted_file);
+        if (output.carry_written) {
+            add_file(location_ / carry_file_name);
+        }
+        VLOG_LP(log_info) << "compaction generation " << new_generation
+                          << " committed (carry: " << (output.carry_written ? "yes" : "no") << ")";
+        impl_->on_compaction_after_commit();  // for testing
+
+        // Removal of the old generation: the commit is already done, so continuing
+        // after a failure would let the old compacted file be selected as an input of
+        // the next compaction by the shape of its name, which could merge two baseline
+        // generations.
+        for (const std::optional<std::string>& old_name : {old_compacted_file_name, old_carry_file_name}) {
+            if (!old_name.has_value()) {
+                continue;
+            }
+            boost::filesystem::path old_path = location_ / old_name.value();
+            boost::system::error_code remove_error;
+            boost::filesystem::remove(old_path, remove_error);
+            if (remove_error) {
+                LOG_LP(FATAL) << "failed to remove the old-generation compaction file '"
+                              << old_path.string() << "': " << remove_error.message();
+            }
+            subtract_file(old_path);
+        }
+    } catch (const std::exception& e) {
+        LOG_LP(FATAL) << "online compaction failed at the publish/commit/delete phase: " << e.what();
+    }
 
     LOG_LP(INFO) << "compaction finished";
 

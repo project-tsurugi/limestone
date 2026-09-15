@@ -22,6 +22,7 @@
 
 #include <array>
 #include <cstring>
+#include <fstream>
 #include <sstream>
 
 #include <boost/filesystem.hpp>
@@ -61,7 +62,12 @@ public:
     const char* location = "/tmp/compaction_test";
     const boost::filesystem::path manifest_path = boost::filesystem::path(location) / std::string(limestone::internal::manifest::file_name);
     const boost::filesystem::path compaction_catalog_path = boost::filesystem::path(location) / "compaction_catalog";
-    const std::string compacted_filename = compaction_catalog::get_compacted_filename();
+    // The compacted file name of the current generation as recorded by the catalog
+    // (an empty string when there is no record).
+    [[nodiscard]] std::string compacted_filename() const {
+        compaction_catalog catalog = compaction_catalog::from_catalog_file(boost::filesystem::path(location));
+        return catalog.get_current_compacted_file_name().value_or("");
+    }
 
     void SetUp() {
         if (boost::filesystem::exists(location)) {
@@ -119,6 +125,27 @@ public:
         out.assign(ss.str());
         LOG(INFO) << "\n" << out;
         return pclose(fp);
+    }
+
+    // Read a whole file into a string (byte-exact, for content comparison).
+    static std::string read_file_bytes(boost::filesystem::path const& path) {
+        std::ifstream ifs(path.string(), std::ios::binary);
+        std::ostringstream ss;
+        ss << ifs.rdbuf();
+        return ss.str();
+    }
+
+    // Copy a directory tree (used to capture a crash-equivalent state of the log directory).
+    static void copy_dir_recursive(const boost::filesystem::path& src, const boost::filesystem::path& dst) {
+        boost::filesystem::create_directories(dst);
+        for (boost::filesystem::recursive_directory_iterator it{src}, end; it != end; ++it) {
+            boost::filesystem::path rel = boost::filesystem::relative(it->path(), src);
+            if (boost::filesystem::is_directory(it->status())) {
+                boost::filesystem::create_directories(dst / rel);
+            } else {
+                boost::filesystem::copy_file(it->path(), dst / rel);
+            }
+        }
     }
 
     // Run offline compaction on the test location via the tglogutil binary.
@@ -396,7 +423,7 @@ protected:
         create_file(manifest_path, data_manifest(persistent_format_version));
         if (persistent_format_version > 1) {
             compaction_catalog catalog{location};
-            catalog.update_catalog_file(0, 0, {}, {});
+            catalog.update_catalog_file(0, 0, 0, {}, std::nullopt, {});
         }
     }
 

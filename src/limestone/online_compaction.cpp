@@ -36,6 +36,38 @@ void safe_rename(const boost::filesystem::path& from, const boost::filesystem::p
     }
 }
 
+std::vector<boost::filesystem::path> remove_orphan_compaction_files(const boost::filesystem::path& location,
+                                                                    const compaction_catalog& catalog) {
+    // Separate the scan from the removal: removing entries during the scan would step
+    // into behavior that readdir leaves unspecified. When the scan fails, fail without
+    // having removed anything.
+    std::vector<boost::filesystem::path> orphans{};
+    boost::system::error_code ec;
+    for (boost::filesystem::directory_iterator it(location, ec), end; it != end && !ec; it.increment(ec)) {
+        if (catalog.is_orphan_compaction_file(it->path().filename().string())) {
+            orphans.push_back(it->path());
+        }
+    }
+    if (ec) {
+        std::string err_msg = "failed to scan the log directory for orphan compaction files: "
+            + location.string() + ": " + ec.message();
+        LOG_LP(ERROR) << err_msg;
+        throw limestone_exception(exception_type::initialization_failure, err_msg);
+    }
+    for (const boost::filesystem::path& path : orphans) {
+        boost::system::error_code remove_error;
+        boost::filesystem::remove(path, remove_error);
+        if (remove_error) {
+            std::string err_msg = "failed to remove the orphan compaction file '" + path.string()
+                + "': " + remove_error.message();
+            LOG_LP(ERROR) << err_msg;
+            throw limestone_exception(exception_type::initialization_failure, err_msg);
+        }
+        LOG_LP(INFO) << "removed the orphan compaction file (not recorded by the compaction catalog): " << path.string();
+    }
+    return orphans;
+}
+
 std::set<std::string> select_files_for_compaction(const std::set<boost::filesystem::path>& rotation_end_files, std::set<std::string>& detached_pwals) {
     std::set<std::string> need_compaction_filenames;
     for (const boost::filesystem::path& path : rotation_end_files) {
@@ -70,18 +102,6 @@ void ensure_directory_exists(const boost::filesystem::path& dir) {
         if (!result_mkdir || error) {
             LOG_AND_THROW_IO_EXCEPTION("failed to create directory: " + dir.string(), error);
         }
-    }
-}
-
-void handle_existing_compacted_file(const boost::filesystem::path& location) {
-    boost::filesystem::path compacted_file = location / compaction_catalog::get_compacted_filename();
-    boost::filesystem::path compacted_prev_file = location / compaction_catalog::get_compacted_backup_filename();
-
-    if (boost::filesystem::exists(compacted_file)) {
-        if (boost::filesystem::exists(compacted_prev_file)) {
-            LOG_AND_THROW_EXCEPTION("the file already exists: " + compacted_prev_file.string());
-        }
-        safe_rename(compacted_file, compacted_prev_file);
     }
 }
 

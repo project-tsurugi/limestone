@@ -20,8 +20,25 @@
 #include <boost/filesystem.hpp>
 #include <set>
 #include <string>
+#include <vector>
+
+#include "compaction_catalog.h"
 
 namespace limestone::internal {
+
+/**
+ * @brief Removes the orphan compaction outputs (directory entries whose name has the
+ *        form of a compaction output and that the catalog does not record) from the
+ *        log directory. Must run before the scan and the snapshot construction at
+ *        startup.
+ *
+ * @param location The log directory.
+ * @param catalog The compaction catalog of the log directory.
+ * @return The paths of the removed entries (for the caller's bookkeeping).
+ * @throws limestone_exception when the directory scan or a removal fails.
+ */
+std::vector<boost::filesystem::path> remove_orphan_compaction_files(const boost::filesystem::path& location,
+                                                                    const compaction_catalog& catalog);
 
 /**
  * @brief Safely renames a file or directory.
@@ -59,18 +76,6 @@ std::set<std::string> select_files_for_compaction(const std::set<boost::filesyst
  * @throws limestone_exception if the path exists but is not a directory, or if directory creation fails.
  */
 void ensure_directory_exists(const boost::filesystem::path& dir);
-
-/**
- * @brief Handles an existing compacted file by renaming it if necessary.
- * 
- * This function checks for the existence of a compacted file in a specified location. If a compacted
- * file already exists and a backup file does not, the function renames the compacted file to a backup
- * name. If both files exist, it logs an error and throws an exception.
- * 
- * @param location The directory path where the compacted file is located.
- * @throws limestone_exception if both the compacted file and backup file already exist.
- */
-void handle_existing_compacted_file(const boost::filesystem::path& location);
 
 /**
  * @brief Retrieves a list of all regular files in a specified directory.

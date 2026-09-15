@@ -35,7 +35,10 @@ public:
 };
   
 
-TEST_F(compaction_blob_gc_test, basic_blob_gc_test) {
+// issue #144: blob GC at online compaction is disabled until the fundamental fix of
+// #144, so this test, which verifies that the GC runs, is disabled. Re-enable it
+// together with the fix.
+TEST_F(compaction_blob_gc_test, DISABLED_basic_blob_gc_test) {
     // Epoch 1: Prepare initial entries.
     gen_datastore();
     datastore_->switch_epoch(1);
@@ -98,8 +101,11 @@ TEST_F(compaction_blob_gc_test, basic_blob_gc_test) {
     EXPECT_EQ(catalog.get_max_blob_id(), 2002);
 
     // Verify the content of the compacted PWAL.
-    // Assuming the compacted file is named "pwal_0000.compacted".
-    log_entries = read_log_file("pwal_0000.compacted", location);
+    // Read the compacted file of the current generation as recorded by the catalog.
+    {
+        compaction_catalog catalog_after = compaction_catalog::from_catalog_file(location);
+        log_entries = read_log_file(catalog_after.get_current_compacted_file_name().value(), location);
+    }
     // Expected effective state:
     // - "blob_key1": effective value from epoch 2 ("blob_value1_epoch2") with blob IDs {2001,2002}.
     // - "blob_key2": remains from epoch 1.
@@ -259,7 +265,10 @@ TEST_F(compaction_blob_gc_test, basic_blob_gc_reboot_test) {
 }
 
 // Test that blob GC is executed when no backup is in progress.
-TEST_F(compaction_blob_gc_test, blob_gc_executes_without_backup_test) {
+// issue #144: blob GC at online compaction is disabled until the fundamental fix of
+// #144, so this test, which verifies that the GC runs, is disabled. Re-enable it
+// together with the fix.
+TEST_F(compaction_blob_gc_test, DISABLED_blob_gc_executes_without_backup_test) {
     gen_datastore();
     prepare_blob_gc_test_data();
     FLAGS_v = 100;
@@ -282,46 +291,63 @@ TEST_F(compaction_blob_gc_test, blob_gc_executes_without_backup_test) {
     EXPECT_TRUE(boost::filesystem::exists(path2002_));
 }
 
-// Test that blob GC is skipped during an old backup (using the backup API without arguments).
+// During a backup (the old API) the compaction itself returns early when it is
+// requested, because the removal of the old generation would make the copy of a file
+// already enumerated by the backup fail. The blob GC is therefore not run either.
 TEST_F(compaction_blob_gc_test, blob_gc_skipped_during_old_backup_test) {
     gen_datastore();
     prepare_blob_gc_test_data();
     auto& backup = datastore_->begin_backup();  // old backup API
-    
-    run_compact_with_epoch_switch(5);
-    
-    // Verify that GC was skipped because old backup is in progress.
+
+    // The early return means no rotation runs, so no help with the epoch switch is needed.
+    datastore_->compact_with_online();
+
+    // The compaction has not run (the catalog stays at the initial generation).
+    compaction_catalog catalog = compaction_catalog::from_catalog_file(boost::filesystem::path(location));
+    EXPECT_EQ(catalog.get_generation(), 0);
+    EXPECT_TRUE(catalog.get_compacted_files().empty());
+
+    // The blob GC has not run either.
     EXPECT_TRUE(boost::filesystem::exists(path1001_));
     EXPECT_TRUE(boost::filesystem::exists(path1002_));
     EXPECT_TRUE(boost::filesystem::exists(path1003_));
     EXPECT_TRUE(boost::filesystem::exists(path2001_));
     EXPECT_TRUE(boost::filesystem::exists(path2002_));
-    
+
     backup.notify_end_backup();
 }
 
-// Test that blob GC is skipped during a new backup (using the backup API with arguments).
+// During a backup (the new API) the compaction itself returns early when it is requested.
 TEST_F(compaction_blob_gc_test, blob_gc_skipped_during_new_backup_test) {
     gen_datastore();
     datastore_->switch_epoch(1);
     auto backup = begin_backup_with_epoch_switch(backup_type::transaction, 2);  // new backup API
 
     prepare_blob_gc_test_data();
-    
-    run_compact_with_epoch_switch(5);
-    
-    // Verify that GC was skipped because new backup is in progress.
+
+    // The early return means no rotation runs, so no help with the epoch switch is needed.
+    datastore_->compact_with_online();
+
+    // The compaction has not run (the catalog stays at the initial generation).
+    compaction_catalog catalog = compaction_catalog::from_catalog_file(boost::filesystem::path(location));
+    EXPECT_EQ(catalog.get_generation(), 0);
+    EXPECT_TRUE(catalog.get_compacted_files().empty());
+
+    // The blob GC has not run either.
     EXPECT_TRUE(boost::filesystem::exists(path1001_));
     EXPECT_TRUE(boost::filesystem::exists(path1002_));
     EXPECT_TRUE(boost::filesystem::exists(path1003_));
     EXPECT_TRUE(boost::filesystem::exists(path2001_));
     EXPECT_TRUE(boost::filesystem::exists(path2002_));
-    
+
     // backup->notify_end_backup();
 }
 
 // Test that blob GC is executed after an old backup has ended (using the backup API without arguments).
-TEST_F(compaction_blob_gc_test, blob_gc_executes_after_old_backup_test) {
+// issue #144: blob GC at online compaction is disabled until the fundamental fix of
+// #144, so this test, which verifies that the GC runs, is disabled. Re-enable it
+// together with the fix.
+TEST_F(compaction_blob_gc_test, DISABLED_blob_gc_executes_after_old_backup_test) {
     gen_datastore();
     prepare_blob_gc_test_data();
     FLAGS_v = 100;
@@ -338,8 +364,62 @@ TEST_F(compaction_blob_gc_test, blob_gc_executes_after_old_backup_test) {
     EXPECT_TRUE(boost::filesystem::exists(path2002_));
 }
 
+// Reproduction test for issue #144: a blob that is registered in a blob_pool but has
+// not been passed to add_entry yet (one held by a transaction still in progress) must
+// not be collected by the blob GC at online compaction. The GC exemption list is
+// built only from the scan of the compaction inputs, so such a blob would be deleted
+// if that GC ran (#144). The test passes now because that GC is disabled altogether,
+// and it must keep passing after the fundamental fix of #144 re-enables the GC,
+// pinning the behavior either way.
+//
+// The GC boundary (available_boundary_version) never exceeds the durable epoch by the
+// discipline of the caller (shirakami); this test uses a boundary that respects it.
+TEST_F(compaction_blob_gc_test, blob_registered_but_not_yet_logged_survives_gc) {
+    gen_datastore();
+
+    // Epoch 3: write one entry with blobs into the WAL (the control group that the
+    // GC boundary protects)
+    datastore_->switch_epoch(3);
+    lc0_->begin_session();
+    lc0_->add_entry(1, "blob_key1", "blob_value1", {3, 0}, {1001, 1002});
+    lc0_->end_session();
+    datastore_->switch_epoch(4);
+
+    auto path1001 = create_dummy_blob_files(1001);
+    auto path1002 = create_dummy_blob_files(1002);
+    datastore_->set_next_blob_id(2000);
+
+    // Simulate a transaction in progress: register a blob through a blob_pool and do
+    // not call add_entry (pre-commit state). Keep the pool alive without release.
+    auto pool = datastore_->acquire_blob_pool();
+    blob_id_type in_flight_blob = pool->register_data("in-flight blob data");
+    boost::filesystem::path in_flight_path = datastore_->get_blob_file(in_flight_blob).path();
+    ASSERT_TRUE(boost::filesystem::exists(in_flight_path));
+
+    // Advance the GC boundary within the caller's discipline ({2,0}, below the durable
+    // epoch 3). It exceeds the catalog max_epoch_id (initially 0), which is the
+    // condition for the GC to run at online compaction.
+    datastore_->switch_available_boundary_version({2, 0});
+
+    // Compaction + blob GC (rotation boundary E = 4)
+    run_compact_with_epoch_switch(5);
+
+    // Control group: blobs recorded in the WAL have write_version {3,0} >= the GC
+    // boundary {2,0}, so they are exempted unconditionally (high container).
+    EXPECT_TRUE(boost::filesystem::exists(path1001));
+    EXPECT_TRUE(boost::filesystem::exists(path1002));
+
+    // The point: a blob that has not appeared in the WAL yet must not be deleted
+    // (its entry is going to be written by add_entry with a write_version above the
+    // GC boundary once the transaction commits).
+    EXPECT_TRUE(boost::filesystem::exists(in_flight_path));
+}
+
 // Test that blob GC is executed after a new backup has ended (using the backup API with arguments).
-TEST_F(compaction_blob_gc_test, blob_gc_executes_after_new_backup_test) {
+// issue #144: blob GC at online compaction is disabled until the fundamental fix of
+// #144, so this test, which verifies that the GC runs, is disabled. Re-enable it
+// together with the fix.
+TEST_F(compaction_blob_gc_test, DISABLED_blob_gc_executes_after_new_backup_test) {
     gen_datastore();
     datastore_->switch_epoch(1);
     auto backup = begin_backup_with_epoch_switch(backup_type::transaction, 2);  // new backup API

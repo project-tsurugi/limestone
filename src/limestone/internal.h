@@ -19,6 +19,8 @@
 #include <limestone/api/datastore.h>
 
 #include <boost/filesystem.hpp>
+#include <boost/system/error_code.hpp>
+#include <functional>
 #include <optional>
 
 #include "file_operations.h"
@@ -43,6 +45,42 @@ static constexpr const std::string_view tmp_epoch_file_name = ".epoch.tmp";
  * @brief prefix of pwal file name
  */
 static constexpr const std::string_view log_channel_prefix = "pwal_";
+
+/**
+ * @brief tells whether the file name matches the naming rule of a pre-rotation
+ *        (unrotated) pwal (`pwal_NNNN`, 9 characters)
+ * @note this check is dedicated to pwal files; epoch files etc. are out of scope
+ * @param filename the file name to check (must not contain a directory part)
+ * @return true if the name matches
+ */
+bool is_unrotated_pwal_name(std::string_view filename) noexcept;
+
+/**
+ * @brief renames the given pwal file to its rotated name
+ *        (`<original name>.<unixtime_millis:14 digits>.<epoch>`), re-fetching
+ *        the wall clock until the target name is free when it already exists
+ * @note concurrent calls on the same file are not allowed; the caller must
+ *       hold the exclusion (the single mutex of the rotation mechanism)
+ * @param file the pwal file to rename
+ * @param epoch the epoch part of the rotated name
+ * @return the path of the renamed file
+ * @throws limestone_io_exception if the rename or the existence check fails
+ */
+boost::filesystem::path rotate_pwal_file(boost::filesystem::path const& file, epoch_id_type epoch);
+
+/**
+ * @brief type of the testing hook; returning an error_code skips the rename and fails
+ *        with that error_code, returning nullopt renames as usual
+ */
+using rotate_pwal_file_rename_hook =
+    std::function<std::optional<boost::system::error_code>(const boost::filesystem::path& from, const boost::filesystem::path& to)>;
+
+/**
+ * @brief hook that replaces only the rename call of rotate_pwal_file
+ * @note always empty in production
+ */
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables,fuchsia-statically-constructed-objects)
+extern rotate_pwal_file_rename_hook rotate_pwal_file_rename_for_test;
 
 /**
  * @brief The maximum number of entries allowed in an epoch file.
@@ -84,17 +122,24 @@ status purge_dir(const boost::filesystem::path& dir);
 // from datastore_snapshot.cpp
 
 /**
- * @brief Creates a compacted PWAL (Persistent Write-Ahead Log) and retrieves the maximum blob ID.
- *
- * This function performs log compaction using the given compaction options. 
- * It processes the specified input directory, compacts the logs, and stores 
- * the result in the target directory.
- *
- * @param options The compaction options that specify source and destination directories, 
- *                number of workers, file set, and garbage collection settings.
- * @return The maximum blob ID found during the compaction process.
+ * @brief The result of producing the compaction output (the files written to the output directory).
  */
-limestone::api::blob_id_type create_compact_pwal_and_get_max_blob_id(compaction_options &options);
+struct compaction_output_result {
+    limestone::api::blob_id_type max_blob_id{};
+    bool carry_written{};
+};
+
+/**
+ * @brief Writes the compacted file into the output directory of options, then fsyncs
+ *        and closes it. When both the boundary epoch and the carry output name are set,
+ *        a carry file is also written if there is any snippet beyond the boundary.
+ *
+ * @param options The compaction options holding the input and output directories, the
+ *                number of workers, the set of input files, the boundary epoch, the
+ *                output file names and the GC settings.
+ * @return The maximum blob ID and whether a carry file was written.
+ */
+compaction_output_result create_compaction_output(compaction_options &options);
 
 
 std::set<boost::filesystem::path> filter_epoch_files(const boost::filesystem::path& directory);

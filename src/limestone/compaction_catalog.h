@@ -18,6 +18,8 @@
 #define COMPACTION_CATALOG_H
 
 #include <boost/filesystem.hpp>
+#include <cstdint>
+#include <optional>
 #include <set>
 #include <string>
 #include <utility>
@@ -133,10 +135,11 @@ public:
 
     /**
      * @brief Updates the compaction catalog and writes the changes to a file.
-     * 
-     * This method updates the catalog with new compacted files, detached PWALs, the maximum epoch ID,
-     * and the maximum blob ID, then writes the updated catalog to a file.
-     * 
+     *
+     * This method updates the catalog with the compaction generation, new compacted files,
+     * the carry file (or its absence), detached PWALs, the maximum epoch ID, and the maximum
+     * blob ID, then writes the updated catalog to a file.
+     *
      * The maximum blob ID is monotonically non-decreasing: the recorded value never
      * drops below the value the catalog already holds, even if @p max_blob_id is
      * smaller. Blob IDs must never be reused, so a compaction (online or offline)
@@ -146,10 +149,15 @@ public:
      * @param max_epoch_id The maximum epoch ID to be recorded in the catalog.
      * @param max_blob_id The candidate maximum blob ID; the recorded value is the
      *                    maximum of this and the current value (see above).
+     * @param generation The compaction generation number, recorded in the catalog as is
+     *                    (the caller advances the generation by passing the current value + 1).
      * @param compacted_files Set of compacted files to be included in the catalog.
+     * @param carry_file Name of the carry file of the current generation. std::nullopt means
+     *                   "no carry", in which case no carry record is written to the catalog.
      * @param detached_pwals Set of detached PWALs to be included in the catalog.
      */
-    void update_catalog_file(epoch_id_type max_epoch_id, blob_id_type max_blob_id, const std::set<compacted_file_info> &compacted_files,
+    void update_catalog_file(epoch_id_type max_epoch_id, blob_id_type max_blob_id, std::uint64_t generation,
+                        const std::set<compacted_file_info> &compacted_files, const std::optional<std::string> &carry_file,
                         const std::set<std::string> &detached_pwals);
 
     /**
@@ -175,10 +183,37 @@ public:
 
     /**
      * @brief Gets the set of detached PWALs from the catalog.
-     * 
+     *
      * @return const std::set<std::string>& Reference to the set of detached PWALs.
      */
     [[nodiscard]] const std::set<std::string> &get_detached_pwals() const;
+
+    /**
+     * @brief Gets the name of the current compacted file.
+     *
+     * Returns the first record if more than one is present; that at most one is
+     * recorded is verified when the catalog is loaded.
+     *
+     * @return The compacted file name recorded in the catalog, or std::nullopt if
+     *         there is no record.
+     */
+    [[nodiscard]] std::optional<std::string> get_current_compacted_file_name() const;
+
+    /**
+     * @brief Gets the compaction generation number.
+     *
+     * @return The generation number of the current generation; 0 for old-format
+     *         catalogs that have no generation record.
+     */
+    [[nodiscard]] std::uint64_t get_generation() const;
+
+    /**
+     * @brief Gets the name of the carry file of the current generation.
+     *
+     * @return The carry file name, or std::nullopt when the current generation has
+     *         no carry (including old-format catalogs).
+     */
+    [[nodiscard]] const std::optional<std::string> &get_carry_file() const;
 
     /**
      * @brief Returns the filename of the compaction catalog.
@@ -209,13 +244,48 @@ public:
     [[nodiscard]] static inline std::string get_compacted_filename() { return COMPACTED_FILENAME; }
 
     /**
-     * @brief Retrieves the filename of the compacted file's backup.
+     * @brief Returns the compacted file name of the given generation.
      *
-     * @return A string containing the filename of the compacted file's backup.
+     * @param generation The generation number.
+     * @return The unnamed form (no suffix) for generation 0 by the migration rule,
+     *         otherwise the name suffixed with the generation number.
      */
-    [[nodiscard]] static inline std::string get_compacted_backup_filename() { return COMPACTED_BACKUP_FILENAME; }
+    [[nodiscard]] static std::string get_compacted_filename_for_generation(std::uint64_t generation);
+
+    /**
+     * @brief Returns the carry file name of the given generation.
+     *
+     * @param generation The generation number.
+     * @return The carry file name suffixed with the generation number.
+     */
+    [[nodiscard]] static std::string get_carry_filename_for_generation(std::uint64_t generation);
+
+    /**
+     * @brief Tells whether the file is an orphan compaction output under this catalog.
+     *
+     * A file whose name has the form of a compaction output (the compacted file of any
+     * generation, including the unnamed generation-0 form, a carry file of any
+     * generation, or a ".prev" remnant of the retired backup scheme) and that this
+     * catalog does not record is an orphan.
+     *
+     * @param filename The file name (no directory part).
+     * @return true when the file is a compaction-output name not recorded by this catalog.
+     */
+    [[nodiscard]] bool is_orphan_compaction_file(const std::string& filename) const;
 
 private:
+    /**
+     * @brief Tells whether the name has the form of a compaction output.
+     *
+     * Matches the compacted file of any generation (including the unnamed generation-0
+     * form), a carry file of any generation, and the ".prev" remnant of the retired
+     * backup scheme.
+     *
+     * @param filename The file name (no directory part).
+     * @return true when the name has the form of a compaction output.
+     */
+    [[nodiscard]] static bool is_compaction_output_filename(const std::string& filename);
+
     // Constants
     static constexpr const char *COMPACTION_CATALOG_FILENAME = "compaction_catalog";              ///< Name of the catalog file
     static constexpr const char *COMPACTION_CATALOG_BACKUP_FILENAME = "compaction_catalog.back";  ///< Name of the backup catalog file
@@ -225,15 +295,20 @@ private:
     static constexpr const char *DETACHED_PWAL_KEY = "DETACHED_PWAL";                             ///< Key for detached PWALs in the catalog file
     static constexpr const char *MAX_EPOCH_ID_KEY = "MAX_EPOCH_ID";                               ///< Key for maximum epoch ID in the catalog file
     static constexpr const char *MAX_BLOB_ID_KEY = "MAX_BLOB_ID";                                 ///< Key for maximum blob ID in the catalog file
+    static constexpr const char *GENERATION_KEY = "GENERATION";                                   ///< Key for the generation number (absence means generation 0, for old-format compatibility)
+    static constexpr const char *CARRY_FILE_KEY = "CARRY_FILE";                                   ///< Key for the carry file name (absence means no carry)
     static constexpr const char *COMPACTION_TEMP_DIRNAME = "compaction_temp";                     ///< Name of the temporary directory for compaction
-    static constexpr const char *COMPACTED_FILENAME = "pwal_0000.compacted";                      ///< Prefix for temporary compaction files
-    static constexpr const char *COMPACTED_BACKUP_FILENAME = "pwal_0000.compacted.prev";          ///< Extension for temporary compaction files
+    static constexpr const char *COMPACTED_FILENAME = "pwal_0000.compacted";                      ///< Base name of the compacted file (generation 0 uses it as-is)
+    static constexpr const char *CARRY_FILENAME_BASE = "pwal_0000.carry";                         ///< Base name of the carry file
+    static constexpr const char *RETIRED_COMPACTED_BACKUP_FILENAME = "pwal_0000.compacted.prev";  ///< Backup file name of the retired backup scheme (matched only to remove remnants)
 
     // Member variables
     std::set<compacted_file_info> compacted_files_{};  ///< Set of compacted files
     std::set<std::string> detached_pwals_{};           ///< Set of detached PWALs
     epoch_id_type max_epoch_id_ = 0;                   ///< Maximum epoch ID included in the compacted files
     blob_id_type max_blob_id_ = 0;                     ///< Maximum blob ID included in the compacted files
+    std::uint64_t generation_ = 0;                     ///< Compaction generation number (0 for old-format catalogs)
+    std::optional<std::string> carry_file_{};          ///< Carry file name of the current generation (nullopt = no carry)
 
     // Static pointer to file operations interface
     std::unique_ptr<file_operations> file_ops_ = std::make_unique<real_file_operations>();

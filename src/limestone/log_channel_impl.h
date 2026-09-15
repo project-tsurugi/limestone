@@ -160,6 +160,51 @@ public:
     void end_session_at(epoch_id_type epoch);
 
     /**
+     * @brief rotation status (WAL rotation mechanism)
+     */
+    enum class rotation_status {
+        none,       ///< not involved in a rotation
+        requested,  ///< rotation requested (waiting for the rename)
+    };
+
+    // --- internal interface of the WAL rotation mechanism ---
+    // The session active flag and the rotation status are guarded by
+    // datastore_impl::get_rotation_state().mutex (the single mutex).
+
+    /**
+     * @brief called at the beginning of begin_session (before the fopen);
+     *        inspects the rotation status, and if it is requested, logs a
+     *        WARNING and consumes the request (renames the file), then raises
+     *        the session active flag
+     */
+    void activate_session_and_consume_rotation_request();
+
+    /**
+     * @brief called right after the fclose of the session file;
+     *        lowers the session active flag, and if the rotation status is
+     *        requested, consumes the request (renames the file)
+     */
+    void deactivate_session_and_consume_rotation_request();
+
+    /**
+     * @brief returns the session active flag
+     * @note the caller must hold the single mutex
+     */
+    [[nodiscard]] bool is_session_active_locked() const noexcept;
+
+    /**
+     * @brief sets the rotation status to "requested"
+     * @note the caller must hold the single mutex
+     */
+    void set_rotation_requested_locked() noexcept;
+
+    /**
+     * @brief resets the rotation status to "none"
+     * @note the caller must hold the single mutex
+     */
+    void clear_rotation_requested_locked() noexcept;
+
+    /**
      * @brief Checks whether RDMA send stream is available.
      * @return true if RDMA stream is set.
      */
@@ -184,6 +229,19 @@ public:
     static constexpr std::size_t rdma_send_buffer_threshold = 56UL * 1024; // 56KB
 
 private:
+    // WAL rotation mechanism states (guarded by the single mutex; not persisted)
+    bool session_active_{false};
+    rotation_status rotation_status_{rotation_status::none};
+
+    /**
+     * @brief consumes the requested rotation: renames the file, resets the
+     *        status to "none", removes this channel from the rename-waiting
+     *        set and notifies the completion
+     * @note the caller must hold the single mutex and the status must be
+     *       "requested"
+     */
+    void consume_rotation_request_locked();
+
     std::unique_ptr<replication::replica_connector> replica_connector_;
     std::unique_ptr<replication::rdma_send_stream_base> rdma_send_stream_;
     replication::replication_message_io rdma_serializer_io_;

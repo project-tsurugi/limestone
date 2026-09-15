@@ -15,6 +15,7 @@
  */
 
 #include <byteswap.h>
+#include <unistd.h>
 #include <boost/filesystem/fstream.hpp>
 #include <cstdlib>
 #include <cstring>
@@ -27,6 +28,7 @@
 
 #include <limestone/api/datastore.h>
 #include "limestone_exception_helper.h"
+#include "compaction_carry_writer.h"
 #include "compaction_catalog.h"
 #include "dblog_scan.h"
 #include "internal.h"
@@ -127,7 +129,15 @@ void insert_twisted_entry(sortdb_wrapper* sortdb, const log_entry& e) {
     sortdb->put(db_key, db_value);
 }
 
-std::pair<epoch_id_type, sorting_context> create_sorted_from_wals(compaction_options &options) {
+// The result of create_sorted_from_wals. max_epoch_per_file is used to select the files
+// that the carry pass re-reads.
+struct sorted_from_wals_result {
+    epoch_id_type max_appeared_epoch{};
+    sorting_context sctx;
+    std::map<boost::filesystem::path, epoch_id_type> max_epoch_per_file;
+};
+
+sorted_from_wals_result create_sorted_from_wals(compaction_options &options) {
     auto from_dir = options.get_from_dir();
     auto file_names = options.get_file_names();
     auto num_worker = options.get_num_worker();
@@ -137,8 +147,6 @@ std::pair<epoch_id_type, sorting_context> create_sorted_from_wals(compaction_opt
     sorting_context sctx{std::make_unique<sortdb_wrapper>(from_dir)};
 #endif
     dblog_scan logscan = file_names.empty() ? dblog_scan{from_dir} : dblog_scan{from_dir, options};
-
-    epoch_id_type ld_epoch = logscan.last_durable_epoch_in_dir();
 
 #if defined SORT_METHOD_PUT_ONLY
     const auto add_entry_to_point = insert_twisted_entry;
@@ -178,10 +186,28 @@ std::pair<epoch_id_type, sorting_context> create_sorted_from_wals(compaction_opt
         LOG(INFO) << "/:limestone:config:datastore this sort method does not work correctly with multi-thread, so force the number of recover process thread = 1";
         num_worker = 1;
     }
+    // With no boundary epoch given, the boundary is the durable epoch: the inputs are
+    // the whole directory, so "every entry at or below the boundary is in the inputs"
+    // holds for it. It is read outside the try block so that an exception caused by
+    // the epoch file is not flattened into "dblogdir is corrupted" by the catch below.
+    epoch_id_type ld_epoch = 0;
+    if (!options.get_boundary_epoch().has_value()) {
+        ld_epoch = logscan.last_durable_epoch_in_dir();
+    }
     logscan.set_thread_num(num_worker);
     try {
-        epoch_id_type max_appeared_epoch = logscan.scan_pwal_files_throws(ld_epoch, add_entry);
-        return {max_appeared_epoch, std::move(sctx)};
+        epoch_id_type max_appeared_epoch = 0;
+        const std::optional<epoch_id_type> boundary_epoch = options.get_boundary_epoch();
+        if (boundary_epoch.has_value()) {
+            // Online compaction: the boundary is the rotation boundary; the preceding
+            // rotation guarantees that every entry at or below it is in the inputs.
+            // Snippets beyond the boundary are skipped, never invalidated (a separate
+            // pass carries them over).
+            max_appeared_epoch = logscan.scan_pwal_files_for_compaction(boundary_epoch.value(), add_entry);
+        } else {
+            max_appeared_epoch = logscan.scan_pwal_files_throws(ld_epoch, add_entry);
+        }
+        return {max_appeared_epoch, std::move(sctx), logscan.get_max_epoch_per_file()};
     } catch (limestone_exception& e) {
         VLOG_LP(log_info) << "failed to scan pwal files: " << e.what();
         LOG(ERROR) << "/:limestone recover process failed. (cause: corruption detected in transaction log data directory), "
@@ -384,8 +410,8 @@ void sortdb_foreach(
 
 namespace limestone::internal {
 
-blob_id_type create_compact_pwal_and_get_max_blob_id(compaction_options &options) {
-    auto [max_appeared_epoch, sctx] = create_sorted_from_wals(options);
+compaction_output_result create_compaction_output(compaction_options &options) {  // NOLINT(readability-function-cognitive-complexity)
+    auto [max_appeared_epoch, sctx, max_epoch_per_file] = create_sorted_from_wals(options);
 
     boost::system::error_code error;
     const auto &to_dir = options.get_to_dir();
@@ -397,60 +423,105 @@ blob_id_type create_compact_pwal_and_get_max_blob_id(compaction_options &options
         }
     }
 
-    boost::filesystem::path snapshot_file = to_dir / boost::filesystem::path("pwal_0000.compacted");
+    std::string compacted_file_name =
+        options.get_compacted_file_name().value_or(compaction_catalog::get_compacted_filename());
+    boost::filesystem::path snapshot_file = to_dir / boost::filesystem::path(compacted_file_name);
     VLOG_LP(log_info) << "generating compacted pwal file: " << snapshot_file;
     FILE* ostrm = fopen(snapshot_file.c_str(), "w");  // NOLINT(*-owning-memory)
     if (!ostrm) {
         LOG_AND_THROW_IO_EXCEPTION("cannot create snapshot file (" + snapshot_file.string() + ")", errno);
     }
-    setvbuf(ostrm, nullptr, _IOFBF, 128L * 1024L);  // NOLINT, NB. glibc may ignore size when _IOFBF and buffer=NULL
-    bool rewind = true;  // TODO: change by flag
-    epoch_id_type epoch = rewind ? 0 : max_appeared_epoch;
-    log_entry::begin_session(ostrm, epoch);
+    try {
+        setvbuf(ostrm, nullptr, _IOFBF, 128L * 1024L);  // NOLINT, NB. glibc may ignore size when _IOFBF and buffer=NULL
+        // NOTE: the header epoch of the compacted file must not exceed the compaction
+        // boundary (0 is the safest). max_appeared_epoch includes the epochs of the
+        // snippets beyond the boundary, so using it as the header would make the next
+        // scan skip the whole compacted file as a snippet beyond the boundary.
+        bool write_version_reset = true;  // TODO: change by flag
+        epoch_id_type epoch = write_version_reset ? 0 : max_appeared_epoch;
+        log_entry::begin_session(ostrm, epoch);
 
-    auto write_snapshot_entry = [&ostrm, rewind](
-        log_entry::entry_type entry_type, 
-        std::string_view key_sid, 
-        std::string_view value_etc, 
-                                                        std::string_view blob_ids) {
-        switch (entry_type) {
-            case log_entry::entry_type::normal_entry:
-                if (rewind) {
-                    static std::string value{};
-                    value = value_etc;
-                    std::memset(value.data(), 0, 16);
-                    log_entry::write(ostrm, key_sid, value);
-                } else {
-                log_entry::write(ostrm, key_sid, value_etc);
-                }
-                break;
-            case log_entry::entry_type::normal_with_blob:
-                if (rewind) {
-                    static std::string value{};
-                    value = value_etc;
-                    std::memset(value.data(), 0, 16);
-                    log_entry::write_with_blob(ostrm, key_sid, value, blob_ids);
-                } else {
-                log_entry::write_with_blob(ostrm, key_sid, value_etc, blob_ids);
-                }
-                break;
-            case log_entry::entry_type::remove_entry:
-                // No action needed
-                break;
-            default:
-                LOG(ERROR) << "Unexpected entry type: " << static_cast<int>(entry_type);
-                std::abort();
-        }
-    };
+        auto write_snapshot_entry = [&ostrm, write_version_reset](
+            log_entry::entry_type entry_type, 
+            std::string_view key_sid, 
+            std::string_view value_etc, 
+                                                            std::string_view blob_ids) {
+            switch (entry_type) {
+                case log_entry::entry_type::normal_entry:
+                    if (write_version_reset) {
+                        static std::string value{};
+                        value = value_etc;
+                        std::memset(value.data(), 0, 16);
+                        log_entry::write(ostrm, key_sid, value);
+                    } else {
+                    log_entry::write(ostrm, key_sid, value_etc);
+                    }
+                    break;
+                case log_entry::entry_type::normal_with_blob:
+                    if (write_version_reset) {
+                        static std::string value{};
+                        value = value_etc;
+                        std::memset(value.data(), 0, 16);
+                        log_entry::write_with_blob(ostrm, key_sid, value, blob_ids);
+                    } else {
+                    log_entry::write_with_blob(ostrm, key_sid, value_etc, blob_ids);
+                    }
+                    break;
+                case log_entry::entry_type::remove_entry:
+                    // No action needed
+                    break;
+                default:
+                    LOG(ERROR) << "Unexpected entry type: " << static_cast<int>(entry_type);
+                    std::abort();
+            }
+        };
     
 
-    sortdb_foreach(options, sctx, write_snapshot_entry);
-    //log_entry::end_session(ostrm, epoch);
+        sortdb_foreach(options, sctx, write_snapshot_entry);
+        //log_entry::end_session(ostrm, epoch);
+    } catch (...) {
+        // Release the FILE* for certain, so that the caller can remove the temporary
+        // files and leave the retry to the next request.
+        (void) fclose(ostrm);  // NOLINT(*-owning-memory) cleanup while an exception propagates (a failure is ignored)
+        throw;
+    }
+    // fsync before close, so that the content reaches the disk before the publishing rename.
+    if (fflush(ostrm) != 0) {
+        int saved_errno = errno;
+        (void) fclose(ostrm);  // NOLINT(*-owning-memory) cleanup before the throw (a failure is ignored)
+        LOG_AND_THROW_IO_EXCEPTION("cannot flush snapshot file (" + snapshot_file.string() + ")", saved_errno);
+    }
+    if (fsync(fileno(ostrm)) != 0) {
+        int saved_errno = errno;
+        (void) fclose(ostrm);  // NOLINT(*-owning-memory) cleanup before the throw (a failure is ignored)
+        LOG_AND_THROW_IO_EXCEPTION("cannot fsync snapshot file (" + snapshot_file.string() + ")", saved_errno);
+    }
     if (fclose(ostrm) != 0) {  // NOLINT(*-owning-memory)
         LOG_AND_THROW_IO_EXCEPTION("cannot close snapshot file (" + snapshot_file.string() + ")", errno);
     }
 
-    return sctx.get_max_blob_id();
+    // Save the snippets beyond the boundary epoch into the carry file (only when both
+    // the boundary and the carry output name are given, that is, on the online path).
+    // Only the files whose per-file maximum epoch exceeds the boundary are re-read; the
+    // current compacted file has header epoch 0, so it is naturally out of scope.
+    bool carry_written = false;
+    const std::optional<epoch_id_type> boundary_epoch_opt = options.get_boundary_epoch();
+    const std::optional<std::string>& carry_file_name = options.get_carry_file_name();
+    if (boundary_epoch_opt.has_value() && carry_file_name.has_value()) {
+        epoch_id_type boundary_epoch = boundary_epoch_opt.value();
+        std::vector<boost::filesystem::path> carry_inputs;
+        for (const auto& [path, max_epoch] : max_epoch_per_file) {
+            if (max_epoch > boundary_epoch) {
+                carry_inputs.push_back(path);
+            }
+        }
+        if (!carry_inputs.empty()) {
+            compaction_carry_writer writer(boundary_epoch, to_dir / carry_file_name.value());
+            carry_written = writer.write(carry_inputs);
+        }
+    }
+
+    return {sctx.get_max_blob_id(), carry_written};
 }
 
 std::set<std::string> assemble_snapshot_input_filenames(
@@ -458,6 +529,13 @@ std::set<std::string> assemble_snapshot_input_filenames(
     const boost::filesystem::path& location,
     file_operations& file_ops) {
     std::set<std::string> detached_pwals = compaction_catalog->get_detached_pwals();
+    // The compacted files excluded from the snapshot input are those recorded in the
+    // catalog, not a well-known name; a cursor reads them directly. A compaction output
+    // absent from the catalog has been removed by the orphan removal at startup.
+    std::set<std::string> compacted_filenames;
+    for (auto const& info : compaction_catalog->get_compacted_files()) {
+        compacted_filenames.insert(info.get_file_name());
+    }
     std::set<std::string> filename_set;
     boost::system::error_code error;
     boost::filesystem::directory_iterator it(location, error);
@@ -473,9 +551,9 @@ std::set<std::string> assemble_snapshot_input_filenames(
         }
         if (boost::filesystem::is_regular_file(it->path())) {
             std::string filename = it->path().filename().string();
-            if (detached_pwals.find(filename) == detached_pwals.end() 
+            if (detached_pwals.find(filename) == detached_pwals.end()
                 && filename != compaction_catalog::get_catalog_filename()
-                && filename != compaction_catalog::get_compacted_filename()) {
+                && compacted_filenames.find(filename) == compacted_filenames.end()) {
                 filename_set.insert(filename);
             }
         }
@@ -537,7 +615,8 @@ blob_id_type datastore::create_snapshot_and_get_max_blob_id() {
     const auto& from_dir = location_;
     std::set<std::string> file_names = assemble_snapshot_input_filenames(compaction_catalog_, from_dir);
     compaction_options options(from_dir, recover_max_parallelism_, file_names);
-    auto [max_appeared_epoch, sctx] = create_sorted_from_wals(options);
+    auto [max_appeared_epoch, sctx, max_epoch_per_file] = create_sorted_from_wals(options);
+    (void) max_epoch_per_file;  // not used on the startup path
     epoch_id_switched_.store(max_appeared_epoch);
     epoch_id_informed_.store(max_appeared_epoch);
 

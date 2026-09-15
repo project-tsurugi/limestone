@@ -56,9 +56,16 @@ manifest::migration_info check_and_migrate_logdir_format(const boost::filesystem
 
 void ensure_compaction_catalog(const boost::filesystem::path& logdir) {
     boost::filesystem::path catalog_path = logdir / compaction_catalog::get_catalog_filename();
-    if (!boost::filesystem::exists(catalog_path)) {
+    boost::filesystem::path backup_path = logdir / compaction_catalog::get_catalog_backup_filename();
+    // Create an empty catalog only when neither the catalog nor its backup exists.
+    // "No catalog, backup present" is the window of a crash in the middle of a catalog
+    // update (rename the catalog to the backup, then create the new catalog); creating
+    // an empty catalog here would let from_catalog_file read the empty catalog
+    // successfully, so the recovery from the backup (restore_from_backup) would never
+    // fire.
+    if (!boost::filesystem::exists(catalog_path) && !boost::filesystem::exists(backup_path)) {
         compaction_catalog catalog(logdir);
-        catalog.update_catalog_file(0, 0, {}, {});
+        catalog.update_catalog_file(0, 0, 0, {}, std::nullopt, {});
     }
 }
 

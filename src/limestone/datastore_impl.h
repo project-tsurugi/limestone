@@ -20,9 +20,11 @@
 
 #include <atomic>
 #include <array>
+#include <condition_variable>
 #include <memory>
 #include <mutex>
 #include <optional>
+#include <set>
 #include <string>
 #include <sys/types.h>
 #include <cstdint>
@@ -61,6 +63,53 @@ public:
     datastore_impl &operator=(const datastore_impl &) = delete;
     datastore_impl(datastore_impl &&) = delete;
     datastore_impl &operator=(datastore_impl &&) = delete;
+
+    /**
+     * @brief shared state of the WAL rotation mechanism.
+     *        The mutex is the single mutex that guards the session active flag
+     *        and the rotation status of every channel and the rename-waiting
+     *        set. rotate_mutex must not be acquired while holding this mutex.
+     */
+    struct rotation_state {
+        std::mutex mutex;
+        std::condition_variable pending_cv;              ///< notified when the rename-waiting set becomes empty
+        std::set<log_channel*> pending_channels;         ///< channels waiting for their rename
+        std::vector<std::string> renamed_files;          ///< files renamed by channel-side consumption during the current request
+        std::atomic<bool> shutdown_requested{false};     ///< tells the rotation waits to give up on shutdown
+    };
+
+    /// @brief returns the shared state of the WAL rotation mechanism
+    [[nodiscard]] rotation_state& get_rotation_state() noexcept;
+
+    /// @brief sets the test hook fired between the decision and an immediate rename (test-only)
+    void set_on_rotate_before_rename_for_test(std::function<void()> hook) noexcept;
+
+    /// @brief sets the test hook fired just before the completion wait starts (test-only)
+    void set_on_rotate_before_wait_for_test(std::function<void()> hook) noexcept;
+
+    /// @brief test hook fired on the rotation thread between the decision and an immediate rename (inside the single mutex)
+    void on_rotate_before_rename() const;
+
+    /// @brief test hook fired on the rotation thread just before the completion wait starts (inside the single mutex)
+    void on_rotate_before_wait() const;
+
+    /// @brief sets the test hook fired after the publish renames and before the catalog commit (test-only)
+    void set_on_compaction_after_publish_for_test(std::function<void()> hook) noexcept;
+
+    /// @brief sets the test hook fired after the catalog commit and before the old-generation removal (test-only)
+    void set_on_compaction_after_commit_for_test(std::function<void()> hook) noexcept;
+
+    /// @brief test hook fired on the compaction thread after the publish renames and before the catalog commit
+    void on_compaction_after_publish() const;
+
+    /// @brief test hook fired on the compaction thread after the catalog commit and before the old-generation removal
+    void on_compaction_after_commit() const;
+
+    /// @brief returns the name of the current compacted file; std::nullopt if there is none
+    [[nodiscard]] std::optional<std::string> get_current_compacted_file_name() const;
+
+    /// @brief sets the name of the current compacted file
+    void set_current_compacted_file_name(std::optional<std::string> file_name);
 
     // Increments the backup counter.
     void increment_backup_counter() noexcept;
@@ -432,6 +481,24 @@ public:
 private:
     [[nodiscard]] limestone::internal::blob_file_resolver& require_blob_file_resolver() noexcept;
     [[nodiscard]] limestone::internal::blob_file_resolver const& require_blob_file_resolver() const noexcept;
+
+    // Shared state of the WAL rotation mechanism.
+    rotation_state rotation_state_;
+
+    // Test hooks of the rotation mechanism (no-op when unset).
+    std::function<void()> on_rotate_before_rename_;
+    std::function<void()> on_rotate_before_wait_;
+
+    // Test hooks at the phase boundaries of the online compaction (no-op when unset).
+    std::function<void()> on_compaction_after_publish_;
+    std::function<void()> on_compaction_after_commit_;
+
+    // Synchronized copy of the current compacted file name. The in-memory state of the
+    // compaction catalog is not thread-safe, so only this value, which is read across
+    // threads, is kept as a copy. It is updated after the catalog is loaded at startup
+    // and right after a compaction commits.
+    mutable std::mutex current_compacted_file_name_mutex_;
+    std::optional<std::string> current_compacted_file_name_{};
 
     // Atomic counter for tracking active backup operations.
     std::atomic<int> backup_counter_;

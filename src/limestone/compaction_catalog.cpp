@@ -16,6 +16,7 @@
 
 #include <glog/logging.h>
 #include <algorithm>
+#include <cctype>
 #include <fstream>
 #include <stdexcept>
 #include <sstream>
@@ -111,6 +112,16 @@ void compaction_catalog::load_catalog_file(const boost::filesystem::path& path) 
         LOG_AND_THROW_EXCEPTION("Invalid header line: " + line);
     }
 
+    // Build the catalog state solely from the content of this file, so that values
+    // partially read from the main catalog do not survive when its load fails midway
+    // and we fall back to the backup.
+    compacted_files_.clear();
+    detached_pwals_.clear();
+    max_epoch_id_ = 0;
+    max_blob_id_ = 0;
+    generation_ = 0;
+    carry_file_.reset();
+
     bool max_epoch_id_found = false;
     while (true) {
         if (!file_ops_->getline(*strm, line)) {
@@ -135,7 +146,7 @@ void compaction_catalog::load_catalog_file(const boost::filesystem::path& path) 
 
 
 // Helper method to parse a catalog entry
-void compaction_catalog::parse_catalog_entry(const std::string& line, bool& max_epoch_id_found) {
+void compaction_catalog::parse_catalog_entry(const std::string& line, bool& max_epoch_id_found) {  // NOLINT(readability-function-cognitive-complexity)
     std::istringstream iss(line);
     std::string type;
     if (!(iss >> type)) {
@@ -172,6 +183,20 @@ void compaction_catalog::parse_catalog_entry(const std::string& line, bool& max_
         } else {
             LOG_AND_THROW_EXCEPTION("Invalid format for " + std::string(MAX_BLOB_ID_KEY) + ": " + line);
         }
+    } else if (type == GENERATION_KEY) {
+        std::uint64_t generation = 0;
+        if (iss >> generation) {
+            generation_ = generation;
+        } else {
+            LOG_AND_THROW_EXCEPTION("Invalid format for " + std::string(GENERATION_KEY) + ": " + line);
+        }
+    } else if (type == CARRY_FILE_KEY) {
+        std::string file_name;
+        if (iss >> file_name) {
+            carry_file_ = file_name;
+        } else {
+            LOG_AND_THROW_EXCEPTION("Invalid format for " + std::string(CARRY_FILE_KEY) + ": " + line);
+        }
     }
     else {
         LOG_AND_THROW_EXCEPTION("Unknown entry type: " + type);
@@ -180,14 +205,18 @@ void compaction_catalog::parse_catalog_entry(const std::string& line, bool& max_
 }
 
 // Method to update the compaction catalog
-void compaction_catalog::update_catalog_file(epoch_id_type max_epoch_id, blob_id_type max_blob_id, const std::set<compacted_file_info>& compacted_files, const std::set<std::string>& detached_pwals) {
+void compaction_catalog::update_catalog_file(epoch_id_type max_epoch_id, blob_id_type max_blob_id, std::uint64_t generation,
+                                             const std::set<compacted_file_info>& compacted_files, const std::optional<std::string>& carry_file,
+                                             const std::set<std::string>& detached_pwals) {
     // Update internal state. The maximum blob ID is a monotonically non-decreasing
     // high-water mark: blob IDs must never be reused, so it must not drop below the
     // value already recorded even when the caller passes a smaller value (e.g. a
     // compaction that observed only the blobs still referenced by live entries).
     max_epoch_id_ = max_epoch_id;
     max_blob_id_ = std::max(max_blob_id, max_blob_id_);
+    generation_ = generation;
     compacted_files_ = compacted_files;
+    carry_file_ = carry_file;
     detached_pwals_ = detached_pwals;
 
     // Create the catalog using std::string
@@ -279,6 +308,17 @@ std::string compaction_catalog::create_catalog_content() const {
         catalog += "\n";
     }
 
+    catalog += GENERATION_KEY;
+    catalog += " " + std::to_string(generation_);
+    catalog += "\n";
+
+    // A generation without a carry writes no record (absence of the record = no carry).
+    if (carry_file_.has_value()) {
+        catalog += CARRY_FILE_KEY;
+        catalog += " " + carry_file_.value();
+        catalog += "\n";
+    }
+
     catalog += MAX_EPOCH_ID_KEY;
     catalog += " " + std::to_string(max_epoch_id_);
     catalog += "\n";
@@ -309,6 +349,64 @@ const std::set<compacted_file_info>& compaction_catalog::get_compacted_files() c
 
 const std::set<std::string>& compaction_catalog::get_detached_pwals() const {
     return detached_pwals_;
+}
+
+std::optional<std::string> compaction_catalog::get_current_compacted_file_name() const {
+    if (compacted_files_.empty()) {
+        return std::nullopt;
+    }
+    return compacted_files_.begin()->get_file_name();
+}
+
+std::string compaction_catalog::get_compacted_filename_for_generation(std::uint64_t generation) {
+    if (generation == 0) {
+        // Migration rule: generation 0 is the unnamed file of an existing deployment
+        return COMPACTED_FILENAME;
+    }
+    return std::string(COMPACTED_FILENAME) + "." + std::to_string(generation);
+}
+
+std::string compaction_catalog::get_carry_filename_for_generation(std::uint64_t generation) {
+    return std::string(CARRY_FILENAME_BASE) + "." + std::to_string(generation);
+}
+
+std::uint64_t compaction_catalog::get_generation() const {
+    return generation_;
+}
+
+bool compaction_catalog::is_compaction_output_filename(const std::string& filename) {
+    const std::string compacted_base{COMPACTED_FILENAME};
+    const std::string carry_base{CARRY_FILENAME_BASE};
+    if (filename == compacted_base) {
+        return true;  // the unnamed generation-0 form of the migration rule
+    }
+    if (filename == RETIRED_COMPACTED_BACKUP_FILENAME) {
+        return true;  // remnant of the retired backup scheme; never recorded by a catalog
+    }
+    auto is_generation_suffixed = [](const std::string& name, const std::string& base) {
+        if (name.size() <= base.size() + 1 || name.compare(0, base.size(), base) != 0 || name[base.size()] != '.') {
+            return false;
+        }
+        return std::all_of(name.begin() + static_cast<std::ptrdiff_t>(base.size()) + 1, name.end(),
+                           [](unsigned char c) { return std::isdigit(c) != 0; });
+    };
+    return is_generation_suffixed(filename, compacted_base) || is_generation_suffixed(filename, carry_base);
+}
+
+bool compaction_catalog::is_orphan_compaction_file(const std::string& filename) const {
+    if (!is_compaction_output_filename(filename)) {
+        return false;
+    }
+    for (const compacted_file_info& info : compacted_files_) {
+        if (info.get_file_name() == filename) {
+            return false;
+        }
+    }
+    return !(carry_file_.has_value() && carry_file_.value() == filename);
+}
+
+const std::optional<std::string>& compaction_catalog::get_carry_file() const {
+    return carry_file_;
 }
 
 // for Unit Testing

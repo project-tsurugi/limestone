@@ -5,6 +5,7 @@
 #include <boost/filesystem.hpp>
 #include <boost/filesystem/fstream.hpp>
 #include <chrono>
+#include <iomanip>
 #include <sstream>
 #include <thread>
 
@@ -280,10 +281,15 @@ TEST_F(rotate_test, inactive_files_are_also_backed_up) { // NOLINT
         datastore_->switch_epoch(45);
         datastore_->shutdown();
     }
+    // Rotation is rejected on a shut-down datastore, so simulate the server
+    // restart (scenario step d) before taking the backup.
+    regen_datastore();
+    datastore_->ready();
+    datastore_->switch_epoch(46);  // rotation requires epoch_id > 0
 
     // setup done
 
-    std::unique_ptr<backup_detail> bd = run_backup_with_epoch_switch(backup_type::standard,46);
+    std::unique_ptr<backup_detail> bd = run_backup_with_epoch_switch(backup_type::standard,47);
     auto entries = bd->entries();
 
     {  // result check
@@ -333,6 +339,115 @@ TEST_F(rotate_test, inactive_files_are_also_backed_up) { // NOLINT
         EXPECT_EQ(v[i].is_mutable(), false);
     }
 
+}
+
+TEST_F(rotate_test, backup_includes_rotated_orphan_pwals) { // NOLINT
+    using namespace limestone::api;
+    // Create pwals with unrotated names bound to no log channel (orphan files):
+    // write with 2 channels, then restart with 1 channel, so pwal_0001 becomes
+    // an orphan. The rotation renames orphans too, so they are included in the
+    // backup under their rotated names (the backup is no longer incomplete) and
+    // no unrotated name appears among the entries; the skip check remains as a
+    // defense for files that appear between the rotation and the enumeration.
+    {
+        log_channel& channel0 = datastore_->create_channel();  // pwal_0000
+        log_channel& channel1 = datastore_->create_channel();  // pwal_0001
+        datastore_->ready();
+        datastore_->switch_epoch(42);
+        channel0.begin_session();
+        channel0.add_entry(2, "k0", "v0", {42, 4});
+        channel0.end_session();
+        channel1.begin_session();
+        channel1.add_entry(2, "k1", "v1", {42, 4});
+        channel1.end_session();
+        datastore_->switch_epoch(43);
+        datastore_->shutdown();
+    }
+    // Also prepare an empty orphan file (the no-log branch of the skip check).
+    // Place it before regenerating the datastore so that the constructor's
+    // directory scan picks it up.
+    create_file(boost::filesystem::path(location) / "pwal_0099", "");
+    regen_datastore();
+
+    log_channel& channel = datastore_->create_channel();  // pwal_0000 (pwal_0001 becomes an orphan)
+    datastore_->ready();
+    datastore_->switch_epoch(44);
+    channel.begin_session();
+    channel.add_entry(2, "k2", "v2", {44, 4});
+    channel.end_session();
+    datastore_->switch_epoch(45);
+
+    std::unique_ptr<backup_detail> bd = run_backup_with_epoch_switch(backup_type::standard, 46);
+
+    // No unrotated name appears among the entries, and the orphans are included
+    // under their rotated names together with the rotated pwal_0000.
+    bool found_rotated_pwal = false;
+    bool found_rotated_orphan1 = false;
+    bool found_rotated_orphan99 = false;
+    for (auto const& e : bd->entries()) {
+        std::string name = e.destination_path().string();
+        EXPECT_NE(name, "pwal_0001");
+        EXPECT_NE(name, "pwal_0099");
+        if (starts_with(name, "pwal_0000.")) {
+            found_rotated_pwal = true;
+        }
+        if (starts_with(name, "pwal_0001.")) {
+            found_rotated_orphan1 = true;
+        }
+        if (starts_with(name, "pwal_0099.")) {
+            found_rotated_orphan99 = true;
+        }
+    }
+    EXPECT_TRUE(found_rotated_pwal);
+    EXPECT_TRUE(found_rotated_orphan1);
+    EXPECT_TRUE(found_rotated_orphan99);
+}
+
+TEST_F(rotate_test, rotate_does_not_overwrite_existing_rotated_file) { // NOLINT
+    using namespace limestone::api;
+    datastore_->ready();
+    log_channel& channel = datastore_->create_channel();
+    datastore_->switch_epoch(42);
+    channel.begin_session();
+    channel.add_entry(42, "k1", "v1", {100, 4});
+    channel.end_session();
+    datastore_->switch_epoch(43);
+
+    // Pre-occupy the rename targets: create pwal_0000.<millis>.0 files covering a
+    // range around the current time in advance, and verify that the rotation
+    // rename does not overwrite any of these existing files.
+    auto now_millis = std::chrono::duration_cast<std::chrono::milliseconds>(
+        std::chrono::system_clock::now().time_since_epoch()).count();
+    constexpr int64_t window_begin_offset = -10;  // covers the time elapsed since the clock was read
+    constexpr int64_t window_end_offset = 300;    // margin until the rotation starts
+    std::set<std::string> pre_created;
+    for (int64_t off = window_begin_offset; off < window_end_offset; ++off) {
+        std::stringstream ss;
+        ss << "pwal_0000." << std::setw(14) << std::setfill('0') << (now_millis + off) << ".0";
+        create_file(boost::filesystem::path(location) / ss.str(), "pre-existing");
+        pre_created.insert(ss.str());
+    }
+
+    run_backup_with_epoch_switch(backup_type::standard, 44);
+
+    // All pre-created files must keep their original content, and exactly one
+    // rotation result must exist under a name distinct from them.
+    int rotated_count = 0;
+    for (const auto& ent : boost::filesystem::directory_iterator(location)) {
+        std::string name = ent.path().filename().string();
+        if (name.rfind("pwal_0000.", 0) != 0) {
+            continue;
+        }
+        if (pre_created.count(name) != 0) {
+            boost::filesystem::ifstream in(ent.path());
+            std::ostringstream content;
+            content << in.rdbuf();
+            EXPECT_EQ(content.str(), "pre-existing") << name;
+        } else {
+            ++rotated_count;
+        }
+    }
+    EXPECT_EQ(rotated_count, 1);
 }
 
 // why in this file??
@@ -611,9 +726,14 @@ TEST_F(rotate_test, restore_file_set_entries_with_blob) {
         datastore_->switch_epoch(45);
         datastore_->shutdown();
     }
+    // Rotation is rejected on a shut-down datastore, so simulate the server
+    // restart before taking the backup.
+    regen_datastore();
+    datastore_->ready();
+    datastore_->switch_epoch(46);  // rotation requires epoch_id > 0
 
     // Step 3: Perform backup (rotate and backup) using run_backup_with_epoch_switch.
-    std::unique_ptr<backup_detail> bd = run_backup_with_epoch_switch(backup_type::standard, 46);
+    std::unique_ptr<backup_detail> bd = run_backup_with_epoch_switch(backup_type::standard, 47);
     auto backup_entries = bd->entries();
 
     // Step 4: Manually create the expected backup state for validation.

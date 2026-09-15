@@ -17,6 +17,7 @@
 
 #include <boost/filesystem.hpp>
 #include <list>
+#include <map>
 
 #include <limestone/api/datastore.h>
 #include "internal.h"
@@ -150,6 +151,26 @@ public:
      * @throws exception on error
      */
     epoch_id_type scan_pwal_files_throws(epoch_id_type ld_epoch, const std::function<void(log_entry&)>& add_entry);
+
+    /**
+     * @brief scan for the compaction path: snippets beyond the boundary epoch are
+     *        skipped, never invalidated (input files are not modified)
+     * @param boundary_epoch the compaction boundary epoch; only entries at or below it reach add_entry
+     * @param add_entry callback that receives the entries at or below the boundary
+     * @returns max epoch in the directory, including the snippets beyond the boundary
+     * @throws exception on error
+     */
+    epoch_id_type scan_pwal_files_for_compaction(epoch_id_type boundary_epoch, const std::function<void(log_entry&)>& add_entry);
+
+    /**
+     * @brief returns the per-file max epoch recorded by the last successful scan
+     * @return the keys are every file the scan processed (files satisfying is_wal,
+     *         which includes non-WAL files whose name starts with pwal, such as
+     *         pwal_0000.compacted)
+     */
+    [[nodiscard]] const std::map<boost::filesystem::path, epoch_id_type>& get_max_epoch_per_file() const noexcept {
+        return max_epoch_per_file_;
+    }
     /**
      * @returns max epoch value in directory
      */
@@ -181,6 +202,9 @@ private:
     std::list<boost::filesystem::path> path_list_;
     int thread_num_{1};
     bool fail_fast_{false};
+
+    // Per-file max epoch recorded by the last successful scan.
+    std::map<boost::filesystem::path, epoch_id_type> max_epoch_per_file_;
 
     // repair-nondurable-epoch-snippet
     //   (implemented in 1.0.0 BETA2)

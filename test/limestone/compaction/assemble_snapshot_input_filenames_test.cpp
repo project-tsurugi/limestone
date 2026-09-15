@@ -65,7 +65,7 @@ protected:
 
     void add_detached_pwals(const std::initializer_list<std::string>& pwals) {
         detached_pwals_.insert(pwals.begin(), pwals.end());
-        compaction_catalog_->update_catalog_file(0, 0, compacted_files_, detached_pwals_);
+        compaction_catalog_->update_catalog_file(0, 0, 0, compacted_files_, std::nullopt, detached_pwals_);
     }
 
     std::unique_ptr<compaction_catalog> compaction_catalog_;
@@ -94,12 +94,40 @@ protected:
         EXPECT_NE(filenames.find("pwal_0003"), filenames.end());
         EXPECT_NE(filenames.find("pwal_0004"), filenames.end());
 
-        // Ensure the detached PWALs are not included
+        // Ensure the compacted file registered in the catalog is not included
+        // The second catalog update creates the backup file compaction_catalog.back, so
+        // check individual file names rather than the size of the set.
         std::ofstream(log_location_ / compaction_catalog::get_compacted_filename());
+        compacted_files_.insert({compaction_catalog::get_compacted_filename(), 1});
+        compaction_catalog_->update_catalog_file(0, 0, 0, compacted_files_, std::nullopt, detached_pwals_);
         filenames = assemble_snapshot_input_filenames(compaction_catalog_, log_location_);
-        EXPECT_EQ(filenames.size(), 2);
         EXPECT_NE(filenames.find("pwal_0003"), filenames.end());
         EXPECT_NE(filenames.find("pwal_0004"), filenames.end());
+        EXPECT_EQ(filenames.find(compaction_catalog::get_compacted_filename()), filenames.end());
+        EXPECT_EQ(filenames.find("pwal_0001"), filenames.end());
+        EXPECT_EQ(filenames.find("pwal_0002"), filenames.end());
+    }
+
+    // The exclusion of compacted files follows the catalog record, not a well-known name.
+    TEST_F(assemble_snapshot_input_filenames_test, compacted_exclusion_follows_catalog) {
+        std::ofstream(log_location_ / "pwal_0001");
+
+        // A generation-suffixed compacted file recorded in the catalog is excluded.
+        std::ofstream(log_location_ / "pwal_0000.compacted.1");
+        compacted_files_.insert({"pwal_0000.compacted.1", 1});
+        compaction_catalog_->update_catalog_file(0, 0, 1, compacted_files_, std::nullopt, detached_pwals_);
+
+        // A compacted file with the well-known name that the catalog does not record is
+        // not excluded. That inconsistent state is rejected by the startup consistency
+        // check; this test only confirms that the exclusion rule does not depend on the
+        // well-known name.
+        std::ofstream(log_location_ / compaction_catalog::get_compacted_filename());
+
+        std::set<std::string> filenames = assemble_snapshot_input_filenames(compaction_catalog_, log_location_);
+        EXPECT_EQ(filenames.size(), 2);
+        EXPECT_NE(filenames.find("pwal_0001"), filenames.end());
+        EXPECT_NE(filenames.find(compaction_catalog::get_compacted_filename()), filenames.end());
+        EXPECT_EQ(filenames.find("pwal_0000.compacted.1"), filenames.end());
     }
 
     TEST_F(assemble_snapshot_input_filenames_test, throws_exception_when_directory_does_not_exist) {

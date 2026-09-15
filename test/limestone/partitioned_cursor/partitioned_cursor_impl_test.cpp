@@ -17,7 +17,7 @@ using limestone::api::log_entry;
 using limestone::api::storage_id_type;
 using limestone::api::write_version_type;
 
-static const std::string tmp_file_path = "/tmp/test_log_entry.tmp";
+static const std::string tmp_file_path = "/tmp/partitioned_cursor_impl_test_log_entry.tmp";
 
 class partitioned_cursor_impl_test : public ::testing::Test {
 protected:

@@ -23,24 +23,28 @@
 #include <boost/filesystem.hpp>
 #include <map>
 #include <memory>
+#include <optional>
+#include <string>
 #include <string_view>
 #include <vector>
 
 namespace limestone::internal {
 
 using limestone::api::cursor;
-using limestone::api::storage_id_type;    
+using limestone::api::storage_id_type;
 using limestone::api::write_version_type;
 
 class snapshot_impl {
 public:
-    explicit snapshot_impl(boost::filesystem::path location, std::map<storage_id_type, write_version_type> clear_storage) noexcept;
+    explicit snapshot_impl(boost::filesystem::path location, std::map<storage_id_type, write_version_type> clear_storage,
+                           std::optional<std::string> compacted_file_name) noexcept;
     std::vector<std::unique_ptr<limestone::api::cursor>> get_partitioned_cursors(std::size_t n);
     [[nodiscard]] std::unique_ptr<cursor> get_cursor() const;
 
 private:
     boost::filesystem::path location_;
     std::map<storage_id_type, write_version_type> clear_storage;
+    std::optional<std::string> compacted_file_name_;  ///< name of the current compacted file recorded in the catalog; std::nullopt if there is none
     std::atomic<bool> partitioned_called_{false};
 };
 
