@@ -19,6 +19,8 @@
 #include <limestone/api/datastore.h>
 
 #include <boost/filesystem.hpp>
+#include <boost/system/error_code.hpp>
+#include <functional>
 #include <optional>
 
 #include "file_operations.h"
@@ -65,6 +67,20 @@ bool is_unrotated_pwal_name(std::string_view filename) noexcept;
  * @throws limestone_io_exception if the rename or the existence check fails
  */
 boost::filesystem::path rotate_pwal_file(boost::filesystem::path const& file, epoch_id_type epoch);
+
+/**
+ * @brief type of the testing hook; returning an error_code skips the rename and fails
+ *        with that error_code, returning nullopt renames as usual
+ */
+using rotate_pwal_file_rename_hook =
+    std::function<std::optional<boost::system::error_code>(const boost::filesystem::path& from, const boost::filesystem::path& to)>;
+
+/**
+ * @brief hook that replaces only the rename call of rotate_pwal_file
+ * @note always empty in production
+ */
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables,fuchsia-statically-constructed-objects)
+extern rotate_pwal_file_rename_hook rotate_pwal_file_rename_for_test;
 
 /**
  * @brief The maximum number of entries allowed in an epoch file.

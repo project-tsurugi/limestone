@@ -46,8 +46,7 @@ public:
     void TearDown() override {
         // Restore the state so that a test failing halfway does not affect later tests.
         limestone::testing::enable_exception_throwing = false;
-        boost::system::error_code ec;
-        boost::filesystem::permissions(location, boost::filesystem::owner_all, ec);
+        limestone::internal::rotate_pwal_file_rename_for_test = nullptr;
         datastore_ = nullptr;
         boost::filesystem::remove_all(location);
     }
@@ -376,13 +375,14 @@ TEST_F(rotation_mechanism_test, rename_failure_in_end_session_aborts_process) {
     }
 
     EXPECT_DEATH({
-        // Drop the write permission of the directory to make the rename fail.
-        boost::filesystem::permissions(location,
-            boost::filesystem::owner_read | boost::filesystem::owner_exe);
+        // Make the consumption rename fail. Dropping the directory permission does
+        // not work under root (the permission bits are ignored), so inject the error.
+        limestone::internal::rotate_pwal_file_rename_for_test =
+            [](const boost::filesystem::path&, const boost::filesystem::path&) {
+                return boost::system::error_code(EACCES, boost::system::system_category());
+            };
         channel.end_session();
     }, "Failed to rename file");
-
-    boost::filesystem::permissions(location, boost::filesystem::owner_all);
 }
 
 // Test matrix "process exit on rename failure" (rotation thread side): the
@@ -398,17 +398,17 @@ TEST_F(rotation_mechanism_test, rename_failure_in_rotation_thread_aborts_process
     channel.end_session();
 
     EXPECT_DEATH({
-        // Drop the write permission of the directory between the decision and
-        // the rename to make the rename fail.
-        datastore_->get_impl()->set_on_rotate_before_rename_for_test([this] {
-            boost::filesystem::permissions(location,
-                boost::filesystem::owner_read | boost::filesystem::owner_exe);
+        // Make the immediate rename on the rotation thread fail. The injection is set
+        // right after the rotation decision to show which path this test targets.
+        datastore_->get_impl()->set_on_rotate_before_rename_for_test([] {
+            limestone::internal::rotate_pwal_file_rename_for_test =
+                [](const boost::filesystem::path&, const boost::filesystem::path&) {
+                    return boost::system::error_code(EACCES, boost::system::system_category());
+                };
         });
         start_rotation(3, {});
         finish_rotation();
     }, "Failed to rename file");
-
-    boost::filesystem::permissions(location, boost::filesystem::owner_all);
 }
 
 }  // namespace limestone::testing

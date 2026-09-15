@@ -47,6 +47,9 @@ bool is_unrotated_pwal_name(std::string_view filename) noexcept {
            filename.rfind(log_channel_prefix, 0) == 0;
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables,fuchsia-statically-constructed-objects)
+rotate_pwal_file_rename_hook rotate_pwal_file_rename_for_test{};
+
 boost::filesystem::path rotate_pwal_file(boost::filesystem::path const& file, epoch_id_type epoch) {
     // Rename-target collision handling: to avoid overwriting an existing rotated
     // file on a second rename of the same file within the same millisecond (or
@@ -73,7 +76,15 @@ boost::filesystem::path rotate_pwal_file(boost::filesystem::path const& file, ep
         std::this_thread::sleep_for(std::chrono::milliseconds(1));
     }
     boost::system::error_code ec;
-    boost::filesystem::rename(file, new_file, ec);
+    std::optional<boost::system::error_code> injected_error{};
+    if (rotate_pwal_file_rename_for_test) {
+        injected_error = rotate_pwal_file_rename_for_test(file, new_file);
+    }
+    if (injected_error.has_value()) {
+        ec = injected_error.value();
+    } else {
+        boost::filesystem::rename(file, new_file, ec);
+    }
     if (ec) {
         std::string err_msg = "Failed to rename file from " + file.string() + " to " + new_file.string() + ". Error: " + ec.message();
         LOG_AND_THROW_IO_EXCEPTION(err_msg, ec);
