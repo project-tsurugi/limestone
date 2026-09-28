@@ -1,0 +1,28 @@
+plugins {
+    id 'java'
+    id 'application'
+}
+
+repositories {
+    mavenCentral()
+}
+
+ext {
+    // Maven Central の tsubakuro を使う。-PtsubakuroVersion=... で上書きできる
+    tsubakuroVersion = findProperty('tsubakuroVersion') ?: '1.16.0'
+}
+
+dependencies {
+    implementation "com.tsurugidb.tsubakuro:tsubakuro-session:${tsubakuroVersion}"
+    implementation "com.tsurugidb.tsubakuro:tsubakuro-connector:${tsubakuroVersion}"
+    runtimeOnly 'org.slf4j:slf4j-simple:1.7.36'
+}
+
+application {
+    mainClass = 'com.tsurugidb.limestone.blobgc.BlobGcWorkload'
+    applicationDefaultJvmArgs = ['-Dorg.slf4j.simpleLogger.defaultLogLevel=warn']
+}
+
+tasks.withType(JavaCompile) {
+    options.encoding = 'UTF-8'
+}
