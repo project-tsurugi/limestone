@@ -15,6 +15,7 @@
  */
 
  #include "limestone/compaction/compaction_test_fixture.h"
+#include "datastore_impl.h"
 
 namespace limestone::testing {
 
@@ -413,6 +414,69 @@ TEST_F(compaction_blob_gc_test, blob_registered_but_not_yet_logged_survives_gc) 
     // (its entry is going to be written by add_entry with a write_version above the
     // GC boundary once the transaction commits).
     EXPECT_TRUE(boost::filesystem::exists(in_flight_path));
+}
+
+// A blob handed out before the compaction started is referenced by an entry written to
+// the fresh pwal after the rotation (outside the compaction inputs). The scan does not see
+// that entry, so the blob is not exempted, but it must not be deleted.
+TEST_F(compaction_blob_gc_test, blob_logged_after_rotation_survives_gc) {
+    gen_datastore();
+
+    // Epoch 3: the control group (blobs recorded in the WAL, protected by the GC boundary)
+    datastore_->switch_epoch(3);
+    lc0_->begin_session();
+    lc0_->add_entry(1, "blob_key1", "blob_value1", {3, 0}, {1001, 1002});
+    lc0_->end_session();
+    datastore_->switch_epoch(4);
+
+    auto path1001 = create_dummy_blob_files(1001);
+    auto path1002 = create_dummy_blob_files(1002);
+    datastore_->set_next_blob_id(2000);
+
+    // Hand out a blob before the compaction starts (a transaction in progress)
+    auto pool = datastore_->acquire_blob_pool();
+    blob_id_type blob_before_compaction = pool->register_data("blob handed out before the compaction");
+    boost::filesystem::path blob_path = datastore_->get_blob_file(blob_before_compaction).path();
+    ASSERT_TRUE(boost::filesystem::exists(blob_path));
+
+    // Advance the GC boundary within the caller's discipline ({2,0}, below the durable
+    // epoch 3). It exceeds the catalog max_epoch_id (initially 0), which is the condition
+    // for the GC to run at online compaction
+    datastore_->switch_available_boundary_version({2, 0});
+
+    // After the rotation and the catalog commit, and before the GC, write an entry that
+    // references the blob to the fresh pwal and finish the transaction (through the
+    // release and the destruction of the pool). When the GC runs, the pool is already
+    // gone and the entry is outside the compaction inputs
+    bool logged_after_rotation = false;
+    datastore_->get_impl()->set_on_compaction_after_commit_for_test([&]() {
+        lc0_->begin_session();
+        lc0_->add_entry(1, "blob_key2", "blob_value2", {5, 0}, {blob_before_compaction});
+        lc0_->end_session();
+        pool->release();
+        pool.reset();
+        logged_after_rotation = true;
+    });
+
+    // Compaction + blob GC (rotation boundary E = 4)
+    run_compact_with_epoch_switch(5);
+    datastore_->get_impl()->set_on_compaction_after_commit_for_test(nullptr);
+    ASSERT_TRUE(logged_after_rotation);
+
+    // The control group is exempted unconditionally (write_version {3,0} >= the GC boundary {2,0})
+    EXPECT_TRUE(boost::filesystem::exists(path1001));
+    EXPECT_TRUE(boost::filesystem::exists(path1002));
+
+    // The point: the blob referenced by the entry written to the pwal after the rotation
+    // must not be deleted
+    EXPECT_TRUE(boost::filesystem::exists(blob_path));
+
+    // The entry itself is durable (it appears in the snapshot after a restart, and the blob remains)
+    datastore_->switch_epoch(6);
+    auto kv_list = restart_datastore_and_read_snapshot();
+    ASSERT_EQ(kv_list.size(), 2);
+    EXPECT_EQ(kv_list[1].first, "blob_key2");
+    EXPECT_TRUE(boost::filesystem::exists(blob_path));
 }
 
 // Test that blob GC is executed after a new backup has ended (using the backup API with arguments).
