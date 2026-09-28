@@ -32,6 +32,7 @@ struct rdma_handshake_start_payload {
     std::uint64_t epoch_number{};        ///< Epoch number at session start.
     std::uint32_t slot_count{};          ///< Ring capacity of the RDMA send buffer.
     std::uint64_t master_dma_address{};  ///< DMA address of the master's receiver.
+    std::uint64_t master_instance_id{};  ///< The master's instance_id (make_rdma_instance_id()).
     std::uint16_t channel_count{};       ///< Number of data channels (ids 0 .. count - 1).
     std::uint16_t control_channel_id{};  ///< Channel id reserved for control messages.
 };
@@ -43,6 +44,7 @@ struct rdma_handshake_response_payload {
     bool          accepted{};             ///< True when the replica accepted the session.
     std::string   error_message;          ///< Rejection reason; empty when accepted.
     std::uint64_t replica_dma_address{};  ///< DMA address of the replica's receiver.
+    std::uint64_t replica_instance_id{};  ///< The replica's instance_id (make_rdma_instance_id()).
 };
 
 /**

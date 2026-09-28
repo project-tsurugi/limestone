@@ -34,7 +34,9 @@ std::optional<std::uint64_t> null_rdma_receiver::get_dma_address() const noexcep
 // because initialize() already returns failure when RDMA is disabled, so callers
 // short-circuit before any finalize step.
 rdma_receiver_base::operation_result null_rdma_receiver::finalize_channel_setup_with_sender(
-        rdma_sender_base* /*sender*/) noexcept {
+        rdma_sender_base* /*sender*/,
+        std::uint64_t     /*local_instance_id*/,
+        std::uint64_t     /*remote_instance_id*/) noexcept {
     return {false, "RDMA is not enabled in this build (ENABLE_RDMA=OFF)"};
 }
 

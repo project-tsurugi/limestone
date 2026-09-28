@@ -49,7 +49,8 @@ public:
     [[nodiscard]] stream_acquire_result get_send_stream(
         std::uint16_t channel_id) noexcept override;
 
-    [[nodiscard]] operation_result finalize_channel_setup() noexcept override;
+    [[nodiscard]] operation_result finalize_channel_setup(
+        std::uint64_t local_instance_id) noexcept override;
 
     [[nodiscard]] operation_result shutdown() noexcept override;
 

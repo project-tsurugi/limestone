@@ -27,6 +27,7 @@
 
 #include <rdma_comm/handshake/handshake_acceptor.h>
 #include <rdma_comm/handshake/handshake_connector.h>
+#include <rdma_comm/instance_id.h>
 #include <rdma_comm/rdma_config.h>
 
 #include <replication/message_group_commit.h>
@@ -49,12 +50,14 @@ rdma::communication::rdma_config make_sender_config(
     rdma::communication::rdma_config config{};
     auto capacity = static_cast<std::size_t>(slot_count);
     config.send_buffer.region_size_bytes = capacity * rdma_slot_size_bytes;
-    config.send_buffer.chunk_size_bytes = rdma_slot_size_bytes;
-    config.send_buffer.ring_capacity = capacity;
     config.send_buffer.kind = kind;
     config.remote_buffer = config.send_buffer;
     config.completion_queue_depth = 1024U;
     config.write_log_mode = rdma::communication::rdma_write_log_mode::full;
+    // Keepalive is available only to a sender whose send_buffer.kind is data_and_ack; leaving it
+    // enabled makes initialize fail. limestone's senders are data_only (log transfer) or
+    // ack_only (ACK transfer), so disable it.
+    config.keepalive_enabled = false;
     return config;
 }
 
@@ -64,8 +67,6 @@ rdma::communication::rdma_config make_receiver_config(
     rdma::communication::rdma_config config{};
     auto capacity = static_cast<std::size_t>(slot_count);
     config.send_buffer.region_size_bytes = capacity * rdma_slot_size_bytes;
-    config.send_buffer.chunk_size_bytes = rdma_slot_size_bytes;
-    config.send_buffer.ring_capacity = capacity;
     config.send_buffer.kind = kind;
     config.remote_buffer = config.send_buffer;
     config.completion_queue_depth = 1024U;
@@ -92,6 +93,10 @@ std::unique_ptr<rdma_receiver_base> make_rdma_data_receiver(std::uint32_t slot_c
 std::unique_ptr<rdma_receiver_base> make_rdma_ack_receiver(std::uint32_t slot_count) {
     return std::make_unique<rdma_comm_receiver>(
         make_receiver_config(slot_count, rdma::communication::rdma_buffer_kind::ack_only));
+}
+
+std::uint64_t make_rdma_instance_id() {
+    return rdma::communication::generate_instance_id();
 }
 
 handshake_connector_create_result make_handshake_connector(

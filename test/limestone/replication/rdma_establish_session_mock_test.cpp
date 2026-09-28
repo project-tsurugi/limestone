@@ -61,6 +61,7 @@ constexpr std::uint32_t slot_count = 4U;
 // Arbitrary non-zero sentinels; nothing in the fake stack dereferences them.
 constexpr std::uint64_t fake_master_dma_address = 0xACC0FFEEULL;
 constexpr std::uint64_t fake_replica_dma_address = 0xBEEFULL;
+constexpr std::uint64_t fake_replica_instance_id = 0xFEEDULL;
 
 /**
  * @brief Scripted results and call record shared between a test and the fake
@@ -99,7 +100,10 @@ struct fake_rdma_stack_state {
     std::uint64_t sender_remote_dma_address{};
     std::vector<std::uint16_t> acquired_stream_ids{};
     int receiver_bind_calls{};
+    std::uint64_t receiver_bind_local_instance_id{};
+    std::uint64_t receiver_bind_remote_instance_id{};
     int sender_finalize_calls{};
+    std::uint64_t sender_finalize_local_instance_id{};
     int receiver_shutdown_calls{};
     int sender_shutdown_calls{};
 };
@@ -152,8 +156,12 @@ public:
     }
 
     [[nodiscard]] operation_result finalize_channel_setup_with_sender(
-            rdma_sender_base* /*sender*/) noexcept override {
+            rdma_sender_base* /*sender*/,
+            std::uint64_t local_instance_id,
+            std::uint64_t remote_instance_id) noexcept override {
         ++state_.receiver_bind_calls;
+        state_.receiver_bind_local_instance_id = local_instance_id;
+        state_.receiver_bind_remote_instance_id = remote_instance_id;
         return state_.receiver_bind_result;
     }
 
@@ -184,8 +192,10 @@ public:
         return {{true, {}}, std::make_unique<fake_send_stream>()};
     }
 
-    [[nodiscard]] operation_result finalize_channel_setup() noexcept override {
+    [[nodiscard]] operation_result finalize_channel_setup(
+            std::uint64_t local_instance_id) noexcept override {
         ++state_.sender_finalize_calls;
+        state_.sender_finalize_local_instance_id = local_instance_id;
         return state_.sender_finalize_result;
     }
 
@@ -295,6 +305,7 @@ protected:
         rdma_handshake_response_payload response{};
         response.accepted = true;
         response.replica_dma_address = fake_replica_dma_address;
+        response.replica_instance_id = fake_replica_instance_id;
         return encode(response);
     }
 
@@ -438,6 +449,25 @@ TEST_F(rdma_establish_session_mock_test, establish_fails_when_replica_rejects_se
     rejection.accepted = false;
     rejection.error_message = "scripted rejection";
     script_.response_result = {true, {}, encode(rejection)};
+    datastore_impl impl{};
+    register_one_channel(impl);
+    install_all(impl);
+
+    EXPECT_FALSE(impl.establish_rdma_session());
+
+    EXPECT_EQ(script_.receive_response_calls, 1);
+    EXPECT_EQ(script_.send_finalize_calls, 0);
+    EXPECT_EQ(state_.receiver_shutdown_calls, 1);
+    EXPECT_EQ(state_.senders_created, 0);
+    expect_rolled_back(impl);
+}
+
+TEST_F(rdma_establish_session_mock_test, establish_fails_when_replica_instance_id_is_unset) {
+    rdma_handshake_response_payload response{};
+    response.accepted = true;
+    response.replica_dma_address = fake_replica_dma_address;
+    response.replica_instance_id = 0U;
+    script_.response_result = {true, {}, encode(response)};
     datastore_impl impl{};
     register_one_channel(impl);
     install_all(impl);
@@ -597,6 +627,7 @@ TEST_F(rdma_establish_session_mock_test, establish_succeeds_with_mocked_handshak
     EXPECT_EQ(start->epoch_number, 0U);
     EXPECT_EQ(start->slot_count, slot_count);
     EXPECT_EQ(start->master_dma_address, fake_master_dma_address);
+    EXPECT_NE(start->master_instance_id, 0U);
     EXPECT_EQ(start->channel_count, 1U);
     EXPECT_EQ(start->control_channel_id, 1U);
 
@@ -611,6 +642,11 @@ TEST_F(rdma_establish_session_mock_test, establish_succeeds_with_mocked_handshak
     EXPECT_EQ(state_.acquired_stream_ids, (std::vector<std::uint16_t>{0U, 1U}));
     EXPECT_EQ(state_.receiver_bind_calls, 1);
     EXPECT_EQ(state_.sender_finalize_calls, 1);
+    // Our own instance_id sent in the start payload and the peer's instance_id received in the
+    // response are passed to finalize.
+    EXPECT_EQ(state_.receiver_bind_local_instance_id, start->master_instance_id);
+    EXPECT_EQ(state_.receiver_bind_remote_instance_id, fake_replica_instance_id);
+    EXPECT_EQ(state_.sender_finalize_local_instance_id, start->master_instance_id);
 
     EXPECT_NE(impl.get_rdma_control_send_stream(), nullptr);
     EXPECT_TRUE(impl.has_replica());

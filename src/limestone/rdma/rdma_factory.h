@@ -88,6 +88,23 @@ std::unique_ptr<rdma_receiver_base> make_rdma_data_receiver(std::uint32_t slot_c
 std::unique_ptr<rdma_receiver_base> make_rdma_ack_receiver(std::uint32_t slot_count);
 
 /**
+ * @brief Generates the instance_id of our own side (master or replica).
+ *
+ * An instance_id is attached to every RDMA frame so that the receiving side can verify its
+ * peer. The receiving side drops frames whose instance_id does not match the peer's (such as
+ * leftovers from a previous connection).
+ *
+ * Call once per RDMA connection establishment by establish_rdma_session(), and use the
+ * obtained value only for that connection.
+ *
+ * Returns the value from the rdma_comm implementation when built with ENABLE_RDMA=ON,
+ * or from the null implementation when built with ENABLE_RDMA=OFF.
+ *
+ * @return A non-zero instance_id.
+ */
+std::uint64_t make_rdma_instance_id();
+
+/**
  * @brief Creates a connect-side handshake_connector_base instance bound to a local
  *        handshake daemon.
  *

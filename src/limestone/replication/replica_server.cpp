@@ -697,7 +697,8 @@ replica_server::rdma_init_result replica_server::initialize_rdma(
     return rdma_init_result::success;
 }
 
-replica_server::rdma_finalize_result replica_server::finalize_rdma() {
+replica_server::rdma_finalize_result replica_server::finalize_rdma(
+        std::uint64_t local_instance_id, std::uint64_t remote_instance_id) {
     std::lock_guard<std::mutex> lock(rdma_init_mutex_);
     if (! rdma_receiver_ || ! ack_sender_) {
         LOG_LP(ERROR) << "RDMA stack not initialized; cannot finalize: receiver="
@@ -706,7 +707,8 @@ replica_server::rdma_finalize_result replica_server::finalize_rdma() {
         return rdma_finalize_result::not_initialized;
     }
 
-    auto result = rdma_receiver_->finalize_channel_setup_with_sender(ack_sender_.get());
+    auto result = rdma_receiver_->finalize_channel_setup_with_sender(
+        ack_sender_.get(), local_instance_id, remote_instance_id);
     if (! result.success) {
         LOG_LP(ERROR) << "rdma_receiver::finalize_channel_setup_with_sender() failed: "
                       << result.error_message;
@@ -770,6 +772,10 @@ bool replica_server::establish_rdma_session(
         send_rdma_session_rejection(*acceptor, reason.str());
         return false;
     }
+    if (start_payload->master_instance_id == 0U) {
+        send_rdma_session_rejection(*acceptor, "master instance_id is unset");
+        return false;
+    }
 
     if (initialize_rdma(start_payload->slot_count, start_payload->master_dma_address)
             != rdma_init_result::success) {
@@ -783,9 +789,14 @@ bool replica_server::establish_rdma_session(
         return false;
     }
 
+    // Our own (replica) instance_id. The same value is used throughout this connection: in the
+    // response payload and in the finalization of the data receiver.
+    auto const replica_instance_id = make_rdma_instance_id();
+
     rdma_handshake_response_payload response{};
     response.accepted = true;
     response.replica_dma_address = dma_address.value();
+    response.replica_instance_id = replica_instance_id;
     auto response_result = acceptor->send_response(encode(response));
     if (! response_result.success) {
         LOG_LP(ERROR) << "Failed to send the handshake response: "
@@ -809,7 +820,8 @@ bool replica_server::establish_rdma_session(
         }
     }
 
-    if (finalize_rdma() != rdma_finalize_result::success) {
+    if (finalize_rdma(replica_instance_id, start_payload->master_instance_id)
+            != rdma_finalize_result::success) {
         release_rdma_stack();
         return false;
     }
@@ -831,7 +843,9 @@ bool replica_server::establish_rdma_session(
 
     LOG_LP(INFO) << "RDMA replication session established: channel_count="
         << start_payload->channel_count
-        << " control_channel_id=" << start_payload->control_channel_id;
+        << " control_channel_id=" << start_payload->control_channel_id
+        << std::hex << " master_instance_id=0x" << start_payload->master_instance_id
+        << " replica_instance_id=0x" << replica_instance_id << std::dec;
     return true;
 }
 

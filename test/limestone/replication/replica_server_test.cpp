@@ -386,7 +386,7 @@ TEST_F(replica_server_test, finalize_rdma_returns_not_initialized_before_initial
     replication::replica_server server;
     server.initialize(location1);
 
-    auto result = server.finalize_rdma();
+    auto result = server.finalize_rdma(0x2ULL, 0x3ULL);
     EXPECT_EQ(result, replication::replica_server::rdma_finalize_result::not_initialized);
 }
 
@@ -405,7 +405,7 @@ TEST_F(replica_server_test, finalize_rdma_returns_success_after_initialize) {
     ASSERT_EQ(server.initialize_rdma(4U, 0x1ULL),
               replication::replica_server::rdma_init_result::success);
 
-    auto result = server.finalize_rdma();
+    auto result = server.finalize_rdma(0x2ULL, 0x3ULL);
     EXPECT_EQ(result, replication::replica_server::rdma_finalize_result::success);
 }
 
@@ -416,7 +416,9 @@ namespace {
 class failing_finalize_rdma_receiver : public noop_rdma_receiver {
 public:
     operation_result finalize_channel_setup_with_sender(
-            replication::rdma_sender_base* /*sender*/) noexcept override {
+            replication::rdma_sender_base* /*sender*/,
+            std::uint64_t /*local_instance_id*/,
+            std::uint64_t /*remote_instance_id*/) noexcept override {
         return {false, "stub finalize failure"};
     }
 };
@@ -438,7 +440,7 @@ TEST_F(replica_server_test, finalize_rdma_returns_failed_when_receiver_finalize_
     ASSERT_EQ(server.initialize_rdma(4U, 0x1ULL),
               replication::replica_server::rdma_init_result::success);
 
-    auto result = server.finalize_rdma();
+    auto result = server.finalize_rdma(0x2ULL, 0x3ULL);
     EXPECT_EQ(result, replication::replica_server::rdma_finalize_result::failed);
 }
 

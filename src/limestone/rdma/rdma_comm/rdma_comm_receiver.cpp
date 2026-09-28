@@ -18,8 +18,16 @@
 #include <string>
 
 #include <rdma/rdma_comm_sender.h>
+#include <rdma/rdma_receive_event.h>
+
+#include <rdma_comm/rdma_frame_header.h>
 
 namespace limestone::replication {
+
+// rdma_frame_current_version mirrors the RDMA library's frame protocol version. A mismatch makes
+// the replica FATAL on receiving a data frame, so the match is checked at build time.
+static_assert(rdma_frame_current_version == rdma::communication::rdma_frame_protocol_version,
+    "rdma_frame_current_version must mirror the RDMA library's frame protocol version");
 
 namespace {
 
@@ -77,7 +85,9 @@ std::optional<std::uint64_t> rdma_comm_receiver::get_dma_address() const noexcep
 }
 
 rdma_receiver_base::operation_result rdma_comm_receiver::finalize_channel_setup_with_sender(
-        rdma_sender_base* sender) noexcept {
+        rdma_sender_base* sender,
+        std::uint64_t     local_instance_id,
+        std::uint64_t     remote_instance_id) noexcept {
     if (sender == nullptr) {
         return {false, "rdma_comm_receiver::finalize_channel_setup_with_sender: sender is null"};
     }
@@ -92,7 +102,8 @@ rdma_receiver_base::operation_result rdma_comm_receiver::finalize_channel_setup_
                 "rdma_comm_receiver::finalize_channel_setup_with_sender: "
                 "sender is not an rdma_comm_sender instance"};
     }
-    auto r = receiver_.finalize_channel_setup_with_sender(comm_sender->get_underlying_sender());
+    auto r = receiver_.finalize_channel_setup_with_sender(
+        comm_sender->get_underlying_sender(), local_instance_id, remote_instance_id);
     return {r.success, r.error_message};
 }
 

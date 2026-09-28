@@ -41,6 +41,12 @@ std::unique_ptr<rdma_receiver_base> make_rdma_ack_receiver(std::uint32_t /*slot_
     return std::make_unique<null_rdma_receiver>();
 }
 
+std::uint64_t make_rdma_instance_id() {
+    // A null build never establishes an RDMA connection, so the value is never used.
+    // Return a fixed value that satisfies the contract (non-zero).
+    return 1U;
+}
+
 handshake_connector_create_result make_handshake_connector(
         std::string const& /*daemon_socket_path*/,
         std::chrono::milliseconds /*operation_timeout*/) {

@@ -136,6 +136,12 @@ public:
     [[nodiscard]] rdma_init_result initialize_rdma(
         uint32_t slot_count, std::uint64_t leader_ack_dma_address);
 
+    enum class rdma_finalize_result {
+        success,
+        not_initialized,
+        failed,
+    };
+
     /**
      * @brief Finalize the replica-side RDMA stack.
      *
@@ -144,14 +150,12 @@ public:
      * receiver into the TRANSFER phase so that incoming data frames can be
      * acknowledged via RDMA.
      *
+     * @param local_instance_id Our own side's (the replica's) instance_id.
+     * @param remote_instance_id The peer side's (the master's) instance_id.
      * @return finalize result.
      */
-    enum class rdma_finalize_result {
-        success,
-        not_initialized,
-        failed,
-    };
-    [[nodiscard]] rdma_finalize_result finalize_rdma();
+    [[nodiscard]] rdma_finalize_result finalize_rdma(
+        std::uint64_t local_instance_id, std::uint64_t remote_instance_id);
 
     /**
      * @brief Get DMA address exposed by the data receiver.

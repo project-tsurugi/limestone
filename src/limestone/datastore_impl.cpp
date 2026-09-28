@@ -615,12 +615,17 @@ bool datastore_impl::establish_rdma_session() {
         return false;
     };
 
+    // Our own (master) instance_id. The same value is used throughout this connection: in the
+    // start payload and in the finalization of the ACK receiver and the data sender.
+    auto const master_instance_id = make_rdma_instance_id();
+
     // configuration_id and epoch_number follow the TCP SESSION_BEGIN behavior, which
     // sends the message default values (see send_session_begin()).
     rdma_handshake_start_payload start_payload{};
     start_payload.protocol_version = replication_protocol_version;
     start_payload.slot_count = slot_count;
     start_payload.master_dma_address = master_dma_address.value();
+    start_payload.master_instance_id = master_instance_id;
     start_payload.channel_count = channel_count;
     start_payload.control_channel_id = control_channel_id;
 
@@ -658,6 +663,10 @@ bool datastore_impl::establish_rdma_session() {
         LOG_LP(ERROR) << "Replica rejected the replication session: " << response->error_message;
         return fail();
     }
+    if (response->replica_instance_id == 0U) {
+        LOG_LP(ERROR) << "Replica accepted the replication session with an unset instance_id.";
+        return fail();
+    }
 
     if (!initialize_rdma_sender(slot_count, response->replica_dma_address)) {
         return fail();
@@ -682,14 +691,15 @@ bool datastore_impl::establish_rdma_session() {
     // Bind the ack_receiver to the data sender so that ACK frames received from the replica
     // are routed to the data sender's send_streams (enabling flush() completion). Must happen
     // before the data sender transitions to TRANSFER phase.
-    auto bind_result = ack_receiver_->finalize_channel_setup_with_sender(rdma_sender_.get());
+    auto bind_result = ack_receiver_->finalize_channel_setup_with_sender(
+        rdma_sender_.get(), master_instance_id, response->replica_instance_id);
     if (!bind_result.success) {
         LOG_LP(ERROR) << "ack_receiver::finalize_channel_setup_with_sender() failed: "
             << bind_result.error_message;
         return fail();
     }
 
-    auto finalize_result = rdma_sender_->finalize_channel_setup();
+    auto finalize_result = rdma_sender_->finalize_channel_setup(master_instance_id);
     if (!finalize_result.success) {
         LOG_LP(ERROR) << "rdma_sender::finalize_channel_setup() failed: "
             << finalize_result.error_message;
@@ -714,7 +724,8 @@ bool datastore_impl::establish_rdma_session() {
 
     replica_exists_.store(true, std::memory_order_release);
     LOG_LP(INFO) << "RDMA session established: " << start_payload
-        << ", replica_dma_address=" << response->replica_dma_address;
+        << ", replica_dma_address=" << response->replica_dma_address
+        << ", replica_instance_id=0x" << std::hex << response->replica_instance_id << std::dec;
     return true;
 }
 

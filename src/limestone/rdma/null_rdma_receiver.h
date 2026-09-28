@@ -40,7 +40,9 @@ public:
     [[nodiscard]] operation_result shutdown() noexcept override;
     [[nodiscard]] std::optional<std::uint64_t> get_dma_address() const noexcept override;
     [[nodiscard]] operation_result finalize_channel_setup_with_sender(
-        rdma_sender_base* sender) noexcept override;
+        rdma_sender_base* sender,
+        std::uint64_t     local_instance_id,
+        std::uint64_t     remote_instance_id) noexcept override;
 };
 
 } // namespace limestone::replication

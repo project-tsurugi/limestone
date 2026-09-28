@@ -31,7 +31,10 @@ namespace limestone::replication {
 ///      frames and identified by the rdma_frame_flag_ack (0x04) bit set by the
 ///      lib internally. This constant is bumped in lockstep with the lib so that
 ///      header.version values produced by rdma_comm match what limestone expects.
-inline constexpr std::uint8_t rdma_frame_current_version = 2U;
+/// - 3, 4: follow frame format changes on the RDMA library side (the frame contents visible to
+///      limestone are unchanged). A static_assert in rdma_comm_receiver.cpp pins the match with
+///      the library's value.
+inline constexpr std::uint8_t rdma_frame_current_version = 4U;
 
 /// @brief Flag indicating that a frame carries a partial payload (mirrors rdma_comm).
 inline constexpr std::uint8_t rdma_frame_flag_partial_payload = 0x02U;

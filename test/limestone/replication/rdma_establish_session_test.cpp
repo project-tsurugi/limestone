@@ -64,6 +64,9 @@ constexpr std::uint32_t slot_count = 4U;
 // so the stub can hand out an arbitrary value in place of a real replica receiver.
 constexpr std::uint64_t stub_replica_dma_address = 0xBEEFU;
 
+// The stub sends no RDMA frames, so any non-zero value will do.
+constexpr std::uint64_t stub_replica_instance_id = 0xFEEDU;
+
 /**
  * @brief Fake control channel send stream recording submitted frames and flush calls.
  */
@@ -192,6 +195,7 @@ protected:
             rdma_handshake_response_payload response{};
             response.accepted = true;
             response.replica_dma_address = stub_replica_dma_address;
+            response.replica_instance_id = stub_replica_instance_id;
             out.response = out.acceptor->send_response(encode(response));
             if (!out.response.success) {
                 return;
@@ -269,6 +273,7 @@ TEST_F(rdma_establish_session_test, ready_establishes_session_with_log_channels)
     auto const start = decode_start_payload(stub.start.payload);
     ASSERT_TRUE(start.has_value()) << "stub received a malformed start payload";
     EXPECT_EQ(start->slot_count, slot_count);
+    EXPECT_NE(start->master_instance_id, 0U);
     EXPECT_EQ(start->channel_count, 2U);
     EXPECT_EQ(start->control_channel_id, 2U);
 
@@ -279,9 +284,10 @@ TEST_F(rdma_establish_session_test, ready_establishes_session_with_log_channels)
     EXPECT_TRUE(channel0.get_impl()->has_rdma_send_stream());
     EXPECT_TRUE(channel1.get_impl()->has_rdma_send_stream());
 
-    // Group commit flow over the established session. Verified here rather than in a
-    // separate test because every establishment costs vendor-mock endpoint slots
-    // (pid-keyed, max 64 per shm epoch, never freed) via the two daemon processes.
+    // Group commit flow over the established session is verified here rather than in a
+    // separate test. Every establishment makes the two daemon processes use one vendor-mock
+    // endpoint slot each. A test run has up to 64 slots, and those of daemons stopped by
+    // SIGTERM are not returned until the shm is wiped at the next test binary startup.
     // Swap the real control channel send stream for a capturing fake so that the
     // serialized bytes can be inspected without a replica-side receiver.
     auto stream = std::make_unique<capturing_control_send_stream>();

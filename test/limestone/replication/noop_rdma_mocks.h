@@ -48,7 +48,9 @@ public:
         return dummy_dma_address;
     }
     operation_result finalize_channel_setup_with_sender(
-            limestone::replication::rdma_sender_base* /*sender*/) noexcept override {
+            limestone::replication::rdma_sender_base* /*sender*/,
+            std::uint64_t /*local_instance_id*/,
+            std::uint64_t /*remote_instance_id*/) noexcept override {
         return {true, {}};
     }
 };
@@ -69,7 +71,10 @@ public:
     stream_acquire_result get_send_stream(std::uint16_t /*channel_id*/) noexcept override {
         return {{false, "noop_rdma_sender does not support get_send_stream"}, nullptr};
     }
-    operation_result finalize_channel_setup() noexcept override { return {true, {}}; }
+    operation_result finalize_channel_setup(
+            std::uint64_t /*local_instance_id*/) noexcept override {
+        return {true, {}};
+    }
     operation_result shutdown() noexcept override { return {true, {}}; }
 };
 

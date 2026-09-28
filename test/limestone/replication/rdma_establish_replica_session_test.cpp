@@ -61,12 +61,16 @@ constexpr std::uint32_t slot_count = 4U;
 // so the master role can hand out an arbitrary value in place of a real receiver.
 constexpr std::uint64_t stub_master_dma_address = 0xCAFEU;
 
+// The master role sends no RDMA frames, so any non-zero value will do.
+constexpr std::uint64_t stub_master_instance_id = 0xF00DU;
+
 // Builds the start payload the master role sends; tests tweak individual fields.
 [[nodiscard]] rdma_handshake_start_payload make_start_payload(std::uint16_t channel_count) {
     rdma_handshake_start_payload payload{};
     payload.protocol_version = replication_protocol_version;
     payload.slot_count = slot_count;
     payload.master_dma_address = stub_master_dma_address;
+    payload.master_instance_id = stub_master_instance_id;
     payload.channel_count = channel_count;
     payload.control_channel_id = channel_count;
     return payload;
@@ -272,15 +276,17 @@ TEST_F(rdma_establish_replica_session_test, establish_succeeds_and_registers_cha
     auto const dma_address = server.get_rdma_dma_address();
     ASSERT_TRUE(dma_address.has_value());
     EXPECT_EQ(response->replica_dma_address, dma_address.value());
+    EXPECT_NE(response->replica_instance_id, 0U);
 
     EXPECT_NE(server.get_rdma_log_channel_receiver(0U), nullptr);
     EXPECT_NE(server.get_rdma_log_channel_receiver(1U), nullptr);
     EXPECT_EQ(server.get_rdma_log_channel_receiver(2U), nullptr);
 
-    // Control channel behavior over the established session. Verified here rather
-    // than in separate tests because every establishment costs vendor-mock endpoint
-    // slots (pid-keyed, max 64 per shm epoch, never freed) via the two daemon
-    // processes. channel_count=2 puts the control channel on id 2, and the handler
+    // Control channel behavior over the established session is verified here rather than in a
+    // separate test. Every establishment makes the two daemon processes use one vendor-mock
+    // endpoint slot each. A test run has up to 64 slots, and those of daemons stopped by
+    // SIGTERM are not returned until the shm is wiped at the next test binary startup.
+    // channel_count=2 puts the control channel on id 2, and the handler
     // runs on the calling thread, so the epoch is persisted when the call returns.
     limestone::replication::message_group_commit first_commit{7U};
     server.handle_rdma_data_event(make_control_frame(2U, 0U, first_commit));
@@ -420,6 +426,38 @@ TEST_F(rdma_establish_replica_session_test, establish_rejects_control_channel_id
     ASSERT_TRUE(response.has_value()) << "master received a malformed response payload";
     EXPECT_FALSE(response->accepted);
     EXPECT_NE(response->error_message.find("overlaps"), std::string::npos)
+        << response->error_message;
+    EXPECT_FALSE(server.get_rdma_dma_address().has_value());
+}
+
+TEST_F(rdma_establish_replica_session_test, establish_rejects_unset_master_instance_id) {
+    ASSERT_NO_FATAL_FAILURE(start_daemons());
+    replica_server server{};
+    server.initialize(boost::filesystem::path{log_dir_});
+
+    bool established = false;
+    auto replica_thread = spawn_replica(server, established);
+
+    bool const seated = wait_replica_seated();
+    master_results master{};
+    if (seated) {
+        auto payload = make_start_payload(2U);
+        payload.master_instance_id = 0U;
+        drive_master(encode(payload), false, master);
+    }
+    if (!seated || !master.response.success) {
+        unblock_replica();
+    }
+    replica_thread.join();
+
+    ASSERT_TRUE(seated) << "replica registration did not reach the server daemon";
+    ASSERT_TRUE(master.response.success) << master.response.error_message;
+    EXPECT_FALSE(established);
+
+    auto const response = decode_response_payload(master.response.payload);
+    ASSERT_TRUE(response.has_value()) << "master received a malformed response payload";
+    EXPECT_FALSE(response->accepted);
+    EXPECT_NE(response->error_message.find("instance_id"), std::string::npos)
         << response->error_message;
     EXPECT_FALSE(server.get_rdma_dma_address().has_value());
 }

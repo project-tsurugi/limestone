@@ -77,12 +77,20 @@ public:
      * @brief Bind the sender used for the RDMA ACK return path and transition
      *        from SETUP to TRANSFER phase.
      * @param sender RDMA sender instance whose buffer is used as the ACK destination.
+     * @param local_instance_id Our own side's instance_id; attached to the ACK frames this
+     *        receiver sends.
+     * @param remote_instance_id The peer side's instance_id (the replica's on the master, the
+     *        master's on the replica). Received frames are checked against it, and those that
+     *        do not match are dropped.
      * @return operation_result describing success or failure.
      * @note Must be called before the receiver starts delivering RDMA frames so
      *       that ACK frames can be RDMA-written back through @p sender.
+     * @note Zero is rejected for either instance_id.
      */
     [[nodiscard]] virtual operation_result finalize_channel_setup_with_sender(
-        rdma_sender_base* sender) noexcept = 0;
+        rdma_sender_base* sender,
+        std::uint64_t     local_instance_id,
+        std::uint64_t     remote_instance_id) noexcept = 0;
 };
 
 } // namespace limestone::replication

@@ -65,7 +65,8 @@ protected:
             << "get_send_stream failed: " << acquired.status.error_message;
         stream_ = std::move(acquired.stream);
 
-        auto finalize_result = sender_->finalize_channel_setup();
+        auto finalize_result =
+            sender_->finalize_channel_setup(limestone::replication::make_rdma_instance_id());
         ASSERT_TRUE(finalize_result.success)
             << "finalize_channel_setup failed: " << finalize_result.error_message;
     }
@@ -112,7 +113,10 @@ TEST_F(rdma_comm_send_stream_test, acquire_rejects_min_capacity_above_max_payloa
 TEST_F(rdma_comm_send_stream_test, acquire_accepts_min_capacity_at_slot_payload) {
     auto frame = stream_->acquire_frame_buffer(slot_payload, slot_payload);
     ASSERT_NE(frame, nullptr);
-    EXPECT_GE(frame->capacity(), slot_payload);
+    // slot_payload is the largest payload that fits in one slot, so the frame spans exactly one
+    // slot. If the area the RDMA library puts at the head of a frame changes and this value no
+    // longer matches, it is detected here.
+    EXPECT_EQ(frame->capacity(), slot_payload);
 }
 
 TEST_F(rdma_comm_send_stream_test, acquire_rejects_min_capacity_above_slot_payload) {

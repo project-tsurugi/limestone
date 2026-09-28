@@ -39,6 +39,7 @@ rdma_handshake_start_payload make_start_payload() {
     payload.epoch_number = 12345U;
     payload.slot_count = 128U;
     payload.master_dma_address = 0x1122334455667788ULL;
+    payload.master_instance_id = 0x0A0B0C0D0E0F1011ULL;
     payload.channel_count = 3U;
     payload.control_channel_id = 5U;
     return payload;
@@ -60,6 +61,7 @@ TEST(rdma_handshake_payload_test, start_payload_round_trips_boundary_values) {
     payload.epoch_number = std::numeric_limits<std::uint64_t>::max();
     payload.slot_count = std::numeric_limits<std::uint32_t>::max();
     payload.master_dma_address = std::numeric_limits<std::uint64_t>::max();
+    payload.master_instance_id = std::numeric_limits<std::uint64_t>::max();
     payload.channel_count = std::numeric_limits<std::uint16_t>::max();
     payload.control_channel_id = std::numeric_limits<std::uint16_t>::max();
     auto const decoded = decode_start_payload(encode(payload));
@@ -74,6 +76,7 @@ TEST(rdma_handshake_payload_test, start_payload_encodes_expected_layout) {
     payload.epoch_number = 7U;
     payload.slot_count = 16U;
     payload.master_dma_address = 0x1122334455667788ULL;
+    payload.master_instance_id = 0x99AABBCCDDEEFF00ULL;
     payload.channel_count = 3U;
     payload.control_channel_id = 5U;
     std::vector<std::uint8_t> const expected{
@@ -82,10 +85,25 @@ TEST(rdma_handshake_payload_test, start_payload_encodes_expected_layout) {
         0x00U, 0x00U, 0x00U, 0x00U, 0x00U, 0x00U, 0x00U, 0x07U,  // epoch_number
         0x00U, 0x00U, 0x00U, 0x10U,                              // slot_count
         0x11U, 0x22U, 0x33U, 0x44U, 0x55U, 0x66U, 0x77U, 0x88U,  // master_dma_address
+        0x99U, 0xAAU, 0xBBU, 0xCCU, 0xDDU, 0xEEU, 0xFFU, 0x00U,  // master_instance_id
         0x00U, 0x03U,                                            // channel_count
         0x00U, 0x05U,                                            // control_channel_id
     };
     EXPECT_EQ(encode(payload), expected);
+}
+
+TEST(rdma_handshake_payload_test, start_payload_decode_rejects_layout_without_instance_id) {
+    // The layout before instance_id was added (channel_count directly follows master_dma_address).
+    std::vector<std::uint8_t> const bytes{
+        0x00U, 0x00U, 0x00U, 0x00U, 0x00U, 0x00U, 0x00U, 0x02U,  // protocol_version
+        0x00U, 0x00U, 0x00U, 0x03U, 'c', 'f', 'g',               // configuration_id
+        0x00U, 0x00U, 0x00U, 0x00U, 0x00U, 0x00U, 0x00U, 0x07U,  // epoch_number
+        0x00U, 0x00U, 0x00U, 0x10U,                              // slot_count
+        0x11U, 0x22U, 0x33U, 0x44U, 0x55U, 0x66U, 0x77U, 0x88U,  // master_dma_address
+        0x00U, 0x03U,                                            // channel_count
+        0x00U, 0x05U,                                            // control_channel_id
+    };
+    EXPECT_FALSE(decode_start_payload(bytes).has_value());
 }
 
 TEST(rdma_handshake_payload_test, start_payload_decode_rejects_truncated_bytes) {
@@ -115,6 +133,7 @@ TEST(rdma_handshake_payload_test, response_payload_round_trips_accepted) {
     rdma_handshake_response_payload payload{};
     payload.accepted = true;
     payload.replica_dma_address = 0x8877665544332211ULL;
+    payload.replica_instance_id = 0x1011121314151617ULL;
     auto const decoded = decode_response_payload(encode(payload));
     ASSERT_TRUE(decoded.has_value());
     EXPECT_EQ(*decoded, payload);
@@ -125,6 +144,7 @@ TEST(rdma_handshake_payload_test, response_payload_round_trips_rejected) {
     payload.accepted = false;
     payload.error_message = "configuration mismatch";
     payload.replica_dma_address = 0U;
+    payload.replica_instance_id = 0U;
     auto const decoded = decode_response_payload(encode(payload));
     ASSERT_TRUE(decoded.has_value());
     EXPECT_EQ(*decoded, payload);
@@ -135,12 +155,24 @@ TEST(rdma_handshake_payload_test, response_payload_encodes_expected_layout) {
     payload.accepted = false;
     payload.error_message = "no";
     payload.replica_dma_address = 0x0102030405060708ULL;
+    payload.replica_instance_id = 0x1112131415161718ULL;
     std::vector<std::uint8_t> const expected{
         0x00U,                                                   // accepted
         0x00U, 0x00U, 0x00U, 0x02U, 'n', 'o',                    // error_message
         0x01U, 0x02U, 0x03U, 0x04U, 0x05U, 0x06U, 0x07U, 0x08U,  // replica_dma_address
+        0x11U, 0x12U, 0x13U, 0x14U, 0x15U, 0x16U, 0x17U, 0x18U,  // replica_instance_id
     };
     EXPECT_EQ(encode(payload), expected);
+}
+
+TEST(rdma_handshake_payload_test, response_payload_decode_rejects_layout_without_instance_id) {
+    // The layout before instance_id was added (ends with replica_dma_address).
+    std::vector<std::uint8_t> const bytes{
+        0x01U,                                                   // accepted
+        0x00U, 0x00U, 0x00U, 0x00U,                              // error_message
+        0x01U, 0x02U, 0x03U, 0x04U, 0x05U, 0x06U, 0x07U, 0x08U,  // replica_dma_address
+    };
+    EXPECT_FALSE(decode_response_payload(bytes).has_value());
 }
 
 TEST(rdma_handshake_payload_test, response_payload_decode_rejects_oversized_length_prefix) {
@@ -160,6 +192,7 @@ TEST(rdma_handshake_payload_test, response_payload_decode_rejects_truncated_byte
     payload.accepted = false;
     payload.error_message = "reason";
     payload.replica_dma_address = 42U;
+    payload.replica_instance_id = 43U;
     auto const bytes = encode(payload);
     for (std::size_t size = 0; size < bytes.size(); ++size) {
         std::vector<std::uint8_t> const truncated(bytes.begin(), bytes.begin() + size);

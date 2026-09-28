@@ -18,6 +18,7 @@
 #include <cstddef>
 
 #include <rdma_comm/constants.h>
+#include <rdma_comm/frame_identification.h>
 #include <rdma_comm/rdma_frame_header.h>
 
 namespace limestone::replication {
@@ -25,15 +26,9 @@ namespace limestone::replication {
 /**
  * @brief Size of one RDMA send-ring slot, in bytes.
  *
- * This is limestone's own configuration value, handed to rdma-comm-lib as
- * rdma_config::send_buffer.chunk_size_bytes by rdma_factory_rdma.cpp. It must equal
- * the vendor RDMA write granularity the library publishes as
- * dma_buffer_alignment_bytes; the static_assert below pins that down.
+ * The slot size fixed by the RDMA library (the vendor RDMA write granularity).
  */
-inline constexpr std::size_t rdma_slot_size_bytes = 4096U;
-
-static_assert(rdma_slot_size_bytes == rdma::communication::dma_buffer_alignment_bytes,
-    "the ring slot size must match the vendor RDMA write granularity");
+inline constexpr std::size_t rdma_slot_size_bytes = rdma::communication::dma_buffer_alignment_bytes;
 
 static_assert(rdma_slot_size_bytes <= rdma::communication::max_dma_write_bytes,
     "a single ring slot must fit within one vendor DMA write");
@@ -41,10 +36,12 @@ static_assert(rdma_slot_size_bytes <= rdma::communication::max_dma_write_bytes,
 /**
  * @brief Largest min_capacity acquire_frame_buffer() can unconditionally satisfy.
  *
- * A valid frame always spans at least one ring slot, so this is the payload of one
- * slot after subtracting the frame header.
+ * A valid frame always spans at least one ring slot, so this is the size of one slot minus
+ * the identification block and the frame header the RDMA library puts at the head of every
+ * frame.
  */
-inline constexpr std::size_t rdma_slot_payload_bytes =
-    rdma_slot_size_bytes - static_cast<std::size_t>(rdma::communication::rdma_frame_header_size);
+inline constexpr std::size_t rdma_slot_payload_bytes = rdma_slot_size_bytes
+    - rdma::communication::frame_identification_size
+    - static_cast<std::size_t>(rdma::communication::rdma_frame_header_size);
 
 } // namespace limestone::replication

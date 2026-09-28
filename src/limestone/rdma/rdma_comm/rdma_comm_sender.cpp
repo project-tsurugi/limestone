@@ -40,8 +40,9 @@ rdma_sender_base::stream_acquire_result rdma_comm_sender::get_send_stream(
     return {{true, ""}, std::move(wrapped)};
 }
 
-rdma_sender_base::operation_result rdma_comm_sender::finalize_channel_setup() noexcept {
-    auto r = sender_.finalize_channel_setup();
+rdma_sender_base::operation_result rdma_comm_sender::finalize_channel_setup(
+        std::uint64_t local_instance_id) noexcept {
+    auto r = sender_.finalize_channel_setup(local_instance_id);
     return {r.success, r.error_message};
 }
 

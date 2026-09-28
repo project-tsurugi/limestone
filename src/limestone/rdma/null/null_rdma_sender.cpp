@@ -30,7 +30,8 @@ rdma_sender_base::stream_acquire_result null_rdma_sender::get_send_stream(
 // Defined for base I/F completeness. Production paths cannot reach this method
 // because initialize() already returns failure when RDMA is disabled, so callers
 // short-circuit before any finalize step.
-rdma_sender_base::operation_result null_rdma_sender::finalize_channel_setup() noexcept {
+rdma_sender_base::operation_result null_rdma_sender::finalize_channel_setup(
+        std::uint64_t /*local_instance_id*/) noexcept {
     return {false, "RDMA is not enabled in this build (ENABLE_RDMA=OFF)"};
 }
 

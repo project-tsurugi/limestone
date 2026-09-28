@@ -127,6 +127,7 @@ bool operator==(rdma_handshake_start_payload const& lhs, rdma_handshake_start_pa
     return lhs.protocol_version == rhs.protocol_version &&
         lhs.configuration_id == rhs.configuration_id && lhs.epoch_number == rhs.epoch_number &&
         lhs.slot_count == rhs.slot_count && lhs.master_dma_address == rhs.master_dma_address &&
+        lhs.master_instance_id == rhs.master_instance_id &&
         lhs.channel_count == rhs.channel_count && lhs.control_channel_id == rhs.control_channel_id;
 }
 
@@ -139,7 +140,8 @@ std::ostream& operator<<(std::ostream& out, rdma_handshake_start_payload const& 
     out << "rdma_handshake_start_payload{protocol_version=" << value.protocol_version
         << ", configuration_id=\"" << value.configuration_id << "\""
         << ", epoch_number=" << value.epoch_number << ", slot_count=" << value.slot_count
-        << ", master_dma_address=0x" << std::hex << value.master_dma_address << std::dec
+        << ", master_dma_address=0x" << std::hex << value.master_dma_address
+        << ", master_instance_id=0x" << value.master_instance_id << std::dec
         << ", channel_count=" << value.channel_count
         << ", control_channel_id=" << value.control_channel_id << "}";
     out.flags(saved_flags);
@@ -149,7 +151,8 @@ std::ostream& operator<<(std::ostream& out, rdma_handshake_start_payload const& 
 bool operator==(
         rdma_handshake_response_payload const& lhs, rdma_handshake_response_payload const& rhs) {
     return lhs.accepted == rhs.accepted && lhs.error_message == rhs.error_message &&
-        lhs.replica_dma_address == rhs.replica_dma_address;
+        lhs.replica_dma_address == rhs.replica_dma_address &&
+        lhs.replica_instance_id == rhs.replica_instance_id;
 }
 
 bool operator!=(
@@ -161,20 +164,22 @@ std::ostream& operator<<(std::ostream& out, rdma_handshake_response_payload cons
     auto const saved_flags = out.flags();
     out << "rdma_handshake_response_payload{accepted=" << std::boolalpha << value.accepted
         << ", error_message=\"" << value.error_message << "\""
-        << ", replica_dma_address=0x" << std::hex << value.replica_dma_address << "}";
+        << ", replica_dma_address=0x" << std::hex << value.replica_dma_address
+        << ", replica_instance_id=0x" << value.replica_instance_id << "}";
     out.flags(saved_flags);
     return out;
 }
 
 std::vector<std::uint8_t> encode(rdma_handshake_start_payload const& payload) {
     std::vector<std::uint8_t> out;
-    out.reserve(sizeof(std::uint64_t) * 3 + sizeof(std::uint32_t) * 2 +
+    out.reserve(sizeof(std::uint64_t) * 4 + sizeof(std::uint32_t) * 2 +
         sizeof(std::uint16_t) * 2 + payload.configuration_id.size());
     append(out, primitive_wire_codec::encode_uint64(payload.protocol_version));
     append_string(out, payload.configuration_id);
     append(out, primitive_wire_codec::encode_uint64(payload.epoch_number));
     append(out, primitive_wire_codec::encode_uint32(payload.slot_count));
     append(out, primitive_wire_codec::encode_uint64(payload.master_dma_address));
+    append(out, primitive_wire_codec::encode_uint64(payload.master_instance_id));
     append(out, primitive_wire_codec::encode_uint16(payload.channel_count));
     append(out, primitive_wire_codec::encode_uint16(payload.control_channel_id));
     return out;
@@ -182,11 +187,12 @@ std::vector<std::uint8_t> encode(rdma_handshake_start_payload const& payload) {
 
 std::vector<std::uint8_t> encode(rdma_handshake_response_payload const& payload) {
     std::vector<std::uint8_t> out;
-    out.reserve(sizeof(std::uint8_t) + sizeof(std::uint32_t) + sizeof(std::uint64_t) +
+    out.reserve(sizeof(std::uint8_t) + sizeof(std::uint32_t) + sizeof(std::uint64_t) * 2 +
         payload.error_message.size());
     append(out, primitive_wire_codec::encode_uint8(payload.accepted ? 1U : 0U));
     append_string(out, payload.error_message);
     append(out, primitive_wire_codec::encode_uint64(payload.replica_dma_address));
+    append(out, primitive_wire_codec::encode_uint64(payload.replica_instance_id));
     return out;
 }
 
@@ -198,6 +204,7 @@ std::optional<rdma_handshake_start_payload> decode_start_payload(
         !reader.read_string(payload.configuration_id) ||
         !reader.read_uint64(payload.epoch_number) || !reader.read_uint32(payload.slot_count) ||
         !reader.read_uint64(payload.master_dma_address) ||
+        !reader.read_uint64(payload.master_instance_id) ||
         !reader.read_uint16(payload.channel_count) ||
         !reader.read_uint16(payload.control_channel_id) || !reader.finished()) {
         return std::nullopt;
@@ -212,7 +219,8 @@ std::optional<rdma_handshake_response_payload> decode_response_payload(
     std::uint8_t accepted{};
     if (!reader.read_uint8(accepted) || accepted > 1U ||
         !reader.read_string(payload.error_message) ||
-        !reader.read_uint64(payload.replica_dma_address) || !reader.finished()) {
+        !reader.read_uint64(payload.replica_dma_address) ||
+        !reader.read_uint64(payload.replica_instance_id) || !reader.finished()) {
         return std::nullopt;
     }
     payload.accepted = accepted != 0U;
