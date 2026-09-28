@@ -439,8 +439,9 @@ void datastore::ready() {
     try {
         blob_id_type max_blob_id =
             std::max(create_snapshot_and_get_max_blob_id_with_wal_started_log(), compaction_catalog_->get_max_blob_id());
+        blob_id_type next_blob_id = max_blob_id + 1;
         blob_file_garbage_collector_ = std::make_unique<blob_file_garbage_collector>(impl_->blob_file_resolver());
-        blob_file_garbage_collector_->scan_blob_files(max_blob_id);
+        blob_file_garbage_collector_->scan_blob_files(next_blob_id);
 
         // Build the compacted path from the catalog record. With no record, pass the
         // well-known name that the migration rule assigns to generation 0; the orphan
@@ -452,7 +453,7 @@ void datastore::ready() {
         boost::filesystem::path snapshot_file = location_ / std::string(snapshot::subdirectory_name_) / std::string(snapshot::file_name_);
         blob_file_garbage_collector_->scan_snapshot(snapshot_file, compacted_file);
 
-        next_blob_id_.store(max_blob_id + 1);
+        next_blob_id_.store(next_blob_id);
 
         online_compaction_worker_future_ = std::async(std::launch::async, &datastore::online_compaction_worker, this);
         if (epoch_id_switched_.load() != 0) {
@@ -1117,21 +1118,30 @@ void datastore::compact_with_online() {  // NOLINT(readability-function-cognitiv
         return;
     }
 
-    // get a copy of next_blob_id and boundary_version before rotation
-    blob_id_type next_blob_id_copy = next_blob_id_.load(std::memory_order_acquire);
+    // Take the blob GC boundary and the boundary_version before the rotation. The GC
+    // boundary is the minimum of the current next_blob_id and the next_blob_id at the
+    // creation of each live blob_pool. No live pool has handed out a blob below it, so a
+    // live blob that the scan of the compaction inputs does not see (one not passed to
+    // add_entry yet, or one whose entry goes to the pwal after the rotation) is at or
+    // above the boundary. next_blob_id must be read before the registry is scanned,
+    // which passing it as the argument guarantees.
+    blob_id_type blob_gc_boundary =
+        impl_->get_live_blob_pool_min_next_blob_id(next_blob_id_.load(std::memory_order_acquire));
     write_version_type boundary_version_copy;
     {
         std::lock_guard<std::mutex> lock(boundary_mutex_);
         boundary_version_copy = available_boundary_version_;
     }
 
-    // Blob GC at online compaction is disabled: its exemption list is built only from
-    // the scan of the compaction inputs, so it would delete a live blob whose entry
-    // has not appeared in those inputs yet (issue #144). Blob files are collected only
-    // by the GC at startup, until the fundamental fix of #144 re-enables this.
+    // check blob file garbage collection runnable
     bool blob_file_gc_runnable = false;
     bool is_active = blob_file_garbage_collector_->is_active();
-    VLOG_LP(log_info) << "boundary_version_copy.get_major(): " << boundary_version_copy.get_major()
+    if (boundary_version_copy.get_major() > compaction_catalog_->get_max_epoch_id() && !is_active) {
+        blob_file_gc_runnable = true;
+        blob_file_garbage_collector_->shutdown();
+    }
+    VLOG_LP(log_info) << "blob_gc_boundary: " << blob_gc_boundary
+                            << ", boundary_version_copy.get_major(): " << boundary_version_copy.get_major()
                             << ", compaction_catalog_->get_max_epoch_id(): " << compaction_catalog_->get_max_epoch_id()
                             << ", blob_file_garbage_collector_->is_active(): " << is_active
                             << ", blob_file_gc_runnable: " << blob_file_gc_runnable;
@@ -1169,7 +1179,6 @@ void datastore::compact_with_online() {  // NOLINT(readability-function-cognitiv
     ensure_directory_exists(compaction_temp_dir);
 
     // Set the appropriate options based on whether blob file GC is executable.
-    VLOG_LP(log_info) << "blob_file_gc_runnable: " << blob_file_gc_runnable;
     compaction_options options = [&]() -> compaction_options {
         if (blob_file_gc_runnable) {
             auto gc_snapshot = std::make_unique<blob_file_gc_snapshot>(boundary_version_copy);
@@ -1310,7 +1319,7 @@ void datastore::compact_with_online() {  // NOLINT(readability-function-cognitiv
     VLOG_LP(log_info) << "options.is_gc_enabled(): " << options.is_gc_enabled() << ", impl_->is_backup_in_progress(): " << impl_->is_backup_in_progress();
     if (options.is_gc_enabled() && !impl_->is_backup_in_progress()) {
         LOG_LP(INFO) << "start blob files garbage collection";
-        blob_file_garbage_collector_->scan_blob_files(next_blob_id_copy);
+        blob_file_garbage_collector_->scan_blob_files(blob_gc_boundary);
         log_entry_container log_entries = options.get_gc_snapshot().finalize_snapshot();
         blob_file_garbage_collector_->start_add_gc_exempt_blob_ids();
         for (const auto& entry : log_entries) {
