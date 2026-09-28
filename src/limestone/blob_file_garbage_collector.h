@@ -41,9 +41,8 @@ namespace limestone::internal {
  * to obtain the root directory for BLOB files and to utilize its functionality for
  * file name validation and blob_id extraction.
  *
- * Only files whose blob_id is less than or equal to a specified maximum (max_existing_blob_id)
- * are considered for garbage collection. Files with blob_id greater than max_existing_blob_id
- * (i.e., newly generated files) are ignored.
+ * Only files whose blob_id is below a specified boundary are considered for garbage
+ * collection. Files with blob_id at or above the boundary are ignored.
  *
  * This class is intended for internal use only.
  *
@@ -89,17 +88,16 @@ public:
      * @brief Starts scanning the BLOB directory for BLOB files in a background thread.
      *
      * This method launches a separate thread that scans the blob_root directory (and its subdirectories)
-     * for files that conform to the expected blob_file naming convention and whose blob_id is less than or
-     * equal to the specified max_existing_blob_id. Files with blob_id greater than max_existing_blob_id
-     * (i.e., newly generated files) are ignored.
+     * for files that conform to the expected blob_file naming convention and whose blob_id is below the
+     * specified boundary. Files with blob_id at or above the boundary are ignored.
      *
-     * @param max_existing_blob_id The maximum blob_id among the BLOB files that existed at startup.
+     * @param boundary The upper bound of the garbage collection: only blob_ids below it are considered.
      *
      * @throws std::logic_error if scan_blob_files() is called more than once.
      *
      * @note This function is intended to be called only once during the lifecycle of the object.
      */
-    void scan_blob_files(blob_id_type max_existing_blob_id);
+    void scan_blob_files(blob_id_type boundary);
 
 
 
@@ -240,7 +238,7 @@ private:
     const blob_file_resolver* resolver_ = nullptr;         ///< Pointer to the blob_file_resolver instance.
     std::unique_ptr<blob_id_container> scanned_blobs_;      ///< Container for storing scanned blob ids.
     std::unique_ptr<blob_id_container> gc_exempt_blob_;     ///< Container for storing blob ids exempt from garbage collection.
-    blob_id_type max_existing_blob_id_ = 0;                 ///< Maximum blob_id that existed at startup.
+    blob_id_type boundary_ = 0;                             ///< Upper bound of the garbage collection (only blob_ids below it are considered).
 
     // --- Blob File Scanning Process Fields ---
     std::thread blob_file_scan_thread_;             ///< Background thread for scanning the BLOB directory.
@@ -265,8 +263,8 @@ private:
      *
      * This function is executed in a separate thread. It recursively scans the blob_file_resolver's
      * blob root directory for files. For each file, it uses the resolver's is_blob_file() to verify
-     * the file format and extract_blob_id() to obtain the blob_id. Only files with blob_id less than or
-     * equal to max_existing_blob_id_ are added to scanned_blobs_.
+     * the file format and extract_blob_id() to obtain the blob_id. Only files with blob_id below
+     * boundary_ are added to scanned_blobs_.
      */
     void scan_directory();
 

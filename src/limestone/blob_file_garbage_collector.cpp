@@ -65,9 +65,9 @@
      }
  }
 
- void blob_file_garbage_collector::scan_blob_files(blob_id_type max_existing_blob_id) {
+ void blob_file_garbage_collector::scan_blob_files(blob_id_type boundary) {
      state_machine_.start_blob_scan();
-     max_existing_blob_id_ = max_existing_blob_id;
+     boundary_ = boundary;
      blob_file_scan_thread_ = std::thread(&blob_file_garbage_collector::scan_directory, this);
  }
 
@@ -85,7 +85,7 @@
 
             blob_id_type id = resolver_->extract_blob_id(file_path);
             VLOG_LP(log_trace) << "Scanned blob file: " << file_path.string();
-            if (id <= max_existing_blob_id_) {
+            if (id < boundary_) {
                 scanned_blobs_->add_blob_id(id);
                 VLOG_LP(log_trace) << "Added blob id: " << id;
             }
@@ -316,7 +316,7 @@ void blob_file_garbage_collector::wait_for_scan_snapshot() {
     state_machine_.reset();
      scanned_blobs_ = std::make_unique<blob_id_container>();
      gc_exempt_blob_ = std::make_unique<blob_id_container>();
-     max_existing_blob_id_ = 0;
+     boundary_ = 0;
  }
 
  bool blob_file_garbage_collector::is_active() const {

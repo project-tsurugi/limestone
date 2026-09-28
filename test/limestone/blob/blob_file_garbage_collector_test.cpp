@@ -132,17 +132,17 @@ void create_blob_file(const blob_file_resolver &resolver, blob_id_type id) {
     ofs.close();
 }
 
-// Test case: Files with blob_id less than or equal to the target are scanned
-TEST_F(blob_file_garbage_collector_test, scan_collects_only_files_with_blob_id_leq_max) {
+// Test case: Files with blob_id below the boundary are scanned
+TEST_F(blob_file_garbage_collector_test, scan_collects_only_files_with_blob_id_below_boundary) {
     // Create some blob_files for testing.
     // Specify blob_id as 100, 200, 300, 600.
-    // Since max_existing_blob_id is 500, the file with 600 will be excluded.
+    // Since the boundary is 500, the file with 600 will be excluded.
     create_blob_file(*resolver_, 100);
     create_blob_file(*resolver_, 200);
     create_blob_file(*resolver_, 300);
     create_blob_file(*resolver_, 600); // Excluded as a new file
 
-    // Start scan: max_existing_blob_id = 500
+    // Start scan: boundary = 500
     gc_->scan_blob_files(500);
     gc_->wait_for_blob_file_scan();
 
@@ -176,7 +176,7 @@ TEST_F(blob_file_garbage_collector_test, scan_ignores_invalid_files) {
         ofs << "invalid data";
         ofs.close();
     }
-    // Start scan: max_existing_blob_id = 500
+    // Start scan: boundary = 500
     gc_->scan_blob_files(500);
     gc_->wait_for_blob_file_scan();
 
@@ -193,7 +193,7 @@ TEST_F(blob_file_garbage_collector_test, get_blob_file_list_after_scan) {
     create_blob_file(*resolver_, 20);
     create_blob_file(*resolver_, 30);
 
-    gc_->scan_blob_files(1000); // Specify a sufficiently large value for max_existing_blob_id
+    gc_->scan_blob_files(1000); // Specify a sufficiently large value for the boundary
     gc_->wait_for_blob_file_scan();
 
     // Expected files are those with blob_id 10, 20, 30
@@ -204,15 +204,14 @@ TEST_F(blob_file_garbage_collector_test, get_blob_file_list_after_scan) {
     EXPECT_EQ(actual_ids[2], 30);
 }
 
-TEST_F(blob_file_garbage_collector_test, max_existing_blob_id_inclusive) {
+TEST_F(blob_file_garbage_collector_test, boundary_collects_the_blob_just_below_it) {
     // Create a blob file with blob_id 100.
     create_blob_file(*resolver_, 100);
     // Create another blob file with blob_id 200.
     create_blob_file(*resolver_, 200);
 
-    // Start scan with max_existing_blob_id exactly equal to 100.
-    // Expected: Only the file with blob_id 100 is collected (since 200 > 100).
-    gc_->scan_blob_files(100);
+    // Scan with the boundary 101: only 100 is collected (200 is at or above the boundary)
+    gc_->scan_blob_files(101);
     gc_->wait_for_blob_file_scan();
 
     auto actual_ids = get_sorted_blob_ids(gc_->get_blob_file_list());
@@ -220,15 +219,14 @@ TEST_F(blob_file_garbage_collector_test, max_existing_blob_id_inclusive) {
     EXPECT_EQ(actual_ids[0], 100);
 }
 
-TEST_F(blob_file_garbage_collector_test, max_existing_blob_id_exclusive) {
+TEST_F(blob_file_garbage_collector_test, boundary_excludes_the_blob_at_it) {
     // Create a blob file with blob_id 100.
     create_blob_file(*resolver_, 100);
     // Create another blob file with blob_id 200.
     create_blob_file(*resolver_, 200);
 
-    // Start scan with max_existing_blob_id set to 99.
-    // Expected: Neither file should be collected because both 100 and 200 exceed 99.
-    gc_->scan_blob_files(99);
+    // Scan with the boundary 100: 100 is at the boundary, so neither file is collected
+    gc_->scan_blob_files(100);
     gc_->wait_for_blob_file_scan();
 
     auto actual_ids = get_sorted_blob_ids(gc_->get_blob_file_list());
@@ -285,7 +283,7 @@ TEST_F(blob_file_garbage_collector_test, finalize_scan_and_cleanup_deletes_non_e
     create_blob_file(*resolver_, 102);
     create_blob_file(*resolver_, 103);
 
-    // Assume that all files have blob IDs <= 200 so that they are included in the scanned list.
+    // Assume that all files have blob IDs < 200 so that they are included in the scanned list.
     gc_->scan_blob_files(200);
 
     // Mark blob 102 as GC exempt.
@@ -312,7 +310,7 @@ TEST_F(blob_file_garbage_collector_test, finalize_scan_and_cleanup_handles_delet
     create_blob_file(*resolver_, 501);
     create_blob_file(*resolver_, 502);
 
-    // Assume that all files have blob IDs <= 600 so that they are included in the scanned list.
+    // Assume that all files have blob IDs < 600 so that they are included in the scanned list.
     gc_->scan_blob_files(600);
     gc_->wait_for_blob_file_scan();
 
@@ -417,7 +415,7 @@ TEST_F(blob_file_garbage_collector_test, full_process_test) {
     create_blob_file(*resolver_, 300);
     create_blob_file(*resolver_, 400);
 
-    // Step 2: Call scan_blob_files with max_existing_blob_id set to 1000 so that all files are included.
+    // Step 2: Call scan_blob_files with the boundary set to 1000 so that all files are included.
     gc_->scan_blob_files(1000);
 
     // Step 3: Wait for the BLOB file scanning to complete.

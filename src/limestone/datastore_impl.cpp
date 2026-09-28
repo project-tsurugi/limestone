@@ -26,6 +26,7 @@
 #include <limits>
 #include <cerrno>
 #include <functional>
+#include <algorithm>
 #include <mutex>
 #include <openssl/hmac.h>
 #include <openssl/rand.h>
@@ -928,6 +929,31 @@ limestone::internal::blob_file_resolver const& datastore_impl::blob_file_resolve
 
 boost::filesystem::path datastore_impl::resolve_blob_path(blob_id_type blob_id) const noexcept {
     return require_blob_file_resolver().resolve_path(blob_id);
+}
+
+void datastore_impl::register_live_blob_pool(limestone::internal::blob_pool_impl const* pool, blob_id_type next_blob_id) {
+    {
+        std::lock_guard<std::mutex> lock(live_blob_pools_mutex_);
+        live_blob_pools_[pool] = next_blob_id;
+    }
+}
+
+void datastore_impl::unregister_live_blob_pool(limestone::internal::blob_pool_impl const* pool) noexcept {
+    {
+        std::lock_guard<std::mutex> lock(live_blob_pools_mutex_);
+        live_blob_pools_.erase(pool);
+    }
+}
+
+blob_id_type datastore_impl::get_live_blob_pool_min_next_blob_id(blob_id_type next_blob_id) const {
+    blob_id_type min_next_blob_id = next_blob_id;
+    {
+        std::lock_guard<std::mutex> lock(live_blob_pools_mutex_);
+        for (const auto& entry : live_blob_pools_) {
+            min_next_blob_id = std::min(min_next_blob_id, entry.second);
+        }
+    }
+    return min_next_blob_id;
 }
 
 limestone::internal::blob_file_resolver& datastore_impl::require_blob_file_resolver() noexcept {

@@ -66,6 +66,13 @@ blob_pool_impl::blob_pool_impl(std::function<blob_id_type()> id_generator,
       real_file_ops_(),
       file_ops_(&real_file_ops_) {}   // Use the address of the member variable
 
+blob_pool_impl::~blob_pool_impl() {
+    // Remove this pool from the live pool registry; datastore::acquire_blob_pool() registered
+    // it. Nothing happens for a pool that is not in the registry (one constructed directly
+    // by a test).
+    datastore_.get_impl()->unregister_live_blob_pool(this);
+}
+
 blob_id_type blob_pool_impl::generate_blob_id() {
     return id_generator_();
 }

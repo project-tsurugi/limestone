@@ -8,6 +8,7 @@
 #include <memory>
 #include <boost/filesystem.hpp>
 #include "test_root.h"
+#include "datastore_impl.h"
 
 namespace limestone::testing {
 
@@ -69,6 +70,11 @@ protected:
         dummy_file.close();
         return path;  
     }
+
+    // The boundary the live pool registry returns (the minimum with the current next_blob_id)
+    blob_id_type live_blob_pool_min_next_blob_id() {
+        return datastore_->get_impl()->get_live_blob_pool_min_next_blob_id(datastore_->next_blob_id());
+    }
 };
 
 TEST_F(datastore_blob_test, acquire_blob_pool_basic) {
@@ -97,7 +103,67 @@ TEST_F(datastore_blob_test, acquire_blob_pool_overflow_boundary) {
     EXPECT_EQ(id2, max_id) << "Expected second registered blob ID to be max, indicating overflow";
 }
 
+// Live pool registry: acquire_blob_pool() registers the next_blob_id at the creation of
+// the pool, and the destruction of the pool removes the registration
+TEST_F(datastore_blob_test, live_blob_pool_holds_the_gc_boundary_until_destroyed) {
+    datastore_->set_next_blob_id(1000);
 
+    // Without a live pool, the current next_blob_id is returned as it is
+    EXPECT_EQ(live_blob_pool_min_next_blob_id(), 1000);
+
+    auto pool = datastore_->acquire_blob_pool();
+    ASSERT_NE(pool, nullptr);
+
+    // The next_blob_id at the creation (1000) is registered
+    EXPECT_EQ(live_blob_pool_min_next_blob_id(), 1000);
+
+    // Handing out blobs advances next_blob_id, but the registered value (at the creation) stays
+    EXPECT_EQ(pool->register_data("blob 1"), 1000);
+    EXPECT_EQ(pool->register_data("blob 2"), 1001);
+    EXPECT_EQ(datastore_->next_blob_id(), 1002);
+    EXPECT_EQ(live_blob_pool_min_next_blob_id(), 1000);
+
+    // release() does not remove the registration (only the destructor does)
+    pool->release();
+    EXPECT_EQ(live_blob_pool_min_next_blob_id(), 1000);
+
+    // The destruction removes the registration, and the current next_blob_id is returned again
+    pool.reset();
+    EXPECT_EQ(live_blob_pool_min_next_blob_id(), 1002);
+}
+
+// Live pool registry: among several pools, the oldest one (with the smallest next_blob_id
+// at its creation) determines the boundary, and its destruction advances the boundary to
+// the registered value of the next oldest pool
+TEST_F(datastore_blob_test, live_blob_pool_boundary_follows_the_oldest_live_pool) {
+    datastore_->set_next_blob_id(1000);
+
+    auto oldest = datastore_->acquire_blob_pool();  // registered value 1000
+    EXPECT_EQ(oldest->register_data("oldest 1"), 1000);
+    EXPECT_EQ(oldest->register_data("oldest 2"), 1001);
+
+    auto middle = datastore_->acquire_blob_pool();  // registered value 1002
+    EXPECT_EQ(middle->register_data("middle 1"), 1002);
+
+    auto newest = datastore_->acquire_blob_pool();  // registered value 1003
+    EXPECT_EQ(newest->register_data("newest 1"), 1003);
+    EXPECT_EQ(datastore_->next_blob_id(), 1004);
+
+    EXPECT_EQ(live_blob_pool_min_next_blob_id(), 1000);
+
+    // Destroying a newer pool first does not move the boundary while the oldest pool is live
+    newest.reset();
+    EXPECT_EQ(live_blob_pool_min_next_blob_id(), 1000);
+
+    // Destroying the oldest pool advances the boundary to the registered value of the next
+    // oldest pool (1002 at its creation)
+    oldest.reset();
+    EXPECT_EQ(live_blob_pool_min_next_blob_id(), 1002);
+
+    // Destroying all pools returns the current next_blob_id again
+    middle.reset();
+    EXPECT_EQ(live_blob_pool_min_next_blob_id(), 1004);
+}
 
 TEST_F(datastore_blob_test, get_blob_file_basic) {
     int next_blob_id = 12345;

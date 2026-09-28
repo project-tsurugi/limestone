@@ -21,6 +21,7 @@
 #include <atomic>
 #include <array>
 #include <condition_variable>
+#include <map>
 #include <memory>
 #include <mutex>
 #include <optional>
@@ -34,6 +35,7 @@
 #include <boost/filesystem/path.hpp>
 
 #include "blob_file_resolver.h"
+#include "blob_pool_impl.h"
 #include "manifest.h"
 #include "replication/replica_connector.h"
 #include "replication/replication_endpoint.h"
@@ -258,6 +260,29 @@ public:
      * @return local BLOB file path.
      */
     [[nodiscard]] boost::filesystem::path resolve_blob_path(blob_id_type blob_id) const noexcept;
+
+    /**
+     * @brief Registers a live blob_pool.
+     * @param pool the pool to register (used only as an identifier).
+     * @param next_blob_id the next_blob_id at the creation of the pool. Every blob_id the pool
+     *        hands out is at or above this value.
+     */
+    void register_live_blob_pool(limestone::internal::blob_pool_impl const* pool, blob_id_type next_blob_id);
+
+    /**
+     * @brief Removes a live blob_pool from the registry.
+     * @param pool the pool to remove. Does nothing if the pool is not registered.
+     */
+    void unregister_live_blob_pool(limestone::internal::blob_pool_impl const* pool) noexcept;
+
+    /**
+     * @brief Returns the lower bound of the blob_ids that the live blob_pools may hand out.
+     * @param next_blob_id the current next_blob_id.
+     * @return the minimum of the next_blob_id of each registered pool and the argument. Returns the
+     *         argument as it is when no pool is live. No live pool has handed out a blob whose
+     *         blob_id is below the returned value.
+     */
+    [[nodiscard]] blob_id_type get_live_blob_pool_min_next_blob_id(blob_id_type next_blob_id) const;
 
     // Setter/getter for instance_id
     /**
@@ -594,6 +619,14 @@ private:
     // Resolver for local BLOB file paths. Owned by datastore_impl so internal
     // replication/restore paths can resolve paths without using public APIs.
     std::unique_ptr<limestone::internal::blob_file_resolver> blob_file_resolver_{};
+
+    // The live blob_pools and the next_blob_id at the creation of each. The blob GC at
+    // online compaction takes the minimum of these values as its boundary and considers
+    // only the blobs below it for deletion, because a blob at or above it may have been
+    // handed out by a live pool (and not have appeared in the WAL yet).
+    // The key is used only as an identifier and is never dereferenced.
+    mutable std::mutex live_blob_pools_mutex_;
+    std::map<limestone::internal::blob_pool_impl const*, blob_id_type> live_blob_pools_;
 };
 
 }  // namespace limestone::api
