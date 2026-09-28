@@ -1348,12 +1348,19 @@ std::unique_ptr<blob_pool> datastore::acquire_blob_pool() {
         }
     };
 
+    // Register the next_blob_id at the creation of the pool in the live pool registry. The
+    // pool starts handing out ids only after it is returned and next_blob_id_ never
+    // decreases, so every id the pool hands out is at or above this value. The pool's
+    // destructor removes the registration.
+    blob_id_type next_blob_id_at_creation = next_blob_id_.load(std::memory_order_acquire);
+
     // Create a blob_pool_impl instance by passing the ID generator lambda and blob_file_resolver.
     // This approach allows flexible configuration and dependency injection for the blob pool.
     auto pool = std::make_unique<limestone::internal::blob_pool_impl>(
             id_generator,
             impl_->blob_file_resolver(),
             *this);
+    impl_->register_live_blob_pool(pool.get(), next_blob_id_at_creation);
     TRACE_END;
     return pool; // Return the constructed blob pool.
 }

@@ -24,6 +24,11 @@ public:
      */
     blob_pool_impl(std::function<blob_id_type()> id_generator, blob_file_resolver& resolver, datastore& datastore);
 
+    /**
+     * @brief Destroys the pool and removes it from the datastore's live pool registry.
+     */
+    ~blob_pool_impl() override;
+
     void release() override;
 
     [[nodiscard]] blob_id_type register_file(boost::filesystem::path const& file,
