@@ -29,6 +29,11 @@ public:
      */
     ~blob_pool_impl() override;
 
+    blob_pool_impl(blob_pool_impl const&) = delete;
+    blob_pool_impl& operator=(blob_pool_impl const&) = delete;
+    blob_pool_impl(blob_pool_impl&&) = delete;
+    blob_pool_impl& operator=(blob_pool_impl&&) = delete;
+
     void release() override;
 
     [[nodiscard]] blob_id_type register_file(boost::filesystem::path const& file,
