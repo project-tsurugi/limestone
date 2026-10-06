@@ -28,6 +28,7 @@
 #include <vector>
 
 #include "compaction_test_fixture.h"
+#include "datastore_impl.h"
 
 namespace limestone::testing {
 
@@ -78,6 +79,7 @@ protected:
         std::condition_variable cv;
         bool reached = false;
         bool released = false;
+        bool waiting = false;
 
         test_datastore->on_rotate_log_files_callback = [&]() {
             {
@@ -87,6 +89,18 @@ protected:
                 cv.wait(lock, [&] { return released; });
             }
         };
+        // Detects that the rotation has selected its targets and entered the completion
+        // wait. If end_session in after_release finished before the selection, the
+        // session would not be seen as in flight and the rename would be done by the
+        // rotation instead of at the session boundary, so after_release is called only
+        // after the selection completes.
+        datastore_->get_impl()->set_on_rotate_before_wait_for_test([&]() {
+            {
+                std::lock_guard<std::mutex> lock(mtx);
+                waiting = true;
+                cv.notify_all();
+            }
+        });
 
         auto future = std::async(std::launch::async, [this] { datastore_->compact_with_online(); });
         {
@@ -102,9 +116,14 @@ protected:
             released = true;
             cv.notify_all();
         }
+        {
+            std::unique_lock<std::mutex> lock(mtx);
+            cv.wait(lock, [&] { return waiting; });
+        }
         after_release();
         future.get();
         test_datastore->on_rotate_log_files_callback = nullptr;
+        datastore_->get_impl()->set_on_rotate_before_wait_for_test(nullptr);
     }
 
     // Returns the rotated file of the given pwal (e.g. "pwal_0001." matches
