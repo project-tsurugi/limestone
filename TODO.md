@@ -1,0 +1,175 @@
+# TODO: R1 ソート方式の置き換え (作業計画)
+
+作業ブランチで使う計画と進捗のメモ。作業しながら更新し、各コミットに含める。作業の記録としてブランチのコミットにだけ残し、
+master へのマージ前に本ファイルを削除する。
+
+## 1. 概要
+
+* 目的: 起動時のスナップショットファイルの作成とコンパクションのソートを、RocksDB からインメモリソートとマージソートの
+  組み合わせに置き換え、RocksDB・LevelDB への依存をなくす。あわせて log_entry を再設計する (ソートの前提になるため)。
+* 設計の正本
+  * L3 (全体): 8 節 (ソート方式)、13 節 (測定)、15 節 (互換性)
+  * log_entry 再設計 仕様 (以下 LE): 9〜14 節 (設計)、15 節 (テスト観点)、16 節 (移行の段階)
+  * S1 メモ: 2 節 (決定事項)、4 節 (環境変数の既定値)、5 節 (変更箇所)、6 節 (テスト項目)、7 節 (作業順序)、
+    8 節 (limestone 以外の対応)
+* 基準コミット: 48032ee (LE と S1 メモの行番号はこのコミットのもの)
+* 日程 (WBS): 2026-10-20〜2026-11-02 (10 人日)。
+
+## 2. 作業の進め方
+
+* 各ステップの終わりで、ビルドが通り、既存のテストが通る状態にする (LE 16.2)。
+* 修正の都度のテストは対象のテストだけを filter で実行する。フルスイートはステップの区切りとコミット前に実行する。
+* コメントは実装中は日本語で書き、コミット準備で英訳する。
+* コミットメッセージは Conventional Commits の英文とし、案に和訳を添えて確認を得てからコミットする。
+* 計画からの変更、判断した事項、残った課題は本ファイルの 5 節・6 節に記録する。
+
+## 3. 着手前の確認事項
+
+| # | 事項 | 状態 |
+|---|---|---|
+| Q1 | 作業ブランチ名 | `feat/replace-recovery-sorter` に決定 |
+| Q2 | 先行修正 (ステップ 1) を作業ブランチに含めるか、master に別に入れるか | 未定 |
+| Q3 | PR の単位。R1 全体で 1 本にするか、ソートの置き換え (ステップ 1〜8) と LE の段階 2〜4 (ステップ 10〜12) に分けるか | 未定 |
+| Q4 | 公開 API `write_version_type(const std::string&)` と `write_version_type(std::string_view)` の削除 (LE 10.4、段階 4)。公開 API は参照がなくても削除しない方針との関係。LE で削除と決めているが、改めて確認する | 未定 |
+| Q5 | 段階 1 で所有型を 1 本のバッファに変えると、`const std::string&` を返す旧アクセサ (`key_sid()`、`value_etc()`、`raw_blob_ids()`、log_entry.h:463-471) を段階 4 まで残せない。戻り値の型を先に変えるか、所有型の構成の変更を段階 2〜3 へ回すか | 未定 |
+
+## 4. ステップ
+
+### ステップ 0: 準備
+
+* [ ] 作業ブランチを作る (Q1)。
+* [ ] 現状のビルドとフルスイートの結果を記録する (基準)。
+* [ ] 旧バージョンとの出力の比較 (ステップ 8) に使う、旧バージョン (既定の構成、RocksDB・PUT_ONLY) のビルドを用意しておく。
+
+### ステップ 1: 先行修正 (LE 16.1)
+
+* [ ] P4: `test/limestone/blob/log_entry_comparator_test.cpp` の誤った前提 (「storage_id が小さいほど key_sid が辞書順で
+      小さい」) のコメントと検証を直す。2 バイト以上の storage_id で成り立たないことを確かめる形にする。
+* [ ] P14: `dblogutil` の count-durable-wal-entries に normal_with_blob とストレージ系を加える (dblogutil.cpp:85-93)。
+
+### ステップ 2: log_entry の基盤 (LE 段階 1 の前半)
+
+* [ ] 形式の定義のヘッダ (仮称 log_entry_format.h): 各フィールドの長さの定数、シリアライズとデシリアライズ、
+      形式の記述、key_sid の順序の比較関数 (LE 10.1・10.2)。static_assert (LE 10.5)。
+* [ ] 参照型 (仮称 log_entry_view) と解析関数 (LE 9.3・11.1)。不足のときの下限の計算を含む。
+* [ ] 所有型 log_entry の構成を 1 本のバッファに変え、アクセサを参照型に委ねる (LE 9.3。Q5 による)。
+      move 元が既定構築の状態になること。
+* [ ] 最も古い版の write_version の定数 (LE 13.2)。
+* [ ] ファクトリ (LE 13.3)。データ系・ストレージ系・marker の各種別。長さの違反で abort。
+* [ ] write_serialized と、最も古い版に置き換えて書く指定 (LE 12)。
+* [ ] UT: LE 15 節の解析関数、比較関数、所有型、write_serialized の観点。
+
+### ステップ 3: ファイルからの読み込み (LE 段階 1 の後半)
+
+* [ ] POSIX の read による読み込み (LE 11.2)。バッファの補充の 3 分岐、位置を指定した読み始め、終端と short_entry の区別。
+* [ ] 書き込み中のファイルの読み出し (LE 11.5)。状態の関数、待ち方。
+* [ ] parse_wal_file と dblog_scan の読み込みを新しい読み込みに移す。無効なスニペットの marker の書き換えは、別に開いた
+      ファイルへの位置を指定した書き込みに変える (LE 11.2)。失敗時の判定を read_error の種別に変える (LE 11.3)。
+* [ ] UT: LE 15 節のファイルからの読み込み、書き込み中のファイルの読み出しの観点。
+* [ ] 既存の dblog_scan・parse_wal_file・compaction のテストが変えずに通ること。
+
+### ステップ 4: 新しいソートの部品 (L3 8.2〜8.6)
+
+* [ ] バッファ: 固定長のアリーナとインデックスの配列。満杯の判定、アリーナを超えるエントリの単独書き出し (8.3)。
+* [ ] インデックスに対する std::sort。比較はアリーナ内の key_sid と write_version を直接読む (8.2・8.3)。ソート後に縮約する。
+* [ ] ソート済みファイルの書き出しと読み込み (LE 14)。末尾で不足と不正は limestone_io_exception。
+* [ ] 置き場所 sorting の作成と削除。LIMESTONE_SORT_WORK_DIR、未指定はログディレクトリ (8.5)。
+* [ ] マージ: マージの上限 (LIMESTONE_SORT_MERGE_FANIN、既定 128) による中間のマージと最後のマージ。どのマージでも縮約し、
+      範囲削除の適用は最後のマージだけで行う。マージは 1 本のスレッド (8.6、S1 メモ 2 節)。
+* [ ] 最後のマージの結果を参照型でコールバックに渡す (S1 メモ 2・5 節)。
+* [ ] コンパクションの最後のマージの入力に現行世代のコンパクション済み WAL ファイルを加える。先頭の marker_begin を読み飛ばし、
+      normal_with_blob を BLOB の GC のために記録する (8.6)。
+* [ ] 環境変数 LIMESTONE_SORT_THREADS (既定 8)、LIMESTONE_SORT_ARENA_SIZE_MB (既定 256)、LIMESTONE_SORT_MERGE_FANIN
+      (既定 128)、LIMESTONE_SORT_WORK_DIR (S1 メモ 4 節、L3 12.5)。
+* [ ] テストからマージの上限とアリーナの大きさを小さく指定する手段。
+* [ ] UT: 順序と縮約、範囲削除の適用、多段のマージ、アリーナを超えるエントリ、sorting の作成と削除 (S1 メモ 6 節)。
+
+### ステップ 5: dblog_scan の拡張 (L3 8.4、S1 メモ 5 節)
+
+* [ ] 入力のファイルを、閉じられるまで待つキューから取り出す形にする。起動時とコンパクションでは、すべてのパスを入れてから閉じる。
+* [ ] キューの中断 (失敗時。スレッドは読みかけのファイルを打ち切って終了し、マージは行わない)。
+* [ ] スレッドの終了時のフック (そのスレッドのバッファの残りをソートして書き出す)。
+* [ ] dblog_scan のスレッドをソートのスレッドとし、add_entry が呼ばれたスレッドのアリーナに詰める。
+* [ ] UT: キューを閉じたときと中断したときの動作、失敗の伝え方。
+
+### ステップ 6: 呼び出し元の置き換え (S1 メモ 5 節)
+
+* [ ] create_snapshot_and_get_max_blob_id(): 新しいソートに置き換える。remove_entry は、コンパクションカタログに
+      コンパクション済み WAL ファイルがあるときだけ書く。
+* [ ] create_compaction_output(): 新しいソートに置き換え、write_serialized の最も古い版に置き換える指定で書く。
+      remove_entry は書かない。値の 1 件ごとのコピーをなくす。
+* [ ] BLOB の ID の最大値を、出力からではなく走査の中で記録する (縮約と範囲削除で除くエントリの分も含める。L3 8.1)。
+* [ ] コンパクションの入力から現行世代のコンパクション済み WAL ファイルを走査の入力から外し、最後のマージに渡す
+      (datastore::compact_with_online()、dblogutil の compaction (dblogutil.cpp:434))。
+* [ ] スレッド数: compaction_options の num_worker を LIMESTONE_SORT_THREADS に置き換える。recover_max_parallelism は
+      受け付けるが使わない。dblogutil の --thread_num は inspect と repair だけに使う (L3 15)。
+* [ ] 既存の compaction 配下、snapshot 配下 (snapshot_impl_test、cursor_impl_test)、log/dblog_scan_test が変えずに通ること。
+
+### ステップ 7: 旧ソートの削除 (S1 メモ 5・6・8 節)
+
+* [ ] sortdb_wrapper、旧ソート専用の関数 (comp_twisted_key()、insert_entry_or_update_to_max()、insert_twisted_entry()、
+      split_db_value_and_blob_ids()、create_value_from_db_key_and_value() など) を削除する。
+* [ ] CMake: RECOVERY_SORTER_KVSLIB・RECOVERY_SORTER_PUT_ONLY、マクロ SORT_METHOD_USE_ROCKSDB・SORT_METHOD_PUT_ONLY、
+      cmake/FindRocksDB.cmake と RocksDB・LevelDB の find_package を削除する。
+* [ ] .github/workflows/ci-build.yml:46 の -DRECOVERY_SORTER_KVSLIB=ROCKSDB と -DRECOVERY_SORTER_PUT_ONLY=ON を削除する。
+* [ ] README.md の librocksdb-dev・libleveldb-dev の導入と注記 (19〜21 行)、ビルドオプションの説明 (47〜48 行) を削除する。
+* [ ] テストの修正: snapshot/sorting_context_test (sortdb の部分を削除)、log/log_entry_4_LevelDB_test (write_serialized に
+      置き換え)、compaction/compaction_boundary_scan_test (sortdb に触れているコメント)。
+* [ ] RocksDB をインストールしていない環境でビルドとフルスイートが通ること。
+
+### ステップ 8: 旧バージョンとの出力の比較 (S1 メモ 6 節、L3 8.7)
+
+* [ ] 入力のデータを作る: 電話料金ベンチマークでデータを作り、料金計算のバッチとオンラインの更新を実行する。更新、削除、
+      同じキーの複数の版を含める。
+* [ ] 同じ入力のログディレクトリの写しから、旧バージョンと新バージョンのそれぞれで作る。
+  * [ ] スナップショットファイル: tsurugidb を起動して停止する。
+  * [ ] コンパクション済み WAL ファイル: tglogutil の compaction を実行する。
+* [ ] 新旧のスナップショットファイル同士、コンパクション済み WAL ファイル同士が同一の内容であることを確かめる。
+* [ ] 手順と結果を 5 節に記録する。
+
+### ステップ 9: 測定と既定値の見直し (L3 13)
+
+* [ ] LIMESTONE_SORT_THREADS と LIMESTONE_SORT_ARENA_SIZE_MB を変えて、起動時のソートの所要時間を測る。測定の条件は
+      S1 メモ 3 節と同じにし、旧バージョンの結果 (ソート 18.2 秒) と比べる。
+* [ ] 結果と考察をもとに、性能、安定性、使用するリソースが過大でないかを基準に既定値を決める。結果を 5 節に記録する。
+
+### ステップ 10: LE 段階 2
+
+* [ ] 分類の判定関数と、利用箇所の entry_type の列挙の置き換え (LE 9.1)。
+* [ ] レプリカの受信で未定義の種別と現れてはならない種別を abort にする (LE 9.1、P21)。
+* [ ] アクセサの種別の検査 (LE 9.2)。
+* [ ] 新しい名前のアクセサ (serialized_key_sid() など) の追加 (LE 10.3)。旧名は段階 4 まで残す。
+* [ ] 型付き版の書き出しの長さの検査 (LE 12)。
+* [ ] BLOB の GC の型 blob_gc_entry と、log_entry_container・log_entry_comparator の置き換え、log_entry_container.h の
+      順序の文書の修正 (LE 13.1、P19)。
+* [ ] UT: LE 15 節の abort する条件、書き出しの観点。
+
+### ステップ 11: LE 段階 3
+
+* [ ] 残りの呼び出し元 (cursor、compaction_carry_writer、レプリカの受信、テスト) を参照型と新しいアクセサに移す。
+* [ ] std::istream から読む残りの呼び出し元を新しい読み込みに移す。
+* [ ] cursor の move 後の状態の文書 (P20)。
+
+### ステップ 12: LE 段階 4
+
+* [ ] 旧 API を削除する: バイト列版の書き出し、旧名のアクセサ、truncate_value_from_normal_entry、
+      make_normal_with_blob_log_entry、static 関数 write_version_epoch_number・write_version_minor_write_version・
+      parse_blob_ids、read と read_entry_from、所有型の write(FILE*)。
+* [ ] 公開 API write_version_type(const std::string&)・write_version_type(std::string_view) の扱い (Q4 による)。
+
+### ステップ 13: 仕上げ
+
+* [ ] フルスイート、clang-tidy の警告の確認。
+* [ ] コメントの英訳。
+* [ ] PR の作成 (Q3)。
+* [ ] limestone 以外のリポジトリの対応 (S1 メモ 8 節)。新しい limestone が取り込まれるまで、依存パッケージを外す変更は
+      入れられない。
+* [ ] master へのマージ前に本ファイルを削除する。
+
+## 5. 記録
+
+<!-- 判断した事項、計画からの変更、測定の結果を日付つきで追記する。 -->
+
+## 6. 残った課題
+
+<!-- R1 の範囲外として持ち越すものを記録する。 -->
