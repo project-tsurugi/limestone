@@ -204,7 +204,7 @@ epoch_id_type dblog_scan::scan_pwal_files(  // NOLINT(readability-function-cogni
                 /* nop */
             }
             {
-                std::lock_guard<std::mutex> lock(max_epoch_per_file_mtx);
+                std::scoped_lock<std::mutex> lock(max_epoch_per_file_mtx);
                 max_epoch_per_file[p] = max_epoch_of_file;
             }
         }
@@ -222,7 +222,7 @@ epoch_id_type dblog_scan::scan_pwal_files(  // NOLINT(readability-function-cogni
             for (;;) {
                 boost::filesystem::path p;
                 {
-                    std::lock_guard<std::mutex> lock(list_mtx);
+                    std::scoped_lock<std::mutex> lock(list_mtx);
                     if (temp_list.empty() || done) break; 
                     p = temp_list.front();
                     temp_list.pop_front();
@@ -239,7 +239,7 @@ epoch_id_type dblog_scan::scan_pwal_files(  // NOLINT(readability-function-cogni
                 } catch (limestone_exception& ex) {
                     VLOG(log_info) << "/:limestone catch runtime_error(" << ex.what() << ")";
                     {
-                        std::lock_guard<std::mutex> lock(list_mtx);
+                        std::scoped_lock<std::mutex> lock(list_mtx);
                         if (!ex_ptr) {  // only save one
                             ex_ptr = std::current_exception();
                         }

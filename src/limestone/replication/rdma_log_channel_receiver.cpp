@@ -32,7 +32,7 @@ rdma_log_channel_receiver::rdma_log_channel_receiver(limestone::api::datastore& 
 
 void rdma_log_channel_receiver::handle_rdma_data_event(rdma_data_event const& event) {
     {
-        std::lock_guard<std::mutex> lock(mutex_);
+        std::scoped_lock<std::mutex> lock(mutex_);
         auto const& header = event.header;
         if (header.version != rdma_frame_current_version) {
             LOG_LP(FATAL) << "RDMA frame version mismatch: expected "

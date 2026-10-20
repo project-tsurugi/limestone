@@ -76,7 +76,7 @@ void log_channel_impl::clear_rotation_requested_locked() noexcept {
 void log_channel_impl::activate_session_and_consume_rotation_request() {
     auto& rotation_state = datastore_->get_impl()->get_rotation_state();
     {
-        std::lock_guard<std::mutex> lock(rotation_state.mutex);
+        std::scoped_lock<std::mutex> lock(rotation_state.mutex);
         if (rotation_status_ == rotation_status::requested) {
             // Unreachable path in theory: a requested status is consumed by the
             // previous session's end_session, so it can never survive until
@@ -92,7 +92,7 @@ void log_channel_impl::activate_session_and_consume_rotation_request() {
 void log_channel_impl::deactivate_session_and_consume_rotation_request() {
     auto& rotation_state = datastore_->get_impl()->get_rotation_state();
     {
-        std::lock_guard<std::mutex> lock(rotation_state.mutex);
+        std::scoped_lock<std::mutex> lock(rotation_state.mutex);
         session_active_ = false;
         if (rotation_status_ == rotation_status::requested) {
             consume_rotation_request_locked();
@@ -156,7 +156,7 @@ log_channel_impl::replica_mode log_channel_impl::get_replica_mode_locked() const
 }
 
 log_channel_impl::replica_mode log_channel_impl::get_replica_mode() const noexcept {
-    std::lock_guard<std::mutex> lock(mtx_replica_connector_);
+    std::scoped_lock<std::mutex> lock(mtx_replica_connector_);
     return get_replica_mode_locked();
 }
 
@@ -168,7 +168,7 @@ log_channel_impl::replica_mode log_channel_impl::get_replica_mode() const noexce
 bool log_channel_impl::send_replica_message(
         uint64_t epoch_id,
         const std::function<void(replication::message_log_entries&)>& modifier) {
-    std::lock_guard<std::mutex> lock(mtx_replica_connector_);
+    std::scoped_lock<std::mutex> lock(mtx_replica_connector_);
     auto mode = get_replica_mode_locked();
     TRACE_START << "epoch=" << epoch_id << " mode=" << mode;
 
@@ -247,7 +247,7 @@ void log_channel_impl::wait_for_replica_ack() {
 }
 
 void log_channel_impl::flush_rdma_stream() {
-    std::lock_guard<std::mutex> lock(mtx_replica_connector_);
+    std::scoped_lock<std::mutex> lock(mtx_replica_connector_);
     if (get_replica_mode_locked() != replica_mode::rdma) {
         LOG_LP(FATAL) << "RDMA flush requested without RDMA send stream.";
     }
@@ -299,27 +299,27 @@ std::future<void> log_channel_impl::flush_rdma_stream_async() {
 }
 
 void log_channel_impl::set_rdma_send_stream(std::unique_ptr<rdma_send_stream_base> stream) noexcept {
-    std::lock_guard<std::mutex> lock(mtx_replica_connector_);
+    std::scoped_lock<std::mutex> lock(mtx_replica_connector_);
     rdma_send_stream_ = std::move(stream);
 }
 
 bool log_channel_impl::has_rdma_send_stream() const noexcept {
-    std::lock_guard<std::mutex> lock(mtx_replica_connector_);
+    std::scoped_lock<std::mutex> lock(mtx_replica_connector_);
     return get_replica_mode_locked() == replica_mode::rdma;
 }
 
 void log_channel_impl::set_replica_connector(std::unique_ptr<replication::replica_connector> connector) {
-    std::lock_guard<std::mutex> lock(mtx_replica_connector_);
+    std::scoped_lock<std::mutex> lock(mtx_replica_connector_);
     replica_connector_ = std::move(connector);
 }
 
 void log_channel_impl::disable_replica_connector() {
-    std::lock_guard<std::mutex> lock(mtx_replica_connector_);
+    std::scoped_lock<std::mutex> lock(mtx_replica_connector_);
     replica_connector_.reset();
 }
 
 replication::replica_connector* log_channel_impl::get_replica_connector() {
-    std::lock_guard<std::mutex> lock(mtx_replica_connector_);
+    std::scoped_lock<std::mutex> lock(mtx_replica_connector_);
     return replica_connector_.get();
 }
 

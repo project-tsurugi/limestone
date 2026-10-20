@@ -476,7 +476,7 @@ public:
     }
     static std::uint64_t write_version_minor_write_version(std::string_view value_etc) {
         std::uint64_t minor_write_version{};
-        memcpy(static_cast<void*>(&minor_write_version), value_etc.data() + sizeof(epoch_id_type), sizeof(std::uint64_t));
+        memcpy(static_cast<void*>(&minor_write_version), value_etc.data() + sizeof(epoch_id_type), sizeof(std::uint64_t));  // NOLINT(*-pointer-arithmetic)
         return le64toh(minor_write_version);
     }
     static std::vector<blob_id_type> parse_blob_ids(std::string_view blob_ids_data) {
@@ -485,7 +485,7 @@ public:
         blob_ids.reserve(blob_count);
         for (std::size_t i = 0; i < blob_count; ++i) {
             blob_id_type blob_id = 0;
-            std::memcpy(&blob_id, blob_ids_data.data() + i * sizeof(blob_id_type), sizeof(blob_id_type));
+            std::memcpy(&blob_id, blob_ids_data.data() + i * sizeof(blob_id_type), sizeof(blob_id_type));  // NOLINT(*-pointer-arithmetic)
             blob_ids.push_back(le64toh(blob_id));
         }
         return blob_ids;

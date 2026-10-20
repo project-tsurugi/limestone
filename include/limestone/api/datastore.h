@@ -378,7 +378,7 @@ protected:  // for tests
     void rotate_epoch_file_for_tests() { rotate_epoch_file(); }
     void set_next_blob_id_for_tests(blob_id_type next_blob_id) noexcept { next_blob_id_.store(next_blob_id); }
     std::set<blob_id_type> get_persistent_blob_ids_for_tests() noexcept {
-        std::lock_guard<std::mutex> lock(persistent_blob_ids_mutex_);
+        std::scoped_lock<std::mutex> lock(persistent_blob_ids_mutex_);
         return persistent_blob_ids_;
     }
     write_version_type get_available_boundary_version_for_tests() const noexcept { return available_boundary_version_; }

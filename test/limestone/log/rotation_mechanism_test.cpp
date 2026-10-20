@@ -219,7 +219,7 @@ TEST_F(rotation_mechanism_test, begin_session_consumes_pending_rotation_request)
     channel.end_session();
 
     {
-        std::lock_guard<std::mutex> lock(datastore_->get_impl()->get_rotation_state().mutex);
+        std::scoped_lock<std::mutex> lock(datastore_->get_impl()->get_rotation_state().mutex);
         channel.get_impl()->set_rotation_requested_locked();
     }
 
@@ -370,7 +370,7 @@ TEST_F(rotation_mechanism_test, rename_failure_in_end_session_aborts_process) {
     channel.add_entry(1, "k1", "v1", {2, 0});
 
     {
-        std::lock_guard<std::mutex> lock(datastore_->get_impl()->get_rotation_state().mutex);
+        std::scoped_lock<std::mutex> lock(datastore_->get_impl()->get_rotation_state().mutex);
         channel.get_impl()->set_rotation_requested_locked();
     }
 

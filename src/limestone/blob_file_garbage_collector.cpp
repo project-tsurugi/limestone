@@ -136,7 +136,7 @@
          state_machine_.complete_cleanup();
          VLOG_LP(log_trace) << "Notifying cleanup_cv_";
          {
-            std::lock_guard<std::mutex> lock(mutex_);
+            std::scoped_lock<std::mutex> lock(mutex_);
             cleanup_cv_.notify_all();
         }
      });
@@ -199,7 +199,7 @@ void blob_file_garbage_collector::wait_for_cleanup() {
  void blob_file_garbage_collector::shutdown() {
      VLOG_LP(log_trace) << "Calling shutdown...";
      {
-         std::lock_guard<std::mutex> lock(shutdown_mutex_);
+         std::scoped_lock<std::mutex> lock(shutdown_mutex_);
 
          // Set shutdown flag before notifying waiting threads
          state_machine_.shutdown();
@@ -209,7 +209,7 @@ void blob_file_garbage_collector::wait_for_cleanup() {
 
          // Wake up all threads that are waiting in their respective wait() calls.
          {
-             std::lock_guard<std::mutex> lock(mutex_);
+             std::scoped_lock<std::mutex> lock(mutex_);
              blob_file_scan_cv_.notify_all();
              snapshot_scan_cv_.notify_all();
              cleanup_cv_.notify_all();

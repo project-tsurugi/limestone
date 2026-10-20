@@ -50,7 +50,7 @@ constexpr std::string_view find_fullname(std::string_view prettyname, std::strin
     if (start_pos == std::string_view::npos) {  // no return type, such as constructors
         start_pos = 0;
     }
-    return {prettyname.data() + start_pos, fn_pos + funcname.length() - start_pos};
+    return prettyname.substr(start_pos, fn_pos + funcname.length() - start_pos);
 }
 
 template<size_t N>

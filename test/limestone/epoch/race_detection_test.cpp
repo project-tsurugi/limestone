@@ -72,7 +72,7 @@ public:
      * @return A vector containing all written epochs.
      */
     std::vector<epoch_id_type> get_written_epochs() const {
-        std::lock_guard<std::mutex> lock(mutex_written_);
+        std::scoped_lock<std::mutex> lock(mutex_written_);
         return written_epochs_;
     }
 
@@ -81,7 +81,7 @@ public:
      * @return The first written epoch if available, otherwise std::nullopt.
      */
     std::optional<epoch_id_type> get_first_written_epoch() const {
-        std::lock_guard<std::mutex> lock(mutex_written_);
+        std::scoped_lock<std::mutex> lock(mutex_written_);
         if (!written_epochs_.empty()) {
             return written_epochs_.front();
         }
@@ -93,7 +93,7 @@ public:
      * @return The last written epoch if available, otherwise std::nullopt.
      */
     std::optional<epoch_id_type> get_last_written_epoch() const {
-        std::lock_guard<std::mutex> lock(mutex_written_);
+        std::scoped_lock<std::mutex> lock(mutex_written_);
         if (!written_epochs_.empty()) {
             return written_epochs_.back();
         }
@@ -105,7 +105,7 @@ public:
      * @return The size of the written_epochs_ list.
      */
     std::size_t get_written_epoch_count() const {
-        std::lock_guard<std::mutex> lock(mutex_written_);
+        std::scoped_lock<std::mutex> lock(mutex_written_);
         return written_epochs_.size();
     }
 
@@ -114,7 +114,7 @@ public:
      * @return A vector containing all persisted epochs.
      */
     std::vector<epoch_id_type> get_persisted_epochs() const {
-        std::lock_guard<std::mutex> lock(mutex_persisted_);
+        std::scoped_lock<std::mutex> lock(mutex_persisted_);
         return persisted_epochs_;
     }
 
@@ -123,7 +123,7 @@ public:
      * @return The first persisted epoch if available, otherwise std::nullopt.
      */
     std::optional<epoch_id_type> get_first_persisted_epoch() const {
-        std::lock_guard<std::mutex> lock(mutex_persisted_);
+        std::scoped_lock<std::mutex> lock(mutex_persisted_);
         if (!persisted_epochs_.empty()) {
             return persisted_epochs_.front();
         }
@@ -135,7 +135,7 @@ public:
      * @return The last persisted epoch if available, otherwise std::nullopt.
      */
     std::optional<epoch_id_type> get_last_persisted_epoch() const {
-        std::lock_guard<std::mutex> lock(mutex_persisted_);
+        std::scoped_lock<std::mutex> lock(mutex_persisted_);
         if (!persisted_epochs_.empty()) {
             return persisted_epochs_.back();
         }
@@ -147,7 +147,7 @@ public:
      * @return The size of the persisted_epochs_ list.
      */
     std::size_t get_persisted_epoch_count() const {
-        std::lock_guard<std::mutex> lock(mutex_persisted_);
+        std::scoped_lock<std::mutex> lock(mutex_persisted_);
         return persisted_epochs_.size();
     }
 
@@ -156,7 +156,7 @@ public:
      * @return A vector containing operation logs in the form of <operation, epoch>.
      */
     std::vector<std::pair<std::string, epoch_id_type>> get_operation_log() const {
-        std::lock_guard<std::mutex> lock(mutex_log_);
+        std::scoped_lock<std::mutex> lock(mutex_log_);
         return operation_log_;
     }
 
@@ -201,17 +201,17 @@ public:
 
 private:
     void record_written_epoch(epoch_id_type epoch) {
-        std::lock_guard<std::mutex> lock(mutex_written_);
+        std::scoped_lock<std::mutex> lock(mutex_written_);
         written_epochs_.emplace_back(epoch);
     }
 
     void record_persisted_epoch(epoch_id_type epoch) {
-        std::lock_guard<std::mutex> lock(mutex_persisted_);
+        std::scoped_lock<std::mutex> lock(mutex_persisted_);
         persisted_epochs_.emplace_back(epoch);
     }
 
     void log_operation(const std::string& operation, epoch_id_type epoch) {
-        std::lock_guard<std::mutex> lock(mutex_log_);
+        std::scoped_lock<std::mutex> lock(mutex_log_);
         operation_log_.emplace_back(operation, epoch);
     }
 

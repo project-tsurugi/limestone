@@ -102,7 +102,7 @@ protected:
      * @return A constant reference to the list of blob IDs.
      */
     [[nodiscard]] std::vector<blob_id_type> get_blob_ids() noexcept {
-        std::lock_guard<std::mutex> lock(mutex_);
+        std::scoped_lock<std::mutex> lock(mutex_);
         return blob_ids_;
     }
 

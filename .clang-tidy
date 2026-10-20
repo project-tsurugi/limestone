@@ -29,6 +29,7 @@ llvm-*,\
 -llvm-include-order,\
 -llvm-header-guard,\
 -llvm-namespace-comment,\
+-llvm-prefer-static-over-anonymous-namespace,\
 -llvm-qualified-auto,\
 misc-*,\
 -misc-const-correctness,\
@@ -53,6 +54,8 @@ CheckOptions:
   - key: readability-implicit-bool-conversion.AllowPointerConditions
     value: 1
   - key: readability-function-cognitive-complexity.IgnoreMacros
+    value: true
+  - key: cppcoreguidelines-use-enum-class.IgnoreUnscopedEnumsInClasses
     value: true
 HeaderFilterRegex: '.*/(include|src|examples)/.*\.h$'
 ...

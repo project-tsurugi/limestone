@@ -55,8 +55,8 @@ void store_bswap64_value(void *dest, const void *src) {
 int comp_twisted_key(const std::string_view& a, const std::string_view& b) {
     std::size_t a_strlen = a.size() - write_version_size;
     std::size_t b_strlen = b.size() - write_version_size;
-    std::string_view a_str(a.data() + write_version_size, a_strlen);
-    std::string_view b_str(b.data() + write_version_size, b_strlen);
+    std::string_view a_str(a.data() + write_version_size, a_strlen);  // NOLINT(*-pointer-arithmetic)
+    std::string_view b_str(b.data() + write_version_size, b_strlen);  // NOLINT(*-pointer-arithmetic)
     if (int c = a_str.compare(b_str); c != 0) return c;
     return std::memcmp(b.data(), a.data(), write_version_size);
 }
@@ -141,14 +141,14 @@ sorted_from_wals_result create_sorted_from_wals(compaction_options &options) {
     auto from_dir = options.get_from_dir();
     auto file_names = options.get_file_names();
     auto num_worker = options.get_num_worker();
-#if defined SORT_METHOD_PUT_ONLY
+#ifdef SORT_METHOD_PUT_ONLY
     sorting_context sctx{std::make_unique<sortdb_wrapper>(from_dir, comp_twisted_key)};
 #else
     sorting_context sctx{std::make_unique<sortdb_wrapper>(from_dir)};
 #endif
     dblog_scan logscan = file_names.empty() ? dblog_scan{from_dir} : dblog_scan{from_dir, options};
 
-#if defined SORT_METHOD_PUT_ONLY
+#ifdef SORT_METHOD_PUT_ONLY
     const auto add_entry_to_point = insert_twisted_entry;
     bool works_with_multi_thread = true;
 #else
@@ -265,7 +265,7 @@ std::string create_value_from_db_key_and_value(const std::string_view& db_key, c
 
 std::pair<std::string, std::string_view> split_db_value_and_blob_ids(const std::string_view raw_db_value) {
 
-#if defined SORT_METHOD_PUT_ONLY
+#ifdef SORT_METHOD_PUT_ONLY
     // The first byte is entry_type
     const char entry_type = raw_db_value[0];
     const std::string_view remaining_data = raw_db_value.substr(1);
@@ -335,11 +335,11 @@ void sortdb_foreach(
         const std::string_view blob_ids
     )>& write_snapshot_entry) {
     static_assert(sizeof(log_entry::entry_type) == 1);
-#if defined SORT_METHOD_PUT_ONLY
+#ifdef SORT_METHOD_PUT_ONLY
     sctx.get_sortdb()->each([&sctx, &write_snapshot_entry, last_key = std::string{}](const std::string_view db_key, const std::string_view db_value) mutable {
         // using the first entry in GROUP BY (original-)key
         // NB: max versions comes first (by the custom-comparator)
-        std::string_view key(db_key.data() + write_version_size, db_key.size() - write_version_size);
+        std::string_view key(db_key.data() + write_version_size, db_key.size() - write_version_size);  // NOLINT(*-pointer-arithmetic)
         if (key == last_key) {  // same (original-)key with prev
             return; // skip
         }

@@ -34,7 +34,8 @@ rdma_send_stream_base::send_result rdma_send_stream_base::send_all_bytes(
         // (the ring hands out whole slots). Clamp to the bytes that are actually left, or
         // the copy below would read past the end of payload.
         auto const chunk = std::min(frame->capacity(), remaining);
-        std::copy_n(payload.data() + offset, chunk, frame->payload());
+        auto const chunk_bytes = payload.substr(offset, chunk);
+        std::copy(chunk_bytes.begin(), chunk_bytes.end(), frame->payload());
         auto result = submit_frame_buffer(*frame, chunk);
         if (! result.success) {
             return {false, result.error_message, offset};

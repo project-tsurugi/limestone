@@ -129,14 +129,14 @@ void datastore_impl::on_compaction_after_commit() const {
 
 std::optional<std::string> datastore_impl::get_current_compacted_file_name() const {
     {
-        std::lock_guard<std::mutex> lock(current_compacted_file_name_mutex_);
+        std::scoped_lock<std::mutex> lock(current_compacted_file_name_mutex_);
         return current_compacted_file_name_;
     }
 }
 
 void datastore_impl::set_current_compacted_file_name(std::optional<std::string> file_name) {
     {
-        std::lock_guard<std::mutex> lock(current_compacted_file_name_mutex_);
+        std::scoped_lock<std::mutex> lock(current_compacted_file_name_mutex_);
         current_compacted_file_name_ = std::move(file_name);
     }
 }
@@ -313,7 +313,7 @@ bool datastore_impl::propagate_group_commit_rdma(uint64_t epoch_id) {
     replication_message::send(io, message);
     // rdma_send_stream is not thread-safe and no mutex is taken here: the caller is
     // already serialized by the CAS in update_min_epoch_id() and runs inside the
-    // lock_guard of mtx_epoch_file_ (plus one pre-threading call in ready()). If that
+    // scoped_lock of mtx_epoch_file_ (plus one pre-threading call in ready()). If that
     // premise ever breaks, multiple threads would touch this stream concurrently.
     auto result = rdma_control_send_stream_->send_all_bytes(io.get_out_view());
     if (!result.success) {
@@ -423,7 +423,7 @@ std::unique_ptr<replication::replica_connector> datastore_impl::create_log_chann
 log_channel& datastore_impl::register_log_channel(
     std::function<std::unique_ptr<log_channel>(std::uint64_t)> const& factory) {
     {
-        std::lock_guard<std::mutex> lock(mtx_channel_);
+        std::scoped_lock<std::mutex> lock(mtx_channel_);
         auto id = log_channel_id_.fetch_add(1);
         log_channels_.emplace_back(factory(id));
         return *log_channels_.back();
@@ -882,7 +882,7 @@ blob_reference_tag_type datastore_impl::generate_reference_tag(
         std::uint64_t transaction_id) const {
     std::array<unsigned char, sizeof(blob_id_type) + sizeof(std::uint64_t)> input_bytes{};
     std::memcpy(input_bytes.data(), &blob_id, sizeof(blob_id_type));
-    std::memcpy(input_bytes.data() + sizeof(blob_id_type),
+    std::memcpy(input_bytes.data() + sizeof(blob_id_type),  // NOLINT(*-pointer-arithmetic)
             &transaction_id, sizeof(std::uint64_t));
 
     auto const& secret_key = get_hmac_secret_key();
@@ -944,14 +944,14 @@ boost::filesystem::path datastore_impl::resolve_blob_path(blob_id_type blob_id) 
 
 void datastore_impl::register_live_blob_pool(limestone::internal::blob_pool_impl const* pool, blob_id_type next_blob_id) {
     {
-        std::lock_guard<std::mutex> lock(live_blob_pools_mutex_);
+        std::scoped_lock<std::mutex> lock(live_blob_pools_mutex_);
         live_blob_pools_[pool] = next_blob_id;
     }
 }
 
 void datastore_impl::unregister_live_blob_pool(limestone::internal::blob_pool_impl const* pool) noexcept {
     {
-        std::lock_guard<std::mutex> lock(live_blob_pools_mutex_);
+        std::scoped_lock<std::mutex> lock(live_blob_pools_mutex_);
         live_blob_pools_.erase(pool);
     }
 }
@@ -959,7 +959,7 @@ void datastore_impl::unregister_live_blob_pool(limestone::internal::blob_pool_im
 blob_id_type datastore_impl::get_live_blob_pool_min_next_blob_id(blob_id_type next_blob_id) const {
     blob_id_type min_next_blob_id = next_blob_id;
     {
-        std::lock_guard<std::mutex> lock(live_blob_pools_mutex_);
+        std::scoped_lock<std::mutex> lock(live_blob_pools_mutex_);
         for (const auto& entry : live_blob_pools_) {
             min_next_blob_id = std::min(min_next_blob_id, entry.second);
         }

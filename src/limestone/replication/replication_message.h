@@ -51,7 +51,7 @@ enum class message_type_id : uint8_t {
 };
 
 // Enum to define connection types
-enum connection_type : uint8_t {
+enum connection_type : uint8_t {  // NOLINT(cppcoreguidelines-use-enum-class)
     CONNECTION_TYPE_CONTROL_CHANNEL = 0,
     CONNECTION_TYPE_LOG_CHANNEL = 1
 };

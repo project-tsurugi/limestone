@@ -129,12 +129,12 @@
  }
 
  blob_file_gc_state blob_file_gc_state_machine::get_state() const {
-     std::lock_guard<std::mutex> lock(mutex_);
+     std::scoped_lock<std::mutex> lock(mutex_);
      return current_state_;
  }
   
  blob_file_gc_state blob_file_gc_state_machine::start_blob_scan() {
-     std::lock_guard<std::mutex> lock(mutex_);
+     std::scoped_lock<std::mutex> lock(mutex_);
      current_state_ = transition(blob_file_gc_event::start_blob_scan);
      return current_state_;
  }
@@ -143,7 +143,7 @@
      if (mode != snapshot_scan_mode::internal && mode != snapshot_scan_mode::external) {
          throw std::invalid_argument("Invalid snapshot scan mode");
      }
-     std::lock_guard<std::mutex> lock(mutex_);
+     std::scoped_lock<std::mutex> lock(mutex_);
      current_state_ = transition(blob_file_gc_event::start_snapshot_scan);
     // If an exception is thrown when the state transition fails,
     // reaching this line indicates that the state transition was successful.
@@ -152,13 +152,13 @@
  }
  
  blob_file_gc_state blob_file_gc_state_machine::complete_blob_scan() {
-     std::lock_guard<std::mutex> lock(mutex_);
+     std::scoped_lock<std::mutex> lock(mutex_);
      current_state_ = transition(blob_file_gc_event::complete_blob_scan);
      return current_state_;
  }
  
  blob_file_gc_state blob_file_gc_state_machine::complete_snapshot_scan(snapshot_scan_mode mode) {
-     std::lock_guard<std::mutex> lock(mutex_);
+     std::scoped_lock<std::mutex> lock(mutex_);
     // If an exception is thrown when the state transition fails,
     // reaching this line indicates that the state transition was successful.
      blob_file_gc_state state = transition(blob_file_gc_event::complete_snapshot_scan);
@@ -171,31 +171,31 @@
  }
 
  blob_file_gc_state blob_file_gc_state_machine::complete_cleanup() {
-     std::lock_guard<std::mutex> lock(mutex_);
+     std::scoped_lock<std::mutex> lock(mutex_);
      current_state_ = transition(blob_file_gc_event::complete_cleanup);
      return current_state_;
  }
  
  blob_file_gc_state blob_file_gc_state_machine::shutdown() {
-     std::lock_guard<std::mutex> lock(mutex_);
+     std::scoped_lock<std::mutex> lock(mutex_);
      current_state_ = transition(blob_file_gc_event::shutdown);
      return current_state_;
  }
  
  blob_file_gc_state blob_file_gc_state_machine::reset() {
-     std::lock_guard<std::mutex> lock(mutex_);
+     std::scoped_lock<std::mutex> lock(mutex_);
      current_state_ = transition(blob_file_gc_event::reset);
      snapshot_scan_mode_ = snapshot_scan_mode::none;
      return current_state_;
  }
  
  void blob_file_gc_state_machine::force_set_state(blob_file_gc_state new_state) {
-    std::lock_guard<std::mutex> lock(mutex_);
+    std::scoped_lock<std::mutex> lock(mutex_);
     current_state_ = new_state;
 }
 
 blob_file_gc_state_machine::snapshot_scan_mode blob_file_gc_state_machine::get_snapshot_scan_mode() {
-    std::lock_guard<std::mutex> lock(mutex_);
+    std::scoped_lock<std::mutex> lock(mutex_);
     return snapshot_scan_mode_;
 }
 

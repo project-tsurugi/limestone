@@ -592,7 +592,7 @@ void datastore::update_min_epoch_id(bool from_switch_epoch) {  // NOLINT(readabi
         if (epoch_id_to_be_recorded_.compare_exchange_strong(old_epoch_id, to_be_epoch)) {
             TRACE_FINE << "epoch_id_to_be_recorded_ updated to " << to_be_epoch;
             on_update_min_epoch_id_epoch_id_to_be_recorded_load();  // for testing
-            std::lock_guard<std::mutex> lock(mtx_epoch_file_);
+            std::scoped_lock<std::mutex> lock(mtx_epoch_file_);
             if (to_be_epoch < epoch_id_to_be_recorded_.load()) {
                 break;
             }           
@@ -626,7 +626,7 @@ void datastore::update_min_epoch_id(bool from_switch_epoch) {  // NOLINT(readabi
             TRACE_FINE << "epoch_id_informed_ updated to " << to_be_epoch;
             {
                 on_update_min_epoch_id_epoch_id_informed_load_2();  // for testing
-                std::lock_guard<std::mutex> lock(mtx_epoch_persistent_callback_);
+                std::scoped_lock<std::mutex> lock(mtx_epoch_persistent_callback_);
                 if (to_be_epoch < epoch_id_informed_.load()) {
                     break;
                 }
@@ -638,7 +638,7 @@ void datastore::update_min_epoch_id(bool from_switch_epoch) {  // NOLINT(readabi
             }
             {
                 // Notify waiting threads in rotate_log_files() about the update to epoch_id_informed_
-                std::lock_guard<std::mutex> lock(informed_mutex);
+                std::scoped_lock<std::mutex> lock(informed_mutex);
                 cv_epoch_informed.notify_all();  
             }
             break;
@@ -655,7 +655,7 @@ void datastore::add_persistent_callback(std::function<void(epoch_id_type)> callb
 
 void datastore::remove_persistent_callback() noexcept {
     check_after_ready(static_cast<const char*>(__func__));
-    std::lock_guard<std::mutex> lock(mtx_epoch_persistent_callback_);
+    std::scoped_lock<std::mutex> lock(mtx_epoch_persistent_callback_);
     persistent_callback_ = {};
 }
 
@@ -706,11 +706,11 @@ std::future<void> datastore::shutdown() noexcept {
         auto& rotation_state = impl_->get_rotation_state();
         rotation_state.shutdown_requested.store(true);
         {
-            std::lock_guard<std::mutex> lock(informed_mutex);
+            std::scoped_lock<std::mutex> lock(informed_mutex);
             cv_epoch_informed.notify_all();
         }
         {
-            std::lock_guard<std::mutex> lock(rotation_state.mutex);
+            std::scoped_lock<std::mutex> lock(rotation_state.mutex);
             rotation_state.pending_cv.notify_all();
         }
     }
@@ -866,7 +866,7 @@ void datastore::recover([[maybe_unused]] const epoch_tag& tag) const noexcept {
 
 rotation_result datastore::rotate_log_files() {  // NOLINT(readability-function-cognitive-complexity)
     TRACE_START;
-    std::lock_guard<std::mutex> lock(rotate_mutex); 
+    std::scoped_lock<std::mutex> lock(rotate_mutex); 
     TRACE << "start rotate_log_files() critical section";
     auto epoch_id = epoch_id_switched_.load();
     if (epoch_id == 0) {
@@ -1019,19 +1019,19 @@ void datastore::rotate_epoch_file() {
 }
 
 void datastore::add_file(const boost::filesystem::path& file) noexcept {
-    std::lock_guard<std::mutex> lock(mtx_files_);
+    std::scoped_lock<std::mutex> lock(mtx_files_);
 
     files_.insert(file);
 }
 
 void datastore::subtract_file(const boost::filesystem::path& file) {
-    std::lock_guard<std::mutex> lock(mtx_files_);
+    std::scoped_lock<std::mutex> lock(mtx_files_);
 
     files_.erase(file);
 }
 
 std::set<boost::filesystem::path> datastore::get_files() {
-    std::lock_guard<std::mutex> lock(mtx_files_);
+    std::scoped_lock<std::mutex> lock(mtx_files_);
 
     return files_;
 }
@@ -1099,7 +1099,7 @@ void datastore::online_compaction_worker() {
 
 void datastore::stop_online_compaction_worker() {
     {
-        std::lock_guard<std::mutex> lock(mtx_online_compaction_worker_);
+        std::scoped_lock<std::mutex> lock(mtx_online_compaction_worker_);
         stop_online_compaction_worker_.store(true);
     }
     cv_online_compaction_worker_.notify_all();
@@ -1129,7 +1129,7 @@ void datastore::compact_with_online() {  // NOLINT(readability-function-cognitiv
         impl_->get_live_blob_pool_min_next_blob_id(next_blob_id_.load(std::memory_order_acquire));
     write_version_type boundary_version_copy;
     {
-        std::lock_guard<std::mutex> lock(boundary_mutex_);
+        std::scoped_lock<std::mutex> lock(boundary_mutex_);
         boundary_version_copy = available_boundary_version_;
     }
 
@@ -1394,7 +1394,7 @@ blob_file datastore::get_blob_file(blob_id_type reference) {
 void datastore::switch_available_boundary_version(write_version_type version) {
     TRACE_FINE_START << "version=" << version.get_major() << "." << version.get_minor();
     {
-        std::lock_guard<std::mutex> lock(boundary_mutex_);
+        std::scoped_lock<std::mutex> lock(boundary_mutex_);
         if (version < available_boundary_version_) {
             LOG_LP(ERROR) << "The new boundary version (" << version.get_major() << ", " 
             << version.get_minor() << ") is smaller than the current boundary version (" 
@@ -1408,7 +1408,7 @@ void datastore::switch_available_boundary_version(write_version_type version) {
 }
 
 void datastore::add_persistent_blob_ids(const std::vector<blob_id_type>& blob_ids) {
-    std::lock_guard<std::mutex> lock(persistent_blob_ids_mutex_);
+    std::scoped_lock<std::mutex> lock(persistent_blob_ids_mutex_);
     for (const auto& blob_id : blob_ids) {
         persistent_blob_ids_.insert(blob_id);
     }
@@ -1416,7 +1416,7 @@ void datastore::add_persistent_blob_ids(const std::vector<blob_id_type>& blob_id
 
 
 std::vector<blob_id_type> datastore::check_and_remove_persistent_blob_ids(const std::vector<blob_id_type>& blob_ids) {
-    std::lock_guard<std::mutex> lock(persistent_blob_ids_mutex_);
+    std::scoped_lock<std::mutex> lock(persistent_blob_ids_mutex_);
     std::vector<blob_id_type> not_found_blob_ids;
 
     for (const auto& blob_id : blob_ids) {

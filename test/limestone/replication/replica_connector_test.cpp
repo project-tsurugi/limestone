@@ -47,14 +47,14 @@ TEST_F(replica_connector_test, send_and_receive_echo_message) {
     std::mutex listen_fd_mutex;
     int listen_fd{};
     {
-        std::lock_guard<std::mutex> lock(listen_fd_mutex);
+        std::scoped_lock<std::mutex> lock(listen_fd_mutex);
         listen_fd = start_test_server(port, true);
     }
     // Server thread: accept one connection, echo back test_message
     std::thread server_thread([&listen_fd, &listen_fd_mutex]() {
         int client_fd;
         {
-            std::lock_guard<std::mutex> lock(listen_fd_mutex);  // Lock the mutex for safe access
+            std::scoped_lock<std::mutex> lock(listen_fd_mutex);  // Lock the mutex for safe access
             client_fd = ::accept(listen_fd, nullptr, nullptr);
         }
         // Server-side logic to handle connection
@@ -96,14 +96,14 @@ TEST_F(replica_connector_test, receive_returns_null_when_server_closes_immediate
     std::mutex listen_fd_mutex;
     int listen_fd{};
     {
-        std::lock_guard<std::mutex> lock(listen_fd_mutex);
+        std::scoped_lock<std::mutex> lock(listen_fd_mutex);
         listen_fd = start_test_server(port, true);
     }
     // Server thread: accept one connection, echo back test_message
     std::thread server_thread([&listen_fd, &listen_fd_mutex]() {
         int client_fd;
         {
-            std::lock_guard<std::mutex> lock(listen_fd_mutex);  // Lock the mutex for safe access
+            std::scoped_lock<std::mutex> lock(listen_fd_mutex);  // Lock the mutex for safe access
             client_fd = ::accept(listen_fd, nullptr, nullptr);
         }
         ::close(client_fd);
@@ -148,14 +148,14 @@ TEST_F(replica_connector_test, connect_to_server_with_blob_support) {
     std::mutex listen_fd_mutex;
     int listen_fd{};
     {
-        std::lock_guard<std::mutex> lock(listen_fd_mutex);
+        std::scoped_lock<std::mutex> lock(listen_fd_mutex);
         listen_fd = start_test_server(port, true);
     }
     // Server thread: accept one connection, echo back test_message
     std::thread server_thread([&listen_fd, &listen_fd_mutex]() {
         int client_fd;
         {
-            std::lock_guard<std::mutex> lock(listen_fd_mutex);  // Lock the mutex for safe access
+            std::scoped_lock<std::mutex> lock(listen_fd_mutex);  // Lock the mutex for safe access
             client_fd = ::accept(listen_fd, nullptr, nullptr);
         }
         // Server-side logic to handle connection

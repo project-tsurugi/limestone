@@ -81,7 +81,7 @@ void blob_pool_impl::release() {
     is_released_.store(true, std::memory_order_release);
 
     // Remove all provisional BLOBs
-    std::lock_guard<std::mutex> lock(mutex_);
+    std::scoped_lock<std::mutex> lock(mutex_);
     boost::system::error_code ec;
     auto blob_ids_to_remove = datastore_.check_and_remove_persistent_blob_ids(blob_ids_);
     for (const auto& id : blob_ids_to_remove) {
@@ -123,7 +123,7 @@ blob_id_type blob_pool_impl::register_file(boost::filesystem::path const& file, 
 
     // Add the blob_id to the internal list
     {
-        std::lock_guard<std::mutex> lock(mutex_);
+        std::scoped_lock<std::mutex> lock(mutex_);
         blob_ids_.push_back(id);
     }
     return id;
@@ -158,7 +158,7 @@ blob_id_type blob_pool_impl::duplicate_data(blob_id_type reference) {
 
     // Add the blob_id to the internal list
     {
-        std::lock_guard<std::mutex> lock(mutex_);
+        std::scoped_lock<std::mutex> lock(mutex_);
         blob_ids_.push_back(new_id);
     }
     return new_id;
@@ -342,7 +342,7 @@ blob_id_type blob_pool_impl::register_data(std::string_view data) {
 
     // Add the blob_id to the internal list
     {
-        std::lock_guard<std::mutex> lock(mutex_);
+        std::scoped_lock<std::mutex> lock(mutex_);
         blob_ids_.push_back(id);
     }
     return id;

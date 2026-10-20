@@ -71,7 +71,7 @@ void replica_server::initialize(const boost::filesystem::path& location) {
 
  bool replica_server::start_listener(const struct sockaddr_in &listen_addr) {
     {
-        std::lock_guard<std::mutex> lock(state_mutex_);
+        std::scoped_lock<std::mutex> lock(state_mutex_);
         event_fd_ = ::eventfd(0, EFD_NONBLOCK);
         if (event_fd_ < 0) {
             LOG_LP(ERROR) << "Error: Failed to create eventfd: " << strerror(errno);
@@ -116,7 +116,7 @@ void replica_server::initialize(const boost::filesystem::path& location) {
  replica_server::poll_result replica_server::poll_shutdown_event_or_client() {
     std::array<pollfd, 2> fds{};
     {
-        std::lock_guard<std::mutex> lock(state_mutex_);
+        std::scoped_lock<std::mutex> lock(state_mutex_);
         fds[0].fd = sockfd_;
         fds[1].fd = event_fd_;
     }
@@ -162,7 +162,7 @@ void replica_server::handle_shutdown_event() {
 void replica_server::accept_new_client() {
     int client_fd = -1;
     {
-        std::lock_guard<std::mutex> lock(state_mutex_);
+        std::scoped_lock<std::mutex> lock(state_mutex_);
         client_fd = ::accept(sockfd_, nullptr, nullptr);
     }
     if (client_fd < 0) {
@@ -184,13 +184,13 @@ void replica_server::accept_new_client() {
     }
     
     {
-        std::lock_guard<std::mutex> lock(futures_mutex_);
+        std::scoped_lock<std::mutex> lock(futures_mutex_);
         client_futures_.emplace_back(std::move(future));
     }
 }
 
 void replica_server::cleanup_completed_futures() {
-    std::lock_guard<std::mutex> lock(futures_mutex_);
+    std::scoped_lock<std::mutex> lock(futures_mutex_);
     for (auto it = client_futures_.begin(); it != client_futures_.end();) {
         if (it->wait_for(std::chrono::seconds(0)) == std::future_status::ready) {
             // When erasing an element, erase returns an iterator to the next element
@@ -203,12 +203,12 @@ void replica_server::cleanup_completed_futures() {
 }
 
 void replica_server::register_active_client(int fd) {
-    std::lock_guard<std::mutex> lock(active_client_fds_mutex_);
+    std::scoped_lock<std::mutex> lock(active_client_fds_mutex_);
     active_client_fds_.insert(fd);
 }
 
 void replica_server::unregister_active_client(int fd) noexcept {
-    std::lock_guard<std::mutex> lock(active_client_fds_mutex_);
+    std::scoped_lock<std::mutex> lock(active_client_fds_mutex_);
     active_client_fds_.erase(fd);
 }
 
@@ -243,7 +243,7 @@ void replica_server::accept_loop() {
     }
 
     {
-        std::lock_guard<std::mutex> lock(state_mutex_);
+        std::scoped_lock<std::mutex> lock(state_mutex_);
         ::close(event_fd_);
         event_fd_ = -1;
     }
@@ -252,7 +252,7 @@ void replica_server::accept_loop() {
 void replica_server::register_handler(message_type_id type, std::function<std::shared_ptr<channel_handler_base>(replication_message_io&)> factory) noexcept {
     TRACE_START << "type: " << static_cast<uint16_t>(type);
     {
-        std::lock_guard<std::mutex> lock(state_mutex_);
+        std::scoped_lock<std::mutex> lock(state_mutex_);
         handler_factories_.emplace(type, std::move(factory));
     }
     TRACE_END << "handler_factories contains " << handler_factories_.size() << " factories";
@@ -262,7 +262,7 @@ void replica_server::register_handler(message_type_id type, std::function<std::s
 void replica_server::clear_handlers() noexcept {
     TRACE_START;
     {
-        std::lock_guard<std::mutex> lock(state_mutex_);
+        std::scoped_lock<std::mutex> lock(state_mutex_);
         handler_factories_.clear();
     }
     TRACE_END << "hanlers contains " << handler_factories_.size() << " handlers";
@@ -287,7 +287,7 @@ void replica_server::handle_client(int client_fd) {
 
         std::shared_ptr<channel_handler_base> handler;
         {
-            std::lock_guard<std::mutex> lock(state_mutex_);
+            std::scoped_lock<std::mutex> lock(state_mutex_);
             // Look up the registered factory and create a handler with the message I/O.
             auto factory_it = handler_factories_.find(type);
             if (factory_it != handler_factories_.end()) {
@@ -338,7 +338,7 @@ void replica_server::setup_log_channel_handler(
 
     {
         auto channel_idx = static_cast<std::size_t>(channel_id);
-        std::lock_guard<std::mutex> lock(log_channel_slot_mutexes_.at(channel_idx));
+        std::scoped_lock<std::mutex> lock(log_channel_slot_mutexes_.at(channel_idx));
         if (log_channel_handlers_.at(channel_idx)) {
             LOG_LP(FATAL) << "Duplicate log channel id registration: id=" << channel_id;
         }
@@ -356,7 +356,7 @@ void replica_server::shutdown() {
     int event_fd = -1;
     int listen_fd = -1;
     {
-        std::lock_guard<std::mutex> lock(state_mutex_);
+        std::scoped_lock<std::mutex> lock(state_mutex_);
         event_fd = event_fd_;
         listen_fd = sockfd_;
         sockfd_ = -1;
@@ -387,7 +387,7 @@ void replica_server::shutdown() {
     }
 
     {
-        std::lock_guard<std::mutex> lock(active_client_fds_mutex_);
+        std::scoped_lock<std::mutex> lock(active_client_fds_mutex_);
         for (int client_fd : active_client_fds_) {
             ::shutdown(client_fd, SHUT_RDWR);
         }
@@ -409,7 +409,7 @@ void replica_server::shutdown() {
     // Wait after waking the accept loop and active client sockets. Client handlers may
     // otherwise remain blocked in recv() while shutdown() waits for their futures.
     {
-        std::lock_guard<std::mutex> lock(futures_mutex_);
+        std::scoped_lock<std::mutex> lock(futures_mutex_);
         for (auto& future : client_futures_) {
             future.wait();
         }
@@ -441,7 +441,7 @@ std::shared_ptr<log_channel_handler> replica_server::get_log_channel_handler(
         return {};
     }
     {
-        std::lock_guard<std::mutex> lock(log_channel_slot_mutexes_.at(id));
+        std::scoped_lock<std::mutex> lock(log_channel_slot_mutexes_.at(id));
         return log_channel_handlers_.at(id);
     }
 }
@@ -473,7 +473,7 @@ replica_server::register_rdma_log_channel_receiver(std::uint64_t channel_id) {
     // checked to reject TCP/RDMA coexistence on one id (a configuration
     // inconsistency).
     {
-        std::lock_guard<std::mutex> lock(log_channel_slot_mutexes_.at(channel_idx));
+        std::scoped_lock<std::mutex> lock(log_channel_slot_mutexes_.at(channel_idx));
         if (rdma_log_channel_receivers_.at(channel_idx)
             || log_channel_handlers_.at(channel_idx)) {
             return register_rdma_receiver_result::already_registered;
@@ -487,7 +487,7 @@ replica_server::register_rdma_log_channel_receiver(std::uint64_t channel_id) {
     auto receiver = std::make_shared<rdma_log_channel_receiver>(*datastore_, channel);
 
     {
-        std::lock_guard<std::mutex> lock(log_channel_slot_mutexes_.at(channel_idx));
+        std::scoped_lock<std::mutex> lock(log_channel_slot_mutexes_.at(channel_idx));
         if (rdma_log_channel_receivers_.at(channel_idx)
             || log_channel_handlers_.at(channel_idx)) {
             return register_rdma_receiver_result::already_registered;
@@ -503,7 +503,7 @@ std::shared_ptr<rdma_log_channel_receiver> replica_server::get_rdma_log_channel_
         return {};
     }
     {
-        std::lock_guard<std::mutex> lock(log_channel_slot_mutexes_.at(id));
+        std::scoped_lock<std::mutex> lock(log_channel_slot_mutexes_.at(id));
         return rdma_log_channel_receivers_.at(id);
     }
 }
@@ -514,7 +514,7 @@ void replica_server::set_rdma_log_channel_receiver_for_test(
         return;
     }
     {
-        std::lock_guard<std::mutex> lock(log_channel_slot_mutexes_.at(id));
+        std::scoped_lock<std::mutex> lock(log_channel_slot_mutexes_.at(id));
         rdma_log_channel_receivers_.at(id) = std::move(receiver);
     }
 }
@@ -525,28 +525,28 @@ void replica_server::set_rdma_control_channel_id_for_test(std::int32_t id) noexc
 
 void replica_server::set_rdma_receiver_for_test(std::unique_ptr<rdma_receiver_base> receiver) noexcept {
     {
-        std::lock_guard<std::mutex> lock(rdma_init_mutex_);
+        std::scoped_lock<std::mutex> lock(rdma_init_mutex_);
         rdma_receiver_ = std::move(receiver);
     }
 }
 
 void replica_server::set_ack_sender_for_test(std::unique_ptr<rdma_sender_base> sender) noexcept {
     {
-        std::lock_guard<std::mutex> lock(rdma_init_mutex_);
+        std::scoped_lock<std::mutex> lock(rdma_init_mutex_);
         ack_sender_ = std::move(sender);
     }
 }
 
 void replica_server::set_rdma_receiver_factory_for_test(rdma_receiver_factory factory) noexcept {
     {
-        std::lock_guard<std::mutex> lock(rdma_init_mutex_);
+        std::scoped_lock<std::mutex> lock(rdma_init_mutex_);
         rdma_receiver_factory_for_test_ = std::move(factory);
     }
 }
 
 void replica_server::set_ack_sender_factory_for_test(rdma_sender_factory factory) noexcept {
     {
-        std::lock_guard<std::mutex> lock(rdma_init_mutex_);
+        std::scoped_lock<std::mutex> lock(rdma_init_mutex_);
         ack_sender_factory_for_test_ = std::move(factory);
     }
 }
@@ -580,7 +580,7 @@ void replica_server::handle_rdma_data_event(rdma_data_event const& event) {
 
     std::shared_ptr<rdma_log_channel_receiver> receiver;
     {
-        std::lock_guard<std::mutex> lock(log_channel_slot_mutexes_.at(channel_idx));
+        std::scoped_lock<std::mutex> lock(log_channel_slot_mutexes_.at(channel_idx));
         receiver = rdma_log_channel_receivers_.at(channel_idx);
     }
     if (! receiver) {
@@ -610,7 +610,7 @@ void replica_server::handle_rdma_control_event(rdma_data_event const& event) {
                       << header.sequence_number;
     }
     {
-        std::lock_guard<std::mutex> lock(control_channel_mutex_);
+        std::scoped_lock<std::mutex> lock(control_channel_mutex_);
         // The transport sends the ACK frame for this event only after this handler
         // returns, so exceptions must not escape to the receive thread; convert them
         // to a diagnosable FATAL, as the WAL data path does.
@@ -649,7 +649,7 @@ bool replica_server::mark_control_channel_created() noexcept {
 
 replica_server::rdma_init_result replica_server::initialize_rdma(
     uint32_t slot_count, std::uint64_t leader_ack_dma_address) {
-    std::lock_guard<std::mutex> lock(rdma_init_mutex_);
+    std::scoped_lock<std::mutex> lock(rdma_init_mutex_);
     if (rdma_receiver_ && ack_sender_) {
         return rdma_init_result::already_initialized;
     }
@@ -699,7 +699,7 @@ replica_server::rdma_init_result replica_server::initialize_rdma(
 
 replica_server::rdma_finalize_result replica_server::finalize_rdma(
         std::uint64_t local_instance_id, std::uint64_t remote_instance_id) {
-    std::lock_guard<std::mutex> lock(rdma_init_mutex_);
+    std::scoped_lock<std::mutex> lock(rdma_init_mutex_);
     if (! rdma_receiver_ || ! ack_sender_) {
         LOG_LP(ERROR) << "RDMA stack not initialized; cannot finalize: receiver="
                       << (rdma_receiver_ ? "set" : "null")
@@ -863,7 +863,7 @@ void replica_server::send_rdma_session_rejection(
 
 void replica_server::release_rdma_stack() noexcept {
     {
-        std::lock_guard<std::mutex> lock(rdma_init_mutex_);
+        std::scoped_lock<std::mutex> lock(rdma_init_mutex_);
         if (rdma_receiver_) {
             [[maybe_unused]] auto const result = rdma_receiver_->shutdown();
             rdma_receiver_.reset();

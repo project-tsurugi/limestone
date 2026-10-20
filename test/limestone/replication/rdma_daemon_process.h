@@ -209,7 +209,7 @@ private:
             break;
         }
         {
-            std::lock_guard<std::mutex> lock{mutex_};
+            std::scoped_lock<std::mutex> lock{mutex_};
             eof_ = true;
         }
         cv_.notify_all();
@@ -217,7 +217,7 @@ private:
 
     void push_line(std::string line) {
         {
-            std::lock_guard<std::mutex> lock{mutex_};
+            std::scoped_lock<std::mutex> lock{mutex_};
             lines_.push_back(std::move(line));
         }
         cv_.notify_all();

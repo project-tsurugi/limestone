@@ -49,7 +49,7 @@ DEFINE_bool(force, false, "(subcommand compaction) skip start prompt");
 DEFINE_bool(dry_run, false, "(subcommand compaction) dry run");
 DEFINE_bool(make_backup, false, "(subcommand compaction) make backup of target dblogdir");
 
-enum subcommand {
+enum class subcommand {
     cmd_inspect,
     cmd_repair,
     cmd_compaction,
@@ -512,7 +512,7 @@ int main(char *dir, subcommand mode) {  // NOLINT
     // --epoch is used only by the inspect and repair subcommands. For other
     // subcommands it is ignored without even being validated, so that options
     // belonging to other subcommands never affect the current one.
-    bool const uses_epoch = (mode == cmd_inspect || mode == cmd_repair);
+    bool const uses_epoch = (mode == subcommand::cmd_inspect || mode == subcommand::cmd_repair);
     std::optional<epoch_id_type> opt_epoch;
     if (!uses_epoch || FLAGS_epoch.empty()) {
         opt_epoch = std::nullopt;
@@ -545,9 +545,9 @@ int main(char *dir, subcommand mode) {  // NOLINT
         }
         dblog_scan ds(p);
         ds.set_thread_num(FLAGS_thread_num);
-        if (mode == cmd_inspect) inspect(ds, opt_epoch);
-        if (mode == cmd_repair) repair(ds, opt_epoch);
-        if (mode == cmd_compaction) compaction(ds);
+        if (mode == subcommand::cmd_inspect) inspect(ds, opt_epoch);
+        if (mode == subcommand::cmd_repair) repair(ds, opt_epoch);
+        if (mode == subcommand::cmd_compaction) compaction(ds);
         close(lock_fd);
     } catch (limestone_exception& e) {
         LOG(ERROR) << e.what();
@@ -584,11 +584,11 @@ int main(int argc, char *argv[]) {  // NOLINT
     const char *arg1 = argv[1];  // NOLINT(*-pointer-arithmetic)
     if (strcmp(arg1, "inspect") == 0) {
         LOG(WARNING) << "WARNING: subcommand 'inspect' is under development";
-        mode = cmd_inspect;
+        mode = subcommand::cmd_inspect;
     } else if (strcmp(arg1, "repair") == 0) {
-        mode = cmd_repair;
+        mode = subcommand::cmd_repair;
     } else if (strcmp(arg1, "compaction") == 0) {
-        mode = cmd_compaction;
+        mode = subcommand::cmd_compaction;
     } else {
         LOG(ERROR) << "unknown subcommand: " << arg1;
         usage();

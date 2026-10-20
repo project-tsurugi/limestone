@@ -37,7 +37,7 @@ void show_usage(const std::string& program_name) {
 
 int main(int argc, char* argv[]) {
     // Convert argv to vector<string> to avoid direct pointer arithmetic.
-    std::vector<std::string> args(argv, argv + argc);
+    std::vector<std::string> args(argv, argv + argc);  // NOLINT(*-pointer-arithmetic)
     
     // Retrieve program name from args[0].
     const std::string program_name = boost::filesystem::path(args[0]).filename().string();

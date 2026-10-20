@@ -60,7 +60,7 @@ public:
 
         test_datastore->on_rotate_log_files_callback = [&]() {
             {
-                std::lock_guard<std::mutex> lock(mtx);
+                std::scoped_lock<std::mutex> lock(mtx);
                 rotation_reached = true;
             }
             cv.notify_all();
@@ -89,7 +89,7 @@ public:
         }
         copy_dir_recursive(boost::filesystem::path(location), copy_to);
         {
-            std::lock_guard<std::mutex> lock(mtx);
+            std::scoped_lock<std::mutex> lock(mtx);
             released = true;
         }
         cv.notify_all();

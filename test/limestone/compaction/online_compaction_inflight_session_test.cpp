@@ -96,7 +96,7 @@ protected:
         // after the selection completes.
         datastore_->get_impl()->set_on_rotate_before_wait_for_test([&]() {
             {
-                std::lock_guard<std::mutex> lock(mtx);
+                std::scoped_lock<std::mutex> lock(mtx);
                 waiting = true;
                 cv.notify_all();
             }
@@ -112,7 +112,7 @@ protected:
         in_window();
 
         {
-            std::lock_guard<std::mutex> lock(mtx);
+            std::scoped_lock<std::mutex> lock(mtx);
             released = true;
             cv.notify_all();
         }

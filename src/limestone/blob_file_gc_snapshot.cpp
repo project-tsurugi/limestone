@@ -60,7 +60,7 @@ void blob_file_gc_snapshot::sanitize_and_add_entry(const log_entry& entry) {
         if (!tls_low_container_) {
             tls_low_container_ = std::make_shared<log_entry_container>();
             {
-                std::lock_guard<std::mutex> lock(global_mtx_);
+                std::scoped_lock<std::mutex> lock(global_mtx_);
                 thread_low_containers_.push_back(tls_low_container_);
             }
         }
@@ -70,7 +70,7 @@ void blob_file_gc_snapshot::sanitize_and_add_entry(const log_entry& entry) {
         if (!tls_high_container_) {
             tls_high_container_ = std::make_shared<log_entry_container>();
             {
-                std::lock_guard<std::mutex> lock(global_mtx_);
+                std::scoped_lock<std::mutex> lock(global_mtx_);
                 thread_high_containers_.push_back(tls_high_container_);
             }
         }
@@ -121,7 +121,7 @@ const log_entry_container& blob_file_gc_snapshot::finalize_snapshot() {
 
 void blob_file_gc_snapshot::reset() {
     {
-        std::lock_guard<std::mutex> lock(global_mtx_);
+        std::scoped_lock<std::mutex> lock(global_mtx_);
         thread_low_containers_.clear();
         thread_high_containers_.clear();
     }

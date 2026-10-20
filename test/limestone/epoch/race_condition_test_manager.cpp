@@ -29,7 +29,7 @@ void race_condition_test_manager::set_random_seed(unsigned int seed) {
 }
 
 void race_condition_test_manager::run() {
-    std::lock_guard<std::mutex> lock(mutex_);
+    std::scoped_lock<std::mutex> lock(mutex_);
     size_t thread_id_counter = 100;
     for (const auto p : test_methods_) {
         auto method = p.first;
@@ -43,11 +43,11 @@ void race_condition_test_manager::run() {
                     method();
                     thread_completed(current_id);
                 } catch (const std::exception& e) {
-                    std::lock_guard<std::mutex> lock(mutex_);
+                    std::scoped_lock<std::mutex> lock(mutex_);
                     std::cerr << "Exception in thread: " << e.what() << std::endl;
                     thread_completed(current_id);
                 } catch (...) {
-                    std::lock_guard<std::mutex> lock(mutex_);
+                    std::scoped_lock<std::mutex> lock(mutex_);
                     std::cerr << "Unknown exception in thread." << std::endl;
                     thread_completed(current_id);
                 }
@@ -103,7 +103,7 @@ void race_condition_test_manager::wait_for_all_threads_to_pause_or_complete() {
 }
 
 bool race_condition_test_manager::all_threads_completed() {
-    std::lock_guard<std::mutex> lock(mutex_);
+    std::scoped_lock<std::mutex> lock(mutex_);
     return threads_completed_ == threads_.size();
 }
 
@@ -116,7 +116,7 @@ void race_condition_test_manager::join_all_threads() {
 }
 
 void race_condition_test_manager::thread_completed(size_t thread_id) {
-    std::lock_guard<std::mutex> lock(mutex_);
+    std::scoped_lock<std::mutex> lock(mutex_);
     threads_completed_++;
     cv_.notify_all();
 }
