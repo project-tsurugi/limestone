@@ -15,6 +15,7 @@
  */
 #include "log_entry.h"
 
+#include <array>
 #include <cstdint>
 #include <limits>
 #include <utility>
@@ -262,6 +263,28 @@ void log_entry::rebuild_view() {
         LOG_LP(FATAL) << "malformed entry: entry size " << result.consumed() << " differs from buffer size " << entry_.size();
     }
     view_ = result.view();
+}
+
+void log_entry::write_serialized(FILE* strm, const log_entry_view& entry, write_version_handling handling) {
+    const std::string_view bytes = entry.serialized_entry();
+    switch (handling) {
+    case write_version_handling::keep:
+        write_bytes(strm, bytes.data(), bytes.size());
+        break;
+    case write_version_handling::oldest: {
+        // write_version is at the beginning of value_etc; split the entry there and write the oldest version in between
+        const auto write_version_offset = static_cast<std::size_t>(entry.serialized_value_etc().data() - bytes.data());
+        const write_version_type oldest = format::oldest_write_version();
+        const std::array<std::uint64_t, 2> oldest_bytes{htole64(static_cast<std::uint64_t>(oldest.get_major())),
+                                                        htole64(oldest.get_minor())};
+        static_assert(sizeof(oldest_bytes) == format::write_version_size);
+        const std::string_view rest = bytes.substr(write_version_offset + format::write_version_size);
+        write_bytes(strm, bytes.data(), write_version_offset);
+        write_bytes(strm, oldest_bytes.data(), sizeof(oldest_bytes));
+        write_bytes(strm, rest.data(), rest.size());
+        break;
+    }
+    }
 }
 
 void log_entry::write(FILE* strm) const {

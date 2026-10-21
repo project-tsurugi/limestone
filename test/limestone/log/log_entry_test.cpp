@@ -25,6 +25,8 @@
 
 #include "test_root.h"
 
+#include <limestone/api/limestone_exception.h>
+
 #include "log_entry.h"
 #include "log_entry_bytes.h"
 
@@ -104,6 +106,25 @@ void expect_default_state(const log_entry& e) {
 bool read_from(const std::string& bytes, log_entry& e, read_error& ec) {
     std::istringstream in(bytes);
     return e.read_entry_from(in, ec);
+}
+
+/**
+ * @brief Writes an entry to a temporary file with write_serialized() and returns the bytes written.
+ * @param bytes the bytes of the entry to write
+ * @param handling how to write the write_version
+ * @return the bytes written
+ */
+std::string write_serialized_to_string(const std::string& bytes, log_entry::write_version_handling handling) {
+    auto r = log_entry_view::parse(bytes);
+    EXPECT_TRUE(r);
+    FILE* fp = std::tmpfile();
+    EXPECT_NE(fp, nullptr);
+    log_entry::write_serialized(fp, r.view(), handling);
+    std::rewind(fp);
+    std::string written(bytes.size() + 1, '\0');
+    written.resize(std::fread(written.data(), 1, written.size(), fp));
+    std::fclose(fp);
+    return written;
 }
 
 }  // namespace
@@ -404,6 +425,57 @@ TEST(log_entry_test, factories_length_exceeds_32bit) {
     EXPECT_DEATH((void) log_entry::make_normal_with_blob(1, huge, "", wv, {}), "key length");
     EXPECT_DEATH((void) log_entry::make_normal_with_blob(1, "", huge, wv, {}), "value length");
     EXPECT_DEATH((void) log_entry::make_remove_entry(1, huge, wv), "key length");
+}
+
+// keep writes the bytes as is
+TEST(log_entry_test, write_serialized_keep) {
+    const std::vector<std::string> entries{
+        normal_entry(1, "key", long_value, 7, 3),
+        normal_with_blob(2, "key", "value", 7, 3, {11, 12}),
+        remove_entry(3, "key", 7, 3),
+        storage_entry(7, 4, 7, 3),
+        marker(2, 10),
+        marker(3, 11) + u8(0x7f),
+    };
+    for (const auto& bytes : entries) {
+        EXPECT_EQ(write_serialized_to_string(bytes, log_entry::write_version_handling::keep), bytes);
+    }
+}
+
+// oldest writes the bytes with only the write_version replaced by (0,0)
+TEST(log_entry_test, write_serialized_oldest) {
+    const std::vector<std::pair<std::string, std::string>> cases{
+        {normal_entry(1, "key", long_value, 7, 3), normal_entry(1, "key", long_value, 0, 0)},
+        {normal_entry(1, "", "", 7, 3), normal_entry(1, "", "", 0, 0)},
+        {normal_with_blob(2, "key", "value", 7, 3, {11, 12}), normal_with_blob(2, "key", "value", 0, 0, {11, 12})},
+        {remove_entry(3, "key", 7, 3), remove_entry(3, "key", 0, 0)},
+        {storage_entry(7, 4, 7, 3), storage_entry(7, 4, 0, 0)},
+    };
+    for (const auto& [bytes, expected] : cases) {
+        EXPECT_EQ(write_serialized_to_string(bytes, log_entry::write_version_handling::oldest), expected);
+    }
+}
+
+// oldest aborts for a marker, which has no write_version
+TEST(log_entry_test, write_serialized_oldest_marker) {
+    EXPECT_DEATH((void) write_serialized_to_string(marker(2, 10), log_entry::write_version_handling::oldest),
+                 "log_entry_view:serialized_value_etc not valid");
+}
+
+// cannot write a default-constructed view
+TEST(log_entry_test, write_serialized_default_view) {
+    EXPECT_DEATH(log_entry::write_serialized(stdout, log_entry_view{}), "log_entry_view:serialized_entry not valid");
+}
+
+// throws limestone_io_exception if writing fails
+TEST(log_entry_test, write_serialized_io_error) {
+    const std::string bytes = normal_entry(1, "key", "value", 7, 3);
+    auto r = log_entry_view::parse(bytes);
+    ASSERT_TRUE(r);
+    FILE* fp = std::fopen("/dev/null", "r");  // opened read-only, so writing fails
+    ASSERT_NE(fp, nullptr);
+    EXPECT_THROW(log_entry::write_serialized(fp, r.view()), limestone::limestone_io_exception);
+    std::fclose(fp);
 }
 
 }  // namespace limestone::testing

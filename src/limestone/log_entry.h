@@ -46,6 +46,16 @@ public:
         no_crc = 1,
         // future values should be added here when implementation is ready
     };
+
+    /**
+     * @brief How write_serialized() writes the write_version.
+     */
+    enum class write_version_handling : std::uint8_t {
+        /// Writes the write_version as is.
+        keep,
+        /// Writes the oldest write_version (log_entry_format::oldest_write_version()) instead.
+        oldest,
+    };
     class read_error {
     public:
         enum code {
@@ -245,6 +255,17 @@ public:
     }
 
 // for writer (entry)
+    /**
+     * @brief Writes the serialized value of the entry the view refers to. Does not check the lengths.
+     * @param strm the output stream
+     * @param entry the entry to write. Writes a FATAL log and aborts if it is in the default-constructed state
+     * @param handling how to write the write_version. oldest is valid for data entries and storage entries, and
+     *                 writes a FATAL log and aborts for markers
+     * @throws limestone_io_exception if writing fails
+     */
+    static void write_serialized(FILE* strm, const limestone::internal::log_entry_view& entry,
+                                 write_version_handling handling = write_version_handling::keep);
+
     /**
      * @brief Writes the serialized value of the entry as is. Writes a FATAL log and aborts in the
      *        default-constructed state.
