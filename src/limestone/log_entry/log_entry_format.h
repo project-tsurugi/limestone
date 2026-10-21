@@ -17,6 +17,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <ostream>
 #include <string_view>
 
 #include <limestone/api/epoch_id_type.h>
@@ -75,17 +76,38 @@ enum class entry_type : std::uint8_t {
 };
 
 /**
+ * @brief Returns the string representation of an entry_type value.
+ * @param type the entry type
+ * @return the name of the entry type, or "unknown" for a value not defined in entry_type
+ */
+[[nodiscard]] std::string_view to_string_view(entry_type type) noexcept;
+
+/**
+ * @brief Writes the string representation of an entry_type value to a stream.
+ * @param out the output stream
+ * @param type the entry type
+ * @return out
+ */
+std::ostream& operator<<(std::ostream& out, entry_type type);
+
+/**
  * @brief Returns whether the type is a data entry type (normal_entry, normal_with_blob, remove_entry).
+ * @param type the entry type
+ * @return true if the type is a data entry type
  */
 [[nodiscard]] bool is_data_entry(entry_type type) noexcept;
 
 /**
  * @brief Returns whether the type is a storage entry type (clear_storage, add_storage, remove_storage).
+ * @param type the entry type
+ * @return true if the type is a storage entry type
  */
 [[nodiscard]] bool is_storage_entry(entry_type type) noexcept;
 
 /**
  * @brief Returns whether the type is a marker type (marker_begin, marker_end, marker_durable, marker_invalidated_begin).
+ * @param type the entry type
+ * @return true if the type is a marker type
  */
 [[nodiscard]] bool is_marker(entry_type type) noexcept;
 
@@ -93,6 +115,8 @@ enum class entry_type : std::uint8_t {
  * @brief Returns whether the type byte is the value of a data entry type, a storage entry type or a marker type.
  *
  * Returns false for this_id_is_not_used (0) and for values not defined in entry_type.
+ * @param value the value of the type byte
+ * @return true if the value is a data entry type, a storage entry type or a marker type
  */
 [[nodiscard]] bool is_valid_entry_type(std::uint8_t value) noexcept;
 

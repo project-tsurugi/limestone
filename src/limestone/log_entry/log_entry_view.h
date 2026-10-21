@@ -17,6 +17,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <ostream>
 #include <string_view>
 #include <vector>
 
@@ -29,7 +30,7 @@
 
 namespace limestone::internal {
 
-struct log_entry_parse_result;
+class log_entry_parse_result;
 
 /**
  * @brief A view of one serialized entry.
@@ -136,15 +137,25 @@ public:
     [[nodiscard]] epoch_id_type epoch_id() const;
 
 private:
+    /**
+     * @brief Creates a view from the parsed region and the lengths of its parts. Called only by parse().
+     */
     log_entry_view(std::string_view entry, entry_type type, std::uint32_t key_length, std::uint32_t value_length,
                    std::uint32_t blob_count) noexcept;
 
+    /**
+     * @brief Returns whether the entry is a data entry or a storage entry.
+     */
     [[nodiscard]] bool is_data_or_storage() const noexcept;
 
-    // the offset of key_sid; called only for data entries and storage entries
+    /**
+     * @brief Returns the offset of key_sid in the entry. Called only for data entries and storage entries.
+     */
     [[nodiscard]] std::size_t key_sid_offset() const noexcept;
 
-    // the offset of value_etc; called only for data entries and storage entries
+    /**
+     * @brief Returns the offset of value_etc in the entry. Called only for data entries and storage entries.
+     */
     [[nodiscard]] std::size_t value_etc_offset() const noexcept;
 
     std::string_view entry_{};
@@ -156,8 +167,12 @@ private:
 
 /**
  * @brief The result of log_entry_view::parse().
+ *
+ * Created only by ok(), short_entry() and invalid_type(). Only the values valid for the result kind can be read; an
+ * accessor writes a FATAL log and aborts if it is asked for a value that is not valid.
  */
-struct log_entry_parse_result {
+class log_entry_parse_result {
+public:
     /**
      * @brief The kind of the result.
      */
@@ -170,25 +185,90 @@ struct log_entry_parse_result {
         invalid_type,
     };
 
-    /// the kind of the result
-    status result{status::ok};
-    /// the parsed entry
-    log_entry_view view{};
-    /// the number of bytes consumed (the size of the entry)
-    std::size_t consumed{};
-    /// the lower bound of the number of bytes needed to parse, counted from the beginning of input and including
-    /// the bytes already in input
-    std::size_t required{};
-    /// the value of the first byte
-    std::uint8_t type_value{};
+    /**
+     * @brief Creates a result of successful parsing.
+     * @param view the parsed entry. Writes a FATAL log and aborts if it is in the default-constructed state.
+     * @return the result. The number of bytes consumed is the size of the region view refers to.
+     */
+    [[nodiscard]] static log_entry_parse_result ok(const log_entry_view& view);
+
+    /**
+     * @brief Creates a result in which the bytes up to the end of the entry are not available.
+     * @param required the lower bound of the number of bytes needed to parse, counted from the beginning of input
+     *                 and including the bytes already in input
+     * @return the result
+     */
+    [[nodiscard]] static log_entry_parse_result short_entry(std::size_t required) noexcept;
+
+    /**
+     * @brief Creates a result in which the first byte is not a valid entry type value.
+     * @param type_value the value of the first byte
+     * @return the result
+     */
+    [[nodiscard]] static log_entry_parse_result invalid_type(std::uint8_t type_value) noexcept;
+
+    /**
+     * @brief Returns the kind of the result.
+     */
+    [[nodiscard]] status result() const noexcept;
 
     /**
      * @brief Returns whether parsing succeeded.
      *
      * Returns true if result is ok, and false if it is short_entry or invalid_type. This conversion does not
-     * distinguish short_entry from invalid_type. A caller that needs to distinguish them refers to result.
+     * distinguish short_entry from invalid_type. A caller that needs to distinguish them refers to result().
      */
     [[nodiscard]] explicit operator bool() const noexcept;
+
+    /**
+     * @brief Returns the parsed entry. Valid when the result kind is ok.
+     */
+    [[nodiscard]] log_entry_view view() const;
+
+    /**
+     * @brief Returns the number of bytes consumed (the size of the entry). Valid when the result kind is ok.
+     */
+    [[nodiscard]] std::size_t consumed() const;
+
+    /**
+     * @brief Returns the lower bound of the number of bytes needed to parse. Valid when the result kind is
+     *        short_entry.
+     *
+     * The number is counted from the beginning of input and includes the bytes already in input.
+     */
+    [[nodiscard]] std::size_t required() const;
+
+    /**
+     * @brief Returns the value of the first byte. Valid when the result kind is invalid_type.
+     */
+    [[nodiscard]] std::uint8_t type_value() const;
+
+private:
+    /**
+     * @brief Creates a result from the values of its members. Called only by ok(), short_entry() and invalid_type().
+     */
+    log_entry_parse_result(status result, const log_entry_view& view, std::size_t required,
+                           std::uint8_t type_value) noexcept;
+
+    status result_{};
+    log_entry_view view_{};
+    std::size_t required_{};
+    std::uint8_t type_value_{};
 };
+
+/**
+ * @brief Returns the string representation of a log_entry_parse_result::status value.
+ * @param result the result kind
+ * @return the name of the result kind, or "unknown" for an undefined value
+ */
+[[nodiscard]] std::string_view to_string_view(log_entry_parse_result::status result) noexcept;
+
+/**
+ * @brief Writes the string representation of a log_entry_parse_result::status value to a stream.
+ * @param out the output stream
+ * @param result the result kind
+ * @return out
+ */
+std::ostream& operator<<(std::ostream& out, log_entry_parse_result::status result);
 
 }  // namespace limestone::internal

@@ -17,6 +17,27 @@
 
 namespace limestone::internal::log_entry_format {
 
+std::string_view to_string_view(entry_type type) noexcept {
+    switch (type) {
+        case entry_type::this_id_is_not_used: return "this_id_is_not_used";
+        case entry_type::normal_entry: return "normal_entry";
+        case entry_type::normal_with_blob: return "normal_with_blob";
+        case entry_type::remove_entry: return "remove_entry";
+        case entry_type::marker_begin: return "marker_begin";
+        case entry_type::marker_end: return "marker_end";
+        case entry_type::marker_durable: return "marker_durable";
+        case entry_type::marker_invalidated_begin: return "marker_invalidated_begin";
+        case entry_type::clear_storage: return "clear_storage";
+        case entry_type::add_storage: return "add_storage";
+        case entry_type::remove_storage: return "remove_storage";
+    }
+    return "unknown";
+}
+
+std::ostream& operator<<(std::ostream& out, entry_type type) {
+    return out << to_string_view(type);
+}
+
 bool is_data_entry(entry_type type) noexcept {
     return type == entry_type::normal_entry || type == entry_type::normal_with_blob || type == entry_type::remove_entry;
 }
