@@ -62,7 +62,7 @@ master へのマージ前に本ファイルを削除する。
   * [x] 旧アクセサ key_sid()・value_etc()・raw_blob_ids() の戻り値を const std::string& から string_view に変える (Q5)。
         コンパイルが通らなくなる呼び出し元を直す: blob_file_gc_snapshot.cpp:97、datastore_snapshot.cpp の旧ソート
         (ステップ 7 で削除するまでのつなぎ)、test/limestone/blob/log_entry_blob_test.cpp:224。
-* [x] 最も古い版の write_version の定数 (LE 13.2)。
+* [x] 最も古い版の write_version を返す関数 oldest_write_version() (LE 13.2。定数ではなく関数にした経緯は 5 節)。
 * [x] ファクトリ (LE 13.3)。データ系・ストレージ系・marker の各種別。長さの違反で abort。
 * [x] write_serialized と、最も古い版に置き換えて書く指定 (LE 12)。
 * [ ] UT: LE 15 節の解析関数、比較関数、所有型、write_serialized の観点。

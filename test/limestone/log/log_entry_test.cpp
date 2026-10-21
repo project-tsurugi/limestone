@@ -116,7 +116,10 @@ bool read_from(const std::string& bytes, log_entry& e, read_error& ec) {
 template <class Write>
 std::string written_by(Write&& write) {
     FILE* fp = std::tmpfile();
-    EXPECT_NE(fp, nullptr);
+    if (fp == nullptr) {
+        ADD_FAILURE() << "tmpfile failed";
+        return {};
+    }
     std::forward<Write>(write)(fp);
     const long size = std::ftell(fp);
     std::rewind(fp);
@@ -413,7 +416,7 @@ TEST(log_entry_test, factories) {
     };
     for (const auto& [e, bytes] : cases) {
         EXPECT_EQ(e.type(), static_cast<entry_type>(bytes[0]));
-        EXPECT_EQ(e.view().serialized_entry(), bytes);
+        EXPECT_EQ(e.view().serialized_entry(), bytes) << e.type();
     }
 }
 

@@ -106,8 +106,8 @@ TEST(log_entry_format_test, compare_key_sid_matches_string_order) {
     for (const auto& a : key_sids) {
         for (const auto& b : key_sids) {
             const int c = format::compare_key_sid(a, b);
-            EXPECT_EQ(c < 0, a < b);
-            EXPECT_EQ(c == 0, a == b);
+            EXPECT_EQ(c < 0, a < b) << ::testing::PrintToString(a) << " " << ::testing::PrintToString(b);
+            EXPECT_EQ(c == 0, a == b) << ::testing::PrintToString(a) << " " << ::testing::PrintToString(b);
         }
     }
 }

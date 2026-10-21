@@ -21,6 +21,7 @@
 #include <istream>
 #include <string>
 #include <string_view>
+#include <vector>
 #include <exception>
 
 #include <glog/logging.h>
@@ -56,6 +57,7 @@ public:
         /// Writes the oldest write_version (log_entry_format::oldest_write_version()) instead.
         oldest,
     };
+
     class read_error {
     public:
         enum code {
