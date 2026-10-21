@@ -366,4 +366,44 @@ TEST(log_entry_test, accessor_not_valid_for_type) {
     EXPECT_DEATH(begin.write_version(wv), "log_entry_view:write_version not valid");
 }
 
+// each factory creates an entry with the bytes in the format
+TEST(log_entry_test, factories) {
+    using limestone::api::write_version_type;
+    const write_version_type wv{7, 3};
+    const std::vector<std::pair<log_entry, std::string>> cases{
+        {log_entry::make_normal_entry(1, "key", "value", wv), normal_entry(1, "key", "value", 7, 3)},
+        {log_entry::make_normal_entry(1, "", "", wv), normal_entry(1, "", "", 7, 3)},
+        {log_entry::make_normal_entry(1, "key", long_value, wv), normal_entry(1, "key", long_value, 7, 3)},
+        {log_entry::make_normal_with_blob(2, "key", "value", wv, {11, 12}),
+         normal_with_blob(2, "key", "value", 7, 3, {11, 12})},
+        {log_entry::make_normal_with_blob(2, "key", "value", wv, {}), normal_with_blob(2, "key", "value", 7, 3, {})},
+        {log_entry::make_remove_entry(3, "key", wv), remove_entry(3, "key", 7, 3)},
+        {log_entry::make_clear_storage(4, wv), storage_entry(7, 4, 7, 3)},
+        {log_entry::make_add_storage(5, wv), storage_entry(8, 5, 7, 3)},
+        {log_entry::make_remove_storage(6, wv), storage_entry(9, 6, 7, 3)},
+        {log_entry::make_marker_begin(10), marker(2, 10)},
+        {log_entry::make_marker_end(11), marker(3, 11) + u8(1)},
+        {log_entry::make_marker_durable(12), marker(4, 12)},
+        {log_entry::make_marker_invalidated_begin(13), marker(6, 13)},
+    };
+    for (const auto& [e, bytes] : cases) {
+        EXPECT_EQ(e.type(), static_cast<entry_type>(bytes[0]));
+        EXPECT_EQ(e.view().serialized_entry(), bytes);
+    }
+}
+
+// aborts if the length of the key or the value does not fit in 32 bits
+TEST(log_entry_test, factories_length_exceeds_32bit) {
+    // the factories check the lengths and abort before reading the bytes, so a string_view that refers to a small
+    // region with a large length is enough
+    const char buf[1]{};
+    const std::string_view huge{buf, std::size_t{UINT32_MAX} + 1};
+    const limestone::api::write_version_type wv{7, 3};
+    EXPECT_DEATH((void) log_entry::make_normal_entry(1, huge, "", wv), "key length");
+    EXPECT_DEATH((void) log_entry::make_normal_entry(1, "", huge, wv), "value length");
+    EXPECT_DEATH((void) log_entry::make_normal_with_blob(1, huge, "", wv, {}), "key length");
+    EXPECT_DEATH((void) log_entry::make_normal_with_blob(1, "", huge, wv, {}), "value length");
+    EXPECT_DEATH((void) log_entry::make_remove_entry(1, huge, wv), "key length");
+}
+
 }  // namespace limestone::testing

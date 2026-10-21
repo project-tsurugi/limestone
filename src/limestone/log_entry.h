@@ -136,6 +136,92 @@ public:
      */
     [[nodiscard]] limestone::internal::log_entry_view view() const noexcept;
 
+    /**
+     * @brief Creates a normal_entry.
+     * @param storage_id storage_id
+     * @param key the key. Writes a FATAL log and aborts if its length does not fit in 32 bits
+     * @param value the value. Writes a FATAL log and aborts if its length does not fit in 32 bits
+     * @param write_version write_version
+     * @return the created entry
+     */
+    [[nodiscard]] static log_entry make_normal_entry(storage_id_type storage_id, std::string_view key,
+                                                     std::string_view value, write_version_type write_version);
+
+    /**
+     * @brief Creates a normal_with_blob.
+     * @param storage_id storage_id
+     * @param key the key. Writes a FATAL log and aborts if its length does not fit in 32 bits
+     * @param value the value. Writes a FATAL log and aborts if its length does not fit in 32 bits
+     * @param write_version write_version
+     * @param blob_ids the blob_ids. Writes a FATAL log and aborts if their number does not fit in 32 bits
+     * @return the created entry
+     */
+    [[nodiscard]] static log_entry make_normal_with_blob(storage_id_type storage_id, std::string_view key,
+                                                         std::string_view value, write_version_type write_version,
+                                                         const std::vector<blob_id_type>& blob_ids);
+
+    /**
+     * @brief Creates a remove_entry.
+     * @param storage_id storage_id
+     * @param key the key. Writes a FATAL log and aborts if its length does not fit in 32 bits
+     * @param write_version write_version
+     * @return the created entry
+     */
+    [[nodiscard]] static log_entry make_remove_entry(storage_id_type storage_id, std::string_view key,
+                                                     write_version_type write_version);
+
+    /**
+     * @brief Creates a clear_storage.
+     * @param storage_id storage_id
+     * @param write_version write_version
+     * @return the created entry
+     */
+    [[nodiscard]] static log_entry make_clear_storage(storage_id_type storage_id, write_version_type write_version);
+
+    /**
+     * @brief Creates an add_storage.
+     * @param storage_id storage_id
+     * @param write_version write_version
+     * @return the created entry
+     */
+    [[nodiscard]] static log_entry make_add_storage(storage_id_type storage_id, write_version_type write_version);
+
+    /**
+     * @brief Creates a remove_storage.
+     * @param storage_id storage_id
+     * @param write_version write_version
+     * @return the created entry
+     */
+    [[nodiscard]] static log_entry make_remove_storage(storage_id_type storage_id, write_version_type write_version);
+
+    /**
+     * @brief Creates a marker_begin.
+     * @param epoch epoch
+     * @return the created entry
+     */
+    [[nodiscard]] static log_entry make_marker_begin(epoch_id_type epoch);
+
+    /**
+     * @brief Creates a marker_end. The CRC type is no_crc.
+     * @param epoch epoch
+     * @return the created entry
+     */
+    [[nodiscard]] static log_entry make_marker_end(epoch_id_type epoch);
+
+    /**
+     * @brief Creates a marker_durable.
+     * @param epoch epoch
+     * @return the created entry
+     */
+    [[nodiscard]] static log_entry make_marker_durable(epoch_id_type epoch);
+
+    /**
+     * @brief Creates a marker_invalidated_begin.
+     * @param epoch epoch
+     * @return the created entry
+     */
+    [[nodiscard]] static log_entry make_marker_invalidated_begin(epoch_id_type epoch);
+
     static void begin_session(FILE* strm, epoch_id_type epoch) {
         entry_type type = entry_type::marker_begin;
         write_uint8(strm, static_cast<std::uint8_t>(type));

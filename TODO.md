@@ -63,7 +63,7 @@ master へのマージ前に本ファイルを削除する。
         コンパイルが通らなくなる呼び出し元を直す: blob_file_gc_snapshot.cpp:97、datastore_snapshot.cpp の旧ソート
         (ステップ 7 で削除するまでのつなぎ)、test/limestone/blob/log_entry_blob_test.cpp:224。
 * [x] 最も古い版の write_version の定数 (LE 13.2)。
-* [ ] ファクトリ (LE 13.3)。データ系・ストレージ系・marker の各種別。長さの違反で abort。
+* [x] ファクトリ (LE 13.3)。データ系・ストレージ系・marker の各種別。長さの違反で abort。
 * [ ] write_serialized と、最も古い版に置き換えて書く指定 (LE 12)。
 * [ ] UT: LE 15 節の解析関数、比較関数、所有型、write_serialized の観点。
 
@@ -261,6 +261,11 @@ master へのマージ前に本ファイルを削除する。
   (log_entry/log_entry_format.h) の関数 oldest_write_version() とした。コンパクション済み WAL ファイルの版は limestone の
   内部の約束事で、公開 API を増やす価値がないため。write_version_type のコンストラクタは constexpr でないので、定数に
   すると起動時の動的な初期化になる。それを避けるため、LE の「定数」ではなく値を返す関数にした。
+
+* 2026-10-21: ファクトリ (LE 13.3) は、所有型の static 関数として種別ごとに 10 個設けた (make_normal_entry など)。種別を
+  引数に取らないので、誤った種別を渡せない。長さの違反の UT は、key と value について、小さな領域を指し長さだけが
+  大きい string_view で書いた (ファクトリはバイト列を読む前に abort する)。BLOB の個数の違反は、2^32 個の要素を
+  作れないので UT を書かず、レビューで確かめる。
 
 ## 6. 残った課題
 
