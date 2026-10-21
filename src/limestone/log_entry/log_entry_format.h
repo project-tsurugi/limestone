@@ -22,6 +22,7 @@
 
 #include <limestone/api/epoch_id_type.h>
 #include <limestone/api/storage_id_type.h>
+#include <limestone/api/write_version_type.h>
 
 /**
  * @file log_entry_format.h
@@ -51,6 +52,7 @@ namespace limestone::internal::log_entry_format {
 
 using limestone::api::epoch_id_type;
 using limestone::api::storage_id_type;
+using limestone::api::write_version_type;
 
 /**
  * @brief The type of an entry. The value is the first byte of the entry.
@@ -157,5 +159,13 @@ static_assert(sizeof(epoch_id_type) == epoch_size);
  * @return negative if a comes before b, 0 if they are equal, positive if a comes after b
  */
 [[nodiscard]] int compare_key_sid(std::string_view a, std::string_view b) noexcept;
+
+/**
+ * @brief Returns the oldest write_version (epoch 0, minor version 0).
+ *
+ * This is the write_version of the entries in compacted WAL files, and it compares as older than any other version.
+ * @return the oldest write_version
+ */
+[[nodiscard]] write_version_type oldest_write_version();
 
 }  // namespace limestone::internal::log_entry_format

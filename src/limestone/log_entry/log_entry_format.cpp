@@ -60,4 +60,8 @@ int compare_key_sid(std::string_view a, std::string_view b) noexcept {
     return a.compare(b);
 }
 
+write_version_type oldest_write_version() {
+    return write_version_type{0, 0};
+}
+
 }  // namespace limestone::internal::log_entry_format

@@ -94,4 +94,16 @@ TEST(log_entry_format_test, compare_key_sid_prefix) {
     EXPECT_GT(format::compare_key_sid("\x01\x00" "abc"sv, "\x01\x00" "ab"sv), 0);
 }
 
+// the oldest write_version is (0,0) and is older than any other version
+TEST(log_entry_format_test, oldest_write_version) {
+    using limestone::api::write_version_type;
+    const write_version_type oldest = format::oldest_write_version();
+    EXPECT_EQ(oldest.get_major(), 0U);
+    EXPECT_EQ(oldest.get_minor(), 0U);
+    for (const auto& other : {write_version_type{0, 1}, write_version_type{1, 0},
+                              write_version_type{UINT64_MAX, UINT64_MAX}}) {
+        EXPECT_LT(oldest, other) << other.get_major() << "," << other.get_minor();
+    }
+}
+
 }  // namespace limestone::testing

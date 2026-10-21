@@ -62,7 +62,7 @@ master へのマージ前に本ファイルを削除する。
   * [x] 旧アクセサ key_sid()・value_etc()・raw_blob_ids() の戻り値を const std::string& から string_view に変える (Q5)。
         コンパイルが通らなくなる呼び出し元を直す: blob_file_gc_snapshot.cpp:97、datastore_snapshot.cpp の旧ソート
         (ステップ 7 で削除するまでのつなぎ)、test/limestone/blob/log_entry_blob_test.cpp:224。
-* [ ] 最も古い版の write_version の定数 (LE 13.2)。
+* [x] 最も古い版の write_version の定数 (LE 13.2)。
 * [ ] ファクトリ (LE 13.3)。データ系・ストレージ系・marker の各種別。長さの違反で abort。
 * [ ] write_serialized と、最も古い版に置き換えて書く指定 (LE 12)。
 * [ ] UT: LE 15 節の解析関数、比較関数、所有型、write_serialized の観点。
@@ -256,6 +256,11 @@ master へのマージ前に本ファイルを削除する。
   (log_entry_test.cpp) で確かめる。
 * 2026-10-21: テスト用のバイト列を組み立てる関数群を、log_entry_view_test.cpp から共有ヘッダ
   test/limestone/log/log_entry_bytes.h へ移した。
+
+* 2026-10-21: 最も古い版の write_version (LE 13.2) は、公開ヘッダの write_version_type ではなく、形式の定義のヘッダ
+  (log_entry/log_entry_format.h) の関数 oldest_write_version() とした。コンパクション済み WAL ファイルの版は limestone の
+  内部の約束事で、公開 API を増やす価値がないため。write_version_type のコンストラクタは constexpr でないので、定数に
+  すると起動時の動的な初期化になる。それを避けるため、LE の「定数」ではなく値を返す関数にした。
 
 ## 6. 残った課題
 
