@@ -31,6 +31,7 @@
 #include <limestone/logging.h>
 #include "logging_helper.h"
 #include "limestone_exception_helper.h"
+#include "log_entry/log_entry_format.h"
 
 namespace limestone::api {
 
@@ -38,25 +39,7 @@ class datastore;
 
 class log_entry {
 public:
-    enum class entry_type : std::uint8_t {
-        this_id_is_not_used = 0,
-
-        // data management
-        normal_entry = 1,
-        normal_with_blob = 10,  
-        remove_entry = 5,
-
-        // epoch management
-        marker_begin = 2,
-        marker_end = 3,
-        marker_durable = 4,
-        marker_invalidated_begin = 6,
-
-        // storage management
-        clear_storage = 7,
-        add_storage = 8,
-        remove_storage = 9,
-    };
+    using entry_type = limestone::internal::log_entry_format::entry_type;
     enum class crc_type : std::uint8_t {
         // use non-zero values to avoid misinterpretation of zero-filled junk
         no_crc = 1,

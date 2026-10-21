@@ -16,6 +16,7 @@
 #pragma once
 
 #include <cstddef>
+#include <cstdint>
 #include <string_view>
 
 #include <limestone/api/epoch_id_type.h>
@@ -49,6 +50,51 @@ namespace limestone::internal::log_entry_format {
 
 using limestone::api::epoch_id_type;
 using limestone::api::storage_id_type;
+
+/**
+ * @brief The type of an entry. The value is the first byte of the entry.
+ */
+enum class entry_type : std::uint8_t {
+    this_id_is_not_used = 0,
+
+    // data management
+    normal_entry = 1,
+    normal_with_blob = 10,
+    remove_entry = 5,
+
+    // epoch management
+    marker_begin = 2,
+    marker_end = 3,
+    marker_durable = 4,
+    marker_invalidated_begin = 6,
+
+    // storage management
+    clear_storage = 7,
+    add_storage = 8,
+    remove_storage = 9,
+};
+
+/**
+ * @brief Returns whether the type is a data entry type (normal_entry, normal_with_blob, remove_entry).
+ */
+[[nodiscard]] bool is_data_entry(entry_type type) noexcept;
+
+/**
+ * @brief Returns whether the type is a storage entry type (clear_storage, add_storage, remove_storage).
+ */
+[[nodiscard]] bool is_storage_entry(entry_type type) noexcept;
+
+/**
+ * @brief Returns whether the type is a marker type (marker_begin, marker_end, marker_durable, marker_invalidated_begin).
+ */
+[[nodiscard]] bool is_marker(entry_type type) noexcept;
+
+/**
+ * @brief Returns whether the type byte is the value of a data entry type, a storage entry type or a marker type.
+ *
+ * Returns false for this_id_is_not_used (0) and for values not defined in entry_type.
+ */
+[[nodiscard]] bool is_valid_entry_type(std::uint8_t value) noexcept;
 
 // sizes of the fields
 inline constexpr std::size_t entry_type_size = 1;
@@ -86,8 +132,6 @@ static_assert(sizeof(epoch_id_type) == epoch_size);
  * @param b serialized key_sid
  * @return negative if a comes before b, 0 if they are equal, positive if a comes after b
  */
-[[nodiscard]] inline int compare_key_sid(std::string_view a, std::string_view b) noexcept {
-    return a.compare(b);
-}
+[[nodiscard]] int compare_key_sid(std::string_view a, std::string_view b) noexcept;
 
 }  // namespace limestone::internal::log_entry_format

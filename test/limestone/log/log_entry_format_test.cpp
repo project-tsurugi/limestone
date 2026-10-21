@@ -14,6 +14,7 @@
  * limitations under the License.
  */
 
+#include <cstdint>
 #include <string_view>
 
 #include "test_root.h"
@@ -34,6 +35,37 @@ TEST(log_entry_format_test, fixed_sizes) {
     EXPECT_EQ(format::storage_entry_size, 25U);
     EXPECT_EQ(format::marker_size, 9U);
     EXPECT_EQ(format::marker_end_size, 10U);
+}
+
+// the classification functions classify each data, storage and marker type correctly
+TEST(log_entry_format_test, classification) {
+    using format::entry_type;
+    for (auto t : {entry_type::normal_entry, entry_type::normal_with_blob, entry_type::remove_entry}) {
+        EXPECT_TRUE(format::is_data_entry(t));
+        EXPECT_FALSE(format::is_storage_entry(t));
+        EXPECT_FALSE(format::is_marker(t));
+    }
+    for (auto t : {entry_type::clear_storage, entry_type::add_storage, entry_type::remove_storage}) {
+        EXPECT_FALSE(format::is_data_entry(t));
+        EXPECT_TRUE(format::is_storage_entry(t));
+        EXPECT_FALSE(format::is_marker(t));
+    }
+    for (auto t : {entry_type::marker_begin, entry_type::marker_end, entry_type::marker_durable,
+                   entry_type::marker_invalidated_begin}) {
+        EXPECT_FALSE(format::is_data_entry(t));
+        EXPECT_FALSE(format::is_storage_entry(t));
+        EXPECT_TRUE(format::is_marker(t));
+    }
+    EXPECT_FALSE(format::is_data_entry(entry_type::this_id_is_not_used));
+    EXPECT_FALSE(format::is_storage_entry(entry_type::this_id_is_not_used));
+    EXPECT_FALSE(format::is_marker(entry_type::this_id_is_not_used));
+}
+
+// only 1 to 10 are valid entry type values
+TEST(log_entry_format_test, is_valid_entry_type) {
+    for (int value = 0; value <= 0xff; ++value) {
+        EXPECT_EQ(format::is_valid_entry_type(static_cast<std::uint8_t>(value)), 1 <= value && value <= 10) << value;
+    }
 }
 
 // equal key_sids compare as 0

@@ -1,5 +1,6 @@
 file(GLOB SOURCES
         "limestone/*.cpp"
+        "limestone/log_entry/*.cpp"
         "limestone/replication/*.cpp"
         "limestone/partitioned_cursor/*.cpp"
         "limestone/rdma/*.cpp"
