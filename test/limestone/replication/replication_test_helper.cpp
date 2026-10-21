@@ -139,8 +139,6 @@ std::vector<log_entry> read_raw_log_file(boost::filesystem::path const& log_path
         return entries;
     }
     while (true) {
-        // A fresh instance per entry: read() only overwrites the fields its entry
-        // type uses, so reusing one would leak fields between entries.
         log_entry entry;
         if (!entry.read(strm)) {
             break;

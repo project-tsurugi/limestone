@@ -94,7 +94,7 @@ log_entry_container blob_file_gc_snapshot::finalize_low_entries_impl() {
     log_entry_container low_merged = log_entry_container::merge_sorted_collections(thread_low_containers_);
     std::string last_key;
     for (const auto& entry : low_merged) {
-        const std::string& current_key = entry.key_sid();
+        const std::string_view current_key = entry.key_sid();
         if (last_key.empty() || current_key != last_key) {
             aggregated_entries.append(entry);
             last_key = current_key;

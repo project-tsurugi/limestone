@@ -57,9 +57,9 @@ master へのマージ前に本ファイルを削除する。
       比較関数 (LE 10.1・10.2)。static_assert (LE 10.5)。シリアライズとデシリアライズは参照型と所有型に置く (5 節)。
 * [x] 参照型 (log_entry/log_entry_view.h の log_entry_view) と解析関数 (LE 9.3・11.1)。不足のときの下限の計算を含む。
       分類の判定関数 (LE 9.1) と参照型のアクセサの種別の検査 (LE 9.2) を前倒しで入れる (5 節)。
-* [ ] 所有型 log_entry の構成を 1 本のバッファに変え、アクセサを参照型に委ねる (LE 9.3)。
+* [x] 所有型 log_entry の構成を 1 本のバッファに変え、アクセサを参照型に委ねる (LE 9.3)。
       move 元が既定構築の状態になること。
-  * [ ] 旧アクセサ key_sid()・value_etc()・raw_blob_ids() の戻り値を const std::string& から string_view に変える (Q5)。
+  * [x] 旧アクセサ key_sid()・value_etc()・raw_blob_ids() の戻り値を const std::string& から string_view に変える (Q5)。
         コンパイルが通らなくなる呼び出し元を直す: blob_file_gc_snapshot.cpp:97、datastore_snapshot.cpp の旧ソート
         (ステップ 7 で削除するまでのつなぎ)、test/limestone/blob/log_entry_blob_test.cpp:224。
 * [ ] 最も古い版の write_version の定数 (LE 13.2)。
@@ -142,6 +142,8 @@ master へのマージ前に本ファイルを削除する。
 * [ ] 結果と考察をもとに、性能、安定性、使用するリソースが過大でないかを基準に既定値を決める。結果を 5 節に記録する。
 * [ ] ソートの比較で呼ぶ関数 (参照型のアクセサ、key_sid の比較関数) を .cpp に置いたことの影響を確かめる。プロファイルで
       呼び出しのコストが目立つ場合に限り、根拠を添えて .h に戻すことを提案する (5 節)。
+* [ ] 所有型の move とコピーのたびに参照型を作り直す (解析し直す) ことの費用を確かめる。目立つ場合は、バッファの置き場所が
+      変わらない move では作り直さない形を検討する。
 
 ### ステップ 10: LE 段階 2
 
@@ -234,6 +236,26 @@ master へのマージ前に本ファイルを削除する。
 * 2026-10-21: 関数の定義は、強い理由がない限り .h ではなく .cpp に置く (探しやすさ、ビルド時間、カバレッジの確認で
   .h を見落とさないため)。参照型のアクセサと key_sid の比較関数も .cpp に置いた。LTO を使っていないので別の .cpp からの
   呼び出しは展開されない。inline 化が効くかはステップ 9 の測定で確かめ、効く関数だけを根拠を添えて .h に戻す。
+
+* 2026-10-21: 所有型の構成 (ステップ 2 の 3 項目目)。所有型はバッファ (std::string) と、それを指す参照型をメンバに
+  持つ。アクセサのたびに解析し直すと、ヘッダから長さを読み直す費用が呼び出しごとにかかるため。参照型を作るのは構築時と
+  代入時だけとし、既存のオブジェクトを書き換える read_entry_from と truncate_value_from_normal_entry も、内部では新しい
+  オブジェクトを作って move 代入する。定義は新設の src/limestone/log_entry.cpp に置いた。
+* 2026-10-21: 旧アクセサは種別の検査ごと参照型に委ねた (LE 9.2 の所有型への適用を段階 2 から前倒し)。normal_entry に
+  対する cursor の blob_ids() も abort するが、cursor の blob_ids() は公開 API ではなく、src と tsurugidb の他の
+  コンポーネントに normal_entry で呼ぶ箇所はない。値のない欄を求めていたテスト (partitioned_cursor_impl_test の
+  blob_ids()、AssertLogEntry に "" を渡していた 10 か所、log_entry_blob_test の marker の value_etc()) は、その欄を
+  確かめない形に直した。
+* 2026-10-21: 読み込みに失敗したとき、所有型は既定構築の状態になる (P5 の途中まで上書きされた状態をなくした)。
+  short_entry でも read_error の種別を入れ、parse_wal_file の short_entry の振り分けを所有型の種別から
+  read_error の種別に変えた (LE 11.3 のうち、この振り分けだけを段階 1 へ前倒し)。終端の判定は従来どおり eof で行う。
+* 2026-10-21: 所有型の write(FILE*) は、持っているバイト列をそのまま書く。marker_end の CRC の種別は、no_crc に
+  書き直さず読んだ値のまま書く。
+* 2026-10-21: make_normal_with_blob_log_entry とそのテスト 2 件を、ステップ 12 から前倒しして削除した。src からの
+  呼び出しはなく、1 本のバッファの構成で作り直す価値がないため。テストが確かめていた内容は、所有型の UT
+  (log_entry_test.cpp) で確かめる。
+* 2026-10-21: テスト用のバイト列を組み立てる関数群を、log_entry_view_test.cpp から共有ヘッダ
+  test/limestone/log/log_entry_bytes.h へ移した。
 
 ## 6. 残った課題
 

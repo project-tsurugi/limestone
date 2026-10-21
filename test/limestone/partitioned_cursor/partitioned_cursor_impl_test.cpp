@@ -80,7 +80,6 @@ TEST_F(partitioned_cursor_impl_test, single_entry_and_end_marker) {
     EXPECT_TRUE(cursor.next());
     EXPECT_EQ(cursor.storage(), 123);
     EXPECT_EQ(cursor.type(), log_entry::entry_type::normal_entry);
-    EXPECT_EQ(cursor.blob_ids().size(), 0);
     std::string key;
     cursor.key(key);
     EXPECT_EQ(key, "key");

@@ -66,7 +66,7 @@ void insert_entry_or_update_to_max(sortdb_wrapper* sortdb, const log_entry& e) {
     bool need_write = true;
     // Skip writing if an older entry is already stored.
     std::string value;
-    if (sortdb->get(e.key_sid(), &value)) {
+    if (sortdb->get(std::string(e.key_sid()), &value)) {
         write_version_type stored_write_version;
         auto stored_entry_type = static_cast<log_entry::entry_type>(value[0]);
         if (stored_entry_type == log_entry::entry_type::normal_with_blob) {
@@ -100,7 +100,7 @@ void insert_entry_or_update_to_max(sortdb_wrapper* sortdb, const log_entry& e) {
         } else {
             db_value.append(e.value_etc());
         }
-        sortdb->put(e.key_sid(), db_value);
+        sortdb->put(std::string(e.key_sid()), db_value);
     }
 }
 
@@ -114,7 +114,7 @@ void insert_twisted_entry(sortdb_wrapper* sortdb, const log_entry& e) {
     store_bswap64_value(&db_key[0], &e.value_etc()[0]);  // NOLINT(readability-container-data-pointer)
     store_bswap64_value(&db_key[8], &e.value_etc()[8]);
     std::memcpy(&db_key[write_version_size], e.key_sid().data(), e.key_sid().size());
-    std::string value = e.value_etc().substr(write_version_size);
+    std::string value(e.value_etc().substr(write_version_size));
     std::string db_value(1, static_cast<char>(e.type()));
     if (e.type() == log_entry::entry_type::normal_with_blob) {
         std::size_t value_size = value.size();

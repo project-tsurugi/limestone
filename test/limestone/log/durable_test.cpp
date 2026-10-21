@@ -249,6 +249,24 @@ TEST_F(durable_test, ut_scan_one_pwal_file_broken_entry_trimmed) {
     ASSERT_EQ(err.value(), log_entry::read_error::short_entry);
 }
 
+// a short entry at the head of the file is reported as unexpected_type with the type of that entry
+TEST_F(durable_test, ut_scan_one_pwal_file_short_entry_at_head) {
+    using namespace limestone::api;
+
+    boost::filesystem::path pwal(location);
+    pwal /= "pwal";
+    {  // make pwal file for test
+        FILE *f = fopen(pwal.c_str(), "w");
+        // make broken entry
+        fputc(static_cast<int>(log_entry::entry_type::normal_entry), f);
+        fputc(99, f);  // the end of file is missing
+        fclose(f);
+    }
+    auto [err, last_epoch, entries] = scan_one_pwal_file(pwal, 42);
+    ASSERT_EQ(err.value(), log_entry::read_error::unexpected_type);
+    EXPECT_EQ(err.entry_type(), log_entry::entry_type::normal_entry);
+}
+
 TEST_F(durable_test, ut_scan_one_pwal_file_broken_entry_type0) {
     using namespace limestone::api;
 

@@ -24,6 +24,7 @@
 #include "test_root.h"
 
 #include "log_entry/log_entry_view.h"
+#include "log_entry_bytes.h"
 
 namespace limestone::testing {
 
@@ -31,62 +32,14 @@ using limestone::internal::log_entry_view;
 using status = limestone::internal::log_entry_parse_result::status;
 using entry_type = limestone::internal::log_entry_format::entry_type;
 
-namespace {
-
-// The functions below build entries by hand, following the format description (log_entry_format.h).
-// They build test inputs and expected values independently of the code under test. Do not replace them with the
-// serialization functions of the code under test (such as the factory): a bug in that code would then also be in
-// the expected values, and the tests could not detect it.
-
-std::string u8(std::uint8_t v) {
-    return std::string(1, static_cast<char>(v));
-}
-
-std::string u32le(std::uint32_t v) {
-    std::string s{};
-    for (int i = 0; i < 4; ++i) {
-        s.push_back(static_cast<char>((v >> (8 * i)) & 0xffU));
-    }
-    return s;
-}
-
-std::string u64le(std::uint64_t v) {
-    std::string s{};
-    for (int i = 0; i < 8; ++i) {
-        s.push_back(static_cast<char>((v >> (8 * i)) & 0xffU));
-    }
-    return s;
-}
-
-std::string normal_entry(std::uint64_t storage, std::string_view key, std::string_view value,
-                         std::uint64_t epoch, std::uint64_t minor) {
-    return u8(1) + u32le(key.size()) + u32le(value.size()) + u64le(storage) + std::string(key)
-        + u64le(epoch) + u64le(minor) + std::string(value);
-}
-
-std::string normal_with_blob(std::uint64_t storage, std::string_view key, std::string_view value,
-                             std::uint64_t epoch, std::uint64_t minor, const std::vector<std::uint64_t>& blob_ids) {
-    std::string s = u8(10) + u32le(key.size()) + u32le(value.size()) + u64le(storage) + std::string(key)
-        + u64le(epoch) + u64le(minor) + std::string(value) + u32le(blob_ids.size());
-    for (auto id : blob_ids) {
-        s += u64le(id);
-    }
-    return s;
-}
-
-std::string remove_entry(std::uint64_t storage, std::string_view key, std::uint64_t epoch, std::uint64_t minor) {
-    return u8(5) + u32le(key.size()) + u64le(storage) + std::string(key) + u64le(epoch) + u64le(minor);
-}
-
-std::string storage_entry(std::uint8_t type, std::uint64_t storage, std::uint64_t epoch, std::uint64_t minor) {
-    return u8(type) + u64le(storage) + u64le(epoch) + u64le(minor);
-}
-
-std::string marker(std::uint8_t type, std::uint64_t epoch) {
-    return u8(type) + u64le(epoch);
-}
-
-}  // namespace
+using log_entry_bytes::marker;
+using log_entry_bytes::normal_entry;
+using log_entry_bytes::normal_with_blob;
+using log_entry_bytes::remove_entry;
+using log_entry_bytes::storage_entry;
+using log_entry_bytes::u32le;
+using log_entry_bytes::u64le;
+using log_entry_bytes::u8;
 
 // parses a normal_entry and gets the value of each accessor
 TEST(log_entry_view_test, parse_normal_entry) {

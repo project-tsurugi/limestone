@@ -361,10 +361,10 @@ TEST_F(message_log_entries_test, post_receive) {
     EXPECT_EQ(log_entries.size(), 6);
     EXPECT_TRUE(AssertLogEntry(log_entries[0], 1, "key1", "value1", 100, 1, {}, log_entry::entry_type::normal_entry));
     EXPECT_TRUE(AssertLogEntry(log_entries[1], 2, "key2", "value2", 200, 2, {99}, log_entry::entry_type::normal_with_blob));
-    EXPECT_TRUE(AssertLogEntry(log_entries[2], 3, "key3", "", 300, 3, {}, log_entry::entry_type::remove_entry));
-    EXPECT_TRUE(AssertLogEntry(log_entries[3], 4, "", "", 400, 4, {}, log_entry::entry_type::clear_storage));
-    EXPECT_TRUE(AssertLogEntry(log_entries[4], 5, "", "", 500, 5, {}, log_entry::entry_type::add_storage));
-    EXPECT_TRUE(AssertLogEntry(log_entries[5], 6, "", "", 600, 6, {}, log_entry::entry_type::remove_storage));
+    EXPECT_TRUE(AssertLogEntry(log_entries[2], 3, "key3", std::nullopt, 300, 3, {}, log_entry::entry_type::remove_entry));
+    EXPECT_TRUE(AssertLogEntry(log_entries[3], 4, std::nullopt, std::nullopt, 400, 4, {}, log_entry::entry_type::clear_storage));
+    EXPECT_TRUE(AssertLogEntry(log_entries[4], 5, std::nullopt, std::nullopt, 500, 5, {}, log_entry::entry_type::add_storage));
+    EXPECT_TRUE(AssertLogEntry(log_entries[5], 6, std::nullopt, std::nullopt, 600, 6, {}, log_entry::entry_type::remove_storage));
 
     auto ack_str = io.get_out_string();
     auto ack = replication_message::receive(io);
@@ -464,10 +464,10 @@ TEST_F(message_log_entries_test, write_all_entry_type_to_pwal_via_replication_ch
     EXPECT_EQ(log_entries.size(), 6);
     EXPECT_TRUE(AssertLogEntry(log_entries[0], 1, "key1", "value1", 100, 1, {}, log_entry::entry_type::normal_entry));
     EXPECT_TRUE(AssertLogEntry(log_entries[1], 2, "key2", "value2", 200, 2, {99}, log_entry::entry_type::normal_with_blob));
-    EXPECT_TRUE(AssertLogEntry(log_entries[2], 3, "key3", "", 300, 3, {}, log_entry::entry_type::remove_entry));
-    EXPECT_TRUE(AssertLogEntry(log_entries[3], 4, "", "", 400, 4, {}, log_entry::entry_type::clear_storage));
-    EXPECT_TRUE(AssertLogEntry(log_entries[4], 5, "", "", 500, 5, {}, log_entry::entry_type::add_storage));
-    EXPECT_TRUE(AssertLogEntry(log_entries[5], 6, "", "", 600, 6, {}, log_entry::entry_type::remove_storage));
+    EXPECT_TRUE(AssertLogEntry(log_entries[2], 3, "key3", std::nullopt, 300, 3, {}, log_entry::entry_type::remove_entry));
+    EXPECT_TRUE(AssertLogEntry(log_entries[3], 4, std::nullopt, std::nullopt, 400, 4, {}, log_entry::entry_type::clear_storage));
+    EXPECT_TRUE(AssertLogEntry(log_entries[4], 5, std::nullopt, std::nullopt, 500, 5, {}, log_entry::entry_type::add_storage));
+    EXPECT_TRUE(AssertLogEntry(log_entries[5], 6, std::nullopt, std::nullopt, 600, 6, {}, log_entry::entry_type::remove_storage));
 }
 
 }  // namespace limestone::testing

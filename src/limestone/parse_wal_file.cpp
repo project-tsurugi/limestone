@@ -181,7 +181,7 @@ using namespace limestone::api;
                 default: assert(false);
                 }
             } else if (ec.value() == log_entry::read_error::short_entry) {
-                switch (e.type()) {
+                switch (ec.entry_type()) {
                 case log_entry::entry_type::normal_entry:             value_ = token_type::SHORT_normal_entry; break;
                 case log_entry::entry_type::normal_with_blob:         value_ = token_type::SHORT_normal_with_blob; break;
                 case log_entry::entry_type::marker_begin:             value_ = token_type::SHORT_marker_begin; break;
@@ -271,7 +271,7 @@ epoch_id_type dblog_scan::scan_one_pwal_file(  // NOLINT(readability-function-co
     auto err_unexpected = [&](){
         log_entry::read_error ectmp{};
         ectmp.value(log_entry::read_error::unexpected_type);
-        ectmp.entry_type(e.type());
+        ectmp.entry_type(ec ? ec.entry_type() : e.type());
         report_error(ectmp);
     };
     boost::filesystem::fstream strm;

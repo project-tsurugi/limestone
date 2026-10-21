@@ -200,8 +200,8 @@ TEST_F(log_entry_blob_test, truncate_value_with_blob) {
 }
 
 /**
- * @brief Verify that for an entry type without a value portion (e.g. marker_begin),
- *        truncate_value_from_normal_entry() does not modify value_etc.
+ * @brief Verify that for an entry type without a value (e.g. marker_begin),
+ *        truncate_value_from_normal_entry() does not modify the entry.
  */
 TEST_F(log_entry_blob_test, truncate_value_non_normal_entry) {
     // Create a marker_begin entry.
@@ -220,49 +220,12 @@ TEST_F(log_entry_blob_test, truncate_value_non_normal_entry) {
     boost::filesystem::remove(temp_file);
     ASSERT_TRUE(rc);
 
-    // Capture the original value_etc.
-    std::string original_value_etc = entry.value_etc();
+    // Capture the whole entry (a marker has no value_etc, so compare the whole entry).
+    std::string original_entry(entry.view().serialized_entry());
     // Invoke truncation.
     entry.truncate_value_from_normal_entry();
-    // For entries like marker_begin that do not have a value portion, value_etc should remain unchanged.
-    EXPECT_EQ(entry.value_etc(), original_value_etc);
+    // For entries like marker_begin that do not have a value, the entry should remain unchanged.
+    EXPECT_EQ(entry.view().serialized_entry(), original_entry);
 }
-
-/**
- * @brief Test the make_normal_with_blob_log_entry factory method.
- *
- * Verifies that the created log_entry has type normal_with_blob and that its
- * key_sid, value_etc, and blob_ids fields match the provided parameters.
- */
-TEST_F(log_entry_blob_test, make_normal_with_blob_log_entry) {
-    std::string key_sid = "dummy_storage_and_key";
-    std::string value_etc = "header_data_and_payload";
-    std::string blob_ids = "dummy_blob_ids";
-
-    log_entry entry = log_entry::make_normal_with_blob_log_entry(key_sid, value_etc, blob_ids);
-
-    EXPECT_EQ(entry.type(), log_entry::entry_type::normal_with_blob);
-    EXPECT_EQ(entry.key_sid(), key_sid);
-    EXPECT_EQ(entry.value_etc(), value_etc);
-    EXPECT_EQ(entry.raw_blob_ids(), blob_ids);
-}
-
-/**
- * @brief Test the make_normal_with_blob_log_entry factory method with default blob_ids.
- *
- * Verifies that when blob_ids is omitted, it defaults to an empty string.
- */
-TEST_F(log_entry_blob_test, make_normal_with_blob_log_entry_default_blob_ids) {
-    std::string key_sid = "dummy_storage_and_key";
-    std::string value_etc = "header_data_and_payload";
-
-    log_entry entry = log_entry::make_normal_with_blob_log_entry(key_sid, value_etc);
-
-    EXPECT_EQ(entry.type(), log_entry::entry_type::normal_with_blob);
-    EXPECT_EQ(entry.key_sid(), key_sid);
-    EXPECT_EQ(entry.value_etc(), value_etc);
-    EXPECT_EQ(entry.raw_blob_ids(), std::string());
-}
-
 
 } // namespace limestone::testing
