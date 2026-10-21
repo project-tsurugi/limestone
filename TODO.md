@@ -65,7 +65,7 @@ master へのマージ前に本ファイルを削除する。
 * [x] 最も古い版の write_version を返す関数 oldest_write_version() (LE 13.2。定数ではなく関数にした経緯は 5 節)。
 * [x] ファクトリ (LE 13.3)。データ系・ストレージ系・marker の各種別。長さの違反で abort。
 * [x] write_serialized と、最も古い版に置き換えて書く指定 (LE 12)。
-* [ ] UT: LE 15 節の解析関数、比較関数、所有型、write_serialized の観点。
+* [x] UT: LE 15 節の解析関数、比較関数、所有型、write_serialized の観点。
 
 ### ステップ 3: ファイルからの読み込み (LE 段階 1 の後半)
 
@@ -280,6 +280,12 @@ master へのマージ前に本ファイルを削除する。
   serialized_value_etc() が abort する。oldest は、write_version の手前、(0,0)、後ろの 3 回の fwrite で書く。1 回で書く
   にはエントリ全体のコピーが要る。fwrite はユーザ空間のバッファへのコピーなので、呼ぶ回数が増えてもシステムコール
   は増えない、という推論による (測定はステップ 9)。
+
+* 2026-10-21: ステップ 2 を完了した。master からの変更のうち src の追加・変更行について、行のカバレッジを lcov で確かめた。
+  実行可能な 419 行のうち 386 行 (92%) が実行された。残りの 33 行は、死亡テストで確かめている FATAL (子プロセスの
+  カバレッジは記録されない)、後のステップで消える旧ソート、到達しない防御のコード (rebuild_view の形式の違反、
+  BLOB の個数の違反、dblogutil の default など)、コンパイラが生成した例外の経路である。to_string_view と operator<<
+  (entry_type、log_entry_parse_result::status) は未実行だったので UT を追加した。
 
 ## 6. 残った課題
 

@@ -15,8 +15,10 @@
  */
 
 #include <cstdint>
+#include <sstream>
 #include <string>
 #include <string_view>
+#include <utility>
 #include <vector>
 
 #include "test_root.h"
@@ -121,6 +123,31 @@ TEST(log_entry_format_test, oldest_write_version) {
     for (const auto& other : {write_version_type{0, 1}, write_version_type{1, 0},
                               write_version_type{UINT64_MAX, UINT64_MAX}}) {
         EXPECT_LT(oldest, other) << other.get_major() << "," << other.get_minor();
+    }
+}
+
+// returns the name of each entry type and "unknown" for an undefined value; operator<< writes the same string
+TEST(log_entry_format_test, entry_type_to_string_view) {
+    using entry_type = format::entry_type;
+    const std::vector<std::pair<entry_type, std::string_view>> cases{
+        {entry_type::this_id_is_not_used, "this_id_is_not_used"},
+        {entry_type::normal_entry, "normal_entry"},
+        {entry_type::normal_with_blob, "normal_with_blob"},
+        {entry_type::remove_entry, "remove_entry"},
+        {entry_type::marker_begin, "marker_begin"},
+        {entry_type::marker_end, "marker_end"},
+        {entry_type::marker_durable, "marker_durable"},
+        {entry_type::marker_invalidated_begin, "marker_invalidated_begin"},
+        {entry_type::clear_storage, "clear_storage"},
+        {entry_type::add_storage, "add_storage"},
+        {entry_type::remove_storage, "remove_storage"},
+        {static_cast<entry_type>(11), "unknown"},
+    };
+    for (const auto& [type, name] : cases) {
+        EXPECT_EQ(format::to_string_view(type), name);
+        std::ostringstream out;
+        out << type;
+        EXPECT_EQ(out.str(), name);
     }
 }
 

@@ -16,6 +16,7 @@
 
 #include <algorithm>
 #include <cstdint>
+#include <sstream>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -328,6 +329,22 @@ TEST(log_entry_view_test, parse_result_accessor_validity) {
 TEST(log_entry_view_test, parse_result_ok_with_default_view_aborts) {
     EXPECT_DEATH((void) limestone::internal::log_entry_parse_result::ok(log_entry_view{}),
                  "log_entry_parse_result:ok default-constructed view");
+}
+
+// returns the name of each result kind and "unknown" for an undefined value; operator<< writes the same string
+TEST(log_entry_view_test, status_to_string_view) {
+    const std::vector<std::pair<status, std::string_view>> cases{
+        {status::ok, "ok"},
+        {status::short_entry, "short_entry"},
+        {status::invalid_type, "invalid_type"},
+        {static_cast<status>(99), "unknown"},
+    };
+    for (const auto& [result, name] : cases) {
+        EXPECT_EQ(limestone::internal::to_string_view(result), name);
+        std::ostringstream out;
+        out << result;
+        EXPECT_EQ(out.str(), name);
+    }
 }
 
 }  // namespace limestone::testing
