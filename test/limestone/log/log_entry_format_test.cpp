@@ -15,7 +15,9 @@
  */
 
 #include <cstdint>
+#include <string>
 #include <string_view>
+#include <vector>
 
 #include "test_root.h"
 
@@ -92,6 +94,22 @@ TEST(log_entry_format_test, compare_key_sid_unsigned_bytes) {
 TEST(log_entry_format_test, compare_key_sid_prefix) {
     EXPECT_LT(format::compare_key_sid("\x01\x00" "ab"sv, "\x01\x00" "abc"sv), 0);
     EXPECT_GT(format::compare_key_sid("\x01\x00" "abc"sv, "\x01\x00" "ab"sv), 0);
+}
+
+// the order matches the order of key_sids by std::string::operator<
+TEST(log_entry_format_test, compare_key_sid_matches_string_order) {
+    const std::vector<std::string> key_sids{
+        std::string("\x00\x01\x00\x00\x00\x00\x00\x00"sv), std::string("\x01\x00\x00\x00\x00\x00\x00\x00"sv),
+        "\x01"s, "\x7f"s, "\x80"s, "\xff"s, std::string("\x00"sv),
+        std::string("\x01\x00" "ab"sv), std::string("\x01\x00" "abc"sv), ""s,
+    };
+    for (const auto& a : key_sids) {
+        for (const auto& b : key_sids) {
+            const int c = format::compare_key_sid(a, b);
+            EXPECT_EQ(c < 0, a < b);
+            EXPECT_EQ(c == 0, a == b);
+        }
+    }
 }
 
 // the oldest write_version is (0,0) and is older than any other version

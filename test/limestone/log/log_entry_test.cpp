@@ -109,6 +109,24 @@ bool read_from(const std::string& bytes, log_entry& e, read_error& ec) {
 }
 
 /**
+ * @brief Calls a function that writes to a temporary file and returns the bytes written.
+ * @param write a function that takes the FILE* of the temporary file and writes to it
+ * @return the bytes written
+ */
+template <class Write>
+std::string written_by(Write&& write) {
+    FILE* fp = std::tmpfile();
+    EXPECT_NE(fp, nullptr);
+    std::forward<Write>(write)(fp);
+    const long size = std::ftell(fp);
+    std::rewind(fp);
+    std::string written(static_cast<std::size_t>(size), '\0');
+    written.resize(std::fread(written.data(), 1, written.size(), fp));
+    std::fclose(fp);
+    return written;
+}
+
+/**
  * @brief Writes an entry to a temporary file with write_serialized() and returns the bytes written.
  * @param bytes the bytes of the entry to write
  * @param handling how to write the write_version
@@ -117,14 +135,7 @@ bool read_from(const std::string& bytes, log_entry& e, read_error& ec) {
 std::string write_serialized_to_string(const std::string& bytes, log_entry::write_version_handling handling) {
     auto r = log_entry_view::parse(bytes);
     EXPECT_TRUE(r);
-    FILE* fp = std::tmpfile();
-    EXPECT_NE(fp, nullptr);
-    log_entry::write_serialized(fp, r.view(), handling);
-    std::rewind(fp);
-    std::string written(bytes.size() + 1, '\0');
-    written.resize(std::fread(written.data(), 1, written.size(), fp));
-    std::fclose(fp);
-    return written;
+    return written_by([&](FILE* fp) { log_entry::write_serialized(fp, r.view(), handling); });
 }
 
 }  // namespace
@@ -351,14 +362,7 @@ TEST(log_entry_test, write_serialized_entry) {
     };
     for (const auto& bytes : entries) {
         log_entry e = make_entry(bytes);
-        FILE* fp = std::tmpfile();
-        ASSERT_NE(fp, nullptr);
-        e.write(fp);
-        std::rewind(fp);
-        std::string written(bytes.size() + 1, '\0');
-        written.resize(std::fread(written.data(), 1, written.size(), fp));
-        std::fclose(fp);
-        EXPECT_EQ(written, bytes);
+        EXPECT_EQ(written_by([&](FILE* fp) { e.write(fp); }), bytes);
     }
 }
 
@@ -476,6 +480,33 @@ TEST(log_entry_test, write_serialized_io_error) {
     ASSERT_NE(fp, nullptr);
     EXPECT_THROW(log_entry::write_serialized(fp, r.view()), limestone::limestone_io_exception);
     std::fclose(fp);
+}
+
+// the output of write_serialized matches the output of the typed writers
+TEST(log_entry_test, write_serialized_matches_typed_writers) {
+    using limestone::api::write_version_type;
+    const write_version_type wv{7, 3};
+    const std::vector<limestone::api::blob_id_type> blob_ids{11, 12};
+    const std::vector<std::pair<log_entry, std::string>> cases{
+        {log_entry::make_normal_entry(1, "key", long_value, wv),
+         written_by([&](FILE* fp) { log_entry::write(fp, 1, "key", long_value, wv); })},
+        {log_entry::make_normal_with_blob(2, "key", "value", wv, blob_ids),
+         written_by([&](FILE* fp) { log_entry::write_with_blob(fp, 2, "key", "value", wv, blob_ids); })},
+        {log_entry::make_remove_entry(3, "key", wv),
+         written_by([&](FILE* fp) { log_entry::write_remove(fp, 3, "key", wv); })},
+        {log_entry::make_clear_storage(4, wv), written_by([&](FILE* fp) { log_entry::write_clear_storage(fp, 4, wv); })},
+        {log_entry::make_add_storage(5, wv), written_by([&](FILE* fp) { log_entry::write_add_storage(fp, 5, wv); })},
+        {log_entry::make_remove_storage(6, wv),
+         written_by([&](FILE* fp) { log_entry::write_remove_storage(fp, 6, wv); })},
+        {log_entry::make_marker_begin(10), written_by([](FILE* fp) { log_entry::begin_session(fp, 10); })},
+        {log_entry::make_marker_end(11), written_by([](FILE* fp) { log_entry::end_session(fp, 11); })},
+        {log_entry::make_marker_durable(12), written_by([](FILE* fp) { log_entry::durable_epoch(fp, 12); })},
+        {log_entry::make_marker_invalidated_begin(13),
+         written_by([](FILE* fp) { log_entry::invalidated_begin(fp, 13); })},
+    };
+    for (const auto& [e, typed] : cases) {
+        EXPECT_EQ(written_by([&](FILE* fp) { log_entry::write_serialized(fp, e.view()); }), typed) << e.type();
+    }
 }
 
 }  // namespace limestone::testing
