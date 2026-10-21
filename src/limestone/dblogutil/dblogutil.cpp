@@ -76,27 +76,39 @@ void inspect(dblog_scan &ds, std::optional<epoch_id_type> epoch) {
     std::cout << "durable-epoch: " << ld_epoch << std::endl;
     std::atomic_size_t count_normal_entry = 0;
     std::atomic_size_t count_remove_entry = 0;
+    std::atomic_size_t count_storage_entry = 0;
     ds.set_process_at_nondurable_epoch_snippet(dblog_scan::process_at_nondurable::report);
     ds.set_process_at_truncated_epoch_snippet(dblog_scan::process_at_truncated::report);
     ds.set_process_at_damaged_epoch_snippet(dblog_scan::process_at_damaged::report);
     ds.set_fail_fast(false);
     dblog_scan::parse_error::code max_ec{};
     epoch_id_type max_appeared_epoch = ds.scan_pwal_files(epoch.value_or(ld_epoch), [&](log_entry& e){
-        if (e.type() == log_entry::entry_type::normal_entry) {
+        switch (e.type()) {
+        case log_entry::entry_type::normal_entry:
+        case log_entry::entry_type::normal_with_blob:
             VLOG(50) << "normal";
             count_normal_entry++;
-        } else if (e.type() == log_entry::entry_type::remove_entry) {
+            break;
+        case log_entry::entry_type::remove_entry:
             VLOG(50) << "remove";
             count_remove_entry++;
-        } else {
+            break;
+        case log_entry::entry_type::clear_storage:
+        case log_entry::entry_type::add_storage:
+        case log_entry::entry_type::remove_storage:
+            VLOG(50) << "storage";
+            count_storage_entry++;
+            break;
+        default:
             LOG(ERROR) << static_cast<int>(e.type());
+            break;
         }
     }, [](log_entry::read_error& ec){
         VLOG(30) << "ERROR " << ec.value() << " : " << ec.message();
         return false;
     }, &max_ec);
     std::cout << "max-appeared-epoch: " << max_appeared_epoch << std::endl;
-    std::cout << "count-durable-wal-entries: " << (count_normal_entry + count_remove_entry) << std::endl;
+    std::cout << "count-durable-wal-entries: " << (count_normal_entry + count_remove_entry + count_storage_entry) << std::endl;
     VLOG(10) << "scan_pwal_files done, max_ec = " << max_ec;
     switch (max_ec) {
     case dblog_scan::parse_error::ok:

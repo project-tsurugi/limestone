@@ -45,9 +45,11 @@ master へのマージ前に本ファイルを削除する。
 
 ### ステップ 1: 先行修正 (LE 16.1)
 
-* [ ] P4: `test/limestone/blob/log_entry_comparator_test.cpp` の誤った前提 (「storage_id が小さいほど key_sid が辞書順で
+* [x] P4: `test/limestone/blob/log_entry_comparator_test.cpp` の誤った前提 (「storage_id が小さいほど key_sid が辞書順で
       小さい」) のコメントと検証を直す。2 バイト以上の storage_id で成り立たないことを確かめる形にする。
-* [ ] P14: `dblogutil` の count-durable-wal-entries に normal_with_blob とストレージ系を加える (dblogutil.cpp:85-93)。
+      既存のテストは 1 バイトのケースとして残してコメントを直し、2 バイト以上のテストを 4 件追加した。
+* [x] P14: `dblogutil` の count-durable-wal-entries に normal_with_blob とストレージ系を加える (dblogutil.cpp:85-93)。
+      6 種を列挙して数え、それ以外は従来どおり LOG(ERROR)。UT を 1 件追加した。
 
 ### ステップ 2: log_entry の基盤 (LE 段階 1 の前半)
 

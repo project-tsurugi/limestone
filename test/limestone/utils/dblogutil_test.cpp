@@ -219,6 +219,14 @@ TEST_F(dblogutil_test, inspect_normal2) {
     EXPECT_NE(out.find("\n" "count-durable-wal-entries: 3"), out.npos);
 }
 
+// count-durable-wal-entries also counts normal_with_blob and the storage entries
+TEST_F(dblogutil_test, inspect_counts_all_entry_types) {
+    auto [rc, out] = inspect("pwal_0000", data_all_entry_types);
+    EXPECT_EQ(rc, 0 << 8);
+    EXPECT_NE(out.find("\n" "status: OK"), out.npos);
+    EXPECT_NE(out.find("\n" "count-durable-wal-entries: 6"), out.npos);
+}
+
 TEST_F(dblogutil_test, inspect_nondurable) {
     auto [rc, out] = inspect("pwal_0000", data_nondurable);
     EXPECT_EQ(rc, 1 << 8);

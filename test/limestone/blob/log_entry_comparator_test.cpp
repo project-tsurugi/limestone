@@ -5,6 +5,7 @@
 #include <string>
 #include <algorithm>
 #include <stdexcept>
+#include <vector>
 #include <boost/filesystem.hpp>
 
 // Include the actual headers for log_entry and log_entry_comparator.
@@ -194,7 +195,8 @@ TEST_F(log_entry_comparator_test, equal_write_versions_equal_keys) {
 }
 
 // Test case: Compare entries with different storage IDs.
-// Assumes that key_sid() includes the storage ID and that a lower storage ID produces a lexicographically smaller key_sid().
+// key_sid() starts with the little-endian storage ID, and the order is the lexicographical order of the key_sid() bytes.
+// For storage IDs that fit in one byte, this order matches the numeric order of the storage IDs.
 TEST_F(log_entry_comparator_test, different_storage_ids) {
     // Create two log_entry objects with the same key and write_version, but different storage IDs.
     std::string key = "testKey";
@@ -209,14 +211,91 @@ TEST_F(log_entry_comparator_test, different_storage_ids) {
     log_entry entry2 = create_normal_log_entry(storage2, key, value, wv);
 
     log_entry_comparator comp;
-    // Expect that the entry with the lower storage ID produces a key_sid that is lexicographically smaller.
+    // The storage IDs fit in one byte, so the numerically smaller one comes first.
     EXPECT_TRUE(comp(entry1, entry2));
     EXPECT_FALSE(comp(entry2, entry1));
 }
 
+// For storage IDs of two or more bytes, the lexicographical order of the key_sid() bytes does not match the numeric order.
+// The first bytes are reversed: 256 (00 01 ...) comes before 1 (01 00 ...).
+TEST_F(log_entry_comparator_test, multibyte_storage_ids_first_byte_reversed) {
+    write_version_type wv(10, 1);
+    log_entry entry_256 = create_normal_log_entry(256, "testKey", "testValue", wv);
+    log_entry entry_1 = create_normal_log_entry(1, "testKey", "testValue", wv);
+
+    log_entry_comparator comp;
+    EXPECT_TRUE(comp(entry_256, entry_1));
+    EXPECT_FALSE(comp(entry_1, entry_256));
+}
+
+// Both are two bytes: 513 (01 02 ...) comes before 258 (02 01 ...).
+TEST_F(log_entry_comparator_test, multibyte_storage_ids_both_two_bytes) {
+    write_version_type wv(10, 1);
+    log_entry entry_513 = create_normal_log_entry(513, "testKey", "testValue", wv);
+    log_entry entry_258 = create_normal_log_entry(258, "testKey", "testValue", wv);
+
+    log_entry_comparator comp;
+    EXPECT_TRUE(comp(entry_513, entry_258));
+    EXPECT_FALSE(comp(entry_258, entry_513));
+}
+
+// The first bytes are equal, so the second byte decides: 65537 (01 00 01 ...) comes before 257 (01 01 00 ...).
+TEST_F(log_entry_comparator_test, multibyte_storage_ids_same_first_byte) {
+    write_version_type wv(10, 1);
+    log_entry entry_65537 = create_normal_log_entry(65537, "testKey", "testValue", wv);
+    log_entry entry_257 = create_normal_log_entry(257, "testKey", "testValue", wv);
+
+    log_entry_comparator comp;
+    EXPECT_TRUE(comp(entry_65537, entry_257));
+    EXPECT_FALSE(comp(entry_257, entry_65537));
+}
+
+// Sorts entries including storage IDs of two or more bytes, and checks that they are ordered by the key_sid() bytes
+// (starting with the little-endian storage ID), then key, then write_version. The expected order is written by hand,
+// independently of the comparator.
+TEST_F(log_entry_comparator_test, multibyte_storage_ids_overall_sort) {
+    struct spec {
+        storage_id_type storage;
+        std::string key;
+        write_version_type wv;
+    };
+    // The expected order. The first two bytes of the storage IDs are 256: 00 01, 1: 01 00, 257: 01 01, 513: 01 02, 258: 02 01.
+    std::vector<spec> expected = {
+        {256, "aaa", write_version_type(5, 0)},
+        {256, "bbb", write_version_type(1, 0)},
+        {1, "aaa", write_version_type(3, 0)},
+        {1, "aaa", write_version_type(3, 1)},
+        {1, "aaa", write_version_type(4, 0)},
+        {257, "aaa", write_version_type(1, 0)},
+        {513, "aaa", write_version_type(1, 0)},
+        {258, "aaa", write_version_type(1, 0)},
+    };
+
+    std::vector<log_entry> entries;
+    entries.reserve(expected.size());
+    for (auto it = expected.rbegin(); it != expected.rend(); ++it) {
+        entries.emplace_back(create_normal_log_entry(it->storage, it->key, "testValue", it->wv));
+    }
+
+    std::sort(entries.begin(), entries.end(), log_entry_comparator{});
+
+    ASSERT_EQ(entries.size(), expected.size());
+    for (std::size_t i = 0; i < entries.size(); ++i) {
+        std::string key;
+        entries[i].key(key);
+        write_version_type wv;
+        entries[i].write_version(wv);
+        EXPECT_EQ(entries[i].storage(), expected[i].storage) << "index " << i;
+        EXPECT_EQ(key, expected[i].key) << "index " << i;
+        EXPECT_EQ(wv.get_major(), expected[i].wv.get_major()) << "index " << i;
+        EXPECT_EQ(wv.get_minor(), expected[i].wv.get_minor()) << "index " << i;
+    }
+}
+
 // Test case: Overall priority test of storage ID, key, and write_version in log_entry comparison.
 // Priority order (all in ascending order):
-// 1. Storage ID (lower is prioritized)
+// 1. key_sid() bytes (starting with the little-endian storage ID). The storage IDs in this test fit in one byte,
+//    so the order matches the numeric order.
 // 2. Key (lexicographical order when storage IDs are equal)
 // 3. Write Version (compared by epoch first, then minor when storage and key are equal)
 TEST_F(log_entry_comparator_test, overall_priority_storage_key_write_version) {
