@@ -97,7 +97,10 @@ public:
         code value_;
         log_entry::entry_type entry_type_{0};
     };
-    
+
+    /**
+     * @brief Creates an entry in the default-constructed state (type this_id_is_not_used, with all values invalid).
+     */
     log_entry() = default;
 
     /**
@@ -258,7 +261,7 @@ public:
 
 // for writer (entry)
     /**
-     * @brief Writes the serialized value of the entry the view refers to. Does not check the lengths.
+     * @brief Writes the serialized value of the entry the view refers to.
      * @param strm the output stream
      * @param entry the entry to write. Writes a FATAL log and aborts if it is in the default-constructed state
      * @param handling how to write the write_version. oldest is valid for data entries and storage entries, and
@@ -272,6 +275,7 @@ public:
      * @brief Writes the serialized value of the entry as is. Writes a FATAL log and aborts in the
      *        default-constructed state.
      * @param strm the output stream
+     * @throws limestone_io_exception if writing fails
      */
     void write(FILE* strm) const;
 
@@ -502,7 +506,7 @@ public:
      * @brief Returns the serialized value_etc. Valid for data entries and storage entries.
      *
      * For remove_entry and storage entries, returns only the write_version. The return value is valid as long as a
-     * view returned by view().
+     * view returned by view() is valid.
      * @return the serialized value_etc
      */
     [[nodiscard]] std::string_view value_etc() const;
@@ -511,7 +515,7 @@ public:
      * @brief Returns the serialized key_sid. Valid for data entries and storage entries.
      *
      * For storage entries, returns only the storage_id. The return value is valid as long as a view returned by
-     * view().
+     * view() is valid.
      * @return the serialized key_sid
      */
     [[nodiscard]] std::string_view key_sid() const;
@@ -519,7 +523,7 @@ public:
     /**
      * @brief Returns the serialized blob_ids (without the number-of-BLOBs field). Valid for normal_with_blob.
      *
-     * The return value is valid as long as a view returned by view().
+     * The return value is valid as long as a view returned by view() is valid.
      * @return the serialized blob_ids
      */
     [[nodiscard]] std::string_view raw_blob_ids() const;

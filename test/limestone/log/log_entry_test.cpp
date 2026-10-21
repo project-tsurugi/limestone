@@ -358,7 +358,7 @@ TEST(log_entry_test, truncate_default_state) {
 }
 
 // write writes the bytes as is, including the CRC type of marker_end as read
-TEST(log_entry_test, write_serialized_entry) {
+TEST(log_entry_test, write_entry_as_is) {
     const std::vector<std::string> entries{
         normal_with_blob(2, "key", long_value, 7, 3, {11, 12}),
         marker(3, 11) + u8(0x7f),

@@ -20,6 +20,7 @@
 #include <ostream>
 #include <string_view>
 
+#include <limestone/api/blob_id_type.h>
 #include <limestone/api/epoch_id_type.h>
 #include <limestone/api/storage_id_type.h>
 #include <limestone/api/write_version_type.h>
@@ -41,10 +42,9 @@
  * | marker_end | type (1), epoch (8), CRC type (1) |
  *
  * - key_sid is the storage_id as 8 little-endian bytes, followed by the key.
- *   The first 8 bytes of key_sid are the little-endian storage_id.
  * - value_etc is the write_version (16) followed by the value. write_version is the epoch and the minor version,
  *   each as 8 little-endian bytes, in this order.
- * - The CRC type of marker_end is written as no_crc, and its value is not checked when read.
+ * - limestone creates marker_end with no_crc as the CRC type, and the value is not checked when read.
  * - The entries in snapshot files and compacted WAL files are ordered by key_sid (compare_key_sid()).
  */
 
@@ -146,6 +146,7 @@ inline constexpr std::size_t marker_end_size = marker_size + crc_type_size;
 
 static_assert(sizeof(storage_id_type) == storage_id_size);
 static_assert(sizeof(epoch_id_type) == epoch_size);
+static_assert(sizeof(limestone::api::blob_id_type) == blob_id_size);
 
 /**
  * @brief Compares key_sids in the order of entries in snapshot files and compacted WAL files.

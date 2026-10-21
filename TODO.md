@@ -149,9 +149,11 @@ master へのマージ前に本ファイルを削除する。
 
 ### ステップ 10: LE 段階 2
 
-* [ ] 分類の判定関数と、利用箇所の entry_type の列挙の置き換え (LE 9.1)。
+* [ ] 分類の判定関数と、利用箇所の entry_type の列挙の置き換え (LE 9.1)。判定関数はステップ 2 で形式の定義のヘッダに
+      置いた (5 節)。残りは利用箇所の置き換え。
 * [ ] レプリカの受信で未定義の種別と現れてはならない種別を abort にする (LE 9.1、P21)。
-* [ ] アクセサの種別の検査 (LE 9.2)。
+* [ ] アクセサの種別の検査 (LE 9.2)。参照型と所有型 (旧アクセサの委譲) にはステップ 2 で入れた (5 節)。残りは、検査に
+      合わせた利用箇所の確認と、旧名のアクセサの利用箇所を新しい名前へ移すときの見直し。
 * [ ] 新しい名前のアクセサ (serialized_key_sid() など) の追加 (LE 10.3)。旧名は段階 4 まで残す。
 * [ ] 型付き版の書き出しの長さの検査 (LE 12)。
   * [ ] 型付き版の書き出しは、1 エントリを書くのに fwrite・fputc を 7 回前後呼ぶ。ボトルネックになっているという報告は
@@ -169,8 +171,8 @@ master へのマージ前に本ファイルを削除する。
 ### ステップ 12: LE 段階 4
 
 * [ ] 旧 API を削除する: バイト列版の書き出し、旧名のアクセサ、truncate_value_from_normal_entry、
-      make_normal_with_blob_log_entry、static 関数 write_version_epoch_number・write_version_minor_write_version・
-      parse_blob_ids、read と read_entry_from、所有型の write(FILE*)。
+      static 関数 write_version_epoch_number・write_version_minor_write_version・parse_blob_ids、read と
+      read_entry_from、所有型の write(FILE*)。make_normal_with_blob_log_entry はステップ 2 で前倒しして削除した (5 節)。
 * [ ] 公開 API write_version_type(const std::string&)・write_version_type(std::string_view) の扱い (Q4 による)。
 
 ### ステップ 13: ディレクトリの fsync と BLOB の移動の fsync
@@ -225,7 +227,8 @@ master へのマージ前に本ファイルを削除する。
   長さの確認を呼び出し側に委ねるので、形式の定義のヘッダ (log_entry/log_entry_format.h) で公開しない。参照型と所有型
   (ファクトリ、書き出しを含む) の実装の .cpp の無名名前空間 (または private static メンバ) に閉じ込め、外には長さが
   保証された操作だけを公開する。参照型は解析関数かファクトリでしか作れないようにし、「参照型があれば領域は形式どおりに
-  揃っている」を型の不変条件とする。friend は使わない。形式の定義のヘッダには、形式の記述、長さの定数、key_sid の比較関数、static_assert だけを置く。
+  揃っている」を型の不変条件とする。friend は使わない。形式の定義のヘッダには、形式の記述、長さの定数、key_sid の比較関数、static_assert だけを置く。(その後、entry_type の
+  列挙、分類の判定関数、oldest_write_version() もこのヘッダに置いた。以下の記録を参照)
 * 2026-10-21: LE 16.2 からの前倒し (ステップ 2 の参照型)。分類の判定関数 (LE 9.1) を形式の定義のヘッダに置き、参照型の
   アクセサには種別の検査 (LE 9.2。無効な値の要求で FATAL のログを書いて abort) を最初から入れる。参照型が安全の境界に
   なるため。所有型と既存の利用箇所への適用は LE どおり段階 2 (ステップ 10) で行う。参照型のアクセサは新しい型なので、

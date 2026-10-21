@@ -72,7 +72,7 @@ public:
     /**
      * @brief Returns the list of blob IDs associated with the current entry.
      * @return a vector of blob IDs.
-     * @note Only valid after a successful call to `next()`.
+     * @note Only valid for a normal_with_blob entry, after a successful call to `next()`.
      */
     [[nodiscard]] virtual std::vector<api::blob_id_type> blob_ids() const = 0;
 

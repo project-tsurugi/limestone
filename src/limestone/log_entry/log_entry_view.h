@@ -235,6 +235,7 @@ public:
      *        short_entry.
      *
      * The number is counted from the beginning of input and includes the bytes already in input.
+     * The lower bound is greater than the size of input.
      */
     [[nodiscard]] std::size_t required() const;
 
