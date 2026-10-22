@@ -63,6 +63,14 @@ inline std::string extract_filename(const std::string& path) {
         throw limestone_io_exception(exception_type::fatal_error, full_message + " (at " + extract_filename(__FILE__) + ":" + std::to_string(__LINE__) + ")", (error_code)); \
     }
 
+// Throws an I/O error that has no errno (such as wrong contents or a wrong position in a file). error_code is 0
+// NOLINTNEXTLINE(cppcoreguidelines-macro-usage)
+#define LOG_AND_THROW_IO_EXCEPTION_NO_ERRNO(message) \
+    { \
+        LOG_LP(ERROR) << (message); \
+        throw limestone_io_exception(exception_type::fatal_error, std::string((message)) + " (at " + extract_filename(__FILE__) + ":" + std::to_string(__LINE__) + ")", 0); \
+    }
+
 // NOLINTNEXTLINE(cppcoreguidelines-macro-usage)
 #define LOG_AND_THROW_BLOB_EXCEPTION(message, error_code) \
     { \

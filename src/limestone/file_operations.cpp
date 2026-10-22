@@ -86,6 +86,14 @@ int real_file_operations::close(int fd) {
     return ::close(fd);
 }
 
+ssize_t real_file_operations::pread(int fd, void* buf, size_t count, off_t offset) {
+    return ::pread(fd, buf, count, offset);
+}
+
+int real_file_operations::fstat(int fd, struct stat* buf) {
+    return ::fstat(fd, buf);
+}
+
 // -----------------------------------------
 // C++-style file operations
 // -----------------------------------------

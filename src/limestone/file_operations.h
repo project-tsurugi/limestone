@@ -15,6 +15,9 @@
  */
 #pragma once
 
+#include <sys/stat.h>
+#include <sys/types.h>
+
 #include <cstdio>
 #include <string> 
 #include <memory>
@@ -90,6 +93,12 @@ public:
     // close system call for file closing
     virtual int close(int fd) = 0;
 
+    // pread system call: reads at the given position (does not move the file position)
+    virtual ssize_t pread(int fd, void* buf, size_t count, off_t offset) = 0;
+
+    // fstat system call: gets the status of an open file
+    virtual int fstat(int fd, struct stat* buf) = 0;
+
     // -----------------------------------------
     // C++-style file operations
     // -----------------------------------------
@@ -154,6 +163,8 @@ public:
     int flock(int fd, int operation) override;
     int open(const char* filename, int flags) override;
     int close(int fd) override;
+    ssize_t pread(int fd, void* buf, size_t count, off_t offset) override;
+    int fstat(int fd, struct stat* buf) override;
 
     std::unique_ptr<std::ifstream> open_ifstream(const std::string& path) override;
     bool getline(std::ifstream& file, std::string& line) override;
