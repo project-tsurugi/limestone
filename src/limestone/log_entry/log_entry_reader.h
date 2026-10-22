@@ -45,7 +45,7 @@ public:
     enum class status : std::uint8_t {
         /// One entry is read. view and offset are valid.
         ok,
-        /// The file ends at an entry boundary. offset is valid.
+        /// The file ends at an entry boundary. offset is valid. Also returned after short_entry.
         end,
         /// The contents of the file do not match the format. error and offset are valid.
         error,
@@ -61,7 +61,7 @@ public:
 
     /**
      * @brief Creates a result of kind end (the file ends at an entry boundary).
-     * @param offset the position next to the last byte of the last entry
+     * @param offset the size of the file
      * @return the result
      */
     [[nodiscard]] static log_entry_read_result end(std::uint64_t offset) noexcept;
@@ -95,10 +95,11 @@ public:
      * - ok: the position of the first byte (the entry type) of the returned entry.
      * - error: the position of the first byte (the entry type) of the entry that could not be parsed. It is not the
      *   position where reading or parsing stopped.
-     * - end: the position next to the last byte of the last entry. It equals the size of the file.
+     * - end: the size of the file.
      *
-     * For every result, the bytes from the start position up to just before this position are the entries returned
-     * as ok, with no gap between them.
+     * For ok and error, the bytes from the start position up to just before this position are the entries returned
+     * as ok, with no gap between them. The same holds for end, except that for end after short_entry, the bytes of
+     * the cut entry lie in between.
      */
     [[nodiscard]] std::uint64_t offset() const noexcept;
 
@@ -221,7 +222,8 @@ public:
      * - error: the contents of the file do not match the format. The kind is either an invalid entry type
      *   (unknown_type) or the file ending in the middle of an entry (short_entry).
      *
-     * A call after end or error is returned returns the same result.
+     * A call after end returns end. A call after short_entry returns end (at the size of the file). A call after
+     * unknown_type returns the same unknown_type.
      *
      * When created with a state function, while the state is writing, it does not return end or short_entry, but
      * waits for more data, calling the state function every wait_interval.
@@ -279,8 +281,11 @@ private:
     /**
      * @brief Creates the result returned at the end of the file: end if there is no unparsed part, and error with
      *        short_entry otherwise.
+     *
+     * When returning short_entry, moves the read position to the end of the file so that the next call returns end.
+     * Called only while reading a file not being written (one that does not grow while it is read).
      */
-    [[nodiscard]] log_entry_read_result end_or_short_entry() const noexcept;
+    [[nodiscard]] log_entry_read_result end_or_short_entry() noexcept;
 
     /**
      * @brief Prepares to refill the buffer. Places the unparsed part at the beginning of the buffer, and makes free

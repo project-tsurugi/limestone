@@ -64,6 +64,30 @@ static constexpr const char* location = "/tmp/dblog_scan_test";
         return ret;
     }
 
+    // scans a read-only pwal file in the given mode, and checks that it succeeds when no rewrite is needed
+    void scan_read_only_pwal_file(const std::function<void(dblog_scan&)>& set_mode) {
+        auto p = boost::filesystem::path(location) / "pwal_0000";
+        create_file(p, data_normal2);
+        boost::filesystem::permissions(p, boost::filesystem::owner_read);  // drop file write permission
+        dblog_scan ds{boost::filesystem::path(location)};
+        ds.set_thread_num(1);
+        set_mode(ds);
+        dblog_scan::parse_error pe;
+        std::size_t entries = 0;
+        std::vector<log_entry::read_error> errors;
+        epoch_id_type max_epoch = ds.scan_one_pwal_file(p, 0x100, [&entries](const log_entry&) { entries++; },
+                                                        [&errors](const log_entry::read_error& re) {
+                                                            errors.emplace_back(re);
+                                                            return false;
+                                                        }, pe);
+        EXPECT_EQ(max_epoch, 0x100);
+        EXPECT_EQ(entries, 3);
+        EXPECT_EQ(errors.size(), 0);
+        EXPECT_EQ(pe.value(), dblog_scan::parse_error::ok);
+        EXPECT_FALSE(pe.modified());
+        boost::filesystem::permissions(p, boost::filesystem::owner_all);
+    }
+
     void scan_one_pwal_file_inspect(
         const std::string_view data,
         std::function<void(const boost::filesystem::path&, epoch_id_type, const std::vector<log_entry::read_error>&, const dblog_scan::parse_error&)> check,
@@ -2738,6 +2762,37 @@ TEST_F(dblog_scan_test, scan_records_max_epoch_per_file) {
     ASSERT_NE(max_epochs.find(p2), max_epochs.end());
     EXPECT_EQ(max_epochs.at(p1), 0x101);
     EXPECT_EQ(max_epochs.at(p2), 0x100);
+}
+
+// a read failure is an exception with errno, distinguished from the end and a cut entry
+TEST_F(dblog_scan_test, scan_one_pwal_file_read_error_throws) {
+    // a directory can be opened read-only, but read fails with EISDIR
+    auto p = boost::filesystem::path(location) / "pwal_0000";
+    boost::filesystem::create_directory(p);
+    dblog_scan ds{boost::filesystem::path(location)};
+    ds.set_thread_num(1);
+    set_inspect_mode(ds);
+    dblog_scan::parse_error pe;
+    try {
+        (void) ds.scan_one_pwal_file(p, 0x100, [](const log_entry&) {}, [](const log_entry::read_error&) { return false; }, pe);
+        FAIL() << "no exception";
+    } catch (const limestone_io_exception& e) {
+        EXPECT_EQ(e.error_code(), EISDIR);
+    }
+}
+
+// in a non-repair mode, a read-only pwal file can be scanned
+TEST_F(dblog_scan_test, scan_one_pwal_file_read_only_inspect) {
+    // root can write files w/o permissions
+    if (geteuid() == 0) { GTEST_SKIP() << "skip when run by root"; }
+    scan_read_only_pwal_file([this](dblog_scan& ds) { set_inspect_mode(ds); });
+}
+
+// even in a repair mode, a read-only pwal file can be scanned when no rewrite is needed
+TEST_F(dblog_scan_test, scan_one_pwal_file_read_only_repair_without_marking) {
+    // root can write files w/o permissions
+    if (geteuid() == 0) { GTEST_SKIP() << "skip when run by root"; }
+    scan_read_only_pwal_file([this](dblog_scan& ds) { set_repair_by_mark_mode(ds); });
 }
 
 }  // namespace limestone::testing

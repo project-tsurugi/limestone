@@ -261,15 +261,21 @@ log_entry_read_result log_entry_reader::next() {
     }
 }
 
-log_entry_read_result log_entry_reader::end_or_short_entry() const noexcept {
+log_entry_read_result log_entry_reader::end_or_short_entry() noexcept {
     const std::uint64_t offset = buffer_offset_ + begin_;
     if (begin_ == end_) {
         return log_entry_read_result::end(offset);
     }
-    return log_entry_read_result::error(
+    auto result = log_entry_read_result::error(
         log_entry::read_error{log_entry::read_error::short_entry,
                               static_cast<log_entry::entry_type>(static_cast<std::uint8_t>(buffer_[begin_]))},
         offset);
+    // empty the buffer and move the read position to the end of the file, so that the next call returns end.
+    // std::max is defensive.
+    buffer_offset_ = std::max(file_size_, buffer_offset_ + end_);
+    begin_ = 0;
+    end_ = 0;
+    return result;
 }
 
 void log_entry_reader::prepare_buffer(std::size_t required) {

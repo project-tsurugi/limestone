@@ -145,7 +145,8 @@ TEST_F(log_entry_reader_test, reads_entries_in_order) {
     expect_end(reader, e1.size() + e2.size() + e3.size());
 }
 
-// a file cut in the middle of an entry is short_entry, distinguished from the end; returns the same result again
+// a file cut in the middle of an entry is short_entry, distinguished from the end; after that, returns end at the
+// size of the file
 TEST_F(log_entry_reader_test, truncated_entry_is_short_entry) {
     std::string e1 = marker(2, 7);
     std::string e2 = normal_entry(1, "key", "value", 7, 1);
@@ -154,7 +155,7 @@ TEST_F(log_entry_reader_test, truncated_entry_is_short_entry) {
         log_entry_reader reader(p);
         expect_entry(reader, e1, 0);
         expect_error(reader, log_entry::read_error::short_entry, entry_type::normal_entry, e1.size());
-        expect_error(reader, log_entry::read_error::short_entry, entry_type::normal_entry, e1.size());
+        expect_end(reader, e1.size() + cut);
         if (HasFailure()) {
             FAIL() << "cut " << cut;
         }
@@ -279,6 +280,16 @@ TEST_F(log_entry_reader_test, short_reads) {
             FAIL() << "max_read " << max_read;
         }
     }
+}
+
+// even if a length field is broken and unread bytes remain, returns end at the size of the file after short_entry,
+// without parsing the remaining bytes
+TEST_F(log_entry_reader_test, short_entry_skips_unread_bytes) {
+    std::string broken = u8(1) + u32le(0xffffffffU) + u32le(0xffffffffU) + std::string(buffer_size + 100, 'x');
+    auto p = write_file(broken);
+    log_entry_reader reader(p);
+    expect_error(reader, log_entry::read_error::short_entry, entry_type::normal_entry, 0);
+    expect_end(reader, broken.size());
 }
 
 // returns short_entry without expanding the buffer if a length field exceeds the rest of the file

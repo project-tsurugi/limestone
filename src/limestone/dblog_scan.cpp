@@ -29,6 +29,7 @@
 #include "internal.h"
 #include "dblog_scan.h"
 #include "log_entry.h"
+#include "log_entry/log_entry_reader.h"
 #include "sortdb_wrapper.h"
 
 namespace {
@@ -53,14 +54,17 @@ using namespace limestone::api;
 std::optional<epoch_id_type> last_durable_epoch(const boost::filesystem::path& file) {
     std::optional<epoch_id_type> rv;
 
-    boost::filesystem::ifstream istrm;
-    log_entry e;
     // ASSERT: file exists
-    istrm.open(file, std::ios_base::in | std::ios_base::binary);
-    if (!istrm) {  // permission?
-        LOG_AND_THROW_IO_EXCEPTION("cannot read epoch file: " + file.string(), errno);
-    }
-    while (e.read(istrm)) {
+    log_entry_reader reader(file);
+    while (true) {
+        const auto r = reader.next();
+        if (r.result() == log_entry_read_result::status::end) {
+            break;
+        }
+        if (r.result() == log_entry_read_result::status::error) {
+            LOG_AND_THROW_EXCEPTION("this epoch file is broken: " + r.error().message());
+        }
+        const auto e = r.view();
         if (e.type() != log_entry::entry_type::marker_durable) {
             LOG_AND_THROW_EXCEPTION("this epoch file is broken: unexpected log_entry type: " + std::to_string(static_cast<int>(e.type())));
         }
@@ -68,7 +72,6 @@ std::optional<epoch_id_type> last_durable_epoch(const boost::filesystem::path& f
             rv = e.epoch_id();
         }
     }
-    istrm.close();
     return rv;
 }
 
