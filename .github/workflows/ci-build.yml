@@ -51,8 +51,11 @@ jobs:
           GTEST_OUTPUT: xml
           ASAN_OPTIONS: detect_stack_use_after_return=true
         run: |
+          # run the tests as a non-root user, so that the tests on file permissions are not skipped
+          useradd -m tester
+          chown -R tester build
           cd build
-          ctest --verbose -j 16
+          runuser -u tester -- ctest --verbose -j 16
 
       - name: Verify
         uses: project-tsurugi/tsurugi-annotations-action@v2
