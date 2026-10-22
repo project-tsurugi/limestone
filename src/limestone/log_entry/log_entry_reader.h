@@ -254,7 +254,8 @@ private:
     /**
      * @brief Gets the size of the file again. If the file is not open, opens it if it exists. If it does not exist,
      *        the size is 0.
-     * @throws limestone_io_exception if the file status cannot be obtained (with errno)
+     * @throws limestone_io_exception if the file cannot be opened for a reason other than not existing, or its status
+     *         cannot be obtained (with errno)
      */
     void refresh_file_size();
 
@@ -265,8 +266,8 @@ private:
      * If written, gets the size of the file again, and treats the file as not being written from then on. If failed,
      * records it and throws.
      * @throws limestone_io_exception if the state is failed (without errno). If written, and the file cannot be opened
-     *         (with errno), or the start position or the end of the range already read exceeds the size of the file
-     *         (without errno)
+     *         or its status cannot be obtained (with errno), or the start position or the end of the range already
+     *         read exceeds the size of the file (without errno)
      */
     void update_write_state();
 

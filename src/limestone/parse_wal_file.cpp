@@ -36,11 +36,17 @@ namespace {
 using namespace limestone;
 using namespace limestone::api;
 
-// rewrites the marker at the head of an invalid epoch snippet. Writes at the position to a file opened for writing,
-// separately from reading. Throws if the marker cannot be rewritten: if scanning continued as repaired without the
-// rewrite, a snippet that should be invalid could be treated as valid data at a later startup, after the durable
-// epoch has advanced
+/**
+ * @brief Rewrites the marker at the head of an invalid epoch snippet to marker_invalidated_begin, and fsyncs.
+ *
+ * Opens the file for writing separately from reading, writes at the position, and closes it.
+ * @param file the pwal file
+ * @param fpos_head_of_epoch_snippet the position of the marker at the head of the snippet
+ * @throws limestone_io_exception if the file cannot be opened, written, or fsynced (with errno)
+ */
 void invalidate_epoch_snippet(const boost::filesystem::path& file, std::streamoff fpos_head_of_epoch_snippet) {
+    // throw if the marker cannot be rewritten: if scanning continued as repaired without the rewrite, a snippet that
+    // should be invalid could be treated as valid data at a later startup, after the durable epoch has advanced
     const int fd = ::open(file.c_str(), O_WRONLY);  // NOLINT(cppcoreguidelines-pro-type-vararg,hicpp-vararg)
     if (fd < 0) {
         const int err = errno;
@@ -575,7 +581,13 @@ epoch_id_type dblog_scan::scan_one_pwal_file(  // NOLINT(readability-function-co
     if (pe.value() == parse_error::broken_after_tobe_cut) {
         // DO trim
         // TODO: check byte at fpos is 0x02 or 0x06
-        boost::filesystem::resize_file(p, pe.fpos());
+        // throw limestone_io_exception if the file cannot be trimmed: the exception of boost would not be caught by
+        // the worker threads of the scan
+        boost::system::error_code error;
+        boost::filesystem::resize_file(p, pe.fpos(), error);
+        if (error) {
+            LOG_AND_THROW_IO_EXCEPTION("cannot trim pwal file: " + p.string(), error);
+        }
         VLOG_LP(0) << "trimmed " << p << " at offset " << pe.fpos();
         pe.value(parse_error::repaired);
         fixed++;

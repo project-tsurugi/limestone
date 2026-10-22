@@ -372,6 +372,14 @@ master へのマージ前に本ファイルを削除する。
   入れた。root ではファイルの権限が効かず、権限に関するテストがスキップされていたため。CI で 4 件のテストが実行されるように
   なったことを確かめた。
 
+* 2026-10-22: ステップ 3 全体に 2 回目の /crv (Sonnet・Opus・Fable) と /cr を実施した。3 モデルとも 1 回目の対応は正しいと
+  確認。対応したもの: 読み取り専用の pWAL を repair_by_cut で切り詰めると boost::filesystem::resize_file の例外が走査の
+  ワーカースレッドの catch (limestone_exception) で受けられず std::terminate していた (読み取り専用で開くようにしたことで
+  通るようになった退行。例外を投げない版の resize_file で limestone_io_exception に変換し、UT を加えた)。private 関数の
+  @throws の不足、dblog_scan_test の <unistd.h>、invalidate_epoch_snippet の @brief (理由のコメントは実装側に移した)。
+  見送り: 待つループ側で failed になる UT (共通の関数で新しい経路を通さない)、契約外のファイルの縮小での end の位置、
+  テストの入れ物の struct のメンバの _ 接尾辞 (既存の入れ物の struct も付けていない)。
+
 ## 6. 残った課題
 
 <!-- R1 の範囲外として持ち越すものを記録する。 -->

@@ -1,4 +1,6 @@
 
+#include <unistd.h>
+
 #include <algorithm>
 #include <cerrno>
 #include <fstream>
@@ -2803,6 +2805,30 @@ TEST_F(dblog_scan_test, scan_one_pwal_file_read_only_repair_throws_when_marking)
     std::ifstream in(p.string(), std::ios::binary);
     std::string content((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
     EXPECT_EQ(content, data_normal2);
+    boost::filesystem::permissions(p, boost::filesystem::owner_all);
+}
+
+// in a repair-by-cut mode, if a read-only pwal file must be trimmed, throws limestone_io_exception with errno rather
+// than letting the exception of boost escape; the file is unchanged
+TEST_F(dblog_scan_test, scan_one_pwal_file_read_only_repair_by_cut_throws_when_trimming) {
+    // root can write files w/o permissions
+    if (geteuid() == 0) { GTEST_SKIP() << "skip when run by root"; }
+    auto p = boost::filesystem::path(location) / "pwal_0000";
+    create_file(p, data_truncated_invalidated_normal_entry);
+    boost::filesystem::permissions(p, boost::filesystem::owner_read);  // drop file write permission
+    dblog_scan ds{boost::filesystem::path(location)};
+    ds.set_thread_num(1);
+    set_repair_by_cut_mode(ds);
+    dblog_scan::parse_error pe;
+    try {
+        (void) ds.scan_one_pwal_file(p, 0x100, [](const log_entry&) {}, [](const log_entry::read_error&) { return false; }, pe);
+        FAIL() << "no exception";
+    } catch (const limestone_io_exception& e) {
+        EXPECT_EQ(e.error_code(), EACCES);
+    }
+    std::ifstream in(p.string(), std::ios::binary);
+    std::string content((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+    EXPECT_EQ(content, data_truncated_invalidated_normal_entry);
     boost::filesystem::permissions(p, boost::filesystem::owner_all);
 }
 
