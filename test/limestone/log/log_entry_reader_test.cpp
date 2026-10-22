@@ -21,6 +21,7 @@
 #include <sstream>
 #include <string>
 #include <string_view>
+#include <utility>
 #include <vector>
 
 #include <boost/filesystem.hpp>
@@ -35,6 +36,8 @@ namespace limestone::testing {
 
 using limestone::api::limestone_io_exception;
 using limestone::api::log_entry;
+using limestone::internal::file_write_state;
+using limestone::internal::file_write_state_function;
 using limestone::internal::log_entry_read_result;
 using limestone::internal::log_entry_reader;
 using limestone::internal::log_entry_view;
@@ -219,7 +222,7 @@ TEST_F(log_entry_reader_test, fstat_failure_throws) {
     } ops;
     auto p = write_file(marker(2, 7));
     try {
-        log_entry_reader reader(p, 0, ops);
+        log_entry_reader reader(p, 0, nullptr, ops);
         FAIL() << "no exception";
     } catch (const limestone_io_exception& e) {
         EXPECT_EQ(e.error_code(), EIO);
@@ -248,7 +251,7 @@ TEST_F(log_entry_reader_test, read_failure_throws_and_eintr_retries) {
     std::string e1 = marker(2, 7);
     std::string e2 = normal_entry(1, "key", std::string(buffer_size, 'v'), 7, 1);
     auto p = write_file(e1 + e2);
-    log_entry_reader reader(p, 0, ops);
+    log_entry_reader reader(p, 0, nullptr, ops);
     expect_entry(reader, e1, 0);
     try {
         (void) reader.next();
@@ -266,7 +269,7 @@ TEST_F(log_entry_reader_test, short_reads) {
     auto p = write_file(e1 + e2 + e3 + e2.substr(0, 5));
     for (std::size_t max_read : {1, 2, 3, 7}) {
         recording_file_operations ops(max_read);
-        log_entry_reader reader(p, 0, ops);
+        log_entry_reader reader(p, 0, nullptr, ops);
         expect_entry(reader, e1, 0);
         expect_entry(reader, e2, e1.size());
         expect_entry(reader, e3, e1.size() + e2.size());
@@ -283,7 +286,7 @@ TEST_F(log_entry_reader_test, length_beyond_file_does_not_allocate) {
     std::string broken = u8(1) + u32le(0xffffffffU) + u32le(0xffffffffU) + "rest";
     auto p = write_file(broken);
     recording_file_operations ops;
-    log_entry_reader reader(p, 0, ops);
+    log_entry_reader reader(p, 0, nullptr, ops);
     expect_error(reader, log_entry::read_error::short_entry, entry_type::normal_entry, 0);
     for (auto count : ops.requests()) {
         EXPECT_LE(count, buffer_size);
@@ -297,7 +300,7 @@ TEST_F(log_entry_reader_test, buffer_expands_and_shrinks) {
     std::string small = remove_entry(1, "key", 7, 2);
     auto p = write_file(large + small);
     recording_file_operations ops;
-    log_entry_reader reader(p, 0, ops);
+    log_entry_reader reader(p, 0, nullptr, ops);
     expect_entry(reader, large, 0);
     expect_entry(reader, small, large.size());
     expect_end(reader, large.size() + small.size());
@@ -318,7 +321,7 @@ TEST_F(log_entry_reader_test, buffer_moves_unparsed_to_front) {
     std::string second = normal_entry(1, "key", "value", 7, 2);
     auto p = write_file(first + second);
     recording_file_operations ops;
-    log_entry_reader reader(p, 0, ops);
+    log_entry_reader reader(p, 0, nullptr, ops);
     expect_entry(reader, first, 0);
     expect_entry(reader, second, first.size());
     expect_end(reader, first.size() + second.size());
@@ -333,7 +336,7 @@ TEST_F(log_entry_reader_test, truncated_large_entry_does_not_expand) {
     std::string large = normal_entry(1, "key", std::string(buffer_size + 100, 'v'), 7, 1);
     auto p = write_file(large.substr(0, large.size() - 50));
     recording_file_operations ops;
-    log_entry_reader reader(p, 0, ops);
+    log_entry_reader reader(p, 0, nullptr, ops);
     expect_error(reader, log_entry::read_error::short_entry, entry_type::normal_entry, 0);
     for (auto count : ops.requests()) {
         EXPECT_LE(count, buffer_size);
@@ -346,7 +349,7 @@ TEST_F(log_entry_reader_test, buffer_expands_twice_for_blob_ids) {
     std::string large = normal_with_blob(1, "key", std::string(buffer_size, 'v'), 7, 1, blob_ids);
     auto p = write_file(large);
     recording_file_operations ops;
-    log_entry_reader reader(p, 0, ops);
+    log_entry_reader reader(p, 0, nullptr, ops);
     expect_entry(reader, large, 0);
     expect_end(reader, large.size());
     // 1st: reads the normal size. 2nd: expands up to the end of the BLOB count field, and reads the rest.
@@ -365,7 +368,7 @@ TEST_F(log_entry_reader_test, short_reads_after_expansion) {
     auto p = write_file(large + small);
     // an amount that does not divide the normal size, so that read boundaries differ from entry boundaries
     recording_file_operations ops(1000003);
-    log_entry_reader reader(p, 0, ops);
+    log_entry_reader reader(p, 0, nullptr, ops);
     expect_entry(reader, large, 0);
     expect_entry(reader, small, large.size());
     expect_end(reader, large.size() + small.size());
@@ -381,7 +384,7 @@ TEST_F(log_entry_reader_test, buffer_expands_from_middle) {
     std::string large = normal_entry(1, "key", std::string(buffer_size + 100, 'v'), 7, 3);
     auto p = write_file(smalls + large);
     recording_file_operations ops;
-    log_entry_reader reader(p, 0, ops);
+    log_entry_reader reader(p, 0, nullptr, ops);
     expect_entry(reader, e1, 0);
     expect_entry(reader, e2, e1.size());
     expect_entry(reader, e3, e1.size() + e2.size());
@@ -412,6 +415,257 @@ TEST_F(log_entry_reader_test, file_truncated_after_open) {
         expect_entry(reader, e1, 0);
         expect_error(reader, log_entry::read_error::short_entry, entry_type::normal_entry, e1.size());
     }
+}
+
+// one step of writing a file being written: the bytes to append, and the state the state function returns after
+// appending
+struct write_step {
+    std::string bytes;
+    file_write_state state;
+};
+
+// advances one step each time it is called: appends to the file and returns the state. Returns written after all the
+// steps are used. Since it is called where the reader waits, it reproduces "more data arrives while waiting" without a
+// writer thread
+class scripted_writer {
+public:
+    scripted_writer(boost::filesystem::path file, std::vector<write_step> steps)
+        : file_(std::move(file)), steps_(std::move(steps)) {}
+
+    file_write_state step() {
+        calls_++;
+        if (next_ >= steps_.size()) {
+            return file_write_state::written;
+        }
+        const auto& s = steps_[next_++];
+        if (! s.bytes.empty()) {
+            std::ofstream out(file_.string(), std::ios::binary | std::ios::app);
+            out.write(s.bytes.data(), static_cast<std::streamsize>(s.bytes.size()));
+        }
+        return s.state;
+    }
+
+    [[nodiscard]] std::size_t calls() const noexcept { return calls_; }
+
+    [[nodiscard]] file_write_state_function function() {
+        return [this]() { return step(); };
+    }
+
+private:
+    boost::filesystem::path file_;
+    std::vector<write_step> steps_;
+    std::size_t next_{};
+    std::size_t calls_{};
+};
+
+// while being written, waits in the middle of an entry and parses it after the rest arrives; after written, a file
+// ending at a boundary is the end
+TEST_F(log_entry_reader_test, writing_waits_until_written) {
+    std::string e1 = marker(2, 7);
+    std::string e2 = normal_entry(1, "key", "value", 7, 1);
+    auto p = write_file(e1 + e2.substr(0, 5));
+    scripted_writer writer(p, {{e2.substr(5), file_write_state::writing}});
+    log_entry_reader reader(p, 0, writer.function());
+    expect_entry(reader, e1, 0);
+    expect_entry(reader, e2, e1.size());
+    expect_end(reader, e1.size() + e2.size());
+    EXPECT_EQ(writer.calls(), 2U);
+}
+
+// after written, a file ending in the middle of an entry is short_entry
+TEST_F(log_entry_reader_test, written_then_short_entry) {
+    std::string e1 = marker(2, 7);
+    std::string e2 = normal_entry(1, "key", "value", 7, 1);
+    auto p = write_file(e1 + e2.substr(0, 5));
+    scripted_writer writer(p, {});
+    log_entry_reader reader(p, 0, writer.function());
+    expect_entry(reader, e1, 0);
+    expect_error(reader, log_entry::read_error::short_entry, entry_type::normal_entry, e1.size());
+}
+
+// throws an exception without errno when the state becomes failed
+TEST_F(log_entry_reader_test, writing_failed_throws) {
+    std::string e1 = marker(2, 7);
+    auto p = write_file(e1);
+    scripted_writer writer(p, {{"", file_write_state::writing}, {"", file_write_state::failed}});
+    log_entry_reader reader(p, 0, writer.function());
+    expect_entry(reader, e1, 0);
+    try {
+        (void) reader.next();
+        FAIL() << "no exception";
+    } catch (const limestone_io_exception& e) {
+        EXPECT_EQ(e.error_code(), 0);
+    }
+    EXPECT_EQ(writer.calls(), 2U);
+}
+
+// after a failure, throws without calling the state function, even if it would return writing
+TEST_F(log_entry_reader_test, failed_is_final) {
+    std::string e1 = marker(2, 7);
+    std::string e2 = normal_entry(1, "key", "value", 7, 1);
+    auto p = write_file(e1);
+    scripted_writer writer(p, {{"", file_write_state::failed}, {e2, file_write_state::writing}});
+    log_entry_reader reader(p, 0, writer.function());
+    expect_entry(reader, e1, 0);
+    for (int i = 0; i < 2; i++) {
+        try {
+            (void) reader.next();
+            FAIL() << "no exception " << i;
+        } catch (const limestone_io_exception& e) {
+            EXPECT_EQ(e.error_code(), 0);
+        }
+    }
+    EXPECT_EQ(writer.calls(), 1U);
+}
+
+// if a file being written does not exist, does not throw at creation, and waits for it to appear
+TEST_F(log_entry_reader_test, writing_waits_for_file_to_appear) {
+    std::string e1 = marker(2, 7);
+    boost::filesystem::path p = boost::filesystem::path(location) / "data";
+    scripted_writer writer(p, {{"", file_write_state::writing}, {e1, file_write_state::writing}});
+    log_entry_reader reader(p, 0, writer.function());
+    expect_entry(reader, e1, 0);
+    expect_end(reader, e1.size());
+}
+
+// throws an exception with errno if the file does not exist after written
+TEST_F(log_entry_reader_test, written_without_file_throws) {
+    boost::filesystem::path p = boost::filesystem::path(location) / "data";
+    scripted_writer writer(p, {});
+    log_entry_reader reader(p, 0, writer.function());
+    try {
+        (void) reader.next();
+        FAIL() << "no exception";
+    } catch (const limestone_io_exception& e) {
+        EXPECT_EQ(e.error_code(), ENOENT);
+    }
+}
+
+// for a file being written, waits even if the start position exceeds the size of the file
+TEST_F(log_entry_reader_test, writing_waits_for_start_offset) {
+    std::string e1 = marker(2, 7);
+    std::string e2 = normal_entry(1, "key", "value", 7, 1);
+    std::string e3 = remove_entry(1, "key", 7, 2);
+    auto p = write_file(e1);
+    scripted_writer writer(p, {{e2 + e3, file_write_state::writing}});
+    log_entry_reader reader(p, e1.size() + e2.size(), writer.function());
+    expect_entry(reader, e3, e1.size() + e2.size());
+    expect_end(reader, e1.size() + e2.size() + e3.size());
+}
+
+// throws an exception without errno if the start position still exceeds the size of the file after written
+TEST_F(log_entry_reader_test, written_with_start_offset_beyond_file_size_throws) {
+    std::string e1 = marker(2, 7);
+    auto p = write_file(e1);
+    scripted_writer writer(p, {});
+    log_entry_reader reader(p, e1.size() + 10, writer.function());
+    try {
+        (void) reader.next();
+        FAIL() << "no exception";
+    } catch (const limestone_io_exception& e) {
+        EXPECT_EQ(e.error_code(), 0);
+    }
+}
+
+// throws an exception without errno if, when written, the file is smaller than the range already read
+TEST_F(log_entry_reader_test, written_shorter_than_read_throws) {
+    std::string e1 = marker(2, 7);
+    std::string e2 = normal_entry(1, "key", "value", 7, 1);
+    auto p = write_file(e1 + e2);
+    log_entry_reader reader(p, 0, [&p, &e1]() {
+        boost::filesystem::resize_file(p, e1.size());
+        return file_write_state::written;
+    });
+    expect_entry(reader, e1, 0);
+    expect_entry(reader, e2, e1.size());
+    try {
+        (void) reader.next();
+        FAIL() << "no exception";
+    } catch (const limestone_io_exception& e) {
+        EXPECT_EQ(e.error_code(), 0);
+    }
+}
+
+// while the lower bound exceeds the buffer, waits without allocating or reading until the rest of the file reaches
+// the lower bound
+TEST_F(log_entry_reader_test, writing_does_not_allocate_while_waiting) {
+    std::string large = normal_entry(1, "key", std::string(buffer_size + 100, 'v'), 7, 1);
+    auto p = write_file(large.substr(0, 100));
+    constexpr std::size_t middle = 10U * 1024U * 1024U;
+    scripted_writer writer(p, {{large.substr(100, middle - 100), file_write_state::writing},
+                               {large.substr(middle, large.size() - 1 - middle), file_write_state::writing},
+                               {large.substr(large.size() - 1), file_write_state::writing}});
+    recording_file_operations ops;
+    log_entry_reader reader(p, 0, writer.function(), ops);
+    expect_entry(reader, large, 0);
+    expect_end(reader, large.size());
+    // 1st: reads the normal size (only 100 bytes have arrived). No read while waiting.
+    // 2nd: after everything arrives, expands to the size of the entry and reads the rest. 3rd: reads into the buffer
+    // shrunk to the normal size
+    ASSERT_EQ(ops.requests().size(), 3U);
+    EXPECT_EQ(ops.requests()[0], buffer_size);
+    EXPECT_EQ(ops.requests()[1], large.size() - 100);
+    EXPECT_EQ(ops.requests()[2], buffer_size);
+    EXPECT_EQ(writer.calls(), 4U);
+}
+
+// if the state becomes written while waiting with the lower bound beyond the buffer, and the file ends in the middle
+// of an entry, returns short_entry without allocating
+TEST_F(log_entry_reader_test, written_while_waiting_then_short_entry) {
+    std::string large = normal_entry(1, "key", std::string(buffer_size + 100, 'v'), 7, 1);
+    auto p = write_file(large.substr(0, 100));
+    scripted_writer writer(p, {{large.substr(100, 1000), file_write_state::writing}});
+    recording_file_operations ops;
+    log_entry_reader reader(p, 0, writer.function(), ops);
+    expect_error(reader, log_entry::read_error::short_entry, entry_type::normal_entry, 0);
+    for (auto count : ops.requests()) {
+        EXPECT_LE(count, buffer_size);
+    }
+}
+
+// throws an exception with errno if a file being written cannot be opened for a reason other than not existing
+TEST_F(log_entry_reader_test, writing_open_failure_throws) {
+    class : public real_file_operations {
+    public:
+        int open(const char*, int) override {
+            errno = EACCES;
+            return -1;
+        }
+    } ops;
+    auto p = write_file(marker(2, 7));
+    scripted_writer writer(p, {});
+    try {
+        log_entry_reader reader(p, 0, writer.function(), ops);
+        FAIL() << "no exception";
+    } catch (const limestone_io_exception& e) {
+        EXPECT_EQ(e.error_code(), EACCES);
+    }
+}
+
+// throws an exception with errno if the size of a file being written cannot be obtained again
+TEST_F(log_entry_reader_test, writing_fstat_failure_throws) {
+    class : public real_file_operations {
+    public:
+        int fstat(int, struct stat*) override {
+            errno = EIO;
+            return -1;
+        }
+    } ops;
+    auto p = write_file(marker(2, 7));
+    scripted_writer writer(p, {});
+    log_entry_reader reader(p, 0, writer.function(), ops);
+    try {
+        (void) reader.next();
+        FAIL() << "no exception";
+    } catch (const limestone_io_exception& e) {
+        EXPECT_EQ(e.error_code(), EIO);
+    }
+}
+
+// a reader of a file being written cannot be created with an empty state function
+TEST_F(log_entry_reader_test, empty_write_state_function_aborts) {
+    auto p = write_file(marker(2, 7));
+    EXPECT_DEATH(log_entry_reader(p, 0, file_write_state_function{}), "empty write state function");
 }
 
 // a result of kind ok cannot be created from a default-constructed view

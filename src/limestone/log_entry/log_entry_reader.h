@@ -15,6 +15,7 @@
  */
 #pragma once
 
+#include <chrono>
 #include <cstddef>
 #include <cstdint>
 #include <ostream>
@@ -25,6 +26,7 @@
 
 #include "file_operations.h"
 #include "log_entry.h"
+#include "log_entry/file_write_state.h"
 #include "log_entry/log_entry_view.h"
 
 namespace limestone::internal {
@@ -142,13 +144,26 @@ std::ostream& operator<<(std::ostream& out, log_entry_read_result::status result
 /**
  * @brief Reads entries from a file in order from the beginning.
  *
- * Reads the file into a buffer in large units, and repeats log_entry_view::parse() on it. The file is treated as not
- * changing while it is read.
+ * Reads the file into a buffer in large units, and repeats log_entry_view::parse() on it.
+ *
+ * When created without a state function, the file is treated as not changing while it is read. When created with a
+ * state function, the file is treated as growing toward its end while the state is writing, and the reader waits for
+ * more data to arrive. After the state becomes written, the file is treated in the same way as without a state
+ * function.
+ *
+ * @note Not thread-safe. An object must be used by only one thread at a time. When handing it over to another thread,
+ *       or reading a view returned by next() in another thread, the caller must establish the ordering by
+ *       synchronization (a mutex, starting and joining a thread, and so on). Different objects may be used
+ *       concurrently in different threads, even if they read the same file. The state function is called in the
+ *       thread that calls next().
  */
 class log_entry_reader {
 public:
     /// The normal size of the buffer (the size read by one read).
     static constexpr std::size_t buffer_size = 16U * 1024U * 1024U;
+
+    /// The interval of waiting for more data in a file being written. The state function is called at each wait.
+    static constexpr std::chrono::milliseconds wait_interval{10};
 
     /**
      * @brief Opens the file and creates a reader that starts reading at the given position.
@@ -160,14 +175,32 @@ public:
     explicit log_entry_reader(const boost::filesystem::path& file, std::uint64_t start_offset = 0);
 
     /**
+     * @brief Creates a reader of a file being written that starts reading at the given position.
+     *
+     * While the state is writing, the file must be written in order from the beginning, and the bytes up to the
+     * current size of the file must hold their final contents (the size must not be extended first with the contents
+     * written later).
+     * If the file does not exist, or start_offset exceeds the size of the file, it does not throw but waits in
+     * next().
+     * @param file the file to read
+     * @param start_offset the position to start reading at. It must be the beginning of an entry
+     * @param state the state function. It must not be empty. As long as it returns writing, next() keeps waiting
+     * @throws limestone_io_exception if the file cannot be opened for a reason other than not existing, or its status
+     *         cannot be obtained (with errno)
+     */
+    log_entry_reader(const boost::filesystem::path& file, std::uint64_t start_offset, file_write_state_function state);
+
+    /**
      * @brief Creates a reader with the file operations replaced. For testing only; must not be used by production
      *        code.
      * @param file the file to read
      * @param start_offset the position to start reading at. It must be the beginning of an entry
+     * @param state the state function. If empty, behaves as the first constructor; otherwise as the second
      * @param file_ops the file operations. It must be valid until this object is destroyed
-     * @throws limestone_io_exception the same as the first constructor
+     * @throws limestone_io_exception the same as the first or the second constructor, depending on state
      */
-    log_entry_reader(const boost::filesystem::path& file, std::uint64_t start_offset, file_operations& file_ops);
+    log_entry_reader(const boost::filesystem::path& file, std::uint64_t start_offset, file_write_state_function state,
+                     file_operations& file_ops);
 
     /**
      * @brief Closes the file.
@@ -189,8 +222,15 @@ public:
      *   (unknown_type) or the file ending in the middle of an entry (short_entry).
      *
      * A call after end or error is returned returns the same result.
+     *
+     * When created with a state function, while the state is writing, it does not return end or short_entry, but
+     * waits for more data, calling the state function every wait_interval.
      * @return the result
      * @throws limestone_io_exception if reading fails (with errno)
+     * @throws limestone_io_exception if the state function returns failed (without errno; later calls throw the same
+     *         exception without calling the state function), if the file cannot be opened after the state becomes
+     *         written (with errno), or if the start position or the end of the range already read exceeds the size of
+     *         the file after the state becomes written (without errno)
      */
     [[nodiscard]] log_entry_read_result next();
 
@@ -201,6 +241,40 @@ private:
      * @throws limestone_io_exception the same as the constructors. The file is closed before throwing
      */
     void open_file(std::uint64_t start_offset);
+
+    /**
+     * @brief Opens the file if it exists. Used for a file being written.
+     * @return true if opened, false if the file does not exist
+     * @throws limestone_io_exception if the file cannot be opened for a reason other than not existing (with errno)
+     */
+    bool open_if_exists();
+
+    /**
+     * @brief Gets the size of the file again. If the file is not open, opens it if it exists. If it does not exist,
+     *        the size is 0.
+     * @throws limestone_io_exception if the file status cannot be obtained (with errno)
+     */
+    void refresh_file_size();
+
+    /**
+     * @brief Calls the state function, and updates the handling by its result. Call it only while the file is
+     *        treated as being written.
+     *
+     * If written, gets the size of the file again, and treats the file as not being written from then on. If failed,
+     * records it and throws.
+     * @throws limestone_io_exception if the state is failed (without errno). If written, and the file cannot be opened
+     *         (with errno), or the start position or the end of the range already read exceeds the size of the file
+     *         (without errno)
+     */
+    void update_write_state();
+
+    /**
+     * @brief For a file being written, waits for and reads the data needed to parse the next entry.
+     * @param required the lower bound of the number of bytes needed to parse, counted from the beginning of the
+     *                 unparsed part
+     * @throws limestone_io_exception the same as update_write_state() and read_into_buffer()
+     */
+    void wait_and_read(std::size_t required);
 
     /**
      * @brief Creates the result returned at the end of the file: end if there is no unparsed part, and error with
@@ -232,6 +306,11 @@ private:
     real_file_operations real_file_ops_{};
     file_operations* file_ops_;
     boost::filesystem::path file_;
+    file_write_state_function state_{};
+    /// whether the file is treated as being written: true while created with a state function and not yet written
+    bool writing_{};
+    /// whether the state function returned failed. If true, next() throws without calling the state function
+    bool failed_{};
     int fd_{-1};
     std::uint64_t file_size_{};
 

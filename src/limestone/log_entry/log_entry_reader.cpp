@@ -22,6 +22,7 @@
 #include <algorithm>
 #include <cerrno>
 #include <cstring>
+#include <thread>
 #include <utility>
 
 #include <glog/logging.h>
@@ -95,14 +96,31 @@ log_entry_reader::log_entry_reader(const boost::filesystem::path& file, std::uin
 }
 
 log_entry_reader::log_entry_reader(const boost::filesystem::path& file, std::uint64_t start_offset,
-                                   file_operations& file_ops)
-    : file_ops_(&file_ops), file_(file) {
-    open_file(start_offset);
+                                   file_write_state_function state)
+    : file_ops_(&real_file_ops_), file_(file), state_(std::move(state)), writing_(true) {
+    if (! state_) {
+        LOG_LP(FATAL) << "empty write state function";
+    }
+    buffer_offset_ = start_offset;
+    open_if_exists();
+}
+
+log_entry_reader::log_entry_reader(const boost::filesystem::path& file, std::uint64_t start_offset,
+                                   file_write_state_function state, file_operations& file_ops)
+    : file_ops_(&file_ops), file_(file), state_(std::move(state)), writing_(static_cast<bool>(state_)) {
+    if (writing_) {
+        buffer_offset_ = start_offset;
+        open_if_exists();
+    } else {
+        open_file(start_offset);
+    }
 }
 
 log_entry_reader::~log_entry_reader() {
     // the file is only read, so a failure of close is ignored
-    file_ops_->close(fd_);
+    if (fd_ >= 0) {
+        file_ops_->close(fd_);
+    }
 }
 
 void log_entry_reader::open_file(std::uint64_t start_offset) {
@@ -126,7 +144,90 @@ void log_entry_reader::open_file(std::uint64_t start_offset) {
     buffer_offset_ = start_offset;
 }
 
+bool log_entry_reader::open_if_exists() {
+    fd_ = file_ops_->open(file_.c_str(), O_RDONLY);
+    if (fd_ < 0) {
+        const int err = errno;
+        if (err == ENOENT) {
+            return false;
+        }
+        LOG_AND_THROW_IO_EXCEPTION("cannot open file: " + file_.string(), err);
+    }
+    return true;
+}
+
+void log_entry_reader::refresh_file_size() {
+    if (fd_ < 0 && ! open_if_exists()) {
+        file_size_ = 0;
+        return;
+    }
+    struct stat st{};
+    if (file_ops_->fstat(fd_, &st) != 0) {
+        const int err = errno;
+        LOG_AND_THROW_IO_EXCEPTION("cannot get the file status: " + file_.string(), err);
+    }
+    file_size_ = static_cast<std::uint64_t>(st.st_size);
+}
+
+void log_entry_reader::update_write_state() {
+    switch (state_()) {
+    case file_write_state::writing:
+        return;
+    case file_write_state::failed:
+        failed_ = true;
+        LOG_AND_THROW_IO_EXCEPTION_NO_ERRNO("writing the file failed: " + file_.string());
+    case file_write_state::written:
+        break;
+    }
+    // get the size after checking the state. In the reverse order, data whose writing completes in between would be
+    // missed
+    writing_ = false;
+    if (fd_ < 0 && ! open_if_exists()) {
+        LOG_AND_THROW_IO_EXCEPTION("cannot open file: " + file_.string(), ENOENT);
+    }
+    refresh_file_size();
+    // if the start position or the end of the range already read exceeds the size of the completed file, the start
+    // position is wrong or the file has shrunk, and the rest cannot be read
+    if (buffer_offset_ + end_ > file_size_) {
+        LOG_AND_THROW_IO_EXCEPTION_NO_ERRNO("the read position " + std::to_string(buffer_offset_ + end_)
+                                            + " exceeds the file size " + std::to_string(file_size_) + ": "
+                                            + file_.string());
+    }
+}
+
+void log_entry_reader::wait_and_read(std::size_t required) {
+    // while the lower bound does not fit in the current buffer, wait without allocating until the rest of the file
+    // reaches the lower bound
+    if (required > buffer_.size()) {
+        while (true) {
+            refresh_file_size();
+            if (required <= remaining_file_size()) {
+                break;
+            }
+            update_write_state();
+            if (! writing_) {
+                return;
+            }
+            std::this_thread::sleep_for(wait_interval);
+        }
+    }
+    // the lower bound fits in the current buffer, or the rest of the file has reached it. Refill without waiting, and
+    // read into the whole free space
+    prepare_buffer(required);
+    if (read_into_buffer() == 0) {
+        update_write_state();
+        if (writing_) {
+            std::this_thread::sleep_for(wait_interval);
+        }
+    }
+}
+
 log_entry_read_result log_entry_reader::next() {
+    // even if the state function returns writing after a failure, do not read a rewritten file as a continuation of
+    // the old buffer
+    if (failed_) {
+        LOG_AND_THROW_IO_EXCEPTION_NO_ERRNO("writing the file failed: " + file_.string());
+    }
     while (true) {
         const std::uint64_t offset = buffer_offset_ + begin_;
         const auto parsed = log_entry_view::parse(std::string_view{buffer_.data() + begin_, end_ - begin_});
@@ -141,6 +242,12 @@ log_entry_read_result log_entry_reader::next() {
                 offset);
         case log_entry_parse_result::status::short_entry:
             break;
+        }
+        if (writing_) {
+            // being written: wait and read, then parse again. Once written, the handling below for a file not being
+            // written applies
+            wait_and_read(parsed.required());
+            continue;
         }
         // if the lower bound exceeds the rest of the file, the rest cannot be read. Even if a length field is broken,
         // no large allocation is made
