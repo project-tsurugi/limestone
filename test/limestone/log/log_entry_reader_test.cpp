@@ -539,16 +539,18 @@ TEST_F(log_entry_reader_test, writing_waits_for_file_to_appear) {
     expect_end(reader, e1.size());
 }
 
-// throws an exception with errno if the file does not exist after written
+// throws an exception with errno if the file does not exist after written; a later call throws again, not end
 TEST_F(log_entry_reader_test, written_without_file_throws) {
     boost::filesystem::path p = boost::filesystem::path(location) / "data";
     scripted_writer writer(p, {});
     log_entry_reader reader(p, 0, writer.function());
-    try {
-        (void) reader.next();
-        FAIL() << "no exception";
-    } catch (const limestone_io_exception& e) {
-        EXPECT_EQ(e.error_code(), ENOENT);
+    for (int i = 0; i < 2; i++) {
+        try {
+            (void) reader.next();
+            FAIL() << "no exception " << i;
+        } catch (const limestone_io_exception& e) {
+            EXPECT_EQ(e.error_code(), ENOENT);
+        }
     }
 }
 
@@ -589,11 +591,13 @@ TEST_F(log_entry_reader_test, written_shorter_than_read_throws) {
     });
     expect_entry(reader, e1, 0);
     expect_entry(reader, e2, e1.size());
-    try {
-        (void) reader.next();
-        FAIL() << "no exception";
-    } catch (const limestone_io_exception& e) {
-        EXPECT_EQ(e.error_code(), 0);
+    for (int i = 0; i < 2; i++) {
+        try {
+            (void) reader.next();
+            FAIL() << "no exception " << i;
+        } catch (const limestone_io_exception& e) {
+            EXPECT_EQ(e.error_code(), 0);
+        }
     }
 }
 

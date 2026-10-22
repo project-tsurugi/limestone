@@ -161,7 +161,7 @@ std::ostream& operator<<(std::ostream& out, log_entry_read_result::status result
 class log_entry_reader {
 public:
     /// The normal size of the buffer (the size read by one read).
-    static constexpr std::size_t buffer_size = 16U * 1024U * 1024U;
+    static constexpr std::size_t buffer_size = std::size_t{16} * 1024 * 1024;
 
     /// The interval of waiting for more data in a file being written. The state function is called at each wait.
     static constexpr std::chrono::milliseconds wait_interval{10};
@@ -173,7 +173,7 @@ public:
      * @throws limestone_io_exception if the file cannot be opened or its status cannot be obtained (with errno), or if
      *         start_offset exceeds the size of the file (without errno)
      */
-    explicit log_entry_reader(const boost::filesystem::path& file, std::uint64_t start_offset = 0);
+    explicit log_entry_reader(boost::filesystem::path file, std::uint64_t start_offset = 0);
 
     /**
      * @brief Creates a reader of a file being written that starts reading at the given position.
@@ -186,10 +186,9 @@ public:
      * @param file the file to read
      * @param start_offset the position to start reading at. It must be the beginning of an entry
      * @param state the state function. It must not be empty. As long as it returns writing, next() keeps waiting
-     * @throws limestone_io_exception if the file cannot be opened for a reason other than not existing, or its status
-     *         cannot be obtained (with errno)
+     * @throws limestone_io_exception if the file cannot be opened for a reason other than not existing (with errno)
      */
-    log_entry_reader(const boost::filesystem::path& file, std::uint64_t start_offset, file_write_state_function state);
+    log_entry_reader(boost::filesystem::path file, std::uint64_t start_offset, file_write_state_function state);
 
     /**
      * @brief Creates a reader with the file operations replaced. For testing only; must not be used by production
@@ -200,7 +199,7 @@ public:
      * @param file_ops the file operations. It must be valid until this object is destroyed
      * @throws limestone_io_exception the same as the first or the second constructor, depending on state
      */
-    log_entry_reader(const boost::filesystem::path& file, std::uint64_t start_offset, file_write_state_function state,
+    log_entry_reader(boost::filesystem::path file, std::uint64_t start_offset, file_write_state_function state,
                      file_operations& file_ops);
 
     /**
@@ -230,9 +229,10 @@ public:
      * @return the result
      * @throws limestone_io_exception if reading fails (with errno)
      * @throws limestone_io_exception if the state function returns failed (without errno; later calls throw the same
-     *         exception without calling the state function), if the file cannot be opened after the state becomes
-     *         written (with errno), or if the start position or the end of the range already read exceeds the size of
-     *         the file after the state becomes written (without errno)
+     *         exception without calling the state function), if the file cannot be opened for a reason other than
+     *         not existing or its status cannot be obtained while waiting (with errno), if the file cannot be opened
+     *         after the state becomes written (with errno), or if the start position or the end of the range already
+     *         read exceeds the size of the file after the state becomes written (without errno)
      */
     [[nodiscard]] log_entry_read_result next();
 
@@ -274,7 +274,7 @@ private:
      * @brief For a file being written, waits for and reads the data needed to parse the next entry.
      * @param required the lower bound of the number of bytes needed to parse, counted from the beginning of the
      *                 unparsed part
-     * @throws limestone_io_exception the same as update_write_state() and read_into_buffer()
+     * @throws limestone_io_exception the same as refresh_file_size(), update_write_state() and read_into_buffer()
      */
     void wait_and_read(std::size_t required);
 
@@ -309,8 +309,8 @@ private:
     [[nodiscard]] std::uint64_t remaining_file_size() const noexcept;
 
     real_file_operations real_file_ops_{};
-    file_operations* file_ops_;
-    boost::filesystem::path file_;
+    file_operations* file_ops_{};
+    boost::filesystem::path file_{};
     file_write_state_function state_{};
     /// whether the file is treated as being written: true while created with a state function and not yet written
     bool writing_{};

@@ -90,14 +90,14 @@ std::ostream& operator<<(std::ostream& out, log_entry_read_result::status result
     return out << to_string_view(result);
 }
 
-log_entry_reader::log_entry_reader(const boost::filesystem::path& file, std::uint64_t start_offset)
-    : file_ops_(&real_file_ops_), file_(file) {
+log_entry_reader::log_entry_reader(boost::filesystem::path file, std::uint64_t start_offset)
+    : file_ops_(&real_file_ops_), file_(std::move(file)) {
     open_file(start_offset);
 }
 
-log_entry_reader::log_entry_reader(const boost::filesystem::path& file, std::uint64_t start_offset,
+log_entry_reader::log_entry_reader(boost::filesystem::path file, std::uint64_t start_offset,
                                    file_write_state_function state)
-    : file_ops_(&real_file_ops_), file_(file), state_(std::move(state)), writing_(true) {
+    : file_ops_(&real_file_ops_), file_(std::move(file)), state_(std::move(state)), writing_(true) {
     if (! state_) {
         LOG_LP(FATAL) << "empty write state function";
     }
@@ -105,9 +105,9 @@ log_entry_reader::log_entry_reader(const boost::filesystem::path& file, std::uin
     open_if_exists();
 }
 
-log_entry_reader::log_entry_reader(const boost::filesystem::path& file, std::uint64_t start_offset,
+log_entry_reader::log_entry_reader(boost::filesystem::path file, std::uint64_t start_offset,
                                    file_write_state_function state, file_operations& file_ops)
-    : file_ops_(&file_ops), file_(file), state_(std::move(state)), writing_(static_cast<bool>(state_)) {
+    : file_ops_(&file_ops), file_(std::move(file)), state_(std::move(state)), writing_(static_cast<bool>(state_)) {
     if (writing_) {
         buffer_offset_ = start_offset;
         open_if_exists();
@@ -181,7 +181,6 @@ void log_entry_reader::update_write_state() {
     }
     // get the size after checking the state. In the reverse order, data whose writing completes in between would be
     // missed
-    writing_ = false;
     if (fd_ < 0 && ! open_if_exists()) {
         LOG_AND_THROW_IO_EXCEPTION("cannot open file: " + file_.string(), ENOENT);
     }
@@ -193,6 +192,10 @@ void log_entry_reader::update_write_state() {
                                             + " exceeds the file size " + std::to_string(file_size_) + ": "
                                             + file_.string());
     }
+    // switch to the handling for a file not being written only after all the checks pass. If one of them throws,
+    // the file stays treated as being written, so that the next call repeats the checks and throws the same
+    // exception
+    writing_ = false;
 }
 
 void log_entry_reader::wait_and_read(std::size_t required) {
@@ -230,7 +233,7 @@ log_entry_read_result log_entry_reader::next() {
     }
     while (true) {
         const std::uint64_t offset = buffer_offset_ + begin_;
-        const auto parsed = log_entry_view::parse(std::string_view{buffer_.data() + begin_, end_ - begin_});
+        const auto parsed = log_entry_view::parse(std::string_view{buffer_}.substr(begin_, end_ - begin_));
         switch (parsed.result()) {
         case log_entry_parse_result::status::ok:
             begin_ += parsed.consumed();
@@ -285,16 +288,16 @@ void log_entry_reader::prepare_buffer(std::size_t required) {
     if (required > buffer_.size()) {
         // expand
         std::string expanded(std::max(required, buffer_size), '\0');
-        std::memcpy(expanded.data(), buffer_.data() + begin_, unparsed_size);
+        std::memcpy(expanded.data(), &buffer_[begin_], unparsed_size);
         buffer_ = std::move(expanded);
     } else if (buffer_.size() > buffer_size && required <= buffer_size) {
         // shrink to the normal size
         std::string shrunk(buffer_size, '\0');
-        std::memcpy(shrunk.data(), buffer_.data() + begin_, unparsed_size);
+        std::memcpy(shrunk.data(), &buffer_[begin_], unparsed_size);
         buffer_ = std::move(shrunk);
-    } else {
+    } else if (begin_ != 0) {
         // move to the beginning
-        std::memmove(buffer_.data(), buffer_.data() + begin_, unparsed_size);
+        std::memmove(buffer_.data(), &buffer_[begin_], unparsed_size);
     }
     buffer_offset_ += begin_;
     begin_ = 0;
@@ -303,7 +306,7 @@ void log_entry_reader::prepare_buffer(std::size_t required) {
 
 std::size_t log_entry_reader::read_into_buffer() {
     while (true) {
-        const ssize_t n = file_ops_->pread(fd_, buffer_.data() + end_, buffer_.size() - end_,
+        const ssize_t n = file_ops_->pread(fd_, &buffer_[end_], buffer_.size() - end_,
                                            static_cast<off_t>(buffer_offset_ + end_));
         if (n >= 0) {
             end_ += static_cast<std::size_t>(n);

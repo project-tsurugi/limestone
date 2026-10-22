@@ -73,8 +73,8 @@ master へのマージ前に本ファイルを削除する。
 * [x] 書き込み中のファイルの読み出し (LE 11.5)。状態の関数、待ち方。
 * [x] parse_wal_file と dblog_scan の読み込みを新しい読み込みに移す。無効なスニペットの marker の書き換えは、別に開いた
       ファイルへの位置を指定した書き込みに変える (LE 11.2)。失敗時の判定を read_error の種別に変える (LE 11.3)。
-* [ ] UT: LE 15 節のファイルからの読み込み、書き込み中のファイルの読み出しの観点。
-* [ ] 既存の dblog_scan・parse_wal_file・compaction のテストが変えずに通ること。
+* [x] UT: LE 15 節のファイルからの読み込み、書き込み中のファイルの読み出しの観点。項目ごとに書いた (5 節に対応表)。
+* [x] 既存の dblog_scan・parse_wal_file・compaction のテストが変えずに通ること。25c5852 のフルスイートで確認した。
 
 ### ステップ 4: 新しいソートの部品 (L3 8.2〜8.6)
 
@@ -322,8 +322,8 @@ master へのマージ前に本ファイルを削除する。
   決定的に再現できる。実際のファイル転送と組み合わせた確認は、シナリオテストとして持ち越す (6 節)。
 
 * 2026-10-22: parse_wal_file と dblog_scan (last_durable_epoch) の読み込みを log_entry_reader に移した。pWAL ファイルは
-  読み取り専用で開き、無効なスニペットの marker の書き換えは、最初に書き換えるときに別に書き込み用に開いたファイルへの
-  pwrite で行う (::open と ::pwrite を直接使い、file_operations は通さない)。add_entry には、参照型から作った所有型を
+  読み取り専用で開き、無効なスニペットの marker の書き換えは、書き換えるたびに別に書き込み用に開いたファイルへの
+  pwrite と fsync で行い、閉じる (::open・::pwrite・::fsync を直接使い、file_operations は通さない)。add_entry には、参照型から作った所有型を
   渡す (参照型のまま渡すのはステップ 5)。
 * 2026-10-22: marker の書き換えに失敗したら (書き込み用に開けない、pwrite が失敗する)、limestone_io_exception を投げる。
   当初は旧実装に合わせて LOG(ERROR) で続行する案としたが、旧実装は走査の最初に読み書き両用で開いていたため、書き込み
@@ -343,6 +343,34 @@ master へのマージ前に本ファイルを削除する。
   ファイルの残りを超えたときは、まだ読んでいないバイトも飛ばす)。unknown_type の後は同じ unknown_type を返す
   (エントリの境界を区切り直す方法がない)。unknown_type の後の扱いは確信が持てないが、確信を得る条件も思いつかない
   ので、このまま進め、問題が出たら考え直す。
+
+* 2026-10-22: LE 15 節の観点と log_entry_reader_test の対応。ファイルからの読み込み: 補充の 3 分岐は
+  buffer_expands_and_shrinks (拡大・縮小)、buffer_moves_unparsed_to_front (先頭への移動)、buffer_expands_from_middle、
+  buffer_expands_twice_for_blob_ids。read が要求より少ない場合は short_reads、short_reads_after_expansion。終端と
+  short_entry の区別は reads_entries_in_order、empty_file_is_end、truncated_entry_is_short_entry、
+  truncated_large_entry_does_not_expand。長さフィールドが残りを超えても確保しないことは length_beyond_file_does_not_allocate、
+  truncated_large_entry_does_not_expand、short_entry_skips_unread_bytes。指定した位置からの読み始めは starts_at_offset、
+  start_offset_beyond_file_size_throws。書き込み中のファイル: 書き込み済みへの遷移は writing_waits_until_written、
+  writing_waits_for_file_to_appear、writing_waits_for_start_offset。失敗への遷移は writing_failed_throws、failed_is_final。
+  途中で待って解析が成功することは writing_waits_until_written。書き込み済み後の終端と不足の区別は
+  writing_waits_until_written、written_then_short_entry、written_while_waiting_then_short_entry。下限がバッファを超える間
+  に確保しないことは writing_does_not_allocate_while_waiting、written_while_waiting_then_short_entry。
+
+* 2026-10-22: ステップ 3 全体 (4975b83..25c5852) に /crv (Sonnet・Opus・Fable) と /cr を実施した。対応したもの:
+  update_write_state() が writing_ = false を先に立ててから例外を投げ、例外の後の next() が黙って end を返していた
+  (検査がすべて通った後に切り替える形に直し、UT で例外が続くことを確かめた)。clang-tidy の警告 9 件 (pointer-arithmetic、
+  implicit-widening、pass-by-value)。marker の書き換え失敗の直接の UT (読み取り専用のファイルで EACCES)。doxygen の
+  @throws のずれ。待つたびに begin_ == 0 でも memmove していた無駄。last_durable_epoch の例外メッセージにパスと位置を
+  加えた。細部 (errno の取り方の統一、{} 初期化、<cerrno>)。pwrite の前の errno = 0。ディレクトリを読ませて read のエラーを
+  起こす dblog_scan のテストは、st_size と EISDIR に依存して脆いので削除した (read のエラーの区別は読み込み側の差し込みの
+  テストで確かめている)。見送り: なし。
+* 2026-10-22: ステップ 3 の src の変更行のカバレッジ (レビュー対応前の 25c5852 時点)。実行可能な 234 行のうち 222 行 (94%) が
+  実行された。未実行は、死亡テストの FATAL 4 行、marker の書き換えの pwrite・fsync の失敗 6 行 (差し込めない)、
+  有効なスニペットの中の切れたエントリ・不正な種別に対する repair_by_mark の invalidate の呼び出し 2 行 (既存のテストが
+  通していなかった経路で、引数を変えただけ)。
+* 2026-10-22: CI (ci-build.yml) の CTest のステップを一般ユーザ (useradd した tester) で実行するようにし、master 4dce266 に
+  入れた。root ではファイルの権限が効かず、権限に関するテストがスキップされていたため。CI で 4 件のテストが実行されるように
+  なったことを確かめた。
 
 ## 6. 残った課題
 

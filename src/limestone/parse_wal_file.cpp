@@ -17,6 +17,7 @@
 #include <fcntl.h>
 #include <unistd.h>
 
+#include <cerrno>
 #include <cstdlib>
 #include <optional>
 
@@ -42,9 +43,11 @@ using namespace limestone::api;
 void invalidate_epoch_snippet(const boost::filesystem::path& file, std::streamoff fpos_head_of_epoch_snippet) {
     const int fd = ::open(file.c_str(), O_WRONLY);  // NOLINT(cppcoreguidelines-pro-type-vararg,hicpp-vararg)
     if (fd < 0) {
-        LOG_AND_THROW_IO_EXCEPTION("cannot open pwal file: " + file.string(), errno);
+        const int err = errno;
+        LOG_AND_THROW_IO_EXCEPTION("cannot open pwal file: " + file.string(), err);
     }
     const char buf = static_cast<char>(log_entry::entry_type::marker_invalidated_begin);
+    errno = 0;  // so that a stale errno is not reported if pwrite returns 0
     if (::pwrite(fd, &buf, sizeof(char), static_cast<off_t>(fpos_head_of_epoch_snippet)) != 1) {
         const int err = errno;
         ::close(fd);

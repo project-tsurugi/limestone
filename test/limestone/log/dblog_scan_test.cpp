@@ -1,5 +1,8 @@
 
 #include <algorithm>
+#include <cerrno>
+#include <fstream>
+#include <iterator>
 #include <sstream>
 #include <limestone/logging.h>
 
@@ -2764,23 +2767,6 @@ TEST_F(dblog_scan_test, scan_records_max_epoch_per_file) {
     EXPECT_EQ(max_epochs.at(p2), 0x100);
 }
 
-// a read failure is an exception with errno, distinguished from the end and a cut entry
-TEST_F(dblog_scan_test, scan_one_pwal_file_read_error_throws) {
-    // a directory can be opened read-only, but read fails with EISDIR
-    auto p = boost::filesystem::path(location) / "pwal_0000";
-    boost::filesystem::create_directory(p);
-    dblog_scan ds{boost::filesystem::path(location)};
-    ds.set_thread_num(1);
-    set_inspect_mode(ds);
-    dblog_scan::parse_error pe;
-    try {
-        (void) ds.scan_one_pwal_file(p, 0x100, [](const log_entry&) {}, [](const log_entry::read_error&) { return false; }, pe);
-        FAIL() << "no exception";
-    } catch (const limestone_io_exception& e) {
-        EXPECT_EQ(e.error_code(), EISDIR);
-    }
-}
-
 // in a non-repair mode, a read-only pwal file can be scanned
 TEST_F(dblog_scan_test, scan_one_pwal_file_read_only_inspect) {
     // root can write files w/o permissions
@@ -2793,6 +2779,31 @@ TEST_F(dblog_scan_test, scan_one_pwal_file_read_only_repair_without_marking) {
     // root can write files w/o permissions
     if (geteuid() == 0) { GTEST_SKIP() << "skip when run by root"; }
     scan_read_only_pwal_file([this](dblog_scan& ds) { set_repair_by_mark_mode(ds); });
+}
+
+// in a repair mode, if the marker of a read-only pwal file must be rewritten, throws an exception with errno
+// instead of continuing as repaired; the file is unchanged
+TEST_F(dblog_scan_test, scan_one_pwal_file_read_only_repair_throws_when_marking) {
+    // root can write files w/o permissions
+    if (geteuid() == 0) { GTEST_SKIP() << "skip when run by root"; }
+    auto p = boost::filesystem::path(location) / "pwal_0000";
+    create_file(p, data_normal2);
+    boost::filesystem::permissions(p, boost::filesystem::owner_read);  // drop file write permission
+    dblog_scan ds{boost::filesystem::path(location)};
+    ds.set_thread_num(1);
+    set_repair_by_mark_mode(ds);
+    dblog_scan::parse_error pe;
+    // ld_epoch 0xf0: the snippet of epoch 0xf1 is nondurable, so its marker must be rewritten
+    try {
+        (void) ds.scan_one_pwal_file(p, 0xf0, [](const log_entry&) {}, [](const log_entry::read_error&) { return false; }, pe);
+        FAIL() << "no exception";
+    } catch (const limestone_io_exception& e) {
+        EXPECT_EQ(e.error_code(), EACCES);
+    }
+    std::ifstream in(p.string(), std::ios::binary);
+    std::string content((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+    EXPECT_EQ(content, data_normal2);
+    boost::filesystem::permissions(p, boost::filesystem::owner_all);
 }
 
 }  // namespace limestone::testing

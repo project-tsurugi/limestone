@@ -62,11 +62,14 @@ std::optional<epoch_id_type> last_durable_epoch(const boost::filesystem::path& f
             break;
         }
         if (r.result() == log_entry_read_result::status::error) {
-            LOG_AND_THROW_EXCEPTION("this epoch file is broken: " + r.error().message());
+            LOG_AND_THROW_EXCEPTION("this epoch file is broken: " + file.string() + " at offset "
+                                    + std::to_string(r.offset()) + ": " + r.error().message());
         }
         const auto e = r.view();
         if (e.type() != log_entry::entry_type::marker_durable) {
-            LOG_AND_THROW_EXCEPTION("this epoch file is broken: unexpected log_entry type: " + std::to_string(static_cast<int>(e.type())));
+            LOG_AND_THROW_EXCEPTION("this epoch file is broken: " + file.string() + " at offset "
+                                    + std::to_string(r.offset()) + ": unexpected log_entry type: "
+                                    + std::to_string(static_cast<int>(e.type())));
         }
         if (!rv.has_value() || e.epoch_id() > rv) {
             rv = e.epoch_id();
