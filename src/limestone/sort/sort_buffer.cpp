@@ -15,6 +15,7 @@
  */
 #include "sort/sort_buffer.h"
 
+#include <algorithm>
 #include <cstring>
 
 #include <glog/logging.h>
@@ -29,8 +30,8 @@ namespace limestone::internal {
 namespace format = log_entry_format;
 
 sort_buffer::sort_buffer(std::size_t arena_size_bytes) : arena_size_bytes_(arena_size_bytes) {
-    if (arena_size_bytes == 0) {
-        LOG_LP(FATAL) << "arena size must be positive";
+    if (arena_size_bytes == 0 || arena_size_bytes > max_arena_size_bytes) {
+        LOG_LP(FATAL) << "arena size " << arena_size_bytes << " must be between 1 and " << max_arena_size_bytes;
     }
 }
 
@@ -50,7 +51,7 @@ sort_buffer::append_result sort_buffer::append(const log_entry_view& entry) {
     }
     // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-pointer-arithmetic)
     std::memcpy(arena_.data() + used_, bytes.data(), bytes.size());
-    index_.push_back(used_);
+    index_.push_back(static_cast<std::uint32_t>(used_));
     used_ += bytes.size();
     return append_result::appended;
 }
@@ -73,6 +74,24 @@ log_entry_view sort_buffer::entry_at(std::size_t i) const {
     }
     // parsing always succeeds because the whole entry has been put into the arena
     return log_entry_view::parse(std::string_view(arena_).substr(index_[i])).view();
+}
+
+void sort_buffer::sort() {
+    const std::string_view arena{arena_};
+    // the comparison reads key_sid and write_version directly from the arena, not through the accessors of the view
+    const auto less = [arena](std::uint32_t a, std::uint32_t b) noexcept {
+        // from the beginning of the entry to the end of the arena; the format functions take the keys out of it by
+        // reading the entry type and the key length
+        const std::string_view entry_a = arena.substr(a);
+        const std::string_view entry_b = arena.substr(b);
+        const int c = format::compare_key_sid(format::data_entry_key_sid(entry_a), format::data_entry_key_sid(entry_b));
+        if (c != 0) {
+            return c < 0;
+        }
+        // within the same key_sid, write_version in descending order
+        return format::data_entry_write_version(entry_b) < format::data_entry_write_version(entry_a);
+    };
+    std::sort(index_.begin(), index_.end(), less);
 }
 
 void sort_buffer::clear() noexcept {

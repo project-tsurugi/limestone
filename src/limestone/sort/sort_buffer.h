@@ -49,9 +49,13 @@ public:
         oversized,
     };
 
+    /// the maximum size of the arena in bytes. The elements of the index are 32-bit, so a position is less than 2^32
+    static constexpr std::size_t max_arena_size_bytes = std::size_t{1} << 32U;
+
     /**
      * @brief Creates a buffer with the given arena size. The arena is not allocated yet.
-     * @param arena_size_bytes the size of the arena in bytes. Writes a FATAL log and aborts if it is 0
+     * @param arena_size_bytes the size of the arena in bytes. Writes a FATAL log and aborts if it is 0 or exceeds
+     *                         max_arena_size_bytes
      */
     explicit sort_buffer(std::size_t arena_size_bytes);
 
@@ -98,6 +102,16 @@ public:
     [[nodiscard]] log_entry_view entry_at(std::size_t i) const;
 
     /**
+     * @brief Sorts the index.
+     *
+     * The order is by the bytes of key_sid (log_entry_format::compare_key_sid()) as the first key, and by
+     * write_version in descending order as the second key. The bytes in the arena are not moved. Duplicates are not
+     * removed (entries with the same key_sid are visible through entry_at() next to each other, the one with the
+     * greatest write_version first).
+     */
+    void sort();
+
+    /**
      * @brief Empties the index. The arena is not released, and is reused from the next append().
      */
     void clear() noexcept;
@@ -109,7 +123,7 @@ private:
     /// the number of bytes used in the arena
     std::size_t used_{};
     /// the position of each entry in the arena (the offset of the first byte of the entry)
-    std::vector<std::size_t> index_{};
+    std::vector<std::uint32_t> index_{};
 };
 
 /**

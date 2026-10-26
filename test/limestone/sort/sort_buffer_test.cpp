@@ -175,10 +175,18 @@ TEST(sort_buffer_test, clear_empty) {
     EXPECT_EQ(buf.append(view_of(remove_entry(1, "", 1, 1))), append_result::appended);
 }
 
-// the arena is not allocated until the first append() (a buffer can be created with a size that cannot be allocated)
+// the smallest arena (1 byte) can be created; every entry is oversized for it
+TEST(sort_buffer_test, smallest_arena) {
+    sort_buffer buf(1);
+    EXPECT_EQ(buf.arena_size_bytes(), 1U);
+    EXPECT_EQ(buf.append(view_of(remove_entry(1, "", 1, 1))), append_result::oversized);
+    EXPECT_TRUE(buf.empty());
+}
+
+// the arena is not allocated until the first append() (a buffer of the maximum size is created without allocation)
 TEST(sort_buffer_test, arena_is_allocated_lazily) {
-    const sort_buffer buf(std::size_t{1} << 50U);
-    EXPECT_EQ(buf.arena_size_bytes(), std::size_t{1} << 50U);
+    const sort_buffer buf(sort_buffer::max_arena_size_bytes);
+    EXPECT_EQ(buf.arena_size_bytes(), std::size_t{1} << 32U);
     EXPECT_TRUE(buf.empty());
 }
 
@@ -191,13 +199,145 @@ TEST(sort_buffer_test, append_non_data_entry_is_fatal) {
     EXPECT_DEATH((void) buf.append(log_entry_view{}), "sort_buffer:append not valid for entry type");
 }
 
-// entry_at() out of range and an arena of size 0 are FATAL
-TEST(sort_buffer_test, out_of_range_and_zero_arena_are_fatal) {
+// entry_at() out of range, an arena of size 0 and an arena larger than the maximum are FATAL
+TEST(sort_buffer_test, out_of_range_and_arena_size_are_fatal) {
     sort_buffer buf(1024);
     EXPECT_DEATH((void) buf.entry_at(0), "sort_buffer:entry_at index 0 is out of range \\(entry count 0\\)");
     ASSERT_EQ(buf.append(view_of(remove_entry(1, "k", 1, 1))), append_result::appended);
     EXPECT_DEATH((void) buf.entry_at(1), "sort_buffer:entry_at index 1 is out of range \\(entry count 1\\)");
-    EXPECT_DEATH(sort_buffer{0}, "sort_buffer:sort_buffer arena size must be positive");
+    EXPECT_DEATH(sort_buffer{0}, "sort_buffer:sort_buffer arena size 0 must be between 1 and 4294967296");
+    EXPECT_DEATH(sort_buffer{sort_buffer::max_arena_size_bytes + 1},
+                 "sort_buffer:sort_buffer arena size 4294967297 must be between 1 and 4294967296");
+}
+
+namespace {
+
+/**
+ * @brief Collects the key_sids of the entries in the buffer in order.
+ * @param buf the buffer
+ * @return the key_sids
+ */
+std::vector<std::string> key_sids_of(const sort_buffer& buf) {
+    std::vector<std::string> result;
+    for (std::size_t i = 0; i < buf.entry_count(); ++i) {
+        result.emplace_back(buf.entry_at(i).serialized_key_sid());
+    }
+    return result;
+}
+
+/**
+ * @brief Appends the entries in order.
+ * @param buf the buffer
+ * @param entries the bytes of the entries to append
+ */
+void append_all(sort_buffer& buf, const std::vector<std::string>& entries) {
+    for (const auto& e : entries) {
+        ASSERT_EQ(buf.append(view_of(e)), append_result::appended);
+    }
+}
+
+}  // namespace
+
+// sorted by the bytes of key_sid: the first byte (the lowest byte of the little-endian storage_id) decides first,
+// each byte is compared as unsigned, and a prefix comes first
+TEST(sort_buffer_test, sort_by_key_sid_bytes) {
+    using log_entry_bytes::u64le;
+    const std::string s256_a = normal_entry(256, "a", "v", 1, 1);  // key_sid 00 01 00 .. 00 'a'
+    const std::string s1_a = normal_entry(1, "a", "v", 1, 1);      // key_sid 01 00 00 .. 00 'a'
+    const std::string s1_ab = normal_entry(1, "ab", "v", 1, 1);
+    const std::string s1_x80 = remove_entry(1, "\x80", 1, 1);    // 0x80 comes after 'a' (0x61)
+    const std::string s1_empty = normal_with_blob(1, "", "v", 1, 1, {7});
+
+    sort_buffer buf(1024);
+    append_all(buf, {s1_x80, s1_ab, s1_a, s256_a, s1_empty});
+    buf.sort();
+    EXPECT_EQ(buf.entry_count(), 5U);
+    EXPECT_EQ(key_sids_of(buf), (std::vector<std::string>{
+        u64le(256) + "a", u64le(1), u64le(1) + "a", u64le(1) + "ab", u64le(1) + "\x80"}));
+}
+
+// entries with the same key_sid are next to each other in descending order of write_version (epoch first, then
+// minor); duplicates are not removed
+TEST(sort_buffer_test, sort_same_key_sid_by_write_version_descending) {
+    const std::string e_epoch10 = normal_entry(1, "k", "epoch10", 10, 0);
+    const std::string e_epoch9_minor5 = normal_entry(1, "k", "epoch9 minor5", 9, 5);
+    const std::string e_epoch9_minor2 = normal_entry(1, "k", "epoch9 minor2", 9, 2);
+    const std::string other = normal_entry(1, "other", "v", 1, 1);
+
+    sort_buffer buf(1024);
+    append_all(buf, {e_epoch9_minor2, other, e_epoch10, e_epoch9_minor5});
+    buf.sort();
+    ASSERT_EQ(buf.entry_count(), 4U);
+    EXPECT_EQ(buf.entry_at(0).serialized_entry(), e_epoch10);
+    EXPECT_EQ(buf.entry_at(1).serialized_entry(), e_epoch9_minor5);
+    EXPECT_EQ(buf.entry_at(2).serialized_entry(), e_epoch9_minor2);
+    EXPECT_EQ(buf.entry_at(3).serialized_entry(), other);
+}
+
+// remove_entry is sorted by the same rule as the other data entries (the entry type does not affect the order)
+TEST(sort_buffer_test, sort_with_remove_entry) {
+    const std::string put_old = normal_entry(1, "k1", "v", 1, 1);
+    const std::string remove_new = remove_entry(1, "k1", 2, 1);
+    const std::string remove_old = remove_entry(1, "k2", 1, 1);
+    const std::string put_new = normal_with_blob(1, "k2", "v", 2, 1, {5});
+
+    sort_buffer buf(1024);
+    append_all(buf, {put_old, remove_old, remove_new, put_new});
+    buf.sort();
+    ASSERT_EQ(buf.entry_count(), 4U);
+    EXPECT_EQ(buf.entry_at(0).serialized_entry(), remove_new);
+    EXPECT_EQ(buf.entry_at(1).serialized_entry(), put_old);
+    EXPECT_EQ(buf.entry_at(2).serialized_entry(), put_new);
+    EXPECT_EQ(buf.entry_at(3).serialized_entry(), remove_old);
+}
+
+// entries with the same key_sid and the same write_version (identical contents) all remain
+TEST(sort_buffer_test, sort_identical) {
+    const std::string e = normal_entry(1, "k", "v", 1, 1);
+    sort_buffer buf(1024);
+    append_all(buf, {e, e, e});
+    buf.sort();
+    ASSERT_EQ(buf.entry_count(), 3U);
+    for (std::size_t i = 0; i < 3; ++i) {
+        EXPECT_EQ(buf.entry_at(i).serialized_entry(), e);
+    }
+}
+
+// sorting an empty buffer and a buffer with one entry does nothing
+TEST(sort_buffer_test, sort_empty_and_single) {
+    sort_buffer buf(1024);
+    buf.sort();
+    EXPECT_TRUE(buf.empty());
+
+    const std::string e = remove_entry(1, "k", 1, 1);
+    append_all(buf, {e});
+    buf.sort();
+    ASSERT_EQ(buf.entry_count(), 1U);
+    EXPECT_EQ(buf.entry_at(0).serialized_entry(), e);
+}
+
+// sorting again does not change the result; entries put after clear() are sorted by the same rule
+TEST(sort_buffer_test, sort_again_and_after_clear) {
+    const std::string a = normal_entry(1, "a", "v", 1, 1);
+    const std::string b_new = normal_entry(1, "b", "new", 2, 1);
+    const std::string b_old = normal_entry(1, "b", "old", 1, 1);
+
+    sort_buffer buf(1024);
+    append_all(buf, {b_old, b_new, a});
+    buf.sort();
+    buf.sort();
+    ASSERT_EQ(buf.entry_count(), 3U);
+    EXPECT_EQ(buf.entry_at(0).serialized_entry(), a);
+    EXPECT_EQ(buf.entry_at(1).serialized_entry(), b_new);
+    EXPECT_EQ(buf.entry_at(2).serialized_entry(), b_old);
+
+    buf.clear();
+    append_all(buf, {b_new, a, b_old});
+    buf.sort();
+    ASSERT_EQ(buf.entry_count(), 3U);
+    EXPECT_EQ(buf.entry_at(0).serialized_entry(), a);
+    EXPECT_EQ(buf.entry_at(1).serialized_entry(), b_new);
+    EXPECT_EQ(buf.entry_at(2).serialized_entry(), b_old);
 }
 
 // the names of append_result

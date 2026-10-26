@@ -169,4 +169,48 @@ static_assert(sizeof(limestone::api::blob_id_type) == blob_id_size);
  */
 [[nodiscard]] write_version_type oldest_write_version();
 
+/**
+ * @brief Reads the first 4 bytes of src as a little-endian value.
+ * @param src the source. It must be at least 4 bytes long
+ * @return the value read
+ */
+[[nodiscard]] std::uint32_t load_uint32le(std::string_view src) noexcept;
+
+/**
+ * @brief Reads the first 8 bytes of src as a little-endian value.
+ * @param src the source. It must be at least 8 bytes long
+ * @return the value read
+ */
+[[nodiscard]] std::uint64_t load_uint64le(std::string_view src) noexcept;
+
+/**
+ * @brief Returns the position of key_sid in an entry (the offset from the beginning of the entry). Valid for data
+ *        entries and storage entries.
+ *
+ * For storage entries, it is the position of storage_id.
+ * @param type the entry type. Writes a FATAL log and aborts if it is neither a data entry nor a storage entry
+ * @return the position of key_sid
+ */
+[[nodiscard]] std::size_t key_sid_offset(entry_type type);
+
+/**
+ * @brief Returns the serialized key_sid from the bytes of a complete data entry.
+ *
+ * Reads only the entry type and the key length. Does not parse the whole entry.
+ * @param entry the bytes of a data entry. The first byte is the entry type, and the bytes must reach at least the
+ *              end of the entry
+ * @return the key_sid (a part of entry)
+ */
+[[nodiscard]] std::string_view data_entry_key_sid(std::string_view entry) noexcept;
+
+/**
+ * @brief Returns the write_version from the bytes of a complete data entry.
+ *
+ * Reads only the entry type and the key length. Does not parse the whole entry.
+ * @param entry the bytes of a data entry. The first byte is the entry type, and the bytes must reach at least the
+ *              end of the entry
+ * @return the write_version
+ */
+[[nodiscard]] write_version_type data_entry_write_version(std::string_view entry) noexcept;
+
 }  // namespace limestone::internal::log_entry_format

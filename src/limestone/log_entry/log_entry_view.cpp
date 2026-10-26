@@ -15,9 +15,6 @@
  */
 #include "log_entry/log_entry_view.h"
 
-#include <cstring>
-#include <endian.h>
-
 #include <glog/logging.h>
 
 #include <limestone/logging.h>
@@ -28,31 +25,8 @@ namespace limestone::internal {
 
 namespace format = log_entry_format;
 
-namespace {
-
-/**
- * @brief Reads the first 4 bytes of src as a little-endian value.
- * @param src the source. It must be at least 4 bytes long.
- * @return the value read
- */
-std::uint32_t load_uint32le(std::string_view src) noexcept {
-    std::uint32_t buf{};
-    std::memcpy(&buf, src.data(), sizeof(buf));
-    return le32toh(buf);
-}
-
-/**
- * @brief Reads the first 8 bytes of src as a little-endian value.
- * @param src the source. It must be at least 8 bytes long.
- * @return the value read
- */
-std::uint64_t load_uint64le(std::string_view src) noexcept {
-    std::uint64_t buf{};
-    std::memcpy(&buf, src.data(), sizeof(buf));
-    return le64toh(buf);
-}
-
-}  // namespace
+using format::load_uint32le;
+using format::load_uint64le;
 
 log_entry_view::log_entry_view(std::string_view entry, entry_type type, std::uint32_t key_length,
                                std::uint32_t value_length, std::uint32_t blob_count) noexcept
@@ -213,13 +187,7 @@ bool log_entry_view::is_data_or_storage() const noexcept {
 }
 
 std::size_t log_entry_view::key_sid_offset() const noexcept {
-    if (type_ == entry_type::normal_entry || type_ == entry_type::normal_with_blob) {
-        return format::entry_type_size + format::key_length_size + format::value_length_size;
-    }
-    if (type_ == entry_type::remove_entry) {
-        return format::entry_type_size + format::key_length_size;
-    }
-    return format::entry_type_size;
+    return format::key_sid_offset(type_);
 }
 
 std::size_t log_entry_view::value_etc_offset() const noexcept {
