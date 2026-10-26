@@ -27,16 +27,17 @@
 #include <limestone/api/limestone_exception.h>
 
 #include "limestone/log/log_entry_bytes.h"
+#include "log_entry/log_entry_reader.h"
 #include "sort/sort_buffer.h"
-#include "sort/sorted_file_reader.h"
 #include "sort/sorted_file_writer.h"
 
 namespace limestone::testing {
 
 using limestone::api::limestone_io_exception;
+using limestone::internal::log_entry_read_result;
+using limestone::internal::log_entry_reader;
 using limestone::internal::log_entry_view;
 using limestone::internal::sort_buffer;
-using limestone::internal::sorted_file_reader;
 using limestone::internal::sorted_file_writer;
 
 using log_entry_bytes::marker;
@@ -164,10 +165,10 @@ TEST_F(sorted_file_writer_test, writes_sorted_buffer_and_reads_back) {
     EXPECT_EQ(writer.written_count(), 3U);
     EXPECT_EQ(read_file(file()), a + b_new + c);
 
-    sorted_file_reader reader(file());
+    log_entry_reader reader(file());
     std::vector<std::string> entries;
-    while (auto v = reader.next()) {
-        entries.emplace_back(v->serialized_entry());
+    for (auto r = reader.next(); r.result() == log_entry_read_result::status::ok; r = reader.next()) {
+        entries.emplace_back(r.view().serialized_entry());
     }
     EXPECT_EQ(entries, (std::vector<std::string>{a, b_new, c}));
 }
