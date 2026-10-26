@@ -82,9 +82,9 @@ master へのマージ前に本ファイルを削除する。
 
 * [x] バッファ: 固定長のアリーナとインデックスの配列。満杯の判定、アリーナを超えるエントリの単独書き出し (8.3)。
 * [x] インデックスに対する std::sort。比較はアリーナ内の key_sid と write_version を直接読む (8.2・8.3)。
-* [ ] 縮約: ソート済みの流れから「直前に出した key_sid と同じエントリ」を除く。バッファの書き出しとマージの出力で同じ
-      ものを使う (ソート済みファイルの書き出しの項目で実装)。
-* [ ] ソート済みファイルの書き出しと読み込み (LE 14)。末尾で不足と不正は limestone_io_exception。
+* [x] 縮約: ソート済みの流れから「直前に出した key_sid と同じエントリ」を除く。バッファの書き出しとマージの出力で同じ
+      ものを使う (key_sid_deduplicator)。
+* [x] ソート済みファイルの書き出しと読み込み (LE 14)。末尾で不足と不正は limestone_io_exception。
 * [ ] 置き場所 sorting の作成と削除。親ディレクトリは設定項目 (sort_work_dir。L3 12.5)、未指定はログディレクトリ (8.5)。
 * [ ] マージ: マージの上限 (設定項目 sort_merge_fanin、既定 128) による中間のマージと最後のマージ。ソート済みファイルが
       2 以上かつ上限以下なら 1 段。0 個・1 個のときも最後のマージと同じ処理で出力を作る (入力は空またはその 1 個。
@@ -116,6 +116,9 @@ master へのマージ前に本ファイルを削除する。
       コンパクション済み WAL ファイルがあるときだけ書く。
 * [ ] create_compaction_output(): 新しいソートに置き換え、write_serialized の最も古い版に置き換える指定で書く。
       remove_entry は書かない。値の 1 件ごとのコピーをなくす。
+* [ ] 上の 2 つの出力の書き出しを sorted_file_writer と共通化するかを、置き換え時に判断する。違いは先頭の marker_begin の
+      有無、write_version の置き換え、remove_entry の扱いの 3 つで、writer の引数にできる。既存の経路の一時ファイルと
+      rename、失敗時の削除との兼ね合いを見比べて決める (2026-10-26 のレビューでの気づき)。
 * [ ] BLOB の ID の最大値を、出力からではなく走査の中で記録する (縮約と範囲削除で除くエントリの分も含める。L3 8.1)。
 * [ ] コンパクションの入力から現行世代のコンパクション済み WAL ファイルを走査の入力から外し、最後のマージに渡す
       (datastore::compact_with_online()、dblogutil の compaction (dblogutil.cpp:434))。
@@ -444,6 +447,20 @@ master へのマージ前に本ファイルを削除する。
     走査は 1 回で終わる。マージの出力の縮約 (L3 8.6「どのマージでも縮約する」) も同じ規則なので、実装を共有する。
   * 同じ key_sid かつ同じ write_version は内容が同一 (L3 8.2) なので、std::sort が不安定でも残る 1 件は問わない。
   * write_version の比較は write_version_type の operator< (epoch、minor の数値) で行う。
+
+* 2026-10-26: ステップ 4 のソート済みファイルの書き出しと読み込み、縮約。
+  * 縮約は key_sid_deduplicator (accept() が「直前に通した key_sid と違えば true」) に切り出した。直前の key_sid は写しを
+    持つ (入力の参照型は次の読み込みで無効になるため)。比較で順序違反 (直前より小さい) が分かるので、それは FATAL とし、
+    呼び出し側の「ソート順で渡す」契約を構造で検査する。最後のマージの出力にも同じものを使う。
+  * sorted_file_writer は write(view) と close() (fflush、fsync、fclose) を持ち、書き出しは既存の
+    log_entry::write_serialized(keep) を使う。stdio のバッファは writer が自前で持つ 128 KiB (glibc の setvbuf は
+    バッファに NULL を渡すと大きさを無視するので、既存の snapshot の書き出しの setvbuf(nullptr, _IOFBF, 128 KiB) は
+    効いていない。大きさの効果はステップ 9 で測る)。close() の前に破棄されたときは fclose だけ行う (例外で抜けるときの後始末)。fwrite/fsync の失敗は注入で
+    起こす手段がない (write_serialized が FILE* を直接取る) ので UT にはない。
+  * sorted_file_reader は log_entry_reader を包み、next() が std::optional<log_entry_view> を返す。末尾で不足、不正な
+    種別、データ系でないエントリは errno なしの limestone_io_exception。開始位置を取れるので、コンパクション済み WAL
+    ファイルの先頭の marker_begin (9 バイト) を飛ばして読むのにも使う (マージの項目)。
+  * sort_buffer の書き出しは、呼び出し側が entry_at() の順に write() を回す (sort_buffer と writer を結ぶ関数は置かない)。
 
 ## 6. 残った課題
 
