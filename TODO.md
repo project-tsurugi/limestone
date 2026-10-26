@@ -12,6 +12,8 @@ master へのマージ前に本ファイルを削除する。
   * log_entry 再設計 仕様 (以下 LE): 9〜14 節 (設計)、15 節 (テスト観点)、16 節 (移行の段階)
   * S1 メモ: 2 節 (決定事項)、4 節 (環境変数の既定値)、5 節 (変更箇所)、6 節 (テスト項目)、7 節 (作業順序)、
     8 節 (limestone 以外の対応)
+  * L3 は、レビュー対応 (nt-tsurugi-internal の instant-recovery-L3 ブランチ 7de8a93、2026-10-23) の時点のものを正本と
+    する。S1 メモ 4 節の環境変数の名前は、L3 12.5 節の設定項目に読み替える (5 節の 2026-10-26 の記録)。
   * ディレクトリの fsync の検討 (nt-tsurugi-internal の 09-notes/directory-fsync-notes.md。以下 DF): ステップ 13 の対象。
     L3 (全体) 12.2 節・17 節の申し送り事項の検討
 * 基準コミット: 48032ee (LE と S1 メモの行番号はこのコミットのもの)
@@ -81,18 +83,22 @@ master へのマージ前に本ファイルを削除する。
 * [ ] バッファ: 固定長のアリーナとインデックスの配列。満杯の判定、アリーナを超えるエントリの単独書き出し (8.3)。
 * [ ] インデックスに対する std::sort。比較はアリーナ内の key_sid と write_version を直接読む (8.2・8.3)。ソート後に縮約する。
 * [ ] ソート済みファイルの書き出しと読み込み (LE 14)。末尾で不足と不正は limestone_io_exception。
-* [ ] 置き場所 sorting の作成と削除。LIMESTONE_SORT_WORK_DIR、未指定はログディレクトリ (8.5)。
-* [ ] マージ: マージの上限 (LIMESTONE_SORT_MERGE_FANIN、既定 128) による中間のマージと最後のマージ。どのマージでも縮約し、
+* [ ] 置き場所 sorting の作成と削除。親ディレクトリは設定項目 (sort_work_dir。L3 12.5)、未指定はログディレクトリ (8.5)。
+* [ ] マージ: マージの上限 (設定項目 sort_merge_fanin、既定 128) による中間のマージと最後のマージ。ソート済みファイルが
+      2 以上かつ上限以下なら 1 段。0 個・1 個のときも最後のマージと同じ処理で出力を作る (入力は空またはその 1 個。
+      コンパクションでは現行世代のコンパクション済み WAL ファイルを加える)。どのマージでも縮約し、
       範囲削除の適用は最後のマージだけで行う。マージは 1 本のスレッド (8.6、S1 メモ 2 節)。
 * [ ] 最後のマージの結果を参照型でコールバックに渡す (S1 メモ 2・5 節)。
 * [ ] コンパクションの最後のマージの入力に現行世代のコンパクション済み WAL ファイルを加える。先頭の marker_begin を読み飛ばし、
       normal_with_blob を BLOB の GC のために記録する (8.6)。
-* [ ] 環境変数 LIMESTONE_SORT_THREADS (既定 8)、LIMESTONE_SORT_ARENA_SIZE_MB (既定 256)、LIMESTONE_SORT_MERGE_FANIN
-      (既定 128)、LIMESTONE_SORT_WORK_DIR (S1 メモ 4 節、L3 12.5)。
+* [ ] ソートの設定値 (スレッド数、アリーナの大きさ (MiB)、マージの上限、置き場所の親ディレクトリ) を、ソートの部品が
+      引数で受け取る形にする。既定値はスレッド数 8、アリーナ 256 MiB (S1 メモ 4 節)、マージの上限 128、置き場所は
+      ログディレクトリ (L3 12.5)。実行ファイルごとの指定の手段 (tsurugi.ini、オプション、環境変数) はステップ 6。
 * [ ] テストからマージの上限とアリーナの大きさを小さく指定する手段。
 * [ ] 走査のスレッドからソートのスレッドへの参照型の受け渡しの同期と、走査が次の next() を呼んでよい時点を決める
       (log_entry_reader はスレッドセーフではなく、参照型は次の next() まで有効。同期は呼び出し側の責務)。
-* [ ] UT: 順序と縮約、範囲削除の適用、多段のマージ、アリーナを超えるエントリ、sorting の作成と削除 (S1 メモ 6 節)。
+* [ ] UT: 順序と縮約、範囲削除の適用、多段のマージ、ソート済みファイルが 0 個・1 個のときの出力、アリーナを超える
+      エントリ、sorting の作成と削除 (S1 メモ 6 節)。
 
 ### ステップ 5: dblog_scan の拡張 (L3 8.4、S1 メモ 5 節)
 
@@ -111,8 +117,16 @@ master へのマージ前に本ファイルを削除する。
 * [ ] BLOB の ID の最大値を、出力からではなく走査の中で記録する (縮約と範囲削除で除くエントリの分も含める。L3 8.1)。
 * [ ] コンパクションの入力から現行世代のコンパクション済み WAL ファイルを走査の入力から外し、最後のマージに渡す
       (datastore::compact_with_online()、dblogutil の compaction (dblogutil.cpp:434))。
-* [ ] スレッド数: compaction_options の num_worker を LIMESTONE_SORT_THREADS に置き換える。recover_max_parallelism は
-      受け付けるが使わない。dblogutil の --thread_num は inspect と repair だけに使う (L3 15)。
+* [ ] スレッド数: compaction_options の num_worker は、tsurugidb では recover_max_parallelism、dblogutil では --thread_num
+      のままとし、意味をソートのスレッド数にする (L3 12.5・15)。dblogutil の compaction の --thread_num の既定値を 1 から
+      8 にする (inspect と repair は走査のスレッド数のままで既定 1)。0 以下は設定の誤りとし、tsurugidb と tgreplica は
+      起動を失敗させ、dblogutil は処理を始めずに終了する。
+* [ ] 設定項目の受け取り (L3 12.5)。tsurugidb: tsurugi.ini の datastore 節の sort_arena_size_mb、sort_work_dir、
+      sort_merge_fanin を tateyama から受け取るため、configuration に setter を加える (tateyama 側はステップ 14)。
+      dblogutil: オプション --sort_arena_size_mb、--sort_work_dir、--sort_merge_fanin を加える。
+      tgreplica: 環境変数 LIMESTONE_SORT_THREADS、LIMESTONE_SORT_ARENA_SIZE_MB、LIMESTONE_SORT_WORK_DIR、
+      LIMESTONE_SORT_MERGE_FANIN で受け取る。tsurugidb はこれらの環境変数を参照しない。既定値は dblogutil の
+      --thread_num を除き実行ファイルによらず同じ。
 * [ ] 既存の compaction 配下、snapshot 配下 (snapshot_impl_test、cursor_impl_test)、log/dblog_scan_test が変えずに通ること。
 
 ### ステップ 7: 旧ソートの削除 (S1 メモ 5・6・8 節)
@@ -139,7 +153,7 @@ master へのマージ前に本ファイルを削除する。
 
 ### ステップ 9: 測定と既定値の見直し (L3 13)
 
-* [ ] LIMESTONE_SORT_THREADS と LIMESTONE_SORT_ARENA_SIZE_MB を変えて、起動時のソートの所要時間を測る。測定の条件は
+* [ ] スレッド数 (recover_max_parallelism) とアリーナの大きさ (sort_arena_size_mb) を変えて、起動時のソートの所要時間を測る。測定の条件は
       S1 メモ 3 節と同じにし、旧バージョンの結果 (ソート 18.2 秒) と比べる。
 * [ ] 結果と考察をもとに、性能、安定性、使用するリソースが過大でないかを基準に既定値を決める。結果を 5 節に記録する。
 * [ ] ソートの比較で呼ぶ関数 (参照型のアクセサ、key_sid の比較関数) を .cpp に置いたことの影響を確かめる。プロファイルで
@@ -202,6 +216,10 @@ master へのマージ前に本ファイルを削除する。
 * [ ] PR の作成 (Q3)。
 * [ ] limestone 以外のリポジトリの対応 (S1 メモ 8 節)。新しい limestone が取り込まれるまで、依存パッケージを外す変更は
       入れられない。ステップ 13 を行った場合は、L3 (全体) の申し送り事項の更新も含める。
+  * [ ] tateyama: datastore resource の bridge (tateyama/datastore/resource/bridge.cpp) で、tsurugi.ini の datastore 節の
+        sort_arena_size_mb、sort_work_dir、sort_merge_fanin を configuration に渡す。設定パラメータの文書
+        (docs/config_parameters.md、docs/config-parameters-en.md) に新設の項目と recover_max_parallelism の意味の変更
+        (ソートのスレッド数。メモリの使用量がスレッド数 × アリーナの大きさに比例する) を書く (L3 12.5・15・17 節)。
 * [ ] master へのマージ前に本ファイルを削除する。
 
 ## 5. 記録
@@ -379,6 +397,25 @@ master へのマージ前に本ファイルを削除する。
   @throws の不足、dblog_scan_test の <unistd.h>、invalidate_epoch_snippet の @brief (理由のコメントは実装側に移した)。
   見送り: 待つループ側で failed になる UT (共通の関数で新しい経路を通さない)、契約外のファイルの縮小での end の位置、
   テストの入れ物の struct のメンバの _ 接尾辞 (既存の入れ物の struct も付けていない)。
+
+* 2026-10-26: L3 のレビュー対応 (c710f4d → 7de8a93) で変わった仕様を計画に反映した。
+  * 設定項目の指定の手段 (12.5 節): 環境変数だけだったものを、tsurugidb は tsurugi.ini の datastore 節、dblogutil は
+    コマンドラインオプション、tgreplica は環境変数にした。スレッド数は既存の recover_max_parallelism と --thread_num の
+    意味を変えて使い、LIMESTONE_SORT_THREADS は tgreplica だけが読む。新設は sort_arena_size_mb、sort_work_dir、
+    sort_merge_fanin (dblogutil は同名のオプション、tgreplica は LIMESTONE_SORT_ の環境変数)。スレッド数 0 以下は設定の
+    誤り。dblogutil の compaction の --thread_num の既定値は 1 から 8 に変わる (15 節)。ステップ 4 の環境変数の項目を
+    「部品は値で受け取る」に変え、指定の手段をステップ 6 に、tateyama 側の対応をステップ 14 に置いた。tsurugi.ini の項目は
+    tateyama が configuration で渡すので、configuration に setter を加える (公開 API の追加)。
+  * マージの段数 (8.6 節): 1 段の条件を「2 以上かつマージの上限以下」とし、ソート済みファイルが 0 個・1 個のときも最後の
+    マージと同じ処理で出力を作ることが明記された (ソート済みファイルは形式が出力と違い、範囲削除の適用も最後のマージで
+    行うため)。ステップ 4 のマージと UT の項目に加えた。
+  * ソートの出力 (8.1 節): 適用箇所ごとの出力 (起動時はスナップショットファイル、コンパクションは新しい世代の
+    コンパクション済み WAL ファイル) が明記され、ソート済みファイルは中間のファイルで出力ではないとされた。起動時に作った
+    スナップショットファイルを次回以降の起動に使うことは M1 では行わない。計画の変更はない。
+  * R1 に影響しない変更: マーカーファイル remote_recovery_in_progress (6.1・6.8 節)、ロケータファイルのヘッダと終端
+    (9.1 節、S2)、tglogsender のマニフェストの flock (12.4 節)、空き容量の確認と BLOB の一覧ファイル (6.5・6.6 節)、
+    コンパクション済み WAL ファイルの分割と tgreplica の systemd への通知の申し送り (17 節)。
+  * S1 メモ 4 節は環境変数の名前のままで更新されていない。既定値 (スレッド数 8、アリーナ 256 MiB) はそのまま使う。
 
 ## 6. 残った課題
 
