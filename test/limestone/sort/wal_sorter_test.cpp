@@ -42,6 +42,7 @@ using limestone::internal::dblog_scan;
 using limestone::internal::log_entry_view;
 using limestone::internal::range_deletions;
 using limestone::internal::sort_settings;
+using limestone::internal::sorted_file_merger;
 using limestone::internal::sorting_directory;
 using limestone::internal::wal_sorter;
 
@@ -88,6 +89,17 @@ protected:
      */
     static boost::filesystem::path sorting_path() {
         return boost::filesystem::path(location) / sorting_directory::name;
+    }
+    /**
+     * @brief Counts the files in the sorting directory.
+     */
+    static std::size_t files_in_sorting() {
+        std::size_t n = 0;
+        for (const auto& e : boost::filesystem::directory_iterator(sorting_path())) {
+            (void) e;
+            ++n;
+        }
+        return n;
     }
 };
 
@@ -167,6 +179,118 @@ TEST_F(wal_sorter_test, call_order_violations_are_fatal) {
     (void) merge_output(sorter);
     EXPECT_DEATH(sorter.merge(std::nullopt, [](const log_entry_view&) {}),
                  "wal_sorter:merge merge\\(\\) is called twice");
+}
+
+// a multistage merge: with fan-in 2, five sorted files (the arena holds two entries) go through intermediate merges
+// and only the latest version of each key remains, in the order of key_sid
+TEST_F(wal_sorter_test, multistage_merge) {
+    std::vector<std::string> v1;
+    std::vector<std::string> v2;
+    for (int i = 0; i < 5; ++i) {
+        v1.push_back(normal_entry(1, "k" + std::to_string(i), "a", 1, 0));
+        v2.push_back(normal_entry(1, "k" + std::to_string(i), "b", 2, 0));
+    }
+    write_pwal("pwal_0000",
+               marker(2, 2) + v1[3] + v1[1] + v2[3] + v1[0] + v1[2] + v2[1] + v1[4] + v2[0] + v2[2] + v2[4]);
+    dblog_scan scan{boost::filesystem::path(location)};
+    wal_sorter sorter(scan, sort_settings{1, v1[0].size() * 2, 2}, location);
+    (void) sorter.scan(std::nullopt, 2, {});
+    EXPECT_EQ(files_in_sorting(), 5U);
+    EXPECT_EQ(merge_output(sorter), v2);
+    EXPECT_FALSE(boost::filesystem::exists(sorting_path()));
+}
+
+// one sorted file: its contents are output as they are, without an intermediate merge
+TEST_F(wal_sorter_test, one_sorted_file) {
+    const std::string a = normal_entry(1, "a", "v", 1, 0);
+    const std::string b = normal_entry(1, "b", "v", 1, 1);
+    write_pwal("pwal_0000", marker(2, 1) + b + a);
+    dblog_scan scan{boost::filesystem::path(location)};
+    wal_sorter sorter(scan, sort_settings{1, 1024 * 1024, 128}, location);
+    (void) sorter.scan(std::nullopt, 1, {});
+    EXPECT_EQ(files_in_sorting(), 1U);
+    EXPECT_EQ(merge_output(sorter), (std::vector<std::string>{a, b}));
+}
+
+// an entry larger than the arena becomes a sorted file of its own, and is output at its position in the order
+TEST_F(wal_sorter_test, oversized_entry) {
+    const std::string s0 = normal_entry(1, "k0", "v", 1, 0);
+    const std::string s1 = normal_entry(1, "k1", "v", 1, 1);
+    const std::string s2 = normal_entry(1, "k2", "v", 1, 2);
+    const std::size_t arena = s0.size() * 2;
+    const std::string big = normal_entry(1, "k5", std::string(arena, 'x'), 1, 3);
+    write_pwal("pwal_0000", marker(2, 1) + s0 + big + s1 + s2);
+    dblog_scan scan{boost::filesystem::path(location)};
+    wal_sorter sorter(scan, sort_settings{1, arena, 128}, location);
+    (void) sorter.scan(std::nullopt, 1, {});
+    EXPECT_EQ(files_in_sorting(), 3U);  // the file of big alone, (s0, s1), (s2)
+    EXPECT_EQ(merge_output(sorter), (std::vector<std::string>{s0, s1, s2, big}));
+}
+
+// a compacted WAL file given to the final merge joins the inputs with its leading marker_begin skipped; for the same
+// key the newer version of the WAL wins, and the callback is called for the normal_with_blob entries in the file
+TEST_F(wal_sorter_test, compacted_wal_file_in_the_final_merge) {
+    const std::string a1 = normal_entry(1, "a", "old", 0, 0);
+    const std::string c0 = normal_with_blob(1, "c", "c0", 0, 0, {3});
+    const std::string e0 = remove_entry(1, "e", 0, 0);
+    const std::string a2 = normal_entry(1, "a", "new", 10, 0);
+    const std::string d1 = normal_entry(1, "d", "d1", 10, 1);
+    write_pwal("pwal_0000", marker(2, 10) + a2 + d1);
+    const boost::filesystem::path compacted_dir = boost::filesystem::path(location) / "compacted_dir";
+    boost::filesystem::create_directory(compacted_dir);
+    const boost::filesystem::path compacted = compacted_dir / "pwal_0000.compacted";
+    {
+        std::ofstream out(compacted.string(), std::ios::binary);
+        const std::string bytes = marker(2, 0) + a1 + c0 + e0;
+        out.write(bytes.data(), static_cast<std::streamsize>(bytes.size()));
+        ASSERT_TRUE(out.good());
+    }
+
+    dblog_scan scan{boost::filesystem::path(location)};
+    wal_sorter sorter(scan, sort_settings{2, 1024 * 1024, 128}, location);
+    const auto result = sorter.scan(std::nullopt, 10, {});
+    EXPECT_EQ(result.max_blob_id, 0U);  // the BLOBs of the compacted WAL file are not counted by the scan
+    std::vector<std::string> with_blob;
+    std::vector<std::string> output;
+    sorter.merge(sorted_file_merger::compacted_wal_input{compacted, [&with_blob](const log_entry_view& view) {
+                     with_blob.emplace_back(view.serialized_entry());
+                 }},
+                 [&output](const log_entry_view& view) { output.emplace_back(view.serialized_entry()); });
+    EXPECT_EQ(output, (std::vector<std::string>{a2, c0, d1, e0}));
+    EXPECT_EQ(with_blob, (std::vector<std::string>{c0}));
+}
+
+// in the compaction mode (with a boundary epoch), the entries of a snippet beyond the boundary are not input, but
+// the epoch counts in the maximum
+TEST_F(wal_sorter_test, compaction_boundary) {
+    const std::string a10 = normal_entry(1, "a", "10", 10, 0);
+    const std::string b11 = normal_entry(1, "b", "11", 11, 0);
+    write_pwal("pwal_0000", marker(2, 10) + a10 + marker(2, 11) + b11);
+    dblog_scan scan{boost::filesystem::path(location)};
+    wal_sorter sorter(scan, sort_settings{1, 1024 * 1024, 128}, location);
+    const auto result = sorter.scan(10, 0, {});
+    EXPECT_EQ(result.max_appeared_epoch, 11U);
+    EXPECT_EQ(merge_output(sorter), (std::vector<std::string>{a10}));
+}
+
+// only the latest version remains even if the versions of a key are in different files (different threads)
+TEST_F(wal_sorter_test, versions_of_a_key_across_threads) {
+    std::vector<std::string> versions;
+    for (int i = 0; i < 4; ++i) {
+        versions.push_back(normal_entry(1, "a", "v" + std::to_string(i), static_cast<std::uint64_t>(i + 1), 0));
+        write_pwal("pwal_000" + std::to_string(i), marker(2, static_cast<std::uint64_t>(i + 1)) + versions.back());
+    }
+    dblog_scan scan{boost::filesystem::path(location)};
+    wal_sorter sorter(scan, sort_settings{4, 1024 * 1024, 128}, location);
+    (void) sorter.scan(std::nullopt, 4, {});
+    EXPECT_EQ(merge_output(sorter), (std::vector<std::string>{versions[3]}));
+}
+
+// a setting of less than one thread is FATAL
+TEST_F(wal_sorter_test, threads_less_than_one_is_fatal) {
+    dblog_scan scan{boost::filesystem::path(location)};
+    EXPECT_DEATH(wal_sorter(scan, sort_settings{0, 1024, 2}, location),
+                 "wal_sorter:wal_sorter the number of threads 0 must be at least 1");
 }
 
 }  // namespace limestone::testing
