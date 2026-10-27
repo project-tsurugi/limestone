@@ -22,8 +22,8 @@
 
 #include <limestone/logging.h>
 
-#include "logging_helper.h"
 #include "log_entry/log_entry_format.h"
+#include "logging_helper.h"
 
 namespace limestone::internal {
 
@@ -46,11 +46,12 @@ sort_buffer::append_result sort_buffer::append(const log_entry_view& entry) {
     if (arena_size_bytes_ - used_ < bytes.size()) {
         return append_result::full;
     }
-    if (arena_.empty()) {
-        arena_.assign(arena_size_bytes_, '\0');
+    if (! arena_) {
+        // allocated without value-initialization (only the pages touched are committed)
+        arena_.reset(new char[arena_size_bytes_]);  // NOLINT(cppcoreguidelines-owning-memory)
     }
     // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-pointer-arithmetic)
-    std::memcpy(arena_.data() + used_, bytes.data(), bytes.size());
+    std::memcpy(arena_.get() + used_, bytes.data(), bytes.size());
     index_.push_back(static_cast<std::uint32_t>(used_));
     used_ += bytes.size();
     return append_result::appended;
@@ -73,11 +74,11 @@ log_entry_view sort_buffer::entry_at(std::size_t i) const {
         LOG_LP(FATAL) << "index " << i << " is out of range (entry count " << index_.size() << ")";
     }
     // parsing always succeeds because the whole entry has been put into the arena
-    return log_entry_view::parse(std::string_view(arena_).substr(index_[i])).view();
+    return log_entry_view::parse(std::string_view(arena_.get(), used_).substr(index_[i])).view();
 }
 
 void sort_buffer::sort() {
-    const std::string_view arena{arena_};
+    const std::string_view arena{arena_.get(), used_};
     // the comparison reads key_sid and write_version directly from the arena, not through the accessors of the view
     const auto less = [arena](std::uint32_t a, std::uint32_t b) noexcept {
         // from the beginning of the entry to the end of the arena; the format functions take the keys out of it by

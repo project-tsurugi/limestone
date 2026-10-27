@@ -16,7 +16,6 @@
 #include "sort/sorted_file_writer.h"
 
 #include <cerrno>
-#include <unistd.h>
 #include <utility>
 
 #include <glog/logging.h>
@@ -85,11 +84,6 @@ void sorted_file_writer::close() {
         const int saved_errno = errno;
         (void) fclose(stream);  // NOLINT(*-owning-memory) cleanup before the throw; failure ignored
         LOG_AND_THROW_IO_EXCEPTION("cannot flush sorted file: " + file_.string(), saved_errno);
-    }
-    if (fsync(fileno(stream)) != 0) {
-        const int saved_errno = errno;
-        (void) fclose(stream);  // NOLINT(*-owning-memory) cleanup before the throw; failure ignored
-        LOG_AND_THROW_IO_EXCEPTION("cannot fsync sorted file: " + file_.string(), saved_errno);
     }
     if (fclose(stream) != 0) {  // NOLINT(*-owning-memory)
         LOG_AND_THROW_IO_EXCEPTION("cannot close sorted file: " + file_.string(), errno);

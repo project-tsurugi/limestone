@@ -15,6 +15,7 @@
  */
 #include "sort/sorted_file_merger.h"
 
+#include <algorithm>
 #include <memory>
 #include <queue>
 #include <sstream>
@@ -28,8 +29,8 @@
 
 #include "limestone_exception_helper.h"
 #include "log_entry/log_entry_format.h"
-#include "logging_helper.h"
 #include "log_entry/log_entry_reader.h"
+#include "logging_helper.h"
 #include "sort/key_sid_deduplicator.h"
 #include "sort/sorted_file_writer.h"
 
@@ -101,7 +102,17 @@ std::optional<log_entry_view> read_next_entry(merge_source& source) {
  */
 class current_entry_order {
 public:
+    /**
+     * @brief Remembers the inputs to compare.
+     * @param sources the inputs. They must be valid while this comparator is used
+     */
     explicit current_entry_order(const std::vector<merge_source>& sources) noexcept : sources_(&sources) {}
+
+    /**
+     * @brief Returns true if the current entry of input a is later (in the order of the output) than that of input b.
+     * @param a the number of an input
+     * @param b the number of an input
+     */
     bool operator()(std::size_t a, std::size_t b) const {
         const log_entry_view& va = (*sources_)[a].current;
         const log_entry_view& vb = (*sources_)[b].current;
@@ -111,6 +122,7 @@ public:
         }
         return va.write_version() < vb.write_version();
     }
+
 private:
     const std::vector<merge_source>* sources_;
 };
@@ -136,6 +148,12 @@ public:
             advance(i);
         }
     }
+
+    ~k_way_merge() = default;
+    k_way_merge(const k_way_merge&) = delete;
+    k_way_merge& operator=(const k_way_merge&) = delete;
+    k_way_merge(k_way_merge&&) = delete;
+    k_way_merge& operator=(k_way_merge&&) = delete;
 
     /**
      * @brief Returns the next entry (the least among all the inputs).
@@ -254,11 +272,14 @@ void sorted_file_merger::merge(std::vector<boost::filesystem::path> sorted_files
     if (! output) {
         LOG_LP(FATAL) << "output must not be empty";
     }
-    // intermediate merges: combine fan-in files at a time until the number of inputs (including the compacted WAL
-    // file) is within the fan-in
+    // intermediate merges: repeated until the number of inputs (including the compacted WAL file) is within the
+    // fan-in. One merge reduces the inputs by (the number combined - 1), so the number to combine is the smaller of
+    // the fan-in and (the excess + 1)
     const std::size_t extra = compacted ? 1 : 0;
     while (sorted_files.size() + extra > merge_fanin_) {
-        const auto batch_end = sorted_files.begin() + static_cast<std::ptrdiff_t>(merge_fanin_);
+        const std::size_t excess = sorted_files.size() + extra - merge_fanin_;
+        const std::size_t batch_size = std::min(merge_fanin_, excess + 1);
+        const auto batch_end = sorted_files.begin() + static_cast<std::ptrdiff_t>(batch_size);
         const std::vector<boost::filesystem::path> batch(sorted_files.begin(), batch_end);
         const boost::filesystem::path merged = intermediate_merge(batch);
         sorted_files.erase(sorted_files.begin(), batch_end);

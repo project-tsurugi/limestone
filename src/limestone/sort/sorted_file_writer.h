@@ -48,7 +48,7 @@ public:
     explicit sorted_file_writer(boost::filesystem::path file);
 
     /**
-     * @brief Closes the file if close() has not been called (without fsync; a failure is ignored).
+     * @brief Closes the file if close() has not been called (a failure is ignored).
      */
     ~sorted_file_writer();
 
@@ -67,10 +67,10 @@ public:
     void write(const log_entry_view& entry);
 
     /**
-     * @brief Finishes writing, makes the contents reach the disk, and closes the file (fflush, fsync, fclose).
+     * @brief Finishes writing and closes the file (fflush, fclose). fsync is not performed.
      *
      * The file is closed even on failure. Writes a FATAL log and aborts if called twice.
-     * @throws limestone_io_exception if fflush, fsync or fclose fails (with errno)
+     * @throws limestone_io_exception if fflush or fclose fails (with errno)
      */
     void close();
 
@@ -81,7 +81,7 @@ public:
 
 private:
     boost::filesystem::path file_;
-    /// the stdio buffer. Owned here because glibc ignores the size given to setvbuf without a buffer
+    // the stdio buffer. Supplied because setvbuf is not guaranteed to honor the size without a buffer
     std::string stream_buffer_;
     FILE* stream_{};
     key_sid_deduplicator deduplicator_{};

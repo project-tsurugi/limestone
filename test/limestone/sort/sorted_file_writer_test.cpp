@@ -173,20 +173,30 @@ TEST_F(sorted_file_writer_test, writes_sorted_buffer_and_reads_back) {
     EXPECT_EQ(entries, (std::vector<std::string>{a, b_new, c}));
 }
 
-// written entries are accumulated in the stdio buffer and do not reach the file while they are smaller than the
-// buffer; close() writes them all
+// written entries are accumulated in the buffer of stream_buffer_size: they do not reach the file while within it,
+// and do once it is exceeded (if the default buffer were in use, one of the two would fail depending on its size).
+// close() writes them all
 TEST_F(sorted_file_writer_test, buffers_writes_until_close) {
     const std::string value(1000, 'v');
     std::string expected;
     sorted_file_writer writer(file());
-    // about 64 KiB: larger than the default buffer (a few KiB), smaller than stream_buffer_size
-    for (int i = 0; i < 64; ++i) {
-        const std::string e = normal_entry(1, "k" + std::to_string(100 + i), value, 1, 0);
+    int i = 0;
+    // nothing reaches the file while within 128 KiB
+    while (true) {
+        const std::string e = normal_entry(1, "k" + std::to_string(1000 + i), value, 1, 0);
+        if (expected.size() + e.size() > sorted_file_writer::stream_buffer_size) {
+            break;
+        }
         writer.write(view_of(e));
         expected += e;
+        ++i;
     }
-    ASSERT_LT(expected.size(), sorted_file_writer::stream_buffer_size);
     EXPECT_EQ(boost::filesystem::file_size(file()), 0U);
+    // exceeding 128 KiB reaches the file
+    const std::string e = normal_entry(1, "k" + std::to_string(1000 + i), value, 1, 0);
+    writer.write(view_of(e));
+    expected += e;
+    EXPECT_GT(boost::filesystem::file_size(file()), 0U);
     writer.close();
     EXPECT_EQ(read_file(file()), expected);
 }

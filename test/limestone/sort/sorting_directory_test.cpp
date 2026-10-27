@@ -114,8 +114,10 @@ TEST_F(sorting_directory_test, new_file_path_from_threads) {
             for (int i = 0; i < per_thread; ++i) {
                 mine.push_back(dir.new_file_path().string());
             }
-            const std::lock_guard<std::mutex> lock(mutex);
-            paths.insert(mine.begin(), mine.end());
+            {
+                const std::lock_guard<std::mutex> lock(mutex);
+                paths.insert(mine.begin(), mine.end());
+            }
         });
     }
     for (auto& w : workers) {

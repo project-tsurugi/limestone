@@ -68,7 +68,8 @@ public:
 
     /**
      * @brief Sets the settings of the merge.
-     * @param directory the place of the outputs of the intermediate merges
+     * @param directory the place of the outputs of the intermediate merges. It must be valid until this merger is
+     *                  destroyed
      * @param merge_fanin the merge fan-in (the number of inputs opened at once). Writes a FATAL log and aborts if it is
      *                    less than 2
      */
@@ -78,10 +79,9 @@ public:
      * @brief Merges all the entries of the input files, and passes each entry of the result to output.
      *
      * One call reads the input files from the beginning to the end, performs the intermediate merges, the final
-     * merge, the removal of duplicates and the range deletions, and then returns. The result is not returned as a
-     * return value. Each time an entry of the output is decided, output is called with it, so the caller processes
-     * the result in output (for example writes it to the output file). output is the only means of receiving the
-     * result.
+     * merge, the removal of duplicates and the range deletions, and then returns. Each time an entry of the output
+     * is decided, output is called with it, so the caller processes the result in output (for example writes it to
+     * the output file).
      * The outputs of the intermediate merges are created in directory, and the files used as their inputs are
      * removed. The input files of the final merge are not removed.
      * @param sorted_files the sorted files to merge

@@ -44,8 +44,7 @@ public:
     [[nodiscard]] bool accept(const log_entry_view& entry);
 
 private:
-    /// a copy of the key_sid of the entry accepted last, or nullopt if none has been accepted yet. A copy is kept
-    /// because the bytes of the input become invalid when the next entry is read
+    /// a copy of the key_sid of the entry accepted last, or nullopt if none has been accepted yet
     std::optional<std::string> last_key_sid_{};
 };
 

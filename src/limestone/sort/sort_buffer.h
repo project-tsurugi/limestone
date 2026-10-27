@@ -17,8 +17,8 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <memory>
 #include <ostream>
-#include <string>
 #include <string_view>
 #include <vector>
 
@@ -49,7 +49,7 @@ public:
         oversized,
     };
 
-    /// the maximum size of the arena in bytes. The elements of the index are 32-bit, so a position is less than 2^32
+    /// the maximum size of the arena in bytes
     static constexpr std::size_t max_arena_size_bytes = std::size_t{1} << 32U;
 
     /**
@@ -118,8 +118,8 @@ public:
 
 private:
     std::size_t arena_size_bytes_;
-    /// the arena. arena_size_bytes_ bytes are allocated and zero-initialized at the first append()
-    std::string arena_{};
+    /// the arena. arena_size_bytes_ bytes are allocated (not initialized) at the first append()
+    std::unique_ptr<char[]> arena_{};  // NOLINT(*-avoid-c-arrays)
     /// the number of bytes used in the arena
     std::size_t used_{};
     /// the position of each entry in the arena (the offset of the first byte of the entry)

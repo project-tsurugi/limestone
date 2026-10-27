@@ -19,8 +19,8 @@
 
 #include <limestone/logging.h>
 
-#include "logging_helper.h"
 #include "log_entry/log_entry_format.h"
+#include "logging_helper.h"
 
 namespace limestone::internal {
 

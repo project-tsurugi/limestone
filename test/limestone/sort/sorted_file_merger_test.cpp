@@ -86,6 +86,8 @@ protected:
         }
         return p;
     }
+    using compacted_wal_input = sorted_file_merger::compacted_wal_input;
+
     /**
      * @brief Runs a merge and collects the bytes of the output.
      * @param fanin the merge fan-in
@@ -94,7 +96,6 @@ protected:
      * @param deletions the range deletions
      * @return the bytes of the entries of the output
      */
-    using compacted_wal_input = sorted_file_merger::compacted_wal_input;
     std::vector<std::string> merge(std::size_t fanin, const std::vector<boost::filesystem::path>& files,
                                    const std::optional<compacted_wal_input>& compacted = std::nullopt,
                                    const range_deletions& deletions = {}) {
@@ -189,6 +190,26 @@ TEST_F(sorted_file_merger_test, multistage) {
     }
     // combining 5 files with fan-in 2 creates 3 intermediate outputs, and only the 2 inputs of the final merge remain
     EXPECT_EQ(files_in_directory(), 2U);
+}
+
+// an intermediate merge combines only as many files as needed to fit within the fan-in (the excess + 1): with
+// fan-in 3 and 4 files, the first 2
+TEST_F(sorted_file_merger_test, intermediate_merge_combines_only_the_excess) {
+    std::vector<boost::filesystem::path> files;
+    std::vector<std::string> expected;
+    for (int i = 0; i < 4; ++i) {
+        const std::string own = normal_entry(1, "k" + std::to_string(i), "v", 1, 0);
+        files.push_back(sorted_file({own}));
+        expected.push_back(own);
+    }
+
+    EXPECT_EQ(merge(3, files), expected);
+    EXPECT_FALSE(boost::filesystem::exists(files[0])) << files[0];
+    EXPECT_FALSE(boost::filesystem::exists(files[1])) << files[1];
+    EXPECT_TRUE(boost::filesystem::exists(files[2])) << files[2];
+    EXPECT_TRUE(boost::filesystem::exists(files[3])) << files[3];
+    // the 2 remaining files and 1 intermediate output
+    EXPECT_EQ(files_in_directory(), 3U);
 }
 
 // the compacted WAL file: added to the inputs of the final merge skipping its marker_begin, and each normal_with_blob

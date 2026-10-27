@@ -124,10 +124,7 @@ key_sid_location locate_data_entry_key_sid(std::string_view entry) noexcept {
     const auto type = static_cast<entry_type>(static_cast<std::uint8_t>(entry[0]));
     // all three data entry types have the key length right after the entry type
     const std::uint32_t key_length = load_uint32le(entry.substr(entry_type_size));
-    const std::size_t offset = (type == entry_type::remove_entry)
-                                   ? entry_type_size + key_length_size
-                                   : entry_type_size + key_length_size + value_length_size;
-    return {offset, storage_id_size + key_length};
+    return {key_sid_offset(type), storage_id_size + key_length};
 }
 
 }  // namespace
