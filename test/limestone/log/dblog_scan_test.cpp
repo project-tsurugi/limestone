@@ -13,6 +13,7 @@
 #include <boost/filesystem.hpp>
 
 #include "dblog_scan.h"
+#include "input_file_queue.h"
 #include "scan_input.h"
 #include "limestone_exception_helper.h"
 #include "internal.h"
@@ -2897,6 +2898,95 @@ TEST_F(dblog_scan_test, thread_end_hook_exception_is_rethrown) {
         THROW_LIMESTONE_EXCEPTION("hook failed in worker " + std::to_string(worker));
     });
     EXPECT_THROW(ds.scan_pwal_files_throws(0x100, [](log_entry&, int) {}), limestone_exception);
+}
+
+// sets the same modes as scan_pwal_files_throws (the scan_pwal_files that takes a queue does not set the modes)
+void set_throwing_mode(dblog_scan& ds) {
+    ds.set_fail_fast(true);
+    ds.set_process_at_nondurable_epoch_snippet(dblog_scan::process_at_nondurable::repair_by_mark);
+    ds.set_process_at_truncated_epoch_snippet(dblog_scan::process_at_truncated::report);
+    ds.set_process_at_damaged_epoch_snippet(dblog_scan::process_at_damaged::report);
+}
+
+bool throw_on_error(log_entry::read_error& e) {
+    THROW_LIMESTONE_EXCEPTION("this pwal file is broken: " + e.message());
+    return false;
+}
+
+// a scan on an aborted queue reads nothing, calls no hook, and ends with the exception of the abort
+TEST_F(dblog_scan_test, abort_before_the_scan_fails_it) {
+    const auto p = boost::filesystem::path(location) / "pwal_0000";
+    create_file(p, data_normal2);
+    input_file_queue queue;
+    queue.push(p);
+    queue.abort();
+    int entries = 0;
+    int hook_calls = 0;
+    dblog_scan ds{boost::filesystem::path(location)};
+    ds.set_thread_num(2);
+    set_throwing_mode(ds);
+    ds.set_thread_end_hook([&hook_calls](int) { ++hook_calls; });
+    try {
+        (void) ds.scan_pwal_files(queue, 0x100, [&entries](log_entry&, int) { ++entries; }, throw_on_error);
+        FAIL() << "no exception";
+    } catch (const limestone_exception& e) {
+        EXPECT_NE(std::string(e.what()).find("the scan is aborted"), std::string::npos) << e.what();
+    }
+    EXPECT_EQ(entries, 0);
+    EXPECT_EQ(hook_calls, 0);
+}
+
+// when aborted during the scan, the rest of the file on hand is not read, no hook is called, and the scan ends
+// with the exception of the abort
+TEST_F(dblog_scan_test, abort_stops_reading_the_file_on_hand) {
+    const auto p = boost::filesystem::path(location) / "pwal_0000";
+    create_file(p, std::string(data_normal2) + std::string(data_normal2));  // 6 entries
+    input_file_queue queue;
+    queue.push(p);
+    queue.close();
+    int entries = 0;
+    int hook_calls = 0;
+    dblog_scan ds{boost::filesystem::path(location)};
+    ds.set_thread_num(1);
+    set_throwing_mode(ds);
+    ds.set_thread_end_hook([&hook_calls](int) { ++hook_calls; });
+    try {
+        (void) ds.scan_pwal_files(queue, 0x100, [&entries, &queue](log_entry&, int) {
+            ++entries;
+            queue.abort();  // aborts at the first entry (seen before the next entry, as this is the thread of the scan)
+        }, throw_on_error);
+        FAIL() << "no exception";
+    } catch (const limestone_exception& e) {
+        EXPECT_NE(std::string(e.what()).find("the scan is aborted"), std::string::npos) << e.what();
+    }
+    EXPECT_EQ(entries, 1);
+    EXPECT_EQ(hook_calls, 0);
+}
+
+// the failure of a worker wakes the other workers waiting on the queue that is not closed, and the scan ends with
+// the exception of that failure (not of the abort). This test hangs if they are not woken
+TEST_F(dblog_scan_test, failure_of_a_worker_wakes_the_waiting_workers) {
+    const auto p = boost::filesystem::path(location) / "pwal_0000";
+    create_file(p,
+                "\x02\xff\x00\x00\x00\x00\x00\x00\x00"
+                "\x02\x01\x01\x00\x00\x00"  // truncated
+                ""sv);
+    input_file_queue queue;
+    queue.push(p);  // not closed
+    int hook_calls = 0;
+    dblog_scan ds{boost::filesystem::path(location)};
+    ds.set_thread_num(2);
+    set_throwing_mode(ds);
+    ds.set_thread_end_hook([&hook_calls](int) { ++hook_calls; });
+    try {
+        (void) ds.scan_pwal_files(queue, 0x100, [](log_entry&, int) {}, throw_on_error);
+        FAIL() << "no exception";
+    } catch (const limestone_exception& e) {
+        EXPECT_NE(std::string(e.what()).find("this pwal file is broken"), std::string::npos) << e.what();
+        EXPECT_EQ(std::string(e.what()).find("the scan is aborted"), std::string::npos) << e.what();
+    }
+    EXPECT_TRUE(queue.aborted());
+    EXPECT_EQ(hook_calls, 0);
 }
 
 }  // namespace limestone::testing
