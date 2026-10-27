@@ -23,6 +23,7 @@
 #include "internal.h"
 #include "log_entry.h"
 #include "compaction_options.h"
+#include "input_file_queue.h"
 
 
 namespace limestone::internal {
@@ -192,9 +193,31 @@ public:
         return max_epoch_per_file_;
     }
     /**
+     * @brief Scans the files determined at construction.
+     *
+     * The same as calling the scan_pwal_files that takes a queue, with a queue closed after all the files are
+     * pushed.
      * @returns max epoch value in directory
      */
     epoch_id_type scan_pwal_files(epoch_id_type ld_epoch, const add_entry_func_t& add_entry,
+        const error_report_func_t& report_error, dblog_scan::parse_error::code* max_parse_error_value = nullptr);
+
+    /**
+     * @brief Scans the files taken out of a queue.
+     *
+     * thread_num workers take the paths out of the queue one by one and scan them. A worker waits if the queue is
+     * empty and not closed. Once the queue is closed and empty, each worker calls the thread end hook and ends.
+     * A failure of a worker (limestone_exception) aborts the queue to stop the other workers, and is rethrown
+     * after all the workers end.
+     * Only the files whose names start with pwal (is_wal) are scanned.
+     * @param queue the queue of the input files. The scan does not end until the producer closes it
+     * @param ld_epoch the durable epoch (or the boundary epoch of the compaction)
+     * @param add_entry called with each valid entry and the number of the worker that read it
+     * @param report_error called for each parse error
+     * @param max_parse_error_value if not null, receives the maximum parse error of the files
+     * @returns max epoch value in the files
+     */
+    epoch_id_type scan_pwal_files(input_file_queue& queue, epoch_id_type ld_epoch, const add_entry_func_t& add_entry,
         const error_report_func_t& report_error, dblog_scan::parse_error::code* max_parse_error_value = nullptr);
 
     epoch_id_type scan_one_pwal_file(const boost::filesystem::path& p, epoch_id_type ld_epoch,

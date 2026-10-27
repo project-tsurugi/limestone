@@ -142,8 +142,19 @@ void dblog_scan::detach_wal_files(bool skip_empty_files) {
     }
 }
 
+epoch_id_type dblog_scan::scan_pwal_files(epoch_id_type ld_epoch, const add_entry_func_t& add_entry,
+                                          const error_report_func_t& report_error,
+                                          dblog_scan::parse_error::code* max_parse_error_value) {
+    input_file_queue queue;
+    for (const auto& p : path_list_) {
+        queue.push(p);
+    }
+    queue.close();
+    return scan_pwal_files(queue, ld_epoch, add_entry, report_error, max_parse_error_value);
+}
+
 epoch_id_type dblog_scan::scan_pwal_files(  // NOLINT(readability-function-cognitive-complexity)
-        epoch_id_type ld_epoch, const add_entry_func_t& add_entry,
+        input_file_queue& queue, epoch_id_type ld_epoch, const add_entry_func_t& add_entry,
         const error_report_func_t& report_error, dblog_scan::parse_error::code* max_parse_error_value) {
     std::atomic<epoch_id_type> max_appeared_epoch{ld_epoch};
     if (max_parse_error_value) { *max_parse_error_value = dblog_scan::parse_error::failed; }
@@ -222,25 +233,17 @@ epoch_id_type dblog_scan::scan_pwal_files(  // NOLINT(readability-function-cogni
         }
     };
 
-    std::mutex list_mtx;
+    std::mutex ex_mtx;
     std::exception_ptr ex_ptr{};
-    bool done = false;
-    
-    auto temp_list = path_list_;
+
     std::vector<std::thread> workers;
     workers.reserve(thread_num_);
     for (int i = 0; i < thread_num_; i++) {
         workers.emplace_back([&, i](){
             try {
-                for (;;) {
-                    boost::filesystem::path p;
-                    {
-                        std::scoped_lock<std::mutex> lock(list_mtx);
-                        if (temp_list.empty() || done) break;
-                        p = temp_list.front();
-                        temp_list.pop_front();
-                    }
-                    process_file(p, i);
+                // takes paths out until the queue is closed and empty, or aborted
+                while (const auto p = queue.pop()) {
+                    process_file(*p, i);
                     if (options_.has_value()) {
                         compaction_options &opts = options_.value().get();
                         if (opts.is_gc_enabled()) {
@@ -249,23 +252,18 @@ epoch_id_type dblog_scan::scan_pwal_files(  // NOLINT(readability-function-cogni
                     }
                 }
                 // the hook is called only when the input is exhausted (not when stopped by another thread's failure)
-                bool aborted{};
-                {
-                    std::scoped_lock<std::mutex> lock(list_mtx);
-                    aborted = done;
-                }
-                if (!aborted && thread_end_hook_) {
+                if (!queue.aborted() && thread_end_hook_) {
                     thread_end_hook_(i);
                 }
             } catch (limestone_exception& ex) {
                 VLOG(log_info) << "/:limestone catch runtime_error(" << ex.what() << ")";
                 {
-                    std::scoped_lock<std::mutex> lock(list_mtx);
+                    std::scoped_lock<std::mutex> lock(ex_mtx);
                     if (!ex_ptr) {  // only save one
                         ex_ptr = std::current_exception();
                     }
-                    done = true;
                 }
+                queue.abort();  // stops the other workers
             }
         });
     }
