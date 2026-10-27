@@ -47,7 +47,7 @@ const boost::filesystem::path compaction_catalog_path = boost::filesystem::path(
 
     static bool starts_with(std::string a, std::string b) { return a.substr(0, b.length()) == b; }
     static bool is_pwal(const boost::filesystem::path& p) { return starts_with(p.filename().string(), "pwal"); }
-    static void ignore_entry(limestone::api::log_entry&) {}
+    static void ignore_entry(limestone::api::log_entry&, int) {}
 
     void create_manifest_file(int persistent_format_version = 1) {
         create_file(manifest_path, data_manifest(persistent_format_version));

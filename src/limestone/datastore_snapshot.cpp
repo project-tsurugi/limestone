@@ -155,7 +155,7 @@ sorted_from_wals_result create_sorted_from_wals(compaction_options &options) {
     const auto add_entry_to_point = insert_entry_or_update_to_max;
     bool works_with_multi_thread = false;
 #endif
-    auto add_entry = [&sctx, &add_entry_to_point, &options](const log_entry& e){
+    auto add_entry = [&sctx, &add_entry_to_point, &options](const log_entry& e, int){
         switch (e.type()) {
         case log_entry::entry_type::normal_with_blob:
             if (options.is_gc_enabled()) {

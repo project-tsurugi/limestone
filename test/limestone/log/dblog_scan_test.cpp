@@ -5,12 +5,15 @@
 #include <cerrno>
 #include <fstream>
 #include <iterator>
+#include <mutex>
+#include <set>
 #include <sstream>
 #include <limestone/logging.h>
 
 #include <boost/filesystem.hpp>
 
 #include "dblog_scan.h"
+#include "limestone_exception_helper.h"
 #include "internal.h"
 #include "log_entry.h"
 
@@ -2717,7 +2720,7 @@ TEST_F(dblog_scan_test, scan_for_compaction_ignores_snippets_beyond_boundary) {
     dblog_scan ds{boost::filesystem::path(location)};
     ds.set_thread_num(1);
     std::vector<log_entry> entries;
-    epoch_id_type max_epoch = ds.scan_pwal_files_for_compaction(0x100, [&entries](log_entry& e) {
+    epoch_id_type max_epoch = ds.scan_pwal_files_for_compaction(0x100, [&entries](log_entry& e, int) {
         entries.push_back(e);
     });
 
@@ -2742,7 +2745,7 @@ TEST_F(dblog_scan_test, scan_for_compaction_passes_all_entries_within_boundary) 
     dblog_scan ds{boost::filesystem::path(location)};
     ds.set_thread_num(1);
     std::vector<log_entry> entries;
-    epoch_id_type max_epoch = ds.scan_pwal_files_for_compaction(0x101, [&entries](log_entry& e) {
+    epoch_id_type max_epoch = ds.scan_pwal_files_for_compaction(0x101, [&entries](log_entry& e, int) {
         entries.push_back(e);
     });
 
@@ -2759,7 +2762,7 @@ TEST_F(dblog_scan_test, scan_records_max_epoch_per_file) {
 
     dblog_scan ds{boost::filesystem::path(location)};
     ds.set_thread_num(1);
-    ds.scan_pwal_files_for_compaction(0x100, [](log_entry&) {});
+    ds.scan_pwal_files_for_compaction(0x100, [](log_entry&, int) {});
 
     const auto& max_epochs = ds.get_max_epoch_per_file();
     ASSERT_EQ(max_epochs.size(), 2);
@@ -2830,6 +2833,68 @@ TEST_F(dblog_scan_test, scan_one_pwal_file_read_only_repair_by_cut_throws_when_t
     std::string content((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
     EXPECT_EQ(content, data_truncated_invalidated_normal_entry);
     boost::filesystem::permissions(p, boost::filesystem::owner_all);
+}
+
+// the thread end hook is called once per worker that exhausted the input, with the number of the worker. add_entry
+// receives numbers in the same range
+TEST_F(dblog_scan_test, thread_end_hook_is_called_once_per_worker) {
+    constexpr int thread_num = 3;
+    for (int i = 0; i < 4; ++i) {
+        create_file(boost::filesystem::path(location) / ("pwal_000" + std::to_string(i)), data_normal2);
+    }
+    std::mutex mutex;
+    std::multiset<int> hook_workers;
+    std::multiset<int> entry_workers;
+    dblog_scan ds{boost::filesystem::path(location)};
+    ds.set_thread_num(thread_num);
+    ds.set_thread_end_hook([&mutex, &hook_workers](int worker) {
+        const std::lock_guard<std::mutex> lock(mutex);
+        hook_workers.insert(worker);
+    });
+    const epoch_id_type max_epoch = ds.scan_pwal_files_throws(0x100, [&mutex, &entry_workers](log_entry&, int worker) {
+        const std::lock_guard<std::mutex> lock(mutex);
+        entry_workers.insert(worker);
+    });
+    EXPECT_EQ(max_epoch, 0x100);
+    EXPECT_EQ(hook_workers, (std::multiset<int>{0, 1, 2}));
+    EXPECT_EQ(entry_workers.size(), 4U * 3);  // 4 files x 3 entries
+    for (const int worker : entry_workers) {
+        EXPECT_GE(worker, 0);
+        EXPECT_LT(worker, thread_num);
+    }
+}
+
+// nothing is called unless the hook is set (the default)
+TEST_F(dblog_scan_test, thread_end_hook_is_optional) {
+    create_file(boost::filesystem::path(location) / "pwal_0000", data_normal2);
+    dblog_scan ds{boost::filesystem::path(location)};
+    ds.set_thread_num(2);
+    EXPECT_EQ(ds.scan_pwal_files_throws(0x100, [](log_entry&, int) {}), 0x100);
+}
+
+// when the scan stops by a failure (an exception with fail_fast), the hook of that worker is not called
+TEST_F(dblog_scan_test, thread_end_hook_is_not_called_when_the_scan_fails) {
+    create_file(boost::filesystem::path(location) / "pwal_0000",
+                "\x02\xff\x00\x00\x00\x00\x00\x00\x00"
+                "\x02\x01\x01\x00\x00\x00"  // truncated
+                ""sv);
+    int hook_calls = 0;
+    dblog_scan ds{boost::filesystem::path(location)};
+    ds.set_thread_num(1);
+    ds.set_thread_end_hook([&hook_calls](int) { ++hook_calls; });
+    EXPECT_THROW(ds.scan_pwal_files_throws(0x100, [](log_entry&, int) {}), limestone_exception);
+    EXPECT_EQ(hook_calls, 0);
+}
+
+// a limestone_exception thrown by the hook is rethrown as a failure of the scan
+TEST_F(dblog_scan_test, thread_end_hook_exception_is_rethrown) {
+    create_file(boost::filesystem::path(location) / "pwal_0000", data_normal2);
+    dblog_scan ds{boost::filesystem::path(location)};
+    ds.set_thread_num(2);
+    ds.set_thread_end_hook([](int worker) {
+        THROW_LIMESTONE_EXCEPTION("hook failed in worker " + std::to_string(worker));
+    });
+    EXPECT_THROW(ds.scan_pwal_files_throws(0x100, [](log_entry&, int) {}), limestone_exception);
 }
 
 }  // namespace limestone::testing

@@ -78,6 +78,13 @@ public:
 
     using error_report_func_t = std::function<bool(log_entry::read_error&)>;
 
+    /// the type of add_entry of the scan_pwal_files family. Receives an entry and the number of the worker that read
+    /// it (0 to thread_num - 1)
+    using add_entry_func_t = std::function<void(log_entry&, int)>;
+
+    /// the type of the thread end hook. Receives the number of the worker (the same as the one passed to add_entry)
+    using thread_end_hook_t = std::function<void(int)>;
+
     /**
      * @brief Constructor that initializes the dblog_scan with the specified log directory.
      *
@@ -111,6 +118,19 @@ public:
 
     const boost::filesystem::path& get_dblogdir() { return dblogdir_; }
     void set_thread_num(int thread_num) noexcept { thread_num_ = thread_num; }
+
+    /**
+     * @brief Sets the function called once in each worker thread when the thread finishes after exhausting the
+     *        input.
+     *
+     * In a scan of the scan_pwal_files family, each worker calls it with its worker number after no file is left to
+     * take and before the thread ends. It is not called when the scan stops by a failure (an exception in the
+     * thread itself, or the thread stopping on seeing the failure of another thread). However, a thread that
+     * exhausted the input before the failure of another thread calls it.
+     * A limestone_exception thrown by the hook is rethrown from the scan_pwal_files family as a failure of the scan.
+     * @param hook the function to call. Not called if empty (the default)
+     */
+    void set_thread_end_hook(thread_end_hook_t hook);
     void set_fail_fast(bool fail_fast) noexcept { fail_fast_ = fail_fast; }
     void detach_wal_files(bool skip_empty_files = true);
 
@@ -150,7 +170,7 @@ public:
      * @returns max epoch value in directory
      * @throws exception on error
      */
-    epoch_id_type scan_pwal_files_throws(epoch_id_type ld_epoch, const std::function<void(log_entry&)>& add_entry);
+    epoch_id_type scan_pwal_files_throws(epoch_id_type ld_epoch, const add_entry_func_t& add_entry);
 
     /**
      * @brief scan for the compaction path: snippets beyond the boundary epoch are
@@ -160,7 +180,7 @@ public:
      * @returns max epoch in the directory, including the snippets beyond the boundary
      * @throws exception on error
      */
-    epoch_id_type scan_pwal_files_for_compaction(epoch_id_type boundary_epoch, const std::function<void(log_entry&)>& add_entry);
+    epoch_id_type scan_pwal_files_for_compaction(epoch_id_type boundary_epoch, const add_entry_func_t& add_entry);
 
     /**
      * @brief returns the per-file max epoch recorded by the last successful scan
@@ -174,7 +194,7 @@ public:
     /**
      * @returns max epoch value in directory
      */
-    epoch_id_type scan_pwal_files(epoch_id_type ld_epoch, const std::function<void(log_entry&)>& add_entry,
+    epoch_id_type scan_pwal_files(epoch_id_type ld_epoch, const add_entry_func_t& add_entry,
         const error_report_func_t& report_error, dblog_scan::parse_error::code* max_parse_error_value = nullptr);
 
     epoch_id_type scan_one_pwal_file(const boost::filesystem::path& p, epoch_id_type ld_epoch,
@@ -201,6 +221,7 @@ private:
     std::optional<std::reference_wrapper<compaction_options>> options_;
     std::list<boost::filesystem::path> path_list_;
     int thread_num_{1};
+    thread_end_hook_t thread_end_hook_{};
     bool fail_fast_{false};
 
     // Per-file max epoch recorded by the last successful scan.

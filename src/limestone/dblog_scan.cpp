@@ -18,6 +18,7 @@
 #include <map>
 #include <mutex>
 #include <set>
+#include <utility>
 #include <boost/filesystem.hpp>
 
 #include <glog/logging.h>
@@ -142,17 +143,22 @@ void dblog_scan::detach_wal_files(bool skip_empty_files) {
 }
 
 epoch_id_type dblog_scan::scan_pwal_files(  // NOLINT(readability-function-cognitive-complexity)
-        epoch_id_type ld_epoch, const std::function<void(log_entry&)>& add_entry,
+        epoch_id_type ld_epoch, const add_entry_func_t& add_entry,
         const error_report_func_t& report_error, dblog_scan::parse_error::code* max_parse_error_value) {
     std::atomic<epoch_id_type> max_appeared_epoch{ld_epoch};
     if (max_parse_error_value) { *max_parse_error_value = dblog_scan::parse_error::failed; }
     std::atomic<dblog_scan::parse_error::code> max_error_value{dblog_scan::parse_error::code::ok};
     std::map<boost::filesystem::path, epoch_id_type> max_epoch_per_file;
     std::mutex max_epoch_per_file_mtx;
-    auto process_file = [&](const boost::filesystem::path& p) {  // NOLINT(readability-function-cognitive-complexity)
+    // NOLINTNEXTLINE(readability-function-cognitive-complexity)
+    auto process_file = [&](const boost::filesystem::path& p, int worker) {
         if (is_wal(p)) {
             parse_error ec;
-            auto rc = scan_one_pwal_file(p, ld_epoch, add_entry, report_error, ec);
+            // passes the worker number along with the entry to add_entry
+            const std::function<void(log_entry&)> add_entry_of_worker = [&add_entry, worker](log_entry& e) {
+                add_entry(e, worker);
+            };
+            auto rc = scan_one_pwal_file(p, ld_epoch, add_entry_of_worker, report_error, ec);
             epoch_id_type max_epoch_of_file = rc;
             auto ec_value = ec.value();
             switch (ec_value) {
@@ -224,34 +230,41 @@ epoch_id_type dblog_scan::scan_pwal_files(  // NOLINT(readability-function-cogni
     std::vector<std::thread> workers;
     workers.reserve(thread_num_);
     for (int i = 0; i < thread_num_; i++) {
-        workers.emplace_back([&](){
-            for (;;) {
-                boost::filesystem::path p;
-                {
-                    std::scoped_lock<std::mutex> lock(list_mtx);
-                    if (temp_list.empty() || done) break; 
-                    p = temp_list.front();
-                    temp_list.pop_front();
-                }
-
-                try {
-                    process_file(p);
+        workers.emplace_back([&, i](){
+            try {
+                for (;;) {
+                    boost::filesystem::path p;
+                    {
+                        std::scoped_lock<std::mutex> lock(list_mtx);
+                        if (temp_list.empty() || done) break;
+                        p = temp_list.front();
+                        temp_list.pop_front();
+                    }
+                    process_file(p, i);
                     if (options_.has_value()) {
                         compaction_options &opts = options_.value().get();
                         if (opts.is_gc_enabled()) {
                             opts.get_gc_snapshot().finalize_local_entries();
                         }
                     }
-                } catch (limestone_exception& ex) {
-                    VLOG(log_info) << "/:limestone catch runtime_error(" << ex.what() << ")";
-                    {
-                        std::scoped_lock<std::mutex> lock(list_mtx);
-                        if (!ex_ptr) {  // only save one
-                            ex_ptr = std::current_exception();
-                        }
-                        done = true;
+                }
+                // the hook is called only when the input is exhausted (not when stopped by another thread's failure)
+                bool aborted{};
+                {
+                    std::scoped_lock<std::mutex> lock(list_mtx);
+                    aborted = done;
+                }
+                if (!aborted && thread_end_hook_) {
+                    thread_end_hook_(i);
+                }
+            } catch (limestone_exception& ex) {
+                VLOG(log_info) << "/:limestone catch runtime_error(" << ex.what() << ")";
+                {
+                    std::scoped_lock<std::mutex> lock(list_mtx);
+                    if (!ex_ptr) {  // only save one
+                        ex_ptr = std::current_exception();
                     }
-                    break;
+                    done = true;
                 }
             }
         });
@@ -269,7 +282,7 @@ epoch_id_type dblog_scan::scan_pwal_files(  // NOLINT(readability-function-cogni
 
 // called from datastore::create_snapshot
 // db_startup mode
-epoch_id_type dblog_scan::scan_pwal_files_throws(epoch_id_type ld_epoch, const std::function<void(log_entry&)>& add_entry) {
+epoch_id_type dblog_scan::scan_pwal_files_throws(epoch_id_type ld_epoch, const add_entry_func_t& add_entry) {
     set_fail_fast(true);
     set_process_at_nondurable_epoch_snippet(process_at_nondurable::repair_by_mark);
     set_process_at_truncated_epoch_snippet(process_at_truncated::report);
@@ -281,12 +294,17 @@ epoch_id_type dblog_scan::scan_pwal_files_throws(epoch_id_type ld_epoch, const s
 // Snippets beyond the boundary are skipped in the ignore mode (files stay unmodified).
 // The parser treats such a snippet as valid = false, so none of its entries reaches
 // add_entry.
-epoch_id_type dblog_scan::scan_pwal_files_for_compaction(epoch_id_type boundary_epoch, const std::function<void(log_entry&)>& add_entry) {
+epoch_id_type dblog_scan::scan_pwal_files_for_compaction(epoch_id_type boundary_epoch,
+                                                          const add_entry_func_t& add_entry) {
     set_fail_fast(true);
     set_process_at_nondurable_epoch_snippet(process_at_nondurable::ignore);
     set_process_at_truncated_epoch_snippet(process_at_truncated::report);
     set_process_at_damaged_epoch_snippet(process_at_damaged::report);
     return scan_pwal_files(boundary_epoch, add_entry, log_error_and_throw);
+}
+
+void dblog_scan::set_thread_end_hook(thread_end_hook_t hook) {
+    thread_end_hook_ = std::move(hook);
 }
 
 void dblog_scan::rescan_directory_paths() {
