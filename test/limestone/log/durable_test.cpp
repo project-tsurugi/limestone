@@ -6,6 +6,7 @@
 #include <boost/filesystem.hpp>
 
 #include "dblog_scan.h"
+#include "scan_input.h"
 #include "internal.h"
 #include "log_entry.h"
 
@@ -151,6 +152,7 @@ TEST_F(durable_test, invalidated_entries_are_never_reused) {
 
 std::tuple<limestone::api::log_entry::read_error, limestone::api::epoch_id_type, std::vector<limestone::api::log_entry>> scan_one_pwal_file(const boost::filesystem::path& p, limestone::api::epoch_id_type ld_epoch) {
     using limestone::internal::dblog_scan;
+    using limestone::internal::scan_input;
     using limestone::api::log_entry;
     dblog_scan ds{""};  // dummy
     dblog_scan::parse_error ec;
@@ -162,7 +164,7 @@ std::tuple<limestone::api::log_entry::read_error, limestone::api::epoch_id_type,
     std::vector<log_entry> entries;
     limestone::api::epoch_id_type durable_epoch = UINT64_MAX;
     try {
-        durable_epoch = ds.scan_one_pwal_file(p, ld_epoch, [&entries](log_entry& e){ entries.emplace_back(e); }, [&err](log_entry::read_error& e) -> bool {
+        durable_epoch = ds.scan_one_pwal_file(scan_input{p}, ld_epoch, [&entries](log_entry& e){ entries.emplace_back(e); }, [&err](log_entry::read_error& e) -> bool {
             err = e;
             throw std::runtime_error("pwal file read error");
         }, ec);

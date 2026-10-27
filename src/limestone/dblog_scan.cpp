@@ -162,14 +162,15 @@ epoch_id_type dblog_scan::scan_pwal_files(  // NOLINT(readability-function-cogni
     std::map<boost::filesystem::path, epoch_id_type> max_epoch_per_file;
     std::mutex max_epoch_per_file_mtx;
     // NOLINTNEXTLINE(readability-function-cognitive-complexity)
-    auto process_file = [&](const boost::filesystem::path& p, int worker) {
+    auto process_file = [&](const scan_input& input, int worker) {
+        const boost::filesystem::path& p = input.path();
         if (is_wal(p)) {
             parse_error ec;
             // passes the worker number along with the entry to add_entry
             const std::function<void(log_entry&)> add_entry_of_worker = [&add_entry, worker](log_entry& e) {
                 add_entry(e, worker);
             };
-            auto rc = scan_one_pwal_file(p, ld_epoch, add_entry_of_worker, report_error, ec);
+            auto rc = scan_one_pwal_file(input, ld_epoch, add_entry_of_worker, report_error, ec);
             epoch_id_type max_epoch_of_file = rc;
             auto ec_value = ec.value();
             switch (ec_value) {
@@ -272,6 +273,9 @@ epoch_id_type dblog_scan::scan_pwal_files(  // NOLINT(readability-function-cogni
     }
     if (ex_ptr) {
         std::rethrow_exception(ex_ptr);
+    }
+    if (queue.aborted()) {  // aborted by the producer
+        THROW_LIMESTONE_EXCEPTION("the scan is aborted");
     }
     max_epoch_per_file_ = std::move(max_epoch_per_file);
     if (max_parse_error_value) { *max_parse_error_value = max_error_value; }

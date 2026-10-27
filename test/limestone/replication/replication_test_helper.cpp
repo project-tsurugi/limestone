@@ -7,6 +7,7 @@
 #include <unistd.h>
 #include <boost/filesystem/fstream.hpp>
 #include "dblog_scan.h"
+#include "scan_input.h"
 #include "internal.h"
 #include "log_entry.h"
 #include <limestone/api/storage_id_type.h>
@@ -206,7 +207,8 @@ std::vector<log_entry> read_log_file(boost::filesystem::path log_path) {
     limestone::internal::dblog_scan scanner(log_path.parent_path());
 
     // Scan the specified log file
-    epoch_id_type max_epoch = scanner.scan_one_pwal_file(log_path, UINT64_MAX, add_entry, report_error, pe);
+    epoch_id_type max_epoch = scanner.scan_one_pwal_file(limestone::internal::scan_input{log_path}, UINT64_MAX,
+                                                         add_entry, report_error, pe);
 
     if (pe.value() != limestone::internal::dblog_scan::parse_error::ok) {
         std::cerr << "Parse error occurred while reading the log file: " << log_path.string() << std::endl;

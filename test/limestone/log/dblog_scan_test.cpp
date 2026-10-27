@@ -13,6 +13,7 @@
 #include <boost/filesystem.hpp>
 
 #include "dblog_scan.h"
+#include "scan_input.h"
 #include "limestone_exception_helper.h"
 #include "internal.h"
 #include "log_entry.h"
@@ -83,7 +84,8 @@ static constexpr const char* location = "/tmp/dblog_scan_test";
         dblog_scan::parse_error pe;
         std::size_t entries = 0;
         std::vector<log_entry::read_error> errors;
-        epoch_id_type max_epoch = ds.scan_one_pwal_file(p, 0x100, [&entries](const log_entry&) { entries++; },
+        epoch_id_type max_epoch = ds.scan_one_pwal_file(scan_input{p}, 0x100,
+                                                        [&entries](const log_entry&) { entries++; },
                                                         [&errors](const log_entry::read_error& re) {
                                                             errors.emplace_back(re);
                                                             return false;
@@ -110,7 +112,7 @@ static constexpr const char* location = "/tmp/dblog_scan_test";
         dblog_scan::parse_error pe;
         std::vector<log_entry::read_error> errors;
 
-        epoch_id_type max_epoch = ds.scan_one_pwal_file(p, ld_epoch, [](const log_entry& e){
+        epoch_id_type max_epoch = ds.scan_one_pwal_file(scan_input{p}, ld_epoch, [](const log_entry& e){
             VLOG(30) << static_cast<int>(e.type());
         }, [&errors](const log_entry::read_error& re){
             VLOG(30) << re.message();
@@ -136,7 +138,7 @@ static constexpr const char* location = "/tmp/dblog_scan_test";
         dblog_scan::parse_error pe;
         std::vector<log_entry::read_error> errors;
 
-        epoch_id_type max_epoch = ds.scan_one_pwal_file(p, ld_epoch, [](const log_entry& e){
+        epoch_id_type max_epoch = ds.scan_one_pwal_file(scan_input{p}, ld_epoch, [](const log_entry& e){
             VLOG(30) << static_cast<int>(e.type());
         }, [&errors](const log_entry::read_error& re){
             VLOG(30) << re.message();
@@ -161,7 +163,7 @@ static constexpr const char* location = "/tmp/dblog_scan_test";
         dblog_scan::parse_error pe;
         std::vector<log_entry::read_error> errors;
 
-        epoch_id_type max_epoch = ds.scan_one_pwal_file(p, ld_epoch, [](const log_entry& e){
+        epoch_id_type max_epoch = ds.scan_one_pwal_file(scan_input{p}, ld_epoch, [](const log_entry& e){
             VLOG(30) << static_cast<int>(e.type());
         }, [&errors](const log_entry::read_error& re){
             VLOG(30) << re.message();
@@ -2800,7 +2802,7 @@ TEST_F(dblog_scan_test, scan_one_pwal_file_read_only_repair_throws_when_marking)
     dblog_scan::parse_error pe;
     // ld_epoch 0xf0: the snippet of epoch 0xf1 is nondurable, so its marker must be rewritten
     try {
-        (void) ds.scan_one_pwal_file(p, 0xf0, [](const log_entry&) {}, [](const log_entry::read_error&) { return false; }, pe);
+        (void) ds.scan_one_pwal_file(scan_input{p}, 0xf0, [](const log_entry&) {}, [](const log_entry::read_error&) { return false; }, pe);
         FAIL() << "no exception";
     } catch (const limestone_io_exception& e) {
         EXPECT_EQ(e.error_code(), EACCES);
@@ -2824,7 +2826,7 @@ TEST_F(dblog_scan_test, scan_one_pwal_file_read_only_repair_by_cut_throws_when_t
     set_repair_by_cut_mode(ds);
     dblog_scan::parse_error pe;
     try {
-        (void) ds.scan_one_pwal_file(p, 0x100, [](const log_entry&) {}, [](const log_entry::read_error&) { return false; }, pe);
+        (void) ds.scan_one_pwal_file(scan_input{p}, 0x100, [](const log_entry&) {}, [](const log_entry::read_error&) { return false; }, pe);
         FAIL() << "no exception";
     } catch (const limestone_io_exception& e) {
         EXPECT_EQ(e.error_code(), EACCES);

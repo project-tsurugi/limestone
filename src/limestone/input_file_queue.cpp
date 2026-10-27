@@ -56,19 +56,18 @@ void input_file_queue::abort() noexcept {
     not_empty_.notify_all();
 }
 
-std::optional<boost::filesystem::path> input_file_queue::pop() {
+std::optional<scan_input> input_file_queue::pop() {
     std::unique_lock<std::mutex> lock(mutex_);
     not_empty_.wait(lock, [this] { return ! paths_.empty() || closed_ || aborted_; });
     if (aborted_ || paths_.empty()) {
         return std::nullopt;
     }
-    boost::filesystem::path path = std::move(paths_.front());
+    scan_input input(std::move(paths_.front()), aborted_);
     paths_.pop_front();
-    return path;
+    return input;
 }
 
 bool input_file_queue::aborted() const noexcept {
-    const std::lock_guard<std::mutex> lock(mutex_);
     return aborted_;
 }
 

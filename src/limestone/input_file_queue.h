@@ -15,6 +15,7 @@
  */
 #pragma once
 
+#include <atomic>
 #include <condition_variable>
 #include <deque>
 #include <mutex>
@@ -22,11 +23,13 @@
 
 #include <boost/filesystem.hpp>
 
+#include "scan_input.h"
+
 namespace limestone::internal {
 
 /**
  * @brief The queue of the input files of a scan. The producer pushes the paths and closes the queue, and the
- *        threads of the scan pop them one by one.
+ *        threads of the scan pop them one by one as inputs of the scan.
  *
  * All the operations are thread-safe. pop() waits while the queue is empty and neither closed nor aborted.
  */
@@ -58,11 +61,12 @@ public:
     void abort() noexcept;
 
     /**
-     * @brief Takes the first path out. If the queue is empty and neither closed nor aborted, waits until one of
-     *        them happens.
-     * @return the path taken out, or nullopt if the queue is closed and empty, or aborted
+     * @brief Takes the first path out as an input of the scan. If the queue is empty and neither closed nor aborted,
+     *        waits until one of them happens.
+     * @return the input taken out (stopped() answers whether this queue is aborted), or nullopt if the queue is
+     *         closed and empty, or aborted
      */
-    std::optional<boost::filesystem::path> pop();
+    std::optional<scan_input> pop();
 
     /**
      * @brief Returns true if aborted.
@@ -74,7 +78,8 @@ private:
     std::condition_variable not_empty_;
     std::deque<boost::filesystem::path> paths_{};
     bool closed_{};
-    bool aborted_{};
+    /// atomic so that it can be read without the mutex, as it is read for every entry (written under the mutex)
+    std::atomic<bool> aborted_{false};
 };
 
 }  // namespace limestone::internal

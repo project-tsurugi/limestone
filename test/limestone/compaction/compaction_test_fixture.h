@@ -30,6 +30,7 @@
 
 #include "compaction_catalog.h"
 #include "dblog_scan.h"
+#include "scan_input.h"
 #include "internal.h"
 #include "log_entry.h"
 #include "manifest.h"
@@ -359,7 +360,8 @@ protected:
         limestone::internal::dblog_scan scanner(log_dir);
 
         // Scan the specified log file
-        epoch_id_type max_epoch = scanner.scan_one_pwal_file(log_path, UINT64_MAX, add_entry, report_error, pe);
+        epoch_id_type max_epoch = scanner.scan_one_pwal_file(limestone::internal::scan_input{log_path}, UINT64_MAX,
+                                                             add_entry, report_error, pe);
 
         if (pe.value() != limestone::internal::dblog_scan::parse_error::ok) {
             std::cerr << "Parse error occurred while reading the log file: " << log_path.string() << std::endl;

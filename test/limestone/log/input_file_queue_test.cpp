@@ -29,12 +29,26 @@
 namespace limestone::testing {
 
 using limestone::internal::input_file_queue;
+using limestone::internal::scan_input;
+
+/// the path of the result of pop() (nullopt as it is)
+std::optional<boost::filesystem::path> path_of(const std::optional<scan_input>& input) {
+    if (! input) {
+        return std::nullopt;
+    }
+    return input->path();
+}
+
+/// calls pop() once and returns its path
+std::optional<boost::filesystem::path> pop_path(input_file_queue& queue) {
+    return path_of(queue.pop());
+}
 
 // a helper that calls pop() once in another thread, to observe whether it has returned
 class popper {
 public:
     explicit popper(input_file_queue& queue) : thread_([this, &queue] {
-        result_ = queue.pop();
+        result_ = path_of(queue.pop());
         returned_ = true;
     }) {}
     ~popper() { thread_.join(); }
@@ -68,10 +82,10 @@ TEST(input_file_queue_test, pop_in_push_order_then_nullopt_after_close) {
     queue.push("a");
     queue.push("b");
     queue.close();
-    EXPECT_EQ(queue.pop(), boost::filesystem::path("a"));
-    EXPECT_EQ(queue.pop(), boost::filesystem::path("b"));
-    EXPECT_EQ(queue.pop(), std::nullopt);
-    EXPECT_EQ(queue.pop(), std::nullopt);  // nullopt however many times it is called
+    EXPECT_EQ(pop_path(queue), boost::filesystem::path("a"));
+    EXPECT_EQ(pop_path(queue), boost::filesystem::path("b"));
+    EXPECT_EQ(pop_path(queue), std::nullopt);
+    EXPECT_EQ(pop_path(queue), std::nullopt);  // nullopt however many times it is called
     EXPECT_FALSE(queue.aborted());
 }
 
@@ -97,7 +111,7 @@ TEST(input_file_queue_test, pop_wakes_on_close) {
 TEST(input_file_queue_test, abort_discards_the_rest_and_wakes) {
     input_file_queue queue;
     queue.push("a");
-    EXPECT_EQ(queue.pop(), boost::filesystem::path("a"));
+    EXPECT_EQ(pop_path(queue), boost::filesystem::path("a"));
     popper p(queue);
     EXPECT_TRUE(p.still_waiting());
     queue.push("b");  // the abort may come before this is popped, so the result is b or nullopt
@@ -105,9 +119,9 @@ TEST(input_file_queue_test, abort_discards_the_rest_and_wakes) {
     const auto popped = p.result();
     EXPECT_TRUE(! popped || *popped == boost::filesystem::path("b"));
     EXPECT_TRUE(queue.aborted());
-    EXPECT_EQ(queue.pop(), std::nullopt);
+    EXPECT_EQ(pop_path(queue), std::nullopt);
     queue.push("c");  // a push after abort is discarded
-    EXPECT_EQ(queue.pop(), std::nullopt);
+    EXPECT_EQ(pop_path(queue), std::nullopt);
 }
 
 // abort after close takes effect too (no thread waits on a closed empty queue, but aborted() becomes true)
@@ -117,7 +131,7 @@ TEST(input_file_queue_test, abort_after_close) {
     queue.close();
     queue.abort();
     EXPECT_TRUE(queue.aborted());
-    EXPECT_EQ(queue.pop(), std::nullopt);
+    EXPECT_EQ(pop_path(queue), std::nullopt);
 }
 
 // push after close is FATAL
@@ -125,6 +139,22 @@ TEST(input_file_queue_test, push_after_close_is_fatal) {
     input_file_queue queue;
     queue.close();
     EXPECT_DEATH(queue.push("a"), R"(push\(\) after close\(\))");
+}
+
+// an input popped out of the queue is stopped by abort, and one made alone is never stopped
+TEST(input_file_queue_test, popped_input_is_stopped_by_abort) {
+    input_file_queue queue;
+    queue.push("a");
+    const std::optional<scan_input> input = queue.pop();
+    ASSERT_TRUE(input);
+    EXPECT_EQ(input->path(), boost::filesystem::path("a"));
+    EXPECT_FALSE(input->stopped());
+    queue.close();
+    EXPECT_FALSE(input->stopped());
+    queue.abort();
+    EXPECT_TRUE(input->stopped());
+    const scan_input alone("b");
+    EXPECT_FALSE(alone.stopped());
 }
 
 // each path is popped exactly once even with multiple popping threads

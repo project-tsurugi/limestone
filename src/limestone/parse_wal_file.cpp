@@ -280,10 +280,11 @@ using namespace limestone::api;
 
 // scan the file, and check max epoch number in this file
 epoch_id_type dblog_scan::scan_one_pwal_file(  // NOLINT(readability-function-cognitive-complexity)
-        const boost::filesystem::path& p, epoch_id_type ld_epoch,
+        const scan_input& input, epoch_id_type ld_epoch,
         const std::function<void(log_entry&)>& add_entry,
         const error_report_func_t& report_error,
         parse_error& pe) {
+    const boost::filesystem::path& p = input.path();
     VLOG_LP(log_debug) << "processing pwal file: " << p.filename().string();
     epoch_id_type current_epoch{UINT64_MAX};
     epoch_id_type max_epoch_of_file{0};
@@ -309,6 +310,9 @@ epoch_id_type dblog_scan::scan_one_pwal_file(  // NOLINT(readability-function-co
     ec.value(log_entry::read_error::ok);
     std::streamoff fpos_epoch_snippet{};
     while (true) {
+        if (input.stopped()) {
+            break;  // the scan is aborted: leaves the rest unread and returns after the cleanup only
+        }
         const auto r = reader->next();
         const auto fpos_before_read_entry = static_cast<std::streamoff>(r.offset());
         if (r.result() == log_entry_read_result::status::ok) {

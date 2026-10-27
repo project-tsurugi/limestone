@@ -24,6 +24,7 @@
 #include "log_entry.h"
 #include "compaction_options.h"
 #include "input_file_queue.h"
+#include "scan_input.h"
 
 
 namespace limestone::internal {
@@ -208,7 +209,8 @@ public:
      * thread_num workers take the paths out of the queue one by one and scan them. A worker waits if the queue is
      * empty and not closed. Once the queue is closed and empty, each worker calls the thread end hook and ends.
      * A failure of a worker (limestone_exception) aborts the queue to stop the other workers, and is rethrown
-     * after all the workers end.
+     * after all the workers end. If the producer aborts the queue, the workers stop reading the files they are
+     * on, and the scan fails with a limestone_exception after all the workers end.
      * Only the files whose names start with pwal (is_wal) are scanned.
      * @param queue the queue of the input files. The scan does not end until the producer closes it
      * @param ld_epoch the durable epoch (or the boundary epoch of the compaction)
@@ -220,7 +222,19 @@ public:
     epoch_id_type scan_pwal_files(input_file_queue& queue, epoch_id_type ld_epoch, const add_entry_func_t& add_entry,
         const error_report_func_t& report_error, dblog_scan::parse_error::code* max_parse_error_value = nullptr);
 
-    epoch_id_type scan_one_pwal_file(const boost::filesystem::path& p, epoch_id_type ld_epoch,
+    /**
+     * @brief Scans the WAL file of one input.
+     *
+     * Once stopped() of the input becomes true, reading stops there (checked for every entry). In that case the
+     * return value and pe are those of the part read.
+     * @param input the input to scan
+     * @param ld_epoch the durable epoch (or the boundary epoch of the compaction)
+     * @param add_entry called with each valid entry
+     * @param report_error called for each parse error
+     * @param pe receives the parse error of the file
+     * @returns max epoch value in the file
+     */
+    epoch_id_type scan_one_pwal_file(const scan_input& input, epoch_id_type ld_epoch,
         const std::function<void(log_entry&)>& add_entry,
         const error_report_func_t& report_error,
         parse_error& pe);
