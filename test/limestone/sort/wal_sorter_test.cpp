@@ -144,6 +144,25 @@ TEST_F(wal_sorter_test, scan_and_merge) {
     EXPECT_FALSE(boost::filesystem::exists(sorting_path()));
 }
 
+// two range deletions of a storage keep the newer write_version, whether the older one comes first or later.
+// One thread processes the files in order: the older one comes first for storage 2, and later for storage 3
+TEST_F(wal_sorter_test, deletions_of_a_storage_keep_the_newest_version) {
+    constexpr auto clear_storage = static_cast<std::uint8_t>(format::entry_type::clear_storage);
+    const std::string x1 = normal_entry(2, "x", "x1", 10, 0);
+    const std::string x2 = normal_entry(2, "x", "x2", 12, 0);
+    const std::string y1 = normal_entry(3, "y", "y1", 10, 1);
+    const std::string y2 = normal_entry(3, "y", "y2", 12, 1);
+    write_pwal("pwal_0000", marker(2, 10) + x1 + y1 + storage_entry(clear_storage, 2, 10, 2)
+                                + storage_entry(clear_storage, 3, 11, 2));
+    write_pwal("pwal_0001", marker(2, 12) + x2 + y2 + storage_entry(clear_storage, 2, 11, 3)
+                                + storage_entry(clear_storage, 3, 10, 3));
+    dblog_scan scan{boost::filesystem::path(location)};
+    wal_sorter sorter(scan, sort_settings{1, 1024 * 1024, 128}, location);
+    const auto result = sorter.scan(std::nullopt, 12, {});
+    EXPECT_EQ(result.deletions, (range_deletions{{2, write_version_type{11, 3}}, {3, write_version_type{11, 2}}}));
+    EXPECT_EQ(merge_output(sorter), (std::vector<std::string>{x2, y2}));
+}
+
 // without a WAL file, the result of the scan is empty and the merge outputs nothing
 TEST_F(wal_sorter_test, no_input) {
     dblog_scan scan{boost::filesystem::path(location)};
