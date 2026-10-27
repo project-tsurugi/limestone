@@ -2,6 +2,7 @@
 #include <unistd.h>
 
 #include <algorithm>
+#include <array>
 #include <cerrno>
 #include <fstream>
 #include <iterator>
@@ -2803,7 +2804,8 @@ TEST_F(dblog_scan_test, scan_one_pwal_file_read_only_repair_throws_when_marking)
     dblog_scan::parse_error pe;
     // ld_epoch 0xf0: the snippet of epoch 0xf1 is nondurable, so its marker must be rewritten
     try {
-        (void) ds.scan_one_pwal_file(scan_input{p}, 0xf0, [](const log_entry&) {}, [](const log_entry::read_error&) { return false; }, pe);
+        (void) ds.scan_one_pwal_file(scan_input{p}, 0xf0, [](const log_entry&) {},
+                                     [](const log_entry::read_error&) { return false; }, pe);
         FAIL() << "no exception";
     } catch (const limestone_io_exception& e) {
         EXPECT_EQ(e.error_code(), EACCES);
@@ -2827,7 +2829,8 @@ TEST_F(dblog_scan_test, scan_one_pwal_file_read_only_repair_by_cut_throws_when_t
     set_repair_by_cut_mode(ds);
     dblog_scan::parse_error pe;
     try {
-        (void) ds.scan_one_pwal_file(scan_input{p}, 0x100, [](const log_entry&) {}, [](const log_entry::read_error&) { return false; }, pe);
+        (void) ds.scan_one_pwal_file(scan_input{p}, 0x100, [](const log_entry&) {},
+                                     [](const log_entry::read_error&) { return false; }, pe);
         FAIL() << "no exception";
     } catch (const limestone_io_exception& e) {
         EXPECT_EQ(e.error_code(), EACCES);
@@ -2848,14 +2851,17 @@ TEST_F(dblog_scan_test, thread_end_hook_is_called_once_per_worker) {
     std::mutex mutex;
     std::multiset<int> hook_workers;
     std::multiset<int> entry_workers;
+    std::array<bool, thread_num> ended{};  // the workers whose hook has been called (no add_entry of them after it)
     dblog_scan ds{boost::filesystem::path(location)};
     ds.set_thread_num(thread_num);
-    ds.set_thread_end_hook([&mutex, &hook_workers](int worker) {
+    ds.set_thread_end_hook([&mutex, &hook_workers, &ended](int worker) {
         const std::lock_guard<std::mutex> lock(mutex);
         hook_workers.insert(worker);
+        ended.at(static_cast<std::size_t>(worker)) = true;
     });
-    const epoch_id_type max_epoch = ds.scan_pwal_files_throws(0x100, [&mutex, &entry_workers](log_entry&, int worker) {
+    const epoch_id_type max_epoch = ds.scan_pwal_files_throws(0x100, [&](log_entry&, int worker) {
         const std::lock_guard<std::mutex> lock(mutex);
+        EXPECT_FALSE(ended.at(static_cast<std::size_t>(worker))) << "add_entry after the hook of worker " << worker;
         entry_workers.insert(worker);
     });
     EXPECT_EQ(max_epoch, 0x100);
@@ -2900,7 +2906,11 @@ TEST_F(dblog_scan_test, thread_end_hook_exception_is_rethrown) {
     EXPECT_THROW(ds.scan_pwal_files_throws(0x100, [](log_entry&, int) {}), limestone_exception);
 }
 
-// sets the same modes as scan_pwal_files_throws (the scan_pwal_files that takes a queue does not set the modes)
+namespace {
+
+/**
+ * @brief Sets the same modes as scan_pwal_files_throws (the scan_pwal_files that takes a queue does not set them).
+ */
 void set_throwing_mode(dblog_scan& ds) {
     ds.set_fail_fast(true);
     ds.set_process_at_nondurable_epoch_snippet(dblog_scan::process_at_nondurable::repair_by_mark);
@@ -2908,10 +2918,15 @@ void set_throwing_mode(dblog_scan& ds) {
     ds.set_process_at_damaged_epoch_snippet(dblog_scan::process_at_damaged::report);
 }
 
+/**
+ * @brief A report_error that throws limestone_exception.
+ */
 bool throw_on_error(log_entry::read_error& e) {
     THROW_LIMESTONE_EXCEPTION("this pwal file is broken: " + e.message());
     return false;
 }
+
+}  // namespace
 
 // a scan on an aborted queue reads nothing, calls no hook, and ends with the exception of the abort
 TEST_F(dblog_scan_test, abort_before_the_scan_fails_it) {

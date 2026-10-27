@@ -212,7 +212,7 @@ public:
      * after all the workers end. If the producer aborts the queue, the workers stop reading the files they are
      * on, and the scan fails with a limestone_exception after all the workers end.
      * Only the files whose names start with pwal (is_wal) are scanned.
-     * @param queue the queue of the input files. The scan does not end until the producer closes it
+     * @param queue the queue of the input files. The scan does not end until the producer closes or aborts it
      * @param ld_epoch the durable epoch (or the boundary epoch of the compaction)
      * @param add_entry called with each valid entry and the number of the worker that read it
      * @param report_error called for each parse error

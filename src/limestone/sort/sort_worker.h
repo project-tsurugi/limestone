@@ -32,8 +32,7 @@ namespace limestone::internal {
  *
  * Used from one thread (not thread-safe). The worker of the scan passes each data entry it reads to add(), and
  * calls finish() when it has exhausted the input. After finish(), the driver collects sorted_files() as the inputs
- * of the merge. The files are written by sorted_file_writer, so each is in the order of key_sid with duplicates
- * removed.
+ * of the merge. Each file is in the order of key_sid with duplicates removed.
  */
 class sort_worker {
 public:

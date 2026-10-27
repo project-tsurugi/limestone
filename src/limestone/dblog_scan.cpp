@@ -166,7 +166,6 @@ epoch_id_type dblog_scan::scan_pwal_files(  // NOLINT(readability-function-cogni
         const boost::filesystem::path& p = input.path();
         if (is_wal(p)) {
             parse_error ec;
-            // passes the worker number along with the entry to add_entry
             const std::function<void(log_entry&)> add_entry_of_worker = [&add_entry, worker](log_entry& e) {
                 add_entry(e, worker);
             };
@@ -242,7 +241,6 @@ epoch_id_type dblog_scan::scan_pwal_files(  // NOLINT(readability-function-cogni
     for (int i = 0; i < thread_num_; i++) {
         workers.emplace_back([&, i](){
             try {
-                // takes paths out until the queue is closed and empty, or aborted
                 while (const auto p = queue.pop()) {
                     process_file(*p, i);
                     if (options_.has_value()) {

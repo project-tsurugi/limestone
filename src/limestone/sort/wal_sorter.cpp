@@ -56,7 +56,7 @@ wal_scan_result wal_sorter::scan(std::optional<epoch_id_type> boundary_epoch, ep
     // failure)
     scan_->set_thread_num(settings_.threads);
     scan_->set_thread_end_hook([this](int worker) { workers_[static_cast<std::size_t>(worker)]->finish(); });
-    const dblog_scan::add_entry_func_t add = [this, &on_normal_with_blob](log_entry& entry, int worker) {
+    const dblog_scan::add_entry_func_t add = [this, &on_normal_with_blob](const log_entry& entry, int worker) {
         add_entry(entry, worker, on_normal_with_blob);
     };
     epoch_id_type max_appeared_epoch{};
@@ -73,6 +73,8 @@ wal_scan_result wal_sorter::scan(std::optional<epoch_id_type> boundary_epoch, ep
         const auto& files = worker->sorted_files();
         sorted_files_.insert(sorted_files_.end(), files.begin(), files.end());
     }
+    workers_.clear();  // frees the arenas of the workers here (merge() and the rest need only sorted_files_)
+    scanned_ = true;
     wal_scan_result result;
     result.max_appeared_epoch = max_appeared_epoch;
     result.max_blob_id = *std::max_element(max_blob_ids_.begin(), max_blob_ids_.end());
@@ -82,19 +84,19 @@ wal_scan_result wal_sorter::scan(std::optional<epoch_id_type> boundary_epoch, ep
 
 void wal_sorter::merge(const std::optional<sorted_file_merger::compacted_wal_input>& compacted,
                        const entry_callback& output) {
-    if (! directory_) {
-        LOG_LP(FATAL) << "merge() is called before scan()";
+    if (! scanned_) {
+        LOG_LP(FATAL) << "merge() is called without a successful scan()";
     }
     if (merged_) {
         LOG_LP(FATAL) << "merge() is called twice";
     }
     merged_ = true;
     sorted_file_merger merger(*directory_, settings_.merge_fanin);
-    merger.merge(sorted_files_, compacted, deletions_, output);
+    merger.merge(std::move(sorted_files_), compacted, deletions_, output);
     directory_->remove();
 }
 
-void wal_sorter::add_entry(log_entry& entry, int worker, const owned_entry_callback& on_normal_with_blob) {
+void wal_sorter::add_entry(const log_entry& entry, int worker, const owned_entry_callback& on_normal_with_blob) {
     const log_entry_view view = entry.view();
     switch (view.type()) {
     case format::entry_type::normal_with_blob: {
@@ -115,10 +117,12 @@ void wal_sorter::add_entry(log_entry& entry, int worker, const owned_entry_callb
     case format::entry_type::clear_storage:
     case format::entry_type::remove_storage: {  // remove_storage is treated the same as clear_storage
         const auto write_version = view.write_version();
-        const std::lock_guard<std::mutex> lock(deletions_mutex_);
-        const auto [it, inserted] = deletions_.try_emplace(view.storage(), write_version);
-        if (! inserted && it->second < write_version) {
-            it->second = write_version;
+        {
+            const std::lock_guard<std::mutex> lock(deletions_mutex_);
+            const auto [it, inserted] = deletions_.try_emplace(view.storage(), write_version);
+            if (! inserted && it->second < write_version) {
+                it->second = write_version;
+            }
         }
         return;
     }

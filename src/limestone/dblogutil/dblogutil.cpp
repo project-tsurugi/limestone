@@ -155,7 +155,8 @@ void repair(dblog_scan &ds, std::optional<epoch_id_type> epoch) {
     ds.rescan_directory_paths();
     std::atomic_size_t count_wal_entry = 0;
     dblog_scan::parse_error::code max_ec{};
-    ds.scan_pwal_files(ld_epoch, [&count_wal_entry](log_entry&, int){ count_wal_entry++; }, [](log_entry::read_error& e) -> bool {
+    ds.scan_pwal_files(ld_epoch, [&count_wal_entry](log_entry&, int){ count_wal_entry++; },
+                       [](log_entry::read_error& e) -> bool {
         LOG_LP(ERROR) << "this pwal file is broken: " << e.message();
         return false;
     }, &max_ec);

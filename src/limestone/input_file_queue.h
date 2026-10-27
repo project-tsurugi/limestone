@@ -78,7 +78,7 @@ private:
     std::condition_variable not_empty_;
     std::deque<boost::filesystem::path> paths_{};
     bool closed_{};
-    /// atomic so that it can be read without the mutex, as it is read for every entry (written under the mutex)
+    // atomic so that it can be read without the mutex, as it is read for every entry (written under the mutex)
     std::atomic<bool> aborted_{false};
 };
 

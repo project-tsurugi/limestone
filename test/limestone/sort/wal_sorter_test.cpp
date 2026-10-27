@@ -16,6 +16,7 @@
 #include <algorithm>
 #include <cstdint>
 #include <fstream>
+#include <mutex>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -36,6 +37,7 @@
 namespace limestone::testing {
 
 using limestone::api::limestone_exception;
+using limestone::api::limestone_io_exception;
 using limestone::api::log_entry;
 using limestone::api::write_version_type;
 using limestone::internal::dblog_scan;
@@ -127,8 +129,10 @@ TEST_F(wal_sorter_test, scan_and_merge) {
     dblog_scan scan{boost::filesystem::path(location)};
     const sort_settings settings{2, 1024 * 1024, 128};
     wal_sorter sorter(scan, settings, location);
+    std::mutex mutex;
     std::vector<std::string> with_blob;
-    const auto result = sorter.scan(std::nullopt, 11, [&with_blob](const log_entry& entry) {
+    const auto result = sorter.scan(std::nullopt, 11, [&mutex, &with_blob](const log_entry& entry) {
+        const std::lock_guard<std::mutex> lock(mutex);  // called concurrently from the 2 threads
         with_blob.emplace_back(entry.view().serialized_entry());
     });
     EXPECT_EQ(result.max_appeared_epoch, 11U);
@@ -175,7 +179,8 @@ TEST_F(wal_sorter_test, no_input) {
     EXPECT_FALSE(boost::filesystem::exists(sorting_path()));
 }
 
-// a failure of the scan (a broken file) is thrown, and sorting is removed by the destructor
+// a failure of the scan (a broken file) is thrown, merge() is FATAL after it, and sorting is removed by the
+// destructor
 TEST_F(wal_sorter_test, scan_failure_is_thrown_and_sorting_is_removed) {
     write_pwal("pwal_0000", marker(2, 10) + normal_entry(1, "a", "a1", 10, 0).substr(0, 5));  // truncated
     dblog_scan scan{boost::filesystem::path(location)};
@@ -183,8 +188,21 @@ TEST_F(wal_sorter_test, scan_failure_is_thrown_and_sorting_is_removed) {
         wal_sorter sorter(scan, sort_settings{}, location);
         EXPECT_THROW((void) sorter.scan(std::nullopt, 10, {}), limestone_exception);
         EXPECT_TRUE(boost::filesystem::exists(sorting_path()));
+        EXPECT_DEATH(sorter.merge(std::nullopt, [](const log_entry_view&) {}),
+                     R"(wal_sorter:merge merge\(\) is called without a successful scan\(\))");
     }
     EXPECT_FALSE(boost::filesystem::exists(sorting_path()));
+}
+
+// a failure of writing a sorted file (sorting is removed in the callback, so finish() cannot write) is thrown by
+// scan() as limestone_io_exception
+TEST_F(wal_sorter_test, write_failure_of_a_sorted_file_is_thrown_by_scan) {
+    write_pwal("pwal_0000", marker(2, 10) + normal_with_blob(1, "a", "a1", 10, 0, {1}));
+    dblog_scan scan{boost::filesystem::path(location)};
+    wal_sorter sorter(scan, sort_settings{1, 1024 * 1024, 128}, location);
+    EXPECT_THROW((void) sorter.scan(std::nullopt, 10, [](const log_entry&) {
+        boost::filesystem::remove_all(sorting_path());
+    }), limestone_io_exception);
 }
 
 // merge() before scan(), a second scan() and a second merge() are FATAL
@@ -192,7 +210,7 @@ TEST_F(wal_sorter_test, call_order_violations_are_fatal) {
     dblog_scan scan{boost::filesystem::path(location)};
     wal_sorter sorter(scan, sort_settings{}, location);
     EXPECT_DEATH(sorter.merge(std::nullopt, [](const log_entry_view&) {}),
-                 "wal_sorter:merge merge\\(\\) is called before scan\\(\\)");
+                 R"(wal_sorter:merge merge\(\) is called without a successful scan\(\))");
     (void) sorter.scan(std::nullopt, 1, {});
     EXPECT_DEATH((void) sorter.scan(std::nullopt, 1, {}), "wal_sorter:scan scan\\(\\) is called twice");
     (void) merge_output(sorter);

@@ -103,7 +103,8 @@ public:
      *                       scan_pwal_files_for_compaction(), otherwise scan_pwal_files_throws()
      * @param ld_epoch the durable epoch at startup (used when boundary_epoch is not given)
      * @param on_normal_with_blob called each time a normal_with_blob is read, in the thread of the scan, before the
-     *                            removal of duplicates (for recording for the BLOB GC). Not called if empty
+     *                            removal of duplicates (for recording for the BLOB GC). May be called concurrently
+     *                            from multiple threads. Not called if empty
      * @return the result of the scan
      * @throws limestone_exception if creating sorting, the scan, or writing a sorted file fails
      */
@@ -115,7 +116,7 @@ public:
      *        with duplicates removed and the range deletions applied, to output one by one. Removes sorting at the
      *        end.
      *
-     * Called only once after scan() (writes a FATAL log and aborts if called before scan() or twice).
+     * Called only once after a successful scan() (writes a FATAL log and aborts if called otherwise or twice).
      * @param compacted the compacted WAL file added to the inputs of the final merge, or nullopt
      * @param output the function that receives the entries of the result one by one in the order of key_sid. The
      *               view passed is valid only during the call
@@ -130,7 +131,8 @@ private:
      * @param worker the number of the worker that read it
      * @param on_normal_with_blob the argument of scan()
      */
-    void add_entry(limestone::api::log_entry& entry, int worker, const owned_entry_callback& on_normal_with_blob);
+    void add_entry(const limestone::api::log_entry& entry, int worker,
+                   const owned_entry_callback& on_normal_with_blob);
 
     dblog_scan* scan_;
     sort_settings settings_;
@@ -142,6 +144,7 @@ private:
     range_deletions deletions_{};
     /// the greatest BLOB ID per worker (indexed by the worker number). Each worker updates only its own slot
     std::vector<limestone::api::blob_id_type> max_blob_ids_{};
+    bool scanned_{};
     bool merged_{};
 };
 

@@ -176,6 +176,9 @@ master へのマージ前に本ファイルを削除する。
       変わらない move では作り直さない形を検討する。
 * [ ] write_serialized の、最も古い版に置き換えて書く指定 (fwrite を 3 回に分けて書く) の費用を、コンパクションの出力の
       時間で確かめる。目立つ場合は書き方を見直す。
+* [ ] wal_sorter の add_entry で normal_with_blob 1 件ごとに blob_ids() が vector を確保することと、ワーカーごとの
+      BLOB ID の最大値 (max_blob_ids_) が隣接していて false sharing になりうることの費用を確かめる。目立つ場合に限り、
+      serialized_blob_ids の直接走査や alignas を検討する (ステップ 5 のレビューの指摘)。
 
 ### ステップ 10: LE 段階 2
 
@@ -507,6 +510,20 @@ master へのマージ前に本ファイルを削除する。
     remove_directory (操作とエラー処理を持つ補助関数、2 か所から呼ぶ) はそのまま。同一 (key_sid, write_version) で
     内容が違うエントリのどれが残るかは不定 (入力番号で決めてもスレッドへの割り当てが不定なので決定的にならない。
     旧実装も同じ。正常な WAL では生じない)。
+* 2026-10-27: ステップ 5 全体のレビュー (3 モデル、cr-step5-20261027.md に指摘と対応をまとめた) の判断。
+  * 直したもの: scan() の末尾でワーカーを解放し、アリーナ (既定 8 × 256 MiB) を merge() の間まで持ち越さない。
+    scan() が失敗した後の merge() は FATAL (成功時だけ立てるフラグで検査する。directory_ の有無では失敗した scan() を
+    通してしまう)。
+  * dblog_scan のワーカーが捕捉するのは limestone_exception だけ (構造は以前から)。他の例外はスレッドから漏れて
+    terminate する。フックと add_entry の先 (sort_worker、sorted_file_writer、sorting_directory) が投げるのは
+    limestone_io_exception だけと確認した。ステップ 6 で limestone が書く on_normal_with_blob のコールバックも
+    limestone_exception に揃える。catch(...) は足さない。
+  * テストでタイミングに依存してよいのは退行の検出率だけ。基準は「正しい実装なら結果がタイミングによらず一意に
+    決まる」こと。input_file_queue_test の popper::still_waiting (100 ms 待って pop() が戻っていないことを見る) は、
+    正しい実装では pop() が戻らないのでタイミングで失敗することがなく、この基準の範囲内として残す。sleep で待ち合わせて
+    から次の操作をする形 (タイミングで結果が変わる) のテストは置かない。
+  * merge_fanin はコンストラクタで検査しない (設定値の検査は入口で行う決定のとおり。sorted_file_merger の FATAL は
+    契約違反の検出として残す)。
 
 ## 6. 残った課題
 

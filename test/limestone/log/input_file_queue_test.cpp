@@ -31,7 +31,11 @@ namespace limestone::testing {
 using limestone::internal::input_file_queue;
 using limestone::internal::scan_input;
 
-/// the path of the result of pop() (nullopt as it is)
+namespace {
+
+/**
+ * @brief Returns the path of the result of pop() (nullopt as it is).
+ */
 std::optional<boost::filesystem::path> path_of(const std::optional<scan_input>& input) {
     if (! input) {
         return std::nullopt;
@@ -39,12 +43,16 @@ std::optional<boost::filesystem::path> path_of(const std::optional<scan_input>& 
     return input->path();
 }
 
-/// calls pop() once and returns its path
+/**
+ * @brief Calls pop() once and returns its path.
+ */
 std::optional<boost::filesystem::path> pop_path(input_file_queue& queue) {
     return path_of(queue.pop());
 }
 
-// a helper that calls pop() once in another thread, to observe whether it has returned
+/**
+ * @brief Calls pop() once in another thread, to observe whether it has returned.
+ */
 class popper {
 public:
     explicit popper(input_file_queue& queue) : thread_([this, &queue] {
@@ -75,6 +83,8 @@ private:
     std::atomic<bool> returned_{false};
     std::thread thread_;
 };
+
+}  // namespace
 
 // the paths are popped in the order of push, and nullopt comes after the rest once closed
 TEST(input_file_queue_test, pop_in_push_order_then_nullopt_after_close) {
