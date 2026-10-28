@@ -33,8 +33,11 @@
 #include "dblog_scan.h"
 #include "internal.h"
 #include "log_entry.h"
+#include "log_entry/log_entry_view.h"
 #include "sortdb_wrapper.h"
 #include "snapshot_impl.h"
+#include "sort/sort_output_writer.h"
+#include "sort/wal_sorter.h"
 #include "sorting_context.h"
 
 namespace  {
@@ -217,6 +220,59 @@ sorted_from_wals_result create_sorted_from_wals(compaction_options &options) {
     }
 }
 
+/**
+ * @brief Creates the dblog_scan that scans the input files.
+ * @param options the target of the scan. If the set of files is empty, the whole directory is scanned
+ * @return dblog_scan
+ */
+dblog_scan make_dblog_scan(compaction_options& options) {
+    return options.get_file_names().empty() ? dblog_scan{options.get_from_dir()}
+                                            : dblog_scan{options.get_from_dir(), options};
+}
+
+/**
+ * @brief Performs the scan of the sort.
+ * @param logscan the dblog_scan with the target of the scan configured (the one passed to sorter)
+ * @param sorter the wal_sorter that performs the scan
+ * @param options the settings of the scan. If the boundary epoch is given, the scan of the compaction, otherwise the
+ *                scan with the durable epoch as the boundary
+ * @param on_normal_with_blob the argument of wal_sorter::scan()
+ * @return the result of the scan
+ * @throws limestone_exception if the inputs are malformed ("dblogdir is corrupted"), or reading the epoch file fails
+ * @throws limestone_io_exception if an I/O operation fails (writing to sorting, for instance)
+ */
+wal_scan_result scan_wals(dblog_scan& logscan, wal_sorter& sorter, const compaction_options& options,
+                          const wal_sorter::owned_entry_callback& on_normal_with_blob) {
+    // Online compaction: the boundary is the rotation boundary, and the snippets beyond it are skipped (the files are
+    // left unmodified, because those snippets are carried over into the carry file).
+    // Otherwise: the boundary is the durable epoch, and the snippets beyond it (not made durable) are invalidated. The
+    // inputs are the whole directory, so "every entry at or below the boundary is in the inputs" holds. The epoch is
+    // read outside the try block so that an exception caused by the epoch file is not flattened into "dblogdir is
+    // corrupted" by the catch below.
+    const std::optional<epoch_id_type> compaction_boundary = options.get_boundary_epoch();
+    epoch_id_type boundary_epoch{};
+    beyond_boundary_handling handling{};
+    if (compaction_boundary.has_value()) {
+        boundary_epoch = compaction_boundary.value();
+        handling = beyond_boundary_handling::skip;
+    } else {
+        boundary_epoch = logscan.last_durable_epoch_in_dir();
+        handling = beyond_boundary_handling::invalidate;
+    }
+    try {
+        return sorter.scan(boundary_epoch, handling, on_normal_with_blob);
+    } catch (const limestone_io_exception&) {
+        // an I/O failure is not a malformed input, so it is passed through (the online compaction retries it)
+        throw;
+    } catch (const limestone_exception& e) {
+        VLOG_LP(log_info) << "failed to scan pwal files: " << e.what();
+        LOG(ERROR) << "/:limestone recover process failed. "
+                   << "(cause: corruption detected in transaction log data directory), "
+                   << "see https://github.com/project-tsurugi/tsurugidb/blob/master/docs/troubleshooting-guide.md";
+        LOG(ERROR) << "/:limestone dblogdir (transaction log directory): " << options.get_from_dir();
+        THROW_LIMESTONE_EXCEPTION("dblogdir is corrupted");
+    }
+}
 
 [[maybe_unused]]
 write_version_type extract_write_version(const std::string_view& db_key) {
@@ -615,10 +671,13 @@ blob_id_type datastore::create_snapshot_and_get_max_blob_id() {
     const auto& from_dir = location_;
     std::set<std::string> file_names = assemble_snapshot_input_filenames(compaction_catalog_, from_dir);
     compaction_options options(from_dir, recover_max_parallelism_, file_names);
-    auto [max_appeared_epoch, sctx, max_epoch_per_file] = create_sorted_from_wals(options);
-    (void) max_epoch_per_file;  // not used on the startup path
-    epoch_id_switched_.store(max_appeared_epoch);
-    epoch_id_informed_.store(max_appeared_epoch);
+    dblog_scan logscan = make_dblog_scan(options);
+    sort_settings settings{};
+    settings.threads = options.get_num_worker();
+    wal_sorter sorter(logscan, settings, from_dir);
+    wal_scan_result scanned = scan_wals(logscan, sorter, options, {});
+    epoch_id_switched_.store(scanned.max_appeared_epoch);
+    epoch_id_informed_.store(scanned.max_appeared_epoch);
 
     boost::filesystem::path sub_dir = location_ / boost::filesystem::path(std::string(snapshot::subdirectory_name_));
     boost::system::error_code error;
@@ -632,45 +691,17 @@ blob_id_type datastore::create_snapshot_and_get_max_blob_id() {
 
     boost::filesystem::path snapshot_file = sub_dir / boost::filesystem::path(std::string(snapshot::file_name_));
     VLOG_LP(log_info) << "generating snapshot file: " << snapshot_file;
-    FILE* ostrm = fopen(snapshot_file.c_str(), "w");  // NOLINT(*-owning-memory)
-    if (!ostrm) {
-        LOG_AND_THROW_IO_EXCEPTION("cannot create snapshot file", errno);
-    }
-    log_entry::begin_session(ostrm, 0);
-    setvbuf(ostrm, nullptr, _IOFBF, 128L * 1024L);  // NOLINT, NB. glibc may ignore size when _IOFBF and buffer=NULL
-
+    // remove_entries are needed for the cursor to hide the old values in the compacted WAL file. They are not written
+    // if there is no compacted WAL file
     const bool should_write_remove_entry = !compaction_catalog_->get_compacted_files().empty();
-    auto write_snapshot_entry = [&ostrm, should_write_remove_entry](
-        log_entry::entry_type entry_type, 
-        std::string_view key_sid, 
-        std::string_view value_etc, 
-        std::string_view blob_ids) {
-        switch (entry_type) {
-        case log_entry::entry_type::normal_entry:
-            log_entry::write(ostrm, key_sid, value_etc);
-            break;
-        case log_entry::entry_type::normal_with_blob:
-            log_entry::write_with_blob(ostrm, key_sid, value_etc, blob_ids);
-            break;
-        case log_entry::entry_type::remove_entry:
-            if (should_write_remove_entry) {
-                log_entry::write_remove(ostrm, key_sid, value_etc);
-            }
-            break;
-        default:
-            LOG(ERROR) << "Unexpected entry type: " << static_cast<int>(entry_type);
-            std::abort();
-        }
-    };
+    sort_output_writer output(snapshot_file, "snapshot file",
+                              {log_entry::write_version_handling::keep, should_write_remove_entry, false});
+    sorter.merge(std::nullopt, [&output](const log_entry_view& entry) { output.write(entry); });
+    output.close();
 
-    sortdb_foreach(options, sctx, write_snapshot_entry);
-    if (fclose(ostrm) != 0) {  // NOLINT(*-owning-memory)
-        LOG_AND_THROW_IO_EXCEPTION("cannot close snapshot file (" + snapshot_file.string() + ")", errno);
-    }
+    clear_storage = std::move(scanned.deletions);
 
-    clear_storage = sctx.get_clear_storage();
-
-    return sctx.get_max_blob_id();
+    return scanned.max_blob_id;
 }
 
 } // namespace limestone::api

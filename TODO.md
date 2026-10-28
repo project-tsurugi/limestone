@@ -118,8 +118,10 @@ master へのマージ前に本ファイルを削除する。
 
 ### ステップ 6: 呼び出し元の置き換え (S1 メモ 5 節)
 
-* [ ] create_snapshot_and_get_max_blob_id(): 新しいソートに置き換える。remove_entry は、コンパクションカタログに
+* [x] create_snapshot_and_get_max_blob_id(): 新しいソートに置き換える。remove_entry は、コンパクションカタログに
       コンパクション済み WAL ファイルがあるときだけ書く。
+      (走査の共通部分を scan_wals() にした。wal_sorter::scan() の引数は境界の epoch と、超えたスニペットの扱い
+      (beyond_boundary_handling) の 1 組にまとめた。5 節。)
 * [ ] create_compaction_output(): 新しいソートに置き換え、write_serialized の最も古い版に置き換える指定で書く。
       remove_entry は書かない。値の 1 件ごとのコピーをなくす。
 * [x] 上の 2 つの出力の書き出しを sorted_file_writer と共通化するかを、置き換え時に判断する。違いは先頭の marker_begin の
@@ -541,6 +543,16 @@ master へのマージ前に本ファイルを削除する。
   * 多重クローズは WARNING で何もしない (実害がなく、tsurugidb を落とすのは過剰なため)。例外は fsync せずに閉じた後の
     sync_and_close() で、戻ると fsync されたと誤認させるので FATAL。閉じた後の stream()・write() は FATAL のまま。
     sorted_file_writer の 2 回目の close() も FATAL から WARNING に変わった。
+
+* 2026-10-28: ステップ 6 の起動時の置き換え。
+  * wal_sorter::scan() は、コンパクションの境界 (optional) と durable epoch を別の引数で受け取り、片方だけを使って
+    いた。どちらも「これを超える epoch のスニペットをソートに含めない」境界で、違いは超えたスニペットの扱い
+    (起動時とオフラインのコンパクションは invalidated に書き換え、オンラインのコンパクションはファイルを変えずに
+    読み飛ばす) だけなので、境界の epoch と beyond_boundary_handling の 1 組にまとめた。引数の意味を明確にするため。
+  * スレッド数は recover_max_parallelism (既定 8) がそのまま効く。旧ソートは RocksDB で PUT_ONLY でない構成のとき 1 に
+    固定していた。
+  * スナップショットの書き出しの失敗は、ファイルを閉じてから例外になる (旧コードは FILE* がリークしていた)。fsync は
+    しない (起動ごとに作り直すため。旧コードと同じ)。
 
 ## 6. 残った課題
 
