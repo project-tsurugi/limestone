@@ -29,21 +29,12 @@
 
 #include "dblog_scan.h"
 #include "log_entry.h"
+#include "sort/sort_settings.h"
 #include "sort/sort_worker.h"
 #include "sort/sorted_file_merger.h"
 #include "sort/sorting_directory.h"
 
 namespace limestone::internal {
-
-/// the settings of the sort. The defaults are held here
-struct sort_settings {
-    /// the number of threads of the scan and the sort
-    int threads{8};
-    /// the size of the arena per thread in bytes
-    std::size_t arena_size_bytes{std::size_t{256} * 1024 * 1024};
-    /// the merge fan-in (the number of inputs opened at once)
-    std::size_t merge_fanin{128};
-};
 
 /// the handling of the snippets whose epoch exceeds the boundary epoch of the scan. In both cases, their entries are
 /// not included in the sort

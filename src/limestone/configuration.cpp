@@ -35,4 +35,16 @@ void configuration::set_db_name(std::string_view db_name) noexcept {
     db_name_ = db_name;
 }
 
+void configuration::set_sort_arena_size_mb(std::size_t size_mb) noexcept {
+    sort_arena_size_mb_ = size_mb;
+}
+
+void configuration::set_sort_work_dir(const std::filesystem::path& dir) noexcept {
+    sort_work_dir_ = boost::filesystem::path(dir.native());
+}
+
+void configuration::set_sort_merge_fanin(std::size_t fanin) noexcept {
+    sort_merge_fanin_ = fanin;
+}
+
 } // namespace limestone::api

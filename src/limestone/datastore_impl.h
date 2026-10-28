@@ -28,6 +28,7 @@
 #include <set>
 #include <string>
 #include <sys/types.h>
+#include <cstddef>
 #include <cstdint>
 #include <functional>
 #include <vector>
@@ -112,6 +113,20 @@ public:
 
     /// @brief sets the name of the current compacted file
     void set_current_compacted_file_name(std::optional<std::string> file_name);
+
+    /// @brief sets the settings of the sort other than the threads. The datastore sets the checked values at its
+    ///        construction
+    void set_sort_settings(std::size_t arena_size_bytes, std::size_t merge_fanin,
+                           boost::filesystem::path work_dir_parent) noexcept;
+
+    /// @brief the size of the arena per thread of the sort in bytes
+    [[nodiscard]] std::size_t sort_arena_size_bytes() const noexcept;
+
+    /// @brief the merge fan-in of the sort
+    [[nodiscard]] std::size_t sort_merge_fanin() const noexcept;
+
+    /// @brief the parent directory in which the sort creates its working directory (sorting)
+    [[nodiscard]] const boost::filesystem::path& sort_work_dir_parent() const noexcept;
 
     // Increments the backup counter.
     void increment_backup_counter() noexcept;
@@ -524,6 +539,12 @@ private:
     // and right after a compaction commits.
     mutable std::mutex current_compacted_file_name_mutex_;
     std::optional<std::string> current_compacted_file_name_{};
+
+    // Settings of the sort (the threads are recover_max_parallelism_ of the datastore). Set at the construction of
+    // the datastore and never changed afterwards
+    std::size_t sort_arena_size_bytes_{};
+    std::size_t sort_merge_fanin_{};
+    boost::filesystem::path sort_work_dir_parent_{};
 
     // Atomic counter for tracking active backup operations.
     std::atomic<int> backup_counter_;

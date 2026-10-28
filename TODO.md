@@ -587,6 +587,14 @@ master へのマージ前に本ファイルを削除する。
     判定)。0 以下は 3 つのサブコマンドとも処理を始めずに終了コード 64。compaction は使うスレッド数を
     "sort-threads: N" として標準出力に出す (既定値の変更に利用者が気づく助けと、UT の確認の手段)。
 
+* 2026-10-28: ステップ 6 の設定項目の受け取り (tsurugidb・tgreplica の経路)。
+  * configuration に setter 3 つ (sort_arena_size_mb、sort_work_dir、sort_merge_fanin) を加えた (公開 API の追加)。
+    検査は datastore の構築時 (ロックの前): アリーナ 1〜4096 MiB (sort_buffer の上限 4 GiB)、マージの上限 2 以上、
+    置き場所は存在するディレクトリ (作らない)。値は datastore_impl に持ち、compaction_options の set_sort_settings()
+    で起動時とコンパクションに渡す。スレッド数は従来どおり num_worker。
+  * sort_settings は wal_sorter.h から sort/sort_settings.h に移した (compaction_options.h が wal_sorter.h を
+    include すると dblog_scan.h 経由で循環するため)。
+
 ## 6. 残った課題
 
 <!-- R1 の範囲外として持ち越すものを記録する。 -->

@@ -15,6 +15,7 @@
  */
 #pragma once
 
+#include <cstddef>
 #include <filesystem>
 #include <string>
 #include <string_view>
@@ -34,6 +35,16 @@ class configuration {
      * @brief default value of recover_max_parallelism
      */
     static constexpr int default_recover_max_parallelism = 8;
+
+    /**
+     * @brief default value of sort_arena_size_mb
+     */
+    static constexpr std::size_t default_sort_arena_size_mb = 256;
+
+    /**
+     * @brief default value of sort_merge_fanin
+     */
+    static constexpr std::size_t default_sort_merge_fanin = 128;
 
 public:
     /**
@@ -65,6 +76,25 @@ public:
      */
     void set_recover_max_parallelism(int recover_max_parallelism) noexcept;
 
+    /**
+     * @brief setter for sort_arena_size_mb: the size of the buffer per thread of the sort at startup and at
+     *        compaction, in MiB
+     * @param size_mb the size in MiB (1 to 4096)
+     */
+    void set_sort_arena_size_mb(std::size_t size_mb) noexcept;
+
+    /**
+     * @brief setter for sort_work_dir: the directory under which the sort creates its working directory
+     * @param dir the directory. It must exist. If empty, the log directory is used
+     */
+    void set_sort_work_dir(const std::filesystem::path& dir) noexcept;
+
+    /**
+     * @brief setter for sort_merge_fanin: the number of sorted files the sort merges at once
+     * @param fanin the fan-in (at least 2)
+     */
+    void set_sort_merge_fanin(std::size_t fanin) noexcept;
+
 private:
     boost::filesystem::path data_location_{};
 
@@ -72,6 +102,10 @@ private:
     std::string db_name_{};
 
     int recover_max_parallelism_{default_recover_max_parallelism};
+
+    std::size_t sort_arena_size_mb_{default_sort_arena_size_mb};
+    boost::filesystem::path sort_work_dir_{};
+    std::size_t sort_merge_fanin_{default_sort_merge_fanin};
 
     friend class datastore;
 };

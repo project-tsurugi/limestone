@@ -43,6 +43,7 @@
 #include "online_compaction.h"
 #include "compaction_catalog.h"
 #include "compaction_options.h"
+#include "sort/sort_buffer.h"
 #include "blob_file_resolver.h"
 #include "blob_pool_impl.h"
 #include "blob_file_garbage_collector.h"
@@ -137,6 +138,33 @@ datastore::datastore(configuration const& conf) : location_(conf.data_location_)
             LOG_LP(ERROR) << err_msg;
             throw limestone_exception(exception_type::initialization_failure, err_msg);
         }
+        // The settings of the sort are checked before the lock as well. The upper bound of the arena is that of
+        // sort_buffer (4 GiB)
+        constexpr std::size_t mib = std::size_t{1024} * 1024;
+        constexpr std::size_t max_sort_arena_size_mb = sort_buffer::max_arena_size_bytes / mib;
+        if (conf.sort_arena_size_mb_ < 1 || conf.sort_arena_size_mb_ > max_sort_arena_size_mb) {
+            std::string err_msg = "sort_arena_size_mb must be between 1 and " + std::to_string(max_sort_arena_size_mb)
+                                  + ": " + std::to_string(conf.sort_arena_size_mb_);
+            LOG_LP(ERROR) << err_msg;
+            throw limestone_exception(exception_type::initialization_failure, err_msg);
+        }
+        if (conf.sort_merge_fanin_ < 2) {
+            std::string err_msg = "sort_merge_fanin must be at least 2: " + std::to_string(conf.sort_merge_fanin_);
+            LOG_LP(ERROR) << err_msg;
+            throw limestone_exception(exception_type::initialization_failure, err_msg);
+        }
+        boost::system::error_code sort_work_dir_error;
+        if (! conf.sort_work_dir_.empty()
+            && ! boost::filesystem::is_directory(conf.sort_work_dir_, sort_work_dir_error)) {
+            std::string err_msg = "sort_work_dir is not an existing directory: " + conf.sort_work_dir_.string();
+            LOG_LP(ERROR) << err_msg;
+            throw limestone_exception(exception_type::initialization_failure, err_msg);
+        }
+        impl_->set_sort_settings(conf.sort_arena_size_mb_ * mib, conf.sort_merge_fanin_,
+                                 conf.sort_work_dir_.empty() ? location_ : conf.sort_work_dir_);
+        LOG(INFO) << "/:limestone:config:datastore setting the sort: arena size = " << conf.sort_arena_size_mb_
+                  << " MiB, merge fanin = " << conf.sort_merge_fanin_
+                  << ", work dir = " << impl_->sort_work_dir_parent().string();
         LOG(INFO) << "/:limestone:config:datastore setting log location = " << location_.string();
         boost::system::error_code error;
         const bool result_check = boost::filesystem::exists(location_, error);
@@ -1201,6 +1229,7 @@ void datastore::compact_with_online() {  // NOLINT(readability-function-cognitiv
     options.set_boundary_epoch(result.get_epoch_id());
     // The compacted WAL file of the current generation is not scanned but is given to the final merge.
     options.set_compacted_input_file_name(current_compacted_file_name);
+    options.set_sort_settings(impl_->sort_arena_size_bytes(), impl_->sort_merge_fanin(), impl_->sort_work_dir_parent());
 
     // Determine the file names of the new generation. The generation number increases
     // monotonically across online and offline compactions.

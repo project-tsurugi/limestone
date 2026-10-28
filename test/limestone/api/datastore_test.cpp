@@ -1,5 +1,6 @@
 
 #include <atomic>
+#include <functional>
 #include <filesystem>
 #include <fstream>
 #include <sstream>
@@ -261,6 +262,68 @@ TEST_F(datastore_test, rejects_recover_max_parallelism_below_one) { // NOLINT
     auto ds = std::make_unique<limestone::api::datastore_test>(conf);
     ds->ready();
     ds->shutdown();
+}
+
+// the checks of the settings of the sort: the arena is 1 to 4096 MiB, the merge fan-in is at least 2, and the work
+// dir is an existing directory. A violation is initialization_failure; the boundary values are accepted
+TEST_F(datastore_test, rejects_invalid_sort_settings) { // NOLINT
+    if (system("rm -rf /tmp/datastore_test") != 0) {
+        std::cerr << "cannot remove directory" << std::endl;
+    }
+    if (system("mkdir -p /tmp/datastore_test/data_location") != 0) {
+        std::cerr << "cannot make directory" << std::endl;
+    }
+    struct invalid_case {
+        std::function<void(limestone::api::configuration&)> apply;
+        const char* message;
+    };
+    const std::vector<invalid_case> cases{
+        {[](auto& c) { c.set_sort_arena_size_mb(0); }, "sort_arena_size_mb must be between 1 and 4096: 0"},
+        {[](auto& c) { c.set_sort_arena_size_mb(4097); }, "sort_arena_size_mb must be between 1 and 4096: 4097"},
+        {[](auto& c) { c.set_sort_merge_fanin(1); }, "sort_merge_fanin must be at least 2: 1"},
+        {[](auto& c) { c.set_sort_work_dir("/tmp/datastore_test/missing"); },
+         "sort_work_dir is not an existing directory: /tmp/datastore_test/missing"},
+    };
+    for (const auto& c : cases) {
+        limestone::api::configuration conf{};
+        conf.set_data_location(data_location);
+        c.apply(conf);
+        try {
+            auto ds = std::make_unique<limestone::api::datastore_test>(conf);
+            FAIL() << "no exception: " << c.message;
+        } catch (const limestone_exception& e) {
+            EXPECT_EQ(e.type(), exception_type::initialization_failure);
+            EXPECT_NE(std::string(e.what()).find(c.message), std::string::npos) << e.what();
+        }
+    }
+    limestone::api::configuration conf{};
+    conf.set_data_location(data_location);
+    conf.set_sort_arena_size_mb(1);
+    conf.set_sort_merge_fanin(2);
+    conf.set_sort_work_dir(parent_directory);
+    auto ds = std::make_unique<limestone::api::datastore_test>(conf);
+    ds->ready();
+    ds->shutdown();
+}
+
+// the work dir given is used by the sort at startup: with a directory that cannot be written, sorting cannot be
+// created under it and the startup fails
+TEST_F(datastore_test, sort_work_dir_is_used_by_the_sort) { // NOLINT
+    if (geteuid() == 0) { GTEST_SKIP() << "skip when run by root"; }
+    if (system("rm -rf /tmp/datastore_test") != 0) {
+        std::cerr << "cannot remove directory" << std::endl;
+    }
+    if (system("mkdir -p /tmp/datastore_test/data_location /tmp/datastore_test/readonly") != 0) {
+        std::cerr << "cannot make directory" << std::endl;
+    }
+    boost::filesystem::permissions("/tmp/datastore_test/readonly",
+                                   boost::filesystem::owner_read | boost::filesystem::owner_exe);
+    limestone::api::configuration conf{};
+    conf.set_data_location(data_location);
+    conf.set_sort_work_dir("/tmp/datastore_test/readonly");
+    auto ds = std::make_unique<limestone::api::datastore_test>(conf);
+    ASSERT_DEATH(ds->ready(), "cannot create sorting directory: /tmp/datastore_test/readonly/sorting");
+    boost::filesystem::permissions("/tmp/datastore_test/readonly", boost::filesystem::owner_all);
 }
 
 TEST_F(datastore_test, prevent_double_start_test) { // NOLINT

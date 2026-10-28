@@ -22,6 +22,7 @@
  #include <functional> // std::reference_wrapper
  #include <boost/filesystem.hpp>
  #include "blob_file_gc_snapshot.h"
+ #include "sort/sort_settings.h"
  #include "limestone/api/epoch_id_type.h"
  #include "limestone/api/write_version_type.h"
  
@@ -141,6 +142,26 @@
          return compacted_input_file_name_;
      }
 
+     // Settings of the sort other than the threads (the threads are num_worker). The defaults of sort_settings
+     // and from_dir are used if not set. The values must have been checked at the entry point (the construction
+     // of the datastore, dblogutil).
+     void set_sort_settings(std::size_t arena_size_bytes, std::size_t merge_fanin,
+                            boost::filesystem::path work_dir_parent) {
+         sort_arena_size_bytes_ = arena_size_bytes;
+         sort_merge_fanin_ = merge_fanin;
+         sort_work_dir_parent_ = std::move(work_dir_parent);
+     }
+
+     // Getter for the settings of the sort (the threads are num_worker).
+     [[nodiscard]] sort_settings get_sort_settings() const {
+         return {num_worker_, sort_arena_size_bytes_, sort_merge_fanin_};
+     }
+
+     // Getter for the parent directory of the working directory of the sort (from_dir if not set).
+     [[nodiscard]] const boost::filesystem::path& get_sort_work_dir_parent() const {
+         return sort_work_dir_parent_.empty() ? from_dir_ : sort_work_dir_parent_;
+     }
+
      // Check if GC is enabled.
      [[nodiscard]] bool is_gc_enabled() const { return static_cast<bool>(gc_snapshot_); }
 
@@ -175,6 +196,11 @@
 
      // The compacted WAL file of the current generation given to the final merge (nullopt = none)
      std::optional<std::string> compacted_input_file_name_{};
+
+     // Settings of the sort other than the threads (defaults of sort_settings; empty work dir = from_dir)
+     std::size_t sort_arena_size_bytes_{sort_settings{}.arena_size_bytes};
+     std::size_t sort_merge_fanin_{sort_settings{}.merge_fanin};
+     boost::filesystem::path sort_work_dir_parent_{};
  };
 
  }  // namespace limestone::internal

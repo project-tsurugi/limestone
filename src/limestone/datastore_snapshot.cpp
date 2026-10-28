@@ -27,6 +27,7 @@
 #include "limestone_exception_helper.h"
 #include "compaction_carry_writer.h"
 #include "compaction_catalog.h"
+#include "datastore_impl.h"
 #include "dblog_scan.h"
 #include "internal.h"
 #include "log_entry.h"
@@ -99,9 +100,7 @@ namespace limestone::internal {
 
 compaction_output_result create_compaction_output(compaction_options &options) {
     dblog_scan logscan = make_dblog_scan(options);
-    sort_settings settings{};
-    settings.threads = options.get_num_worker();
-    wal_sorter sorter(logscan, settings, options.get_from_dir());
+    wal_sorter sorter(logscan, options.get_sort_settings(), options.get_sort_work_dir_parent());
     // recording for the BLOB GC. gc_snapshot puts the entries into containers per thread, so it can be called
     // concurrently from the threads of the scan
     wal_sorter::owned_entry_callback on_normal_with_blob{};
@@ -270,10 +269,9 @@ blob_id_type datastore::create_snapshot_and_get_max_blob_id() {
     const auto& from_dir = location_;
     std::set<std::string> file_names = assemble_snapshot_input_filenames(compaction_catalog_, from_dir);
     compaction_options options(from_dir, recover_max_parallelism_, file_names);
+    options.set_sort_settings(impl_->sort_arena_size_bytes(), impl_->sort_merge_fanin(), impl_->sort_work_dir_parent());
     dblog_scan logscan = make_dblog_scan(options);
-    sort_settings settings{};
-    settings.threads = options.get_num_worker();
-    wal_sorter sorter(logscan, settings, from_dir);
+    wal_sorter sorter(logscan, options.get_sort_settings(), options.get_sort_work_dir_parent());
     wal_scan_result scanned = scan_wals(logscan, sorter, options, {});
     epoch_id_switched_.store(scanned.max_appeared_epoch);
     epoch_id_informed_.store(scanned.max_appeared_epoch);
