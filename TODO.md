@@ -601,6 +601,23 @@ master へのマージ前に本ファイルを削除する。
     形式の誤りは tgreplica が stderr に出して終了コード 1、値の範囲は datastore の構築の検査に任せ、その例外を
     replica_server::initialize(location, conf) (新しいオーバーロード) から受けて起動を失敗させる。
 
+* 2026-10-28: ステップ 6 のレビュー (3 モデル) の対応。
+  * ソートの置き場所を、固定名 sorting から mkdtemp による一意な名前 sorting-XXXXXX に変えた。親を設定で指定できるように
+    なったことで、同じ親を共有する複数のインスタンスが互いの sorting を消す経路 (ソート済みファイルが読めてしまえば別の
+    DB のエントリが混ざる) と、利用者の sorting を消す経路ができたため。sorting_directory は自分が作ったものだけを消す。
+    異常終了 (abort、kill、電源断) で残ったものは limestone は消さず、利用者の責務とする (L3 7.1・8.4・8.5・12.5・16 節を
+    更新)。flock による専有の検査は limestone 同士の衝突しか防げないので採らない。監視プロセスで後始末する構成は、
+    プロセス管理が tateyama と systemd の側にあり、掃除のためだけには費用が大きいので採らない。
+  * configuration の既定値 (private の定数 3 つ) を廃し、メンバを optional にして未設定を表す。既定値は sort_settings の
+    1 か所に置き、datastore の構築時に補う。dblogutil の --thread_num の help の既定値も sort_settings から組み立てる。
+  * テストを足した: --thread_num 1 の明示 (gflags の is_default に依存する境界)、オンラインコンパクションでのソートの
+    失敗の再試行 (置き場所の設定が届くことの確認を兼ねる)、buffered_output_file の flush の失敗 (/dev/full)。
+    datastore_test の TearDown で enable_exception_throwing を戻す。
+  * 見送り: sort_output_writer::format の bool を名前付きにする (定義と呼び出し元のコメントで足りる)、マージの上限と
+    スレッド数の上限の検査 (超えれば I/O 例外で明示的に失敗する)、設定値がソートに届くことの大規模テスト (arena と
+    fanin の取り違えは結果では検出できない)、dblogutil の既定の work dir を tmp にする (5 節の決定のまま)、
+    --gtest_list_tests=0 の判定、datastore_impl の既定値 (試験専用のコンストラクタだけが通る)。
+
 ## 6. 残った課題
 
 <!-- R1 の範囲外として持ち越すものを記録する。 -->
