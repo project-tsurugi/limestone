@@ -146,7 +146,8 @@ master へのマージ前に本ファイルを削除する。
       tgreplica: 環境変数 LIMESTONE_SORT_THREADS、LIMESTONE_SORT_ARENA_SIZE_MB、LIMESTONE_SORT_WORK_DIR、
       LIMESTONE_SORT_MERGE_FANIN で受け取る。tsurugidb はこれらの環境変数を参照しない。既定値は dblogutil の
       --thread_num を除き実行ファイルによらず同じ。
-* [ ] 既存の compaction 配下、snapshot 配下 (snapshot_impl_test、cursor_impl_test)、log/dblog_scan_test が変えずに通ること。
+* [x] 既存の compaction 配下、snapshot 配下 (snapshot_impl_test、cursor_impl_test)、log/dblog_scan_test が変えずに通ること。
+      (各項目のコミット前のフルスイートで確認した。)
 
 ### ステップ 7: 旧ソートの削除 (S1 メモ 5・6・8 節)
 
