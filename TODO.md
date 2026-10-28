@@ -122,13 +122,14 @@ master へのマージ前に本ファイルを削除する。
       コンパクション済み WAL ファイルがあるときだけ書く。
       (走査の共通部分を scan_wals() にした。wal_sorter::scan() の引数は境界の epoch と、超えたスニペットの扱い
       (beyond_boundary_handling) の 1 組にまとめた。5 節。)
-* [ ] create_compaction_output(): 新しいソートに置き換え、write_serialized の最も古い版に置き換える指定で書く。
+* [x] create_compaction_output(): 新しいソートに置き換え、write_serialized の最も古い版に置き換える指定で書く。
       remove_entry は書かない。値の 1 件ごとのコピーをなくす。
+      (使われなくなった旧ソートの関数は、ここで前倒しして削除した。ステップ 7 を参照。)
 * [x] 上の 2 つの出力の書き出しを sorted_file_writer と共通化するかを、置き換え時に判断する。違いは先頭の marker_begin の
       有無、write_version の置き換え、remove_entry の扱いの 3 つで、writer の引数にできる。既存の経路の一時ファイルと
       rename、失敗時の削除との兼ね合いを見比べて決める (2026-10-26 のレビューでの気づき)。
       (出力は別クラス sort_output_writer にし、stdio の扱いだけを buffered_output_file に切り出して共有した。5 節。)
-* [ ] BLOB の ID の最大値を、出力からではなく走査の中で記録する (縮約と範囲削除で除くエントリの分も含める。L3 8.1)。
+* [x] BLOB の ID の最大値を、出力からではなく走査の中で記録する (縮約と範囲削除で除くエントリの分も含める。L3 8.1)。
       tsurugi-issues #1590 の報告のケース (コミット後に削除した BLOB の ID が再起動後に再利用される) の対応でもある。
       走査しなくなる現行世代のコンパクション済み WAL ファイルの分は、コンパクションカタログの max_blob_id が覆う
       (起動時は走査の値との max、コンパクションではカタログの更新が単調非減少。datastore.cpp:441、1276)。マージでは集めない。
@@ -150,6 +151,9 @@ master へのマージ前に本ファイルを削除する。
 
 * [ ] sortdb_wrapper、旧ソート専用の関数 (comp_twisted_key()、insert_entry_or_update_to_max()、insert_twisted_entry()、
       split_db_value_and_blob_ids()、create_value_from_db_key_and_value() など) を削除する。
+      (datastore_snapshot.cpp の旧ソート専用の関数は、使われなくなったステップ 6 のコンパクションの置き換えで削除した。
+      残りは sortdb_wrapper と sorting_context。test/limestone/blob/datastore_blob_test.cpp:621 のコメントが
+      insert_entry_or_update_to_max() に触れているので見直す。)
 * [ ] CMake: RECOVERY_SORTER_KVSLIB・RECOVERY_SORTER_PUT_ONLY、マクロ SORT_METHOD_USE_ROCKSDB・SORT_METHOD_PUT_ONLY、
       cmake/FindRocksDB.cmake と RocksDB・LevelDB の find_package を削除する。
 * [ ] .github/workflows/ci-build.yml:46 の -DRECOVERY_SORTER_KVSLIB=ROCKSDB と -DRECOVERY_SORTER_PUT_ONLY=ON を削除する。
@@ -553,6 +557,14 @@ master へのマージ前に本ファイルを削除する。
     固定していた。
   * スナップショットの書き出しの失敗は、ファイルを閉じてから例外になる (旧コードは FILE* がリークしていた)。fsync は
     しない (起動ごとに作り直すため。旧コードと同じ)。
+
+* 2026-10-28: ステップ 6 のコンパクションの置き換えのフルスイートで、1 回だけ replica_server_test が失敗した。
+  * 失敗したケースは不明 (ログを上書きした。残っていた LastTestsFailed.log でテストの名前だけが分かった)。その後の
+    ctest -j 16 の 16 回と -j 32 の 10 回、単独での 30 回の繰り返しでは再現しない。RUN_SERIAL の外から ctest と
+    並行に繰り返すと、initialize_rdma_success_then_already_initialized で 1 回目の initialize_rdma() が failed を
+    返すことはある (RDMA スタック (GnMock) の排他の前提を破った条件で、元の失敗と同じとは限らない)。
+  * RDMA の初期化はソートの変更と関わらないので、関係は薄いと見て深追いしない。以後のフルスイートは
+    --output-on-failure で失敗時のログを残し、再発したらそのログで調べる。
 
 ## 6. 残った課題
 
