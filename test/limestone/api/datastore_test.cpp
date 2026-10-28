@@ -324,7 +324,7 @@ TEST_F(datastore_test, sort_work_dir_is_used_by_the_sort) { // NOLINT
     conf.set_data_location(data_location);
     conf.set_sort_work_dir("/tmp/datastore_test/readonly");
     auto ds = std::make_unique<limestone::api::datastore_test>(conf);
-    ASSERT_DEATH(ds->ready(), "cannot create sorting directory: /tmp/datastore_test/readonly/sorting");
+    ASSERT_DEATH(ds->ready(), "cannot create sorting directory: /tmp/datastore_test/readonly/sorting-");
     boost::filesystem::permissions("/tmp/datastore_test/readonly", boost::filesystem::owner_all);
 }
 

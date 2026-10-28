@@ -84,7 +84,9 @@ public:
     void set_sort_arena_size_mb(std::size_t size_mb) noexcept;
 
     /**
-     * @brief setter for sort_work_dir: the directory under which the sort creates its working directory
+     * @brief setter for sort_work_dir: the directory under which the sort creates its working directory. A
+     *        sorting-XXXXXX is created directly under it for each sort and removed when the sort ends (a crash may
+     *        leave it)
      * @param dir the directory. It must exist. If empty, the log directory is used
      */
     void set_sort_work_dir(const std::filesystem::path& dir) noexcept;

@@ -88,10 +88,16 @@ protected:
         return output;
     }
     /**
-     * @brief Returns the path of the sorting directory.
+     * @brief Returns the path of the sorting directory (the entry of location whose name begins with the prefix), or
+     *        an empty path if there is none.
      */
     static boost::filesystem::path sorting_path() {
-        return boost::filesystem::path(location) / sorting_directory::name;
+        for (const auto& e : boost::filesystem::directory_iterator(location)) {
+            if (e.path().filename().string().rfind(sorting_directory::name_prefix, 0) == 0) {
+                return e.path();
+            }
+        }
+        return {};
     }
     /**
      * @brief Counts the files in the sorting directory.

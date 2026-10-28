@@ -250,7 +250,7 @@ TEST_F(dblogutil_compaction_test, sort_work_dir_is_used_by_the_sort) {
                     + dir.string() + " 2>&1", out);
     boost::filesystem::permissions(readonly, boost::filesystem::owner_all);
     EXPECT_EQ(rc, 64 << 8) << out;
-    EXPECT_TRUE(contains(out, "cannot create sorting directory: " + (readonly / "sorting").string())) << out;
+    EXPECT_TRUE(contains(out, "cannot create sorting directory: " + (readonly / "sorting-").string())) << out;
 }
 
 TEST_F(dblogutil_compaction_test, rejects_symlink) {

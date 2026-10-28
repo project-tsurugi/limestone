@@ -37,6 +37,8 @@ void show_usage(const std::string& program_name) {
     std::cerr << "      The sort at startup can be configured with LIMESTONE_SORT_THREADS," << std::endl;
     std::cerr << "      LIMESTONE_SORT_ARENA_SIZE_MB, LIMESTONE_SORT_WORK_DIR and LIMESTONE_SORT_MERGE_FANIN."
               << std::endl;
+    std::cerr << "      The sort creates its working directory sorting-XXXXXX under LIMESTONE_SORT_WORK_DIR"
+              << " and removes it when it ends (a crash may leave it)." << std::endl;
 }
 
 /**

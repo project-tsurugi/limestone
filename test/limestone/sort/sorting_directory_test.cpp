@@ -50,8 +50,12 @@ protected:
     static boost::filesystem::path parent() {
         return {location};
     }
-    static boost::filesystem::path sorting() {
-        return parent() / "sorting";
+    /**
+     * @brief Returns whether p is directly under the parent and its name begins with the prefix.
+     * @param p the path to check
+     */
+    static bool is_sorting_path(const boost::filesystem::path& p) {
+        return p.parent_path() == parent() && p.filename().string().rfind(sorting_directory::name_prefix, 0) == 0;
     }
     /**
      * @brief Creates a non-empty file, creating its parent directory if needed.
@@ -64,38 +68,45 @@ protected:
     }
 };
 
-// sorting is created under the parent, and remove() removes it with its contents
+// sorting-XXXXXX is created directly under the parent, and remove() removes it with its contents
 TEST_F(sorting_directory_test, create_and_remove) {
     sorting_directory dir(parent());
-    EXPECT_EQ(dir.path(), sorting());
-    EXPECT_TRUE(boost::filesystem::is_directory(sorting()));
+    const boost::filesystem::path sorting = dir.path();
+    EXPECT_TRUE(is_sorting_path(sorting)) << sorting;
+    EXPECT_TRUE(boost::filesystem::is_directory(sorting));
+    EXPECT_TRUE(boost::filesystem::is_empty(sorting));
 
     touch(dir.new_file_path());
-    touch(sorting() / "sub" / "file");
+    touch(sorting / "sub" / "file");
     dir.remove();
-    EXPECT_FALSE(boost::filesystem::exists(sorting()));
+    EXPECT_FALSE(boost::filesystem::exists(sorting));
     EXPECT_TRUE(boost::filesystem::is_directory(parent()));
 }
 
-// if sorting already exists, it is removed with its contents (files and subdirectories) before being created
-TEST_F(sorting_directory_test, removes_existing_contents) {
-    touch(sorting() / "stale");
-    touch(sorting() / "sub" / "stale");
-    sorting_directory dir(parent());
-    EXPECT_TRUE(boost::filesystem::is_directory(sorting()));
-    EXPECT_TRUE(boost::filesystem::is_empty(sorting()));
+// the existing entries of the parent (a remnant of a crash, the place of another instance) are left as they are, and
+// a second place under the same parent gets a different name
+TEST_F(sorting_directory_test, keeps_existing_entries) {
+    touch(parent() / "sorting-stale" / "stale");
+    sorting_directory first(parent());
+    sorting_directory second(parent());
+    EXPECT_NE(first.path(), second.path());
+    EXPECT_TRUE(is_sorting_path(second.path())) << second.path();
+    EXPECT_TRUE(boost::filesystem::exists(parent() / "sorting-stale" / "stale"));
+    first.remove();
+    EXPECT_TRUE(boost::filesystem::is_directory(second.path()));
+    EXPECT_TRUE(boost::filesystem::exists(parent() / "sorting-stale" / "stale"));
 }
 
-// new_file_path() returns a different path directly under sorting at each call, and does not create the file
+// new_file_path() returns a different path directly under the place at each call, and does not create the file
 TEST_F(sorting_directory_test, new_file_path_is_unique) {
     sorting_directory dir(parent());
     const auto p1 = dir.new_file_path();
     const auto p2 = dir.new_file_path();
-    EXPECT_EQ(p1.parent_path(), sorting());
-    EXPECT_EQ(p2.parent_path(), sorting());
+    EXPECT_EQ(p1.parent_path(), dir.path());
+    EXPECT_EQ(p2.parent_path(), dir.path());
     EXPECT_NE(p1, p2);
     EXPECT_FALSE(boost::filesystem::exists(p1));
-    EXPECT_TRUE(boost::filesystem::is_empty(sorting()));
+    EXPECT_TRUE(boost::filesystem::is_empty(dir.path()));
 }
 
 // numbering from multiple threads gives no duplicate
@@ -128,11 +139,14 @@ TEST_F(sorting_directory_test, new_file_path_from_threads) {
 
 // destruction without remove() also removes it
 TEST_F(sorting_directory_test, destructor_removes) {
+    boost::filesystem::path sorting;
     {
         sorting_directory dir(parent());
+        sorting = dir.path();
         touch(dir.new_file_path());
     }
-    EXPECT_FALSE(boost::filesystem::exists(sorting()));
+    EXPECT_FALSE(boost::filesystem::exists(sorting));
+    EXPECT_TRUE(boost::filesystem::is_empty(parent()));
 }
 
 // calling remove() twice is FATAL
@@ -177,7 +191,7 @@ TEST_F(sorting_directory_test, cannot_remove) {
         EXPECT_NE(std::string(e.what()).find("cannot remove sorting directory"), std::string::npos) << e.what();
     }
     boost::filesystem::permissions(parent(), boost::filesystem::owner_all);
-    EXPECT_TRUE(boost::filesystem::is_directory(sorting()));
+    EXPECT_TRUE(boost::filesystem::is_directory(dir.path()));
 }
 
 }  // namespace limestone::testing

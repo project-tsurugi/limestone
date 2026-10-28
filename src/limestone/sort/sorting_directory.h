@@ -23,22 +23,22 @@
 namespace limestone::internal {
 
 /**
- * @brief The place of the sorted files. Creates and removes the subdirectory with the fixed name "sorting" under the
- *        parent directory.
+ * @brief The place of the sorted files. Creates and removes a subdirectory with a unique name (sorting-XXXXXX)
+ *        directly under the parent directory.
  *
- * If sorting already exists at creation, it is removed with its contents before being created. remove() removes it
- * with its contents. It is also removed when destroyed without remove() (a failure is ignored).
+ * Only the subdirectory it created is removed; the existing entries of the parent are left as they are. remove()
+ * removes it with its contents. It is also removed when destroyed without remove() (a failure is ignored).
  * The paths of the sorted files are numbered by new_file_path(), which is thread-safe.
  */
 class sorting_directory {
 public:
-    /// the name of the subdirectory
-    static constexpr const char* name = "sorting";
+    /// the prefix of the name of the subdirectory; the remaining 6 characters are decided by mkdtemp
+    static constexpr const char* name_prefix = "sorting-";
 
     /**
-     * @brief Creates sorting under parent. If it already exists, removes it with its contents first.
+     * @brief Creates a subdirectory with a unique name directly under parent.
      * @param parent the parent directory. It must exist
-     * @throws limestone_io_exception if the removal or the creation fails (with errno)
+     * @throws limestone_io_exception if the creation fails (with errno)
      */
     explicit sorting_directory(const boost::filesystem::path& parent);
 

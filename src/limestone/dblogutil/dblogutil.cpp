@@ -54,8 +54,8 @@ DEFINE_bool(make_backup, false, "(subcommand compaction) make backup of target d
 DEFINE_uint64(sort_arena_size_mb, limestone::internal::sort_settings{}.arena_size_bytes / (std::uint64_t{1024} * 1024),
               "(subcommand compaction) size of the buffer per thread of the sort in MiB (1 to 4096)");
 DEFINE_string(sort_work_dir, "",
-              "(subcommand compaction) directory under which the sort creates its working directory "
-              "(default: dblogdir)");
+              "(subcommand compaction) directory under which the sort creates its working directory sorting-XXXXXX, "
+              "removed when the sort ends (a crash may leave it) (default: dblogdir)");
 DEFINE_uint64(sort_merge_fanin, limestone::internal::sort_settings{}.merge_fanin,
               "(subcommand compaction) number of sorted files the sort merges at once (at least 2)");
 

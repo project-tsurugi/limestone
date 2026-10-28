@@ -15,6 +15,8 @@
  */
 #include "sort/sorting_directory.h"
 
+#include <cerrno>
+#include <cstdlib>
 #include <string>
 
 #include <boost/system/error_code.hpp>
@@ -45,13 +47,15 @@ void remove_directory(const boost::filesystem::path& path) {
 
 }  // namespace
 
-sorting_directory::sorting_directory(const boost::filesystem::path& parent) : path_(parent / name) {
-    remove_directory(path_);
-    boost::system::error_code ec;
-    boost::filesystem::create_directory(path_, ec);
-    if (ec) {
-        LOG_AND_THROW_IO_EXCEPTION("cannot create sorting directory: " + path_.string(), ec.value());
+sorting_directory::sorting_directory(const boost::filesystem::path& parent) {
+    // mkdtemp replaces the trailing XXXXXX with 6 characters that do not collide with the existing entries and creates
+    // the directory (mode 0700). A remnant of a previous crash or the place of another instance is not removed
+    std::string name = (parent / (std::string(name_prefix) + "XXXXXX")).string();
+    if (::mkdtemp(name.data()) == nullptr) {
+        const int saved_errno = errno;
+        LOG_AND_THROW_IO_EXCEPTION("cannot create sorting directory: " + name, saved_errno);
     }
+    path_ = name;
 }
 
 sorting_directory::~sorting_directory() {
