@@ -41,7 +41,7 @@ struct sort_config {
  * @param config the settings read
  * @param conf the configuration to put them into
  */
-void apply_sort_config(sort_config const& config, limestone::api::configuration& conf);
+void apply_sort_config(const sort_config& config, limestone::api::configuration& conf);
 
 /**
  * @brief The result of reading the settings of the sort.

@@ -25,35 +25,40 @@ namespace limestone::replication {
 
 namespace {
 
-constexpr char const* threads_env_name = "LIMESTONE_SORT_THREADS";
-constexpr char const* arena_size_mb_env_name = "LIMESTONE_SORT_ARENA_SIZE_MB";
-constexpr char const* work_dir_env_name = "LIMESTONE_SORT_WORK_DIR";
-constexpr char const* merge_fanin_env_name = "LIMESTONE_SORT_MERGE_FANIN";
+constexpr const char* threads_env_name = "LIMESTONE_SORT_THREADS";
+constexpr const char* arena_size_mb_env_name = "LIMESTONE_SORT_ARENA_SIZE_MB";
+constexpr const char* work_dir_env_name = "LIMESTONE_SORT_WORK_DIR";
+constexpr const char* merge_fanin_env_name = "LIMESTONE_SORT_MERGE_FANIN";
 
 /**
  * @brief Parses a decimal non-negative integer. No sign, no whitespace, no trailing characters.
  * @param text the string to parse
  * @return the value, or nullopt if the form is wrong or the value does not fit in uint64
  */
-std::optional<std::uint64_t> parse_unsigned(std::string const& text) {
+std::optional<std::uint64_t> parse_unsigned(const std::string& text) {
     if (text.empty() || text.find_first_not_of("0123456789") != std::string::npos) {
         return std::nullopt;
     }
     errno = 0;
-    std::uint64_t const parsed = std::strtoull(text.c_str(), nullptr, 10);
+    const std::uint64_t parsed = std::strtoull(text.c_str(), nullptr, 10);
     if (errno == ERANGE) {
         return std::nullopt;
     }
     return parsed;
 }
 
+/**
+ * @brief Makes the result of a failure.
+ * @param message the reason of the failure
+ * @return the result with ok = false and the default settings
+ */
 sort_config_parse_result fail(std::string message) {
     return {false, std::move(message), sort_config{}};
 }
 
 }  // namespace
 
-void apply_sort_config(sort_config const& config, limestone::api::configuration& conf) {
+void apply_sort_config(const sort_config& config, limestone::api::configuration& conf) {
     if (config.threads.has_value()) {
         conf.set_recover_max_parallelism(config.threads.value());
     }
@@ -70,25 +75,25 @@ void apply_sort_config(sort_config const& config, limestone::api::configuration&
 
 sort_config_parse_result load_sort_config_from_environment() {
     sort_config config{};
-    if (char const* env = std::getenv(threads_env_name); env != nullptr) {
-        auto const parsed = parse_unsigned(env);
+    if (const char* env = std::getenv(threads_env_name); env != nullptr) {
+        const auto parsed = parse_unsigned(env);
         if (! parsed.has_value() || parsed.value() > static_cast<std::uint64_t>(std::numeric_limits<int>::max())) {
             return fail(std::string(threads_env_name) + " is not a valid non-negative integer: " + env);
         }
         config.threads = static_cast<int>(parsed.value());
     }
-    if (char const* env = std::getenv(arena_size_mb_env_name); env != nullptr) {
-        auto const parsed = parse_unsigned(env);
+    if (const char* env = std::getenv(arena_size_mb_env_name); env != nullptr) {
+        const auto parsed = parse_unsigned(env);
         if (! parsed.has_value()) {
             return fail(std::string(arena_size_mb_env_name) + " is not a valid non-negative integer: " + env);
         }
         config.arena_size_mb = parsed;
     }
-    if (char const* env = std::getenv(work_dir_env_name); env != nullptr && *env != '\0') {
+    if (const char* env = std::getenv(work_dir_env_name); env != nullptr && *env != '\0') {
         config.work_dir = std::string{env};
     }
-    if (char const* env = std::getenv(merge_fanin_env_name); env != nullptr) {
-        auto const parsed = parse_unsigned(env);
+    if (const char* env = std::getenv(merge_fanin_env_name); env != nullptr) {
+        const auto parsed = parse_unsigned(env);
         if (! parsed.has_value()) {
             return fail(std::string(merge_fanin_env_name) + " is not a valid non-negative integer: " + env);
         }

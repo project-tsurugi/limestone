@@ -46,7 +46,7 @@ protected:
         unsetenv("LIMESTONE_SORT_MERGE_FANIN");
     }
 
-    static void set_env(char const* name, char const* value) {
+    static void set_env(const char* name, const char* value) {
         setenv(name, value, 1);
     }
 
@@ -65,7 +65,7 @@ protected:
 
 // without the environment variables, everything is unset (nullopt)
 TEST_F(sort_config_loader_test, no_env_leaves_everything_unset) {
-    auto const result = load_sort_config_from_environment();
+    const auto result = load_sort_config_from_environment();
     ASSERT_TRUE(result.ok) << result.error_message;
     EXPECT_FALSE(result.config.threads.has_value());
     EXPECT_FALSE(result.config.arena_size_mb.has_value());
@@ -79,7 +79,7 @@ TEST_F(sort_config_loader_test, reads_the_four_variables) {
     set_env("LIMESTONE_SORT_ARENA_SIZE_MB", "64");
     set_env("LIMESTONE_SORT_WORK_DIR", "/tmp/sort_config_loader_test/work");
     set_env("LIMESTONE_SORT_MERGE_FANIN", "16");
-    auto const result = load_sort_config_from_environment();
+    const auto result = load_sort_config_from_environment();
     ASSERT_TRUE(result.ok) << result.error_message;
     EXPECT_EQ(result.config.threads, 4);
     EXPECT_EQ(result.config.arena_size_mb, 64U);
@@ -90,7 +90,7 @@ TEST_F(sort_config_loader_test, reads_the_four_variables) {
 // an empty LIMESTONE_SORT_WORK_DIR is the same as unset
 TEST_F(sort_config_loader_test, empty_work_dir_is_unset) {
     set_env("LIMESTONE_SORT_WORK_DIR", "");
-    auto const result = load_sort_config_from_environment();
+    const auto result = load_sort_config_from_environment();
     ASSERT_TRUE(result.ok) << result.error_message;
     EXPECT_FALSE(result.config.work_dir.has_value());
 }
@@ -99,8 +99,8 @@ TEST_F(sort_config_loader_test, empty_work_dir_is_unset) {
 // of the variable
 TEST_F(sort_config_loader_test, malformed_numbers_are_rejected) {
     struct malformed {
-        char const* name;
-        char const* value;
+        const char* name;
+        const char* value;
     };
     for (const malformed& m : {malformed{"LIMESTONE_SORT_THREADS", "abc"}, malformed{"LIMESTONE_SORT_THREADS", "-1"},
                                malformed{"LIMESTONE_SORT_THREADS", "2147483648"},
@@ -109,7 +109,7 @@ TEST_F(sort_config_loader_test, malformed_numbers_are_rejected) {
                                malformed{"LIMESTONE_SORT_MERGE_FANIN", "16x"}}) {
         clear_env();
         set_env(m.name, m.value);
-        auto const result = load_sort_config_from_environment();
+        const auto result = load_sort_config_from_environment();
         EXPECT_FALSE(result.ok) << m.name << "=" << m.value;
         EXPECT_NE(result.error_message.find(m.name), std::string::npos) << result.error_message;
     }
@@ -119,9 +119,9 @@ TEST_F(sort_config_loader_test, malformed_numbers_are_rejected) {
 // datastore fails at the check of that item
 TEST_F(sort_config_loader_test, applied_values_reach_the_datastore) {
     struct rejected {
-        char const* name;
-        char const* value;
-        char const* message;
+        const char* name;
+        const char* value;
+        const char* message;
     };
     const std::vector<rejected> cases{
         {"LIMESTONE_SORT_THREADS", "0", "recover_max_parallelism must be at least 1: 0"},
@@ -133,7 +133,7 @@ TEST_F(sort_config_loader_test, applied_values_reach_the_datastore) {
     for (const rejected& r : cases) {
         clear_env();
         set_env(r.name, r.value);
-        auto const result = load_sort_config_from_environment();
+        const auto result = load_sort_config_from_environment();
         ASSERT_TRUE(result.ok) << result.error_message;
         auto conf = make_conf();
         apply_sort_config(result.config, conf);
@@ -149,7 +149,7 @@ TEST_F(sort_config_loader_test, applied_values_reach_the_datastore) {
     set_env("LIMESTONE_SORT_THREADS", "2");
     set_env("LIMESTONE_SORT_ARENA_SIZE_MB", "1");
     set_env("LIMESTONE_SORT_MERGE_FANIN", "2");
-    auto const result = load_sort_config_from_environment();
+    const auto result = load_sort_config_from_environment();
     ASSERT_TRUE(result.ok) << result.error_message;
     auto conf = make_conf();
     apply_sort_config(result.config, conf);

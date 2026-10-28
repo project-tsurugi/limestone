@@ -78,7 +78,9 @@ void log_and_exit(int error) {
     exit(error);
 }
 
-// the settings of the sort of compaction (from the --thread_num and --sort_* options)
+/**
+ * @brief The settings of the sort of compaction (from the --thread_num and --sort_* options).
+ */
 struct sort_options {
     limestone::internal::sort_settings settings{};
     boost::filesystem::path work_dir_parent{};  // dblogdir if empty
