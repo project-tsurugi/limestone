@@ -27,6 +27,7 @@
 #include <vector>
 #include <boost/filesystem.hpp>
 #include "replication_message.h"
+#include <limestone/api/configuration.h>
 #include <limestone/api/datastore.h>
 #include "limestone_exception_helper.h"
 #include <rdma/handshake_client_base.h>
@@ -59,6 +60,15 @@ public:
      * @param location filesystem path used for storing replication data and metadata.
      */
     void initialize(const boost::filesystem::path& location);
+
+    /**
+     * @brief Initializes with the given configuration of the datastore.
+     * @param location filesystem path used for storing replication data and metadata. It replaces the
+     *                 data_location of conf
+     * @param conf the configuration of the datastore (the settings of the sort, for instance)
+     * @throws limestone_exception if a value of conf is invalid (the checks of the construction of the datastore)
+     */
+    void initialize(const boost::filesystem::path& location, limestone::api::configuration conf);
 
     /**
      * Bind and listen on the specified IPv4 address for incoming replication clients.

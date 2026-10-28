@@ -18,6 +18,7 @@
 
 #include <arpa/inet.h>
 #include <gtest/gtest.h>
+#include <limestone/api/limestone_exception.h>
 
 #include <boost/filesystem.hpp>
 #include <chrono>
@@ -317,6 +318,21 @@ TEST_F(replica_server_test, listener_restart_multiple_times) {
     // Shutdown the server again
     server.shutdown();
     accept_thread_2.join();
+}
+
+// initialize() with a configuration: invalid settings are initialization_failure by the checks of the construction of
+// the datastore
+TEST_F(replica_server_test, initialize_with_configuration_rejects_invalid_settings) {
+    replication::replica_server server;
+    limestone::api::configuration conf{};
+    conf.set_sort_merge_fanin(1);
+    try {
+        server.initialize(location1, conf);
+        FAIL() << "no exception";
+    } catch (const limestone::api::limestone_exception& e) {
+        EXPECT_EQ(e.type(), limestone::api::exception_type::initialization_failure);
+        EXPECT_NE(std::string(e.what()).find("sort_merge_fanin must be at least 2: 1"), std::string::npos) << e.what();
+    }
 }
 
 TEST_F(replica_server_test, get_datastore_returns_valid_instance) {

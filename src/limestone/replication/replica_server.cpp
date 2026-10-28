@@ -46,12 +46,15 @@
 namespace limestone::replication {
 
 void replica_server::initialize(const boost::filesystem::path& location) {
+    initialize(location, limestone::api::configuration{});
+}
+
+void replica_server::initialize(const boost::filesystem::path& location, limestone::api::configuration conf) {
     location_ = location;
     if (location_.empty()) {
         LOG_LP(FATAL) << "Error: Invalid location for replica server";
         throw limestone_exception(exception_type::initialization_failure, "Invalid location for replica server");
     }
-    limestone::api::configuration conf{};
     conf.set_data_location(std::filesystem::path(location.native()));
     datastore_ = std::make_unique<limestone::api::datastore>(conf);
     datastore_->get_impl()->set_replica_role();

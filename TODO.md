@@ -140,7 +140,7 @@ master へのマージ前に本ファイルを削除する。
       のままとし、意味をソートのスレッド数にする (L3 12.5・15)。dblogutil の compaction の --thread_num の既定値を 1 から
       8 にする (inspect と repair は走査のスレッド数のままで既定 1)。0 以下は設定の誤りとし、tsurugidb と tgreplica は
       起動を失敗させ、dblogutil は処理を始めずに終了する。(5 節。)
-* [ ] 設定項目の受け取り (L3 12.5)。tsurugidb: tsurugi.ini の datastore 節の sort_arena_size_mb、sort_work_dir、
+* [x] 設定項目の受け取り (L3 12.5)。tsurugidb: tsurugi.ini の datastore 節の sort_arena_size_mb、sort_work_dir、
       sort_merge_fanin を tateyama から受け取るため、configuration に setter を加える (tateyama 側はステップ 14)。
       dblogutil: オプション --sort_arena_size_mb、--sort_work_dir、--sort_merge_fanin を加える。
       tgreplica: 環境変数 LIMESTONE_SORT_THREADS、LIMESTONE_SORT_ARENA_SIZE_MB、LIMESTONE_SORT_WORK_DIR、
@@ -594,6 +594,11 @@ master へのマージ前に本ファイルを削除する。
     で起動時とコンパクションに渡す。スレッド数は従来どおり num_worker。
   * sort_settings は wal_sorter.h から sort/sort_settings.h に移した (compaction_options.h が wal_sorter.h を
     include すると dblog_scan.h 経由で循環するため)。
+  * dblogutil: --sort_arena_size_mb、--sort_work_dir、--sort_merge_fanin を compaction だけが使い (他のサブコマンドでは
+    --epoch と同じく検査もしない)、処理を始める前に検査して compaction_options に渡す。
+  * tgreplica: 環境変数の読み取りは replication/sort_config_loader (replication_config_loader と同じ形で、UT を書ける)。
+    形式の誤りは tgreplica が stderr に出して終了コード 1、値の範囲は datastore の構築の検査に任せ、その例外を
+    replica_server::initialize(location, conf) (新しいオーバーロード) から受けて起動を失敗させる。
 
 ## 6. 残った課題
 
