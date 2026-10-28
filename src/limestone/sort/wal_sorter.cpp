@@ -41,7 +41,7 @@ wal_sorter::wal_sorter(dblog_scan& scan, const sort_settings& settings, boost::f
     }
 }
 
-wal_scan_result wal_sorter::scan(std::optional<epoch_id_type> boundary_epoch, epoch_id_type ld_epoch,
+wal_scan_result wal_sorter::scan(epoch_id_type boundary_epoch, beyond_boundary_handling handling,
                                  const owned_entry_callback& on_normal_with_blob) {
     if (directory_) {
         LOG_LP(FATAL) << "scan() is called twice";
@@ -61,8 +61,9 @@ wal_scan_result wal_sorter::scan(std::optional<epoch_id_type> boundary_epoch, ep
     };
     epoch_id_type max_appeared_epoch{};
     try {
-        max_appeared_epoch = boundary_epoch ? scan_->scan_pwal_files_for_compaction(*boundary_epoch, add)
-                                            : scan_->scan_pwal_files_throws(ld_epoch, add);
+        max_appeared_epoch = handling == beyond_boundary_handling::skip
+                                     ? scan_->scan_pwal_files_for_compaction(boundary_epoch, add)
+                                     : scan_->scan_pwal_files_throws(boundary_epoch, add);
     } catch (...) {
         scan_->set_thread_end_hook({});
         throw;

@@ -45,6 +45,17 @@ struct sort_settings {
     std::size_t merge_fanin{128};
 };
 
+/// the handling of the snippets whose epoch exceeds the boundary epoch of the scan. In both cases, their entries are
+/// not included in the sort
+enum class beyond_boundary_handling {
+    /// rewrites the marker to invalidated (dblog_scan::scan_pwal_files_throws()). Used by the scans that discard the
+    /// snippets not made durable (at startup, and the offline compaction)
+    invalidate,
+    /// skips them without modifying the files (dblog_scan::scan_pwal_files_for_compaction()). Used by the scan that
+    /// leaves the snippets to be carried over into the carry file later (the online compaction)
+    skip,
+};
+
 /// the result of the scan
 struct wal_scan_result {
     /// the greatest epoch the scan saw (the return value of dblog_scan)
@@ -99,17 +110,18 @@ public:
      * Called only once (writes a FATAL log and aborts if called twice). A data entry goes into the buffer of the
      * worker that read it. clear_storage and remove_storage are recorded as range deletions, and the greatest BLOB
      * ID of normal_with_blob is recorded. add_storage is ignored.
-     * @param boundary_epoch the boundary epoch of the compaction. If given, the scan is
-     *                       scan_pwal_files_for_compaction(), otherwise scan_pwal_files_throws()
-     * @param ld_epoch the durable epoch at startup (used when boundary_epoch is not given)
+     * @param boundary_epoch the boundary epoch of the scan. The snippets whose epoch exceeds it are not included in
+     *                       the sort (the durable epoch at startup and in the offline compaction, the rotation
+     *                       boundary in the online compaction)
+     * @param handling the handling of the snippets beyond the boundary
      * @param on_normal_with_blob called each time a normal_with_blob is read, in the thread of the scan, before the
      *                            removal of duplicates (for recording for the BLOB GC). May be called concurrently
      *                            from multiple threads. Not called if empty
      * @return the result of the scan
      * @throws limestone_exception if creating sorting, the scan, or writing a sorted file fails
      */
-    wal_scan_result scan(std::optional<limestone::api::epoch_id_type> boundary_epoch,
-                         limestone::api::epoch_id_type ld_epoch, const owned_entry_callback& on_normal_with_blob);
+    wal_scan_result scan(limestone::api::epoch_id_type boundary_epoch, beyond_boundary_handling handling,
+                         const owned_entry_callback& on_normal_with_blob);
 
     /**
      * @brief The final merge: merges the sorted files (and the compacted WAL file if any), and passes the result,

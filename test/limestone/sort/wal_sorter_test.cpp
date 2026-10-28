@@ -40,6 +40,7 @@ using limestone::api::limestone_exception;
 using limestone::api::limestone_io_exception;
 using limestone::api::log_entry;
 using limestone::api::write_version_type;
+using limestone::internal::beyond_boundary_handling;
 using limestone::internal::dblog_scan;
 using limestone::internal::log_entry_view;
 using limestone::internal::range_deletions;
@@ -131,10 +132,11 @@ TEST_F(wal_sorter_test, scan_and_merge) {
     wal_sorter sorter(scan, settings, location);
     std::mutex mutex;
     std::vector<std::string> with_blob;
-    const auto result = sorter.scan(std::nullopt, 11, [&mutex, &with_blob](const log_entry& entry) {
-        const std::lock_guard<std::mutex> lock(mutex);  // called concurrently from the 2 threads
-        with_blob.emplace_back(entry.view().serialized_entry());
-    });
+    const auto result =
+        sorter.scan(11, beyond_boundary_handling::invalidate, [&mutex, &with_blob](const log_entry& entry) {
+            const std::lock_guard<std::mutex> lock(mutex);  // called concurrently from the 2 threads
+            with_blob.emplace_back(entry.view().serialized_entry());
+        });
     EXPECT_EQ(result.max_appeared_epoch, 11U);
     EXPECT_EQ(result.max_blob_id, 9U);
     EXPECT_EQ(result.deletions, (range_deletions{{2, write_version_type{11, 3}}, {3, write_version_type{11, 4}}}));
@@ -162,7 +164,7 @@ TEST_F(wal_sorter_test, deletions_of_a_storage_keep_the_newest_version) {
                                 + storage_entry(clear_storage, 3, 10, 3));
     dblog_scan scan{boost::filesystem::path(location)};
     wal_sorter sorter(scan, sort_settings{1, 1024 * 1024, 128}, location);
-    const auto result = sorter.scan(std::nullopt, 12, {});
+    const auto result = sorter.scan(12, beyond_boundary_handling::invalidate, {});
     EXPECT_EQ(result.deletions, (range_deletions{{2, write_version_type{11, 3}}, {3, write_version_type{11, 2}}}));
     EXPECT_EQ(merge_output(sorter), (std::vector<std::string>{x2, y2}));
 }
@@ -171,7 +173,7 @@ TEST_F(wal_sorter_test, deletions_of_a_storage_keep_the_newest_version) {
 TEST_F(wal_sorter_test, no_input) {
     dblog_scan scan{boost::filesystem::path(location)};
     wal_sorter sorter(scan, sort_settings{}, location);
-    const auto result = sorter.scan(std::nullopt, 5, {});
+    const auto result = sorter.scan(5, beyond_boundary_handling::invalidate, {});
     EXPECT_EQ(result.max_appeared_epoch, 5U);
     EXPECT_EQ(result.max_blob_id, 0U);
     EXPECT_TRUE(result.deletions.empty());
@@ -186,7 +188,7 @@ TEST_F(wal_sorter_test, scan_failure_is_thrown_and_sorting_is_removed) {
     dblog_scan scan{boost::filesystem::path(location)};
     {
         wal_sorter sorter(scan, sort_settings{}, location);
-        EXPECT_THROW((void) sorter.scan(std::nullopt, 10, {}), limestone_exception);
+        EXPECT_THROW((void) sorter.scan(10, beyond_boundary_handling::invalidate, {}), limestone_exception);
         EXPECT_TRUE(boost::filesystem::exists(sorting_path()));
         EXPECT_DEATH(sorter.merge(std::nullopt, [](const log_entry_view&) {}),
                      R"(wal_sorter:merge merge\(\) is called without a successful scan\(\))");
@@ -200,7 +202,7 @@ TEST_F(wal_sorter_test, write_failure_of_a_sorted_file_is_thrown_by_scan) {
     write_pwal("pwal_0000", marker(2, 10) + normal_with_blob(1, "a", "a1", 10, 0, {1}));
     dblog_scan scan{boost::filesystem::path(location)};
     wal_sorter sorter(scan, sort_settings{1, 1024 * 1024, 128}, location);
-    EXPECT_THROW((void) sorter.scan(std::nullopt, 10, [](const log_entry&) {
+    EXPECT_THROW((void) sorter.scan(10, beyond_boundary_handling::invalidate, [](const log_entry&) {
         boost::filesystem::remove_all(sorting_path());
     }), limestone_io_exception);
 }
@@ -211,8 +213,9 @@ TEST_F(wal_sorter_test, call_order_violations_are_fatal) {
     wal_sorter sorter(scan, sort_settings{}, location);
     EXPECT_DEATH(sorter.merge(std::nullopt, [](const log_entry_view&) {}),
                  R"(wal_sorter:merge merge\(\) is called without a successful scan\(\))");
-    (void) sorter.scan(std::nullopt, 1, {});
-    EXPECT_DEATH((void) sorter.scan(std::nullopt, 1, {}), "wal_sorter:scan scan\\(\\) is called twice");
+    (void) sorter.scan(1, beyond_boundary_handling::invalidate, {});
+    EXPECT_DEATH((void) sorter.scan(1, beyond_boundary_handling::invalidate, {}),
+                 "wal_sorter:scan scan\\(\\) is called twice");
     (void) merge_output(sorter);
     EXPECT_DEATH(sorter.merge(std::nullopt, [](const log_entry_view&) {}),
                  "wal_sorter:merge merge\\(\\) is called twice");
@@ -231,7 +234,7 @@ TEST_F(wal_sorter_test, multistage_merge) {
                marker(2, 2) + v1[3] + v1[1] + v2[3] + v1[0] + v1[2] + v2[1] + v1[4] + v2[0] + v2[2] + v2[4]);
     dblog_scan scan{boost::filesystem::path(location)};
     wal_sorter sorter(scan, sort_settings{1, v1[0].size() * 2, 2}, location);
-    (void) sorter.scan(std::nullopt, 2, {});
+    (void) sorter.scan(2, beyond_boundary_handling::invalidate, {});
     EXPECT_EQ(files_in_sorting(), 5U);
     EXPECT_EQ(merge_output(sorter), v2);
     EXPECT_FALSE(boost::filesystem::exists(sorting_path()));
@@ -244,7 +247,7 @@ TEST_F(wal_sorter_test, one_sorted_file) {
     write_pwal("pwal_0000", marker(2, 1) + b + a);
     dblog_scan scan{boost::filesystem::path(location)};
     wal_sorter sorter(scan, sort_settings{1, 1024 * 1024, 128}, location);
-    (void) sorter.scan(std::nullopt, 1, {});
+    (void) sorter.scan(1, beyond_boundary_handling::invalidate, {});
     EXPECT_EQ(files_in_sorting(), 1U);
     EXPECT_EQ(merge_output(sorter), (std::vector<std::string>{a, b}));
 }
@@ -259,7 +262,7 @@ TEST_F(wal_sorter_test, oversized_entry) {
     write_pwal("pwal_0000", marker(2, 1) + s0 + big + s1 + s2);
     dblog_scan scan{boost::filesystem::path(location)};
     wal_sorter sorter(scan, sort_settings{1, arena, 128}, location);
-    (void) sorter.scan(std::nullopt, 1, {});
+    (void) sorter.scan(1, beyond_boundary_handling::invalidate, {});
     EXPECT_EQ(files_in_sorting(), 3U);  // the file of big alone, (s0, s1), (s2)
     EXPECT_EQ(merge_output(sorter), (std::vector<std::string>{s0, s1, s2, big}));
 }
@@ -285,7 +288,7 @@ TEST_F(wal_sorter_test, compacted_wal_file_in_the_final_merge) {
 
     dblog_scan scan{boost::filesystem::path(location)};
     wal_sorter sorter(scan, sort_settings{2, 1024 * 1024, 128}, location);
-    const auto result = sorter.scan(std::nullopt, 10, {});
+    const auto result = sorter.scan(10, beyond_boundary_handling::invalidate, {});
     EXPECT_EQ(result.max_blob_id, 0U);  // the BLOBs of the compacted WAL file are not counted by the scan
     std::vector<std::string> with_blob;
     std::vector<std::string> output;
@@ -305,7 +308,7 @@ TEST_F(wal_sorter_test, compaction_boundary) {
     write_pwal("pwal_0000", marker(2, 10) + a10 + marker(2, 11) + b11);
     dblog_scan scan{boost::filesystem::path(location)};
     wal_sorter sorter(scan, sort_settings{1, 1024 * 1024, 128}, location);
-    const auto result = sorter.scan(10, 0, {});
+    const auto result = sorter.scan(10, beyond_boundary_handling::skip, {});
     EXPECT_EQ(result.max_appeared_epoch, 11U);
     EXPECT_EQ(merge_output(sorter), (std::vector<std::string>{a10}));
 }
@@ -319,7 +322,7 @@ TEST_F(wal_sorter_test, versions_of_a_key_across_threads) {
     }
     dblog_scan scan{boost::filesystem::path(location)};
     wal_sorter sorter(scan, sort_settings{4, 1024 * 1024, 128}, location);
-    (void) sorter.scan(std::nullopt, 4, {});
+    (void) sorter.scan(4, beyond_boundary_handling::invalidate, {});
     EXPECT_EQ(merge_output(sorter), (std::vector<std::string>{versions[3]}));
 }
 
