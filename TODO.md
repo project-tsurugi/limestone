@@ -122,9 +122,10 @@ master へのマージ前に本ファイルを削除する。
       コンパクション済み WAL ファイルがあるときだけ書く。
 * [ ] create_compaction_output(): 新しいソートに置き換え、write_serialized の最も古い版に置き換える指定で書く。
       remove_entry は書かない。値の 1 件ごとのコピーをなくす。
-* [ ] 上の 2 つの出力の書き出しを sorted_file_writer と共通化するかを、置き換え時に判断する。違いは先頭の marker_begin の
+* [x] 上の 2 つの出力の書き出しを sorted_file_writer と共通化するかを、置き換え時に判断する。違いは先頭の marker_begin の
       有無、write_version の置き換え、remove_entry の扱いの 3 つで、writer の引数にできる。既存の経路の一時ファイルと
       rename、失敗時の削除との兼ね合いを見比べて決める (2026-10-26 のレビューでの気づき)。
+      (出力は別クラス sort_output_writer にし、stdio の扱いだけを buffered_output_file に切り出して共有した。5 節。)
 * [ ] BLOB の ID の最大値を、出力からではなく走査の中で記録する (縮約と範囲削除で除くエントリの分も含める。L3 8.1)。
       tsurugi-issues #1590 の報告のケース (コミット後に削除した BLOB の ID が再起動後に再利用される) の対応でもある。
       走査しなくなる現行世代のコンパクション済み WAL ファイルの分は、コンパクションカタログの max_blob_id が覆う
@@ -524,6 +525,22 @@ master へのマージ前に本ファイルを削除する。
     から次の操作をする形 (タイミングで結果が変わる) のテストは置かない。
   * merge_fanin はコンストラクタで検査しない (設定値の検査は入口で行う決定のとおり。sorted_file_merger の FATAL は
     契約違反の検出として残す)。
+
+* 2026-10-28: ステップ 6 の進め方と出力の書き出し。
+  * 進め方: 出力の書き出し → 起動時の置き換え → コンパクションの置き換え (入力は変えない) → 現行世代のコンパクション
+    済み WAL ファイルを最後のマージへ移す → スレッド数の意味と検査 → 設定項目の受け取り、の順に 1 項目 1 コミット。
+    BLOB ID の最大値を走査で記録する項目は、起動時とコンパクションの置き換えで実現する。
+  * 走査の失敗を "dblogdir is corrupted" に変える変換では limestone_io_exception をそのまま通す。sorting への書き出しの
+    I/O の失敗 (ディスク満杯など) を形式の誤りに変えると、オンラインのコンパクションが再試行でなく FATAL になるため。
+  * 出力の書き出しは sorted_file_writer と共通化せず、別クラス sort_output_writer (先頭の marker_begin(0)、
+    write_version の扱い、remove_entry を書くか、close で fsync するかを format で指定) にした。L3 で「ソート済み
+    ファイル」は中間のファイルの名前で出力と区別されていること、最後のマージは縮約済みで writer の縮約が空回りすること
+    による。共通の stdio の扱い (自前のバッファで開く、close と sync_and_close、close なしの破棄での fclose) は
+    buffered_output_file に切り出し、sorted_file_writer もそれを使う形にした。一時ファイルと rename、失敗時の削除は
+    呼び出し側の仕事のまま。
+  * 多重クローズは WARNING で何もしない (実害がなく、tsurugidb を落とすのは過剰なため)。例外は fsync せずに閉じた後の
+    sync_and_close() で、戻ると fsync されたと誤認させるので FATAL。閉じた後の stream()・write() は FATAL のまま。
+    sorted_file_writer の 2 回目の close() も FATAL から WARNING に変わった。
 
 ## 6. 残った課題
 

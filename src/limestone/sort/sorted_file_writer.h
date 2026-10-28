@@ -17,12 +17,11 @@
 
 #include <cstddef>
 #include <cstdint>
-#include <cstdio>
-#include <string>
 
 #include <boost/filesystem.hpp>
 
 #include "log_entry/log_entry_view.h"
+#include "sort/buffered_output_file.h"
 #include "sort/key_sid_deduplicator.h"
 
 namespace limestone::internal {
@@ -34,11 +33,13 @@ namespace limestone::internal {
  * remove_entries are kept. The entries are passed to write() in ascending order of key_sid (and in descending order
  * of write_version within the same key_sid). Only the first of the entries with the same key_sid is written
  * (duplicates are removed).
+ *
+ * Not thread-safe (used from one thread).
  */
 class sorted_file_writer {
 public:
     /// the size of the stdio buffer in bytes. The fwrite of each entry is accumulated up to this size before write
-    static constexpr std::size_t stream_buffer_size = std::size_t{128} * 1024;
+    static constexpr std::size_t stream_buffer_size = buffered_output_file::stream_buffer_size;
 
     /**
      * @brief Creates and opens the file.
@@ -69,7 +70,7 @@ public:
     /**
      * @brief Finishes writing and closes the file (fflush, fclose). fsync is not performed.
      *
-     * The file is closed even on failure. Writes a FATAL log and aborts if called twice.
+     * The file is closed even on failure. If called after the file is closed, writes a WARNING log and does nothing.
      * @throws limestone_io_exception if fflush or fclose fails (with errno)
      */
     void close();
@@ -80,10 +81,7 @@ public:
     [[nodiscard]] std::uint64_t written_count() const noexcept;
 
 private:
-    boost::filesystem::path file_;
-    // the stdio buffer. Supplied because setvbuf is not guaranteed to honor the size without a buffer
-    std::string stream_buffer_;
-    FILE* stream_{};
+    buffered_output_file file_;
     key_sid_deduplicator deduplicator_{};
     std::uint64_t written_count_{};
 };

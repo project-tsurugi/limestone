@@ -223,7 +223,7 @@ TEST_F(sorted_file_writer_test, cannot_create_file) {
     }
 }
 
-// a non-data entry, an order violation, write() after close() and a second close() are FATAL
+// a non-data entry, an order violation and write() after close() are FATAL
 TEST_F(sorted_file_writer_test, contract_violations_are_fatal) {
     const std::string b = normal_entry(1, "b", "v", 1, 0);
     const std::string a = normal_entry(1, "a", "v", 1, 0);
@@ -233,7 +233,16 @@ TEST_F(sorted_file_writer_test, contract_violations_are_fatal) {
     EXPECT_DEATH(writer.write(view_of(a)), "entries are out of order");
     writer.close();
     EXPECT_DEATH(writer.write(view_of(b)), "sorted_file_writer:write already closed");
-    EXPECT_DEATH(writer.close(), "sorted_file_writer:close already closed");
+}
+
+// a second close() does nothing (what has been written remains)
+TEST_F(sorted_file_writer_test, second_close_does_nothing) {
+    const std::string e = normal_entry(1, "a", "v", 1, 0);
+    sorted_file_writer writer(file());
+    writer.write(view_of(e));
+    writer.close();
+    writer.close();
+    EXPECT_EQ(read_file(file()), e);
 }
 
 }  // namespace limestone::testing
