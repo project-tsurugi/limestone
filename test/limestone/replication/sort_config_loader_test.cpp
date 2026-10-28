@@ -95,7 +95,8 @@ TEST_F(sort_config_loader_test, empty_work_dir_is_unset) {
     EXPECT_FALSE(result.config.work_dir.has_value());
 }
 
-// a value that is not a number (letters, a sign, empty, THREADS beyond int) fails with the name of the variable
+// a value that is not a number (letters, a sign, empty, THREADS beyond int, a number beyond uint64) fails with the name
+// of the variable
 TEST_F(sort_config_loader_test, malformed_numbers_are_rejected) {
     struct malformed {
         char const* name;
@@ -104,6 +105,7 @@ TEST_F(sort_config_loader_test, malformed_numbers_are_rejected) {
     for (const malformed& m : {malformed{"LIMESTONE_SORT_THREADS", "abc"}, malformed{"LIMESTONE_SORT_THREADS", "-1"},
                                malformed{"LIMESTONE_SORT_THREADS", "2147483648"},
                                malformed{"LIMESTONE_SORT_ARENA_SIZE_MB", ""},
+                               malformed{"LIMESTONE_SORT_ARENA_SIZE_MB", "99999999999999999999"},  // beyond uint64
                                malformed{"LIMESTONE_SORT_MERGE_FANIN", "16x"}}) {
         clear_env();
         set_env(m.name, m.value);

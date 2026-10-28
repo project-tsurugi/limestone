@@ -11,6 +11,8 @@
 #include "test_root.h"
 #include "internal.h"
 #include "datastore_impl.h"
+#include "limestone_exception_helper.h"
+#include "limestone/log/testdata.h"
 #include <limestone/api/limestone_exception.h>
 
 #ifdef ENABLE_ALTIMETER
@@ -324,6 +326,37 @@ TEST_F(datastore_test, sort_work_dir_is_used_by_the_sort) { // NOLINT
     auto ds = std::make_unique<limestone::api::datastore_test>(conf);
     ASSERT_DEATH(ds->ready(), "cannot create sorting directory: /tmp/datastore_test/readonly/sorting");
     boost::filesystem::permissions("/tmp/datastore_test/readonly", boost::filesystem::owner_all);
+}
+
+// a corrupted WAL at startup (a truncated entry in a durable snippet) fails ready() with "dblogdir is corrupted"
+TEST_F(datastore_test, corrupted_wal_at_startup_is_reported_as_corrupted) { // NOLINT
+    if (system("rm -rf /tmp/datastore_test") != 0) {
+        std::cerr << "cannot remove directory" << std::endl;
+    }
+    if (system("mkdir -p /tmp/datastore_test/data_location") != 0) {
+        std::cerr << "cannot make directory" << std::endl;
+    }
+    limestone::api::configuration conf{};
+    conf.set_data_location(data_location);
+    auto ds = std::make_unique<limestone::api::datastore_test>(conf);
+    // the durable epoch is 0x101 so that the snippet of epoch 0x101 holding the truncated entry is durable (an error
+    // to report, not a nondurable snippet to invalidate)
+    {
+        std::ofstream epoch(std::string(data_location) + "/epoch", std::ios::binary | std::ios::trunc);
+        epoch << "\x04\x01\x01\x00\x00\x00\x00\x00\x00"sv;
+    }
+    {
+        std::ofstream pwal(std::string(data_location) + "/pwal_0000", std::ios::binary);
+        pwal << data_truncated_normal_entry;
+    }
+    limestone::testing::enable_exception_throwing = true;  // ready() rethrows instead of aborting
+    try {
+        ds->ready();
+        FAIL() << "no exception";
+    } catch (const limestone_exception& e) {
+        EXPECT_NE(std::string(e.what()).find("dblogdir is corrupted"), std::string::npos) << e.what();
+    }
+    limestone::testing::enable_exception_throwing = false;
 }
 
 TEST_F(datastore_test, prevent_double_start_test) { // NOLINT
