@@ -596,7 +596,7 @@ master へのマージ前に本ファイルを削除する。
   disconnect を繰り返すと稀に ASan の SEGV になる (2026-10-28 に 52 周目で 1 回)。原因はメンバの破棄の順序:
   active_client_fds_ (replica_server.h:338) は client_futures_ (336) より後に宣言されているので先に破棄され、その後で
   future のデストラクタが handle_client の完了を待つ間に guard が破棄済みの set を触る。宣言順の入れ替えか、shutdown
-  で future をすべて待つ対応が要る。R1 の範囲外。(2026-10-28)
+  で future をすべて待つ対応が要る。R1 の範囲外として issue #151 に起票した。(2026-10-28)
 * log_entry::read_error::operator bool() は、警告 (nondurable_snippet) でも true を返す (value_ != 0)。使われ方
   (読み込みの失敗の判定) からは false が適切。今のコードには警告を bool に変換する経路がないので、動作への影響は
   ない。変えるなら、警告とエラーの判定 (コードの値の最上位ビット) を含めて設計する。(2026-10-22)
