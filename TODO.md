@@ -560,12 +560,14 @@ master へのマージ前に本ファイルを削除する。
     しない (起動ごとに作り直すため。旧コードと同じ)。
 
 * 2026-10-28: ステップ 6 のコンパクションの置き換えのフルスイートで、1 回だけ replica_server_test が失敗した。
-  * 失敗したケースは不明 (ログを上書きした。残っていた LastTestsFailed.log でテストの名前だけが分かった)。その後の
-    ctest -j 16 の 16 回と -j 32 の 10 回、単独での 30 回の繰り返しでは再現しない。RUN_SERIAL の外から ctest と
-    並行に繰り返すと、initialize_rdma_success_then_already_initialized で 1 回目の initialize_rdma() が failed を
-    返すことはある (RDMA スタック (GnMock) の排他の前提を破った条件で、元の失敗と同じとは限らない)。
-  * RDMA の初期化はソートの変更と関わらないので、関係は薄いと見て深追いしない。以後のフルスイートは
-    --output-on-failure で失敗時のログを残し、再発したらそのログで調べる。
+  * 原因: limestone-test は起動時に GnMock の固定名 shm を消す (test/main.cpp) が、--gtest_list_tests の一覧の取得でも
+    消していた。エディタの C++ TestMate は実行ファイルの更新を検知して一覧を取り直すので、ビルド直後の ctest で
+    RUN_SERIAL の RDMA 系テストと重なると、マップ済みの shm が消えて initialize_rdma() が failed を返す。一覧の取得を
+    並行して回すと replica_server_test の 60 周中 4 周で再現し、--gtest_list_tests のときは消さないようにすると 60 周
+    すべて通った。ソートの変更とは無関係。
+  * 調べている途中で別の既存のバグを見つけた: replica_server の handle_client のスレッドが、破棄された後の server の
+    unregister_active_client() を呼ぶ (active_client_guard のデストラクタ、use-after-free。start_listener_and_client_
+    connect_disconnect の 52 周目で ASan の SEGV)。R1 の範囲外として 6 節に記録した。
 
 * 2026-10-28: ステップ 6 の現行世代のコンパクション済み WAL ファイルの扱い。
   * 呼び出し側 (オンライン、dblogutil) がカタログの現行のファイル名を compaction_options に渡し、options が走査の
@@ -589,6 +591,12 @@ master へのマージ前に本ファイルを削除する。
 
 <!-- R1 の範囲外として持ち越すものを記録する。 -->
 
+* replica_server::handle_client() のスレッド (std::async) が、server の破棄後に active_client_guard のデストラクタから
+  unregister_active_client() を呼ぶことがある (use-after-free)。replica_server_test.start_listener_and_client_connect_
+  disconnect を繰り返すと稀に ASan の SEGV になる (2026-10-28 に 52 周目で 1 回)。原因はメンバの破棄の順序:
+  active_client_fds_ (replica_server.h:338) は client_futures_ (336) より後に宣言されているので先に破棄され、その後で
+  future のデストラクタが handle_client の完了を待つ間に guard が破棄済みの set を触る。宣言順の入れ替えか、shutdown
+  で future をすべて待つ対応が要る。R1 の範囲外。(2026-10-28)
 * log_entry::read_error::operator bool() は、警告 (nondurable_snippet) でも true を返す (value_ != 0)。使われ方
   (読み込みの失敗の判定) からは false が適切。今のコードには警告を bool に変換する経路がないので、動作への影響は
   ない。変えるなら、警告とエラーの判定 (コードの値の最上位ビット) を含めて設計する。(2026-10-22)
