@@ -37,6 +37,7 @@ public:
 
     virtual void TearDown() {
         datastore_ = nullptr;
+        limestone::testing::enable_exception_throwing = false;  // in case a test left it set
         unsetenv("TSURUGI_REPLICATION_ENDPOINT");
         if (system("rm -rf /tmp/datastore_test") != 0) {
             std::cerr << "cannot remove directory" << std::endl;

@@ -171,8 +171,8 @@ TEST_F(dblogutil_compaction_test, nondblogdir) {
     EXPECT_TRUE(contains(out, "unsupport"));
 }
 
-// the number of threads of the sort is 8 without --thread_num and the given value with it; a value below 1 exits with
-// code 64 without starting the processing
+// the number of threads of the sort is 8 without --thread_num and the given value with it (1, the default of gflags,
+// is kept when given explicitly); a value below 1 exits with code 64 without starting the processing
 TEST_F(dblogutil_compaction_test, thread_num_option) {
     boost::filesystem::path dir{location};
     dir /= "log";
@@ -191,6 +191,10 @@ TEST_F(dblogutil_compaction_test, thread_num_option) {
     EXPECT_EQ(rc, 0);
     EXPECT_TRUE(contains_line_starts_with(out, "sort-threads: 2")) << out;
 
+    rc = invoke(UTIL_COMMAND " compaction --force --dry_run --thread_num 1 " + dir.string() + " 2>&1", out);
+    EXPECT_EQ(rc, 0);
+    EXPECT_TRUE(contains_line_starts_with(out, "sort-threads: 1")) << out;
+
     rc = invoke(UTIL_COMMAND " compaction --force --thread_num 0 " + dir.string() + " 2>&1", out);
     EXPECT_EQ(rc, 64 << 8);
     EXPECT_TRUE(contains_line_starts_with(out, "E"));  // LOG(ERROR)
@@ -200,7 +204,7 @@ TEST_F(dblogutil_compaction_test, thread_num_option) {
 }
 
 // --sort_arena_size_mb, --sort_merge_fanin and --sort_work_dir: an invalid value exits with code 64 without starting
-// the processing; the boundary values are accepted
+// the processing; the lower boundary values are accepted
 TEST_F(dblogutil_compaction_test, sort_options) {
     boost::filesystem::path dir{location};
     dir /= "log";
