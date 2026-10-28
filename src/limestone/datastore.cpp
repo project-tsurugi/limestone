@@ -44,6 +44,7 @@
 #include "compaction_catalog.h"
 #include "compaction_options.h"
 #include "sort/sort_buffer.h"
+#include "sort/sort_settings.h"
 #include "blob_file_resolver.h"
 #include "blob_pool_impl.h"
 #include "blob_file_garbage_collector.h"
@@ -130,26 +131,30 @@ datastore::datastore(configuration const& conf) : location_(conf.data_location_)
             LOG_LP(ERROR) << err_msg;
             throw limestone_exception(exception_type::initialization_failure, err_msg);
         }
+        // the items of the settings of the sort that are not set are filled in with the defaults of sort_settings
+        constexpr std::size_t mib = std::size_t{1024} * 1024;
+        const sort_settings sort_defaults{};
+        const int sort_threads = conf.recover_max_parallelism_.value_or(sort_defaults.threads);
+        const std::size_t sort_arena_size_mb = conf.sort_arena_size_mb_.value_or(sort_defaults.arena_size_bytes / mib);
+        const std::size_t sort_merge_fanin = conf.sort_merge_fanin_.value_or(sort_defaults.merge_fanin);
         // recover_max_parallelism is the number of threads of the sort; a value below 1 is a misconfiguration. It is
         // checked before the lock of the log directory is taken (a throw after that would not release the lock)
-        if (conf.recover_max_parallelism_ < 1) {
-            std::string err_msg = "recover_max_parallelism must be at least 1: "
-                                  + std::to_string(conf.recover_max_parallelism_);
+        if (sort_threads < 1) {
+            std::string err_msg = "recover_max_parallelism must be at least 1: " + std::to_string(sort_threads);
             LOG_LP(ERROR) << err_msg;
             throw limestone_exception(exception_type::initialization_failure, err_msg);
         }
         // The settings of the sort are checked before the lock as well. The upper bound of the arena is that of
         // sort_buffer (4 GiB)
-        constexpr std::size_t mib = std::size_t{1024} * 1024;
         constexpr std::size_t max_sort_arena_size_mb = sort_buffer::max_arena_size_bytes / mib;
-        if (conf.sort_arena_size_mb_ < 1 || conf.sort_arena_size_mb_ > max_sort_arena_size_mb) {
+        if (sort_arena_size_mb < 1 || sort_arena_size_mb > max_sort_arena_size_mb) {
             std::string err_msg = "sort_arena_size_mb must be between 1 and " + std::to_string(max_sort_arena_size_mb)
-                                  + ": " + std::to_string(conf.sort_arena_size_mb_);
+                                  + ": " + std::to_string(sort_arena_size_mb);
             LOG_LP(ERROR) << err_msg;
             throw limestone_exception(exception_type::initialization_failure, err_msg);
         }
-        if (conf.sort_merge_fanin_ < 2) {
-            std::string err_msg = "sort_merge_fanin must be at least 2: " + std::to_string(conf.sort_merge_fanin_);
+        if (sort_merge_fanin < 2) {
+            std::string err_msg = "sort_merge_fanin must be at least 2: " + std::to_string(sort_merge_fanin);
             LOG_LP(ERROR) << err_msg;
             throw limestone_exception(exception_type::initialization_failure, err_msg);
         }
@@ -160,10 +165,10 @@ datastore::datastore(configuration const& conf) : location_(conf.data_location_)
             LOG_LP(ERROR) << err_msg;
             throw limestone_exception(exception_type::initialization_failure, err_msg);
         }
-        impl_->set_sort_settings(conf.sort_arena_size_mb_ * mib, conf.sort_merge_fanin_,
+        impl_->set_sort_settings(sort_arena_size_mb * mib, sort_merge_fanin,
                                  conf.sort_work_dir_.empty() ? location_ : conf.sort_work_dir_);
-        LOG(INFO) << "/:limestone:config:datastore setting the sort: arena size = " << conf.sort_arena_size_mb_
-                  << " MiB, merge fanin = " << conf.sort_merge_fanin_
+        LOG(INFO) << "/:limestone:config:datastore setting the sort: arena size = " << sort_arena_size_mb
+                  << " MiB, merge fanin = " << sort_merge_fanin
                   << ", work dir = " << impl_->sort_work_dir_parent().string();
         LOG(INFO) << "/:limestone:config:datastore setting log location = " << location_.string();
         boost::system::error_code error;
@@ -313,7 +318,7 @@ datastore::datastore(configuration const& conf) : location_(conf.data_location_)
             }
         }
 
-        recover_max_parallelism_ = conf.recover_max_parallelism_;
+        recover_max_parallelism_ = sort_threads;
         LOG(INFO) << "/:limestone:config:datastore setting the number of recover process thread = " << recover_max_parallelism_;
 
         impl_->initialize_blob_file_resolver(location_);

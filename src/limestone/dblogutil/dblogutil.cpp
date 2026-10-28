@@ -15,6 +15,7 @@
  */
 
 #include <iostream>
+#include <string>
 #include <stdlib.h>  // NOLINT(*-deprecated-headers): <cstdlib> does not provide std::mkdtemp
 #include <glog/logging.h>
 #include <limestone/logging.h>
@@ -37,8 +38,11 @@ using namespace limestone::internal;
 
 // common options
 DEFINE_string(epoch, "", "specify valid epoch upper limit");
-DEFINE_int32(thread_num, 1, "specify thread num of scanning wal file "
-                            "(subcommand compaction: the number of threads of the sort, default 8)");
+// the help of gflags is a const char*, so the string holding the default of compaction (sort_settings) is built first
+static const std::string thread_num_help =  // NOLINT(cert-err58-cpp)
+    "specify thread num of scanning wal file (subcommand compaction: the number of threads of the sort, default "
+    + std::to_string(limestone::internal::sort_settings{}.threads) + ")";
+DEFINE_int32(thread_num, 1, thread_num_help.c_str());
 DEFINE_bool(h, false, "display help message");
 DEFINE_bool(verbose, false, "verbose");
 

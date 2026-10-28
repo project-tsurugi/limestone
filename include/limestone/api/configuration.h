@@ -17,6 +17,7 @@
 
 #include <cstddef>
 #include <filesystem>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -31,21 +32,6 @@ class datastore;
  * @brief configuration for datastore
  */
 class configuration {
-    /**
-     * @brief default value of recover_max_parallelism
-     */
-    static constexpr int default_recover_max_parallelism = 8;
-
-    /**
-     * @brief default value of sort_arena_size_mb
-     */
-    static constexpr std::size_t default_sort_arena_size_mb = 256;
-
-    /**
-     * @brief default value of sort_merge_fanin
-     */
-    static constexpr std::size_t default_sort_merge_fanin = 128;
-
 public:
     /**
      * @brief create empty object
@@ -103,11 +89,12 @@ private:
     std::string instance_id_{};
     std::string db_name_{};
 
-    int recover_max_parallelism_{default_recover_max_parallelism};
+    // nullopt (an empty path for the work dir) means not set; the datastore fills in the defaults of the sort
+    std::optional<int> recover_max_parallelism_{};
 
-    std::size_t sort_arena_size_mb_{default_sort_arena_size_mb};
+    std::optional<std::size_t> sort_arena_size_mb_{};
     boost::filesystem::path sort_work_dir_{};
-    std::size_t sort_merge_fanin_{default_sort_merge_fanin};
+    std::optional<std::size_t> sort_merge_fanin_{};
 
     friend class datastore;
 };
