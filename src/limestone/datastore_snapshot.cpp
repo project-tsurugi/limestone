@@ -66,9 +66,8 @@ wal_scan_result scan_wals(dblog_scan& logscan, wal_sorter& sorter, const compact
     // Online compaction: the boundary is the rotation boundary, and the snippets beyond it are skipped (the files are
     // left unmodified, because those snippets are carried over into the carry file).
     // Otherwise: the boundary is the durable epoch, and the snippets beyond it (not made durable) are invalidated. The
-    // inputs are the whole directory, so "every entry at or below the boundary is in the inputs" holds. The epoch is
-    // read outside the try block so that an exception caused by the epoch file is not flattened into "dblogdir is
-    // corrupted" by the catch below.
+    // epoch is read outside the try block so that an exception caused by the epoch file is not flattened into
+    // "dblogdir is corrupted" by the catch below.
     const std::optional<epoch_id_type> compaction_boundary = options.get_boundary_epoch();
     epoch_id_type boundary_epoch{};
     beyond_boundary_handling handling{};
@@ -156,8 +155,8 @@ compaction_output_result create_compaction_output(compaction_options &options) {
 
     // Save the snippets beyond the boundary epoch into the carry file (only when both
     // the boundary and the carry output name are given, that is, on the online path).
-    // Only the files whose per-file maximum epoch exceeds the boundary are re-read; the
-    // current compacted file has header epoch 0, so it is naturally out of scope.
+    // Only the files whose per-file maximum epoch exceeds the boundary are re-read (the
+    // compacted WAL file of the current generation is not scanned, so it is not among them).
     bool carry_written = false;
     const std::optional<epoch_id_type> boundary_epoch_opt = options.get_boundary_epoch();
     const std::optional<std::string>& carry_file_name = options.get_carry_file_name();

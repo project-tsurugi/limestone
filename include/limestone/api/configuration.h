@@ -30,6 +30,9 @@ class datastore;
 
 /**
  * @brief configuration for datastore
+ *
+ * A value out of the range stated by a setter makes the construction of the datastore fail with a limestone_exception
+ * of initialization_failure.
  */
 class configuration {
 public:
@@ -57,8 +60,8 @@ public:
     void set_db_name(std::string_view db_name) noexcept;
 
     /**
-     * @brief setter for recover_max_parallelism
-     * @param recover_max_parallelism  the number of recover_max_parallelism
+     * @brief setter for recover_max_parallelism: the number of threads of the sort at startup and at compaction
+     * @param recover_max_parallelism the number of threads (at least 1)
      */
     void set_recover_max_parallelism(int recover_max_parallelism) noexcept;
 
