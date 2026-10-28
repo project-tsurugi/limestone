@@ -233,6 +233,36 @@ TEST_F(datastore_test, remove_persistent_callback_test) { // NOLINT
     EXPECT_EQ(previous_epoch, get_durable_epoch());
 }
 
+// constructing with recover_max_parallelism (the number of threads of the sort) below 1 is initialization_failure;
+// 1 is accepted
+TEST_F(datastore_test, rejects_recover_max_parallelism_below_one) { // NOLINT
+    if (system("rm -rf /tmp/datastore_test") != 0) {
+        std::cerr << "cannot remove directory" << std::endl;
+    }
+    if (system("mkdir -p /tmp/datastore_test/data_location") != 0) {
+        std::cerr << "cannot make directory" << std::endl;
+    }
+    for (const int threads : {0, -1}) {
+        limestone::api::configuration conf{};
+        conf.set_data_location(data_location);
+        conf.set_recover_max_parallelism(threads);
+        try {
+            auto ds = std::make_unique<limestone::api::datastore_test>(conf);
+            FAIL() << "no exception for recover_max_parallelism " << threads;
+        } catch (const limestone_exception& e) {
+            EXPECT_EQ(e.type(), exception_type::initialization_failure);
+            EXPECT_NE(std::string(e.what()).find("recover_max_parallelism must be at least 1"), std::string::npos)
+                << e.what();
+        }
+    }
+    limestone::api::configuration conf{};
+    conf.set_data_location(data_location);
+    conf.set_recover_max_parallelism(1);
+    auto ds = std::make_unique<limestone::api::datastore_test>(conf);
+    ds->ready();
+    ds->shutdown();
+}
+
 TEST_F(datastore_test, prevent_double_start_test) { // NOLINT
     if (system("rm -rf /tmp/datastore_test") != 0) {
         std::cerr << "cannot remove directory" << std::endl;

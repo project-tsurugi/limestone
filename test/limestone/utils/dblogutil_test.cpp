@@ -276,6 +276,20 @@ TEST_F(dblogutil_test, inspect_allzero) {
     EXPECT_NE(out.find("\n" "status: auto-repairable"), out.npos);
 }
 
+// repair with --thread_num below 1 exits with code 64 without starting the processing (no thread of the scan would
+// do nothing)
+TEST_F(dblogutil_test, repair_rejects_thread_num_below_one) {
+    boost::filesystem::path dir{location};
+    create_file(dir / "epoch", epoch_0x100_str);
+    create_file(dir / std::string(manifest::file_name), data_manifest());
+    create_file(dir / "pwal_0000", data_normal);
+    std::string out;
+    int rc = invoke(UTIL_COMMAND " repair --thread_num -1 " + dir.string() + " 2>&1", out);
+    EXPECT_EQ(rc, 64 << 8);
+    EXPECT_TRUE(contains(out, "invalid value for --thread_num option"));
+    EXPECT_FALSE(contains(out, "dblogdir:"));
+}
+
 TEST_F(dblogutil_test, repairm_normal) {
     auto orig_data = data_normal;
     auto [rc, out] = repairm("pwal_0000", orig_data);

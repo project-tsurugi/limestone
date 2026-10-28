@@ -129,6 +129,14 @@ datastore::datastore(configuration const& conf) : location_(conf.data_location_)
             LOG_LP(ERROR) << err_msg;
             throw limestone_exception(exception_type::initialization_failure, err_msg);
         }
+        // recover_max_parallelism is the number of threads of the sort; a value below 1 is a misconfiguration. It is
+        // checked before the lock of the log directory is taken (a throw after that would not release the lock)
+        if (conf.recover_max_parallelism_ < 1) {
+            std::string err_msg = "recover_max_parallelism must be at least 1: "
+                                  + std::to_string(conf.recover_max_parallelism_);
+            LOG_LP(ERROR) << err_msg;
+            throw limestone_exception(exception_type::initialization_failure, err_msg);
+        }
         LOG(INFO) << "/:limestone:config:datastore setting log location = " << location_.string();
         boost::system::error_code error;
         const bool result_check = boost::filesystem::exists(location_, error);

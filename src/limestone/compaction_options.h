@@ -96,7 +96,7 @@
      // Getter for to_dir.
      [[nodiscard]] const boost::filesystem::path& get_to_dir() const { return to_dir_; }
  
-     // Getter for num_worker.
+     // Getter for num_worker (the number of threads of the sort: the scan and the sort per thread).
      [[nodiscard]] int get_num_worker() const { return num_worker_; }
  
      // Getter for file_names.

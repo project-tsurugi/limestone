@@ -27,6 +27,7 @@
 #include "limestone_exception_helper.h"
 #include "manifest.h"
 #include "compaction_catalog.h"
+#include "sort/wal_sorter.h"
 
 // NOLINTBEGIN(performance-avoid-endl)
 
@@ -35,7 +36,8 @@ using namespace limestone::internal;
 
 // common options
 DEFINE_string(epoch, "", "specify valid epoch upper limit");
-DEFINE_int32(thread_num, 1, "specify thread num of scanning wal file");
+DEFINE_int32(thread_num, 1, "specify thread num of scanning wal file "
+                            "(subcommand compaction: the number of threads of the sort, default 8)");
 DEFINE_bool(h, false, "display help message");
 DEFINE_bool(verbose, false, "verbose");
 
@@ -355,7 +357,7 @@ void carry_over_blob_directory(
     }
 }
 
-void compaction(dblog_scan &ds) {
+void compaction(dblog_scan &ds, int thread_num) {
     // The --epoch option is not meaningful for compaction: it never restricts the
     // compacted data, so it is ignored here (consistent with other options that do
     // not apply to a given subcommand). The durable epoch recorded in the log
@@ -368,6 +370,7 @@ void compaction(dblog_scan &ds) {
         log_and_exit(64);
     }
     std::cout << "durable-epoch: " << ld_epoch << std::endl;
+    std::cout << "sort-threads: " << thread_num << std::endl;
     auto from_dir = ds.get_dblogdir();
     {
         auto p = from_dir;  // make copy
@@ -444,7 +447,7 @@ void compaction(dblog_scan &ds) {
     blob_id_type max_blob_id{};
     if (compacted_file_created) {
         VLOG_LP(log_info) << "making compact pwal file to " << tmp;
-        compaction_options options{from_dir, tmp, FLAGS_thread_num, input_file_names};
+        compaction_options options{from_dir, tmp, thread_num, input_file_names};
         options.set_output_file_names(compaction_catalog::get_compacted_filename_for_generation(new_generation),
                                       compaction_catalog::get_carry_filename_for_generation(new_generation));
         // The compacted WAL file of the current generation is not scanned but is given to the final merge.
@@ -544,6 +547,17 @@ int main(char *dir, subcommand mode) {  // NOLINT
             log_and_exit(64);
         }
     }
+    // --thread_num: the number of threads of the scan (inspect, repair) or of the sort (compaction). gflags has one
+    // default, so compaction without the option uses the default of the sort. A value below 1 is a misconfiguration,
+    // and the process exits without starting the processing
+    int thread_num = FLAGS_thread_num;
+    if (mode == subcommand::cmd_compaction && gflags::GetCommandLineFlagInfoOrDie("thread_num").is_default) {
+        thread_num = sort_settings{}.threads;
+    }
+    if (thread_num < 1) {
+        LOG(ERROR) << "invalid value for --thread_num option: " << thread_num << " (must be at least 1)";
+        log_and_exit(64);
+    }
     boost::filesystem::path p(dir);
     std::cout << "dblogdir: " << p << std::endl;
     if (!boost::filesystem::exists(p)) {
@@ -559,10 +573,10 @@ int main(char *dir, subcommand mode) {  // NOLINT
             log_and_exit(64);
         }
         dblog_scan ds(p);
-        ds.set_thread_num(FLAGS_thread_num);
+        ds.set_thread_num(thread_num);
         if (mode == subcommand::cmd_inspect) inspect(ds, opt_epoch);
         if (mode == subcommand::cmd_repair) repair(ds, opt_epoch);
-        if (mode == subcommand::cmd_compaction) compaction(ds);
+        if (mode == subcommand::cmd_compaction) compaction(ds, thread_num);
         close(lock_fd);
     } catch (limestone_exception& e) {
         LOG(ERROR) << e.what();

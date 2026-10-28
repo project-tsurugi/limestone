@@ -136,10 +136,10 @@ master へのマージ前に本ファイルを削除する。
 * [x] コンパクションの入力から現行世代のコンパクション済み WAL ファイルを走査の入力から外し、最後のマージに渡す
       (datastore::compact_with_online()、dblogutil の compaction (dblogutil.cpp:434))。
       (compaction_options::set_compacted_input_file_name()。5 節。)
-* [ ] スレッド数: compaction_options の num_worker は、tsurugidb では recover_max_parallelism、dblogutil では --thread_num
+* [x] スレッド数: compaction_options の num_worker は、tsurugidb では recover_max_parallelism、dblogutil では --thread_num
       のままとし、意味をソートのスレッド数にする (L3 12.5・15)。dblogutil の compaction の --thread_num の既定値を 1 から
       8 にする (inspect と repair は走査のスレッド数のままで既定 1)。0 以下は設定の誤りとし、tsurugidb と tgreplica は
-      起動を失敗させ、dblogutil は処理を始めずに終了する。
+      起動を失敗させ、dblogutil は処理を始めずに終了する。(5 節。)
 * [ ] 設定項目の受け取り (L3 12.5)。tsurugidb: tsurugi.ini の datastore 節の sort_arena_size_mb、sort_work_dir、
       sort_merge_fanin を tateyama から受け取るため、configuration に setter を加える (tateyama 側はステップ 14)。
       dblogutil: オプション --sort_arena_size_mb、--sort_work_dir、--sort_merge_fanin を加える。
@@ -576,6 +576,14 @@ master へのマージ前に本ファイルを削除する。
     何も走査しない動作に変わる。
   * BLOB の GC の記録はマージのスレッドからも呼ぶ。マージの後に finalize_local_entries() でそのスレッドの thread_local
     のコンテナを切り離す (dblog_scan のワーカーがファイルごとに行っているのと同じ決まり)。
+
+* 2026-10-28: ステップ 6 のスレッド数の検査。
+  * datastore のコンストラクタで recover_max_parallelism < 1 を initialization_failure にする (tsurugidb と tgreplica の
+    両方が通る)。検査はログディレクトリのロックを取る前に置く。ロックの後で throw するとロックが解放されず、同じ
+    プロセスで作り直せない (UT で判明)。
+  * dblogutil は、compaction で --thread_num の指定がなければ sort_settings の既定値 (8) を使う (gflags の is_default で
+    判定)。0 以下は 3 つのサブコマンドとも処理を始めずに終了コード 64。compaction は使うスレッド数を
+    "sort-threads: N" として標準出力に出す (既定値の変更に利用者が気づく助けと、UT の確認の手段)。
 
 ## 6. 残った課題
 

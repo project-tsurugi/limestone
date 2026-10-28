@@ -171,6 +171,34 @@ TEST_F(dblogutil_compaction_test, nondblogdir) {
     EXPECT_TRUE(contains(out, "unsupport"));
 }
 
+// the number of threads of the sort is 8 without --thread_num and the given value with it; a value below 1 exits with
+// code 64 without starting the processing
+TEST_F(dblogutil_compaction_test, thread_num_option) {
+    boost::filesystem::path dir{location};
+    dir /= "log";
+    boost::filesystem::create_directory(dir);
+    create_file(dir / "epoch", data_case1_epoch);
+    create_file(dir / std::string(manifest::file_name), data_manifest());
+    create_file(dir / "pwal_0000", data_case1_pwal0);
+    create_file(dir / "pwal_0001", data_case1_pwal1);
+
+    std::string out;
+    int rc = invoke(UTIL_COMMAND " compaction --force --dry_run " + dir.string() + " 2>&1", out);
+    EXPECT_EQ(rc, 0);
+    EXPECT_TRUE(contains_line_starts_with(out, "sort-threads: 8")) << out;
+
+    rc = invoke(UTIL_COMMAND " compaction --force --dry_run --thread_num 2 " + dir.string() + " 2>&1", out);
+    EXPECT_EQ(rc, 0);
+    EXPECT_TRUE(contains_line_starts_with(out, "sort-threads: 2")) << out;
+
+    rc = invoke(UTIL_COMMAND " compaction --force --thread_num 0 " + dir.string() + " 2>&1", out);
+    EXPECT_EQ(rc, 64 << 8);
+    EXPECT_TRUE(contains_line_starts_with(out, "E"));  // LOG(ERROR)
+    EXPECT_TRUE(contains(out, "invalid value for --thread_num option")) << out;
+    EXPECT_FALSE(contains(out, "dblogdir:")) << out;  // exits before starting the processing
+    EXPECT_EQ(list_dir(dir).size(), 2U);  // the log directory is untouched
+}
+
 TEST_F(dblogutil_compaction_test, rejects_symlink) {
     // setup normal logdir as same as case1
     boost::filesystem::path dir{location};
