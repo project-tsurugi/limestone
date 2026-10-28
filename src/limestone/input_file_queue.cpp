@@ -27,7 +27,7 @@ namespace limestone::internal {
 
 void input_file_queue::push(boost::filesystem::path path) {
     {
-        const std::lock_guard<std::mutex> lock(mutex_);
+        const std::scoped_lock<std::mutex> lock(mutex_);
         if (closed_) {
             LOG_LP(FATAL) << "push() after close(): " << path.string();
         }
@@ -41,7 +41,7 @@ void input_file_queue::push(boost::filesystem::path path) {
 
 void input_file_queue::close() noexcept {
     {
-        const std::lock_guard<std::mutex> lock(mutex_);
+        const std::scoped_lock<std::mutex> lock(mutex_);
         closed_ = true;
     }
     not_empty_.notify_all();
@@ -49,7 +49,7 @@ void input_file_queue::close() noexcept {
 
 void input_file_queue::abort() noexcept {
     {
-        const std::lock_guard<std::mutex> lock(mutex_);
+        const std::scoped_lock<std::mutex> lock(mutex_);
         aborted_ = true;
         paths_.clear();
     }

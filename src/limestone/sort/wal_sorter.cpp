@@ -119,7 +119,7 @@ void wal_sorter::add_entry(const log_entry& entry, int worker, const owned_entry
     case format::entry_type::remove_storage: {  // remove_storage is treated the same as clear_storage
         const auto write_version = view.write_version();
         {
-            const std::lock_guard<std::mutex> lock(deletions_mutex_);
+            const std::scoped_lock<std::mutex> lock(deletions_mutex_);
             const auto [it, inserted] = deletions_.try_emplace(view.storage(), write_version);
             if (! inserted && it->second < write_version) {
                 it->second = write_version;
