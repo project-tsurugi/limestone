@@ -83,7 +83,11 @@ public:
     void gen_datastore() {
         limestone::api::configuration conf{};
         conf.set_data_location(location);
+        gen_datastore(conf);
+    }
 
+    // Creates the datastore with the given configuration (data_location must be set) and makes it ready.
+    void gen_datastore(const limestone::api::configuration& conf) {
         datastore_ = std::make_unique<limestone::api::datastore_test>(conf);
         lc0_ = &datastore_->create_channel();
         lc1_ = &datastore_->create_channel();

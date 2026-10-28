@@ -242,6 +242,47 @@ TEST_F(online_compaction_generation_test, temp_write_failure_is_retried_on_the_n
     EXPECT_EQ(kv_list[0].first, "k1");
 }
 
+// A failure of the sort (the configured work directory cannot be written, so sorting-XXXXXX cannot be created)
+// lets the process continue, leaves the catalog unchanged, and succeeds on the next request once the work
+// directory can be written. This also checks that the setting of the work directory reaches the online
+// compaction (otherwise the sort runs in the log directory and succeeds).
+TEST_F(online_compaction_generation_test, sort_failure_is_retried_on_the_next_request) {
+    if (geteuid() == 0) { GTEST_SKIP() << "skip when run by root"; }
+    const boost::filesystem::path work_dir = boost::filesystem::path(location) / "sort_work";
+    boost::filesystem::create_directory(work_dir);
+    limestone::api::configuration conf{};
+    conf.set_data_location(location);
+    conf.set_sort_work_dir(work_dir.string());
+    gen_datastore(conf);
+    datastore_->switch_epoch(1);
+    write_and_make_durable("k1", "v1", 1);
+
+    boost::filesystem::permissions(work_dir, boost::filesystem::owner_read | boost::filesystem::owner_exe);
+    run_compact_with_epoch_switch(3);
+    boost::filesystem::permissions(work_dir, boost::filesystem::owner_all);
+
+    // The compaction has not run (the catalog stays in its initial state).
+    {
+        compaction_catalog catalog = compaction_catalog::from_catalog_file(boost::filesystem::path(location));
+        EXPECT_EQ(catalog.get_generation(), 0);
+        EXPECT_TRUE(catalog.get_compacted_files().empty());
+    }
+
+    // The next request succeeds, and the work directory is empty again.
+    run_compact_with_epoch_switch(4);
+    {
+        compaction_catalog catalog = compaction_catalog::from_catalog_file(boost::filesystem::path(location));
+        EXPECT_EQ(catalog.get_generation(), 1);
+        ASSERT_TRUE(catalog.get_current_compacted_file_name().has_value());
+        EXPECT_EQ(catalog.get_current_compacted_file_name().value(), "pwal_0000.compacted.1");
+    }
+    EXPECT_TRUE(boost::filesystem::is_empty(work_dir));
+
+    std::vector<std::pair<std::string, std::string>> kv_list = restart_datastore_and_read_snapshot();
+    EXPECT_EQ(kv_list.size(), 1);
+    EXPECT_EQ(kv_list[0].first, "k1");
+}
+
 // Idempotency of the double read: in the one-time migration window (a crash remnant of
 // an old binary, where the generation-0 compacted file registered by the catalog and the
 // un-detached originals hold the same entries), the duplicate of a key with an equal
