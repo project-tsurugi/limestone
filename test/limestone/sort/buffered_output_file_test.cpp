@@ -166,4 +166,27 @@ TEST_F(buffered_output_file_test, sync_and_close_after_close_is_fatal) {
     EXPECT_DEATH(f.sync_and_close(), "buffered_output_file:sync_and_close already closed without fsync");
 }
 
+// a failure of the writing (fflush on /dev/full fails with ENOSPC) is thrown, and the file is closed anyway.
+// sync_and_close() after a failed sync_and_close() is FATAL because the contents are not fsynced
+TEST_F(buffered_output_file_test, flush_failure_closes_the_file) {
+    if (!boost::filesystem::exists("/dev/full")) { GTEST_SKIP() << "no /dev/full"; }
+    {
+        buffered_output_file f("/dev/full", "test file");
+        put(f, "abc");
+        EXPECT_THROW(f.close(), limestone_io_exception);
+        EXPECT_FALSE(f.is_open());
+    }
+    buffered_output_file f("/dev/full", "test file");
+    put(f, "abc");
+    try {
+        f.sync_and_close();
+        FAIL() << "no exception";
+    } catch (const limestone_io_exception& e) {
+        EXPECT_EQ(e.error_code(), ENOSPC);
+        EXPECT_NE(std::string(e.what()).find("cannot flush test file"), std::string::npos) << e.what();
+    }
+    EXPECT_FALSE(f.is_open());
+    EXPECT_DEATH(f.sync_and_close(), "buffered_output_file:sync_and_close already closed without fsync");
+}
+
 }  // namespace limestone::testing
