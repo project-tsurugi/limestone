@@ -447,6 +447,8 @@ void compaction(dblog_scan &ds) {
         compaction_options options{from_dir, tmp, FLAGS_thread_num, input_file_names};
         options.set_output_file_names(compaction_catalog::get_compacted_filename_for_generation(new_generation),
                                       compaction_catalog::get_carry_filename_for_generation(new_generation));
+        // The compacted WAL file of the current generation is not scanned but is given to the final merge.
+        options.set_compacted_input_file_name(catalog.get_current_compacted_file_name());
         max_blob_id = create_compaction_output(options).max_blob_id;
     } else {
         VLOG_LP(log_info) << "no pwal file to compact in " << from_dir;

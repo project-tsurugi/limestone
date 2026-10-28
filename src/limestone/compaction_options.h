@@ -127,6 +127,20 @@
      // Getter for carry_file_name.
      [[nodiscard]] const std::optional<std::string>& get_carry_file_name() const { return carry_file_name_; }
 
+     // Takes the compacted WAL file of the current generation (recorded by the catalog; nullopt = none) out of
+     // the scanned files (file_names) and makes it an input of the final merge. Does nothing if file_name is
+     // nullopt or is not in file_names (it is not an input of this compaction).
+     void set_compacted_input_file_name(const std::optional<std::string>& file_name) {
+         if (file_name.has_value() && file_names_.erase(file_name.value()) > 0) {
+             compacted_input_file_name_ = file_name;
+         }
+     }
+
+     // Getter for compacted_input_file_name (nullopt = the final merge has no compacted WAL file).
+     [[nodiscard]] const std::optional<std::string>& get_compacted_input_file_name() const {
+         return compacted_input_file_name_;
+     }
+
      // Check if GC is enabled.
      [[nodiscard]] bool is_gc_enabled() const { return static_cast<bool>(gc_snapshot_); }
 
@@ -158,6 +172,9 @@
      // File names of the compaction output (nullopt = fixed name for compacted, no carry)
      std::optional<std::string> compacted_file_name_{};
      std::optional<std::string> carry_file_name_{};
+
+     // The compacted WAL file of the current generation given to the final merge (nullopt = none)
+     std::optional<std::string> compacted_input_file_name_{};
  };
 
  }  // namespace limestone::internal

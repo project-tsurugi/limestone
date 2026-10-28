@@ -41,12 +41,12 @@ using namespace limestone::internal;
 
 /**
  * @brief Creates the dblog_scan that scans the input files.
- * @param options the target of the scan. If the set of files is empty, the whole directory is scanned
+ * @param options the target of the scan. If it has no set of files, the whole directory is scanned (an empty set
+ *                scans nothing)
  * @return dblog_scan
  */
 dblog_scan make_dblog_scan(compaction_options& options) {
-    return options.get_file_names().empty() ? dblog_scan{options.get_from_dir()}
-                                            : dblog_scan{options.get_from_dir(), options};
+    return options.has_file_set() ? dblog_scan{options.get_from_dir(), options} : dblog_scan{options.get_from_dir()};
 }
 
 /**
@@ -136,8 +136,24 @@ compaction_output_result create_compaction_output(compaction_options &options) {
     // the disk before the publishing rename.
     sort_output_writer output(compacted_file, "compacted file",
                               {log_entry::write_version_handling::oldest, false, true});
-    sorter.merge(std::nullopt, [&output](const log_entry_view& entry) { output.write(entry); });
+    // The compacted WAL file of the current generation is not scanned but is an input of the final merge. Its
+    // normal_with_blob entries are also recorded for the BLOB GC (called in this thread)
+    std::optional<sorted_file_merger::compacted_wal_input> compacted{};
+    if (const auto& name = options.get_compacted_input_file_name(); name.has_value()) {
+        sorted_file_merger::entry_callback on_compacted_blob{};
+        if (options.is_gc_enabled()) {
+            on_compacted_blob = [&options](const log_entry_view& entry) {
+                options.get_gc_snapshot().sanitize_and_add_entry(log_entry{entry});
+            };
+        }
+        compacted = sorted_file_merger::compacted_wal_input{options.get_from_dir() / name.value(), on_compacted_blob};
+    }
+    sorter.merge(compacted, [&output](const log_entry_view& entry) { output.write(entry); });
     output.close();
+    if (options.is_gc_enabled()) {
+        // detaches the container of the GC records of this thread (as the workers of the scan do per file)
+        options.get_gc_snapshot().finalize_local_entries();
+    }
 
     // Save the snippets beyond the boundary epoch into the carry file (only when both
     // the boundary and the carry output name are given, that is, on the online path).

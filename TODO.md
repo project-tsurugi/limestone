@@ -133,8 +133,9 @@ master へのマージ前に本ファイルを削除する。
       tsurugi-issues #1590 の報告のケース (コミット後に削除した BLOB の ID が再起動後に再利用される) の対応でもある。
       走査しなくなる現行世代のコンパクション済み WAL ファイルの分は、コンパクションカタログの max_blob_id が覆う
       (起動時は走査の値との max、コンパクションではカタログの更新が単調非減少。datastore.cpp:441、1276)。マージでは集めない。
-* [ ] コンパクションの入力から現行世代のコンパクション済み WAL ファイルを走査の入力から外し、最後のマージに渡す
+* [x] コンパクションの入力から現行世代のコンパクション済み WAL ファイルを走査の入力から外し、最後のマージに渡す
       (datastore::compact_with_online()、dblogutil の compaction (dblogutil.cpp:434))。
+      (compaction_options::set_compacted_input_file_name()。5 節。)
 * [ ] スレッド数: compaction_options の num_worker は、tsurugidb では recover_max_parallelism、dblogutil では --thread_num
       のままとし、意味をソートのスレッド数にする (L3 12.5・15)。dblogutil の compaction の --thread_num の既定値を 1 から
       8 にする (inspect と repair は走査のスレッド数のままで既定 1)。0 以下は設定の誤りとし、tsurugidb と tgreplica は
@@ -565,6 +566,16 @@ master へのマージ前に本ファイルを削除する。
     返すことはある (RDMA スタック (GnMock) の排他の前提を破った条件で、元の失敗と同じとは限らない)。
   * RDMA の初期化はソートの変更と関わらないので、関係は薄いと見て深追いしない。以後のフルスイートは
     --output-on-failure で失敗時のログを残し、再発したらそのログで調べる。
+
+* 2026-10-28: ステップ 6 の現行世代のコンパクション済み WAL ファイルの扱い。
+  * 呼び出し側 (オンライン、dblogutil) がカタログの現行のファイル名を compaction_options に渡し、options が走査の
+    ファイルの集合から外して記録する。名前が集合になければ何もしない (その回の入力ではないため)。
+  * make_dblog_scan() の「ディレクトリ全体を走査する」条件を、集合が空から「集合の指定がない (has_file_set() が
+    false)」に変えた。dblogutil で入力が現行世代のファイルだけのとき、外すと集合が空になり、旧条件では外したファイルまで
+    走査してしまうため。起動時に入力の集合が空のときは、ディレクトリ全体 (カタログが除外したファイルを含む) でなく
+    何も走査しない動作に変わる。
+  * BLOB の GC の記録はマージのスレッドからも呼ぶ。マージの後に finalize_local_entries() でそのスレッドの thread_local
+    のコンテナを切り離す (dblog_scan のワーカーがファイルごとに行っているのと同じ決まり)。
 
 ## 6. 残った課題
 

@@ -1191,6 +1191,8 @@ void datastore::compact_with_online() {  // NOLINT(readability-function-cognitiv
     // rotated files, so "every entry at or below the boundary is in the inputs" would
     // not hold for it.
     options.set_boundary_epoch(result.get_epoch_id());
+    // The compacted WAL file of the current generation is not scanned but is given to the final merge.
+    options.set_compacted_input_file_name(current_compacted_file_name);
 
     // Determine the file names of the new generation. The generation number increases
     // monotonically across online and offline compactions.
