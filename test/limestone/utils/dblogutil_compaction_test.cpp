@@ -199,6 +199,60 @@ TEST_F(dblogutil_compaction_test, thread_num_option) {
     EXPECT_EQ(list_dir(dir).size(), 2U);  // the log directory is untouched
 }
 
+// --sort_arena_size_mb, --sort_merge_fanin and --sort_work_dir: an invalid value exits with code 64 without starting
+// the processing; the boundary values are accepted
+TEST_F(dblogutil_compaction_test, sort_options) {
+    boost::filesystem::path dir{location};
+    dir /= "log";
+    boost::filesystem::create_directory(dir);
+    create_file(dir / "epoch", data_case1_epoch);
+    create_file(dir / std::string(manifest::file_name), data_manifest());
+    create_file(dir / "pwal_0000", data_case1_pwal0);
+    create_file(dir / "pwal_0001", data_case1_pwal1);
+    boost::filesystem::path work_dir{location};
+    work_dir /= "work";
+    boost::filesystem::create_directory(work_dir);
+
+    std::string out;
+    for (const std::string& option : {std::string("--sort_arena_size_mb 0"), std::string("--sort_arena_size_mb 4097"),
+                                      std::string("--sort_merge_fanin 1"),
+                                      "--sort_work_dir " + (boost::filesystem::path(location) / "missing").string()}) {
+        int rc = invoke(UTIL_COMMAND " compaction --force " + option + " " + dir.string() + " 2>&1", out);
+        EXPECT_EQ(rc, 64 << 8) << option;
+        EXPECT_TRUE(contains(out, "invalid value for --sort_")) << option << "\n" << out;
+        EXPECT_FALSE(contains(out, "dblogdir:")) << option << "\n" << out;  // exits before starting the processing
+    }
+    EXPECT_EQ(list_dir(dir).size(), 2U);  // the log directory is untouched
+
+    int rc = invoke(UTIL_COMMAND " compaction --force --dry_run --sort_arena_size_mb 1 --sort_merge_fanin 2"
+                    " --sort_work_dir " + work_dir.string() + " " + dir.string() + " 2>&1", out);
+    EXPECT_EQ(rc, 0) << out;
+    EXPECT_TRUE(contains(out, "compaction will be successfully completed (dry-run mode)")) << out;
+}
+
+// --sort_work_dir is used by the sort: with a directory that cannot be written, sorting cannot be created under it
+// and the compaction fails
+TEST_F(dblogutil_compaction_test, sort_work_dir_is_used_by_the_sort) {
+    if (geteuid() == 0) { GTEST_SKIP() << "skip when run by root"; }
+    boost::filesystem::path dir{location};
+    dir /= "log";
+    boost::filesystem::create_directory(dir);
+    create_file(dir / "epoch", data_case1_epoch);
+    create_file(dir / std::string(manifest::file_name), data_manifest());
+    create_file(dir / "pwal_0000", data_case1_pwal0);
+    boost::filesystem::path readonly{location};
+    readonly /= "readonly";
+    boost::filesystem::create_directory(readonly);
+    boost::filesystem::permissions(readonly, boost::filesystem::owner_read | boost::filesystem::owner_exe);
+
+    std::string out;
+    int rc = invoke(UTIL_COMMAND " compaction --force --dry_run --sort_work_dir " + readonly.string() + " "
+                    + dir.string() + " 2>&1", out);
+    boost::filesystem::permissions(readonly, boost::filesystem::owner_all);
+    EXPECT_EQ(rc, 64 << 8) << out;
+    EXPECT_TRUE(contains(out, "cannot create sorting directory: " + (readonly / "sorting").string())) << out;
+}
+
 TEST_F(dblogutil_compaction_test, rejects_symlink) {
     // setup normal logdir as same as case1
     boost::filesystem::path dir{location};
