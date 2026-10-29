@@ -81,7 +81,8 @@ void send_operation_flags(replication_message_io& io, std::uint8_t flags);
 
 /**
  * @brief Convert an encoded entry type byte into the LOG entry enum.
- * @param value Wire value of the entry type field.
+ * @param value Wire value of the entry type field. Writes a FATAL log and aborts if it is not a value defined in
+ *              entry_type.
  * @return Decoded LOG entry type.
  */
 [[nodiscard]] limestone::api::log_entry::entry_type decode_entry_type(std::uint8_t value) noexcept;

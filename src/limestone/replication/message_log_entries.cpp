@@ -3,7 +3,12 @@
 #include <algorithm>
 #include <cassert>
 
+#include <glog/logging.h>
+
+#include <limestone/logging.h>
+
 #include "limestone_exception_helper.h"
+#include "logging_helper.h"
 #include "replication_message_io.h"
 #include "log_channel_handler_resources.h"
 #include "log_channel_impl.h"
@@ -208,13 +213,14 @@ void message_log_entries::apply_to(limestone::api::log_channel& channel) const {
             case log_entry::entry_type::remove_storage:
                 channel.remove_storage(entry.storage_id, entry.write_version);
                 break;
+            // the types not allowed in a message, and undefined values
             case log_entry::entry_type::this_id_is_not_used:
             case log_entry::entry_type::marker_begin:
             case log_entry::entry_type::marker_end:
             case log_entry::entry_type::marker_durable:
             case log_entry::entry_type::marker_invalidated_begin:
-                std::string msg = "Invalid entry type: " + std::to_string(static_cast<int>(entry.type));
-                LOG_AND_THROW_EXCEPTION(msg);
+            default:
+                LOG_LP(FATAL) << "unexpected entry type " << static_cast<int>(entry.type);
                 break;
         }
     }

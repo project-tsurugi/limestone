@@ -2,7 +2,13 @@
 
 #include <limits>
 
+#include <glog/logging.h>
+
+#include <limestone/logging.h>
+
 #include "limestone_exception_helper.h"
+#include "log_entry/log_entry_format.h"
+#include "logging_helper.h"
 #include "replication_message_io.h"
 
 namespace limestone::replication::message_log_entries_wire_codec {
@@ -71,6 +77,13 @@ std::uint8_t receive_operation_flags(replication_message_io& io) {
 }
 
 limestone::api::log_entry::entry_type decode_entry_type(std::uint8_t value) noexcept {
+    using limestone::internal::log_entry_format::entry_type;
+    // this_id_is_not_used is a defined value, so it passes here; the receivers abort on it as a type not allowed in a
+    // message
+    if (value != static_cast<std::uint8_t>(entry_type::this_id_is_not_used)
+            && ! limestone::internal::log_entry_format::is_valid_entry_type(value)) {
+        LOG_LP(FATAL) << "undefined entry type value " << static_cast<int>(value);
+    }
     return static_cast<limestone::api::log_entry::entry_type>(value);
 }
 

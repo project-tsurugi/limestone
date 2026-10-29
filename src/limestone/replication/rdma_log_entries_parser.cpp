@@ -7,9 +7,13 @@
 #include <stdexcept>
 
 #include <boost/filesystem.hpp>
+#include <glog/logging.h>
+
+#include <limestone/logging.h>
 
 #include "datastore_impl.h"
 #include "limestone_exception_helper.h"
+#include "logging_helper.h"
 #include "message_log_entries_wire_codec.h"
 #include "primitive_wire_codec.h"
 
@@ -333,12 +337,15 @@ void rdma_log_entries_parser::add_current_entry() {
                     current_entry_.write_version,
                     current_entry_.blob_ids);
             break;
+        // the types not allowed in a message, and undefined values
         case log_entry::entry_type::this_id_is_not_used:
         case log_entry::entry_type::marker_begin:
         case log_entry::entry_type::marker_end:
         case log_entry::entry_type::marker_durable:
         case log_entry::entry_type::marker_invalidated_begin:
-            throw std::runtime_error("Invalid entry type in RDMA LOG_ENTRY parser");
+        default:
+            LOG_LP(FATAL) << "unexpected entry type " << static_cast<int>(current_entry_.type);
+            break;
     }
     --entries_remaining_;
 }

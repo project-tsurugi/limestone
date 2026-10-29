@@ -629,4 +629,16 @@ TEST(rdma_log_entries_parser_test, blob_size_mismatch_larger_than_payload_leaves
     boost::filesystem::remove_all(receiver_location);
 }
 
+TEST(rdma_log_entries_parser_test, aborts_on_entry_type_not_allowed_in_message) {
+    // receiving a type not allowed in a message (a marker) aborts
+    message_log_entries original{323};
+    original.add_clear_storage(3, {30, 31});
+    std::string body = serialize_body(original);
+    // the body has the epoch (8 bytes) and the number of entries (4 bytes), followed by the type of the first entry
+    body[12] = static_cast<char>(log_entry::entry_type::marker_begin);
+
+    rdma_log_entries_parser parser;
+    EXPECT_DEATH((void) parser.consume(body), "unexpected entry type");
+}
+
 }  // namespace limestone::testing

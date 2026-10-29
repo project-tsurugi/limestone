@@ -208,7 +208,7 @@ master へのマージ前に本ファイルを削除する。
 * [x] 分類の判定関数と、利用箇所の entry_type の列挙の置き換え (LE 9.1)。判定関数はステップ 2 で形式の定義のヘッダに
       置いた (5 節)。残りは利用箇所の置き換え。(cursor_impl.cpp の 2 か所を is_data_entry に置き換えた。P12 の
       datastore_snapshot.cpp の箇所はステップ 7 で削除済み。分類でない列挙は残した。5 節)
-* [ ] レプリカの受信で未定義の種別と現れてはならない種別を abort にする (LE 9.1、P21)。
+* [x] レプリカの受信で未定義の種別と現れてはならない種別を abort にする (LE 9.1、P21)。(5 節)
 * [ ] アクセサの種別の検査 (LE 9.2)。参照型と所有型 (旧アクセサの委譲) にはステップ 2 で入れた (5 節)。残りは、検査に
       合わせた利用箇所の確認と、旧名のアクセサの利用箇所を新しい名前へ移すときの見直し。
 * [ ] 新しい名前のアクセサ (serialized_key_sid() など) の追加 (LE 10.3)。旧名は段階 4 まで残す。
@@ -728,6 +728,11 @@ master へのマージ前に本ファイルを削除する。
   (marker_begin と marker_invalidated_begin) の判定 (compaction_carry_writer.cpp)、種別ごとに数え分ける switch
   (dblogutil.cpp)、種別ごとの対応づけや振り分け (parse_wal_file.cpp、wal_sorter.cpp)。レプリカの受信の switch は次の
   項目 (P21) で扱う。
+* 2026-10-29: ステップ 10 のレプリカの受信の種別の扱い (P21)。decode_entry_type に値域の検査を加え、entry_type に定義の
+  ない値で FATAL にした (this_id_is_not_used は定義のある値なので通し、受け手で扱う)。apply_to と rdma モードの
+  add_current_entry の switch で、メッセージに現れてはならない種別 (this_id_is_not_used と marker) を例外から FATAL に
+  変え、同じ case に default を加えた (decode_entry_type を通らない値への備え)。UT は 3 件 (decode_entry_type の未定義の
+  値、rdma の解析と apply_to の marker)。
 
 ## 6. 残った課題
 

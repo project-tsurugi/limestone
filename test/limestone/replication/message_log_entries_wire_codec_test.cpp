@@ -61,4 +61,22 @@ TEST(message_log_entries_wire_codec_test, apply_operation_flags_updates_message)
     EXPECT_TRUE(message.has_flush_flag());
 }
 
+TEST(message_log_entries_wire_codec_test, decode_entry_type_returns_defined_values) {
+    // a defined value is returned as is (the types not allowed in a message also pass here)
+    for (auto const type : {log_entry::entry_type::this_id_is_not_used, log_entry::entry_type::normal_entry,
+                            log_entry::entry_type::normal_with_blob, log_entry::entry_type::remove_entry,
+                            log_entry::entry_type::marker_begin, log_entry::entry_type::marker_end,
+                            log_entry::entry_type::marker_durable, log_entry::entry_type::marker_invalidated_begin,
+                            log_entry::entry_type::clear_storage, log_entry::entry_type::add_storage,
+                            log_entry::entry_type::remove_storage}) {
+        EXPECT_EQ(message_log_entries_wire_codec::decode_entry_type(static_cast<std::uint8_t>(type)), type);
+    }
+}
+
+TEST(message_log_entries_wire_codec_test, decode_entry_type_aborts_on_undefined_value) {
+    // an undefined value aborts (discarding it silently would make the persistent data of the replica differ from
+    // the master)
+    EXPECT_DEATH((void) message_log_entries_wire_codec::decode_entry_type(0xFF), "undefined entry type value 255");
+}
+
 }  // namespace limestone::testing

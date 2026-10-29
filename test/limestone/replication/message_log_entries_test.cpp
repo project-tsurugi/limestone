@@ -470,4 +470,25 @@ TEST_F(message_log_entries_test, write_all_entry_type_to_pwal_via_replication_ch
     EXPECT_TRUE(AssertLogEntry(log_entries[5], 6, std::nullopt, std::nullopt, 600, 6, {}, log_entry::entry_type::remove_storage));
 }
 
+TEST_F(message_log_entries_test, post_receive_aborts_on_entry_type_not_allowed_in_message) {
+    // receiving a type not allowed in a message (a marker) aborts before writing to the log channel
+    message_log_entries original{100};
+    original.add_clear_storage(4, {400, 4});
+    replication_message_io out("");
+    original.send_body(out);
+    std::string body = out.get_out_string();
+    // the body has the epoch (8 bytes) and the number of entries (4 bytes), followed by the type of the first entry
+    body[12] = static_cast<char>(log_entry::entry_type::marker_end);
+
+    message_log_entries received{0};
+    replication_message_io in(body);
+    received.receive_body(in);
+
+    auto& lc = datastore_->create_channel();
+    datastore_->ready();
+    replication_message_io io("");
+    log_channel_handler_resources resources(io, lc);
+    EXPECT_DEATH(received.post_receive(resources), "unexpected entry type");
+}
+
 }  // namespace limestone::testing
