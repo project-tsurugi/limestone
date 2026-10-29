@@ -105,6 +105,58 @@ public:
     }
 };
 
+namespace {
+
+// records the directories passed to fsync_directory, and makes it fail if fail is true
+class directory_sync_recorder : public real_file_operations {
+public:
+    int fsync_directory(const boost::filesystem::path& dir) override {
+        synced_dirs.push_back(dir);
+        if (fail) {
+            errno = EIO;
+            return -1;
+        }
+        return real_file_operations::fsync_directory(dir);
+    }
+    bool fail = false;
+    std::vector<boost::filesystem::path> synced_dirs;
+};
+
+}  // namespace
+
+// create_initial synchronizes the directory of the created manifest, and throws if it fails
+TEST_F(manifest_test, create_initial_synchronizes_directory) {
+    directory_sync_recorder ops;
+    manifest::create_initial(logdir, ops);
+    EXPECT_EQ(ops.synced_dirs, std::vector<boost::filesystem::path>{logdir});
+
+    directory_sync_recorder failing_ops;
+    failing_ops.fail = true;
+    try {
+        manifest::create_initial(logdir, failing_ops);
+        FAIL() << "Expected limestone_io_exception";
+    } catch (const limestone::api::limestone_io_exception& e) {
+        EXPECT_NE(std::string(e.what()).find("Failed to sync directory to disk"), std::string::npos) << e.what();
+    }
+}
+
+// check_and_migrate synchronizes the directory after the rename from the backup, and throws if it fails
+TEST_F(manifest_test, check_and_migrate_rename_backup_synchronizes_directory) {
+    auto backup_path = logdir / std::string(manifest::backup_file_name);
+    nlohmann::json j = { {"format_version", "1.0"}, {"persistent_format_version", 4} };
+    std::ofstream(backup_path.string()) << j.dump();
+
+    directory_sync_recorder failing_ops;
+    failing_ops.fail = true;
+    try {
+        manifest::check_and_migrate(logdir, failing_ops);
+        FAIL() << "Expected limestone_io_exception";
+    } catch (const limestone::api::limestone_io_exception& e) {
+        EXPECT_NE(std::string(e.what()).find("Failed to sync directory to disk"), std::string::npos) << e.what();
+    }
+    EXPECT_EQ(failing_ops.synced_dirs, std::vector<boost::filesystem::path>{logdir});
+}
+
 TEST_F(manifest_test, create_initial_fails_on_fwrite_error) {
     failing_file_ops ops;
     ops.fail_step = failing_file_ops::fail_step_type::fwrite;

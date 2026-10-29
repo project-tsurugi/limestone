@@ -81,6 +81,12 @@ void compaction_catalog::restore_from_backup() {
             LOG_AND_THROW_IO_EXCEPTION("Failed to rename backup file: " + backup_file_path_.string() + " to catalog file: " + catalog_file_path_.string(),
                                        error_num);
         }
+        // persist the result of the rename
+        if (file_ops_->fsync_directory(catalog_file_path_.parent_path()) != 0) {
+            int error_num = errno;
+            LOG_AND_THROW_IO_EXCEPTION("Failed to fsync the directory of compaction catalog file: "
+                                       + catalog_file_path_.parent_path().string(), error_num);
+        }
     } else if (ec && ec != boost::system::errc::no_such_file_or_directory) {
         LOG_AND_THROW_IO_EXCEPTION("Error checking backup file existence", ec.value());
     } else {
@@ -282,6 +288,13 @@ void compaction_catalog::update_catalog_file(epoch_id_type max_epoch_id, blob_id
     if (file_ops_->fsync(fd) != 0) {
         int error_num = errno;
         LOG_AND_THROW_IO_EXCEPTION("Failed to fsync compaction catalog file '" + catalog_file_path_.string() + "'", error_num);
+    }
+
+    // persist the rename to the backup and the creation of the new catalog before returning
+    if (file_ops_->fsync_directory(catalog_file_path_.parent_path()) != 0) {
+        int error_num = errno;
+        LOG_AND_THROW_IO_EXCEPTION("Failed to fsync the directory of compaction catalog file '"
+                                   + catalog_file_path_.parent_path().string() + "'", error_num);
     }
 
     // The file will be automatically closed by unique_ptr when going out of scope

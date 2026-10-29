@@ -62,6 +62,28 @@ public:
     using blob_pool_impl::handle_hmac_result;
 };
 
+namespace {
+
+// records the directories passed to fsync_directory, and makes it fail if fail is true
+class directory_sync_recorder : public real_file_operations {
+public:
+    int fsync_directory(const boost::filesystem::path& dir) override {
+        synced_dirs.push_back(dir);
+        if (fail) {
+            errno = EIO;
+            return -1;
+        }
+        return real_file_operations::fsync_directory(dir);
+    }
+    [[nodiscard]] bool synced(const boost::filesystem::path& dir) const {
+        return std::find(synced_dirs.begin(), synced_dirs.end(), dir) != synced_dirs.end();
+    }
+    bool fail = false;
+    std::vector<boost::filesystem::path> synced_dirs;
+};
+
+}  // namespace
+
 class blob_pool_impl_test : public ::testing::Test {
 protected:
     void SetUp() override {
@@ -1198,6 +1220,119 @@ TEST_F(blob_pool_impl_test, move_file_remove_source_fails) {
     // Verify that both the source and destination files exist
     EXPECT_TRUE(boost::filesystem::exists(source_path)) << "The source file should still exist.";
     EXPECT_TRUE(boost::filesystem::exists(destination_path)) << "The destination file should exist.";
+}
+
+// register_data synchronizes the directory of the created file and the parent of the created subdirectory
+TEST_F(blob_pool_impl_test, register_data_synchronizes_directories) {
+    directory_sync_recorder ops;
+    pool_->set_file_operations(ops);
+    boost::filesystem::path target_path = resolver_->resolve_path(1);
+    ASSERT_FALSE(boost::filesystem::exists(target_path.parent_path()));
+
+    (void) pool_->register_data("test data");
+
+    EXPECT_TRUE(ops.synced(target_path.parent_path()));
+    EXPECT_TRUE(ops.synced(target_path.parent_path().parent_path()));
+}
+
+// failing to synchronize the parent of a created subdirectory throws
+TEST_F(blob_pool_impl_test, register_data_created_directory_sync_fails) {
+    directory_sync_recorder ops;
+    ops.fail = true;
+    pool_->set_file_operations(ops);
+    ASSERT_FALSE(boost::filesystem::exists(resolver_->resolve_path(1).parent_path()));
+
+    EXPECT_THROW_WITH_PARTIAL_MESSAGE(
+        (void) pool_->register_data("test data"),
+        limestone_blob_exception,
+        "Failed to synchronize the parent directory of a created directory: "
+    );
+    EXPECT_TRUE(pool_->get_blob_ids().empty());
+}
+
+// if register_data fails to synchronize the directory of the created file, it throws and removes the file
+TEST_F(blob_pool_impl_test, register_data_directory_sync_fails) {
+    boost::filesystem::path target_path = resolver_->resolve_path(1);
+    boost::filesystem::create_directories(target_path.parent_path());
+    directory_sync_recorder ops;
+    ops.fail = true;
+    pool_->set_file_operations(ops);
+
+    EXPECT_THROW_WITH_PARTIAL_MESSAGE(
+        (void) pool_->register_data("test data"),
+        limestone_blob_exception,
+        "Failed to synchronize the directory of the destination file: "
+    );
+    EXPECT_FALSE(boost::filesystem::exists(target_path));
+    EXPECT_TRUE(pool_->get_blob_ids().empty());
+}
+
+// registering by copying throws and removes the file if synchronizing the directory of the created file fails
+TEST_F(blob_pool_impl_test, register_file_copy_directory_sync_fails) {
+    boost::filesystem::path source_path("/tmp/blob_pool_impl_test/source_blob_copy_dir_sync_fail");
+    std::ofstream(source_path.string()) << "test data";
+    boost::filesystem::path target_path = resolver_->resolve_path(1);
+    boost::filesystem::create_directories(target_path.parent_path());
+    directory_sync_recorder ops;
+    ops.fail = true;
+    pool_->set_file_operations(ops);
+
+    EXPECT_THROW_WITH_PARTIAL_MESSAGE(
+        (void) pool_->register_file(source_path, false),
+        limestone_blob_exception,
+        "Failed to synchronize the directory of the destination file: "
+    );
+    EXPECT_TRUE(boost::filesystem::exists(source_path));
+    EXPECT_FALSE(boost::filesystem::exists(target_path));
+    EXPECT_TRUE(pool_->get_blob_ids().empty());
+}
+
+// registering by moving synchronizes the destination directory
+TEST_F(blob_pool_impl_test, register_file_move_synchronizes_directory) {
+    boost::filesystem::path source_path("/tmp/blob_pool_impl_test/source_blob_move_dir_sync");
+    std::ofstream(source_path.string()) << "test data";
+    directory_sync_recorder ops;
+    pool_->set_file_operations(ops);
+
+    (void) pool_->register_file(source_path, true);
+
+    EXPECT_TRUE(ops.synced(resolver_->resolve_path(1).parent_path()));
+}
+
+// registering by moving throws and registers nothing if synchronizing the destination directory fails
+TEST_F(blob_pool_impl_test, register_file_move_directory_sync_fails) {
+    boost::filesystem::path source_path("/tmp/blob_pool_impl_test/source_blob_move_dir_sync_fail");
+    std::ofstream(source_path.string()) << "test data";
+    boost::filesystem::create_directories(resolver_->resolve_path(1).parent_path());
+    directory_sync_recorder ops;
+    ops.fail = true;
+    pool_->set_file_operations(ops);
+
+    EXPECT_THROW_WITH_PARTIAL_MESSAGE(
+        (void) pool_->register_file(source_path, true),
+        limestone_blob_exception,
+        "Failed to synchronize the directory of the moved file: "
+    );
+    EXPECT_TRUE(pool_->get_blob_ids().empty());
+}
+
+// duplicate_data synchronizes the directory of the link; if it fails, it throws and registers nothing
+TEST_F(blob_pool_impl_test, duplicate_data_synchronizes_directory) {
+    blob_id_type original = pool_->register_data("test data");
+    directory_sync_recorder ops;
+    pool_->set_file_operations(ops);
+
+    blob_id_type duplicated = pool_->duplicate_data(original);
+    EXPECT_TRUE(ops.synced(resolver_->resolve_path(duplicated).parent_path()));
+
+    ops.fail = true;
+    boost::filesystem::create_directories(resolver_->resolve_path(duplicated + 1).parent_path());
+    EXPECT_THROW_WITH_PARTIAL_MESSAGE(
+        (void) pool_->duplicate_data(original),
+        limestone_blob_exception,
+        "Failed to synchronize the directory of the hard link: "
+    );
+    EXPECT_EQ(pool_->get_blob_ids().size(), 2U);
 }
 
 TEST_F(blob_pool_impl_test, register_data_success) {

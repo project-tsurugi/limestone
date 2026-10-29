@@ -878,6 +878,75 @@ TEST_F(compaction_catalog_test, restore_from_backup_exceptions) {
 // Verifies that max_blob_id is a monotonically non-decreasing high-water mark:
 // update_catalog_file must never lower it (blob IDs must never be reused), while
 // max_epoch_id is set directly.
+namespace {
+
+// records the directories passed to fsync_directory, and makes it fail if fail is true
+class directory_sync_recorder : public limestone::internal::real_file_operations {
+public:
+    directory_sync_recorder(std::vector<boost::filesystem::path>& synced_dirs, bool fail)
+        : synced_dirs_(synced_dirs), fail_(fail) {}
+    int fsync_directory(const boost::filesystem::path& dir) override {
+        synced_dirs_.push_back(dir);
+        if (fail_) {
+            errno = EIO;
+            return -1;
+        }
+        return real_file_operations::fsync_directory(dir);
+    }
+private:
+    std::vector<boost::filesystem::path>& synced_dirs_;
+    bool fail_;
+};
+
+}  // namespace
+
+// update_catalog_file synchronizes the catalog directory before returning, and throws if it fails
+TEST_F(compaction_catalog_test, update_catalog_file_synchronizes_directory) {
+    testable_compaction_catalog catalog(test_dir);
+    std::set<compacted_file_info> compacted_files = {{"file1", 1}};
+    std::set<std::string> detached_pwals = {"pwal1"};
+
+    std::vector<boost::filesystem::path> synced_dirs;
+    catalog.set_file_operations(std::make_unique<directory_sync_recorder>(synced_dirs, false));
+    catalog.update_catalog_file(10, 20, 0, compacted_files, std::nullopt, detached_pwals);
+    EXPECT_EQ(synced_dirs, std::vector<boost::filesystem::path>{catalog_file_path.parent_path()});
+
+    catalog.set_file_operations(std::make_unique<directory_sync_recorder>(synced_dirs, true));
+    try {
+        catalog.update_catalog_file(10, 20, 0, compacted_files, std::nullopt, detached_pwals);
+        FAIL() << "expected limestone_io_exception";
+    } catch (const limestone_io_exception& e) {
+        EXPECT_EQ(e.error_code(), EIO);
+        EXPECT_NE(std::string(e.what()).find("Failed to fsync the directory of compaction catalog file"),
+                  std::string::npos) << e.what();
+    }
+}
+
+// restore_from_backup synchronizes the catalog directory after the rename from the backup, and throws if it fails
+TEST_F(compaction_catalog_test, restore_from_backup_synchronizes_directory) {
+    test_file_writer writer(backup_file_path.string());
+    testable_compaction_catalog catalog(test_dir);
+
+    std::vector<boost::filesystem::path> synced_dirs;
+    writer.clear();
+    writer << COMPACTION_CATALOG_CONTENT;
+    catalog.set_file_operations(std::make_unique<directory_sync_recorder>(synced_dirs, false));
+    catalog.restore_from_backup();
+    EXPECT_EQ(synced_dirs, std::vector<boost::filesystem::path>{catalog_file_path.parent_path()});
+
+    writer.clear();
+    writer << COMPACTION_CATALOG_CONTENT;
+    catalog.set_file_operations(std::make_unique<directory_sync_recorder>(synced_dirs, true));
+    try {
+        catalog.restore_from_backup();
+        FAIL() << "expected limestone_io_exception";
+    } catch (const limestone_io_exception& e) {
+        EXPECT_EQ(e.error_code(), EIO);
+        EXPECT_NE(std::string(e.what()).find("Failed to fsync the directory of compaction catalog file"),
+                  std::string::npos) << e.what();
+    }
+}
+
 TEST_F(compaction_catalog_test, max_blob_id_is_monotonically_non_decreasing) {
     compaction_catalog catalog(test_dir);
 

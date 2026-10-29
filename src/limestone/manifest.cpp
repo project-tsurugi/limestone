@@ -87,6 +87,11 @@ void manifest::write_file_safely(
         std::string err_msg = "Failed to close file: " + file_path.string();
         LOG_AND_THROW_IO_EXCEPTION(err_msg, errno);
     }
+    // persist the name of the created file
+    if (ops.fsync_directory(file_path.parent_path()) != 0) {
+        std::string err_msg = "Failed to sync directory to disk: " + file_path.parent_path().string();
+        LOG_AND_THROW_IO_EXCEPTION(err_msg, errno);
+    }
 }
 
 
@@ -161,6 +166,11 @@ manifest::migration_info manifest::check_and_migrate(const boost::filesystem::pa
         if (ec) {
             std::string err_msg = "Failed to rename manifest backup from " + manifest_backup_path.string() + " to " + manifest_path.string();
             LOG_AND_THROW_IO_EXCEPTION(err_msg, ec);
+        }
+        // persist the result of the rename
+        if (ops.fsync_directory(logdir) != 0) {
+            std::string err_msg = "Failed to sync directory to disk: " + logdir.string();
+            LOG_AND_THROW_IO_EXCEPTION(err_msg, errno);
         }
         manifest = manifest_backup;
     }
