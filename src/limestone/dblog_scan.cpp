@@ -31,7 +31,6 @@
 #include "dblog_scan.h"
 #include "log_entry.h"
 #include "log_entry/log_entry_reader.h"
-#include "sortdb_wrapper.h"
 
 namespace {
 using namespace limestone;

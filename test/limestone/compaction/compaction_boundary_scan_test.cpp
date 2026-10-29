@@ -38,7 +38,7 @@ using limestone::internal::compaction_options;
 // Verifies the boundary behavior of the compaction scan (its first pass) by calling
 // create_compaction_output directly with the boundary epoch set on
 // compaction_options: entries of the snippets beyond the boundary must not reach the
-// compacted file (the sortdb).
+// compacted file.
 class compaction_boundary_scan_test : public ::testing::Test {
 public:
     static constexpr const char* location = "/tmp/compaction_boundary_scan_test";

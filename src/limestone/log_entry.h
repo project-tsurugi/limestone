@@ -299,22 +299,6 @@ public:
         write_bytes(strm, value.data(), value_len);
     }
 
-    static void write(FILE* strm, std::string_view key_sid, std::string_view value_etc) {
-        entry_type type = entry_type::normal_entry;
-        write_uint8(strm, static_cast<std::uint8_t>(type));
-
-        std::size_t key_len = key_sid.length() - sizeof(storage_id_type);
-        assert(key_len <= UINT32_MAX);
-        write_uint32le(strm, static_cast<std::uint32_t>(key_len));
-
-        std::size_t value_len = value_etc.length() - (sizeof(epoch_id_type) + sizeof(std::uint64_t));
-        assert(value_len <= UINT32_MAX);
-        write_uint32le(strm, static_cast<std::uint32_t>(value_len));
-
-        write_bytes(strm, key_sid.data(), key_sid.length());
-        write_bytes(strm, value_etc.data(), value_etc.length());
-    }
-
     static void write_with_blob(
         FILE* strm, 
         storage_id_type storage_id, 
