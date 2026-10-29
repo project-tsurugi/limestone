@@ -18,9 +18,9 @@
 #include "test_root.h"
 
 #include <boost/filesystem.hpp>
-#include <boost/filesystem/fstream.hpp>
 
 #include "log_entry.h"
+#include "log_entry/log_entry_reader.h"
 
 namespace limestone::testing {
 
@@ -72,16 +72,13 @@ protected:
     }
 
     void verify_log_entries(const boost::filesystem::path& file_path) {
-        limestone::api::log_entry log_entry;
-        boost::filesystem::ifstream istrm;
-        istrm.open(file_path, std::ios_base::in | std::ios_base::binary);
-
-        EXPECT_TRUE(log_entry_begin_.read(istrm));
-        EXPECT_TRUE(log_entry_normal_.read(istrm));
-        EXPECT_TRUE(log_entry_normal_with_blob_.read(istrm));
-        EXPECT_TRUE(log_entry_end_.read(istrm));
-        EXPECT_FALSE(log_entry.read(istrm));
-        istrm.close();
+        limestone::internal::log_entry_reader reader(file_path);
+        for (auto* entry : {&log_entry_begin_, &log_entry_normal_, &log_entry_normal_with_blob_, &log_entry_end_}) {
+            const auto read_result = reader.next();
+            ASSERT_EQ(read_result.result(), limestone::internal::log_entry_read_result::status::ok);
+            *entry = limestone::api::log_entry{read_result.view()};
+        }
+        EXPECT_EQ(reader.next().result(), limestone::internal::log_entry_read_result::status::end);
 
         EXPECT_EQ(log_entry_begin_.type(), limestone::api::log_entry::entry_type::marker_begin);
         EXPECT_EQ(log_entry_begin_.epoch_id(), epoch_id);
@@ -89,34 +86,17 @@ protected:
         EXPECT_EQ(log_entry_normal_.type(), limestone::api::log_entry::entry_type::normal_entry);
         EXPECT_EQ(log_entry_normal_.storage(), storage_id);
 
-        std::string buf_key;
-        log_entry_normal_.key(buf_key);
-        EXPECT_EQ(buf_key, key);
-
-        std::string buf_value;
-        log_entry_normal_.value(buf_value);
-        EXPECT_EQ(buf_value, value);
-
-        limestone::api::write_version_type buf_version;
-        log_entry_normal_.write_version(buf_version);
-        EXPECT_EQ(buf_version, write_version);
+        EXPECT_EQ(log_entry_normal_.key(), key);
+        EXPECT_EQ(log_entry_normal_.value(), value);
+        EXPECT_EQ(log_entry_normal_.write_version(), write_version);
 
         EXPECT_EQ(log_entry_normal_with_blob_.type(), limestone::api::log_entry::entry_type::normal_with_blob);
         EXPECT_EQ(log_entry_normal_with_blob_.storage(), storage_id);
 
-        std::string buf_key2;
-        log_entry_normal_with_blob_.key(buf_key2);
-        EXPECT_EQ(buf_key2, key2);
-
-        std::string buf_value2;
-        log_entry_normal_with_blob_.value(buf_value2);
-        EXPECT_EQ(buf_value2, value2);
-
-        limestone::api::write_version_type buf_version2;
-        log_entry_normal_with_blob_.write_version(buf_version2);
-        EXPECT_EQ(buf_version2, write_version2);
-
-        EXPECT_EQ(log_entry_normal_with_blob_.get_blob_ids(), blob_ids);
+        EXPECT_EQ(log_entry_normal_with_blob_.key(), key2);
+        EXPECT_EQ(log_entry_normal_with_blob_.value(), value2);
+        EXPECT_EQ(log_entry_normal_with_blob_.write_version(), write_version2);
+        EXPECT_EQ(log_entry_normal_with_blob_.blob_ids(), blob_ids);
 
         EXPECT_EQ(log_entry_end_.type(), limestone::api::log_entry::entry_type::marker_end);
         EXPECT_EQ(log_entry_end_.epoch_id(), epoch_id + 1);
@@ -124,24 +104,24 @@ protected:
 };
 
 TEST_F(log_entry_type_test, write_and_read) {
-    limestone::api::log_entry log_entry;
-
     write_log_entries(file1_);
     verify_log_entries(file1_);
 }
 
 TEST_F(log_entry_type_test, write_and_read_and_write_and_read) {
-    limestone::api::log_entry log_entry;
-    
     write_log_entries(file1_);
 
-    boost::filesystem::ifstream istrm;
-    istrm.open(file1_, std::ios_base::in | std::ios_base::binary);
+    limestone::internal::log_entry_reader reader(file1_);
     FILE* ostrm2 = fopen(file2_.c_str(), "a");
-    while(log_entry.read(istrm)) {
-        log_entry.write(ostrm2);
+    while (true) {
+        const auto read_result = reader.next();
+        if (read_result.result() != limestone::internal::log_entry_read_result::status::ok) {
+            EXPECT_EQ(read_result.result(), limestone::internal::log_entry_read_result::status::end);
+            break;
+        }
+        limestone::api::log_entry::write_serialized(ostrm2, read_result.view(),
+                                                    limestone::api::log_entry::write_version_handling::keep);
     }
-    istrm.close();
     fclose(ostrm2);
 
     verify_log_entries(file2_);
