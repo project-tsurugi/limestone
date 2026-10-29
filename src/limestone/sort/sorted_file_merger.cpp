@@ -63,32 +63,33 @@ struct merge_source {
  *         not a data entry
  */
 std::optional<log_entry_view> read_next_entry(merge_source& source) {
-    log_entry_read_result r = source.reader->next();
+    log_entry_read_result read_result = source.reader->next();
     if (source.unread) {
         source.unread = false;
-        if (r.result() == log_entry_read_result::status::ok && r.view().type() == format::entry_type::marker_begin) {
-            r = source.reader->next();
+        if (read_result.result() == log_entry_read_result::status::ok
+            && read_result.view().type() == format::entry_type::marker_begin) {
+            read_result = source.reader->next();
         }
     }
-    switch (r.result()) {
+    switch (read_result.result()) {
     case log_entry_read_result::status::ok:
-        if (! format::is_data_entry(r.view().type())) {
+        if (! format::is_data_entry(read_result.view().type())) {
             std::ostringstream message;
-            message << "merge input is broken (non-data entry " << r.view().type() << ") at offset " << r.offset()
-                    << ": " << source.file.string();
+            message << "merge input is broken (non-data entry " << read_result.view().type() << ") at offset "
+                    << read_result.offset() << ": " << source.file.string();
             LOG_AND_THROW_IO_EXCEPTION_NO_ERRNO(message.str());
         }
-        return r.view();
+        return read_result.view();
     case log_entry_read_result::status::end:
         return std::nullopt;
     case log_entry_read_result::status::error: {
         std::ostringstream message;
-        message << "merge input is broken (" << r.error().message() << ") at offset " << r.offset() << ": "
-                << source.file.string();
+        message << "merge input is broken (" << read_result.error().message() << ") at offset "
+                << read_result.offset() << ": " << source.file.string();
         LOG_AND_THROW_IO_EXCEPTION_NO_ERRNO(message.str());
     }
     }
-    LOG_LP(FATAL) << "unexpected read result " << r.result();
+    LOG_LP(FATAL) << "unexpected read result " << read_result.result();
     return std::nullopt;
 }
 

@@ -65,18 +65,18 @@ void cursor_impl::close() {
 void cursor_impl::validate_and_read_stream(std::optional<log_entry_reader>& reader, const std::string& stream_name,
                                            std::optional<log_entry>& log_entry, std::string& previous_key_sid) {
     while (reader) {
-        const auto r = reader->next();
+        const auto read_result = reader->next();
         // Close the reader at the end of the file
-        if (r.result() == log_entry_read_result::status::end) {
+        if (read_result.result() == log_entry_read_result::status::end) {
             DVLOG_LP(log_trace) << stream_name << " file reached the end, closing it.";
             reader = std::nullopt;
             return;
         }
-        if (r.result() == log_entry_read_result::status::error) {
-            LOG_AND_THROW_EXCEPTION(stream_name + " file is broken at offset " + std::to_string(r.offset()) + ": "
-                                    + r.error().message());
+        if (read_result.result() == log_entry_read_result::status::error) {
+            LOG_AND_THROW_EXCEPTION(stream_name + " file is broken at offset " + std::to_string(read_result.offset())
+                                    + ": " + read_result.error().message());
         }
-        const auto view = r.view();
+        const auto view = read_result.view();
         if (! log_entry_format::is_data_entry(view.type())) {
             continue;
         }

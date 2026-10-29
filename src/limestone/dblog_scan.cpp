@@ -57,22 +57,22 @@ std::optional<epoch_id_type> last_durable_epoch(const boost::filesystem::path& f
     // ASSERT: file exists
     log_entry_reader reader(file);
     while (true) {
-        const auto r = reader.next();
-        if (r.result() == log_entry_read_result::status::end) {
+        const auto read_result = reader.next();
+        if (read_result.result() == log_entry_read_result::status::end) {
             break;
         }
-        if (r.result() == log_entry_read_result::status::error) {
+        if (read_result.result() == log_entry_read_result::status::error) {
             LOG_AND_THROW_EXCEPTION("this epoch file is broken: " + file.string() + " at offset "
-                                    + std::to_string(r.offset()) + ": " + r.error().message());
+                                    + std::to_string(read_result.offset()) + ": " + read_result.error().message());
         }
-        const auto e = r.view();
-        if (e.type() != log_entry::entry_type::marker_durable) {
+        const auto entry = read_result.view();
+        if (entry.type() != log_entry::entry_type::marker_durable) {
             LOG_AND_THROW_EXCEPTION("this epoch file is broken: " + file.string() + " at offset "
-                                    + std::to_string(r.offset()) + ": unexpected log_entry type: "
-                                    + std::to_string(static_cast<int>(e.type())));
+                                    + std::to_string(read_result.offset()) + ": unexpected log_entry type: "
+                                    + std::to_string(static_cast<int>(entry.type())));
         }
-        if (!rv.has_value() || e.epoch_id() > rv) {
-            rv = e.epoch_id();
+        if (!rv.has_value() || entry.epoch_id() > rv) {
+            rv = entry.epoch_id();
         }
     }
     return rv;

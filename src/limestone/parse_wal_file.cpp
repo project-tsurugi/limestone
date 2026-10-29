@@ -183,14 +183,14 @@ using namespace limestone::api;
             UNKNOWN_TYPE_entry = 1001,
         };
 
-        explicit lex_token(const log_entry_read_result& r) {
-            set(r);
+        explicit lex_token(const log_entry_read_result& read_result) {
+            set(read_result);
         }
-        void set(const log_entry_read_result& r) {
-            if (r.result() != log_entry_read_result::status::error) {
-                if (r.result() == log_entry_read_result::status::end) {
+        void set(const log_entry_read_result& read_result) {
+            if (read_result.result() != log_entry_read_result::status::error) {
+                if (read_result.result() == log_entry_read_result::status::end) {
                     value_ = token_type::eof;
-                } else switch (r.view().type()) {  // NOLINT(*braces-around-statements)
+                } else switch (read_result.view().type()) {  // NOLINT(*braces-around-statements)
                 case log_entry::entry_type::normal_entry:             value_ = token_type::normal_entry; break;
                 case log_entry::entry_type::normal_with_blob:         value_ = token_type::normal_with_blob; break;
                 case log_entry::entry_type::marker_begin:             value_ = token_type::marker_begin; break;
@@ -203,8 +203,8 @@ using namespace limestone::api;
                 case log_entry::entry_type::remove_storage:           value_ = token_type::remove_storage; break;
                 default: assert(false);
                 }
-            } else if (r.error().value() == log_entry::read_error::short_entry) {
-                switch (r.error().entry_type()) {
+            } else if (read_result.error().value() == log_entry::read_error::short_entry) {
+                switch (read_result.error().entry_type()) {
                 case log_entry::entry_type::normal_entry:             value_ = token_type::SHORT_normal_entry; break;
                 case log_entry::entry_type::normal_with_blob:         value_ = token_type::SHORT_normal_with_blob; break;
                 case log_entry::entry_type::marker_begin:             value_ = token_type::SHORT_marker_begin; break;
@@ -217,7 +217,7 @@ using namespace limestone::api;
                 case log_entry::entry_type::remove_storage:           value_ = token_type::SHORT_remove_storage; break;
                 default: assert(false);
                 }
-            } else if (r.error().value() == log_entry::read_error::unknown_type) {
+            } else if (read_result.error().value() == log_entry::read_error::unknown_type) {
                 value_ = token_type::UNKNOWN_TYPE_entry;
             } else {
                 assert(false);
@@ -313,17 +313,19 @@ epoch_id_type dblog_scan::scan_one_pwal_file(  // NOLINT(readability-function-co
         if (input.stopped()) {
             break;  // the scan is aborted: leaves the rest unread and returns after the cleanup only
         }
-        const auto r = reader->next();
-        const auto fpos_before_read_entry = static_cast<std::streamoff>(r.offset());
-        if (r.result() == log_entry_read_result::status::ok) {
-            e = log_entry{r.view()};
+        const auto read_result = reader->next();
+        const auto fpos_before_read_entry = static_cast<std::streamoff>(read_result.offset());
+        if (read_result.result() == log_entry_read_result::status::ok) {
+            e = log_entry{read_result.view()};
             ec = log_entry::read_error{};
         } else {
             e = log_entry{};
-            ec = r.result() == log_entry_read_result::status::error ? r.error() : log_entry::read_error{};
+            ec = read_result.result() == log_entry_read_result::status::error ? read_result.error()
+                                                                              : log_entry::read_error{};
         }
-        VLOG_LP(45) << "read: { result:" << r.result() << ", ec:" << ec.value() << " : " << ec.message() << ", e:" << static_cast<int>(e.type()) << "}";
-        lex_token tok{r};
+        VLOG_LP(45) << "read: { result:" << read_result.result() << ", ec:" << ec.value() << " : " << ec.message()
+                    << ", e:" << static_cast<int>(e.type()) << "}";
+        lex_token tok{read_result};
         VLOG_LP(45) << "token: " << static_cast<int>(tok.value());
         bool aborted = false;
         switch (tok.value()) {
