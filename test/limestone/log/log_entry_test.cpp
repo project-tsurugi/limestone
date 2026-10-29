@@ -227,8 +227,8 @@ TEST(log_entry_test, copy_and_move_default_state) {
     expect_default_state(move_assigned);
 }
 
-// the accessors with the new names also abort when asked for a value that is not valid
-TEST(log_entry_test, new_accessor_not_valid_for_type) {
+// the accessors abort when asked for a value that is not valid
+TEST(log_entry_test, accessor_not_valid_for_type) {
     log_entry normal = make_entry(normal_entry(1, "key", "value", 7, 3));
     EXPECT_DEATH((void) normal.blob_ids(), "log_entry_view:blob_ids not valid");
     EXPECT_DEATH((void) normal.serialized_blob_ids(), "log_entry_view:serialized_blob_ids not valid");

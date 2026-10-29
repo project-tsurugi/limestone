@@ -241,6 +241,7 @@ master へのマージ前に本ファイルを削除する。
       ステップ 7 で、前倒しして削除した (5 節)。(残りを削除した。5 節)
 * [x] 公開 API write_version_type(const std::string&)・write_version_type(std::string_view) の扱い (Q4 による)。
       (削除した。5 節)
+* [x] 旧名のアクセサのテストの削除に伴う new_accessor_not_valid_for_type の改名 (accessor_not_valid_for_type へ)。
 
 ### ステップ 13: ディレクトリの fsync と BLOB の移動の fsync
 
