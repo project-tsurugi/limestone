@@ -227,7 +227,7 @@ master へのマージ前に本ファイルを削除する。
 * [ ] std::istream から読む残りの呼び出し元を新しい読み込みに移す。
   * [x] cursor_impl (読み込みと参照型、新しいアクセサ)。(5 節)
   * [x] partitioned_cursor_impl のアクセサ。
-  * [ ] compaction_carry_writer。
+  * [x] compaction_carry_writer。
   * [ ] レプリカの受信 (移すものはない。entry_type だけを使う)。
   * [ ] テスト (ファイルの中身を確かめるための read と旧名のアクセサ)。read、read_entry_from、旧名のアクセサそのものを
         試すテストは、ステップ 12 で旧 API と一緒に削除する。
