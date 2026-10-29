@@ -991,7 +991,7 @@ rotation_result datastore::rotate_log_files() {  // NOLINT(readability-function-
                 if (channel == nullptr) {
                     // Orphan file: nobody has it open, so it can be renamed on the spot.
                     impl_->on_rotate_before_rename();  // for testing
-                    boost::filesystem::path renamed = internal::rotate_pwal_file(target, 0, impl_->file_ops());
+                    boost::filesystem::path renamed = internal::rotate_pwal_file(target, 0);
                     add_file(renamed);
                     subtract_file(target);
                     result.add_rotated_file(renamed.filename().string());
@@ -1032,6 +1032,13 @@ rotation_result datastore::rotate_log_files() {  // NOLINT(readability-function-
             }
         }
         if (!aborted_by_shutdown) {
+            // persist the results of all the renames by synchronizing the directory once here, not after every
+            // rename: that would run under rotation_state.mutex and stall begin_session and end_session of all the
+            // channels. A give-up does not synchronize; a pwal is handled at the next startup under either name
+            if (impl_->file_ops().fsync_directory(location_) != 0) {
+                LOG_AND_THROW_IO_EXCEPTION(
+                    "Failed to fsync the log directory after the rotation: " + location_.string(), errno);
+            }
             auto wait_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
                 std::chrono::steady_clock::now() - wait_begin).count();
             VLOG_LP(log_info) << "rotation request completed: boundary epoch = " << epoch_id

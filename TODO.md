@@ -876,6 +876,15 @@ master へのマージ前に本ファイルを削除する。
   改め、6.7 節の転送完了待ち API にも同じことを加え、17 節の申し送り事項を削除した。インスタントリカバリの受信の扱いの
   詳細は S4 で詰める。DF の 10 節に決定を記録した。ステップ 13 は、S1 メモ 5 節の「fsync、close、キャリーファイルの
   作成の構造は変えない」からの変更である (コンパクションの公開の rename の後にディレクトリの fsync を加えた)。
+* 2026-10-29: ステップ 13 の /crv の指摘への対応。(1) datastore のコンストラクタで location の親を fsync するとき、
+  location_.parent_path() は相対 1 要素 ("data") で空に、末尾の区切り付き ("data/") で自分自身になるので、canonical に
+  して remove_trailing_dir_separators (2024 年の make_tmp_dir_next_to の末尾区切り対応と同じ手法) で落としてから親を
+  取る。location_ 自身を絶対パスにするのは、公開 API が返すパスの文字列が変わる設計変更なので、ステップ 14 の判断事項に
+  した。(2) ローテーションの rename のディレクトリ fsync を、rename ごと (rotation_state.mutex の中。全チャネルの
+  begin_session と end_session が止まる) から、rotate_log_files の最後に mutex の外で 1 回に変えた。永続化が要るのは
+  rotate_log_files が返る前だけで、rename はジャーナリング FS でクラッシュに対して原子的 (前後どちらかの名前になる) で、
+  どちらの名前の pwal も次の起動で読めるので、途中で落ちても害はない。shutdown で諦めたときは fsync しない。
+  rotate_pwal_file は rename だけを行い、file_operations を受けない。
 
 ## 6. 残った課題
 

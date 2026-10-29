@@ -322,25 +322,75 @@ TEST_F(directory_fsync_test, pwal_creation_directory_sync_fails) {
     ops_.fail_if({});
 }
 
-// rotate_pwal_file synchronizes the directory after the rename, and throws if it fails
-TEST_F(directory_fsync_test, rotate_pwal_file_synchronizes_directory) {
-    boost::filesystem::create_directories(location_);
-    const boost::filesystem::path pwal = location_ / "pwal_0000";
-    std::ofstream(pwal.string()) << "data";
-    directory_sync_recorder ops;
+// the rotation synchronizes the directory once at its end, whatever the number of the renamed files
+TEST_F(directory_fsync_test, rotation_synchronizes_directory_once) {
+    gen_datastore();
+    auto& channel1 = datastore_->create_channel();
+    auto& channel2 = datastore_->create_channel();
+    datastore_->ready();
+    datastore_->switch_epoch(2);
+    channel1.begin_session();
+    channel1.end_session();
+    channel2.begin_session();
+    channel2.end_session();
+    ops_.clear();
 
-    (void) limestone::internal::rotate_pwal_file(pwal, 1, ops);
-    EXPECT_EQ(ops.count(location_), 1U);
+    // the backup also rotates the epoch file before the rotation (one fsync). It waits for the epoch to advance, so
+    // switch the epoch in another thread
+    std::atomic<bool> backup_completed{false};
+    std::atomic<limestone::api::epoch_id_type> epoch{3};
+    std::thread switch_epoch_thread([&]() {
+        while (!backup_completed.load()) {
+            datastore_->switch_epoch(epoch++);
+            std::this_thread::sleep_for(std::chrono::milliseconds(1));
+        }
+    });
+    (void) datastore_->begin_backup(limestone::api::backup_type::standard);
+    backup_completed.store(true);
+    switch_epoch_thread.join();
+    EXPECT_EQ(ops_.count(location_), 2U) << "the epoch file rotation and the pwal rotation";
+}
 
-    std::ofstream(pwal.string()) << "data";
-    ops.fail_if([](const boost::filesystem::path&) { return true; });
+// failing to synchronize the directory at the end of the rotation
+TEST_F(directory_fsync_test, rotation_directory_sync_fails) {
+    gen_datastore();
+    auto& channel = datastore_->create_channel();
+    datastore_->ready();
+    datastore_->switch_epoch(2);
+    channel.begin_session();
+    channel.end_session();
+    // fail only the fsync after the renames (the fsync of the epoch file rotation passes)
+    ops_.fail_if([this](const boost::filesystem::path& dir) {
+        if (dir != location_) {
+            return false;
+        }
+        for (const boost::filesystem::path& p : boost::filesystem::directory_iterator(location_)) {
+            if (p.filename().string().rfind("pwal_0000.", 0) == 0) {
+                return true;
+            }
+        }
+        return false;
+    });
+
+    std::atomic<bool> backup_completed{false};
+    std::atomic<limestone::api::epoch_id_type> epoch{3};
+    std::thread switch_epoch_thread([&]() {
+        while (!backup_completed.load()) {
+            datastore_->switch_epoch(epoch++);
+            std::this_thread::sleep_for(std::chrono::milliseconds(1));
+        }
+    });
     try {
-        (void) limestone::internal::rotate_pwal_file(pwal, 2, ops);
+        (void) datastore_->begin_backup(limestone::api::backup_type::standard);
         FAIL() << "expected limestone_io_exception";
     } catch (const limestone_io_exception& e) {
         EXPECT_EQ(e.error_code(), EIO);
-        EXPECT_NE(std::string(e.what()).find("Failed to fsync directory"), std::string::npos) << e.what();
+        EXPECT_NE(std::string(e.what()).find("Failed to fsync the log directory after the rotation"), std::string::npos)
+            << e.what();
     }
+    backup_completed.store(true);
+    switch_epoch_thread.join();
+    ops_.fail_if({});
 }
 
 // rewriting the epoch file (the rename from the temporary file) synchronizes the directory, and throws if it fails

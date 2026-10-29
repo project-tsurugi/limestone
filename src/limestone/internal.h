@@ -61,14 +61,13 @@ bool is_unrotated_pwal_name(std::string_view filename) noexcept;
  *        the wall clock until the target name is free when it already exists
  * @note concurrent calls on the same file are not allowed; the caller must
  *       hold the exclusion (the single mutex of the rotation mechanism)
+ * @note the result of the rename is not persisted; the rotation synchronizes the directory once at its end
  * @param file the pwal file to rename
  * @param epoch the epoch part of the rotated name
- * @param ops the file_operations used to synchronize the directory
- * @return the path of the renamed file. The result of the rename is persisted when this returns
- * @throws limestone_io_exception if the rename, the existence check or the fsync of the directory fails
+ * @return the path of the renamed file
+ * @throws limestone_io_exception if the rename or the existence check fails
  */
-boost::filesystem::path rotate_pwal_file(boost::filesystem::path const& file, epoch_id_type epoch,
-                                         file_operations& ops);
+boost::filesystem::path rotate_pwal_file(boost::filesystem::path const& file, epoch_id_type epoch);
 
 /**
  * @brief type of the testing hook; returning an error_code skips the rename and fails
