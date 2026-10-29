@@ -18,7 +18,6 @@
 #include <cassert>
 #include <cstdio>
 #include <endian.h>
-#include <istream>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -272,14 +271,6 @@ public:
     static void write_serialized(FILE* strm, const limestone::internal::log_entry_view& entry,
                                  write_version_handling handling = write_version_handling::keep);
 
-    /**
-     * @brief Writes the serialized value of the entry as is. Writes a FATAL log and aborts in the
-     *        default-constructed state.
-     * @param strm the output stream
-     * @throws limestone_io_exception if writing fails
-     */
-    void write(FILE* strm) const;
-
     static void write(FILE* strm, storage_id_type storage_id, std::string_view key, std::string_view value, write_version_type write_version) {
         std::size_t key_len = key.length();
         std::size_t value_len = value.length();
@@ -386,49 +377,11 @@ public:
     }
 
 // for reader
-    bool read(std::istream& strm) {
-        read_error ec{};
-        bool rc = read_entry_from(strm, ec);
-        if (ec) {
-            LOG_AND_THROW_EXCEPTION("this log_entry is broken: " + ec.message());
-        }
-        return rc;
-    }
-
-    /**
-     * @brief Reads one entry from a stream.
-     *
-     * On success, this object becomes the entry read. At the end of the stream or on failure, it is left in the
-     * default-constructed state. The kind of failure and the entry type are set in ec.
-     * @param strm the input stream
-     * @param ec the result of reading
-     * @return true if an entry is read, false at the end of the stream or on failure
-     */
-    bool read_entry_from(std::istream& strm, read_error& ec);
-
-    /**
-     * @brief Returns the write_version. Valid for data entries and storage entries.
-     * @param buf the destination of the write_version
-     */
-    void write_version(write_version_type& buf) const;
-
     /**
      * @brief Returns the storage_id. Valid for data entries and storage entries.
      * @return the storage_id
      */
     [[nodiscard]] storage_id_type storage() const;
-
-    /**
-     * @brief Returns the value. Valid for normal_entry and normal_with_blob.
-     * @param buf the destination of the value
-     */
-    void value(std::string& buf) const;
-
-    /**
-     * @brief Returns the key. Valid for data entries.
-     * @param buf the destination of the key
-     */
-    void key(std::string& buf) const;
 
     /**
      * @brief Returns the entry type. Returns this_id_is_not_used in the default-constructed state.
@@ -442,32 +395,6 @@ public:
      */
     [[nodiscard]] epoch_id_type epoch_id() const;
 
-    /**
-     * @brief Returns the serialized value_etc. Valid for data entries and storage entries.
-     *
-     * For remove_entry and storage entries, returns only the write_version. The return value is valid as long as a
-     * view returned by view() is valid.
-     * @return the serialized value_etc
-     */
-    [[nodiscard]] std::string_view value_etc() const;
-
-    /**
-     * @brief Returns the serialized key_sid. Valid for data entries and storage entries.
-     *
-     * For storage entries, returns only the storage_id. The return value is valid as long as a view returned by
-     * view() is valid.
-     * @return the serialized key_sid
-     */
-    [[nodiscard]] std::string_view key_sid() const;
-
-    /**
-     * @brief Returns the serialized blob_ids (without the number-of-BLOBs field). Valid for normal_with_blob.
-     *
-     * The return value is valid as long as a view returned by view() is valid.
-     * @return the serialized blob_ids
-     */
-    [[nodiscard]] std::string_view raw_blob_ids() const;
-
     static epoch_id_type write_version_epoch_number(std::string_view value_etc) {
         epoch_id_type epoch_id{};
         memcpy(static_cast<void*>(&epoch_id), value_etc.data(), sizeof(epoch_id_type));
@@ -478,22 +405,6 @@ public:
         memcpy(static_cast<void*>(&minor_write_version), value_etc.data() + sizeof(epoch_id_type), sizeof(std::uint64_t));  // NOLINT(*-pointer-arithmetic)
         return le64toh(minor_write_version);
     }
-    static std::vector<blob_id_type> parse_blob_ids(std::string_view blob_ids_data) {
-        std::vector<blob_id_type> blob_ids;
-        const std::size_t blob_count = blob_ids_data.size() / sizeof(blob_id_type);
-        blob_ids.reserve(blob_count);
-        for (std::size_t i = 0; i < blob_count; ++i) {
-            blob_id_type blob_id = 0;
-            std::memcpy(&blob_id, blob_ids_data.data() + i * sizeof(blob_id_type), sizeof(blob_id_type));  // NOLINT(*-pointer-arithmetic)
-            blob_ids.push_back(le64toh(blob_id));
-        }
-        return blob_ids;
-    }    
-    /**
-     * @brief Returns the blob_ids. Valid for normal_with_blob.
-     * @return the blob_ids
-     */
-    [[nodiscard]] std::vector<blob_id_type> get_blob_ids() const;
 
     /**
      * @brief Returns the serialized value of the whole entry. Valid except in the default-constructed state.
@@ -556,14 +467,6 @@ public:
      * @return the blob_ids
      */
     [[nodiscard]] std::vector<blob_id_type> blob_ids() const;
-
-    /**
-     * @brief Empties the value of normal_entry and normal_with_blob.
-     *
-     * value_etc becomes only the write_version, and the entry type, key_sid and blob_ids do not change. Does
-     * nothing for other entry types.
-     */
-    void truncate_value_from_normal_entry();
 
 private:
     /**

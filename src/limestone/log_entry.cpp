@@ -288,64 +288,8 @@ void log_entry::write_serialized(FILE* strm, const log_entry_view& entry, write_
     }
 }
 
-void log_entry::write(FILE* strm) const {
-    const std::string_view entry = view_.serialized_entry();
-    write_bytes(strm, entry.data(), entry.size());
-}
-
-bool log_entry::read_entry_from(std::istream& strm, read_error& ec) {
-    ec.value(read_error::ok);
-    ec.entry_type(entry_type::this_id_is_not_used);
-    *this = log_entry{};
-
-    // read from the type byte, and each time parsing returns short_entry, read up to the returned lower bound
-    std::string buffer(format::entry_type_size, '\0');
-    strm.read(buffer.data(), static_cast<std::streamsize>(buffer.size()));
-    // the end is detected by eof. If nothing is read without eof (such as a stream opened on a directory), the type
-    // byte stays 0 and parsing gives unknown_type
-    if (strm.eof()) {
-        return false;
-    }
-    while (true) {
-        const auto result = log_entry_view::parse(buffer);
-        switch (result.result()) {
-        case internal::log_entry_parse_result::status::ok:
-            *this = log_entry{std::move(buffer)};
-            return true;
-        case internal::log_entry_parse_result::status::invalid_type:
-            ec.value(read_error::unknown_type);
-            ec.entry_type(static_cast<entry_type>(result.type_value()));
-            return false;
-        case internal::log_entry_parse_result::status::short_entry: {
-            const std::size_t filled = buffer.size();
-            buffer.resize(result.required());
-            const auto requested = static_cast<std::streamsize>(buffer.size() - filled);
-            strm.read(&buffer[filled], requested);
-            if (strm.gcount() < requested) {
-                ec.value(read_error::short_entry);
-                ec.entry_type(static_cast<entry_type>(static_cast<std::uint8_t>(buffer[0])));
-                return false;
-            }
-            break;
-        }
-        }
-    }
-}
-
-void log_entry::write_version(write_version_type& buf) const {
-    buf = view_.write_version();
-}
-
 storage_id_type log_entry::storage() const {
     return view_.storage();
-}
-
-void log_entry::value(std::string& buf) const {
-    buf.assign(view_.value());
-}
-
-void log_entry::key(std::string& buf) const {
-    buf.assign(view_.key());
 }
 
 log_entry::entry_type log_entry::type() const noexcept {
@@ -354,22 +298,6 @@ log_entry::entry_type log_entry::type() const noexcept {
 
 epoch_id_type log_entry::epoch_id() const {
     return view_.epoch_id();
-}
-
-std::string_view log_entry::value_etc() const {
-    return view_.serialized_value_etc();
-}
-
-std::string_view log_entry::key_sid() const {
-    return view_.serialized_key_sid();
-}
-
-std::string_view log_entry::raw_blob_ids() const {
-    return view_.serialized_blob_ids();
-}
-
-std::vector<blob_id_type> log_entry::get_blob_ids() const {
-    return view_.blob_ids();
 }
 
 std::string_view log_entry::serialized_entry() const {
@@ -402,21 +330,6 @@ write_version_type log_entry::write_version() const {
 
 std::vector<blob_id_type> log_entry::blob_ids() const {
     return view_.blob_ids();
-}
-
-void log_entry::truncate_value_from_normal_entry() {
-    const entry_type type = view_.type();
-    if (type != entry_type::normal_entry && type != entry_type::normal_with_blob) {
-        return;
-    }
-    // copy the whole entry, remove the value, and set the value length to 0
-    constexpr std::size_t value_length_offset = format::entry_type_size + format::key_length_size;
-    const std::size_t value_offset =
-        value_length_offset + format::value_length_size + view_.serialized_key_sid().size() + format::write_version_size;
-    std::string buffer = entry_;
-    buffer.erase(value_offset, view_.value().size());
-    buffer.replace(value_length_offset, format::value_length_size, format::value_length_size, '\0');
-    *this = log_entry{std::move(buffer)};
 }
 
 }  // namespace limestone::api
