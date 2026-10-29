@@ -372,6 +372,38 @@ std::vector<blob_id_type> log_entry::get_blob_ids() const {
     return view_.blob_ids();
 }
 
+std::string_view log_entry::serialized_entry() const {
+    return view_.serialized_entry();
+}
+
+std::string_view log_entry::serialized_key_sid() const {
+    return view_.serialized_key_sid();
+}
+
+std::string_view log_entry::serialized_value_etc() const {
+    return view_.serialized_value_etc();
+}
+
+std::string_view log_entry::serialized_blob_ids() const {
+    return view_.serialized_blob_ids();
+}
+
+std::string_view log_entry::key() const {
+    return view_.key();
+}
+
+std::string_view log_entry::value() const {
+    return view_.value();
+}
+
+write_version_type log_entry::write_version() const {
+    return view_.write_version();
+}
+
+std::vector<blob_id_type> log_entry::blob_ids() const {
+    return view_.blob_ids();
+}
+
 void log_entry::truncate_value_from_normal_entry() {
     const entry_type type = view_.type();
     if (type != entry_type::normal_entry && type != entry_type::normal_with_blob) {

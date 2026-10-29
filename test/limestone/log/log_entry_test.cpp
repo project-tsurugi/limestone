@@ -85,6 +85,16 @@ void expect_blob_entry(const log_entry& e, const std::string& value) {
     EXPECT_EQ(e.key_sid(), log_entry_bytes::u64le(2) + "key");
     EXPECT_EQ(e.value_etc(), log_entry_bytes::u64le(7) + log_entry_bytes::u64le(3) + value);
     EXPECT_EQ(e.raw_blob_ids(), log_entry_bytes::u64le(11) + log_entry_bytes::u64le(12));
+    // the accessors with the new names return the same values
+    EXPECT_EQ(e.serialized_entry(), e.view().serialized_entry());
+    EXPECT_EQ(e.serialized_key_sid(), log_entry_bytes::u64le(2) + "key");
+    EXPECT_EQ(e.serialized_value_etc(), log_entry_bytes::u64le(7) + log_entry_bytes::u64le(3) + value);
+    EXPECT_EQ(e.serialized_blob_ids(), log_entry_bytes::u64le(11) + log_entry_bytes::u64le(12));
+    EXPECT_EQ(e.key(), "key");
+    EXPECT_EQ(e.value(), value);
+    EXPECT_EQ(e.write_version().get_major(), 7U);
+    EXPECT_EQ(e.write_version().get_minor(), 3U);
+    EXPECT_EQ(e.blob_ids(), (std::vector<limestone::api::blob_id_type>{11, 12}));
 }
 
 /**
@@ -407,6 +417,23 @@ TEST(log_entry_test, accessor_not_valid_for_type) {
     EXPECT_DEATH((void) begin.storage(), "log_entry_view:storage not valid");
     limestone::api::write_version_type wv;
     EXPECT_DEATH(begin.write_version(wv), "log_entry_view:write_version not valid");
+}
+
+// the accessors with the new names also abort when asked for a value that is not valid
+TEST(log_entry_test, new_accessor_not_valid_for_type) {
+    log_entry normal = make_entry(normal_entry(1, "key", "value", 7, 3));
+    EXPECT_DEATH((void) normal.blob_ids(), "log_entry_view:blob_ids not valid");
+    EXPECT_DEATH((void) normal.serialized_blob_ids(), "log_entry_view:serialized_blob_ids not valid");
+    log_entry storage = make_entry(storage_entry(7, 4, 7, 3));
+    EXPECT_DEATH((void) storage.key(), "log_entry_view:key not valid");
+    log_entry removed = make_entry(remove_entry(3, "key", 7, 3));
+    EXPECT_DEATH((void) removed.value(), "log_entry_view:value not valid");
+    log_entry begin = make_entry(marker(2, 10));
+    EXPECT_DEATH((void) begin.serialized_key_sid(), "log_entry_view:serialized_key_sid not valid");
+    EXPECT_DEATH((void) begin.serialized_value_etc(), "log_entry_view:serialized_value_etc not valid");
+    EXPECT_DEATH((void) begin.write_version(), "log_entry_view:write_version not valid");
+    const log_entry empty{};
+    EXPECT_DEATH((void) empty.serialized_entry(), "log_entry_view:serialized_entry not valid");
 }
 
 // each factory creates an entry with the bytes in the format

@@ -209,9 +209,10 @@ master へのマージ前に本ファイルを削除する。
       置いた (5 節)。残りは利用箇所の置き換え。(cursor_impl.cpp の 2 か所を is_data_entry に置き換えた。P12 の
       datastore_snapshot.cpp の箇所はステップ 7 で削除済み。分類でない列挙は残した。5 節)
 * [x] レプリカの受信で未定義の種別と現れてはならない種別を abort にする (LE 9.1、P21)。(5 節)
-* [ ] アクセサの種別の検査 (LE 9.2)。参照型と所有型 (旧アクセサの委譲) にはステップ 2 で入れた (5 節)。残りは、検査に
-      合わせた利用箇所の確認と、旧名のアクセサの利用箇所を新しい名前へ移すときの見直し。
-* [ ] 新しい名前のアクセサ (serialized_key_sid() など) の追加 (LE 10.3)。旧名は段階 4 まで残す。
+* [x] アクセサの種別の検査 (LE 9.2)。参照型と所有型 (旧アクセサの委譲) にはステップ 2 で入れた (5 節)。残りは、検査に
+      合わせた利用箇所の確認と、旧名のアクセサの利用箇所を新しい名前へ移すときの見直し。(利用箇所はすべて種別を
+      確かめてから呼んでいた。新しい名前へ移すときの見直しはステップ 11 で行う。5 節)
+* [x] 新しい名前のアクセサ (serialized_key_sid() など) の追加 (LE 10.3)。旧名は段階 4 まで残す。(5 節)
 * [ ] 型付き版の書き出しの長さの検査 (LE 12)。
   * [ ] 型付き版の書き出しは、1 エントリを書くのに fwrite・fputc を 7 回前後呼ぶ。ボトルネックになっているという報告は
         ないが、良い書き方ではない。長さの検査を加えるときに、見直すかを判断する。
@@ -733,6 +734,15 @@ master へのマージ前に本ファイルを削除する。
   add_current_entry の switch で、メッセージに現れてはならない種別 (this_id_is_not_used と marker) を例外から FATAL に
   変え、同じ case に default を加えた (decode_entry_type を通らない値への備え)。UT は 3 件 (decode_entry_type の未定義の
   値、rdma の解析と apply_to の marker)。
+* 2026-10-29: ステップ 10 のアクセサの検査 (LE 9.2) の利用箇所の確認。所有型のアクセサを呼ぶ箇所 (src、ソート以外) は
+  すべて、呼ぶ前に種別を確かめていた (epoch_id は marker の判定の後、key_sid・storage・write_version は is_data_entry
+  の後、key・value は cursor が返す normal_entry と normal_with_blob だけ、cursor の blob_ids は呼び出し元の
+  normal_with_blob の判定の後、BLOB の GC は normal_with_blob だけ)。直す箇所はなかった。
+* 2026-10-29: 所有型 log_entry に新しい名前のアクセサを追加した (LE 10.3)。serialized_entry、serialized_key_sid、
+  serialized_value_etc、serialized_blob_ids、key と value (string_view を返す)、write_version (値を返す)、blob_ids。
+  いずれも参照型に委ねる。key、value、write_version は旧名の出力引数版と多重定義で並存する。storage、type、epoch_id
+  は名前も形も LE のとおりなので変えない。呼び出し元を新しい名前で使う形 (所有型に置く) は、呼び出し元に
+  view() を通させる案と比べて決めた (LE のとおり、呼び出し元の多くが所有型を持つ)。
 
 ## 6. 残った課題
 

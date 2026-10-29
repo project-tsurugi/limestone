@@ -481,6 +481,68 @@ public:
     [[nodiscard]] std::vector<blob_id_type> get_blob_ids() const;
 
     /**
+     * @brief Returns the serialized value of the whole entry. Valid except in the default-constructed state.
+     *
+     * The return value is valid as long as a view returned by view() is valid.
+     * @return the serialized value of the whole entry (from the type byte to the end)
+     */
+    [[nodiscard]] std::string_view serialized_entry() const;
+
+    /**
+     * @brief Returns the serialized key_sid. Valid for data entries and storage entries.
+     *
+     * For storage entries, returns only the storage_id. The return value is valid as long as a view returned by
+     * view() is valid.
+     * @return the serialized key_sid
+     */
+    [[nodiscard]] std::string_view serialized_key_sid() const;
+
+    /**
+     * @brief Returns the serialized value_etc. Valid for data entries and storage entries.
+     *
+     * For remove_entry and storage entries, returns only the write_version. The return value is valid as long as a
+     * view returned by view() is valid.
+     * @return the serialized value_etc
+     */
+    [[nodiscard]] std::string_view serialized_value_etc() const;
+
+    /**
+     * @brief Returns the serialized blob_ids (without the number-of-BLOBs field). Valid for normal_with_blob.
+     *
+     * The return value is valid as long as a view returned by view() is valid.
+     * @return the serialized blob_ids
+     */
+    [[nodiscard]] std::string_view serialized_blob_ids() const;
+
+    /**
+     * @brief Returns the key. Valid for data entries.
+     *
+     * The return value is valid as long as a view returned by view() is valid.
+     * @return the key
+     */
+    [[nodiscard]] std::string_view key() const;
+
+    /**
+     * @brief Returns the value. Valid for normal_entry and normal_with_blob.
+     *
+     * The return value is valid as long as a view returned by view() is valid.
+     * @return the value
+     */
+    [[nodiscard]] std::string_view value() const;
+
+    /**
+     * @brief Returns the write_version. Valid for data entries and storage entries.
+     * @return the write_version
+     */
+    [[nodiscard]] write_version_type write_version() const;
+
+    /**
+     * @brief Returns the blob_ids. Valid for normal_with_blob.
+     * @return the blob_ids
+     */
+    [[nodiscard]] std::vector<blob_id_type> blob_ids() const;
+
+    /**
      * @brief Empties the value of normal_entry and normal_with_blob.
      *
      * value_etc becomes only the write_version, and the entry type, key_sid and blob_ids do not change. Does
