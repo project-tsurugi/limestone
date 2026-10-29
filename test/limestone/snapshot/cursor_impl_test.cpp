@@ -46,7 +46,6 @@ public:
     using cursor_impl::cursor_impl;
     using cursor_impl::next;
     using cursor_impl::validate_and_read_stream;
-    using cursor_impl::open;
     using cursor_impl::close;
     using cursor_impl::storage;
     using cursor_impl::key;    
@@ -366,8 +365,13 @@ TEST_F(cursor_impl_test, validate_stream_broken) {
 
     // Use cursor_impl_testable to call validate_and_read_stream.
     cursor_impl_testable test_cursor(bad_file);
-    EXPECT_THROW(test_cursor.validate_and_read_stream(reader, "bad_stream", log_entry, previous_key),
-                 limestone::limestone_exception);
+    try {
+        test_cursor.validate_and_read_stream(reader, "bad_stream", log_entry, previous_key);
+        FAIL() << "expected limestone_exception";
+    } catch (const limestone::limestone_exception& e) {
+        // the message names the broken file
+        EXPECT_NE(std::string(e.what()).find(bad_file.string()), std::string::npos) << e.what();
+    }
     EXPECT_FALSE(log_entry.has_value());
 }
 

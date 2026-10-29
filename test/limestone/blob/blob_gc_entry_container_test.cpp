@@ -14,13 +14,8 @@
  * limitations under the License.
  */
 #include <gtest/gtest.h>
-#include <cstdio>
-#include <fstream>
-#include <cstdlib>
 #include <string>
-#include <stdexcept>
 #include <vector>
-#include <boost/filesystem.hpp>
 
 #include "log_entry.h"
 #include "blob_gc_entry.h"
@@ -32,8 +27,7 @@
 using namespace limestone::api;
 using namespace limestone::internal;
 
-namespace limestone {
-namespace testing {
+namespace limestone::testing {
 
 class blob_gc_entry_container_test : public ::testing::Test {
 protected:
@@ -63,7 +57,7 @@ TEST_F(blob_gc_entry_container_test, append_and_size) {
 
     blob_gc_entry entry1 = create_blob_gc_entry(100, "keyA", write_version_type(10, 1));
     blob_gc_entry entry2 = create_blob_gc_entry(100, "keyB", write_version_type(5, 1));
-    
+
     container.append(entry1);
     container.append(entry2);
     EXPECT_EQ(container.size(), 2u);
@@ -205,42 +199,42 @@ TEST_F(blob_gc_entry_container_test, merge_sorted_collections) {
 TEST_F(blob_gc_entry_container_test, merge_sorted_collections_with_empty_container) {
     // Create two non-empty containers and one empty container.
     blob_gc_entry_container container1, container2, container_empty;
-    
+
     // --- Container 1 ---
     blob_gc_entry c1_e1 = create_blob_gc_entry(100, "B", write_version_type(2, 0));
     blob_gc_entry c1_e2 = create_blob_gc_entry(100, "A", write_version_type(1, 0));
     container1.append(c1_e1);
     container1.append(c1_e2);
-    
+
     // --- Container 2 ---
     blob_gc_entry c2_e1 = create_blob_gc_entry(100, "C", write_version_type(3, 0));
     container2.append(c2_e1);
-    
+
     // Prepare vector using shared_ptr.
     std::vector<std::shared_ptr<blob_gc_entry_container>> containers;
     containers.push_back(std::make_unique<blob_gc_entry_container>(std::move(container1)));
     containers.push_back(std::make_unique<blob_gc_entry_container>(std::move(container_empty)));
     containers.push_back(std::make_unique<blob_gc_entry_container>(std::move(container2)));
-    
+
     // Perform the merge.
     blob_gc_entry_container merged = blob_gc_entry_container::merge_sorted_collections(containers);
-    
+
     // Expected descending order: "C" > "B" > "A"
     auto it = merged.begin();
     ASSERT_NE(it, merged.end());
     check_blob_gc_entry(*it, 100, "C", write_version_type(3, 0));
-    
+
     ++it;
     ASSERT_NE(it, merged.end());
     check_blob_gc_entry(*it, 100, "B", write_version_type(2, 0));
-    
+
     ++it;
     ASSERT_NE(it, merged.end());
     check_blob_gc_entry(*it, 100, "A", write_version_type(1, 0));
-    
+
     ++it;
     EXPECT_EQ(it, merged.end());
-    
+
     // Verify that all original containers have been cleared.
     for (auto& uptr : containers) {
         EXPECT_EQ(uptr->size(), 0u);
@@ -251,19 +245,19 @@ TEST_F(blob_gc_entry_container_test, merge_sorted_collections_with_empty_contain
 TEST_F(blob_gc_entry_container_test, merge_all_empty_containers) {
     // Create three empty containers.
     blob_gc_entry_container container1, container2, container3;
-    
+
     // Prepare vector using shared_ptr.
     std::vector<std::shared_ptr<blob_gc_entry_container>> containers;
     containers.push_back(std::make_unique<blob_gc_entry_container>(std::move(container1)));
     containers.push_back(std::make_unique<blob_gc_entry_container>(std::move(container2)));
     containers.push_back(std::make_unique<blob_gc_entry_container>(std::move(container3)));
-    
+
     // Perform the merge.
     blob_gc_entry_container merged = blob_gc_entry_container::merge_sorted_collections(containers);
-    
+
     // Expect the merged container to be empty.
     EXPECT_EQ(merged.size(), 0u);
-    
+
     // Also, each original container should be cleared.
     for (auto& uptr : containers) {
         EXPECT_EQ(uptr->size(), 0u);
@@ -274,10 +268,10 @@ TEST_F(blob_gc_entry_container_test, merge_all_empty_containers) {
 TEST_F(blob_gc_entry_container_test, merge_empty_container_list) {
     // Prepare an empty vector of containers using shared_ptr.
     std::vector<std::shared_ptr<blob_gc_entry_container>> containers;
-    
+
     // Perform the merge.
     blob_gc_entry_container merged = blob_gc_entry_container::merge_sorted_collections(containers);
-    
+
     // Expect the merged container to be empty.
     EXPECT_EQ(merged.size(), 0u);
 }
@@ -287,41 +281,41 @@ TEST_F(blob_gc_entry_container_test, merge_empty_container_list) {
 TEST_F(blob_gc_entry_container_test, merge_single_entry_containers) {
     // Create three containers, each with one entry.
     blob_gc_entry_container container1, container2, container3;
-    
+
     blob_gc_entry c1_e1 = create_blob_gc_entry(100, "A", write_version_type(1, 0));
     container1.append(c1_e1);
-    
+
     blob_gc_entry c2_e1 = create_blob_gc_entry(100, "B", write_version_type(2, 0));
     container2.append(c2_e1);
-    
+
     blob_gc_entry c3_e1 = create_blob_gc_entry(100, "C", write_version_type(3, 0));
     container3.append(c3_e1);
-    
+
     // Prepare vector using shared_ptr.
     std::vector<std::shared_ptr<blob_gc_entry_container>> containers;
     containers.push_back(std::make_unique<blob_gc_entry_container>(std::move(container1)));
     containers.push_back(std::make_unique<blob_gc_entry_container>(std::move(container2)));
     containers.push_back(std::make_unique<blob_gc_entry_container>(std::move(container3)));
-    
+
     // Perform the merge.
     blob_gc_entry_container merged = blob_gc_entry_container::merge_sorted_collections(containers);
-    
+
     // Expected descending order: "C" > "B" > "A"
     auto it = merged.begin();
     ASSERT_NE(it, merged.end());
     check_blob_gc_entry(*it, 100, "C", write_version_type(3, 0));
-    
+
     ++it;
     ASSERT_NE(it, merged.end());
     check_blob_gc_entry(*it, 100, "B", write_version_type(2, 0));
-    
+
     ++it;
     ASSERT_NE(it, merged.end());
     check_blob_gc_entry(*it, 100, "A", write_version_type(1, 0));
-    
+
     ++it;
     EXPECT_EQ(it, merged.end());
-    
+
     // Verify that all original containers have been cleared.
     for (auto& uptr : containers) {
         EXPECT_EQ(uptr->size(), 0u);
@@ -333,23 +327,23 @@ TEST_F(blob_gc_entry_container_test, merge_single_entry_containers) {
 TEST_F(blob_gc_entry_container_test, merge_with_duplicate_entries) {
     // Create two containers with duplicate entries.
     blob_gc_entry_container container1, container2;
-    
+
     blob_gc_entry dup_entry1 = create_blob_gc_entry(100, "X", write_version_type(5, 0));
     blob_gc_entry dup_entry2 = create_blob_gc_entry(100, "X", write_version_type(5, 0));
     blob_gc_entry dup_entry3 = create_blob_gc_entry(100, "X", write_version_type(5, 0));
-    
+
     container1.append(dup_entry1);
     container1.append(dup_entry2);
     container2.append(dup_entry3);
-    
+
     // Prepare vector using shared_ptr.
     std::vector<std::shared_ptr<blob_gc_entry_container>> containers;
     containers.push_back(std::make_unique<blob_gc_entry_container>(std::move(container1)));
     containers.push_back(std::make_unique<blob_gc_entry_container>(std::move(container2)));
-    
+
     // Perform the merge.
     blob_gc_entry_container merged = blob_gc_entry_container::merge_sorted_collections(containers);
-    
+
     // Since all entries are identical, merged container should contain all 3 entries.
     int count = 0;
     for (auto it = merged.begin(); it != merged.end(); ++it) {
@@ -357,12 +351,11 @@ TEST_F(blob_gc_entry_container_test, merge_with_duplicate_entries) {
         count++;
     }
     EXPECT_EQ(count, 3);
-    
+
     // Verify that all original containers have been cleared.
     for (auto& uptr : containers) {
         EXPECT_EQ(uptr->size(), 0u);
     }
 }
 
-} // namespace testing
-} // namespace limestone
+}  // namespace limestone::testing

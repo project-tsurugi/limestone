@@ -236,6 +236,12 @@ public:
      */
     [[nodiscard]] log_entry_read_result next();
 
+    /**
+     * @brief Returns the file being read.
+     * @return the path given to the constructor
+     */
+    [[nodiscard]] const boost::filesystem::path& file() const noexcept;
+
 private:
     /**
      * @brief Opens the file, obtains its size, and sets the start position. Called only by the constructors.

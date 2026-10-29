@@ -33,8 +33,7 @@
 using namespace limestone::api;      // For log_entry, storage_id_type, write_version_type, epoch_id_type, etc.
 using namespace limestone::internal; // For blob_gc_entry_comparator
 
-namespace limestone {
-namespace testing {
+namespace limestone::testing {
 
 // Test fixture to avoid symbol collisions with datastore_blob_test.
 class blob_gc_entry_comparator_test : public ::testing::Test {
@@ -59,7 +58,7 @@ protected:
 TEST_F(blob_gc_entry_comparator_test, different_minor_numbers) {
     storage_id_type storage = 400;
     std::string key = "testKey";
-    
+
     // Both entries have the same epoch (10) but different minor numbers.
     // In ascending order, write_version (10,1) is less than (10,2).
     write_version_type wv_low(10, 1);  // Lower minor number
@@ -78,7 +77,7 @@ TEST_F(blob_gc_entry_comparator_test, different_minor_numbers) {
 TEST_F(blob_gc_entry_comparator_test, different_epoch_numbers) {
     storage_id_type storage = 500;
     std::string key = "testKey";
-    
+
     // Both entries have the same minor number (1) but different epochs.
     // In ascending order, write_version (10,1) is less than (20,1).
     write_version_type wv_low(10, 1);  // Lower epoch
@@ -97,7 +96,7 @@ TEST_F(blob_gc_entry_comparator_test, different_epoch_numbers) {
 TEST_F(blob_gc_entry_comparator_test, equal_epoch_and_minor) {
     storage_id_type storage = 600;
     std::string key = "testKey";
-    
+
     // Both entries have identical write_versions.
     write_version_type wv(15, 3);
 
@@ -114,7 +113,7 @@ TEST_F(blob_gc_entry_comparator_test, equal_epoch_and_minor) {
 TEST_F(blob_gc_entry_comparator_test, epoch_priority_over_minor) {
     storage_id_type storage = 700;
     std::string key = "testKey";
-    
+
     // Create write_versions:
     // One entry with (epoch=10, minor=100) and another with (epoch=11, minor=1).
     // Since epoch is prioritized, (10,100) is less than (11,1) in ascending order.
@@ -270,10 +269,10 @@ TEST_F(blob_gc_entry_comparator_test, overall_priority_storage_key_write_version
     // Entry2: storage=100, key="aaa", write_version=(10,1)   (Same storage and key as Entry1, but higher write_version)
     // Entry3: storage=100, key="bbb", write_version=(9,9)    (Same storage as Entry1/2, but key "bbb")
     // Entry4: storage=200, key="aaa", write_version=(9,9)    (Higher storage than Entry1-3; key is "aaa")
-    
+
     storage_id_type storage_low = 100;
     storage_id_type storage_high = 200;
-    
+
     // Entries with same storage and key, differing only in write_version.
     write_version_type wv1(10, 0);
     write_version_type wv2(10, 1);
@@ -281,19 +280,19 @@ TEST_F(blob_gc_entry_comparator_test, overall_priority_storage_key_write_version
     write_version_type wv3(9, 9);
     // Entry4: different storage, key "aaa".
     write_version_type wv4(9, 9);
-    
+
     blob_gc_entry entry1 = create_blob_gc_entry(storage_low, "aaa", wv1);
     blob_gc_entry entry2 = create_blob_gc_entry(storage_low, "aaa", wv2);
     blob_gc_entry entry3 = create_blob_gc_entry(storage_low, "bbb", wv3);
     blob_gc_entry entry4 = create_blob_gc_entry(storage_high, "aaa", wv4);
-    
+
     // Place entries in unsorted order.
     std::vector<blob_gc_entry> entries = { entry3, entry4, entry2, entry1 };
-    
+
     // Sort using blob_gc_entry_comparator.
     blob_gc_entry_comparator comp;
     std::sort(entries.begin(), entries.end(), comp);
-    
+
     // Expected sorted order (ascending):
     // 1. entry1: storage=100, key="aaa", write_version=(10,0)
     // 2. entry2: storage=100, key="aaa", write_version=(10,1)
@@ -304,12 +303,12 @@ TEST_F(blob_gc_entry_comparator_test, overall_priority_storage_key_write_version
     // - Entries with storage=100 come before those with storage=200.
     // - Among entries with storage=100 and key "aaa", (10,0) < (10,1).
     // - For the same storage, "aaa" is lexicographically less than "bbb".
-    
+
     // Verify the sorted order using the comparator.
     EXPECT_TRUE(comp(entries[0], entries[1]));  // entry1 < entry2
     EXPECT_TRUE(comp(entries[1], entries[2]));  // entry2 < entry3
     EXPECT_TRUE(comp(entries[2], entries[3]));  // entry3 < entry4
-    
+
     // Optionally, print the sorted order for manual verification.
     auto describe = [](const blob_gc_entry& entry) -> std::string {
         std::ostringstream oss;
@@ -318,11 +317,10 @@ TEST_F(blob_gc_entry_comparator_test, overall_priority_storage_key_write_version
         oss << ", write_version: (" << wv.get_major() << "," << wv.get_minor() << ")";
         return oss.str();
     };
-    
+
     for (size_t i = 0; i < entries.size(); ++i) {
         std::cout << "Entry " << i+1 << ": " << describe(entries[i]) << std::endl;
     }
 }
 
-} // namespace testing
-} // namespace limestone
+}  // namespace limestone::testing

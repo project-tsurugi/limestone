@@ -55,7 +55,6 @@ private:
     std::map<limestone::api::storage_id_type, limestone::api::write_version_type> clear_storage_; 
 
 protected:
-    void open(const boost::filesystem::path& file, std::optional<log_entry_reader>& reader);
     void close() override;
 
     bool next() override;

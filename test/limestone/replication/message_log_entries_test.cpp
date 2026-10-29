@@ -503,7 +503,11 @@ TEST_F(message_log_entries_test, post_receive_aborts_on_entry_type_not_allowed_i
     datastore_->ready();
     replication_message_io io("");
     log_channel_handler_resources resources(io, lc);
+    // The datastore threads are running, so use the threadsafe style for the death test
+    const std::string saved_style = ::testing::FLAGS_gtest_death_test_style;
+    ::testing::FLAGS_gtest_death_test_style = "threadsafe";
     EXPECT_DEATH(received.post_receive(resources), "unexpected entry type");
+    ::testing::FLAGS_gtest_death_test_style = saved_style;
 }
 
 }  // namespace limestone::testing

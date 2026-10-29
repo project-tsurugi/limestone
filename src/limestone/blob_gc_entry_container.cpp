@@ -19,13 +19,14 @@
  #include <boost/heap/binomial_heap.hpp>
   #include <algorithm>   // for std::sort
  #include <iterator>    // for std::back_inserter
+ #include <utility>     // for std::move
  
  namespace limestone::internal {
  
  // ----- Log Entry Addition (append) -----
  
- void blob_gc_entry_container::append(const blob_gc_entry& entry) {
-     entries_.push_back(entry);
+ void blob_gc_entry_container::append(blob_gc_entry entry) {
+     entries_.push_back(std::move(entry));
      // When a new entry is added, the collection is no longer sorted.
      sorted_ = false;
  }

@@ -138,6 +138,7 @@ TEST_F(log_entry_reader_test, reads_entries_in_order) {
     std::string e3 = remove_entry(1, "key", 7, 2);
     auto p = write_file(e1 + e2 + e3);
     log_entry_reader reader(p);
+    EXPECT_EQ(reader.file(), p);
     expect_entry(reader, e1, 0);
     expect_entry(reader, e2, e1.size());
     expect_entry(reader, e3, e1.size() + e2.size());

@@ -22,7 +22,6 @@
 
 #include <limestone/logging.h>
 
-#include "limestone_exception_helper.h"
 #include "logging_helper.h"
 #include "replication_message_io.h"
 #include "log_channel_handler_resources.h"

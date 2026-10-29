@@ -15,9 +15,10 @@
  */
 #include <iostream>
 #include <filesystem>
-#include <fstream>
 #include <optional>
 #include <iomanip>
+#include <string_view>
+#include <boost/filesystem.hpp>
 #include <log_entry.h>
 #include <log_entry/log_entry_reader.h>
 

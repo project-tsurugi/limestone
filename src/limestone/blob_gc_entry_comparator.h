@@ -21,8 +21,6 @@
 
 namespace limestone::internal {
 
-using namespace limestone::api;
-
 /**
  * @brief A comparator that orders blob_gc_entry in ascending order of the pair (key_sid, write_version).
  *

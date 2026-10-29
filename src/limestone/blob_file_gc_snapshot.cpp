@@ -18,6 +18,7 @@
 #include "blob_gc_entry_container.h"
 #include "blob_gc_entry_comparator.h"
 #include <algorithm>
+#include <utility>
 
 namespace limestone::internal {
 
@@ -44,7 +45,7 @@ void blob_file_gc_snapshot::sanitize_and_add_entry(const log_entry_view& entry) 
     }
 
     // take only the values needed by the GC (key_sid, write_version and blob_ids)
-    const blob_gc_entry gc_entry{entry};
+    blob_gc_entry gc_entry{entry};
     const write_version_type entry_wv = gc_entry.write_version();
 
     // Dispatch entry to the appropriate container based on write_version.
@@ -57,7 +58,7 @@ void blob_file_gc_snapshot::sanitize_and_add_entry(const log_entry_view& entry) 
                 thread_low_containers_.push_back(tls_low_container_);
             }
         }
-        tls_low_container_->append(gc_entry);
+        tls_low_container_->append(std::move(gc_entry));
     } else {
         // Process high container.
         if (!tls_high_container_) {
@@ -67,7 +68,7 @@ void blob_file_gc_snapshot::sanitize_and_add_entry(const log_entry_view& entry) 
                 thread_high_containers_.push_back(tls_high_container_);
             }
         }
-        tls_high_container_->append(gc_entry);
+        tls_high_container_->append(std::move(gc_entry));
     }
 }
 

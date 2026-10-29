@@ -17,15 +17,12 @@
 #pragma once
 
 #include <cstddef>
-#include <vector>
-
 #include <memory>
+#include <vector>
 
 #include "blob_gc_entry.h"
 
 namespace limestone::internal {
-
-using namespace limestone::api;
 
 /**
  * @brief A container that collects the entries for the BLOB GC (blob_gc_entry), and sorts and merges them.
@@ -35,10 +32,10 @@ public:
     // ----- Log Entry Addition (append) -----
 
     /// @brief Adds a single entry to the container.
-    /// @param entry The entry to add (by copy).
+    /// @param entry The entry to add.
     ///
     /// Note: When a new entry is added, the internal sorted flag is set to false.
-    void append(const blob_gc_entry& entry);
+    void append(blob_gc_entry entry);
 
     // ----- Iteration Functions -----
 

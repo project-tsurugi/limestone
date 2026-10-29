@@ -15,7 +15,6 @@
  */
 #pragma once
 
-#include <cassert>
 #include <cstdio>
 #include <endian.h>
 #include <string>
@@ -276,10 +275,10 @@ public:
         std::size_t value_len = value.length();
         // all the lengths are checked before writing the first byte; the exception for a violation is caught by the
         // public API of log_channel (HANDLE_EXCEPTION_AND_ABORT), which aborts
-        if (key_len > UINT32_MAX) {
+        if (key_len > limestone::internal::log_entry_format::max_length_field_value) {
             LOG_AND_THROW_EXCEPTION("key length " + std::to_string(key_len) + " does not fit in 32 bits");
         }
-        if (value_len > UINT32_MAX) {
+        if (value_len > limestone::internal::log_entry_format::max_length_field_value) {
             LOG_AND_THROW_EXCEPTION("value length " + std::to_string(value_len) + " does not fit in 32 bits");
         }
 
@@ -308,13 +307,13 @@ public:
         std::size_t blob_count = large_objects.size();
         // all the lengths are checked before writing the first byte; the exception for a violation is caught by the
         // public API of log_channel (HANDLE_EXCEPTION_AND_ABORT), which aborts
-        if (key_len > UINT32_MAX) {
+        if (key_len > limestone::internal::log_entry_format::max_length_field_value) {
             LOG_AND_THROW_EXCEPTION("key length " + std::to_string(key_len) + " does not fit in 32 bits");
         }
-        if (value_len > UINT32_MAX) {
+        if (value_len > limestone::internal::log_entry_format::max_length_field_value) {
             LOG_AND_THROW_EXCEPTION("value length " + std::to_string(value_len) + " does not fit in 32 bits");
         }
-        if (blob_count > UINT32_MAX) {
+        if (blob_count > limestone::internal::log_entry_format::max_length_field_value) {
             LOG_AND_THROW_EXCEPTION("blob count " + std::to_string(blob_count) + " does not fit in 32 bits");
         }
 
@@ -341,7 +340,7 @@ public:
         std::size_t key_len = key.length();
         // the length is checked before writing the first byte; the exception for a violation is caught by the public
         // API of log_channel (HANDLE_EXCEPTION_AND_ABORT), which aborts
-        if (key_len > UINT32_MAX) {
+        if (key_len > limestone::internal::log_entry_format::max_length_field_value) {
             LOG_AND_THROW_EXCEPTION("key length " + std::to_string(key_len) + " does not fit in 32 bits");
         }
 

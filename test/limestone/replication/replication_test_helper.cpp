@@ -26,6 +26,7 @@
 #include "internal.h"
 #include "log_entry.h"
 #include "log_entry/log_entry_reader.h"
+#include "log_entry/log_entry_format.h"
 #include <limestone/api/storage_id_type.h>
 #include <limestone/api/write_version_type.h>
 #include "internal.h"
@@ -83,25 +84,23 @@ void print_log_entry(const log_entry& entry) {
     storage_id_type storage_id = entry.storage();
     log_entry::entry_type type = entry.type();
 
-    if (type == log_entry::entry_type::normal_entry || type == log_entry::entry_type::remove_entry) {
+    if (limestone::internal::log_entry_format::is_data_entry(type)) {
         key = entry.key();
     }
 
     switch (type) {
         case log_entry::entry_type::normal_entry: {
-            std::string value;
-            value = entry.value();
+            std::string value{entry.value()};
             std::cout << "Entry Type: normal_entry, Storage ID: " << storage_id << ", Key: " << key << ", Value: " << value
                       << ", Write Version: Epoch: " << entry.write_version().get_major()
                       << ", Minor: " << entry.write_version().get_minor() << std::endl;
             break;
         }
         case log_entry::entry_type::normal_with_blob: {
-            std::string value;
-            value = entry.value();
+            std::string value{entry.value()};
             std::cout << "Entry Type: normal_with_blob, Storage ID: " << storage_id << ", Key: " << key << ", Value: " << value
                       << ", Write Version: Epoch: " << entry.write_version().get_major()
-                      << ", Minor: " << entry.write_version().get_minor() 
+                      << ", Minor: " << entry.write_version().get_minor()
                       << ", Blob IDs: ";
             for (const auto& blob_id : entry.blob_ids()) {
                 std::cout << blob_id << " ";

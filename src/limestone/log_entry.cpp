@@ -17,7 +17,6 @@
 
 #include <array>
 #include <cstdint>
-#include <limits>
 #include <utility>
 
 #include <glog/logging.h>
@@ -32,9 +31,6 @@ namespace format = limestone::internal::log_entry_format;
 using limestone::internal::log_entry_view;
 
 namespace {
-
-// the maximum value of a 32-bit length field
-constexpr std::size_t max_length_field_value = std::numeric_limits<std::uint32_t>::max();
 
 /**
  * @brief Appends the value as 1 byte to dest.
@@ -176,11 +172,11 @@ log_entry_view log_entry::view() const noexcept {
 
 log_entry log_entry::make_normal_entry(storage_id_type storage_id, std::string_view key, std::string_view value,
                                        write_version_type write_version) {
-    if (key.size() > max_length_field_value) {
-        LOG_LP(FATAL) << "key length " << key.size() << " exceeds the maximum " << max_length_field_value;
+    if (key.size() > format::max_length_field_value) {
+        LOG_LP(FATAL) << "key length " << key.size() << " exceeds the maximum " << format::max_length_field_value;
     }
-    if (value.size() > max_length_field_value) {
-        LOG_LP(FATAL) << "value length " << value.size() << " exceeds the maximum " << max_length_field_value;
+    if (value.size() > format::max_length_field_value) {
+        LOG_LP(FATAL) << "value length " << value.size() << " exceeds the maximum " << format::max_length_field_value;
     }
     return log_entry{normal_entry_bytes(entry_type::normal_entry, storage_id, key, value, write_version, 0)};
 }
@@ -188,14 +184,15 @@ log_entry log_entry::make_normal_entry(storage_id_type storage_id, std::string_v
 log_entry log_entry::make_normal_with_blob(storage_id_type storage_id, std::string_view key, std::string_view value,
                                            write_version_type write_version,
                                            const std::vector<blob_id_type>& blob_ids) {
-    if (key.size() > max_length_field_value) {
-        LOG_LP(FATAL) << "key length " << key.size() << " exceeds the maximum " << max_length_field_value;
+    if (key.size() > format::max_length_field_value) {
+        LOG_LP(FATAL) << "key length " << key.size() << " exceeds the maximum " << format::max_length_field_value;
     }
-    if (value.size() > max_length_field_value) {
-        LOG_LP(FATAL) << "value length " << value.size() << " exceeds the maximum " << max_length_field_value;
+    if (value.size() > format::max_length_field_value) {
+        LOG_LP(FATAL) << "value length " << value.size() << " exceeds the maximum " << format::max_length_field_value;
     }
-    if (blob_ids.size() > max_length_field_value) {
-        LOG_LP(FATAL) << "number of BLOBs " << blob_ids.size() << " exceeds the maximum " << max_length_field_value;
+    if (blob_ids.size() > format::max_length_field_value) {
+        LOG_LP(FATAL) << "number of BLOBs " << blob_ids.size() << " exceeds the maximum "
+                      << format::max_length_field_value;
     }
     std::string buffer = normal_entry_bytes(entry_type::normal_with_blob, storage_id, key, value, write_version,
                                             format::blob_count_size + blob_ids.size() * format::blob_id_size);
@@ -208,8 +205,8 @@ log_entry log_entry::make_normal_with_blob(storage_id_type storage_id, std::stri
 
 log_entry log_entry::make_remove_entry(storage_id_type storage_id, std::string_view key,
                                        write_version_type write_version) {
-    if (key.size() > max_length_field_value) {
-        LOG_LP(FATAL) << "key length " << key.size() << " exceeds the maximum " << max_length_field_value;
+    if (key.size() > format::max_length_field_value) {
+        LOG_LP(FATAL) << "key length " << key.size() << " exceeds the maximum " << format::max_length_field_value;
     }
     std::string buffer{};
     buffer.reserve(format::remove_entry_fixed_size + key.size());

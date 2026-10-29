@@ -225,6 +225,10 @@ void log_entry_reader::wait_and_read(std::size_t required) {
     }
 }
 
+const boost::filesystem::path& log_entry_reader::file() const noexcept {
+    return file_;
+}
+
 log_entry_read_result log_entry_reader::next() {
     // even if the state function returns writing after a failure, do not read a rewritten file as a continuation of
     // the old buffer

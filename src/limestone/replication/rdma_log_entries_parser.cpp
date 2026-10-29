@@ -19,7 +19,6 @@
 
 #include <algorithm>
 #include <cerrno>
-#include <stdexcept>
 
 #include <boost/filesystem.hpp>
 #include <glog/logging.h>

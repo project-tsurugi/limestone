@@ -1364,9 +1364,9 @@ void datastore::compact_with_online() {  // NOLINT(readability-function-cognitiv
     if (options.is_gc_enabled() && !impl_->is_backup_in_progress()) {
         LOG_LP(INFO) << "start blob files garbage collection";
         blob_file_garbage_collector_->scan_blob_files(blob_gc_boundary);
-        blob_gc_entry_container log_entries = options.get_gc_snapshot().finalize_snapshot();
+        const blob_gc_entry_container& gc_entries = options.get_gc_snapshot().finalize_snapshot();
         blob_file_garbage_collector_->start_add_gc_exempt_blob_ids();
-        for (const auto& entry : log_entries) {
+        for (const auto& entry : gc_entries) {
             for (const auto& blob_id : entry.blob_ids()) {
                 blob_file_garbage_collector_->add_gc_exempt_blob_id(blob_id);
             }

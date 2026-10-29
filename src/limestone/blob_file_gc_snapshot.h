@@ -22,8 +22,11 @@
 #include "log_entry/log_entry_view.h"
 #include "blob_gc_entry_container.h"
 #include "limestone/api/blob_id_type.h"
+#include "limestone/api/write_version_type.h"
 
 namespace limestone::internal {
+
+using limestone::api::write_version_type;
 
 /*
  * blob_file_gc_snapshot

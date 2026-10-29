@@ -43,18 +43,16 @@ std::unique_ptr<cursor> cursor_impl::create_cursor(
 
 cursor_impl::cursor_impl(const boost::filesystem::path& snapshot_file, std::map<api::storage_id_type, api::write_version_type> clear_storage)
     : clear_storage_(std::move(clear_storage)) {
-    open(snapshot_file, snapshot_reader_);
+    // log_entry_reader throws limestone_io_exception if the file cannot be opened
+    snapshot_reader_.emplace(snapshot_file);
 }
 
 cursor_impl::cursor_impl(const boost::filesystem::path& snapshot_file, const boost::filesystem::path& compacted_file,
                          std::map<api::storage_id_type, api::write_version_type> clear_storage)
     : clear_storage_(std::move(clear_storage)) {
-    open(snapshot_file, snapshot_reader_);
-    open(compacted_file, compacted_reader_);
-}
-
-void cursor_impl::open(const boost::filesystem::path& file, std::optional<log_entry_reader>& reader) {
-    reader.emplace(file);  // log_entry_reader throws limestone_io_exception if the file cannot be opened
+    // log_entry_reader throws limestone_io_exception if the file cannot be opened
+    snapshot_reader_.emplace(snapshot_file);
+    compacted_reader_.emplace(compacted_file);
 }
 
 void cursor_impl::close() {
@@ -73,8 +71,8 @@ void cursor_impl::validate_and_read_stream(std::optional<log_entry_reader>& read
             return;
         }
         if (read_result.result() == log_entry_read_result::status::error) {
-            LOG_AND_THROW_EXCEPTION(stream_name + " file is broken at offset " + std::to_string(read_result.offset())
-                                    + ": " + read_result.error().message());
+            LOG_AND_THROW_EXCEPTION(stream_name + " file is broken: " + reader->file().string() + " at offset "
+                                    + std::to_string(read_result.offset()) + ": " + read_result.error().message());
         }
         const auto view = read_result.view();
         if (! log_entry_format::is_data_entry(view.type())) {

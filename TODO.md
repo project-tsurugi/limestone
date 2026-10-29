@@ -790,8 +790,9 @@ master へのマージ前に本ファイルを削除する。
   要るので確かめない (ファクトリと書き出しの両方)。
 * 2026-10-29: ステップ 11 の cursor_impl の移行。スナップショットファイルとコンパクション済みファイルを std::istream と
   log_entry::read ではなく log_entry_reader で読む。キーの順序、重複、clear_storage の判定を参照型の上で行い、cursor が
-  返すエントリだけを所有型にコピーする (旧実装は全件を所有型にコピーしてから捨てていた)。read のエラーは、黙って
-  ストリームを終えるのではなく limestone_io_exception を投げる (LE 11.4)。cursor 1 つが 16 MiB のバッファを 2 本持つが、
+  返すエントリだけを所有型にコピーする (旧実装は全件を所有型にコピーしてから捨てていた)。POSIX の read の失敗は、
+  黙ってストリームを終えるのではなく limestone_io_exception を投げる (LE 11.4。読み込みの中で投げる)。形式の誤り
+  (読み込みが error を返す場合) は、旧実装と同じく limestone_exception を投げる。cursor 1 つが 16 MiB のバッファを 2 本持つが、
   cursor を作るのは起動時だけなので許容する。性能への影響はステップ 14 で測る。ifstream に failbit を立てて試していた
   テスト (validate_stream_not_good) は、形式に合わないファイルで例外になることを確かめるテスト (validate_stream_broken)
   に置き換えた。
@@ -821,6 +822,18 @@ master へのマージ前に本ファイルを削除する。
   受信の 3 か所)、BLOB の個数の 32 ビットの超過の検査 1 行 (確かめないと決めたもの)、sorted_file_merger の switch の後の
   届かない FATAL 1 行、partitioned_cursor_impl::blob_ids() 1 行。最後の 1 行はどのテストも呼んでいなかったので、
   partitioned_cursor_impl_test に normal_with_blob の blob_ids() を確かめる UT を加えた。
+* 2026-10-29: ステップ 10〜12 の /crv (Sonnet・Opus・Fable) の対応。3 モデルとも動作を変える誤りは指摘しなかった。
+  対応したもの: cursor の形式の誤りのメッセージにファイルのパスを入れた (log_entry_reader に file() を加えた)、
+  cursor_impl::open() を削除した、BLOB の GC で blob_gc_entry を move で container に渡す (append を値渡しにした)、
+  datastore の GC の確定の結果を参照で受け、変数名を中身に合わせた、スレッドが動いている状態の死亡テスト
+  (message_log_entries_test) を threadsafe 形式にした、不要な include と using を削除した (log_entry.h の <cassert> は
+  assert を使う .cpp へ移した)、新設のファイルの書式 (include の並び、namespace、行末の空白)、32 ビットの上限の
+  定数を log_entry_format.h へ移して書き出しでも使う、docs/internal/blob-limestone.md の旧名、テストの print_log_entry
+  が normal_with_blob の key を表示しない既存の不具合。著作権表記は、全ソースファイルを最後のコミットの年に合わせて
+  別のコミットで直した (3222c8d)。対応しないもの: field_buffer の詰め足りなさの検査 (書き出しの経路の費用を増やさない。
+  書き漏らしは write_serialized_matches_typed_writers で捕まえられる)、wal_dump の所有型へのコピー、blob_gc_entry の
+  コンストラクタのメンバの代入、switch の default による -Wswitch の抑止 (P21 で意図的に入れた)、テストの auto const
+  (周辺の書き方)。GC の確定処理のコピー (finalize_*_impl の戻り値、merge の move) は 6 節へ持ち越した。
 
 ## 6. 残った課題
 
@@ -855,3 +868,7 @@ master へのマージ前に本ファイルを削除する。
   BLOB を含む WAL を作る手段が要る。(2026-10-29)
 * cursor_distributor がキューへ渡すときに vector<log_entry> をコピーしている (文字列の確保とコピー)。move で渡せる
   かを確かめる。起動の読み取り (T1→T2) の limestone 側の費用の一部である。(2026-10-29)
+* BLOB の GC の確定処理で、コンテナ全体をむだにコピーしている。blob_file_gc_snapshot の finalize_low_entries_impl と
+  finalize_high_entries_impl はコンテナを値で返すが、finalize_snapshot はその戻り値を使わない。
+  blob_gc_entry_container::merge_sorted_collections は、後でクリアする入力から move せずにコピーしている。既存の
+  コードの効率の問題 (ステップ 10〜12 の /crv の指摘)。(2026-10-29)

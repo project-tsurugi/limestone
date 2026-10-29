@@ -19,6 +19,7 @@
 #include <cstdint>
 #include <cstring>
 #include <endian.h>
+#include <limits>
 #include <ostream>
 #include <string_view>
 
@@ -149,6 +150,9 @@ inline constexpr std::size_t write_version_size = write_version_epoch_size + wri
 inline constexpr std::size_t blob_count_size = 4;
 inline constexpr std::size_t blob_id_size = 8;
 inline constexpr std::size_t crc_type_size = 1;
+
+// the maximum value of a 32-bit length field (key length, value length and the number of BLOBs)
+inline constexpr std::size_t max_length_field_value = std::numeric_limits<std::uint32_t>::max();
 
 // sizes of each entry type, excluding the variable-length parts
 inline constexpr std::size_t normal_entry_fixed_size =
