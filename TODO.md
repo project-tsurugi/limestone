@@ -235,11 +235,12 @@ master へのマージ前に本ファイルを削除する。
 
 ### ステップ 12: LE 段階 4
 
-* [ ] 旧 API を削除する: バイト列版の書き出し、旧名のアクセサ、truncate_value_from_normal_entry、
+* [x] 旧 API を削除する: バイト列版の書き出し、旧名のアクセサ、truncate_value_from_normal_entry、
       static 関数 write_version_epoch_number・write_version_minor_write_version・parse_blob_ids、read と
       read_entry_from、所有型の write(FILE*)。make_normal_with_blob_log_entry はステップ 2 で、バイト列版の書き出しは
-      ステップ 7 で、前倒しして削除した (5 節)。
-* [ ] 公開 API write_version_type(const std::string&)・write_version_type(std::string_view) の扱い (Q4 による)。
+      ステップ 7 で、前倒しして削除した (5 節)。(残りを削除した。5 節)
+* [x] 公開 API write_version_type(const std::string&)・write_version_type(std::string_view) の扱い (Q4 による)。
+      (削除した。5 節)
 
 ### ステップ 13: ディレクトリの fsync と BLOB の移動の fsync
 
@@ -806,6 +807,14 @@ master へのマージ前に本ファイルを削除する。
   move してよく、その後は次の next() まで現在のエントリが既定構築の状態になり、type() は this_id_is_not_used を返し、
   値を求めるアクセサは FATAL で abort する。cursor_impl と partitioned_cursor_impl の両方にこの契約を確かめる UT を
   加えた。あわせて、current() が返したエントリに旧名のアクセサを使っていたテスト 2 か所 (テストの移行の漏れ) を直した。
+* 2026-10-29: ステップ 12 の旧 API の削除。テストを先に整理し (log_entry_type_test は log_entry_reader と新しいアクセサへ
+  移し、log_entry_test の旧 API のテストと log_entry_blob_test を削除。旧名のアクセサのテストにあった epoch_id() と
+  storage() の確認は新しい名前のテストへ移した)、次に log_entry から read、read_entry_from、旧名のアクセサ、
+  parse_blob_ids、truncate_value_from_normal_entry、write(FILE*) を削除した。sandbox の wal_dump が旧 API を使って
+  いた (ステップ 11 の洗い出しの漏れ) ので、同じコミットで log_entry_reader と新しいアクセサへ移した。
+  write_version_epoch_number と write_version_minor_write_version は公開 API の文字列版のコンストラクタが使っていたので、
+  そのコンストラクタ (Q4 で削除と決定) と一緒に削除した。tsurugidb のコンポーネント (shirakami、jogasaki、tateyama) に
+  文字列版のコンストラクタの利用はない (grep で確認)。コミットメッセージに BREAKING CHANGE は付けない (ユーザの判断)。
 
 ## 6. 残った課題
 

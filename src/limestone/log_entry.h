@@ -395,17 +395,6 @@ public:
      */
     [[nodiscard]] epoch_id_type epoch_id() const;
 
-    static epoch_id_type write_version_epoch_number(std::string_view value_etc) {
-        epoch_id_type epoch_id{};
-        memcpy(static_cast<void*>(&epoch_id), value_etc.data(), sizeof(epoch_id_type));
-        return le64toh(epoch_id);
-    }
-    static std::uint64_t write_version_minor_write_version(std::string_view value_etc) {
-        std::uint64_t minor_write_version{};
-        memcpy(static_cast<void*>(&minor_write_version), value_etc.data() + sizeof(epoch_id_type), sizeof(std::uint64_t));  // NOLINT(*-pointer-arithmetic)
-        return le64toh(minor_write_version);
-    }
-
     /**
      * @brief Returns the serialized value of the whole entry. Valid except in the default-constructed state.
      *
