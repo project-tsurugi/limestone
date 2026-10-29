@@ -88,20 +88,14 @@ TEST_F(partitioned_cursor_impl_test, current_returns_last_entry_after_next) {
     ASSERT_TRUE(cursor.next());
     const log_entry& current1 = cursor.current();
     EXPECT_EQ(current1.storage(), 123);
-    std::string key1, value1;
-    current1.key(key1);
-    current1.value(value1);
-    EXPECT_EQ(key1, "k1");
-    EXPECT_EQ(value1, "v1");
+    EXPECT_EQ(current1.key(), "k1");
+    EXPECT_EQ(current1.value(), "v1");
 
     ASSERT_TRUE(cursor.next());
     const log_entry& current2 = cursor.current();
     EXPECT_EQ(current2.storage(), 456);
-    std::string key2, value2;
-    current2.key(key2);
-    current2.value(value2);
-    EXPECT_EQ(key2, "k2");
-    EXPECT_EQ(value2, "v2");
+    EXPECT_EQ(current2.key(), "k2");
+    EXPECT_EQ(current2.value(), "v2");
 
     EXPECT_FALSE(cursor.next());
 }

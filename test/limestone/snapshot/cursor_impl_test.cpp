@@ -739,19 +739,13 @@ TEST_F(cursor_impl_test, current_returns_latest_entry_after_next) {
 
     ASSERT_TRUE(cursor.next());
     const auto& entry1 = cursor.current();
-    std::string key;
-    std::string value;
-    entry1.key(key);
-    entry1.value(value);
-    EXPECT_EQ(key, "key1");
-    EXPECT_EQ(value, "value1");
+    EXPECT_EQ(entry1.key(), "key1");
+    EXPECT_EQ(entry1.value(), "value1");
 
     ASSERT_TRUE(cursor.next());
     const auto& entry2 = cursor.current();
-    entry2.key(key);
-    entry2.value(value);
-    EXPECT_EQ(key, "key2");
-    EXPECT_EQ(value, "value2"); 
+    EXPECT_EQ(entry2.key(), "key2");
+    EXPECT_EQ(entry2.value(), "value2");
 
     EXPECT_FALSE(cursor.next());
 }
