@@ -9,6 +9,7 @@
 #include "scan_input.h"
 #include "internal.h"
 #include "log_entry.h"
+#include "log_entry/log_entry_reader.h"
 
 #include "test_root.h"
 
@@ -194,19 +195,15 @@ TEST_F(durable_test, ut_scan_one_pwal_file_nondurable_entry) {
     EXPECT_EQ(last_epoch, 43);
     EXPECT_EQ(entries.size(), 1);
     {  // check (marked) pwal file after scan
-        std::ifstream in;
-        log_entry e;
-        in.open(pwal, std::ios::in | std::ios::binary);
-        ASSERT_TRUE(e.read(in));
-        EXPECT_EQ(e.type(), log_entry::entry_type::marker_begin);
-        ASSERT_TRUE(e.read(in));
-        EXPECT_EQ(e.type(), log_entry::entry_type::normal_entry);
-        ASSERT_TRUE(e.read(in));
-        EXPECT_EQ(e.type(), log_entry::entry_type::marker_invalidated_begin);
-        ASSERT_TRUE(e.read(in));
-        EXPECT_EQ(e.type(), log_entry::entry_type::normal_entry);
-        ASSERT_FALSE(e.read(in));
-        in.close();
+        using limestone::internal::log_entry_read_result;
+        limestone::internal::log_entry_reader reader(pwal);
+        for (auto expected : {log_entry::entry_type::marker_begin, log_entry::entry_type::normal_entry,
+                              log_entry::entry_type::marker_invalidated_begin, log_entry::entry_type::normal_entry}) {
+            const auto read_result = reader.next();
+            ASSERT_EQ(read_result.result(), log_entry_read_result::status::ok);
+            EXPECT_EQ(read_result.view().type(), expected);
+        }
+        EXPECT_EQ(reader.next().result(), log_entry_read_result::status::end);
     }
 }
 
