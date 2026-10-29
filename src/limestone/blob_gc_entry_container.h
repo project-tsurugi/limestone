@@ -30,7 +30,7 @@ using namespace limestone::api;
 /**
  * @brief A container that collects the entries for the BLOB GC (blob_gc_entry), and sorts and merges them.
  */
-class log_entry_container {
+class blob_gc_entry_container {
 public:
     // ----- Log Entry Addition (append) -----
 
@@ -63,7 +63,7 @@ public:
     ///
     /// The entries are sorted in descending order of the pair (key_sid, write_version): in descending order of
     /// key_sid, and within the same key_sid in descending order of write_version (the reverse of
-    /// log_entry_comparator).
+    /// blob_gc_entry_comparator).
     /// After sorting is completed, the internal sorted flag is set to true.
     void sort_descending();
 
@@ -73,14 +73,15 @@ public:
 
     // ----- Static Merge Sort Function -----
 
-    /// @brief Merges multiple sorted log_entry_container objects into a single sorted container.
+    /// @brief Merges multiple sorted blob_gc_entry_container objects into a single sorted container.
     ///
     /// The merge is performed internally using a merge sort algorithm.
     /// The containers provided as arguments are merged, and the original containers are cleared.
     ///
-    /// @param container_list A vector of shared_ptr to log_entry_container objects to merge.
-    /// @return A single sorted log_entry_container containing all merged entries.
-    static log_entry_container merge_sorted_collections(std::vector<std::shared_ptr<log_entry_container>>& container_list);
+    /// @param container_list A vector of shared_ptr to blob_gc_entry_container objects to merge.
+    /// @return A single sorted blob_gc_entry_container containing all merged entries.
+    static blob_gc_entry_container merge_sorted_collections(
+            std::vector<std::shared_ptr<blob_gc_entry_container>>& container_list);
 
 private:
     // Internal data structure (can be replaced later for optimizations like lazy loading)

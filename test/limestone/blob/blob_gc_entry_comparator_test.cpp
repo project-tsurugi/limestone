@@ -8,21 +8,21 @@
 #include <vector>
 #include <boost/filesystem.hpp>
 
-// Include the actual headers for log_entry and log_entry_comparator.
+// Include the actual headers for log_entry and blob_gc_entry_comparator.
 #include "log_entry.h"
 #include "blob_gc_entry.h"
 #include "log_entry/log_entry_format.h"
-#include "log_entry_comparator.h"
+#include "blob_gc_entry_comparator.h"
 
 // Use the appropriate namespaces for the API and internal classes.
 using namespace limestone::api;      // For log_entry, storage_id_type, write_version_type, epoch_id_type, etc.
-using namespace limestone::internal; // For log_entry_comparator
+using namespace limestone::internal; // For blob_gc_entry_comparator
 
 namespace limestone {
 namespace testing {
 
 // Test fixture to avoid symbol collisions with datastore_blob_test.
-class log_entry_comparator_test : public ::testing::Test {
+class blob_gc_entry_comparator_test : public ::testing::Test {
 protected:
     // creates a blob_gc_entry from a view of a normal_with_blob
     static blob_gc_entry create_blob_gc_entry(storage_id_type storage,
@@ -41,7 +41,7 @@ protected:
 };
 
 // Test case: Different minor numbers with the same epoch.
-TEST_F(log_entry_comparator_test, different_minor_numbers) {
+TEST_F(blob_gc_entry_comparator_test, different_minor_numbers) {
     storage_id_type storage = 400;
     std::string key = "testKey";
     
@@ -53,14 +53,14 @@ TEST_F(log_entry_comparator_test, different_minor_numbers) {
     blob_gc_entry entry_low = create_blob_gc_entry(storage, key, wv_low);
     blob_gc_entry entry_high = create_blob_gc_entry(storage, key, wv_high);
 
-    log_entry_comparator comp;
+    blob_gc_entry_comparator comp;
     // Since keys are equal, ordering is determined by write_version in ascending order.
     EXPECT_TRUE(comp(entry_low, entry_high));
     EXPECT_FALSE(comp(entry_high, entry_low));
 }
 
 // Test case: Different epochs with the same minor number.
-TEST_F(log_entry_comparator_test, different_epoch_numbers) {
+TEST_F(blob_gc_entry_comparator_test, different_epoch_numbers) {
     storage_id_type storage = 500;
     std::string key = "testKey";
     
@@ -72,14 +72,14 @@ TEST_F(log_entry_comparator_test, different_epoch_numbers) {
     blob_gc_entry entry_low = create_blob_gc_entry(storage, key, wv_low);
     blob_gc_entry entry_high = create_blob_gc_entry(storage, key, wv_high);
 
-    log_entry_comparator comp;
+    blob_gc_entry_comparator comp;
     // Since keys are equal, ordering is determined by write_version in ascending order.
     EXPECT_TRUE(comp(entry_low, entry_high));
     EXPECT_FALSE(comp(entry_high, entry_low));
 }
 
 // Test case: Equal epochs and minor numbers.
-TEST_F(log_entry_comparator_test, equal_epoch_and_minor) {
+TEST_F(blob_gc_entry_comparator_test, equal_epoch_and_minor) {
     storage_id_type storage = 600;
     std::string key = "testKey";
     
@@ -89,14 +89,14 @@ TEST_F(log_entry_comparator_test, equal_epoch_and_minor) {
     blob_gc_entry entry1 = create_blob_gc_entry(storage, key, wv);
     blob_gc_entry entry2 = create_blob_gc_entry(storage, key, wv);
 
-    log_entry_comparator comp;
+    blob_gc_entry_comparator comp;
     // When write_version and keys are equal, neither entry is considered less than the other.
     EXPECT_FALSE(comp(entry1, entry2));
     EXPECT_FALSE(comp(entry2, entry1));
 }
 
 // Test case: Verify that epoch is prioritized over minor in write_version comparison.
-TEST_F(log_entry_comparator_test, epoch_priority_over_minor) {
+TEST_F(blob_gc_entry_comparator_test, epoch_priority_over_minor) {
     storage_id_type storage = 700;
     std::string key = "testKey";
     
@@ -109,14 +109,14 @@ TEST_F(log_entry_comparator_test, epoch_priority_over_minor) {
     blob_gc_entry entry_low_epoch = create_blob_gc_entry(storage, key, wv_low_epoch);
     blob_gc_entry entry_high_epoch = create_blob_gc_entry(storage, key, wv_high_epoch);
 
-    log_entry_comparator comp;
+    blob_gc_entry_comparator comp;
     EXPECT_TRUE(comp(entry_low_epoch, entry_high_epoch));
     EXPECT_FALSE(comp(entry_high_epoch, entry_low_epoch));
 }
 
 // Test case: Equal write_versions but different keys.
 // Ordering is determined solely by key_sid() using lexicographical order (ascending).
-TEST_F(log_entry_comparator_test, equal_write_versions_different_keys) {
+TEST_F(blob_gc_entry_comparator_test, equal_write_versions_different_keys) {
     storage_id_type storage = 200;
     // Use different user keys.
     std::string key1 = "zzz";  // Part of key_sid.
@@ -126,7 +126,7 @@ TEST_F(log_entry_comparator_test, equal_write_versions_different_keys) {
     blob_gc_entry entry1 = create_blob_gc_entry(storage, key1, wv);
     blob_gc_entry entry2 = create_blob_gc_entry(storage, key2, wv);
 
-    log_entry_comparator comp;
+    blob_gc_entry_comparator comp;
     // Assuming key_sid() includes storage and key, "aaa" is lexicographically less than "zzz".
     EXPECT_TRUE(comp(entry2, entry1));
     EXPECT_FALSE(comp(entry1, entry2));
@@ -134,7 +134,7 @@ TEST_F(log_entry_comparator_test, equal_write_versions_different_keys) {
 
 // Test case: Equal write_versions and equal keys.
 // When both key_sid() and write_version are identical, neither entry is less than the other.
-TEST_F(log_entry_comparator_test, equal_write_versions_equal_keys) {
+TEST_F(blob_gc_entry_comparator_test, equal_write_versions_equal_keys) {
     storage_id_type storage = 300;
     std::string key = "sameKey";
     write_version_type wv(8, 2);
@@ -142,7 +142,7 @@ TEST_F(log_entry_comparator_test, equal_write_versions_equal_keys) {
     blob_gc_entry entry1 = create_blob_gc_entry(storage, key, wv);
     blob_gc_entry entry2 = create_blob_gc_entry(storage, key, wv);
 
-    log_entry_comparator comp;
+    blob_gc_entry_comparator comp;
     EXPECT_FALSE(comp(entry1, entry2));
     EXPECT_FALSE(comp(entry2, entry1));
 }
@@ -150,7 +150,7 @@ TEST_F(log_entry_comparator_test, equal_write_versions_equal_keys) {
 // Test case: Compare entries with different storage IDs.
 // key_sid() starts with the little-endian storage ID, and the order is the lexicographical order of the key_sid() bytes.
 // For storage IDs that fit in one byte, this order matches the numeric order of the storage IDs.
-TEST_F(log_entry_comparator_test, different_storage_ids) {
+TEST_F(blob_gc_entry_comparator_test, different_storage_ids) {
     // Create two log_entry objects with the same key and write_version, but different storage IDs.
     std::string key = "testKey";
     write_version_type wv(10, 1);
@@ -162,7 +162,7 @@ TEST_F(log_entry_comparator_test, different_storage_ids) {
     blob_gc_entry entry1 = create_blob_gc_entry(storage1, key, wv);
     blob_gc_entry entry2 = create_blob_gc_entry(storage2, key, wv);
 
-    log_entry_comparator comp;
+    blob_gc_entry_comparator comp;
     // The storage IDs fit in one byte, so the numerically smaller one comes first.
     EXPECT_TRUE(comp(entry1, entry2));
     EXPECT_FALSE(comp(entry2, entry1));
@@ -170,34 +170,34 @@ TEST_F(log_entry_comparator_test, different_storage_ids) {
 
 // For storage IDs of two or more bytes, the lexicographical order of the key_sid() bytes does not match the numeric order.
 // The first bytes are reversed: 256 (00 01 ...) comes before 1 (01 00 ...).
-TEST_F(log_entry_comparator_test, multibyte_storage_ids_first_byte_reversed) {
+TEST_F(blob_gc_entry_comparator_test, multibyte_storage_ids_first_byte_reversed) {
     write_version_type wv(10, 1);
     blob_gc_entry entry_256 = create_blob_gc_entry(256, "testKey", wv);
     blob_gc_entry entry_1 = create_blob_gc_entry(1, "testKey", wv);
 
-    log_entry_comparator comp;
+    blob_gc_entry_comparator comp;
     EXPECT_TRUE(comp(entry_256, entry_1));
     EXPECT_FALSE(comp(entry_1, entry_256));
 }
 
 // Both are two bytes: 513 (01 02 ...) comes before 258 (02 01 ...).
-TEST_F(log_entry_comparator_test, multibyte_storage_ids_both_two_bytes) {
+TEST_F(blob_gc_entry_comparator_test, multibyte_storage_ids_both_two_bytes) {
     write_version_type wv(10, 1);
     blob_gc_entry entry_513 = create_blob_gc_entry(513, "testKey", wv);
     blob_gc_entry entry_258 = create_blob_gc_entry(258, "testKey", wv);
 
-    log_entry_comparator comp;
+    blob_gc_entry_comparator comp;
     EXPECT_TRUE(comp(entry_513, entry_258));
     EXPECT_FALSE(comp(entry_258, entry_513));
 }
 
 // The first bytes are equal, so the second byte decides: 65537 (01 00 01 ...) comes before 257 (01 01 00 ...).
-TEST_F(log_entry_comparator_test, multibyte_storage_ids_same_first_byte) {
+TEST_F(blob_gc_entry_comparator_test, multibyte_storage_ids_same_first_byte) {
     write_version_type wv(10, 1);
     blob_gc_entry entry_65537 = create_blob_gc_entry(65537, "testKey", wv);
     blob_gc_entry entry_257 = create_blob_gc_entry(257, "testKey", wv);
 
-    log_entry_comparator comp;
+    blob_gc_entry_comparator comp;
     EXPECT_TRUE(comp(entry_65537, entry_257));
     EXPECT_FALSE(comp(entry_257, entry_65537));
 }
@@ -205,7 +205,7 @@ TEST_F(log_entry_comparator_test, multibyte_storage_ids_same_first_byte) {
 // Sorts entries including storage IDs of two or more bytes, and checks that they are ordered by the key_sid() bytes
 // (starting with the little-endian storage ID), then key, then write_version. The expected order is written by hand,
 // independently of the comparator.
-TEST_F(log_entry_comparator_test, multibyte_storage_ids_overall_sort) {
+TEST_F(blob_gc_entry_comparator_test, multibyte_storage_ids_overall_sort) {
     struct spec {
         storage_id_type storage;
         std::string key;
@@ -229,7 +229,7 @@ TEST_F(log_entry_comparator_test, multibyte_storage_ids_overall_sort) {
         entries.emplace_back(create_blob_gc_entry(it->storage, it->key, it->wv));
     }
 
-    std::sort(entries.begin(), entries.end(), log_entry_comparator{});
+    std::sort(entries.begin(), entries.end(), blob_gc_entry_comparator{});
 
     ASSERT_EQ(entries.size(), expected.size());
     for (std::size_t i = 0; i < entries.size(); ++i) {
@@ -248,7 +248,7 @@ TEST_F(log_entry_comparator_test, multibyte_storage_ids_overall_sort) {
 //    so the order matches the numeric order.
 // 2. Key (lexicographical order when storage IDs are equal)
 // 3. Write Version (compared by epoch first, then minor when storage and key are equal)
-TEST_F(log_entry_comparator_test, overall_priority_storage_key_write_version) {
+TEST_F(blob_gc_entry_comparator_test, overall_priority_storage_key_write_version) {
     // Create four log_entry objects with various combinations:
     //
     // Entry1: storage=100, key="aaa", write_version=(10,0)
@@ -275,8 +275,8 @@ TEST_F(log_entry_comparator_test, overall_priority_storage_key_write_version) {
     // Place entries in unsorted order.
     std::vector<blob_gc_entry> entries = { entry3, entry4, entry2, entry1 };
     
-    // Sort using log_entry_comparator.
-    log_entry_comparator comp;
+    // Sort using blob_gc_entry_comparator.
+    blob_gc_entry_comparator comp;
     std::sort(entries.begin(), entries.end(), comp);
     
     // Expected sorted order (ascending):

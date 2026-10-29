@@ -15,17 +15,17 @@
  */
 
 #include "blob_file_gc_snapshot.h"
-#include "log_entry_container.h"
-#include "log_entry_comparator.h"
+#include "blob_gc_entry_container.h"
+#include "blob_gc_entry_comparator.h"
 #include <algorithm>
 
 namespace limestone::internal {
 
 // ----------------- Implementation of blob_file_gc_snapshot methods -----------------
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
-thread_local std::shared_ptr<log_entry_container> blob_file_gc_snapshot::tls_low_container_ = nullptr;
+thread_local std::shared_ptr<blob_gc_entry_container> blob_file_gc_snapshot::tls_low_container_ = nullptr;
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
-thread_local std::shared_ptr<log_entry_container> blob_file_gc_snapshot::tls_high_container_ = nullptr;
+thread_local std::shared_ptr<blob_gc_entry_container> blob_file_gc_snapshot::tls_high_container_ = nullptr;
 
 blob_file_gc_snapshot::blob_file_gc_snapshot(const write_version_type& boundary_version) : boundary_version_(boundary_version) {
     // The thread_low_containers_, thread_high_containers_ and aggregated_entries are default-constructed.
@@ -51,7 +51,7 @@ void blob_file_gc_snapshot::sanitize_and_add_entry(const log_entry_view& entry) 
     if (entry_wv < boundary_version_) {
         // Process low container.
         if (!tls_low_container_) {
-            tls_low_container_ = std::make_shared<log_entry_container>();
+            tls_low_container_ = std::make_shared<blob_gc_entry_container>();
             {
                 std::scoped_lock<std::mutex> lock(global_mtx_);
                 thread_low_containers_.push_back(tls_low_container_);
@@ -61,7 +61,7 @@ void blob_file_gc_snapshot::sanitize_and_add_entry(const log_entry_view& entry) 
     } else {
         // Process high container.
         if (!tls_high_container_) {
-            tls_high_container_ = std::make_shared<log_entry_container>();
+            tls_high_container_ = std::make_shared<blob_gc_entry_container>();
             {
                 std::scoped_lock<std::mutex> lock(global_mtx_);
                 thread_high_containers_.push_back(tls_high_container_);
@@ -82,9 +82,9 @@ void blob_file_gc_snapshot::finalize_local_entries() {
     }
 }
 
-log_entry_container blob_file_gc_snapshot::finalize_low_entries_impl() {
+blob_gc_entry_container blob_file_gc_snapshot::finalize_low_entries_impl() {
     // Merge and sort low containers, then remove duplicate entries.
-    log_entry_container low_merged = log_entry_container::merge_sorted_collections(thread_low_containers_);
+    blob_gc_entry_container low_merged = blob_gc_entry_container::merge_sorted_collections(thread_low_containers_);
     std::string last_key;
     for (const auto& entry : low_merged) {
         const std::string_view current_key = entry.serialized_key_sid();
@@ -96,7 +96,7 @@ log_entry_container blob_file_gc_snapshot::finalize_low_entries_impl() {
     return aggregated_entries;
 }
 
-log_entry_container blob_file_gc_snapshot::finalize_high_entries_impl() {
+blob_gc_entry_container blob_file_gc_snapshot::finalize_high_entries_impl() {
     for (const auto& high_container : thread_high_containers_) {
         for (const auto& entry : *high_container) {
             aggregated_entries.append(entry);
@@ -105,7 +105,7 @@ log_entry_container blob_file_gc_snapshot::finalize_high_entries_impl() {
     return aggregated_entries;
 }
 
-const log_entry_container& blob_file_gc_snapshot::finalize_snapshot() {
+const blob_gc_entry_container& blob_file_gc_snapshot::finalize_snapshot() {
     aggregated_entries.clear();
     finalize_low_entries_impl();
     finalize_high_entries_impl();

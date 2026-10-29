@@ -29,7 +29,7 @@ using namespace limestone::api;
  * Compares the serialized key_sids in the order of log_entry_format::compare_key_sid(), and if they are equal,
  * compares the write_versions in ascending order.
  */
-class log_entry_comparator {
+class blob_gc_entry_comparator {
 public:
     /**
      * @brief Returns whether a comes before b.

@@ -10,8 +10,8 @@
 #include "log_entry.h"
 #include "blob_gc_entry.h"
 #include "log_entry/log_entry_format.h"
-#include "log_entry_container.h"
-#include "log_entry_comparator.h"
+#include "blob_gc_entry_container.h"
+#include "blob_gc_entry_comparator.h"
 
 // Use the namespaces defined for the API and internal classes.
 using namespace limestone::api;
@@ -20,7 +20,7 @@ using namespace limestone::internal;
 namespace limestone {
 namespace testing {
 
-class log_entry_container_test : public ::testing::Test {
+class blob_gc_entry_container_test : public ::testing::Test {
 protected:
     // creates a blob_gc_entry from a view of a normal_with_blob
     static blob_gc_entry create_blob_gc_entry(storage_id_type storage,
@@ -42,8 +42,8 @@ protected:
 };
 
 // Test that appending log_entry instances increases container size.
-TEST_F(log_entry_container_test, append_and_size) {
-    log_entry_container container;
+TEST_F(blob_gc_entry_container_test, append_and_size) {
+    blob_gc_entry_container container;
     EXPECT_EQ(container.size(), 0u);
 
     blob_gc_entry entry1 = create_blob_gc_entry(100, "keyA", write_version_type(10, 1));
@@ -54,8 +54,8 @@ TEST_F(log_entry_container_test, append_and_size) {
     EXPECT_EQ(container.size(), 2u);
 }
 
-TEST_F(log_entry_container_test, sort_order) {
-    log_entry_container container;
+TEST_F(blob_gc_entry_container_test, sort_order) {
+    blob_gc_entry_container container;
     // Two entries with the same key ("keyA") have different versions,
     // and one entry with a different key ("keyB").
     blob_gc_entry entry1 = create_blob_gc_entry(100, "keyB", write_version_type(1, 1));
@@ -96,9 +96,9 @@ TEST_F(log_entry_container_test, sort_order) {
 }
 
 // Test merging three sorted containers.
-TEST_F(log_entry_container_test, merge_sorted_collections) {
+TEST_F(blob_gc_entry_container_test, merge_sorted_collections) {
     // Create three containers.
-    log_entry_container container1, container2, container3;
+    blob_gc_entry_container container1, container2, container3;
 
     // --- Container 1 ---
     // Two entries:
@@ -131,13 +131,13 @@ TEST_F(log_entry_container_test, merge_sorted_collections) {
     container3.append(c3_e3);
 
     // Prepare a vector of containers to merge using shared_ptr.
-    std::vector<std::shared_ptr<log_entry_container>> containers;
-    containers.push_back(std::make_shared<log_entry_container>(std::move(container1)));
-    containers.push_back(std::make_shared<log_entry_container>(std::move(container2)));
-    containers.push_back(std::make_shared<log_entry_container>(std::move(container3)));
+    std::vector<std::shared_ptr<blob_gc_entry_container>> containers;
+    containers.push_back(std::make_shared<blob_gc_entry_container>(std::move(container1)));
+    containers.push_back(std::make_shared<blob_gc_entry_container>(std::move(container2)));
+    containers.push_back(std::make_shared<blob_gc_entry_container>(std::move(container3)));
 
     // Perform the merge.
-    log_entry_container merged = log_entry_container::merge_sorted_collections(containers);
+    blob_gc_entry_container merged = blob_gc_entry_container::merge_sorted_collections(containers);
 
     // Expected merged order (descending):
     //   1. ("E", (5,0))      -- container3
@@ -187,9 +187,9 @@ TEST_F(log_entry_container_test, merge_sorted_collections) {
 
 
 // Test case: Merge sorted collections with an empty container included.
-TEST_F(log_entry_container_test, merge_sorted_collections_with_empty_container) {
+TEST_F(blob_gc_entry_container_test, merge_sorted_collections_with_empty_container) {
     // Create two non-empty containers and one empty container.
-    log_entry_container container1, container2, container_empty;
+    blob_gc_entry_container container1, container2, container_empty;
     
     // --- Container 1 ---
     blob_gc_entry c1_e1 = create_blob_gc_entry(100, "B", write_version_type(2, 0));
@@ -202,13 +202,13 @@ TEST_F(log_entry_container_test, merge_sorted_collections_with_empty_container) 
     container2.append(c2_e1);
     
     // Prepare vector using shared_ptr.
-    std::vector<std::shared_ptr<log_entry_container>> containers;
-    containers.push_back(std::make_unique<log_entry_container>(std::move(container1)));
-    containers.push_back(std::make_unique<log_entry_container>(std::move(container_empty)));
-    containers.push_back(std::make_unique<log_entry_container>(std::move(container2)));
+    std::vector<std::shared_ptr<blob_gc_entry_container>> containers;
+    containers.push_back(std::make_unique<blob_gc_entry_container>(std::move(container1)));
+    containers.push_back(std::make_unique<blob_gc_entry_container>(std::move(container_empty)));
+    containers.push_back(std::make_unique<blob_gc_entry_container>(std::move(container2)));
     
     // Perform the merge.
-    log_entry_container merged = log_entry_container::merge_sorted_collections(containers);
+    blob_gc_entry_container merged = blob_gc_entry_container::merge_sorted_collections(containers);
     
     // Expected descending order: "C" > "B" > "A"
     auto it = merged.begin();
@@ -233,18 +233,18 @@ TEST_F(log_entry_container_test, merge_sorted_collections_with_empty_container) 
 }
 
 // Test case: All containers are empty.
-TEST_F(log_entry_container_test, merge_all_empty_containers) {
+TEST_F(blob_gc_entry_container_test, merge_all_empty_containers) {
     // Create three empty containers.
-    log_entry_container container1, container2, container3;
+    blob_gc_entry_container container1, container2, container3;
     
     // Prepare vector using shared_ptr.
-    std::vector<std::shared_ptr<log_entry_container>> containers;
-    containers.push_back(std::make_unique<log_entry_container>(std::move(container1)));
-    containers.push_back(std::make_unique<log_entry_container>(std::move(container2)));
-    containers.push_back(std::make_unique<log_entry_container>(std::move(container3)));
+    std::vector<std::shared_ptr<blob_gc_entry_container>> containers;
+    containers.push_back(std::make_unique<blob_gc_entry_container>(std::move(container1)));
+    containers.push_back(std::make_unique<blob_gc_entry_container>(std::move(container2)));
+    containers.push_back(std::make_unique<blob_gc_entry_container>(std::move(container3)));
     
     // Perform the merge.
-    log_entry_container merged = log_entry_container::merge_sorted_collections(containers);
+    blob_gc_entry_container merged = blob_gc_entry_container::merge_sorted_collections(containers);
     
     // Expect the merged container to be empty.
     EXPECT_EQ(merged.size(), 0u);
@@ -256,12 +256,12 @@ TEST_F(log_entry_container_test, merge_all_empty_containers) {
 }
 
 // Test case: Container list is empty.
-TEST_F(log_entry_container_test, merge_empty_container_list) {
+TEST_F(blob_gc_entry_container_test, merge_empty_container_list) {
     // Prepare an empty vector of containers using shared_ptr.
-    std::vector<std::shared_ptr<log_entry_container>> containers;
+    std::vector<std::shared_ptr<blob_gc_entry_container>> containers;
     
     // Perform the merge.
-    log_entry_container merged = log_entry_container::merge_sorted_collections(containers);
+    blob_gc_entry_container merged = blob_gc_entry_container::merge_sorted_collections(containers);
     
     // Expect the merged container to be empty.
     EXPECT_EQ(merged.size(), 0u);
@@ -269,9 +269,9 @@ TEST_F(log_entry_container_test, merge_empty_container_list) {
 
 
 // Test case: Each container contains a single entry.
-TEST_F(log_entry_container_test, merge_single_entry_containers) {
+TEST_F(blob_gc_entry_container_test, merge_single_entry_containers) {
     // Create three containers, each with one entry.
-    log_entry_container container1, container2, container3;
+    blob_gc_entry_container container1, container2, container3;
     
     blob_gc_entry c1_e1 = create_blob_gc_entry(100, "A", write_version_type(1, 0));
     container1.append(c1_e1);
@@ -283,13 +283,13 @@ TEST_F(log_entry_container_test, merge_single_entry_containers) {
     container3.append(c3_e1);
     
     // Prepare vector using shared_ptr.
-    std::vector<std::shared_ptr<log_entry_container>> containers;
-    containers.push_back(std::make_unique<log_entry_container>(std::move(container1)));
-    containers.push_back(std::make_unique<log_entry_container>(std::move(container2)));
-    containers.push_back(std::make_unique<log_entry_container>(std::move(container3)));
+    std::vector<std::shared_ptr<blob_gc_entry_container>> containers;
+    containers.push_back(std::make_unique<blob_gc_entry_container>(std::move(container1)));
+    containers.push_back(std::make_unique<blob_gc_entry_container>(std::move(container2)));
+    containers.push_back(std::make_unique<blob_gc_entry_container>(std::move(container3)));
     
     // Perform the merge.
-    log_entry_container merged = log_entry_container::merge_sorted_collections(containers);
+    blob_gc_entry_container merged = blob_gc_entry_container::merge_sorted_collections(containers);
     
     // Expected descending order: "C" > "B" > "A"
     auto it = merged.begin();
@@ -315,9 +315,9 @@ TEST_F(log_entry_container_test, merge_single_entry_containers) {
 
 
 // Test case: Merge sorted collections with duplicate entries.
-TEST_F(log_entry_container_test, merge_with_duplicate_entries) {
+TEST_F(blob_gc_entry_container_test, merge_with_duplicate_entries) {
     // Create two containers with duplicate entries.
-    log_entry_container container1, container2;
+    blob_gc_entry_container container1, container2;
     
     blob_gc_entry dup_entry1 = create_blob_gc_entry(100, "X", write_version_type(5, 0));
     blob_gc_entry dup_entry2 = create_blob_gc_entry(100, "X", write_version_type(5, 0));
@@ -328,12 +328,12 @@ TEST_F(log_entry_container_test, merge_with_duplicate_entries) {
     container2.append(dup_entry3);
     
     // Prepare vector using shared_ptr.
-    std::vector<std::shared_ptr<log_entry_container>> containers;
-    containers.push_back(std::make_unique<log_entry_container>(std::move(container1)));
-    containers.push_back(std::make_unique<log_entry_container>(std::move(container2)));
+    std::vector<std::shared_ptr<blob_gc_entry_container>> containers;
+    containers.push_back(std::make_unique<blob_gc_entry_container>(std::move(container1)));
+    containers.push_back(std::make_unique<blob_gc_entry_container>(std::move(container2)));
     
     // Perform the merge.
-    log_entry_container merged = log_entry_container::merge_sorted_collections(containers);
+    blob_gc_entry_container merged = blob_gc_entry_container::merge_sorted_collections(containers);
     
     // Since all entries are identical, merged container should contain all 3 entries.
     int count = 0;

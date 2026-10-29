@@ -83,7 +83,7 @@ TEST_F(blob_file_gc_snapshot_test, sanitize_and_add_entry_valid) {
     blob_file_gc_snapshot snapshot(write_version_type(100, 1));
     snapshot.sanitize_and_add_entry(entry.view());
     snapshot.finalize_local_entries();
-    const log_entry_container& snap = snapshot.finalize_snapshot();
+    const blob_gc_entry_container& snap = snapshot.finalize_snapshot();
     
     // Expect one entry in the snapshot.
     EXPECT_EQ(snap.size(), 1u);
@@ -113,7 +113,7 @@ TEST_F(blob_file_gc_snapshot_test, sanitize_and_add_entry_invalid_type) {
     blob_file_gc_snapshot snapshot(write_version_type(100, 1));
     snapshot.sanitize_and_add_entry(entry.view());
     snapshot.finalize_local_entries();
-    const log_entry_container& snap = snapshot.finalize_snapshot();
+    const blob_gc_entry_container& snap = snapshot.finalize_snapshot();
     
     // Since the entry is not normal_with_blob, it should not be added.
     EXPECT_EQ(snap.size(), 0u);
@@ -132,14 +132,14 @@ TEST_F(blob_file_gc_snapshot_test, reset_snapshot) {
     blob_file_gc_snapshot snapshot(write_version_type(100, 1));
     snapshot.sanitize_and_add_entry(entry.view());
     snapshot.finalize_local_entries();
-    const log_entry_container& snap = snapshot.finalize_snapshot();
+    const blob_gc_entry_container& snap = snapshot.finalize_snapshot();
     EXPECT_EQ(snap.size(), 1u);
     
     // Reset the snapshot.
     snapshot.reset();
     
     // After reset, finalize_snapshot should return an empty snapshot.
-    const log_entry_container& snap2 = snapshot.finalize_snapshot();
+    const blob_gc_entry_container& snap2 = snapshot.finalize_snapshot();
     EXPECT_EQ(snap2.size(), 0u);
 }
 
@@ -165,7 +165,7 @@ TEST_F(blob_file_gc_snapshot_test, finalize_snapshot_merging_duplicates) {
     snapshot.sanitize_and_add_entry(entry1.view());
     snapshot.sanitize_and_add_entry(entry2.view());
     snapshot.finalize_local_entries();
-    const log_entry_container& snap = snapshot.finalize_snapshot();
+    const blob_gc_entry_container& snap = snapshot.finalize_snapshot();
     
     // After merging and duplicate removal, only one entry should remain.
     EXPECT_EQ(snap.size(), 1u);
@@ -187,7 +187,7 @@ TEST_F(blob_file_gc_snapshot_test, tls_container_null_state_behavior) {
 
     // Calling finalize_local_entries() when tls_container_ is nullptr should not crash.
     EXPECT_NO_THROW(snapshot.finalize_local_entries());
-    const log_entry_container& snap1 = snapshot.finalize_snapshot();
+    const blob_gc_entry_container& snap1 = snapshot.finalize_snapshot();
     EXPECT_EQ(snap1.size(), 0u);
 
     // Now, create a valid blob entry.
@@ -201,7 +201,7 @@ TEST_F(blob_file_gc_snapshot_test, tls_container_null_state_behavior) {
     // and should create a new container to add the entry.
     EXPECT_NO_THROW(snapshot.sanitize_and_add_entry(entry.view()));
     snapshot.finalize_local_entries();
-    const log_entry_container& snap2 = snapshot.finalize_snapshot();
+    const blob_gc_entry_container& snap2 = snapshot.finalize_snapshot();
     EXPECT_EQ(snap2.size(), 1u);
 }
 
@@ -215,7 +215,7 @@ TEST_F(blob_file_gc_snapshot_test, threshold_boundary_test) {
     log_entry entry_equal = create_blob_log_entry(600, "boundaryKey", "boundaryValue", write_version_type(100, 1));
     snapshot.sanitize_and_add_entry(entry_equal.view());
     snapshot.finalize_local_entries();
-    log_entry_container snap_equal = snapshot.finalize_low_entries_impl();
+    blob_gc_entry_container snap_equal = snapshot.finalize_low_entries_impl();
     EXPECT_EQ(snap_equal.size(), 0u);
     snap_equal = snapshot.finalize_high_entries_impl();
     EXPECT_EQ(snap_equal.size(), 1u);
@@ -228,7 +228,7 @@ TEST_F(blob_file_gc_snapshot_test, threshold_boundary_test) {
     log_entry entry_lower = create_blob_log_entry(600, "boundaryKey", "boundaryValue", write_version_type(100, 0));
     snapshot.sanitize_and_add_entry(entry_lower.view());
     snapshot.finalize_local_entries();
-    log_entry_container snap_lower = snapshot.finalize_low_entries_impl();
+    blob_gc_entry_container snap_lower = snapshot.finalize_low_entries_impl();
     EXPECT_EQ(snap_lower.size(), 1u);
     snap_lower = snapshot.finalize_high_entries_impl();
     EXPECT_EQ(snap_lower.size(), 1u);
@@ -241,7 +241,7 @@ TEST_F(blob_file_gc_snapshot_test, threshold_boundary_test) {
     log_entry entry_higher = create_blob_log_entry(600, "boundaryKey", "boundaryValue", write_version_type(101, 0));
     snapshot.sanitize_and_add_entry(entry_higher.view());
     snapshot.finalize_local_entries();
-    log_entry_container snap_higher = snapshot.finalize_low_entries_impl();
+    blob_gc_entry_container snap_higher = snapshot.finalize_low_entries_impl();
     EXPECT_EQ(snap_higher.size(), 0u);
     snap_higher = snapshot.finalize_high_entries_impl();
     EXPECT_EQ(snap_higher.size(), 1u);
