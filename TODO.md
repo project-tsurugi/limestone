@@ -264,8 +264,9 @@ master へのマージ前に本ファイルを削除する。
 * [x] restore (datastore_restore): 写したファイルのデータの fsync、写し先のディレクトリの fsync、mkdir した親ディレクトリの
       fsync。(5 節)
 * [x] レプリカで BLOB を受信して書く経路 (rdma と tcp) に、ディレクトリの fsync を入れる (DF 10 節)。(5 節)
-* [x] スナップショットファイル、sorting の下の作業ファイル、dblogutil の作業ファイルは対象外とする (DF 6 節。クラッシュ
-      後に作り直すか、利用者がやり直せば回復する)。
+* [x] スナップショットファイルと sorting の下の作業ファイルは対象外とする (DF 6 節。クラッシュ後に作り直すか、利用者が
+      やり直せば回復する)。dblogutil の compaction の作業ディレクトリは、差し替えで本番のログディレクトリになるので対象
+      (差し替えの前に中身を、差し替えの後に親ディレクトリを fsync する)。(5 節)
 * [x] UT: fsync の失敗の注入で例外になること (全箇所)。
 * [x] L3 (全体) の 12.2 節と 17 節の申し送り事項を更新する (ステップ 14 の limestone 以外の対応)。(5 節)
 
@@ -884,7 +885,12 @@ master へのマージ前に本ファイルを削除する。
   begin_session と end_session が止まる) から、rotate_log_files の最後に mutex の外で 1 回に変えた。永続化が要るのは
   rotate_log_files が返る前だけで、rename はジャーナリング FS でクラッシュに対して原子的 (前後どちらかの名前になる) で、
   どちらの名前の pwal も次の起動で読めるので、途中で落ちても害はない。shutdown で諦めたときは fsync しない。
-  rotate_pwal_file は rename だけを行い、file_operations を受けない。
+  rotate_pwal_file は rename だけを行い、file_operations を受けない。(3) dblogutil の compaction の作業ディレクトリ
+  tmp は、remove_all(from_dir) (または backup への rename) と rename(tmp, from_dir) で本番のログディレクトリになるので、
+  「やり直せば回復する」作業ファイルではない。差し替えの前に tmp の中身 (copy した manifest、--make_backup のときの blob
+  のコピー (再帰)、tmp のエントリ) を、差し替えの後に親ディレクトリを fsync する。catalog、epoch、compacted は書いた時に
+  同期済み、通常の blob は rename で移っていて中身は元から durable なので、改めて同期しない。2 段の差し替え自体が
+  非原子的なこと (RENAME_EXCHANGE が要る) は変えない。dblogutil のテストは別プロセスなので、失敗の注入はできない。
 
 ## 6. 残った課題
 

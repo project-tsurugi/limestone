@@ -14,6 +14,9 @@
  * limitations under the License.
  */
 
+#include <fcntl.h>
+#include <unistd.h>
+
 #include <iostream>
 #include <string>
 #include <stdlib.h>  // NOLINT(*-deprecated-headers): <cstdlib> does not provide std::mkdtemp
@@ -248,6 +251,58 @@ boost::filesystem::path make_work_dir_next_to(const boost::filesystem::path& tar
 
 boost::filesystem::path make_backup_dir_next_to(const boost::filesystem::path& target_dir) {
     return make_tmp_dir_next_to(target_dir, ".backup_XXXXXX");
+}
+
+// synchronizes the data of file to disk
+void sync_file(const boost::filesystem::path& file) {
+    int fd = ::open(file.c_str(), O_RDONLY);  // NOLINT(cppcoreguidelines-pro-type-vararg,hicpp-vararg)
+    if (fd < 0) {
+        LOG_AND_THROW_IO_EXCEPTION("failed to open the file to synchronize it: " + file.string(), errno);
+    }
+    if (::fsync(fd) != 0) {
+        int error_code = errno;
+        ::close(fd);
+        LOG_AND_THROW_IO_EXCEPTION("failed to synchronize the file: " + file.string(), error_code);
+    }
+    if (::close(fd) != 0) {
+        LOG_AND_THROW_IO_EXCEPTION("failed to close the synchronized file: " + file.string(), errno);
+    }
+}
+
+// synchronizes the entries of dir to disk
+void sync_directory(const boost::filesystem::path& dir) {
+    real_file_operations ops;
+    if (ops.fsync_directory(dir) != 0) {
+        LOG_AND_THROW_IO_EXCEPTION("failed to synchronize the directory: " + dir.string(), errno);
+    }
+}
+
+// synchronizes the data of every file and the entries of every directory under dir, recursively
+void sync_tree(const boost::filesystem::path& dir) {
+    boost::system::error_code ec;
+    for (boost::filesystem::recursive_directory_iterator it(dir, ec), end; it != end && !ec; it.increment(ec)) {
+        if (boost::filesystem::is_directory(it->path())) {
+            sync_directory(it->path());
+        } else if (boost::filesystem::is_regular_file(it->path())) {
+            sync_file(it->path());
+        }
+    }
+    if (ec) {
+        LOG_AND_THROW_IO_EXCEPTION("failed to scan the directory to synchronize it: " + dir.string(), ec);
+    }
+    sync_directory(dir);
+}
+
+// persists the contents of the work directory tmp before the swap, as tmp becomes from_dir itself. The catalog, the
+// epoch file and the compacted file were synchronized when written; the copied manifest and (with a backup) the
+// copied BLOB files were not, so they are synchronized here. Otherwise the BLOB directory was moved by rename and its
+// contents are durable already, so synchronizing the entries of tmp is enough
+void sync_work_directory(const boost::filesystem::path& tmp, bool blob_copied) {
+    sync_file(tmp / std::string(manifest::file_name));
+    if (blob_copied && boost::filesystem::exists(tmp / "blob")) {
+        sync_tree(tmp / "blob");
+    }
+    sync_directory(tmp);
 }
 
 /**
@@ -555,6 +610,9 @@ void compaction(dblog_scan &ds, const sort_options& sort) {
     // touches from_dir, and right before the directory swap below.
     carry_over_blob_directory(from_dir, tmp, FLAGS_make_backup);
 
+    VLOG_LP(log_info) << "synchronizing the work directory " << tmp;
+    sync_work_directory(tmp, FLAGS_make_backup);
+
     if (FLAGS_make_backup) {
         auto bkdir = make_backup_dir_next_to(from_dir);
         VLOG_LP(log_info) << "renaming " << from_dir << " to " << bkdir << " for backup";
@@ -568,6 +626,9 @@ void compaction(dblog_scan &ds, const sort_options& sort) {
     }
     VLOG_LP(log_info) << "renaming " << tmp << " to " << from_dir;
     boost::filesystem::rename(tmp, from_dir);
+    // persist the renames of the swap (and the removal of from_dir) before reporting the success. tmp is created
+    // as a normalized absolute path, so its parent is the parent of from_dir
+    sync_directory(tmp.parent_path());
 
     std::cout << "compaction was successfully completed: " << from_dir << std::endl;
 }
