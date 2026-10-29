@@ -336,35 +336,6 @@ public:
         }
     }
 
-    static void write_with_blob(FILE* strm, std::string_view key_sid, std::string_view value_etc, std::string_view blob_ids) {
-        entry_type type = entry_type::normal_with_blob;
-        write_uint8(strm, static_cast<std::uint8_t>(type));
-
-        // Calculate key_len
-        std::size_t key_len = key_sid.length() - sizeof(storage_id_type);
-        assert(key_len <= UINT32_MAX);
-        write_uint32le(strm, static_cast<std::uint32_t>(key_len));
-
-        // Calculate value_len
-        std::size_t value_len = value_etc.length() - (sizeof(epoch_id_type) + sizeof(std::uint64_t));
-        assert(value_len <= UINT32_MAX);
-        write_uint32le(strm, static_cast<std::uint32_t>(value_len));
-
-        // Write key_sid
-        write_bytes(strm, key_sid.data(), key_sid.length());
-
-        // Write value_etc
-        write_bytes(strm, value_etc.data(), value_etc.length());
-
-        // Calculate and write the number of BLOBs
-        std::size_t blob_count = blob_ids.length() / sizeof(blob_id_type);
-        assert(blob_count <= UINT32_MAX);
-        write_uint32le(strm, static_cast<std::uint32_t>(blob_count));
-
-        // Write the actual BLOB data
-        write_bytes(strm, blob_ids.data(), blob_ids.length());
-    }
-
     static void write_remove(FILE* strm, storage_id_type storage_id, std::string_view key, write_version_type write_version) {
         entry_type type = entry_type::remove_entry;
         write_uint8(strm, static_cast<std::uint8_t>(type));
@@ -380,18 +351,6 @@ public:
         write_uint64le(strm, write_version.minor_write_version_);
     }
 
-    static void write_remove(FILE* strm, std::string_view key_sid, std::string_view value_etc) {
-        entry_type type = entry_type::remove_entry;
-        write_uint8(strm, static_cast<std::uint8_t>(type));
-
-        std::size_t key_len = key_sid.length() - sizeof(storage_id_type);
-        assert(key_len <= UINT32_MAX);
-        write_uint32le(strm, static_cast<std::uint32_t>(key_len));
-
-        write_bytes(strm, key_sid.data(), key_sid.length());
-        write_bytes(strm, value_etc.data(), value_etc.length());
-    }
-
     static inline void write_ope_storage_common(FILE* strm, entry_type type, storage_id_type storage_id, write_version_type write_version) {
         write_uint8(strm, static_cast<std::uint8_t>(type));
         write_uint64le(strm, static_cast<std::uint64_t>(storage_id));
@@ -399,34 +358,16 @@ public:
         write_uint64le(strm, write_version.minor_write_version_);
     }
 
-    static inline void write_ope_storage_common(FILE* strm, entry_type type, std::string_view key_sid, std::string_view value_etc) {
-        write_uint8(strm, static_cast<std::uint8_t>(type));
-        write_bytes(strm, key_sid.data(), key_sid.length());
-        write_bytes(strm, value_etc.data(), value_etc.length());
-    }
-
     static void write_clear_storage(FILE* strm, storage_id_type storage_id, write_version_type write_version) {
         write_ope_storage_common(strm, entry_type::clear_storage, storage_id, write_version);
-    }
-
-    static void write_clear_storage(FILE* strm, std::string_view key_sid, std::string_view value_etc) {
-        write_ope_storage_common(strm, entry_type::clear_storage, key_sid, value_etc);
     }
 
     static void write_add_storage(FILE* strm, storage_id_type storage_id, write_version_type write_version) {
         write_ope_storage_common(strm, entry_type::add_storage, storage_id, write_version);
     }
 
-    static void write_add_storage(FILE* strm, std::string_view key_sid, std::string_view value_etc) {
-        write_ope_storage_common(strm, entry_type::add_storage, key_sid, value_etc);
-    }
-
     static void write_remove_storage(FILE* strm, storage_id_type storage_id, write_version_type write_version) {
         write_ope_storage_common(strm, entry_type::remove_storage, storage_id, write_version);
-    }
-
-    static void write_remove_storage(FILE* strm, std::string_view key_sid, std::string_view value_etc) {
-        write_ope_storage_common(strm, entry_type::remove_storage, key_sid, value_etc);
     }
 
 // for reader

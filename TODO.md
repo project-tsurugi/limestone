@@ -155,8 +155,9 @@ master へのマージ前に本ファイルを削除する。
       split_db_value_and_blob_ids()、create_value_from_db_key_and_value() など) を削除する。
       (datastore_snapshot.cpp の旧ソート専用の関数は、使われなくなったステップ 6 のコンパクションの置き換えで削除した。
       残りの sortdb_wrapper と sorting_context は使う側がないのでクラスごと削除し、log_entry の旧ソートの出力用の
-      write(key_sid, value_etc) も削除した。test/limestone/blob/datastore_blob_test.cpp:621 のコメントは旧関数名を出さない
-      形に直した。)
+      バイト列版の書き出し (write、write_with_blob、write_remove、write_ope_storage_common、write_clear_storage、
+      write_add_storage、write_remove_storage の (key_sid, value_etc) 版) も削除した (ステップ 12 の前倒し。5 節)。
+      test/limestone/blob/datastore_blob_test.cpp:621 のコメントは旧関数名を出さない形に直した。)
 * [x] CMake: RECOVERY_SORTER_KVSLIB・RECOVERY_SORTER_PUT_ONLY、マクロ SORT_METHOD_USE_ROCKSDB・SORT_METHOD_PUT_ONLY、
       cmake/FindRocksDB.cmake と RocksDB・LevelDB の find_package を削除する。
 * [x] .github/workflows/ci-build.yml:46 の -DRECOVERY_SORTER_KVSLIB=ROCKSDB と -DRECOVERY_SORTER_PUT_ONLY=ON を削除する。
@@ -219,7 +220,8 @@ master へのマージ前に本ファイルを削除する。
 
 * [ ] 旧 API を削除する: バイト列版の書き出し、旧名のアクセサ、truncate_value_from_normal_entry、
       static 関数 write_version_epoch_number・write_version_minor_write_version・parse_blob_ids、read と
-      read_entry_from、所有型の write(FILE*)。make_normal_with_blob_log_entry はステップ 2 で前倒しして削除した (5 節)。
+      read_entry_from、所有型の write(FILE*)。make_normal_with_blob_log_entry はステップ 2 で、バイト列版の書き出しは
+      ステップ 7 で、前倒しして削除した (5 節)。
 * [ ] 公開 API write_version_type(const std::string&)・write_version_type(std::string_view) の扱い (Q4 による)。
 
 ### ステップ 13: ディレクトリの fsync と BLOB の移動の fsync
@@ -624,6 +626,10 @@ master へのマージ前に本ファイルを削除する。
     スレッド数の上限の検査 (超えれば I/O 例外で明示的に失敗する)、設定値がソートに届くことの大規模テスト (arena と
     fanin の取り違えは結果では検出できない)、dblogutil の既定の work dir を tmp にする (5 節の決定のまま)、
     --gtest_list_tests=0 の判定、datastore_impl の既定値 (試験専用のコンストラクタだけが通る)。
+
+* 2026-10-29: log_entry のバイト列版の書き出し ((key_sid, value_etc) を受ける write、write_with_blob、write_remove、
+  write_ope_storage_common、write_clear_storage、write_add_storage、write_remove_storage) を、ステップ 12 から前倒しして
+  ステップ 7 で削除した。旧ソートの出力だけが使っていたもので、呼び出し元が残っていないため。
 
 ## 6. 残った課題
 
