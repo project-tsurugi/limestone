@@ -161,8 +161,8 @@ master へのマージ前に本ファイルを削除する。
 * [x] CMake: RECOVERY_SORTER_KVSLIB・RECOVERY_SORTER_PUT_ONLY、マクロ SORT_METHOD_USE_ROCKSDB・SORT_METHOD_PUT_ONLY、
       cmake/FindRocksDB.cmake と RocksDB・LevelDB の find_package を削除する。
 * [x] .github/workflows/ci-build.yml:46 の -DRECOVERY_SORTER_KVSLIB=ROCKSDB と -DRECOVERY_SORTER_PUT_ONLY=ON を削除する。
-      (tsurugidb の .github/workflows/ci-test-modules.yml:233 も同じ -D を limestone に渡している。削除後は未使用の変数の
-      警告になるだけで失敗はしないが、ステップ 14 で追従する。)
+      (tsurugidb の .github/workflows/ci-test-modules.yml:233 と dist/install/install-server.sh:76 も同じ -D を limestone に
+      渡している。削除後は未使用の変数の警告になるだけで失敗はしないが、ステップ 14 で追従する。)
 * [x] README.md の librocksdb-dev・libleveldb-dev の導入と注記 (19〜21 行)、ビルドオプションの説明 (47〜48 行) を削除する。
 * [x] テストの修正: snapshot/sorting_context_test と log/log_entry_4_LevelDB_test は削除 (後者の write → read の往復は
       log/log_entry_type_test が覆う)、compaction/compaction_boundary_scan_test (sortdb に触れているコメント)。
@@ -249,8 +249,12 @@ master へのマージ前に本ファイルを削除する。
 * [ ] PR の作成 (Q3)。
 * [ ] limestone 以外のリポジトリの対応 (S1 メモ 8 節)。新しい limestone が取り込まれるまで、依存パッケージを外す変更は
       入れられない。ステップ 13 を行った場合は、L3 (全体) の申し送り事項の更新も含める。
-  * [ ] tsurugidb: .github/workflows/ci-test-modules.yml:233 の limestone のビルドから -DRECOVERY_SORTER_KVSLIB=ROCKSDB と
-        -DRECOVERY_SORTER_PUT_ONLY=ON を外す (ステップ 7 で limestone 側のオプションを削除した)。
+  * [ ] tsurugidb: limestone のビルドから -DRECOVERY_SORTER_KVSLIB=ROCKSDB と -DRECOVERY_SORTER_PUT_ONLY=ON を外す
+        (.github/workflows/ci-test-modules.yml:233、dist/install/install-server.sh:76。ステップ 7 で limestone 側の
+        オプションを削除した。残っていても未使用の変数の警告になるだけで失敗はしない)。新しい limestone の取り込み後に、
+        dist/install/apt-install.sh の libleveldb-dev・librocksdb-dev と dist/install/dnf-install.sh の rocksdb-devel を
+        外し、docs/troubleshooting-guide.md の "Too many open files" の例 (sortdb_wrapper のログ) を新しいソートの失敗の
+        形に直す。limestone をビルドする他のコンポーネントの CMakeLists.txt に同じ変数の定義があれば、同様に外す。
   * [ ] tateyama: datastore resource の bridge (tateyama/datastore/resource/bridge.cpp) で、tsurugi.ini の datastore 節の
         sort_arena_size_mb、sort_work_dir、sort_merge_fanin を configuration に渡す。設定パラメータの文書
         (docs/config_parameters.md、docs/config-parameters-en.md) に新設の項目と recover_max_parallelism の意味の変更
