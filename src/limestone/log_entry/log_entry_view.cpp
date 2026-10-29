@@ -109,24 +109,6 @@ log_entry_view log_entry_view::relocated(std::string_view entry) const noexcept 
     return view;
 }
 
-log_entry_view::entry_type log_entry_view::type() const noexcept {
-    return type_;
-}
-
-std::string_view log_entry_view::serialized_entry() const {
-    if (type_ == entry_type::this_id_is_not_used) {
-        LOG_LP(FATAL) << "not valid for entry type " << type_;
-    }
-    return entry_;
-}
-
-std::string_view log_entry_view::serialized_key_sid() const {
-    if (! is_data_or_storage()) {
-        LOG_LP(FATAL) << "not valid for entry type " << type_;
-    }
-    return entry_.substr(key_sid_offset(), format::storage_id_size + key_length_);
-}
-
 std::string_view log_entry_view::serialized_value_etc() const {
     if (! is_data_or_storage()) {
         LOG_LP(FATAL) << "not valid for entry type " << type_;
@@ -162,15 +144,6 @@ std::string_view log_entry_view::value() const {
     return entry_.substr(value_etc_offset() + format::write_version_size, value_length_);
 }
 
-log_entry_view::write_version_type log_entry_view::write_version() const {
-    if (! is_data_or_storage()) {
-        LOG_LP(FATAL) << "not valid for entry type " << type_;
-    }
-    const std::string_view version = entry_.substr(value_etc_offset());
-    return {static_cast<epoch_id_type>(load_uint64le(version)),
-            load_uint64le(version.substr(format::write_version_epoch_size))};
-}
-
 std::vector<log_entry_view::blob_id_type> log_entry_view::blob_ids() const {
     if (type_ != entry_type::normal_with_blob) {
         LOG_LP(FATAL) << "not valid for entry type " << type_;
@@ -189,18 +162,6 @@ log_entry_view::epoch_id_type log_entry_view::epoch_id() const {
         LOG_LP(FATAL) << "not valid for entry type " << type_;
     }
     return static_cast<epoch_id_type>(load_uint64le(entry_.substr(format::entry_type_size)));
-}
-
-bool log_entry_view::is_data_or_storage() const noexcept {
-    return format::is_data_entry(type_) || format::is_storage_entry(type_);
-}
-
-std::size_t log_entry_view::key_sid_offset() const noexcept {
-    return format::key_sid_offset(type_);
-}
-
-std::size_t log_entry_view::value_etc_offset() const noexcept {
-    return key_sid_offset() + format::storage_id_size + key_length_;
 }
 
 log_entry_parse_result::log_entry_parse_result(status result, const log_entry_view& view, std::size_t required,

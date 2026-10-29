@@ -21,12 +21,16 @@
 #include <string_view>
 #include <vector>
 
+#include <glog/logging.h>
+
 #include <limestone/api/blob_id_type.h>
 #include <limestone/api/epoch_id_type.h>
 #include <limestone/api/storage_id_type.h>
 #include <limestone/api/write_version_type.h>
+#include <limestone/logging.h>
 
 #include "log_entry/log_entry_format.h"
+#include "logging_helper.h"
 
 namespace limestone::internal {
 
@@ -280,5 +284,48 @@ private:
  * @return out
  */
 std::ostream& operator<<(std::ostream& out, log_entry_parse_result::status result);
+
+// the accessors called for each entry in the sort and the merge. The cost of the calls takes a large part of the
+// processing time, so they are defined here to allow inlining (moving them to the .cpp file makes the sort and the
+// merge slower).
+
+inline log_entry_view::entry_type log_entry_view::type() const noexcept {
+    return type_;
+}
+
+inline std::string_view log_entry_view::serialized_entry() const {
+    if (type_ == entry_type::this_id_is_not_used) {
+        LOG_LP(FATAL) << "not valid for entry type " << type_;
+    }
+    return entry_;
+}
+
+inline std::string_view log_entry_view::serialized_key_sid() const {
+    if (! is_data_or_storage()) {
+        LOG_LP(FATAL) << "not valid for entry type " << type_;
+    }
+    return entry_.substr(key_sid_offset(), log_entry_format::storage_id_size + key_length_);
+}
+
+inline log_entry_view::write_version_type log_entry_view::write_version() const {
+    if (! is_data_or_storage()) {
+        LOG_LP(FATAL) << "not valid for entry type " << type_;
+    }
+    const std::string_view version = entry_.substr(value_etc_offset());
+    return {static_cast<epoch_id_type>(log_entry_format::load_uint64le(version)),
+            log_entry_format::load_uint64le(version.substr(log_entry_format::write_version_epoch_size))};
+}
+
+inline bool log_entry_view::is_data_or_storage() const noexcept {
+    return log_entry_format::is_data_entry(type_) || log_entry_format::is_storage_entry(type_);
+}
+
+inline std::size_t log_entry_view::key_sid_offset() const noexcept {
+    return log_entry_format::key_sid_offset(type_);
+}
+
+inline std::size_t log_entry_view::value_etc_offset() const noexcept {
+    return key_sid_offset() + log_entry_format::storage_id_size + key_length_;
+}
 
 }  // namespace limestone::internal

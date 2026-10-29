@@ -17,13 +17,20 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <cstring>
+#include <endian.h>
 #include <ostream>
 #include <string_view>
+
+#include <glog/logging.h>
 
 #include <limestone/api/blob_id_type.h>
 #include <limestone/api/epoch_id_type.h>
 #include <limestone/api/storage_id_type.h>
 #include <limestone/api/write_version_type.h>
+#include <limestone/logging.h>
+
+#include "logging_helper.h"
 
 /**
  * @file log_entry_format.h
@@ -49,6 +56,10 @@
  */
 
 namespace limestone::internal::log_entry_format {
+
+// the functions defined inline here are called for each entry in the sort and the merge. The cost of the calls takes
+// a large part of the processing time, so they are defined in this header to allow inlining (moving them to the .cpp
+// file makes the sort and the merge slower).
 
 using limestone::api::epoch_id_type;
 using limestone::api::storage_id_type;
@@ -97,14 +108,18 @@ std::ostream& operator<<(std::ostream& out, entry_type type);
  * @param type the entry type
  * @return true if the type is a data entry type
  */
-[[nodiscard]] bool is_data_entry(entry_type type) noexcept;
+[[nodiscard]] inline bool is_data_entry(entry_type type) noexcept {
+    return type == entry_type::normal_entry || type == entry_type::normal_with_blob || type == entry_type::remove_entry;
+}
 
 /**
  * @brief Returns whether the type is a storage entry type (clear_storage, add_storage, remove_storage).
  * @param type the entry type
  * @return true if the type is a storage entry type
  */
-[[nodiscard]] bool is_storage_entry(entry_type type) noexcept;
+[[nodiscard]] inline bool is_storage_entry(entry_type type) noexcept {
+    return type == entry_type::clear_storage || type == entry_type::add_storage || type == entry_type::remove_storage;
+}
 
 /**
  * @brief Returns whether the type is a marker type (marker_begin, marker_end, marker_durable, marker_invalidated_begin).
@@ -159,7 +174,9 @@ static_assert(sizeof(limestone::api::blob_id_type) == blob_id_size);
  * @param b serialized key_sid
  * @return negative if a comes before b, 0 if they are equal, positive if a comes after b
  */
-[[nodiscard]] int compare_key_sid(std::string_view a, std::string_view b) noexcept;
+[[nodiscard]] inline int compare_key_sid(std::string_view a, std::string_view b) noexcept {
+    return a.compare(b);
+}
 
 /**
  * @brief Returns the oldest write_version (epoch 0, minor version 0).
@@ -174,14 +191,22 @@ static_assert(sizeof(limestone::api::blob_id_type) == blob_id_size);
  * @param src the source. It must be at least 4 bytes long
  * @return the value read
  */
-[[nodiscard]] std::uint32_t load_uint32le(std::string_view src) noexcept;
+[[nodiscard]] inline std::uint32_t load_uint32le(std::string_view src) noexcept {
+    std::uint32_t buf{};
+    std::memcpy(&buf, src.data(), sizeof(buf));
+    return le32toh(buf);
+}
 
 /**
  * @brief Reads the first 8 bytes of src as a little-endian value.
  * @param src the source. It must be at least 8 bytes long
  * @return the value read
  */
-[[nodiscard]] std::uint64_t load_uint64le(std::string_view src) noexcept;
+[[nodiscard]] inline std::uint64_t load_uint64le(std::string_view src) noexcept {
+    std::uint64_t buf{};
+    std::memcpy(&buf, src.data(), sizeof(buf));
+    return le64toh(buf);
+}
 
 /**
  * @brief Returns the position of key_sid in an entry (the offset from the beginning of the entry). Valid for data
@@ -191,7 +216,49 @@ static_assert(sizeof(limestone::api::blob_id_type) == blob_id_size);
  * @param type the entry type. Writes a FATAL log and aborts if it is neither a data entry nor a storage entry
  * @return the position of key_sid
  */
-[[nodiscard]] std::size_t key_sid_offset(entry_type type);
+[[nodiscard]] inline std::size_t key_sid_offset(entry_type type) {
+    switch (type) {
+    case entry_type::normal_entry:
+    case entry_type::normal_with_blob:
+        return entry_type_size + key_length_size + value_length_size;
+    case entry_type::remove_entry:
+        return entry_type_size + key_length_size;
+    case entry_type::clear_storage:
+    case entry_type::add_storage:
+    case entry_type::remove_storage:
+        return entry_type_size;
+    case entry_type::this_id_is_not_used:
+    case entry_type::marker_begin:
+    case entry_type::marker_end:
+    case entry_type::marker_durable:
+    case entry_type::marker_invalidated_begin:
+        break;
+    }
+    LOG_LP(FATAL) << "not valid for entry type " << type;
+    return 0;
+}
+
+namespace detail {
+
+/// the position and the length of key_sid in an entry
+struct key_sid_location {
+    std::size_t offset;
+    std::size_t length;
+};
+
+/**
+ * @brief Locates key_sid in the bytes of a complete data entry.
+ * @param entry the bytes of a data entry
+ * @return the position and the length of key_sid
+ */
+inline key_sid_location locate_data_entry_key_sid(std::string_view entry) noexcept {
+    const auto type = static_cast<entry_type>(static_cast<std::uint8_t>(entry[0]));
+    // all three data entry types have the key length right after the entry type
+    const std::uint32_t key_length = load_uint32le(entry.substr(entry_type_size));
+    return {key_sid_offset(type), storage_id_size + key_length};
+}
+
+}  // namespace detail
 
 /**
  * @brief Returns the serialized key_sid from the bytes of a complete data entry.
@@ -201,7 +268,10 @@ static_assert(sizeof(limestone::api::blob_id_type) == blob_id_size);
  *              end of the entry
  * @return the key_sid (a part of entry)
  */
-[[nodiscard]] std::string_view data_entry_key_sid(std::string_view entry) noexcept;
+[[nodiscard]] inline std::string_view data_entry_key_sid(std::string_view entry) noexcept {
+    const detail::key_sid_location key_sid = detail::locate_data_entry_key_sid(entry);
+    return entry.substr(key_sid.offset, key_sid.length);
+}
 
 /**
  * @brief Returns the write_version from the bytes of a complete data entry.
@@ -211,6 +281,11 @@ static_assert(sizeof(limestone::api::blob_id_type) == blob_id_size);
  *              end of the entry
  * @return the write_version
  */
-[[nodiscard]] write_version_type data_entry_write_version(std::string_view entry) noexcept;
+[[nodiscard]] inline write_version_type data_entry_write_version(std::string_view entry) noexcept {
+    const detail::key_sid_location key_sid = detail::locate_data_entry_key_sid(entry);
+    const std::string_view version = entry.substr(key_sid.offset + key_sid.length);
+    return {static_cast<epoch_id_type>(load_uint64le(version)),
+            load_uint64le(version.substr(write_version_epoch_size))};
+}
 
 }  // namespace limestone::internal::log_entry_format
