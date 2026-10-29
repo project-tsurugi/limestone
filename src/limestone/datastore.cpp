@@ -1367,7 +1367,7 @@ void datastore::compact_with_online() {  // NOLINT(readability-function-cognitiv
         log_entry_container log_entries = options.get_gc_snapshot().finalize_snapshot();
         blob_file_garbage_collector_->start_add_gc_exempt_blob_ids();
         for (const auto& entry : log_entries) {
-            for (const auto& blob_id : entry.get_blob_ids()) {
+            for (const auto& blob_id : entry.blob_ids()) {
                 blob_file_garbage_collector_->add_gc_exempt_blob_id(blob_id);
             }
         }

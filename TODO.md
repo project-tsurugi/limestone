@@ -217,8 +217,8 @@ master へのマージ前に本ファイルを削除する。
   * [x] 型付き版の書き出しは、1 エントリを書くのに fwrite・fputc を 7 回前後呼ぶ。ボトルネックになっているという報告は
         ないが、良い書き方ではない。長さの検査を加えるときに、見直すかを判断する。(見直すことにした。固定長の部分をまとめて書く。
         5 節)
-* [ ] BLOB の GC の型 blob_gc_entry と、log_entry_container・log_entry_comparator の置き換え、log_entry_container.h の
-      順序の文書の修正 (LE 13.1、P19)。
+* [x] BLOB の GC の型 blob_gc_entry と、log_entry_container・log_entry_comparator の置き換え、log_entry_container.h の
+      順序の文書の修正 (LE 13.1、P19)。(型の置き換えとクラス名の変更をコミットを分けて行う。5 節)
 * [ ] UT: LE 15 節の abort する条件、書き出しの観点。
 
 ### ステップ 11: LE 段階 3
@@ -762,6 +762,16 @@ master へのマージ前に本ファイルを削除する。
   スレッドから使い、1 つの log_channel に 1 本のログファイルが対応するので、FILE のロックは競合せず (ユーザ空間の
   アトミック命令だけ)、減る費用は 1 エントリあたり数十 ns 程度と見込む。flockfile と fwrite_unlocked でロックを 1 回に
   する形は、ステップ 14 の測定で書き込みの費用が目立つ場合の候補とする。
+* 2026-10-29: BLOB の GC 用の型 blob_gc_entry (blob_gc_entry.h/.cpp) を新設し、log_entry_container と
+  log_entry_comparator が扱う型を log_entry から置き換えた (LE 13.1)。blob_gc_entry は normal_with_blob の参照型から
+  作り、key_sid のシリアライズ済みの値、write_version、blob_ids を自分で持つ (ほかの種別は FATAL)。
+  blob_file_gc_snapshot::sanitize_and_add_entry は参照型を受けるようにし、compaction の側の呼び出し元が GC のためだけに
+  していた log_entry{view} のコピーをなくした。比較子は compare_key_sid で比べる (順序は変えない)。container の順序の
+  文書を実装どおり (key_sid, write_version) の組の降順に直した (P19)。truncate_value_from_normal_entry は使われなく
+  なったが、削除はステップ 12 で行う。テストは、一時ファイルに書いて読み戻していたエントリの作り方を、ファクトリの
+  参照型から blob_gc_entry を作る形に変えた。クラス名 (log_entry_container、log_entry_comparator) はユーザの判断で
+  blob_gc_entry_container、blob_gc_entry_comparator に変える。型の置き換えと名前の変更はコミットを分け、名前と中身が
+  食い違う状態を作らないよう、型の置き換えを先にした。
 
 ## 6. 残った課題
 

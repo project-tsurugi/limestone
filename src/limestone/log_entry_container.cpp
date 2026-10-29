@@ -24,7 +24,7 @@
  
  // ----- Log Entry Addition (append) -----
  
- void log_entry_container::append(const log_entry& entry) {
+ void log_entry_container::append(const blob_gc_entry& entry) {
      entries_.push_back(entry);
      // When a new entry is added, the collection is no longer sorted.
      sorted_ = false;
@@ -55,7 +55,7 @@
  void log_entry_container::sort_descending() {
     if (!sorted_) {
         // Reverse the order by swapping the operands in the comparator.
-        std::sort(entries_.begin(), entries_.end(), [](const log_entry& a, const log_entry& b) {
+        std::sort(entries_.begin(), entries_.end(), [](const blob_gc_entry& a, const blob_gc_entry& b) {
             return log_entry_comparator()(b, a);
         });
         sorted_ = true;
@@ -70,8 +70,8 @@
  
  // Structure to hold the current iterator and the end iterator for a collection.
  struct iterator_range {
-     std::vector<log_entry>::const_iterator current;
-     std::vector<log_entry>::const_iterator end;
+     std::vector<blob_gc_entry>::const_iterator current;
+     std::vector<blob_gc_entry>::const_iterator end;
  };
  
  // Comparator for the heap: ensures that the largest key_sid is at the top.

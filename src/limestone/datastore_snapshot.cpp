@@ -105,7 +105,7 @@ compaction_output_result create_compaction_output(compaction_options &options) {
     wal_sorter::owned_entry_callback on_normal_with_blob{};
     if (options.is_gc_enabled()) {
         on_normal_with_blob = [&options](const log_entry& entry) {
-            options.get_gc_snapshot().sanitize_and_add_entry(entry);
+            options.get_gc_snapshot().sanitize_and_add_entry(entry.view());
         };
     }
     wal_scan_result scanned = scan_wals(logscan, sorter, options, on_normal_with_blob);
@@ -141,7 +141,7 @@ compaction_output_result create_compaction_output(compaction_options &options) {
         sorted_file_merger::entry_callback on_compacted_blob{};
         if (options.is_gc_enabled()) {
             on_compacted_blob = [&options](const log_entry_view& entry) {
-                options.get_gc_snapshot().sanitize_and_add_entry(log_entry{entry});
+                options.get_gc_snapshot().sanitize_and_add_entry(entry);
             };
         }
         compacted = sorted_file_merger::compacted_wal_input{options.get_from_dir() / name.value(), on_compacted_blob};

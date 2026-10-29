@@ -19,6 +19,7 @@
 #include <vector>
 #include <memory>
 #include <mutex>
+#include "log_entry/log_entry_view.h"
 #include "log_entry_container.h"
 #include "limestone/api/blob_id_type.h"
 
@@ -59,14 +60,14 @@ public:
      * Sanitizes and adds a log entry to the snapshot.
      *
      * Only entries of type normal_with_blob are processed.
-     * The method clears the payload from the entry’s value_etc (keeping the write_version header)
-     * and adds the entry into the appropriate container based on its write_version:
+     * The method takes the key_sid, the write_version and the blob_ids of the entry (blob_gc_entry)
+     * and adds them into the appropriate container based on its write_version:
      *   - write_version below boundary_version goes to the low entries container.
      *   - write_version greater than or equal to boundary_version goes to the high entries container.
      *
-     * @param entry The log_entry to be processed and potentially added.
+     * @param entry The entry to be processed and potentially added.
      */
-    void sanitize_and_add_entry(const log_entry& entry);
+    void sanitize_and_add_entry(const log_entry_view& entry);
 
     /* 
      * Notifies that the add_entry operations in the current thread are complete,

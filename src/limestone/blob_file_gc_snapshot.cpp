@@ -37,22 +37,15 @@ blob_file_gc_snapshot::~blob_file_gc_snapshot() {
     tls_high_container_.reset();
 }
 
-void blob_file_gc_snapshot::sanitize_and_add_entry(const log_entry& entry) {
+void blob_file_gc_snapshot::sanitize_and_add_entry(const log_entry_view& entry) {
     // Only process entries of type normal_with_blob.
-    if (entry.type() != log_entry::entry_type::normal_with_blob) {
+    if (entry.type() != log_entry_view::entry_type::normal_with_blob) {
         return;
     }
 
-    // Create a modifiable copy of the entry.
-    // NOLINTNEXTLINE(performance-unnecessary-copy-initialization)
-    log_entry modified_entry = entry;
-
-    // Truncate unnecessary data from the value_etc field.
-    modified_entry.truncate_value_from_normal_entry();
-
-    // Obtain the write_version from the modified entry.
-    write_version_type entry_wv;
-    modified_entry.write_version(entry_wv);
+    // take only the values needed by the GC (key_sid, write_version and blob_ids)
+    const blob_gc_entry gc_entry{entry};
+    const write_version_type entry_wv = gc_entry.write_version();
 
     // Dispatch entry to the appropriate container based on write_version.
     if (entry_wv < boundary_version_) {
@@ -64,7 +57,7 @@ void blob_file_gc_snapshot::sanitize_and_add_entry(const log_entry& entry) {
                 thread_low_containers_.push_back(tls_low_container_);
             }
         }
-        tls_low_container_->append(modified_entry);
+        tls_low_container_->append(gc_entry);
     } else {
         // Process high container.
         if (!tls_high_container_) {
@@ -74,7 +67,7 @@ void blob_file_gc_snapshot::sanitize_and_add_entry(const log_entry& entry) {
                 thread_high_containers_.push_back(tls_high_container_);
             }
         }
-        tls_high_container_->append(modified_entry);
+        tls_high_container_->append(gc_entry);
     }
 }
 
@@ -94,7 +87,7 @@ log_entry_container blob_file_gc_snapshot::finalize_low_entries_impl() {
     log_entry_container low_merged = log_entry_container::merge_sorted_collections(thread_low_containers_);
     std::string last_key;
     for (const auto& entry : low_merged) {
-        const std::string_view current_key = entry.key_sid();
+        const std::string_view current_key = entry.serialized_key_sid();
         if (last_key.empty() || current_key != last_key) {
             aggregated_entries.append(entry);
             last_key = current_key;

@@ -14,40 +14,36 @@
  * limitations under the License.
  */
 
- #pragma once
+#pragma once
 
- #include "limestone/api/write_version_type.h"
- #include "log_entry.h"
- 
- namespace limestone::internal {
- 
- using namespace limestone::api;
+#include "blob_gc_entry.h"
+#include "log_entry/log_entry_format.h"
 
- class log_entry_comparator {
- public:
-     /// @brief Compare log_entry objects in ascending order.
-     ///
-     /// First, compare key_sid() in lexicographical (ascending) order.
-     /// If they differ, return the result of that comparison.
-     /// If key_sid() values are equal, then compare write_version in ascending order.
-     bool operator()(const log_entry& a, const log_entry& b) const {
-         // Compare key_sid() in lexicographical order
-         std::string_view key_a(a.key_sid());
-         std::string_view key_b(b.key_sid());
-         if (key_a != key_b) {
-             return key_a < key_b;
-         }
-         // If key_sid() values are equal, compare write_version in ascending order
-         write_version_type wa;
-         write_version_type wb;
-         a.write_version(wa);
-         b.write_version(wb);
-         return wa < wb;
-     }
- };
+namespace limestone::internal {
 
- } // namespace limestone::internal
- 
+using namespace limestone::api;
 
+/**
+ * @brief A comparator that orders blob_gc_entry in ascending order of the pair (key_sid, write_version).
+ *
+ * Compares the serialized key_sids in the order of log_entry_format::compare_key_sid(), and if they are equal,
+ * compares the write_versions in ascending order.
+ */
+class log_entry_comparator {
+public:
+    /**
+     * @brief Returns whether a comes before b.
+     * @param a an entry to compare
+     * @param b an entry to compare
+     * @return true if a comes before b
+     */
+    bool operator()(const blob_gc_entry& a, const blob_gc_entry& b) const {
+        const int c = log_entry_format::compare_key_sid(a.serialized_key_sid(), b.serialized_key_sid());
+        if (c != 0) {
+            return c < 0;
+        }
+        return a.write_version() < b.write_version();
+    }
+};
 
-
+}  // namespace limestone::internal
