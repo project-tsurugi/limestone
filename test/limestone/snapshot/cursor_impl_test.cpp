@@ -330,10 +330,9 @@ TEST_F(cursor_impl_test, validate_stream_eof) {
         ofs.close();
     }
 
-    // Open the empty file into a stream.
-    std::optional<boost::filesystem::ifstream> stream;
-    stream.emplace(empty_file, std::ios::binary);
-    ASSERT_TRUE(stream->is_open());
+    // Open the empty file with a reader.
+    std::optional<limestone::internal::log_entry_reader> reader;
+    reader.emplace(empty_file);
 
     // Create dummy log_entry and previous key to pass to validate_and_read_stream.
     std::optional<limestone::api::log_entry> log_entry;
@@ -341,15 +340,16 @@ TEST_F(cursor_impl_test, validate_stream_eof) {
 
     // Use cursor_impl_testable to call validate_and_read_stream.
     cursor_impl_testable test_cursor(empty_file);
-    test_cursor.validate_and_read_stream(stream, "empty_stream", log_entry, previous_key);
+    test_cursor.validate_and_read_stream(reader, "empty_stream", log_entry, previous_key);
 
-    // Expect that the stream is closed and reset to nullopt due to EOF.
-    EXPECT_FALSE(stream.has_value()) << "stream should be closed and reset when EOF is reached";
+    // Expect that the reader is reset to nullopt due to EOF.
+    EXPECT_FALSE(reader.has_value()) << "reader should be reset when EOF is reached";
+    EXPECT_FALSE(log_entry.has_value());
 }
 
-// Validate stream closure when stream is not good
-TEST_F(cursor_impl_test, validate_stream_not_good) {
-    // Create a file with dummy content.
+// Validate that a file not matching the format throws
+TEST_F(cursor_impl_test, validate_stream_broken) {
+    // Create a file with dummy content. The first byte 'd' is not a valid entry type.
     boost::filesystem::path bad_file = boost::filesystem::path(location) / "bad_file";
     {
         std::ofstream ofs(bad_file.string());
@@ -357,13 +357,8 @@ TEST_F(cursor_impl_test, validate_stream_not_good) {
         ofs.close();
     }
 
-    // Open the file into a stream.
-    std::optional<boost::filesystem::ifstream> stream;
-    stream.emplace(bad_file, std::ios::binary);
-    ASSERT_TRUE(stream->is_open());
-
-    // Force the stream into a bad state.
-    stream->setstate(std::ios::failbit);
+    std::optional<limestone::internal::log_entry_reader> reader;
+    reader.emplace(bad_file);
 
     // Prepare dummy log_entry and previous key.
     std::optional<limestone::api::log_entry> log_entry;
@@ -371,10 +366,9 @@ TEST_F(cursor_impl_test, validate_stream_not_good) {
 
     // Use cursor_impl_testable to call validate_and_read_stream.
     cursor_impl_testable test_cursor(bad_file);
-    test_cursor.validate_and_read_stream(stream, "bad_stream", log_entry, previous_key);
-
-    // Expect that the stream is closed and reset to nullopt due to not being in a good state.
-    EXPECT_FALSE(stream.has_value()) << "stream should be closed and reset when not in a good state";
+    EXPECT_THROW(test_cursor.validate_and_read_stream(reader, "bad_stream", log_entry, previous_key),
+                 limestone::limestone_exception);
+    EXPECT_FALSE(log_entry.has_value());
 }
 
 // Verify while loop processes multiple entries with sorted keys

@@ -20,12 +20,13 @@
 #include <limestone/api/storage_id_type.h>
 
 #include <boost/filesystem.hpp>
-#include <boost/filesystem/fstream.hpp>
 #include <map>
 #include <optional>
 
 #include "cursor_impl_base.h"
 #include "log_entry.h"
+#include "log_entry/log_entry_reader.h"
+#include "log_entry/log_entry_view.h"
 
 namespace limestone::internal {
 
@@ -47,18 +48,18 @@ private:
     limestone::api::log_entry log_entry_;
     std::optional<limestone::api::log_entry> snapshot_log_entry_;
     std::optional<limestone::api::log_entry> compacted_log_entry_;
-    std::optional<boost::filesystem::ifstream> snapshot_istrm_;
-    std::optional<boost::filesystem::ifstream> compacted_istrm_;
+    std::optional<log_entry_reader> snapshot_reader_;
+    std::optional<log_entry_reader> compacted_reader_;
     std::string previous_snapshot_key_sid;
     std::string previous_compacted_key_sid;
     std::map<limestone::api::storage_id_type, limestone::api::write_version_type> clear_storage_; 
 
 protected:
-    void open(const boost::filesystem::path& file, std::optional<boost::filesystem::ifstream>& stream);
+    void open(const boost::filesystem::path& file, std::optional<log_entry_reader>& reader);
     void close() override;
 
     bool next() override;
-    void validate_and_read_stream(std::optional<boost::filesystem::ifstream>& stream, const std::string& stream_name, 
+    void validate_and_read_stream(std::optional<log_entry_reader>& reader, const std::string& stream_name,
                                   std::optional<limestone::api::log_entry>& log_entry, std::string& previous_key_sid);
 
     [[nodiscard]] limestone::api::storage_id_type storage() const noexcept override;
@@ -66,7 +67,7 @@ protected:
     void value(std::string& buf) const noexcept override;
     std::vector<limestone::api::blob_id_type> blob_ids() const override;
     [[nodiscard]] limestone::api::log_entry::entry_type type() const override;
-    bool is_relevant_entry(const limestone::api::log_entry& entry);
+    bool is_relevant_entry(const log_entry_view& entry);
     [[nodiscard]] log_entry& current() override;
     // Making the cursor class a friend so that it can access protected members
     friend class limestone::api::cursor;

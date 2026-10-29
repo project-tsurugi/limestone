@@ -43,84 +43,75 @@ std::unique_ptr<cursor> cursor_impl::create_cursor(
 
 cursor_impl::cursor_impl(const boost::filesystem::path& snapshot_file, std::map<api::storage_id_type, api::write_version_type> clear_storage)
     : clear_storage_(std::move(clear_storage)) {
-    open(snapshot_file, snapshot_istrm_);
+    open(snapshot_file, snapshot_reader_);
 }
 
 cursor_impl::cursor_impl(const boost::filesystem::path& snapshot_file, const boost::filesystem::path& compacted_file,
                          std::map<api::storage_id_type, api::write_version_type> clear_storage)
     : clear_storage_(std::move(clear_storage)) {
-    open(snapshot_file, snapshot_istrm_);
-    open(compacted_file, compacted_istrm_);
+    open(snapshot_file, snapshot_reader_);
+    open(compacted_file, compacted_reader_);
 }
 
-void cursor_impl::open(const boost::filesystem::path& file, std::optional<boost::filesystem::ifstream>& stream) {
-    stream.emplace(file, std::ios_base::in | std::ios_base::binary);
-    if (!stream->is_open() || !stream->good()) {
-        LOG_AND_THROW_EXCEPTION("Failed to open file: " + file.string());
-    }
+void cursor_impl::open(const boost::filesystem::path& file, std::optional<log_entry_reader>& reader) {
+    reader.emplace(file);  // log_entry_reader throws limestone_io_exception if the file cannot be opened
 }
 
 void cursor_impl::close() {
-    if (snapshot_istrm_) snapshot_istrm_->close();
-    if (compacted_istrm_) compacted_istrm_->close();
+    snapshot_reader_ = std::nullopt;
+    compacted_reader_ = std::nullopt;
 }
 
-void cursor_impl::validate_and_read_stream(std::optional<boost::filesystem::ifstream>& stream, const std::string& stream_name,
+void cursor_impl::validate_and_read_stream(std::optional<log_entry_reader>& reader, const std::string& stream_name,
                                            std::optional<log_entry>& log_entry, std::string& previous_key_sid) {
-    while (stream) {
-        // If the stream is not in good condition, close it and exit
-        if (!stream->good()) {
-            DVLOG_LP(log_trace) << stream_name << " stream is not good, closing it.";
-            stream->close();
-            stream = std::nullopt;
+    while (reader) {
+        const auto r = reader->next();
+        // Close the reader at the end of the file
+        if (r.result() == log_entry_read_result::status::end) {
+            DVLOG_LP(log_trace) << stream_name << " file reached the end, closing it.";
+            reader = std::nullopt;
             return;
         }
-
-        // If the entry is not yet read, read it
-        if (!log_entry) {
-            log_entry.emplace();  // Construct a new log_entry
-            // NOLINTNEXTLINE(cppcoreguidelines-avoid-do-while)
-            do {
-                if (!log_entry->read(*stream)) {
-                    // If reading fails, close the stream and reset the log_entry
-                    stream->close();
-                    stream = std::nullopt;
-                    log_entry = std::nullopt;
-                    return;
-                }
-            } while (! log_entry_format::is_data_entry(log_entry->type()));
-            // Check if the key_sid is in ascending order
-            // TODO: Key order violation is detected here and the process is aborted.
-            // However, this check should be moved to an earlier point, and if the key order is invalid,
-            // a different processing method should be considered instead of aborting immediately.
-            if (!previous_key_sid.empty() && log_entry->key_sid() < previous_key_sid) {
-                LOG(ERROR) << "Key order violation in " << stream_name << ": current key_sid (" << log_entry->key_sid()
+        if (r.result() == log_entry_read_result::status::error) {
+            LOG_AND_THROW_EXCEPTION(stream_name + " file is broken at offset " + std::to_string(r.offset()) + ": "
+                                    + r.error().message());
+        }
+        const auto view = r.view();
+        if (! log_entry_format::is_data_entry(view.type())) {
+            continue;
+        }
+        // Check if the key_sid is in ascending order
+        // TODO: Key order violation is detected here and the process is aborted.
+        // However, this check should be moved to an earlier point, and if the key order is invalid,
+        // a different processing method should be considered instead of aborting immediately.
+        const std::string_view key_sid = view.serialized_key_sid();
+        if (!previous_key_sid.empty()) {
+            const int order = log_entry_format::compare_key_sid(key_sid, previous_key_sid);
+            if (order < 0) {
+                LOG(ERROR) << "Key order violation in " << stream_name << ": current key_sid (" << key_sid
                            << ") is smaller than the previous key_sid (" << previous_key_sid << ")";
                 THROW_LIMESTONE_EXCEPTION("Key order violation detected in " + stream_name);
             }
             // Skip processing if key_sid is the same as previous_key_sid
-            if (!previous_key_sid.empty() && log_entry->key_sid() == previous_key_sid) {
-                DVLOG_LP(log_trace_fine) << stream_name << " log entry key_sid (" << log_entry->key_sid() << ") is same as previous, skipping.";
-                log_entry = std::nullopt;
+            if (order == 0) {
+                DVLOG_LP(log_trace_fine) << stream_name << " log entry key_sid (" << key_sid
+                                         << ") is same as previous, skipping.";
                 continue;
             }
-            // Update the previous key_sid to the current one
-            previous_key_sid = log_entry->key_sid();
         }
+        // Update the previous key_sid to the current one
+        previous_key_sid.assign(key_sid);
 
-        // Check the validity of the entry
-        if (is_relevant_entry(log_entry.value())) {
-            // If a valid entry is found, return
+        // Copy only a relevant entry into a log_entry (the view is valid until the next call to next())
+        if (is_relevant_entry(view)) {
+            log_entry.emplace(view);
             return;
         }
-
-        // If the entry is invalid, reset the log_entry and continue processing the stream
-        log_entry = std::nullopt;
     }
 }
 
 
-bool cursor_impl::is_relevant_entry(const limestone::api::log_entry& entry) {
+bool cursor_impl::is_relevant_entry(const log_entry_view& entry) {
         // Step 1: Check if the entry is one of normal_entry, remove_entry, or normal_with_blob
         if (! log_entry_format::is_data_entry(entry.type())) {
             return false;  // Skip this entry if it's not a normal, remove, or blob entry
@@ -133,8 +124,7 @@ bool cursor_impl::is_relevant_entry(const limestone::api::log_entry& entry) {
         auto it = clear_storage_.find(storage_id);
         if (it != clear_storage_.end()) {
             // Step 4: Retrieve the write_version from log_entry (only if the storage ID is found)
-            write_version_type wv;
-            entry.write_version(wv);
+            write_version_type wv = entry.write_version();
 
             // Step 5: Retrieve the write_version from clear_storage_ for the same storage ID
             write_version_type range_ver = it->second;
@@ -153,12 +143,12 @@ bool cursor_impl::next() {
     while (true) {
         // Read from the snapshot stream if the snapshot_log_entry_ is empty
         if (!snapshot_log_entry_) {
-            validate_and_read_stream(snapshot_istrm_, "Snapshot", snapshot_log_entry_, previous_snapshot_key_sid);
+            validate_and_read_stream(snapshot_reader_, "Snapshot", snapshot_log_entry_, previous_snapshot_key_sid);
         }
 
         // Read from the compacted stream if the compacted_log_entry_ is empty
         if (!compacted_log_entry_) {
-            validate_and_read_stream(compacted_istrm_, "Compacted", compacted_log_entry_, previous_compacted_key_sid);
+            validate_and_read_stream(compacted_reader_, "Compacted", compacted_log_entry_, previous_compacted_key_sid);
         }
 
         // Case 1: Both snapshot and compacted are empty, return false
@@ -176,10 +166,12 @@ bool cursor_impl::next() {
             compacted_log_entry_ = std::nullopt;
         } else {
             // Case 3: Both snapshot and compacted have values
-            if (snapshot_log_entry_->key_sid() < compacted_log_entry_->key_sid()) {
+            const int order = log_entry_format::compare_key_sid(snapshot_log_entry_->serialized_key_sid(),
+                                                                compacted_log_entry_->serialized_key_sid());
+            if (order < 0) {
                 log_entry_ = std::move(snapshot_log_entry_.value());
                 snapshot_log_entry_ = std::nullopt;
-            } else if (snapshot_log_entry_->key_sid() > compacted_log_entry_->key_sid()) {
+            } else if (order > 0) {
                 log_entry_ = std::move(compacted_log_entry_.value());
                 compacted_log_entry_ = std::nullopt;
             } else {
@@ -209,11 +201,11 @@ limestone::api::storage_id_type cursor_impl::storage() const noexcept {
 }
 
 void cursor_impl::key(std::string& buf) const noexcept {
-    log_entry_.key(buf);
+    buf.assign(log_entry_.key());
 }
 
 void cursor_impl::value(std::string& buf) const noexcept {
-    log_entry_.value(buf);
+    buf.assign(log_entry_.value());
 }
 
 log_entry::entry_type cursor_impl::type() const {
@@ -221,7 +213,7 @@ log_entry::entry_type cursor_impl::type() const {
 }
 
 std::vector<limestone::api::blob_id_type> cursor_impl::blob_ids() const {
-    return log_entry_.get_blob_ids();
+    return log_entry_.blob_ids();
 }
 
 log_entry& cursor_impl::current() {

@@ -225,6 +225,12 @@ master へのマージ前に本ファイルを削除する。
 
 * [ ] 残りの呼び出し元 (cursor、compaction_carry_writer、レプリカの受信、テスト) を参照型と新しいアクセサに移す。
 * [ ] std::istream から読む残りの呼び出し元を新しい読み込みに移す。
+  * [x] cursor_impl (読み込みと参照型、新しいアクセサ)。(5 節)
+  * [ ] partitioned_cursor_impl のアクセサ。
+  * [ ] compaction_carry_writer。
+  * [ ] レプリカの受信 (移すものはない。entry_type だけを使う)。
+  * [ ] テスト (ファイルの中身を確かめるための read と旧名のアクセサ)。read、read_entry_from、旧名のアクセサそのものを
+        試すテストは、ステップ 12 で旧 API と一緒に削除する。
 * [ ] cursor の move 後の状態の文書 (P20)。
 
 ### ステップ 12: LE 段階 4
@@ -780,6 +786,13 @@ master へのマージ前に本ファイルを削除する。
   (write_serialized_matches_typed_writers) は、ステップ 2〜10 で入れたテストで覆われている。足りなかった
   レプリカの this_id_is_not_used の受信を、rdma の解析のテストに加えた。BLOB の個数の超過は、要素数 2^32 の vector が
   要るので確かめない (ファクトリと書き出しの両方)。
+* 2026-10-29: ステップ 11 の cursor_impl の移行。スナップショットファイルとコンパクション済みファイルを std::istream と
+  log_entry::read ではなく log_entry_reader で読む。キーの順序、重複、clear_storage の判定を参照型の上で行い、cursor が
+  返すエントリだけを所有型にコピーする (旧実装は全件を所有型にコピーしてから捨てていた)。read のエラーは、黙って
+  ストリームを終えるのではなく limestone_io_exception を投げる (LE 11.4)。cursor 1 つが 16 MiB のバッファを 2 本持つが、
+  cursor を作るのは起動時だけなので許容する。性能への影響はステップ 14 で測る。ifstream に failbit を立てて試していた
+  テスト (validate_stream_not_good) は、形式に合わないファイルで例外になることを確かめるテスト (validate_stream_broken)
+  に置き換えた。
 
 ## 6. 残った課題
 
