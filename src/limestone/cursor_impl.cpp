@@ -17,6 +17,7 @@
 #include "cursor_impl.h"
 #include <glog/logging.h>
 #include "limestone_exception_helper.h"
+#include "log_entry/log_entry_format.h"
 
 namespace limestone::internal {
 
@@ -87,9 +88,7 @@ void cursor_impl::validate_and_read_stream(std::optional<boost::filesystem::ifst
                     log_entry = std::nullopt;
                     return;
                 }
-            } while (log_entry->type() != log_entry::entry_type::normal_entry &&
-                     log_entry->type() != log_entry::entry_type::normal_with_blob 
-                     && log_entry->type() != log_entry::entry_type::remove_entry);
+            } while (! log_entry_format::is_data_entry(log_entry->type()));
             // Check if the key_sid is in ascending order
             // TODO: Key order violation is detected here and the process is aborted.
             // However, this check should be moved to an earlier point, and if the key order is invalid,
@@ -123,9 +122,7 @@ void cursor_impl::validate_and_read_stream(std::optional<boost::filesystem::ifst
 
 bool cursor_impl::is_relevant_entry(const limestone::api::log_entry& entry) {
         // Step 1: Check if the entry is one of normal_entry, remove_entry, or normal_with_blob
-        if (entry.type() != limestone::api::log_entry::entry_type::normal_entry &&
-            entry.type() != limestone::api::log_entry::entry_type::remove_entry &&
-            entry.type() != limestone::api::log_entry::entry_type::normal_with_blob) {
+        if (! log_entry_format::is_data_entry(entry.type())) {
             return false;  // Skip this entry if it's not a normal, remove, or blob entry
         }
 
