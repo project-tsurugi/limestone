@@ -60,6 +60,7 @@ public:
      * @brief registers a BLOB file provisionally into this BLOB pool.
      * @param is_temporary_file true to allow remove the source file, or false to copy the source file
      * @return the corresponding BLOB reference
+     * @note When this returns, the data of the registered BLOB is persisted, regardless of is_temporary_file.
      * @attention This only act as provisional registration for the BLOB, and it may be lost after release() was called.
      *     To avoid it, you need to pass the BLOB references to log_channel::add_entry() to persistent them.
      * @throws std::logic_error if this pool is already released

@@ -25,6 +25,7 @@
 #include <cstdio>
 #include <memory>
 #include <cstring>
+#include <fcntl.h>
 
 #include <openssl/hmac.h>
 #include <openssl/evp.h>
@@ -260,6 +261,24 @@ void blob_pool_impl::move_file(const boost::filesystem::path& source, const boos
 
     file_ops_->rename(source, destination, ec);
     if (!ec) {
+        // the moved file was written by the caller, and nobody has synchronized its data. Persist it before returning,
+        // as the copy path does
+        int fd = file_ops_->open(destination.string().c_str(), O_RDONLY);
+        if (fd < 0) {
+            int error_code = errno;
+            LOG_AND_THROW_BLOB_EXCEPTION("Failed to open the moved file to synchronize it: " + destination.string(),
+                                         error_code);
+        }
+        if (file_ops_->fsync(fd) != 0) {
+            int error_code = errno;
+            file_ops_->close(fd);
+            LOG_AND_THROW_BLOB_EXCEPTION("Failed to synchronize the moved file to disk: " + destination.string(),
+                                         error_code);
+        }
+        if (file_ops_->close(fd) != 0) {
+            int error_code = errno;
+            LOG_AND_THROW_BLOB_EXCEPTION("Failed to close the moved file: " + destination.string(), error_code);
+        }
         return;
     }
 

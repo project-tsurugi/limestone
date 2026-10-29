@@ -22,6 +22,7 @@
 #include <boost/filesystem.hpp>
 #include <fstream>
 #include <algorithm>
+#include <vector>
 
 #include "blob_file_resolver.h"
 #include "file_operations.h"
@@ -275,6 +276,109 @@ TEST_F(blob_pool_impl_test, register_file_rename_fails_with_other_error) {
     EXPECT_FALSE(boost::filesystem::exists(target_path));
 
     // Verify the pool is empty
+    EXPECT_TRUE(pool_->get_blob_ids().empty());
+}
+
+// registering by moving synchronizes the data of the destination file before returning
+TEST_F(blob_pool_impl_test, register_file_move_synchronizes_destination) {
+    boost::filesystem::path source_path("/tmp/blob_pool_impl_test/source_blob_move_sync");
+    boost::filesystem::path target_path = resolver_->resolve_path(1);
+    std::ofstream(source_path.string()) << "test data";
+
+    // records the fds opened for the target path and the fds synchronized
+    class : public real_file_operations {
+    public:
+        int open(const char* filename, int flags) override {
+            int fd = real_file_operations::open(filename, flags);
+            if (filename == target) {
+                target_fds.push_back(fd);
+            }
+            return fd;
+        }
+        int fsync(int fd) override {
+            synced_fds.push_back(fd);
+            return real_file_operations::fsync(fd);
+        }
+        std::string target;
+        std::vector<int> target_fds;
+        std::vector<int> synced_fds;
+    } custom_ops;
+    custom_ops.target = target_path.string();
+    pool_->set_file_operations(custom_ops);
+
+    (void) pool_->register_file(source_path, true);
+
+    EXPECT_FALSE(boost::filesystem::exists(source_path));
+    EXPECT_TRUE(boost::filesystem::exists(target_path));
+    ASSERT_EQ(custom_ops.target_fds.size(), 1U);
+    EXPECT_NE(std::find(custom_ops.synced_fds.begin(), custom_ops.synced_fds.end(), custom_ops.target_fds[0]),
+              custom_ops.synced_fds.end());
+}
+
+// failing to open the destination file throws, and nothing is registered
+TEST_F(blob_pool_impl_test, register_file_move_open_fails) {
+    boost::filesystem::path source_path("/tmp/blob_pool_impl_test/source_blob_move_open_fail");
+    std::ofstream(source_path.string()) << "test data";
+
+    class : public real_file_operations {
+    public:
+        int open(const char* /* filename */, int /* flags */) override {
+            errno = EACCES;
+            return -1;
+        }
+    } custom_ops;
+    pool_->set_file_operations(custom_ops);
+
+    EXPECT_THROW_WITH_PARTIAL_MESSAGE(
+        (void) pool_->register_file(source_path, true),
+        limestone_blob_exception,
+        "Failed to open the moved file to synchronize it: "
+    );
+    EXPECT_TRUE(pool_->get_blob_ids().empty());
+}
+
+// failing to synchronize the destination file throws, and nothing is registered
+TEST_F(blob_pool_impl_test, register_file_move_fsync_fails) {
+    boost::filesystem::path source_path("/tmp/blob_pool_impl_test/source_blob_move_fsync_fail");
+    std::ofstream(source_path.string()) << "test data";
+
+    class : public real_file_operations {
+    public:
+        int fsync(int /* fd */) override {
+            errno = EIO;
+            return -1;
+        }
+    } custom_ops;
+    pool_->set_file_operations(custom_ops);
+
+    EXPECT_THROW_WITH_PARTIAL_MESSAGE(
+        (void) pool_->register_file(source_path, true),
+        limestone_blob_exception,
+        "Failed to synchronize the moved file to disk: "
+    );
+    EXPECT_TRUE(pool_->get_blob_ids().empty());
+}
+
+// failing to close the destination file throws, and nothing is registered
+TEST_F(blob_pool_impl_test, register_file_move_close_fails) {
+    boost::filesystem::path source_path("/tmp/blob_pool_impl_test/source_blob_move_close_fail");
+    std::ofstream(source_path.string()) << "test data";
+
+    class : public real_file_operations {
+    public:
+        int close(int fd) override {
+            real_file_operations::close(fd);
+            errno = EIO;
+            return -1;
+        }
+    } custom_ops;
+    pool_->set_file_operations(custom_ops);
+
+    EXPECT_THROW_WITH_PARTIAL_MESSAGE(
+        (void) pool_->register_file(source_path, true),
+        limestone_blob_exception,
+        "Failed to close the moved file: "
+    );
     EXPECT_TRUE(pool_->get_blob_ids().empty());
 }
 

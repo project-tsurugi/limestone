@@ -245,20 +245,29 @@ master へのマージ前に本ファイルを削除する。
 
 ### ステップ 13: ディレクトリの fsync と BLOB の移動の fsync
 
-* [ ] R1 で行うかを、ステップ 12 の終了時点の進捗状況で判断する。行わない場合は 6 節に記録して持ち越す。
-* [ ] 名前の永続化を ext4・XFS の性質に任せるか、POSIX どおり親ディレクトリを fsync するかを決める (DF 10 節)。
+* [x] R1 で行うかを、ステップ 12 の終了時点の進捗状況で判断する。行わない場合は 6 節に記録して持ち越す。
+      (R1 で行う。進捗は判断の基準にしない。5 節)
+* [x] 名前の永続化を ext4・XFS の性質に任せるか、POSIX どおり親ディレクトリを fsync するかを決める (DF 10 節)。
+      (POSIX どおりにする。5 節)
 * [ ] BLOB の移動による登録 (register_file の is_temporary_file が true) で、rename の後に移動先のファイルを fsync する
       (DF 9 節)。名前の永続化の判断によらず行う。公開 API の doxygen に、戻った時点で登録したデータが永続化されている
       ことを書く。
-* [ ] 以下は、名前の永続化を POSIX どおりにすると決めた場合に行う。
-  * [ ] ディレクトリを fsync する関数を file_operations に加える (テストで失敗を注入できるようにする)。
-  * [ ] DF 6 節の箇所に、DF 8 節の指針のタイミングでディレクトリの fsync を入れる。pwal の新規作成とローテーションの
-        rename、epoch ファイル、コンパクションカタログ、マニフェスト、コンパクション済み WAL とキャリーファイル、BLOB
-        (作成、rename、hard link、サブディレクトリの mkdir)。
-  * [ ] レプリカで BLOB を受信して書く経路の現状を確かめ、必要なら同じ対応をする (DF 10 節)。
-  * [ ] スナップショットファイルと sorting の下の作業ファイルは対象外とする (DF 6 節)。
-* [ ] UT: fsync の失敗の注入で例外になること。
-* [ ] 行った場合は、L3 (全体) の 12.2 節と 17 節の申し送り事項を更新する (ステップ 14 の limestone 以外の対応)。
+* [ ] ディレクトリを fsync する関数 fsync_directory を file_operations に加える (テストで失敗を注入できるようにする)。
+      成功で 0、失敗で -1 と errno を返し、例外は呼び出し元がその場で投げる。
+* [ ] file_operations を通している箇所に、DF 8 節の指針のタイミングでディレクトリの fsync を入れる: BLOB (作成、コピー、
+      rename、hard link、サブディレクトリの mkdir)、コンパクションカタログ、マニフェスト。
+* [ ] file_operations を通していない箇所に file_operations を持たせ (datastore_impl、log_channel_impl、dblog_scan。
+      filepath.cpp の rotate_pwal_file には引数で渡す。既定は real_file_operations、テスト用の差し替え口を設ける)、
+      ディレクトリの fsync を入れる: pwal の新規作成とローテーションの rename、epoch ファイルの作成と rename、
+      コンパクション済み WAL とキャリーファイルの rename、location・blob・ctrl の mkdir、dblogutil の repair の
+      detach の rename (dblog_scan)。
+* [ ] restore (datastore_restore): 写したファイルのデータの fsync、写し先のディレクトリの fsync、mkdir した親ディレクトリの
+      fsync。
+* [ ] レプリカで BLOB を受信して書く経路 (rdma と tcp) に、ディレクトリの fsync を入れる (DF 10 節)。
+* [ ] スナップショットファイル、sorting の下の作業ファイル、dblogutil の作業ファイルは対象外とする (DF 6 節。クラッシュ
+      後に作り直すか、利用者がやり直せば回復する)。
+* [ ] UT: fsync の失敗の注入で例外になること (全箇所)。
+* [ ] L3 (全体) の 12.2 節と 17 節の申し送り事項を更新する (ステップ 14 の limestone 以外の対応)。
 
 ### ステップ 14: 仕上げ
 
@@ -834,6 +843,14 @@ master へのマージ前に本ファイルを削除する。
   書き漏らしは write_serialized_matches_typed_writers で捕まえられる)、wal_dump の所有型へのコピー、blob_gc_entry の
   コンストラクタのメンバの代入、switch の default による -Wswitch の抑止 (P21 で意図的に入れた)、テストの auto const
   (周辺の書き方)。GC の確定処理のコピー (finalize_*_impl の戻り値、merge の move) は 6 節へ持ち越した。
+* 2026-10-29: ステップ 13 を R1 で行う (①・② とも。ユーザの判断)。Claude は WBS の残り日数を理由に別の issue へ持ち越す
+  案を推したが、ユーザは「やるべきことを後回しにして進捗を確保する意味はない」として、進捗を判断の基準から外した。
+  DF 10 節の未決事項は、POSIX どおり親ディレクトリを fsync すると決まった。file_operations を通していない箇所は、
+  datastore_impl などに file_operations を持たせ、全箇所の失敗の経路を UT で確かめる (案 a。新しい内部状態を _impl に
+  置く既定の方針による)。DF の一覧になかった dblogutil の repair の detach の rename と restore も対象に加えた (ユーザの
+  指示)。restore は std::filesystem::copy_file で写したファイルのデータも fsync していなかったので、データの fsync も
+  含める。dblogutil の作業ファイルは対象外 (利用者がやり直せば回復する)。レプリカの BLOB の受信でデータの fsync の
+  失敗が WARNING だけになっていることは、6 節に記録した。
 
 ## 6. 残った課題
 
@@ -872,3 +889,6 @@ master へのマージ前に本ファイルを削除する。
   finalize_high_entries_impl はコンテナを値で返すが、finalize_snapshot はその戻り値を使わない。
   blob_gc_entry_container::merge_sorted_collections は、後でクリアする入力から move せずにコピーしている。既存の
   コードの効率の問題 (ステップ 10〜12 の /crv の指摘)。(2026-10-29)
+* レプリカで BLOB を受信して書く経路 (rdma_log_entries_parser.cpp、tcp_replication_message_io.cpp) は、データの fsync が
+  失敗しても WARNING を出すだけで続行する。永続化されていない BLOB を参照する WAL エントリが durable になりうる。
+  ディレクトリの fsync (ステップ 13) とは別の問題。(2026-10-29)
