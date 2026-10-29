@@ -16,9 +16,7 @@ git submodule update --init --recursive
 ```dockerfile
 FROM ubuntu:22.04
 
-RUN apt update -y && apt install -y git build-essential cmake ninja-build libboost-filesystem-dev libboost-system-dev libboost-container-dev libboost-thread-dev libgoogle-glog-dev libgflags-dev doxygen libleveldb-dev librocksdb-dev pkg-config nlohmann-json3-dev
-# libleveldb-dev is not required if -DRECOVERY_SORTER_KVSLIB=ROCKSDB
-# librocksdb-dev is not required if -DRECOVERY_SORTER_KVSLIB=LEVELDB
+RUN apt update -y && apt install -y git build-essential cmake ninja-build libboost-filesystem-dev libboost-system-dev libboost-container-dev libboost-thread-dev libgoogle-glog-dev libgflags-dev doxygen pkg-config nlohmann-json3-dev
 ```
 
 optional packages:
@@ -44,8 +42,6 @@ available options:
 * `-DBUILD_STRICT=OFF` - don't treat compile warnings as build errors
 * `-DINSTALL_EXAMPLES=ON` - install example applications
 * `-DINSTALL_EXPERIMENTAL_TOOLS=ON` - install experimental tools (e.g. tgreplica)
-* `-DRECOVERY_SORTER_KVSLIB=<library>` - select the eKVS library using at recovery process. (`LEVELDB` or `ROCKSDB` (default), case-insensitive)
-* `-DRECOVERY_SORTER_PUT_ONLY=OFF` - don't use (faster) put-only method at recovery process
 * `-DBUILD_REPLICATION_TESTS=ON` - (temporary) enable experimental replication tests (excluded by default)
 * `-DENABLE_RDMA=ON` - enable RDMA-based replication backend (requires rdma_comm library; OFF by default)
 * `-DENABLE_ALTIMETER=ON` - enable Altimeter event logging for WAL operations
