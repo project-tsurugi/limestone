@@ -465,6 +465,15 @@ TEST(rdma_log_entries_parser_test, blob_file_synchronizes_directories) {
         rdma_log_entries_parser parser{receiver_datastore};
         EXPECT_THROW((void) parser.consume(body), limestone::api::limestone_io_exception);
     }
+    EXPECT_EQ(ops.synced_dirs.back(), receiver_blob_path.parent_path());
+
+    // when the BLOB directory is created again, a failure to synchronize its parent throws
+    boost::filesystem::remove_all(receiver_blob_path.parent_path());
+    {
+        rdma_log_entries_parser parser{receiver_datastore};
+        EXPECT_THROW((void) parser.consume(body), limestone::api::limestone_io_exception);
+    }
+    EXPECT_EQ(ops.synced_dirs.back(), receiver_blob_path.parent_path().parent_path());
 
     boost::filesystem::remove_all(sender_location);
     boost::filesystem::remove_all(receiver_location);

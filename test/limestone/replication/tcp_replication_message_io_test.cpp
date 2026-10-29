@@ -146,6 +146,15 @@ TEST_F(tcp_replication_message_io_test, receive_blob_synchronizes_directories) {
         tcp_replication_message_io receiver(wire, *datastore_);
         EXPECT_THROW(receiver.receive_blob(), limestone_io_exception);
     }
+    EXPECT_EQ(ops.synced_dirs.back(), path.parent_path());
+
+    // when the BLOB directory is created again, a failure to synchronize its parent throws
+    boost::filesystem::remove_all(path.parent_path());
+    {
+        tcp_replication_message_io receiver(wire, *datastore_);
+        EXPECT_THROW(receiver.receive_blob(), limestone_io_exception);
+    }
+    EXPECT_EQ(ops.synced_dirs.back(), path.parent_path().parent_path());
     datastore_.reset();
 }
 

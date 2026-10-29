@@ -98,12 +98,54 @@ public:
         std::scoped_lock lock(mutex_);
         fail_file_sync_ = fail;
     }
+    // makes open fail for the path given to fail_open, and close fail for an fd opened for the path given to fail_close
+    int open(const char* filename, int flags) override {
+        {
+            std::scoped_lock lock(mutex_);
+            if (fail_open_path_ == filename) {
+                errno = EACCES;
+                return -1;
+            }
+        }
+        int fd = real_file_operations::open(filename, flags);
+        if (fd >= 0) {
+            std::scoped_lock lock(mutex_);
+            if (fail_close_path_ == filename) {
+                fds_to_fail_close_.push_back(fd);
+            }
+        }
+        return fd;
+    }
+    int close(int fd) override {
+        {
+            std::scoped_lock lock(mutex_);
+            auto it = std::find(fds_to_fail_close_.begin(), fds_to_fail_close_.end(), fd);
+            if (it != fds_to_fail_close_.end()) {
+                fds_to_fail_close_.erase(it);
+                (void) real_file_operations::close(fd);  // does not leak the fd
+                errno = EIO;
+                return -1;
+            }
+        }
+        return real_file_operations::close(fd);
+    }
+    void fail_open(const boost::filesystem::path& path) {
+        std::scoped_lock lock(mutex_);
+        fail_open_path_ = path;
+    }
+    void fail_close(const boost::filesystem::path& path) {
+        std::scoped_lock lock(mutex_);
+        fail_close_path_ = path;
+    }
 private:
     mutable std::mutex mutex_;
     std::vector<boost::filesystem::path> synced_dirs_;
     std::function<bool(const boost::filesystem::path&)> fail_if_;
     std::size_t file_syncs_{};
     bool fail_file_sync_{};
+    boost::filesystem::path fail_open_path_{};
+    boost::filesystem::path fail_close_path_{};
+    std::vector<int> fds_to_fail_close_{};
 };
 
 }  // namespace
@@ -410,6 +452,52 @@ TEST_F(directory_fsync_test, restore_directory_sync_fails) {
     ops_.fail_if([this](const boost::filesystem::path& dir) { return dir == location_; });
     EXPECT_EQ(datastore_->restore(backup_.string(), true), limestone::status::err_permission_error);
     ops_.fail_if({});
+}
+
+// restore returns err_permission_error if a copied file cannot be opened to synchronize it
+TEST_F(directory_fsync_test, restore_file_open_fails) {
+    gen_datastore();
+    (void) prepare_backup();
+    ops_.fail_open(location_ / "pwal_0000");
+    EXPECT_EQ(datastore_->restore(backup_.string(), true), limestone::status::err_permission_error);
+    ops_.fail_open({});
+}
+
+// restore returns err_permission_error if closing a copied file fails
+TEST_F(directory_fsync_test, restore_file_close_fails) {
+    gen_datastore();
+    (void) prepare_backup();
+    ops_.fail_close(location_ / "pwal_0000");
+    EXPECT_EQ(datastore_->restore(backup_.string(), true), limestone::status::err_permission_error);
+    ops_.fail_close({});
+}
+
+// restore with file_set_entry returns err_permission_error if a file cannot be copied
+TEST_F(directory_fsync_test, restore_with_entries_copy_fails) {
+    gen_datastore();
+    (void) prepare_backup();
+    std::vector<limestone::api::file_set_entry> entries;
+    entries.emplace_back("limestone-manifest.json", "limestone-manifest.json", false);
+    // the destination directory does not exist
+    entries.emplace_back("pwal_0000", "no_such_directory/pwal_0000", false);
+
+    EXPECT_EQ(datastore_->restore(backup_.string(), entries), limestone::status::err_permission_error);
+}
+
+// restore with file_set_entry returns err_permission_error if the directory of a BLOB file cannot be created
+TEST_F(directory_fsync_test, restore_with_entries_create_blob_directory_fails) {
+    gen_datastore();
+    const boost::filesystem::path blob_destination = prepare_backup();
+    const boost::filesystem::path blob_directory = blob_destination.parent_path();
+    boost::filesystem::remove_all(blob_directory);  // the purge in restore does not remove directories
+    std::vector<limestone::api::file_set_entry> entries;
+    entries.emplace_back("limestone-manifest.json", "limestone-manifest.json", false);
+    // places a regular file at the position of the directory of the BLOB file, so that the directory cannot be created
+    entries.emplace_back("pwal_0000", blob_directory.lexically_relative(location_), false);
+    entries.emplace_back(blob_destination.filename(), blob_destination.filename(), false);
+
+    EXPECT_EQ(datastore_->restore(backup_.string(), entries), limestone::status::err_permission_error);
+    EXPECT_TRUE(boost::filesystem::is_regular_file(blob_directory));
 }
 
 }  // namespace limestone::testing
