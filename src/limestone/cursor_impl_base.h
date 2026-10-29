@@ -78,11 +78,12 @@ public:
 
     /**
      * @brief Returns the current entry.
-     * @return the current log_entry, typically moved.
-     * @details Only valid after a successful call to `next()`.
-     *          The returned object is intended to be moved.
-     *          After calling this method, the cursor may enter an unspecified internal state,
-     *          and calling any method other than `next()` may result in undefined behavior.
+     *
+     * Valid only after next() returns true. The caller may move from the returned object. After that, until next() is
+     * called, the current entry is in the default-constructed state (type this_id_is_not_used, with all values
+     * invalid): type() returns this_id_is_not_used, and storage(), key(), value() and blob_ids() write a FATAL log and
+     * abort.
+     * @return the current entry
      */
     [[nodiscard]] virtual log_entry& current() = 0;
 

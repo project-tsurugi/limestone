@@ -100,6 +100,26 @@ TEST_F(partitioned_cursor_impl_test, current_returns_last_entry_after_next) {
     EXPECT_FALSE(cursor.next());
 }
 
+// Verify that after moving from current(), the current entry is in the default-constructed state until next()
+TEST_F(partitioned_cursor_impl_test, current_after_move_is_default_constructed) {
+    auto queue = std::make_shared<cursor_entry_queue>(8);
+    partitioned_cursor_impl cursor(queue);
+
+    EXPECT_TRUE(queue->push(create_log_entry_batch({{123, "k1", "v1", {1, 0}}, {456, "k2", "v2", {2, 0}}})));
+    EXPECT_TRUE(queue->push(end_marker{true, ""}));
+
+    ASSERT_TRUE(cursor.next());
+    log_entry taken = std::move(cursor.current());
+    EXPECT_EQ(taken.key(), "k1");
+    EXPECT_EQ(cursor.type(), log_entry::entry_type::this_id_is_not_used);
+    EXPECT_DEATH((void) cursor.storage(), "log_entry_view:storage not valid");
+
+    // next() moves to the next entry as usual
+    ASSERT_TRUE(cursor.next());
+    EXPECT_EQ(cursor.current().key(), "k2");
+    EXPECT_FALSE(cursor.next());
+}
+
 TEST_F(partitioned_cursor_impl_test, create_cursor_returns_valid_cursor) {
     auto queue = std::make_shared<cursor_entry_queue>(8);
 

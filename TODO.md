@@ -223,15 +223,15 @@ master へのマージ前に本ファイルを削除する。
 
 ### ステップ 11: LE 段階 3
 
-* [ ] 残りの呼び出し元 (cursor、compaction_carry_writer、レプリカの受信、テスト) を参照型と新しいアクセサに移す。
-* [ ] std::istream から読む残りの呼び出し元を新しい読み込みに移す。
+* [x] 残りの呼び出し元 (cursor、compaction_carry_writer、レプリカの受信、テスト) を参照型と新しいアクセサに移す。
+* [x] std::istream から読む残りの呼び出し元を新しい読み込みに移す。
   * [x] cursor_impl (読み込みと参照型、新しいアクセサ)。(5 節)
   * [x] partitioned_cursor_impl のアクセサ。
   * [x] compaction_carry_writer。
   * [x] レプリカの受信 (移すものはない。entry_type だけを使う)。
   * [x] テスト (ファイルの中身を確かめるための read と旧名のアクセサ)。(5 節)read、read_entry_from、旧名のアクセサそのものを
         試すテストは、ステップ 12 で旧 API と一緒に削除する。
-* [ ] cursor の move 後の状態の文書 (P20)。
+* [x] cursor の move 後の状態の文書 (P20)。(5 節)
 
 ### ステップ 12: LE 段階 4
 
@@ -801,6 +801,11 @@ master へのマージ前に本ファイルを削除する。
   get_major()・get_minor() に移した。read、read_entry_from、旧名のアクセサ、truncate_value_from_normal_entry そのものを
   試すテスト (log_entry_test、log_entry_type_test、log_entry_blob_test) は、ステップ 12 で旧 API と一緒に扱う。レプリカの
   受信は log_entry の entry_type だけを使い、移すものはなかった。
+* 2026-10-29: ステップ 11 の cursor の move 後の状態 (P20)。cursor_impl_base::current() の文書を、「move 後は不定の
+  状態で、next() 以外の呼び出しは未定義動作」から、所有型の move の契約 (LE 9.3) にもとづく契約に書き直した: 返り値から
+  move してよく、その後は次の next() まで現在のエントリが既定構築の状態になり、type() は this_id_is_not_used を返し、
+  値を求めるアクセサは FATAL で abort する。cursor_impl と partitioned_cursor_impl の両方にこの契約を確かめる UT を
+  加えた。あわせて、current() が返したエントリに旧名のアクセサを使っていたテスト 2 か所 (テストの移行の漏れ) を直した。
 
 ## 6. 残った課題
 
