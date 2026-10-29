@@ -618,9 +618,6 @@ TEST_F(datastore_blob_test, switch_available_boundary_version) {
  * - First write: normal_entry (BLOB column is NULL, no blob_ids)
  * - Second write: normal_with_blob (BLOB column has data, with blob_ids)
  * 
- * The sort must tell the format of the stored value by the stored entry type, not by
- * the type of the new entry (the bug once was in the old sort).
- *
  * Scenario matches the issue:
  * 1. INSERT with BLOB=NULL → normal_entry
  * 2. INSERT OR REPLACE with BLOB=<data> → normal_with_blob

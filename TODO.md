@@ -634,6 +634,12 @@ master へのマージ前に本ファイルを削除する。
 * 2026-10-29: log_entry のバイト列版の書き出し ((key_sid, value_etc) を受ける write、write_with_blob、write_remove、
   write_ope_storage_common、write_clear_storage、write_add_storage、write_remove_storage) を、ステップ 12 から前倒しして
   ステップ 7 で削除した。旧ソートの出力だけが使っていたもので、呼び出し元が残っていないため。
+* 2026-10-29: ステップ 7 のレビュー (3 モデル) の対応。
+  * docs/internal/blob-limestone.md の SORT_METHOD_PUT_ONLY の記述 (752〜753 行) は、2025 年の BLOB 対応の計画文書の
+    記録として残す。
+  * 旧バージョン (RocksDB) が異常終了でログディレクトリに残した固定名の sorting は、新しいコードでは消さない (旧コードは
+    次回の起動で消していた)。利用者の責務とする扱い (2026-10-28 の記録、L3 8.5 節) に含める。
+  * tsurugidb 側の追従 (ステップ 14 に列挙) は、master へのマージ時にあわせて行う。
 
 ## 6. 残った課題
 
