@@ -32,6 +32,7 @@
 #include <limestone/logging.h>
 #include "logging_helper.h"
 #include "limestone_exception_helper.h"
+#include "log_entry/field_buffer.h"
 #include "log_entry/log_entry_format.h"
 #include "log_entry/log_entry_view.h"
 
@@ -291,16 +292,15 @@ public:
             LOG_AND_THROW_EXCEPTION("value length " + std::to_string(value_len) + " does not fit in 32 bits");
         }
 
-        entry_type type = entry_type::normal_entry;
-        write_uint8(strm, static_cast<std::uint8_t>(type));
-        write_uint32le(strm, static_cast<std::uint32_t>(key_len));
-        write_uint32le(strm, static_cast<std::uint32_t>(value_len));
-
-        write_uint64le(strm, static_cast<std::uint64_t>(storage_id));
+        // the fixed-length fields that come one after another are written at once (to reduce the calls of fwrite)
+        limestone::internal::field_buffer<normal_entry_head_size> head{};
+        head.append_uint8(static_cast<std::uint8_t>(entry_type::normal_entry));
+        head.append_uint32le(static_cast<std::uint32_t>(key_len));
+        head.append_uint32le(static_cast<std::uint32_t>(value_len));
+        head.append_uint64le(static_cast<std::uint64_t>(storage_id));
+        write_bytes(strm, head.data(), head.size());
         write_bytes(strm, key.data(), key_len);
-
-        write_uint64le(strm, static_cast<std::uint64_t>(write_version.epoch_number_));
-        write_uint64le(strm, write_version.minor_write_version_);
+        write_write_version(strm, write_version);
         write_bytes(strm, value.data(), value_len);
     }
 
@@ -327,16 +327,14 @@ public:
             LOG_AND_THROW_EXCEPTION("blob count " + std::to_string(blob_count) + " does not fit in 32 bits");
         }
 
-        entry_type type = entry_type::normal_with_blob;
-        write_uint8(strm, static_cast<std::uint8_t>(type));
-        write_uint32le(strm, static_cast<std::uint32_t>(key_len));
-        write_uint32le(strm, static_cast<std::uint32_t>(value_len));
-
-        write_uint64le(strm, static_cast<std::uint64_t>(storage_id));
+        limestone::internal::field_buffer<normal_entry_head_size> head{};
+        head.append_uint8(static_cast<std::uint8_t>(entry_type::normal_with_blob));
+        head.append_uint32le(static_cast<std::uint32_t>(key_len));
+        head.append_uint32le(static_cast<std::uint32_t>(value_len));
+        head.append_uint64le(static_cast<std::uint64_t>(storage_id));
+        write_bytes(strm, head.data(), head.size());
         write_bytes(strm, key.data(), key_len);
-
-        write_uint64le(strm, static_cast<std::uint64_t>(write_version.epoch_number_));
-        write_uint64le(strm, write_version.minor_write_version_);
+        write_write_version(strm, write_version);
         write_bytes(strm, value.data(), value_len);
 
         // Write the number of BLOB references
@@ -356,22 +354,23 @@ public:
             LOG_AND_THROW_EXCEPTION("key length " + std::to_string(key_len) + " does not fit in 32 bits");
         }
 
-        entry_type type = entry_type::remove_entry;
-        write_uint8(strm, static_cast<std::uint8_t>(type));
-        write_uint32le(strm, static_cast<std::uint32_t>(key_len));
-
-        write_uint64le(strm, static_cast<std::uint64_t>(storage_id));
+        limestone::internal::field_buffer<remove_entry_head_size> head{};
+        head.append_uint8(static_cast<std::uint8_t>(entry_type::remove_entry));
+        head.append_uint32le(static_cast<std::uint32_t>(key_len));
+        head.append_uint64le(static_cast<std::uint64_t>(storage_id));
+        write_bytes(strm, head.data(), head.size());
         write_bytes(strm, key.data(), key_len);
-
-        write_uint64le(strm, static_cast<std::uint64_t>(write_version.epoch_number_));
-        write_uint64le(strm, write_version.minor_write_version_);
+        write_write_version(strm, write_version);
     }
 
     static inline void write_ope_storage_common(FILE* strm, entry_type type, storage_id_type storage_id, write_version_type write_version) {
-        write_uint8(strm, static_cast<std::uint8_t>(type));
-        write_uint64le(strm, static_cast<std::uint64_t>(storage_id));
-        write_uint64le(strm, static_cast<std::uint64_t>(write_version.epoch_number_));
-        write_uint64le(strm, write_version.minor_write_version_);
+        // a storage entry is entirely fixed-length, so it is written at once
+        limestone::internal::field_buffer<limestone::internal::log_entry_format::storage_entry_size> entry{};
+        entry.append_uint8(static_cast<std::uint8_t>(type));
+        entry.append_uint64le(static_cast<std::uint64_t>(storage_id));
+        entry.append_uint64le(static_cast<std::uint64_t>(write_version.epoch_number_));
+        entry.append_uint64le(write_version.minor_write_version_);
+        write_bytes(strm, entry.data(), entry.size());
     }
 
     static void write_clear_storage(FILE* strm, storage_id_type storage_id, write_version_type write_version) {
@@ -584,6 +583,31 @@ private:
     // the view of entry_; rebuilt by rebuild_view() when the content changes, and relocated when only the location
     // changes (copy and move)
     limestone::internal::log_entry_view view_{};
+
+    // the sizes of the leading fixed-length parts written at once by the typed writers (normal_entry and
+    // normal_with_blob, and remove_entry)
+    static constexpr std::size_t normal_entry_head_size =
+            limestone::internal::log_entry_format::entry_type_size
+            + limestone::internal::log_entry_format::key_length_size
+            + limestone::internal::log_entry_format::value_length_size
+            + limestone::internal::log_entry_format::storage_id_size;
+    static constexpr std::size_t remove_entry_head_size =
+            limestone::internal::log_entry_format::entry_type_size
+            + limestone::internal::log_entry_format::key_length_size
+            + limestone::internal::log_entry_format::storage_id_size;
+
+    /**
+     * @brief Writes a write_version (the epoch and the minor version) at once.
+     * @param out the output stream
+     * @param write_version the write_version to write
+     * @throws limestone_io_exception if writing fails
+     */
+    static void write_write_version(FILE* out, const write_version_type& write_version) {
+        limestone::internal::field_buffer<limestone::internal::log_entry_format::write_version_size> buf{};
+        buf.append_uint64le(static_cast<std::uint64_t>(write_version.epoch_number_));
+        buf.append_uint64le(write_version.minor_write_version_);
+        write_bytes(out, buf.data(), buf.size());
+    }
 
     static void write_uint8(FILE* out, const std::uint8_t value) {
         int ret = fputc(value, out);
