@@ -17,6 +17,7 @@
 #include "file_operations.h"
 
 #include <limestone/api/limestone_exception.h>
+#include <fcntl.h>    // for open
 #include <sys/file.h> // for flock
 #include <unistd.h>  // for fsync
 
@@ -92,6 +93,21 @@ ssize_t real_file_operations::pread(int fd, void* buf, size_t count, off_t offse
 
 int real_file_operations::fstat(int fd, struct stat* buf) {
     return ::fstat(fd, buf);
+}
+
+int real_file_operations::fsync_directory(const boost::filesystem::path& dir) {
+    // calls the system calls directly, so that overriding open, fsync or close does not affect this function
+    int fd = ::open(dir.c_str(), O_RDONLY | O_DIRECTORY);  // NOLINT(cppcoreguidelines-pro-type-vararg,hicpp-vararg)
+    if (fd < 0) {
+        return -1;
+    }
+    if (::fsync(fd) != 0) {
+        int error_code = errno;
+        ::close(fd);
+        errno = error_code;
+        return -1;
+    }
+    return ::close(fd);
 }
 
 // -----------------------------------------

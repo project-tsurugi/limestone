@@ -99,6 +99,10 @@ public:
     // fstat system call: gets the status of an open file
     virtual int fstat(int fd, struct stat* buf) = 0;
 
+    // Synchronizes a directory (the names of the files in it) with storage: opens it with O_DIRECTORY, fsyncs and
+    // closes it. Returns 0 on success, or -1 with errno set on failure
+    virtual int fsync_directory(const boost::filesystem::path& dir) = 0;
+
     // -----------------------------------------
     // C++-style file operations
     // -----------------------------------------
@@ -165,6 +169,7 @@ public:
     int close(int fd) override;
     ssize_t pread(int fd, void* buf, size_t count, off_t offset) override;
     int fstat(int fd, struct stat* buf) override;
+    int fsync_directory(const boost::filesystem::path& dir) override;
 
     std::unique_ptr<std::ifstream> open_ifstream(const std::string& path) override;
     bool getline(std::ifstream& file, std::string& line) override;
