@@ -37,6 +37,7 @@
 
 #include "blob_file_resolver.h"
 #include "blob_pool_impl.h"
+#include "file_operations.h"
 #include "manifest.h"
 #include "replication/replica_connector.h"
 #include "replication/replication_endpoint.h"
@@ -113,6 +114,14 @@ public:
 
     /// @brief sets the name of the current compacted file
     void set_current_compacted_file_name(std::optional<std::string> file_name);
+
+    /// @brief returns the file_operations used by the datastore and its log channels
+    [[nodiscard]] limestone::internal::file_operations& file_ops() const noexcept;
+
+    /// @brief replaces the file_operations used by the datastores created after this call (test-only)
+    /// @param ops the file_operations to use. It must be valid until the datastores using it are destroyed. nullptr
+    ///        restores the default (real_file_operations)
+    static void set_file_operations_for_test(limestone::internal::file_operations* ops) noexcept;
 
     /// @brief sets the settings of the sort other than the threads. The datastore sets the checked values at its
     ///        construction
@@ -524,6 +533,13 @@ private:
 
     // Shared state of the WAL rotation mechanism.
     rotation_state rotation_state_;
+
+    // the default file_operations, and the one to use (the one given by set_file_operations_for_test in tests)
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+    static inline limestone::internal::file_operations* file_ops_for_test_ = nullptr;
+    limestone::internal::real_file_operations real_file_ops_{};
+    limestone::internal::file_operations* file_ops_{
+        file_ops_for_test_ != nullptr ? file_ops_for_test_ : &real_file_ops_};
 
     // Test hooks of the rotation mechanism (no-op when unset).
     std::function<void()> on_rotate_before_rename_;

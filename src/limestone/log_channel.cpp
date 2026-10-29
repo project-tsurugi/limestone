@@ -246,7 +246,7 @@ boost::filesystem::path log_channel::file_path() const noexcept {
 // DO rotate without condition check.
 //  use this after your check
 std::string log_channel::do_rotate_file(epoch_id_type epoch) {
-    boost::filesystem::path new_file = internal::rotate_pwal_file(file_path(), epoch);
+    boost::filesystem::path new_file = internal::rotate_pwal_file(file_path(), epoch, envelope_.get_impl()->file_ops());
     envelope_.add_file(new_file);
 
     registered_ = false;

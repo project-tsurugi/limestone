@@ -50,7 +50,8 @@ bool is_unrotated_pwal_name(std::string_view filename) noexcept {
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables,fuchsia-statically-constructed-objects)
 rotate_pwal_file_rename_hook rotate_pwal_file_rename_for_test{};
 
-boost::filesystem::path rotate_pwal_file(boost::filesystem::path const& file, epoch_id_type epoch) {
+boost::filesystem::path rotate_pwal_file(boost::filesystem::path const& file, epoch_id_type epoch,
+                                         file_operations& ops) {
     // Rename-target collision handling: to avoid overwriting an existing rotated
     // file on a second rename of the same file within the same millisecond (or
     // after a clock rollback), re-fetch the wall clock until the target is free.
@@ -88,6 +89,10 @@ boost::filesystem::path rotate_pwal_file(boost::filesystem::path const& file, ep
     if (ec) {
         std::string err_msg = "Failed to rename file from " + file.string() + " to " + new_file.string() + ". Error: " + ec.message();
         LOG_AND_THROW_IO_EXCEPTION(err_msg, ec);
+    }
+    // persist the result of the rename before returning the result of the rotation
+    if (ops.fsync_directory(new_file.parent_path()) != 0) {
+        LOG_AND_THROW_IO_EXCEPTION("Failed to fsync directory: " + new_file.parent_path().string(), errno);
     }
     return new_file;
 }

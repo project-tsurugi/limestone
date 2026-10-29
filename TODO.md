@@ -249,18 +249,18 @@ master へのマージ前に本ファイルを削除する。
       (R1 で行う。進捗は判断の基準にしない。5 節)
 * [x] 名前の永続化を ext4・XFS の性質に任せるか、POSIX どおり親ディレクトリを fsync するかを決める (DF 10 節)。
       (POSIX どおりにする。5 節)
-* [ ] BLOB の移動による登録 (register_file の is_temporary_file が true) で、rename の後に移動先のファイルを fsync する
+* [x] BLOB の移動による登録 (register_file の is_temporary_file が true) で、rename の後に移動先のファイルを fsync する
       (DF 9 節)。名前の永続化の判断によらず行う。公開 API の doxygen に、戻った時点で登録したデータが永続化されている
       ことを書く。
-* [ ] ディレクトリを fsync する関数 fsync_directory を file_operations に加える (テストで失敗を注入できるようにする)。
+* [x] ディレクトリを fsync する関数 fsync_directory を file_operations に加える (テストで失敗を注入できるようにする)。
       成功で 0、失敗で -1 と errno を返し、例外は呼び出し元がその場で投げる。
-* [ ] file_operations を通している箇所に、DF 8 節の指針のタイミングでディレクトリの fsync を入れる: BLOB (作成、コピー、
+* [x] file_operations を通している箇所に、DF 8 節の指針のタイミングでディレクトリの fsync を入れる: BLOB (作成、コピー、
       rename、hard link、サブディレクトリの mkdir)、コンパクションカタログ、マニフェスト。
-* [ ] file_operations を通していない箇所に file_operations を持たせ (datastore_impl、log_channel_impl、dblog_scan。
+* [x] file_operations を通していない箇所に file_operations を持たせ (datastore_impl、log_channel_impl、dblog_scan。
       filepath.cpp の rotate_pwal_file には引数で渡す。既定は real_file_operations、テスト用の差し替え口を設ける)、
       ディレクトリの fsync を入れる: pwal の新規作成とローテーションの rename、epoch ファイルの作成と rename、
       コンパクション済み WAL とキャリーファイルの rename、location・blob・ctrl の mkdir、dblogutil の repair の
-      detach の rename (dblog_scan)。
+      detach の rename (dblog_scan)。(5 節)
 * [ ] restore (datastore_restore): 写したファイルのデータの fsync、写し先のディレクトリの fsync、mkdir した親ディレクトリの
       fsync。
 * [ ] レプリカで BLOB を受信して書く経路 (rdma と tcp) に、ディレクトリの fsync を入れる (DF 10 節)。
@@ -851,6 +851,17 @@ master へのマージ前に本ファイルを削除する。
   指示)。restore は std::filesystem::copy_file で写したファイルのデータも fsync していなかったので、データの fsync も
   含める。dblogutil の作業ファイルは対象外 (利用者がやり直せば回復する)。レプリカの BLOB の受信でデータの fsync の
   失敗が WARNING だけになっていることは、6 節に記録した。
+* 2026-10-29: ステップ 13 の file_operations を通していない箇所。datastore_impl に file_operations を持たせ
+  (file_ops())、log_channel_impl は datastore_impl のものを、rotate_pwal_file は引数で受けたものを、dblog_scan は
+  set_file_operations で指定されたもの (指定がなければ real_file_operations) を使う。テストの差し替え口は、インスタンスごとの
+  setter ではなく、これ以降に作る datastore が使うものを指定する static の set_file_operations_for_test にした。
+  datastore のコンストラクタの中の箇所 (location と blob の mkdir、epoch ファイルの作成) は、作った後の差し替えでは
+  間に合わないため。pwal の作成は、ファイルが未登録 (チャネルを作った後か、ローテーションの後の最初のセッション) の
+  ときにだけディレクトリを fsync し、セッションごとの費用を増やさない (起動後の最初のセッションは、既存のファイルでも
+  1 回 fsync する)。epoch ファイルの書き直しの rename は durable の宣言の前に、コンパクションの公開の rename は
+  カタログに記録する前に fsync する。対象外にしたもの: ctrl ディレクトリ (コンパクションの開始の合図に使い、失われても
+  次の起動で作り直す)、コンパクションの一時ディレクトリの mkdir (中のファイルは公開の rename で移し、一時ディレクトリ
+  自体の名前は残らなくてよい)。
 
 ## 6. 残った課題
 

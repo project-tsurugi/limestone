@@ -126,6 +126,9 @@ void dblog_scan::detach_wal_files(bool skip_empty_files) {
             attached_files.emplace_back(p);
         }
     }
+    if (attached_files.empty()) {
+        return;
+    }
     for (const boost::filesystem::path& p : attached_files) {
         std::stringstream ssbase;
         auto unix_epoch = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::system_clock::now().time_since_epoch()).count();
@@ -140,6 +143,16 @@ void dblog_scan::detach_wal_files(bool skip_empty_files) {
             }
         }
     }
+    // persist the result of the renames
+    real_file_operations default_ops;
+    file_operations& ops = file_ops_ != nullptr ? *file_ops_ : default_ops;
+    if (ops.fsync_directory(dblogdir_) != 0) {
+        LOG_AND_THROW_IO_EXCEPTION("Failed to fsync directory: " + dblogdir_.string(), errno);
+    }
+}
+
+void dblog_scan::set_file_operations(file_operations& ops) noexcept {
+    file_ops_ = &ops;
 }
 
 epoch_id_type dblog_scan::scan_pwal_files(epoch_id_type ld_epoch, const add_entry_func_t& add_entry,

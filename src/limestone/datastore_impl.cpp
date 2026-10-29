@@ -141,6 +141,14 @@ void datastore_impl::set_current_compacted_file_name(std::optional<std::string> 
     }
 }
 
+limestone::internal::file_operations& datastore_impl::file_ops() const noexcept {
+    return *file_ops_;
+}
+
+void datastore_impl::set_file_operations_for_test(limestone::internal::file_operations* ops) noexcept {
+    file_ops_for_test_ = ops;
+}
+
 void datastore_impl::set_sort_settings(std::size_t arena_size_bytes, std::size_t merge_fanin,
                                        boost::filesystem::path work_dir_parent) noexcept {
     sort_arena_size_bytes_ = arena_size_bytes;

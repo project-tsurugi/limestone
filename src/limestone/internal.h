@@ -63,10 +63,12 @@ bool is_unrotated_pwal_name(std::string_view filename) noexcept;
  *       hold the exclusion (the single mutex of the rotation mechanism)
  * @param file the pwal file to rename
  * @param epoch the epoch part of the rotated name
- * @return the path of the renamed file
- * @throws limestone_io_exception if the rename or the existence check fails
+ * @param ops the file_operations used to synchronize the directory
+ * @return the path of the renamed file. The result of the rename is persisted when this returns
+ * @throws limestone_io_exception if the rename, the existence check or the fsync of the directory fails
  */
-boost::filesystem::path rotate_pwal_file(boost::filesystem::path const& file, epoch_id_type epoch);
+boost::filesystem::path rotate_pwal_file(boost::filesystem::path const& file, epoch_id_type epoch,
+                                         file_operations& ops);
 
 /**
  * @brief type of the testing hook; returning an error_code skips the rename and fails

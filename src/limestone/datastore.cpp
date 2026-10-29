@@ -180,6 +180,10 @@ datastore::datastore(configuration const& conf) : location_(conf.data_location_)
             if (!result_mkdir || error) {
                 LOG_AND_THROW_IO_EXCEPTION("fail to create directory: " + location_.string(), error);
             }
+            // persist the name of the created directory
+            if (impl_->file_ops().fsync_directory(location_.parent_path()) != 0) {
+                LOG_AND_THROW_IO_EXCEPTION("fail to fsync the parent directory of " + location_.string(), errno);
+            }
             internal::setup_initial_logdir(location_);
             add_file(manifest_path);
         } else {
@@ -307,6 +311,10 @@ datastore::datastore(configuration const& conf) : location_(conf.data_location_)
             if (fclose(strm) != 0) {  // NOLINT(*-owning-memory)
                 LOG_AND_THROW_IO_EXCEPTION("fclose failed", errno);
             }
+            // persist the name of the created epoch file
+            if (impl_->file_ops().fsync_directory(location_) != 0) {
+                LOG_AND_THROW_IO_EXCEPTION("fail to fsync directory: " + location_.string(), errno);
+            }
             add_file(epoch_file_path_);
         }
 
@@ -328,6 +336,10 @@ datastore::datastore(configuration const& conf) : location_(conf.data_location_)
             const bool result_mkdir = boost::filesystem::create_directories(blob_root, error);
             if (!result_mkdir || error) {
                 LOG_AND_THROW_IO_EXCEPTION("fail to create directory: " + blob_root.string(), error);
+            }
+            // persist the name of the created directory (blob_root is right under the location)
+            if (impl_->file_ops().fsync_directory(blob_root.parent_path()) != 0) {
+                LOG_AND_THROW_IO_EXCEPTION("fail to fsync the parent directory of " + blob_root.string(), errno);
             }
         }
         VLOG_LP(log_debug) << "datastore is created, location = " << location_.string();
@@ -366,6 +378,11 @@ void datastore::persist_epoch_id(epoch_id_type epoch_id) {
             if (::rename(tmp_epoch_file_path_.c_str(), epoch_file_path_.c_str()) != 0) {
                 TRACE_ABORT;
                 LOG_AND_THROW_IO_EXCEPTION("Failed to rename temp file: " + tmp_epoch_file_path_.string() + " to " + epoch_file_path_.string(), errno);
+            }
+            // persist the result of the rename before declaring the epoch durable
+            if (impl_->file_ops().fsync_directory(location_) != 0) {
+                TRACE_ABORT;
+                LOG_AND_THROW_IO_EXCEPTION("Failed to fsync directory: " + location_.string(), errno);
             }
             boost::filesystem::remove(tmp_epoch_file_path_, ec);
             if (ec) {
@@ -505,6 +522,7 @@ void datastore::ready() {
         if (migration_info.has_value() && migration_info->requires_rotation()) {
             LOG(INFO) << "Manifest migration requires WAL rotation.";
             dblog_scan ds(location_);
+            ds.set_file_operations(impl_->file_ops());
             ds.detach_wal_files();
             LOG(INFO) << "WAL rotation completed.";
         }
@@ -966,7 +984,7 @@ rotation_result datastore::rotate_log_files() {  // NOLINT(readability-function-
                 if (channel == nullptr) {
                     // Orphan file: nobody has it open, so it can be renamed on the spot.
                     impl_->on_rotate_before_rename();  // for testing
-                    boost::filesystem::path renamed = internal::rotate_pwal_file(target, 0);
+                    boost::filesystem::path renamed = internal::rotate_pwal_file(target, 0, impl_->file_ops());
                     add_file(renamed);
                     subtract_file(target);
                     result.add_rotated_file(renamed.filename().string());
@@ -1057,6 +1075,10 @@ void datastore::rotate_epoch_file() {
         LOG_AND_THROW_IO_EXCEPTION("does not have write permission for the log_location directory, path: " + location_.string(), errno);
     }
     strm.close();
+    // persist the rename and the creation of the new epoch file
+    if (impl_->file_ops().fsync_directory(location_) != 0) {
+        LOG_AND_THROW_IO_EXCEPTION("Failed to fsync directory: " + location_.string(), errno);
+    }
 }
 
 void datastore::add_file(const boost::filesystem::path& file) noexcept {
@@ -1288,6 +1310,10 @@ void datastore::compact_with_online() {  // NOLINT(readability-function-cognitiv
         safe_rename(compaction_temp_dir / compacted_file_name, compacted_file);
         if (output.carry_written) {
             safe_rename(compaction_temp_dir / carry_file_name, location_ / carry_file_name);
+        }
+        // persist the result of the renames before recording them in the catalog
+        if (impl_->file_ops().fsync_directory(location_) != 0) {
+            LOG_AND_THROW_IO_EXCEPTION("Failed to fsync directory: " + location_.string(), errno);
         }
         impl_->on_compaction_after_publish();  // for testing
 

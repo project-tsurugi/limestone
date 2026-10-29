@@ -134,6 +134,14 @@ public:
      */
     void set_thread_end_hook(thread_end_hook_t hook);
     void set_fail_fast(bool fail_fast) noexcept { fail_fast_ = fail_fast; }
+
+    /**
+     * @brief Sets the file_operations that detach_wal_files uses to synchronize the directory. If not set,
+     *        real_file_operations is used
+     * @param ops the file_operations to use. It must be valid until this object is no longer used
+     */
+    void set_file_operations(file_operations& ops) noexcept;
+
     void detach_wal_files(bool skip_empty_files = true);
 
     enum class process_at_nondurable {
@@ -260,6 +268,7 @@ private:
     int thread_num_{1};
     thread_end_hook_t thread_end_hook_{};
     bool fail_fast_{false};
+    file_operations* file_ops_{};
 
     // Per-file max epoch recorded by the last successful scan.
     std::map<boost::filesystem::path, epoch_id_type> max_epoch_per_file_;
