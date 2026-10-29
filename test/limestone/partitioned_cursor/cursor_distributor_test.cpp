@@ -41,11 +41,11 @@ public:
     }
 
     void key(std::string& buf) const noexcept override {
-        current_.key(buf);
+        buf.assign(current_.key());
     }
 
     void value(std::string& buf) const noexcept override {
-        current_.value(buf);
+        buf.assign(current_.value());
     }
 
     api::log_entry::entry_type type() const override {
@@ -53,7 +53,7 @@ public:
     }
 
     std::vector<api::blob_id_type> blob_ids() const override {
-        return current_.get_blob_ids();
+        return current_.blob_ids();
     }
 
     void close() override {}

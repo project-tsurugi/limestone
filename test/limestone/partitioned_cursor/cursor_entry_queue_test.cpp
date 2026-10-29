@@ -17,32 +17,15 @@ using limestone::internal::cursor_entry_queue;
 using limestone::internal::cursor_entry_type;
 
 
-static const std::string tmp_file_path = "/tmp/cursor_entry_queue_test_log_entry.tmp";
-
 // Generate a test log_entry (using only storage_id as the identifier)
 log_entry create_log_entry(std::uint64_t storage_id) {
-    {
-        FILE* fp = std::fopen(tmp_file_path.c_str(), "wb");
-        log_entry::write(fp, storage_id, "key", "value", write_version_type{1234, 1});
-        std::fclose(fp);
-    }
-
-    std::ifstream ifs(tmp_file_path, std::ios::binary);
-    log_entry entry;
-    entry.read(ifs);
-    boost::filesystem::remove(tmp_file_path);
-    return entry;
+    return log_entry::make_normal_entry(storage_id, "key", "value", write_version_type{1234, 1});
 }
 
 class cursor_entry_queue_test : public ::testing::Test {
 protected:
     void SetUp() override {}
-    void TearDown() override {
-        // Clean up any temporary files created during tests
-        if (boost::filesystem::exists(tmp_file_path)) {
-            boost::filesystem::remove(tmp_file_path);
-        }
-    }
+    void TearDown() override {}
 };
 
 TEST_F(cursor_entry_queue_test, push_and_wait_and_pop_single_entry) {

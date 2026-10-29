@@ -228,8 +228,8 @@ master へのマージ前に本ファイルを削除する。
   * [x] cursor_impl (読み込みと参照型、新しいアクセサ)。(5 節)
   * [x] partitioned_cursor_impl のアクセサ。
   * [x] compaction_carry_writer。
-  * [ ] レプリカの受信 (移すものはない。entry_type だけを使う)。
-  * [ ] テスト (ファイルの中身を確かめるための read と旧名のアクセサ)。read、read_entry_from、旧名のアクセサそのものを
+  * [x] レプリカの受信 (移すものはない。entry_type だけを使う)。
+  * [x] テスト (ファイルの中身を確かめるための read と旧名のアクセサ)。(5 節)read、read_entry_from、旧名のアクセサそのものを
         試すテストは、ステップ 12 で旧 API と一緒に削除する。
 * [ ] cursor の move 後の状態の文書 (P20)。
 
@@ -793,6 +793,14 @@ master へのマージ前に本ファイルを削除する。
   cursor を作るのは起動時だけなので許容する。性能への影響はステップ 14 で測る。ifstream に failbit を立てて試していた
   テスト (validate_stream_not_good) は、形式に合わないファイルで例外になることを確かめるテスト (validate_stream_broken)
   に置き換えた。
+* 2026-10-29: ステップ 11 のテストの移行。ファイルの中身を確かめるために std::istream から読んでいた箇所
+  (replication_test_helper の read_raw_log_file、compaction の 2 つのテストの read_raw_entries、durable_test) を
+  log_entry_reader に移した。読み込みが end 以外で終わったら、テストの失敗にする。一時ファイルに書いて読み戻して
+  エントリを作っていた partitioned_cursor の 2 つのテストは、ファクトリで作る形に変えた。旧名のアクセサと static 関数
+  (write_version_epoch_number、write_version_minor_write_version) は、新しいアクセサと write_version() の
+  get_major()・get_minor() に移した。read、read_entry_from、旧名のアクセサ、truncate_value_from_normal_entry そのものを
+  試すテスト (log_entry_test、log_entry_type_test、log_entry_blob_test) は、ステップ 12 で旧 API と一緒に扱う。レプリカの
+  受信は log_entry の entry_type だけを使い、移すものはなかった。
 
 ## 6. 残った課題
 

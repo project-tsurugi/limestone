@@ -17,43 +17,15 @@ using limestone::api::log_entry;
 using limestone::api::storage_id_type;
 using limestone::api::write_version_type;
 
-static const std::string tmp_file_path = "/tmp/partitioned_cursor_impl_test_log_entry.tmp";
-
 class partitioned_cursor_impl_test : public ::testing::Test {
 protected:
     void SetUp() override {}
-    void TearDown() override {
-        // Clean up the temporary file after each test
-        boost::filesystem::remove(tmp_file_path);
-    }
+    void TearDown() override {}
 
-    // Create a log_entry instance by writing a normal entry into a temporary file
-    // and reading it back. Uses the log_entry::write() and log_entry::read() methods.
+    // Create a log_entry instance of a normal entry.
     std::vector<log_entry> create_singleton_log_entry_batch(storage_id_type storage, const std::string& key, const std::string& value,
                                                    const write_version_type& wversion) {
-        FILE* out = std::fopen(tmp_file_path.c_str(), "wb");
-        if (!out) {
-            throw std::runtime_error("Failed to open temporary file for writing.");
-        }
-
-        log_entry::write(out, storage, key, value, wversion);
-        std::fclose(out);
-
-        std::ifstream in(tmp_file_path, std::ios::binary);
-        if (!in.is_open()) {
-            throw std::runtime_error("Failed to open temporary file for reading.");
-        }
-
-        log_entry entry;
-        bool rc = entry.read(in);
-        in.close();
-        boost::filesystem::remove(tmp_file_path);
-
-        if (!rc) {
-            throw std::runtime_error("Failed to read log entry from temporary file.");
-        }
-
-        return {std::move(entry)};  // Return as vector<log_entry>
+        return {log_entry::make_normal_entry(storage, key, value, wversion)};  // Return as vector<log_entry>
     }
 
     // Create a batch of log_entry instances from a list of tuples.
