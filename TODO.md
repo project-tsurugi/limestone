@@ -261,8 +261,8 @@ master へのマージ前に本ファイルを削除する。
       ディレクトリの fsync を入れる: pwal の新規作成とローテーションの rename、epoch ファイルの作成と rename、
       コンパクション済み WAL とキャリーファイルの rename、location・blob・ctrl の mkdir、dblogutil の repair の
       detach の rename (dblog_scan)。(5 節)
-* [ ] restore (datastore_restore): 写したファイルのデータの fsync、写し先のディレクトリの fsync、mkdir した親ディレクトリの
-      fsync。
+* [x] restore (datastore_restore): 写したファイルのデータの fsync、写し先のディレクトリの fsync、mkdir した親ディレクトリの
+      fsync。(5 節)
 * [ ] レプリカで BLOB を受信して書く経路 (rdma と tcp) に、ディレクトリの fsync を入れる (DF 10 節)。
 * [ ] スナップショットファイル、sorting の下の作業ファイル、dblogutil の作業ファイルは対象外とする (DF 6 節。クラッシュ
       後に作り直すか、利用者がやり直せば回復する)。
@@ -862,6 +862,10 @@ master へのマージ前に本ファイルを削除する。
   カタログに記録する前に fsync する。対象外にしたもの: ctrl ディレクトリ (コンパクションの開始の合図に使い、失われても
   次の起動で作り直す)、コンパクションの一時ディレクトリの mkdir (中のファイルは公開の rename で移し、一時ディレクトリ
   自体の名前は残らなくてよい)。
+* 2026-10-29: ステップ 13 の restore。2 つの restore (keep_backup を受けるものと、file_set_entry を受けるもの) に同じ形で
+  あった写す処理を、無名名前空間の restore_copier にまとめた。写したファイルのデータを fsync し、写し先のディレクトリと
+  作ったディレクトリの親を、写し終えた後にディレクトリごとに 1 回 fsync する。失敗は、既存のコピーの失敗と同じく
+  ERROR のログを書いて status::err_permission_error を返す (restore は noexcept で status を返す)。
 
 ## 6. 残った課題
 

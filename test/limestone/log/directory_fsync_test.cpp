@@ -30,11 +30,14 @@
 
 #include <boost/filesystem.hpp>
 
+#include "blob_file_resolver.h"
 #include "datastore_impl.h"
 #include "dblog_scan.h"
 #include "file_operations.h"
 #include "internal.h"
+#include "limestone/api/file_set_entry.h"
 #include "limestone/api/limestone_exception.h"
+#include "limestone/status.h"
 #include "limestone_exception_helper.h"
 #include "test_root.h"
 
@@ -75,10 +78,32 @@ public:
         std::scoped_lock lock(mutex_);
         fail_if_ = std::move(predicate);
     }
+    // counts the fsyncs of files, and makes them fail if fail_file_sync is true
+    int fsync(int fd) override {
+        {
+            std::scoped_lock lock(mutex_);
+            file_syncs_++;
+            if (fail_file_sync_) {
+                errno = EIO;
+                return -1;
+            }
+        }
+        return real_file_operations::fsync(fd);
+    }
+    [[nodiscard]] std::size_t file_syncs() const {
+        std::scoped_lock lock(mutex_);
+        return file_syncs_;
+    }
+    void fail_file_sync(bool fail) {
+        std::scoped_lock lock(mutex_);
+        fail_file_sync_ = fail;
+    }
 private:
     mutable std::mutex mutex_;
     std::vector<boost::filesystem::path> synced_dirs_;
     std::function<bool(const boost::filesystem::path&)> fail_if_;
+    std::size_t file_syncs_{};
+    bool fail_file_sync_{};
 };
 
 }  // namespace
@@ -96,6 +121,7 @@ protected:
         datastore_impl::set_file_operations_for_test(nullptr);
         limestone::testing::enable_exception_throwing = false;
         boost::filesystem::remove_all(location);
+        boost::filesystem::remove_all(backup_);
     }
 
     void gen_datastore() {
@@ -104,7 +130,21 @@ protected:
         datastore_ = std::make_unique<limestone::api::datastore_test>(conf);
     }
 
+    // creates a manifest, a pwal and a BLOB file in the backup directory, and returns the restore destination of the
+    // BLOB file
+    boost::filesystem::path prepare_backup() {
+        boost::filesystem::remove_all(backup_);
+        boost::filesystem::create_directories(backup_);
+        limestone::internal::setup_initial_logdir(backup_);
+        std::ofstream((backup_ / "pwal_0000").string()) << "data";
+        limestone::internal::blob_file_resolver resolver{location_};
+        const boost::filesystem::path blob_destination = resolver.resolve_path(1);
+        std::ofstream((backup_ / blob_destination.filename()).string()) << "blob";
+        return blob_destination;
+    }
+
     const boost::filesystem::path location_{location};
+    const boost::filesystem::path backup_{std::string(location) + "_backup"};
     directory_sync_recorder ops_{};
     std::unique_ptr<limestone::api::datastore_test> datastore_{};
 };
@@ -316,6 +356,60 @@ TEST_F(directory_fsync_test, detach_wal_files_without_files_does_not_synchronize
     ds.set_file_operations(ops);
     ds.detach_wal_files();
     EXPECT_EQ(ops.count(location_), 0U);
+}
+
+// restore synchronizes the data of the copied files, the destination directories and the parents of the created
+// directories
+TEST_F(directory_fsync_test, restore_synchronizes_files_and_directories) {
+    gen_datastore();
+    const boost::filesystem::path blob_destination = prepare_backup();
+    ops_.clear();
+    const std::size_t file_syncs_before = ops_.file_syncs();
+
+    EXPECT_EQ(datastore_->restore(backup_.string(), true), limestone::status::ok);
+
+    EXPECT_TRUE(boost::filesystem::exists(blob_destination));
+    EXPECT_GE(ops_.file_syncs() - file_syncs_before, 3U);  // the manifest, the pwal and the BLOB file at least
+    EXPECT_GE(ops_.count(location_), 1U);
+    EXPECT_EQ(ops_.count(blob_destination.parent_path()), 1U);
+    EXPECT_EQ(ops_.count(blob_destination.parent_path().parent_path()), 1U);  // the BLOB subdirectory is created
+}
+
+// restore with file_set_entry persists them in the same way
+TEST_F(directory_fsync_test, restore_with_entries_synchronizes_files_and_directories) {
+    gen_datastore();
+    const boost::filesystem::path blob_destination = prepare_backup();
+    std::vector<limestone::api::file_set_entry> entries;
+    for (const boost::filesystem::path& p : boost::filesystem::directory_iterator(backup_)) {
+        entries.emplace_back(p.filename(), p.filename(), false);
+    }
+    ops_.clear();
+    const std::size_t file_syncs_before = ops_.file_syncs();
+
+    EXPECT_EQ(datastore_->restore(backup_.string(), entries), limestone::status::ok);
+
+    EXPECT_TRUE(boost::filesystem::exists(blob_destination));
+    EXPECT_GE(ops_.file_syncs() - file_syncs_before, 3U);
+    EXPECT_GE(ops_.count(location_), 1U);
+    EXPECT_EQ(ops_.count(blob_destination.parent_path()), 1U);
+}
+
+// restore returns err_permission_error if synchronizing a copied file fails
+TEST_F(directory_fsync_test, restore_file_sync_fails) {
+    gen_datastore();
+    (void) prepare_backup();
+    ops_.fail_file_sync(true);
+    EXPECT_EQ(datastore_->restore(backup_.string(), true), limestone::status::err_permission_error);
+    ops_.fail_file_sync(false);
+}
+
+// restore returns err_permission_error if synchronizing a directory fails
+TEST_F(directory_fsync_test, restore_directory_sync_fails) {
+    gen_datastore();
+    (void) prepare_backup();
+    ops_.fail_if([this](const boost::filesystem::path& dir) { return dir == location_; });
+    EXPECT_EQ(datastore_->restore(backup_.string(), true), limestone::status::err_permission_error);
+    ops_.fail_if({});
 }
 
 }  // namespace limestone::testing

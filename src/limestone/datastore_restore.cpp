@@ -14,12 +14,22 @@
  * limitations under the License.
  */
 
+#include <fcntl.h>
+
+#include <cerrno>
+#include <cstring>
+#include <filesystem>
+#include <set>
+#include <vector>
+
 #include <glog/logging.h>
 #include <limestone/api/datastore.h>
 #include <limestone/logging.h>
 #include <limestone/status.h>
 
 #include "blob_file_resolver.h"
+#include "datastore_impl.h"
+#include "file_operations.h"
 #include "internal.h"
 #include "logging_helper.h"
 #include "manifest.h"
@@ -113,15 +123,123 @@ status validate_manifest_files(const boost::filesystem::path& from_dir, const st
 }
 
 /**
+ * @brief A copier that copies the files of a backup to the restore location and persists them.
+ *
+ * Synchronizes the data of each copied file, and synchronizes the directories that received the files and the parents
+ * of the created directories in finish(). A failure writes an ERROR log and is returned as a status.
+ */
+class restore_copier {
+public:
+    /**
+     * @brief Creates a copier.
+     * @param ops the file_operations used to synchronize the files and the directories
+     */
+    explicit restore_copier(file_operations& ops) : ops_(&ops) {}
+
+    /**
+     * @brief Copies one file of the backup: a BLOB file to the position given by the resolver (creating the
+     *        directories if missing), and any other file to dst.
+     * @return status::ok, or status::err_permission_error on failure
+     */
+    status copy_backup_file(const blob_file_resolver& resolver, const boost::filesystem::path& src,
+                            const boost::filesystem::path& dst) {
+        if (!resolver.is_blob_file(src)) {
+            return copy(src, dst);
+        }
+        boost::filesystem::path blob_dst = resolver.resolve_path(resolver.extract_blob_id(src));
+        if (auto rc = create_directories(blob_dst.parent_path()); rc != status::ok) {
+            return rc;
+        }
+        return copy(src, blob_dst);
+    }
+
+    /**
+     * @brief Persists the names of the copied files and the created directories by synchronizing their directories.
+     * @return status::ok, or status::err_permission_error on failure
+     */
+    status finish() {
+        for (const boost::filesystem::path& dir : dirs_to_sync_) {
+            if (ops_->fsync_directory(dir) != 0) {
+                int error_code = errno;
+                LOG_LP(ERROR) << "failed to synchronize the directory: " << dir.string() << ": "
+                              << std::strerror(error_code);  // NOLINT(concurrency-mt-unsafe)
+                return status::err_permission_error;
+            }
+        }
+        return status::ok;
+    }
+
+private:
+    /**
+     * @brief Copies src to dst (overwriting it), and synchronizes the data of dst.
+     * @return status::ok, or status::err_permission_error on failure
+     */
+    status copy(const boost::filesystem::path& src, const boost::filesystem::path& dst) {
+        try {
+            std::filesystem::copy_file(std::filesystem::path{src.string()}, std::filesystem::path{dst.string()},
+                                       std::filesystem::copy_options::overwrite_existing);
+        } catch (std::filesystem::filesystem_error& ex) {
+            LOG_LP(ERROR) << ex.what() << " file = " << src.string();
+            return status::err_permission_error;
+        }
+        int fd = ops_->open(dst.c_str(), O_RDONLY);
+        if (fd < 0) {
+            int error_code = errno;
+            LOG_LP(ERROR) << "failed to open the restored file to synchronize it: " << dst.string() << ": "
+                          << std::strerror(error_code);  // NOLINT(concurrency-mt-unsafe)
+            return status::err_permission_error;
+        }
+        if (ops_->fsync(fd) != 0) {
+            int error_code = errno;
+            ops_->close(fd);
+            LOG_LP(ERROR) << "failed to synchronize the restored file: " << dst.string() << ": "
+                          << std::strerror(error_code);  // NOLINT(concurrency-mt-unsafe)
+            return status::err_permission_error;
+        }
+        if (ops_->close(fd) != 0) {
+            int error_code = errno;
+            LOG_LP(ERROR) << "failed to close the restored file: " << dst.string() << ": "
+                          << std::strerror(error_code);  // NOLINT(concurrency-mt-unsafe)
+            return status::err_permission_error;
+        }
+        dirs_to_sync_.insert(dst.parent_path());
+        return status::ok;
+    }
+
+    /**
+     * @brief Creates dir and its missing ancestors.
+     * @return status::ok, or status::err_permission_error on failure
+     */
+    status create_directories(const boost::filesystem::path& dir) {
+        try {
+            for (boost::filesystem::path p = dir; !p.empty() && !boost::filesystem::exists(p); p = p.parent_path()) {
+                dirs_to_sync_.insert(p.parent_path());
+            }
+            boost::filesystem::create_directories(dir);
+        } catch (const boost::filesystem::filesystem_error& ex) {
+            LOG_LP(ERROR) << ex.what() << " dir = " << dir.string();
+            return status::err_permission_error;
+        }
+        return status::ok;
+    }
+
+    file_operations* ops_;
+    std::set<boost::filesystem::path> dirs_to_sync_{};
+};
+
+/**
  * @brief Copies backup files to the restore location.
  *
  * @param from_dir The backup directory path.
  * @param entries The list of file entries.
  * @param location The target restore location.
+ * @param ops the file_operations used to persist the copied files
  * @return status::ok if copy succeeds, otherwise an error status.
  */
-status copy_backup_files(const boost::filesystem::path& from_dir, const std::vector<file_set_entry>& entries, const boost::filesystem::path& location) {
+status copy_backup_files(const boost::filesystem::path& from_dir, const std::vector<file_set_entry>& entries,
+                         const boost::filesystem::path& location, file_operations& ops) {
     blob_file_resolver resolver{location};
+    restore_copier copier{ops};
 
     for (auto & ent : entries) {
         boost::filesystem::path src{ent.source_path()};
@@ -137,31 +255,11 @@ status copy_backup_files(const boost::filesystem::path& from_dir, const std::vec
             LOG_LP(ERROR) << "file not found : file = " << src.string();
             return status::err_not_found;
         }
-        try {
-            if (!resolver.is_blob_file(src)) {
-                std::filesystem::copy_file(
-                    std::filesystem::path{src.string()},
-                    std::filesystem::path{(location / dst).string()},
-                    std::filesystem::copy_options::overwrite_existing
-                );
-            } else {
-                boost::filesystem::path full_dst = resolver.resolve_path(resolver.extract_blob_id(src));
-                boost::filesystem::path dst_dir = full_dst.parent_path();
-                if (!boost::filesystem::exists(dst_dir)) {
-                    boost::filesystem::create_directories(dst_dir);
-                }
-                std::filesystem::copy_file(
-                    std::filesystem::path{src.string()},
-                    std::filesystem::path{full_dst.string()},
-                    std::filesystem::copy_options::overwrite_existing
-                );
-            }
-        } catch (std::filesystem::filesystem_error& ex) {
-            LOG_LP(ERROR) << ex.what() << " file = " << src.string();
-            return status::err_permission_error;
+        if (auto rc = copier.copy_backup_file(resolver, src, location / dst); rc != status::ok) {
+            return rc;
         }
-}
-    return status::ok;
+    }
+    return copier.finish();
 }
 
 
@@ -191,35 +289,19 @@ status datastore::restore(std::string_view from, bool keep_backup) const noexcep
 
     if (auto rc = internal::purge_dir(location_); rc != status::ok) { return rc; }
 
+    restore_copier copier{impl_->file_ops()};
     try {
         for (const boost::filesystem::path& p : boost::filesystem::directory_iterator(from_dir)) {
-            try {
-                if (!resolver.is_blob_file(p)) {
-                    std::filesystem::copy_file(
-                        std::filesystem::path{p.string()},
-                        std::filesystem::path{(location_ / p.filename()).string()},
-                        std::filesystem::copy_options::overwrite_existing
-                    );
-                } else {
-                    boost::filesystem::path full_dst = resolver.resolve_path(resolver.extract_blob_id(p));
-                    boost::filesystem::path dst_dir = full_dst.parent_path();
-                    if (!boost::filesystem::exists(dst_dir)) {
-                        boost::filesystem::create_directories(dst_dir);
-                    }
-                    std::filesystem::copy_file(
-                        std::filesystem::path{p.string()},
-                        std::filesystem::path{full_dst.string()},
-                        std::filesystem::copy_options::overwrite_existing
-                    );
-                }
-            } catch (std::filesystem::filesystem_error& ex) {
-                LOG_LP(ERROR) << ex.what() << " file = " << p.string();
-                return status::err_permission_error;
+            if (auto rc = copier.copy_backup_file(resolver, p, location_ / p.filename()); rc != status::ok) {
+                return rc;
             }
         }
     } catch (const boost::filesystem::filesystem_error& ex) {
         LOG_LP(ERROR) << "Failed to iterate directory: " << ex.what();
         return status::err_permission_error;
+    }
+    if (auto rc = copier.finish(); rc != status::ok) {
+        return rc;
     }
     try {
         if (!keep_backup) {
@@ -245,7 +327,7 @@ status datastore::restore(std::string_view from, std::vector<file_set_entry>& en
 
     if (auto rc = validate_manifest_files(from_dir, entries); rc != status::ok) { return rc; }
     if (auto rc = internal::purge_dir(location_); rc != status::ok) { return rc; }
-    if (auto rc = copy_backup_files(from_dir, entries, location_); rc != status::ok) { return rc; }
+    if (auto rc = copy_backup_files(from_dir, entries, location_, impl_->file_ops()); rc != status::ok) { return rc; }
 
     return status::ok;
 }
