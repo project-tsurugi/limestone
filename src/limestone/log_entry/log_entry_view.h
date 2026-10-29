@@ -78,6 +78,15 @@ public:
     [[nodiscard]] static log_entry_parse_result parse(std::string_view input) noexcept;
 
     /**
+     * @brief Returns the view of the same bytes placed at another location. Does not parse again.
+     * @param entry the same bytes as this entry (the destination of a copy or a move). Writes a FATAL log and aborts
+     *              if its length differs. Does not check that the content is the same
+     * @return the view that refers to entry, with the same type and the same lengths of the parts as this view. The
+     *         default-constructed state for the default-constructed state
+     */
+    [[nodiscard]] log_entry_view relocated(std::string_view entry) const noexcept;
+
+    /**
      * @brief Returns the entry type. Returns this_id_is_not_used in the default-constructed state.
      */
     [[nodiscard]] entry_type type() const noexcept;

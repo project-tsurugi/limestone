@@ -503,7 +503,8 @@ private:
 
     // the serialized value of one entry (from the type byte to the end); empty in the default-constructed state
     std::string entry_{};
-    // the view of entry_; rebuilt by rebuild_view() whenever the content or the location of entry_ changes
+    // the view of entry_; rebuilt by rebuild_view() when the content changes, and relocated when only the location
+    // changes (copy and move)
     limestone::internal::log_entry_view view_{};
 
     static void write_uint8(FILE* out, const std::uint8_t value) {

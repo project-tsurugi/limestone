@@ -141,29 +141,30 @@ log_entry::log_entry(std::string entry) : entry_(std::move(entry)) {
     rebuild_view();
 }
 
-log_entry::log_entry(const log_entry& other) : entry_(other.entry_) {
-    // a copied view_ would still refer to other.entry_, so rebuild it from this entry_
-    rebuild_view();
+log_entry::log_entry(const log_entry& other) : entry_(other.entry_), view_(other.view_.relocated(entry_)) {
+    // a copied view_ would still refer to other.entry_, so relocate it to this entry_ (the content is the same, so it
+    // is not parsed again)
 }
 
 log_entry& log_entry::operator=(const log_entry& other) {
     if (this != &other) {
         entry_ = other.entry_;
-        rebuild_view();
+        view_ = other.view_.relocated(entry_);
     }
     return *this;
 }
 
-log_entry::log_entry(log_entry&& other) noexcept : entry_(std::exchange(other.entry_, {})) {
-    // a short byte sequence is stored inside std::string (SSO) and moves to a new location, so rebuild view_
-    rebuild_view();
+log_entry::log_entry(log_entry&& other) noexcept
+    : entry_(std::exchange(other.entry_, {})), view_(other.view_.relocated(entry_)) {
+    // a short byte sequence is stored inside std::string (SSO) and moves to a new location, so relocate view_ to
+    // this entry_
     other.view_ = log_entry_view{};
 }
 
 log_entry& log_entry::operator=(log_entry&& other) noexcept {
     if (this != &other) {
         entry_ = std::exchange(other.entry_, {});
-        rebuild_view();
+        view_ = other.view_.relocated(entry_);
         other.view_ = log_entry_view{};
     }
     return *this;

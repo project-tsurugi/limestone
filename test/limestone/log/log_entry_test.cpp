@@ -230,6 +230,21 @@ TEST(log_entry_test, move_assign_self) {
     expect_blob_entry(e, short_value);  // NOLINT(bugprone-use-after-move)
 }
 
+// copies and moves of a default-constructed entry are in the default-constructed state
+TEST(log_entry_test, copy_and_move_default_state) {
+    const log_entry src{};
+    log_entry copied{src};
+    expect_default_state(copied);
+    log_entry assigned = make_entry(normal_entry(1, "other", "other", 1, 1));
+    assigned = src;
+    expect_default_state(assigned);
+    log_entry moved{std::move(copied)};
+    expect_default_state(moved);
+    log_entry move_assigned = make_entry(normal_entry(1, "other", "other", 1, 1));
+    move_assigned = std::move(assigned);
+    expect_default_state(move_assigned);
+}
+
 // reading an entry of each type holds exactly the bytes read
 TEST(log_entry_test, read_each_type) {
     const std::vector<std::string> entries{

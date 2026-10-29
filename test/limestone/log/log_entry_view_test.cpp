@@ -325,6 +325,35 @@ TEST(log_entry_view_test, parse_result_accessor_validity) {
     EXPECT_DEATH((void) invalid.required(), "log_entry_parse_result:required not valid");
 }
 
+// a view relocated to a copy of the same bytes refers to the copy and returns the same values
+TEST(log_entry_view_test, relocated) {
+    const std::string bytes = normal_with_blob(2, "key", "value", 7, 3, {11, 12});
+    const log_entry_view v = log_entry_view::parse(bytes).view();
+    const std::string copy = bytes;
+    const log_entry_view r = v.relocated(copy);
+    EXPECT_EQ(r.serialized_entry().data(), copy.data());
+    EXPECT_EQ(r.type(), entry_type::normal_with_blob);
+    EXPECT_EQ(r.serialized_entry(), bytes);
+    EXPECT_EQ(r.key(), "key");
+    EXPECT_EQ(r.value(), "value");
+    EXPECT_EQ(r.write_version().get_major(), 7U);
+    EXPECT_EQ(r.blob_ids(), (std::vector<limestone::api::blob_id_type>{11, 12}));
+}
+
+// a default-constructed view relocated to empty bytes stays in the default-constructed state
+TEST(log_entry_view_test, relocated_default) {
+    const log_entry_view r = log_entry_view{}.relocated({});
+    EXPECT_EQ(r.type(), entry_type::this_id_is_not_used);
+}
+
+// a view cannot be relocated to bytes of a different length
+TEST(log_entry_view_test, relocated_size_mismatch_aborts) {
+    const std::string bytes = normal_entry(1, "key", "value", 7, 3);
+    const log_entry_view v = log_entry_view::parse(bytes).view();
+    const std::string longer = bytes + "x";
+    EXPECT_DEATH((void) v.relocated(longer), "log_entry_view:relocated entry size");
+}
+
 // a successful result cannot be created from a default-constructed view
 TEST(log_entry_view_test, parse_result_ok_with_default_view_aborts) {
     EXPECT_DEATH((void) limestone::internal::log_entry_parse_result::ok(log_entry_view{}),

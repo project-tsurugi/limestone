@@ -100,6 +100,15 @@ log_entry_parse_result log_entry_view::parse(std::string_view input) noexcept {
     return log_entry_parse_result::ok(log_entry_view{input.substr(0, length), type, key_length, value_length, blob_count});
 }
 
+log_entry_view log_entry_view::relocated(std::string_view entry) const noexcept {
+    if (entry.size() != entry_.size()) {
+        LOG_LP(FATAL) << "entry size " << entry.size() << " differs from the size of the view " << entry_.size();
+    }
+    log_entry_view view = *this;
+    view.entry_ = entry;
+    return view;
+}
+
 log_entry_view::entry_type log_entry_view::type() const noexcept {
     return type_;
 }
