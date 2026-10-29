@@ -167,8 +167,12 @@ protected:
     }
 
     void gen_datastore() {
+        gen_datastore_at(location);
+    }
+
+    void gen_datastore_at(const boost::filesystem::path& data_location) {
         limestone::api::configuration conf{};
-        conf.set_data_location(location);
+        conf.set_data_location(data_location.string());
         datastore_ = std::make_unique<limestone::api::datastore_test>(conf);
     }
 
@@ -197,6 +201,28 @@ TEST_F(directory_fsync_test, new_datastore_synchronizes_directories) {
     gen_datastore();
     EXPECT_EQ(ops_.count(location_.parent_path()), 1U);
     EXPECT_EQ(ops_.count(location_), 2U);  // the epoch file and the blob directory
+}
+
+// a relative location of one element (for which parent_path() is empty) also synchronizes the parent of the created
+// directory
+TEST_F(directory_fsync_test, new_datastore_with_relative_location_synchronizes_parent) {
+    const boost::filesystem::path saved_cwd = boost::filesystem::current_path();
+    boost::filesystem::current_path(location_.parent_path());
+    gen_datastore_at(location_.filename());
+    datastore_ = nullptr;  // it works with the relative path, so stop it before restoring the cwd
+    boost::filesystem::current_path(saved_cwd);
+    EXPECT_EQ(ops_.count(location_.parent_path()), 1U);
+}
+
+// a location with trailing separators synchronizes its parent, not itself
+TEST_F(directory_fsync_test, new_datastore_with_trailing_separator_synchronizes_parent) {
+    gen_datastore_at(location_.string() + "/");
+    EXPECT_EQ(ops_.count(location_.parent_path()), 1U);
+}
+
+TEST_F(directory_fsync_test, new_datastore_with_two_trailing_separators_synchronizes_parent) {
+    gen_datastore_at(location_.string() + "//");
+    EXPECT_EQ(ops_.count(location_.parent_path()), 1U);
 }
 
 // failing to synchronize the parent directory after creating the log directory

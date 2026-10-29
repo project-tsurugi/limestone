@@ -180,9 +180,16 @@ datastore::datastore(configuration const& conf) : location_(conf.data_location_)
             if (!result_mkdir || error) {
                 LOG_AND_THROW_IO_EXCEPTION("fail to create directory: " + location_.string(), error);
             }
-            // persist the name of the created directory
-            if (impl_->file_ops().fsync_directory(location_.parent_path()) != 0) {
-                LOG_AND_THROW_IO_EXCEPTION("fail to fsync the parent directory of " + location_.string(), errno);
+            // persist the name of the created directory. location_.parent_path() is empty for a relative location of
+            // one element such as "data" and is the location itself for "data/", so the created directory is made
+            // canonical and its trailing separators are removed before taking the parent
+            boost::filesystem::path created = boost::filesystem::canonical(location_, error);
+            if (error) {
+                LOG_AND_THROW_IO_EXCEPTION("fail to resolve the created directory: " + location_.string(), error);
+            }
+            internal::remove_trailing_dir_separators(created);
+            if (impl_->file_ops().fsync_directory(created.parent_path()) != 0) {
+                LOG_AND_THROW_IO_EXCEPTION("fail to fsync the parent directory of " + created.string(), errno);
             }
             internal::setup_initial_logdir(location_);
             add_file(manifest_path);
