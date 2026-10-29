@@ -195,12 +195,39 @@ protected:
     std::unique_ptr<limestone::api::datastore_test> datastore_{};
 };
 
-// a new datastore synchronizes the parent of the created directory, and the directory of the created epoch file and
-// blob directory
+// a new datastore synchronizes the parent of the created directory, the directory of the created epoch file and
+// blob directory, and the blob directory for its created subdirectories
 TEST_F(directory_fsync_test, new_datastore_synchronizes_directories) {
     gen_datastore();
     EXPECT_EQ(ops_.count(location_.parent_path()), 1U);
     EXPECT_EQ(ops_.count(location_), 2U);  // the epoch file and the blob directory
+    const auto& resolver = datastore_->get_impl()->blob_file_resolver();
+    EXPECT_EQ(ops_.count(resolver.get_blob_root()), 1U);
+    for (const boost::filesystem::path& subdirectory : resolver.get_subdirectories()) {
+        EXPECT_TRUE(boost::filesystem::is_directory(subdirectory)) << subdirectory.string();
+    }
+
+    // the second startup finds the subdirectories, so it neither creates nor synchronizes
+    datastore_ = nullptr;
+    ops_.clear();
+    gen_datastore();
+    EXPECT_EQ(ops_.count(resolver.get_blob_root()), 0U);
+}
+
+// failing to synchronize the blob directory after creating its subdirectories
+TEST_F(directory_fsync_test, blob_subdirectory_sync_fails) {
+    boost::filesystem::create_directories(location_);
+    limestone::internal::setup_initial_logdir(location_);
+    std::ofstream((location_ / std::string(limestone::internal::epoch_file_name)).string());
+    boost::filesystem::create_directories(location_ / "blob");
+    ops_.fail_if([this](const boost::filesystem::path& dir) { return dir == location_ / "blob"; });
+    try {
+        gen_datastore();
+        FAIL() << "expected limestone_io_exception";
+    } catch (const limestone_io_exception& e) {
+        EXPECT_EQ(e.error_code(), EIO);
+        EXPECT_NE(std::string(e.what()).find("fail to fsync the blob directory"), std::string::npos) << e.what();
+    }
 }
 
 // a relative location of one element (for which parent_path() is empty) also synchronizes the parent of the created
@@ -481,6 +508,7 @@ TEST_F(directory_fsync_test, detach_wal_files_without_files_does_not_synchronize
 TEST_F(directory_fsync_test, restore_synchronizes_files_and_directories) {
     gen_datastore();
     const boost::filesystem::path blob_destination = prepare_backup();
+    boost::filesystem::remove_all(blob_destination.parent_path());  // the purge in restore does not remove directories
     ops_.clear();
     const std::size_t file_syncs_before = ops_.file_syncs();
 

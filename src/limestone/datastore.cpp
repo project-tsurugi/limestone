@@ -349,6 +349,22 @@ datastore::datastore(configuration const& conf) : location_(conf.data_location_)
                 LOG_AND_THROW_IO_EXCEPTION("fail to fsync the parent directory of " + blob_root.string(), errno);
             }
         }
+        // create the subdirectories for the BLOB files here and synchronize their parent once. Creating one when the
+        // first BLOB is registered or received lets another thread see it before its parent is synchronized, and
+        // return as if the name were persisted
+        bool subdirectory_created = false;
+        for (const boost::filesystem::path& subdirectory : impl_->blob_file_resolver().get_subdirectories()) {
+            if (boost::filesystem::exists(subdirectory, error)) {
+                continue;
+            }
+            if (!boost::filesystem::create_directory(subdirectory, error) || error) {
+                LOG_AND_THROW_IO_EXCEPTION("fail to create directory: " + subdirectory.string(), error);
+            }
+            subdirectory_created = true;
+        }
+        if (subdirectory_created && impl_->file_ops().fsync_directory(blob_root) != 0) {
+            LOG_AND_THROW_IO_EXCEPTION("fail to fsync the blob directory: " + blob_root.string(), errno);
+        }
         VLOG_LP(log_debug) << "datastore is created, location = " << location_.string();
     } catch (...) {
         HANDLE_EXCEPTION_AND_ABORT();
