@@ -816,6 +816,11 @@ master へのマージ前に本ファイルを削除する。
   write_version_epoch_number と write_version_minor_write_version は公開 API の文字列版のコンストラクタが使っていたので、
   そのコンストラクタ (Q4 で削除と決定) と一緒に削除した。tsurugidb のコンポーネント (shirakami、jogasaki、tateyama) に
   文字列版のコンストラクタの利用はない (grep で確認)。コミットメッセージに BREAKING CHANGE は付けない (ユーザの判断)。
+* 2026-10-29: ステップ 10〜12 の src の変更行のカバレッジ (a5edb55 からの差分、78c4648 時点)。実行可能な 221 行のうち
+  213 行 (96.4%) が実行された。未実行は、死亡テストで確かめている FATAL 5 行 (blob_gc_entry、field_buffer、レプリカの
+  受信の 3 か所)、BLOB の個数の 32 ビットの超過の検査 1 行 (確かめないと決めたもの)、sorted_file_merger の switch の後の
+  届かない FATAL 1 行、partitioned_cursor_impl::blob_ids() 1 行。最後の 1 行はどのテストも呼んでいなかったので、
+  partitioned_cursor_impl_test に normal_with_blob の blob_ids() を確かめる UT を加えた。
 
 ## 6. 残った課題
 

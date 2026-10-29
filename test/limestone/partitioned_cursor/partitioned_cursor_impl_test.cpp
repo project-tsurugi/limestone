@@ -100,6 +100,21 @@ TEST_F(partitioned_cursor_impl_test, current_returns_last_entry_after_next) {
     EXPECT_FALSE(cursor.next());
 }
 
+// Verify that blob_ids() returns the BLOB IDs of a normal_with_blob entry
+TEST_F(partitioned_cursor_impl_test, blob_ids_of_normal_with_blob) {
+    auto queue = std::make_shared<cursor_entry_queue>(8);
+    partitioned_cursor_impl cursor(queue);
+
+    std::vector<log_entry> batch{log_entry::make_normal_with_blob(123, "k1", "v1", {1, 0}, {11, 12})};
+    EXPECT_TRUE(queue->push(batch));
+    EXPECT_TRUE(queue->push(end_marker{true, ""}));
+
+    ASSERT_TRUE(cursor.next());
+    EXPECT_EQ(cursor.type(), log_entry::entry_type::normal_with_blob);
+    EXPECT_EQ(cursor.blob_ids(), (std::vector<limestone::api::blob_id_type>{11, 12}));
+    EXPECT_FALSE(cursor.next());
+}
+
 // Verify that after moving from current(), the current entry is in the default-constructed state until next()
 TEST_F(partitioned_cursor_impl_test, current_after_move_is_default_constructed) {
     auto queue = std::make_shared<cursor_entry_queue>(8);
