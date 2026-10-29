@@ -10,6 +10,7 @@
 #include "scan_input.h"
 #include "internal.h"
 #include "log_entry.h"
+#include "log_entry/log_entry_reader.h"
 #include <limestone/api/storage_id_type.h>
 #include <limestone/api/write_version_type.h>
 #include "internal.h"
@@ -68,26 +69,26 @@ void print_log_entry(const log_entry& entry) {
     log_entry::entry_type type = entry.type();
 
     if (type == log_entry::entry_type::normal_entry || type == log_entry::entry_type::remove_entry) {
-        entry.key(key);
+        key = entry.key();
     }
 
     switch (type) {
         case log_entry::entry_type::normal_entry: {
             std::string value;
-            entry.value(value);
+            value = entry.value();
             std::cout << "Entry Type: normal_entry, Storage ID: " << storage_id << ", Key: " << key << ", Value: " << value
-                      << ", Write Version: Epoch: " << log_entry::write_version_epoch_number(entry.value_etc())
-                      << ", Minor: " << log_entry::write_version_minor_write_version(entry.value_etc()) << std::endl;
+                      << ", Write Version: Epoch: " << entry.write_version().get_major()
+                      << ", Minor: " << entry.write_version().get_minor() << std::endl;
             break;
         }
         case log_entry::entry_type::normal_with_blob: {
             std::string value;
-            entry.value(value);
+            value = entry.value();
             std::cout << "Entry Type: normal_with_blob, Storage ID: " << storage_id << ", Key: " << key << ", Value: " << value
-                      << ", Write Version: Epoch: " << log_entry::write_version_epoch_number(entry.value_etc())
-                      << ", Minor: " << log_entry::write_version_minor_write_version(entry.value_etc()) 
+                      << ", Write Version: Epoch: " << entry.write_version().get_major()
+                      << ", Minor: " << entry.write_version().get_minor() 
                       << ", Blob IDs: ";
-            for (const auto& blob_id : entry.get_blob_ids()) {
+            for (const auto& blob_id : entry.blob_ids()) {
                 std::cout << blob_id << " ";
             }
             std::cout << std::endl;
@@ -95,18 +96,16 @@ void print_log_entry(const log_entry& entry) {
         }
         case log_entry::entry_type::remove_entry: {
             std::cout << "Entry Type: remove_entry, Storage ID: " << storage_id << ", Key: " << key
-                      << ", Write Version: Epoch: " << log_entry::write_version_epoch_number(entry.value_etc())
-                      << ", Minor: " << log_entry::write_version_minor_write_version(entry.value_etc()) << std::endl;
+                      << ", Write Version: Epoch: " << entry.write_version().get_major()
+                      << ", Minor: " << entry.write_version().get_minor() << std::endl;
             break;
         }
         case log_entry::entry_type::clear_storage:
         case log_entry::entry_type::add_storage:
         case log_entry::entry_type::remove_storage: {
-            write_version_type write_version;
-            entry.write_version(write_version);
             std::cout << "Entry Type: " << static_cast<int>(type) << ", Storage ID: " << storage_id
-                      << ", Write Version: Epoch: " << log_entry::write_version_epoch_number(entry.value_etc())
-                      << ", Minor: " << log_entry::write_version_minor_write_version(entry.value_etc()) << std::endl;
+                      << ", Write Version: Epoch: " << entry.write_version().get_major()
+                      << ", Minor: " << entry.write_version().get_minor() << std::endl;
             break;
         }
         case log_entry::entry_type::marker_begin:
@@ -134,17 +133,15 @@ std::vector<log_entry> read_log_file(boost::filesystem::path dir_path, const std
 
 std::vector<log_entry> read_raw_log_file(boost::filesystem::path const& log_path) {
     std::vector<log_entry> entries;
-    boost::filesystem::ifstream strm(log_path, std::ios_base::in | std::ios_base::binary);
-    if (!strm) {
-        ADD_FAILURE() << "cannot open log file: " << log_path.string();
-        return entries;
-    }
+    limestone::internal::log_entry_reader reader(log_path);
     while (true) {
-        log_entry entry;
-        if (!entry.read(strm)) {
+        const auto read_result = reader.next();
+        if (read_result.result() != limestone::internal::log_entry_read_result::status::ok) {
+            EXPECT_EQ(read_result.result(), limestone::internal::log_entry_read_result::status::end)
+                << "at offset " << read_result.offset();
             break;
         }
-        entries.push_back(std::move(entry));
+        entries.emplace_back(read_result.view());
     }
     return entries;
 }
@@ -241,8 +238,7 @@ std::vector<log_entry> read_log_file(boost::filesystem::path log_path) {
 
     // Check the key if it exists
     if (expected_key.has_value()) {
-        std::string actual_key;
-        entry.key(actual_key);
+        std::string actual_key{entry.key()};
         if (actual_key != expected_key.value()) {
             return ::testing::AssertionFailure() << "Expected key: " << expected_key.value() << ", but got: " << actual_key;
         }
@@ -250,8 +246,7 @@ std::vector<log_entry> read_log_file(boost::filesystem::path log_path) {
 
     // Check the value if it exists
     if (expected_value.has_value()) {
-        std::string actual_value;
-        entry.value(actual_value);
+        std::string actual_value{entry.value()};
         if (actual_value != expected_value.value()) {
             return ::testing::AssertionFailure() << "Expected value: " << expected_value.value() << ", but got: " << actual_value;
         }
@@ -259,8 +254,8 @@ std::vector<log_entry> read_log_file(boost::filesystem::path log_path) {
 
     // Check the write version if it exists
     if (expected_epoch_number.has_value() && expected_minor_version.has_value()) {
-        epoch_id_type actual_epoch_number = log_entry::write_version_epoch_number(entry.value_etc());
-        std::uint64_t actual_minor_version = log_entry::write_version_minor_write_version(entry.value_etc());
+        epoch_id_type actual_epoch_number = entry.write_version().get_major();
+        std::uint64_t actual_minor_version = entry.write_version().get_minor();
 
         if (actual_epoch_number != expected_epoch_number.value() || actual_minor_version != expected_minor_version.value()) {
             return ::testing::AssertionFailure() << "Expected write version (epoch_number: " << expected_epoch_number.value()
@@ -271,7 +266,7 @@ std::vector<log_entry> read_log_file(boost::filesystem::path log_path) {
 
     // Check the blob IDs
     if (entry.type() == log_entry::entry_type::normal_with_blob) {
-        std::vector<blob_id_type> actual_blob_ids = entry.get_blob_ids();
+        std::vector<blob_id_type> actual_blob_ids = entry.blob_ids();
         if (actual_blob_ids.size() != expected_blob_ids.size()) {
             return ::testing::AssertionFailure() << "Expected blob IDs size: " << expected_blob_ids.size() << ", but got: " << actual_blob_ids.size();
         }
