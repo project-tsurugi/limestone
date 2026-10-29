@@ -70,6 +70,10 @@ blob_id_type tcp_replication_message_io::receive_blob() {
                 e.code().value()
             );
         }
+        // persist the name of the created directory
+        if (datastore_.get_impl()->file_ops().fsync_directory(parent.parent_path()) != 0) {
+            LOG_AND_THROW_IO_EXCEPTION("Failed to fsync the parent directory of " + parent.string(), errno);
+        }
     } else if (!boost::filesystem::is_directory(parent)) {
         LOG_AND_THROW_IO_EXCEPTION(
             "Expected directory at path for blob file: " + parent.string(),
@@ -110,6 +114,10 @@ blob_id_type tcp_replication_message_io::receive_blob() {
         LOG_LP(WARNING) << "fsync failed: " << strerror(ec);
     }
     safe_close(fp);
+    // persist the name of the created file before the entries referring to the BLOB are applied
+    if (datastore_.get_impl()->file_ops().fsync_directory(parent) != 0) {
+        LOG_AND_THROW_IO_EXCEPTION("Failed to fsync the directory of blob file: " + parent.string(), errno);
+    }
 
     return blob_id;
 }

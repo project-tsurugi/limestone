@@ -380,6 +380,10 @@ void rdma_log_entries_parser::open_current_blob_file() {
                     "Failed to create directory for RDMA blob file: " + parent.string(),
                     e.code().value());
         }
+        // persist the name of the created directory
+        if (datastore_->get_impl()->file_ops().fsync_directory(parent.parent_path()) != 0) {
+            LOG_AND_THROW_IO_EXCEPTION("Failed to fsync the parent directory of " + parent.string(), errno);
+        }
     } else if (!boost::filesystem::is_directory(parent)) {
         LOG_AND_THROW_IO_EXCEPTION(
                 "Expected directory at path for RDMA blob file: " + parent.string(),
@@ -408,6 +412,11 @@ void rdma_log_entries_parser::finish_current_blob_file() {
                         << current_blob_path_ << ": " << strerror(ec);
     }
     close_current_blob_file_noexcept();
+    // persist the name of the created file before the entry is applied
+    auto directory = boost::filesystem::path(current_blob_path_).parent_path();
+    if (datastore_->get_impl()->file_ops().fsync_directory(directory) != 0) {
+        LOG_AND_THROW_IO_EXCEPTION("Failed to fsync the directory of RDMA blob file: " + directory.string(), errno);
+    }
 }
 
 void rdma_log_entries_parser::close_current_blob_file_noexcept() noexcept {

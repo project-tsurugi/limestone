@@ -17,12 +17,17 @@
 
 #include <boost/filesystem.hpp>
 #include <arpa/inet.h>
+#include <algorithm>
+#include <cerrno>
 #include <fstream>
 #include <iterator>
 #include <string>
 #include <vector>
 
 #include "gtest/gtest.h"
+#include "datastore_impl.h"
+#include "file_operations.h"
+#include "limestone/api/limestone_exception.h"
 #include "replication/tcp_replication_message_io.h"
 #include "replication/message_log_entries.h"
 #include "replication/replication_message_io.h"
@@ -63,6 +68,24 @@ std::string read_file(boost::filesystem::path const& path) {
     }
     return content;
 }
+
+// records the directories passed to fsync_directory, and makes it fail if fail is true
+class directory_sync_recorder : public limestone::internal::real_file_operations {
+public:
+    int fsync_directory(const boost::filesystem::path& dir) override {
+        synced_dirs.push_back(dir);
+        if (fail) {
+            errno = EIO;
+            return -1;
+        }
+        return real_file_operations::fsync_directory(dir);
+    }
+    [[nodiscard]] bool synced(const boost::filesystem::path& dir) const {
+        return std::find(synced_dirs.begin(), synced_dirs.end(), dir) != synced_dirs.end();
+    }
+    bool fail = false;
+    std::vector<boost::filesystem::path> synced_dirs;
+};
 
 }  // namespace
 
@@ -393,6 +416,55 @@ TEST(rdma_log_entries_parser_test, streams_blob_body_to_replica_file) {
     auto receiver_blob_path = receiver_datastore.get_blob_file(blob_id).path();
     EXPECT_TRUE(boost::filesystem::exists(receiver_blob_path));
     EXPECT_EQ(read_file(receiver_blob_path), blob_body);
+
+    boost::filesystem::remove_all(sender_location);
+    boost::filesystem::remove_all(receiver_location);
+}
+
+// writing a received BLOB synchronizes the parent of the created BLOB directory and the directory of the created file,
+// and throws if it fails
+TEST(rdma_log_entries_parser_test, blob_file_synchronizes_directories) {
+    static constexpr const char* sender_location = "/tmp/rdma_log_entries_parser_blob_sync_sender_test";
+    static constexpr const char* receiver_location = "/tmp/rdma_log_entries_parser_blob_sync_receiver_test";
+    boost::filesystem::remove_all(sender_location);
+    boost::filesystem::remove_all(receiver_location);
+
+    limestone::api::configuration sender_conf{};
+    sender_conf.set_data_location(sender_location);
+    limestone::api::datastore_test sender_datastore{sender_conf};
+
+    directory_sync_recorder ops;
+    limestone::api::datastore_impl::set_file_operations_for_test(&ops);
+    limestone::api::configuration receiver_conf{};
+    receiver_conf.set_data_location(receiver_location);
+    limestone::api::datastore_test receiver_datastore{receiver_conf};
+    limestone::api::datastore_impl::set_file_operations_for_test(nullptr);
+
+    constexpr limestone::api::blob_id_type blob_id = 2468;
+    auto sender_blob_path = sender_datastore.get_blob_file(blob_id).path();
+    boost::filesystem::create_directories(sender_blob_path.parent_path());
+    std::ofstream(sender_blob_path.string(), std::ios::binary) << "rdma-blob-body";
+
+    message_log_entries original{901};
+    original.add_normal_with_blob(3, "key", "value", {4, 5}, {blob_id});
+    tcp_replication_message_io io("", sender_datastore);
+    original.send_body(io);
+    std::string body = io.get_out_string();
+
+    {
+        rdma_log_entries_parser parser{receiver_datastore};
+        EXPECT_EQ(parser.consume(body), body.size());
+        ASSERT_TRUE(parser.complete());
+    }
+    auto receiver_blob_path = receiver_datastore.get_blob_file(blob_id).path();
+    EXPECT_TRUE(ops.synced(receiver_blob_path.parent_path()));
+    EXPECT_TRUE(ops.synced(receiver_blob_path.parent_path().parent_path()));
+
+    ops.fail = true;
+    {
+        rdma_log_entries_parser parser{receiver_datastore};
+        EXPECT_THROW((void) parser.consume(body), limestone::api::limestone_io_exception);
+    }
 
     boost::filesystem::remove_all(sender_location);
     boost::filesystem::remove_all(receiver_location);
