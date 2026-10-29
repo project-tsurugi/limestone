@@ -219,7 +219,7 @@ master へのマージ前に本ファイルを削除する。
         5 節)
 * [x] BLOB の GC の型 blob_gc_entry と、log_entry_container・log_entry_comparator の置き換え、log_entry_container.h の
       順序の文書の修正 (LE 13.1、P19)。(型の置き換えとクラス名の変更をコミットを分けて行う。5 節)
-* [ ] UT: LE 15 節の abort する条件、書き出しの観点。
+* [x] UT: LE 15 節の abort する条件、書き出しの観点。(5 節)
 
 ### ステップ 11: LE 段階 3
 
@@ -772,6 +772,14 @@ master へのマージ前に本ファイルを削除する。
   参照型から blob_gc_entry を作る形に変えた。クラス名 (log_entry_container、log_entry_comparator) はユーザの判断で
   blob_gc_entry_container、blob_gc_entry_comparator に変える。型の置き換えと名前の変更はコミットを分け、名前と中身が
   食い違う状態を作らないよう、型の置き換えを先にした。
+* 2026-10-29: ステップ 10 の UT (LE 15 節の abort する条件と書き出しの観点) を確かめた。無効な値の要求と既定構築の状態の
+  アクセサ (log_entry_view_test.accessor_validity、log_entry_test.accessor_not_valid_for_type と
+  new_accessor_not_valid_for_type)、レプリカの未定義の種別と現れてはならない種別 (decode_entry_type、rdma の解析、
+  apply_to)、ファクトリの長さの違反 (factories_length_exceeds_32bit)、書き出しの長さの検査と違反時に 1 バイトも
+  書かないこと (typed_writers_length_exceeds_32bit)、write_serialized と型付き版の出力の一致
+  (write_serialized_matches_typed_writers) は、ステップ 2〜10 で入れたテストで覆われている。足りなかった
+  レプリカの this_id_is_not_used の受信を、rdma の解析のテストに加えた。BLOB の個数の超過は、要素数 2^32 の vector が
+  要るので確かめない (ファクトリと書き出しの両方)。
 
 ## 6. 残った課題
 
