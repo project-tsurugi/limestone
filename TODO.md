@@ -151,18 +151,23 @@ master へのマージ前に本ファイルを削除する。
 
 ### ステップ 7: 旧ソートの削除 (S1 メモ 5・6・8 節)
 
-* [ ] sortdb_wrapper、旧ソート専用の関数 (comp_twisted_key()、insert_entry_or_update_to_max()、insert_twisted_entry()、
+* [x] sortdb_wrapper、旧ソート専用の関数 (comp_twisted_key()、insert_entry_or_update_to_max()、insert_twisted_entry()、
       split_db_value_and_blob_ids()、create_value_from_db_key_and_value() など) を削除する。
       (datastore_snapshot.cpp の旧ソート専用の関数は、使われなくなったステップ 6 のコンパクションの置き換えで削除した。
-      残りは sortdb_wrapper と sorting_context。test/limestone/blob/datastore_blob_test.cpp:621 のコメントが
-      insert_entry_or_update_to_max() に触れているので見直す。)
-* [ ] CMake: RECOVERY_SORTER_KVSLIB・RECOVERY_SORTER_PUT_ONLY、マクロ SORT_METHOD_USE_ROCKSDB・SORT_METHOD_PUT_ONLY、
+      残りの sortdb_wrapper と sorting_context は使う側がないのでクラスごと削除し、log_entry の旧ソートの出力用の
+      write(key_sid, value_etc) も削除した。test/limestone/blob/datastore_blob_test.cpp:621 のコメントは旧関数名を出さない
+      形に直した。)
+* [x] CMake: RECOVERY_SORTER_KVSLIB・RECOVERY_SORTER_PUT_ONLY、マクロ SORT_METHOD_USE_ROCKSDB・SORT_METHOD_PUT_ONLY、
       cmake/FindRocksDB.cmake と RocksDB・LevelDB の find_package を削除する。
-* [ ] .github/workflows/ci-build.yml:46 の -DRECOVERY_SORTER_KVSLIB=ROCKSDB と -DRECOVERY_SORTER_PUT_ONLY=ON を削除する。
-* [ ] README.md の librocksdb-dev・libleveldb-dev の導入と注記 (19〜21 行)、ビルドオプションの説明 (47〜48 行) を削除する。
-* [ ] テストの修正: snapshot/sorting_context_test (sortdb の部分を削除)、log/log_entry_4_LevelDB_test (write_serialized に
-      置き換え)、compaction/compaction_boundary_scan_test (sortdb に触れているコメント)。
-* [ ] RocksDB をインストールしていない環境でビルドとフルスイートが通ること。
+* [x] .github/workflows/ci-build.yml:46 の -DRECOVERY_SORTER_KVSLIB=ROCKSDB と -DRECOVERY_SORTER_PUT_ONLY=ON を削除する。
+      (tsurugidb の .github/workflows/ci-test-modules.yml:233 も同じ -D を limestone に渡している。削除後は未使用の変数の
+      警告になるだけで失敗はしないが、ステップ 14 で追従する。)
+* [x] README.md の librocksdb-dev・libleveldb-dev の導入と注記 (19〜21 行)、ビルドオプションの説明 (47〜48 行) を削除する。
+* [x] テストの修正: snapshot/sorting_context_test と log/log_entry_4_LevelDB_test は削除 (後者の write → read の往復は
+      log/log_entry_type_test が覆う)、compaction/compaction_boundary_scan_test (sortdb に触れているコメント)。
+* [x] RocksDB をインストールしていない環境でビルドとフルスイートが通ること。(手元にその環境がないので、rocksdb / leveldb の
+      include が残っていないこと (grep) と、liblimestone.so・limestone-test・tglogutil・tgreplica が librocksdb と
+      libleveldb にリンクしていないこと (ldd) で代えた。フルスイート 116 件通過。)
 
 ### ステップ 8: 旧バージョンとの出力の比較 (S1 メモ 6 節、L3 8.7)
 
@@ -242,6 +247,8 @@ master へのマージ前に本ファイルを削除する。
 * [ ] PR の作成 (Q3)。
 * [ ] limestone 以外のリポジトリの対応 (S1 メモ 8 節)。新しい limestone が取り込まれるまで、依存パッケージを外す変更は
       入れられない。ステップ 13 を行った場合は、L3 (全体) の申し送り事項の更新も含める。
+  * [ ] tsurugidb: .github/workflows/ci-test-modules.yml:233 の limestone のビルドから -DRECOVERY_SORTER_KVSLIB=ROCKSDB と
+        -DRECOVERY_SORTER_PUT_ONLY=ON を外す (ステップ 7 で limestone 側のオプションを削除した)。
   * [ ] tateyama: datastore resource の bridge (tateyama/datastore/resource/bridge.cpp) で、tsurugi.ini の datastore 節の
         sort_arena_size_mb、sort_work_dir、sort_merge_fanin を configuration に渡す。設定パラメータの文書
         (docs/config_parameters.md、docs/config-parameters-en.md) に新設の項目と recover_max_parallelism の意味の変更
