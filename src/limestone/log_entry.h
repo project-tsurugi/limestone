@@ -280,15 +280,20 @@ public:
     void write(FILE* strm) const;
 
     static void write(FILE* strm, storage_id_type storage_id, std::string_view key, std::string_view value, write_version_type write_version) {
+        std::size_t key_len = key.length();
+        std::size_t value_len = value.length();
+        // all the lengths are checked before writing the first byte; the exception for a violation is caught by the
+        // public API of log_channel (HANDLE_EXCEPTION_AND_ABORT), which aborts
+        if (key_len > UINT32_MAX) {
+            LOG_AND_THROW_EXCEPTION("key length " + std::to_string(key_len) + " does not fit in 32 bits");
+        }
+        if (value_len > UINT32_MAX) {
+            LOG_AND_THROW_EXCEPTION("value length " + std::to_string(value_len) + " does not fit in 32 bits");
+        }
+
         entry_type type = entry_type::normal_entry;
         write_uint8(strm, static_cast<std::uint8_t>(type));
-
-        std::size_t key_len = key.length();
-        assert(key_len <= UINT32_MAX);
         write_uint32le(strm, static_cast<std::uint32_t>(key_len));
-
-        std::size_t value_len = value.length();
-        assert(value_len <= UINT32_MAX);
         write_uint32le(strm, static_cast<std::uint32_t>(value_len));
 
         write_uint64le(strm, static_cast<std::uint64_t>(storage_id));
@@ -307,15 +312,24 @@ public:
         write_version_type write_version, 
         const std::vector<blob_id_type>& large_objects) 
     {
+        std::size_t key_len = key.length();
+        std::size_t value_len = value.length();
+        std::size_t blob_count = large_objects.size();
+        // all the lengths are checked before writing the first byte; the exception for a violation is caught by the
+        // public API of log_channel (HANDLE_EXCEPTION_AND_ABORT), which aborts
+        if (key_len > UINT32_MAX) {
+            LOG_AND_THROW_EXCEPTION("key length " + std::to_string(key_len) + " does not fit in 32 bits");
+        }
+        if (value_len > UINT32_MAX) {
+            LOG_AND_THROW_EXCEPTION("value length " + std::to_string(value_len) + " does not fit in 32 bits");
+        }
+        if (blob_count > UINT32_MAX) {
+            LOG_AND_THROW_EXCEPTION("blob count " + std::to_string(blob_count) + " does not fit in 32 bits");
+        }
+
         entry_type type = entry_type::normal_with_blob;
         write_uint8(strm, static_cast<std::uint8_t>(type));
-
-        std::size_t key_len = key.length();
-        assert(key_len <= UINT32_MAX);
         write_uint32le(strm, static_cast<std::uint32_t>(key_len));
-
-        std::size_t value_len = value.length();
-        assert(value_len <= UINT32_MAX);
         write_uint32le(strm, static_cast<std::uint32_t>(value_len));
 
         write_uint64le(strm, static_cast<std::uint64_t>(storage_id));
@@ -326,8 +340,6 @@ public:
         write_bytes(strm, value.data(), value_len);
 
         // Write the number of BLOB references
-        std::size_t blob_count = large_objects.size();
-        assert(blob_count <= UINT32_MAX);
         write_uint32le(strm, static_cast<std::uint32_t>(blob_count));
 
         // Write each BLOB ID
@@ -337,11 +349,15 @@ public:
     }
 
     static void write_remove(FILE* strm, storage_id_type storage_id, std::string_view key, write_version_type write_version) {
+        std::size_t key_len = key.length();
+        // the length is checked before writing the first byte; the exception for a violation is caught by the public
+        // API of log_channel (HANDLE_EXCEPTION_AND_ABORT), which aborts
+        if (key_len > UINT32_MAX) {
+            LOG_AND_THROW_EXCEPTION("key length " + std::to_string(key_len) + " does not fit in 32 bits");
+        }
+
         entry_type type = entry_type::remove_entry;
         write_uint8(strm, static_cast<std::uint8_t>(type));
-
-        std::size_t key_len = key.length();
-        assert(key_len <= UINT32_MAX);
         write_uint32le(strm, static_cast<std::uint32_t>(key_len));
 
         write_uint64le(strm, static_cast<std::uint64_t>(storage_id));

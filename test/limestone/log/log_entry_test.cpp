@@ -16,6 +16,7 @@
 
 #include <cstdint>
 #include <cstdio>
+#include <functional>
 #include <memory>
 #include <sstream>
 #include <string>
@@ -474,6 +475,34 @@ TEST(log_entry_test, factories_length_exceeds_32bit) {
     EXPECT_DEATH((void) log_entry::make_normal_with_blob(1, huge, "", wv, {}), "key length");
     EXPECT_DEATH((void) log_entry::make_normal_with_blob(1, "", huge, wv, {}), "value length");
     EXPECT_DEATH((void) log_entry::make_remove_entry(1, huge, wv), "key length");
+}
+
+// the typed writers throw limestone_exception without writing any byte if the length of the key or the value, or
+// the number of BLOBs, does not fit in 32 bits
+TEST(log_entry_test, typed_writers_length_exceeds_32bit) {
+    // the lengths are checked before writing, so a string_view that refers to a small region with a large length is
+    // enough. The number of BLOBs is not checked here, because it would need a vector of 2^32 elements
+    const char buf[1]{};
+    const std::string_view huge{buf, std::size_t{UINT32_MAX} + 1};
+    const limestone::api::write_version_type wv{7, 3};
+    const std::vector<std::pair<std::function<void(FILE*)>, std::string>> cases{
+        {[&](FILE* fp) { log_entry::write(fp, 1, huge, "", wv); }, "key length"},
+        {[&](FILE* fp) { log_entry::write(fp, 1, "", huge, wv); }, "value length"},
+        {[&](FILE* fp) { log_entry::write_with_blob(fp, 1, huge, "", wv, {11}); }, "key length"},
+        {[&](FILE* fp) { log_entry::write_with_blob(fp, 1, "", huge, wv, {11}); }, "value length"},
+        {[&](FILE* fp) { log_entry::write_remove(fp, 1, huge, wv); }, "key length"},
+    };
+    for (const auto& [write, message] : cases) {
+        const std::string written = written_by([&](FILE* fp) {
+            try {
+                write(fp);
+                ADD_FAILURE() << "no exception: " << message;
+            } catch (const limestone::api::limestone_exception& e) {
+                EXPECT_NE(std::string_view{e.what()}.find(message), std::string_view::npos) << e.what();
+            }
+        });
+        EXPECT_TRUE(written.empty()) << message;
+    }
 }
 
 // keep writes the bytes as is
