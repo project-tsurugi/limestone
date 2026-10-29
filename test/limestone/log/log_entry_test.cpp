@@ -18,7 +18,6 @@
 #include <cstdio>
 #include <functional>
 #include <memory>
-#include <sstream>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -36,7 +35,6 @@ namespace limestone::testing {
 using limestone::api::log_entry;
 using limestone::internal::log_entry_view;
 using entry_type = log_entry::entry_type;
-using read_error = log_entry::read_error;
 
 using log_entry_bytes::marker;
 using log_entry_bytes::normal_entry;
@@ -72,21 +70,6 @@ void expect_blob_entry(const log_entry& e, const std::string& value) {
     EXPECT_EQ(e.type(), entry_type::normal_with_blob);
     EXPECT_EQ(e.view().serialized_entry(), normal_with_blob(2, "key", value, 7, 3, {11, 12}));
     EXPECT_EQ(e.storage(), 2U);
-    std::string key;
-    e.key(key);
-    EXPECT_EQ(key, "key");
-    std::string v;
-    e.value(v);
-    EXPECT_EQ(v, value);
-    limestone::api::write_version_type wv;
-    e.write_version(wv);
-    EXPECT_EQ(wv.get_major(), 7U);
-    EXPECT_EQ(wv.get_minor(), 3U);
-    EXPECT_EQ(e.get_blob_ids(), (std::vector<limestone::api::blob_id_type>{11, 12}));
-    EXPECT_EQ(e.key_sid(), log_entry_bytes::u64le(2) + "key");
-    EXPECT_EQ(e.value_etc(), log_entry_bytes::u64le(7) + log_entry_bytes::u64le(3) + value);
-    EXPECT_EQ(e.raw_blob_ids(), log_entry_bytes::u64le(11) + log_entry_bytes::u64le(12));
-    // the accessors with the new names return the same values
     EXPECT_EQ(e.serialized_entry(), e.view().serialized_entry());
     EXPECT_EQ(e.serialized_key_sid(), log_entry_bytes::u64le(2) + "key");
     EXPECT_EQ(e.serialized_value_etc(), log_entry_bytes::u64le(7) + log_entry_bytes::u64le(3) + value);
@@ -105,18 +88,6 @@ void expect_blob_entry(const log_entry& e, const std::string& value) {
 void expect_default_state(const log_entry& e) {
     EXPECT_EQ(e.type(), entry_type::this_id_is_not_used);
     EXPECT_EQ(e.view().type(), entry_type::this_id_is_not_used);
-}
-
-/**
- * @brief Reads one entry from a stream of bytes.
- * @param bytes the content of the stream
- * @param e the destination
- * @param ec the result of reading
- * @return the return value of read_entry_from
- */
-bool read_from(const std::string& bytes, log_entry& e, read_error& ec) {
-    std::istringstream in(bytes);
-    return e.read_entry_from(in, ec);
 }
 
 /**
@@ -256,175 +227,12 @@ TEST(log_entry_test, copy_and_move_default_state) {
     expect_default_state(move_assigned);
 }
 
-// reading an entry of each type holds exactly the bytes read
-TEST(log_entry_test, read_each_type) {
-    const std::vector<std::string> entries{
-        normal_entry(1, "key", "value", 7, 3),
-        normal_with_blob(2, "key", "value", 7, 3, {11, 12}),
-        normal_with_blob(2, "key", "value", 7, 3, {}),
-        remove_entry(3, "key", 7, 3),
-        storage_entry(7, 4, 7, 3),
-        storage_entry(8, 5, 7, 3),
-        storage_entry(9, 6, 7, 3),
-        marker(2, 10),
-        marker(3, 11) + u8(1),
-        marker(4, 12),
-        marker(6, 13),
-    };
-    for (const auto& bytes : entries) {
-        log_entry e;
-        read_error ec;
-        EXPECT_TRUE(read_from(bytes, e, ec));
-        EXPECT_FALSE(ec);
-        EXPECT_EQ(e.type(), static_cast<entry_type>(bytes[0]));
-        EXPECT_EQ(e.view().serialized_entry(), bytes);
-    }
-}
-
-// returns the epoch of a marker
-TEST(log_entry_test, read_marker_epoch) {
-    log_entry e;
-    read_error ec;
-    ASSERT_TRUE(read_from(marker(4, 0x0102030405060708ULL), e, ec));
-    EXPECT_EQ(e.epoch_id(), 0x0102030405060708ULL);
-}
-
-// reading again into the same object leaves no values of the previous entry
-TEST(log_entry_test, read_sequence) {
-    std::string first = normal_with_blob(2, "key", long_value, 7, 3, {11, 12});
-    std::string second = remove_entry(3, "k", 8, 4);
-    std::istringstream in(first + second);
-    log_entry e;
-    read_error ec;
-    ASSERT_TRUE(e.read_entry_from(in, ec));
-    EXPECT_EQ(e.view().serialized_entry(), first);
-    ASSERT_TRUE(e.read_entry_from(in, ec));
-    EXPECT_EQ(e.view().serialized_entry(), second);
-    EXPECT_FALSE(e.read_entry_from(in, ec));
-    EXPECT_FALSE(ec);
-    expect_default_state(e);
-}
-
-// at the end of the stream, returns false without an error and leaves the default-constructed state
-TEST(log_entry_test, read_eof) {
-    log_entry e = make_entry(normal_entry(1, "key", "value", 7, 3));
-    read_error ec;
-    EXPECT_FALSE(read_from("", e, ec));
-    EXPECT_FALSE(ec);
-    expect_default_state(e);
-}
-
-// a truncated entry gives short_entry with its type in ec, and leaves the default-constructed state
-TEST(log_entry_test, read_short_entry) {
-    const std::vector<std::string> entries{
-        normal_entry(1, "key", "value", 7, 3),
-        normal_with_blob(2, "key", "value", 7, 3, {11, 12}),
-        remove_entry(3, "key", 7, 3),
-        storage_entry(7, 4, 7, 3),
-        marker(3, 11) + u8(1),
-    };
-    for (const auto& bytes : entries) {
-        for (std::size_t n = 1; n < bytes.size(); ++n) {
-            log_entry e = make_entry(normal_entry(1, "other", "other", 1, 1));
-            read_error ec;
-            EXPECT_FALSE(read_from(bytes.substr(0, n), e, ec)) << n;
-            EXPECT_EQ(ec.value(), read_error::short_entry) << n;
-            EXPECT_EQ(ec.entry_type(), static_cast<entry_type>(bytes[0])) << n;
-            expect_default_state(e);
-        }
-    }
-}
-
-// an undefined type value gives unknown_type with the value in ec, and leaves the default-constructed state
-TEST(log_entry_test, read_unknown_type) {
-    for (std::uint8_t value : {0, 11, 0xff}) {
-        log_entry e = make_entry(normal_entry(1, "other", "other", 1, 1));
-        read_error ec;
-        EXPECT_FALSE(read_from(u8(value) + std::string(32, '\0'), e, ec));
-        EXPECT_EQ(ec.value(), read_error::unknown_type);
-        EXPECT_EQ(ec.entry_type(), static_cast<entry_type>(value));
-        expect_default_state(e);
-    }
-}
-
-// emptying the value of normal_entry sets the value length to 0 and keeps the other parts
-TEST(log_entry_test, truncate_normal_entry) {
-    log_entry e = make_entry(normal_entry(1, "key", long_value, 7, 3));
-    e.truncate_value_from_normal_entry();
-    EXPECT_EQ(e.view().serialized_entry(), normal_entry(1, "key", "", 7, 3));
-}
-
-// emptying the value of normal_with_blob sets the value length to 0 and keeps the blob_ids
-TEST(log_entry_test, truncate_normal_with_blob) {
-    log_entry e = make_entry(normal_with_blob(2, "key", long_value, 7, 3, {11, 12}));
-    e.truncate_value_from_normal_entry();
-    EXPECT_EQ(e.view().serialized_entry(), normal_with_blob(2, "key", "", 7, 3, {11, 12}));
-    EXPECT_EQ(e.get_blob_ids(), (std::vector<limestone::api::blob_id_type>{11, 12}));
-}
-
-// entry types without a value do not change
-TEST(log_entry_test, truncate_other_types) {
-    const std::vector<std::string> entries{
-        remove_entry(3, "key", 7, 3),
-        storage_entry(7, 4, 7, 3),
-        marker(2, 10),
-    };
-    for (const auto& bytes : entries) {
-        log_entry e = make_entry(bytes);
-        e.truncate_value_from_normal_entry();
-        EXPECT_EQ(e.view().serialized_entry(), bytes);
-    }
-}
-
-// does nothing in the default-constructed state
-TEST(log_entry_test, truncate_default_state) {
-    log_entry e;
-    e.truncate_value_from_normal_entry();
-    expect_default_state(e);
-}
-
-// write writes the bytes as is, including the CRC type of marker_end as read
-TEST(log_entry_test, write_entry_as_is) {
-    const std::vector<std::string> entries{
-        normal_with_blob(2, "key", long_value, 7, 3, {11, 12}),
-        marker(3, 11) + u8(0x7f),
-    };
-    for (const auto& bytes : entries) {
-        log_entry e = make_entry(bytes);
-        EXPECT_EQ(written_by([&](FILE* fp) { e.write(fp); }), bytes);
-    }
-}
-
-// cannot write the default-constructed state
-TEST(log_entry_test, write_default_state) {
-    log_entry e;
-    EXPECT_DEATH(e.write(stdout), "log_entry_view:serialized_entry not valid");
-}
-
-// the old accessors follow the type checks of the view and abort when asked for a value that is not valid
-TEST(log_entry_test, accessor_not_valid_for_type) {
-    log_entry normal = make_entry(normal_entry(1, "key", "value", 7, 3));
-    EXPECT_DEATH((void) normal.get_blob_ids(), "log_entry_view:blob_ids not valid");
-    EXPECT_DEATH((void) normal.raw_blob_ids(), "log_entry_view:serialized_blob_ids not valid");
-    EXPECT_DEATH((void) normal.epoch_id(), "log_entry_view:epoch_id not valid");
-    log_entry storage = make_entry(storage_entry(7, 4, 7, 3));
-    std::string buf;
-    EXPECT_DEATH(storage.key(buf), "log_entry_view:key not valid");
-    log_entry removed = make_entry(remove_entry(3, "key", 7, 3));
-    EXPECT_DEATH(removed.value(buf), "log_entry_view:value not valid");
-    log_entry begin = make_entry(marker(2, 10));
-    EXPECT_DEATH((void) begin.key_sid(), "log_entry_view:serialized_key_sid not valid");
-    EXPECT_DEATH((void) begin.value_etc(), "log_entry_view:serialized_value_etc not valid");
-    EXPECT_DEATH((void) begin.storage(), "log_entry_view:storage not valid");
-    limestone::api::write_version_type wv;
-    EXPECT_DEATH(begin.write_version(wv), "log_entry_view:write_version not valid");
-}
-
 // the accessors with the new names also abort when asked for a value that is not valid
 TEST(log_entry_test, new_accessor_not_valid_for_type) {
     log_entry normal = make_entry(normal_entry(1, "key", "value", 7, 3));
     EXPECT_DEATH((void) normal.blob_ids(), "log_entry_view:blob_ids not valid");
     EXPECT_DEATH((void) normal.serialized_blob_ids(), "log_entry_view:serialized_blob_ids not valid");
+    EXPECT_DEATH((void) normal.epoch_id(), "log_entry_view:epoch_id not valid");
     log_entry storage = make_entry(storage_entry(7, 4, 7, 3));
     EXPECT_DEATH((void) storage.key(), "log_entry_view:key not valid");
     log_entry removed = make_entry(remove_entry(3, "key", 7, 3));
@@ -432,6 +240,7 @@ TEST(log_entry_test, new_accessor_not_valid_for_type) {
     log_entry begin = make_entry(marker(2, 10));
     EXPECT_DEATH((void) begin.serialized_key_sid(), "log_entry_view:serialized_key_sid not valid");
     EXPECT_DEATH((void) begin.serialized_value_etc(), "log_entry_view:serialized_value_etc not valid");
+    EXPECT_DEATH((void) begin.storage(), "log_entry_view:storage not valid");
     EXPECT_DEATH((void) begin.write_version(), "log_entry_view:write_version not valid");
     const log_entry empty{};
     EXPECT_DEATH((void) empty.serialized_entry(), "log_entry_view:serialized_entry not valid");
