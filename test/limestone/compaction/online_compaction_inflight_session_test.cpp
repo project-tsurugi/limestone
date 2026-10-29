@@ -29,6 +29,7 @@
 
 #include "compaction_test_fixture.h"
 #include "datastore_impl.h"
+#include "log_entry/log_entry_reader.h"
 
 namespace limestone::testing {
 
@@ -149,11 +150,15 @@ protected:
     // the entries of an invalidated snippet.
     static std::vector<log_entry> read_raw_entries(boost::filesystem::path const& path) {
         std::vector<log_entry> entries;
-        std::ifstream in;
-        in.open(path.string(), std::ios::in | std::ios::binary);
-        log_entry e;
-        while (e.read(in)) {
-            entries.push_back(e);
+        limestone::internal::log_entry_reader reader(path);
+        while (true) {
+            const auto read_result = reader.next();
+            if (read_result.result() != limestone::internal::log_entry_read_result::status::ok) {
+                EXPECT_EQ(read_result.result(), limestone::internal::log_entry_read_result::status::end)
+                    << "at offset " << read_result.offset();
+                break;
+            }
+            entries.emplace_back(read_result.view());
         }
         return entries;
     }
@@ -164,9 +169,7 @@ protected:
             if (e.type() != log_entry::entry_type::normal_entry) {
                 return false;
             }
-            std::string k;
-            e.key(k);
-            return k == key;
+            return e.key() == key;
         });
     }
 
