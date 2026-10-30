@@ -107,7 +107,7 @@ using namespace limestone::api;
 //   log_entries                   = log_entry log_entries
 //                                 | (empty)
 //   log_entry                     = normal_entry             { if (valid) process-entry }
-//                                 | normal_with_blob         { if (valid) process-entry }
+//                                 | normal_with_blob         { max-blob-id := max(max-blob-id, blob-ids); if (valid) process-entry }
 //                                 | remove_entry             { if (valid) process-entry }
 //                                 | clear_storage            { if (valid) process-entry }
 //                                 | add_storage              { if (valid) process-entry }
@@ -255,7 +255,7 @@ using namespace limestone::api;
 //
 //  loop:
 //    normal_entry               : { if (valid) process-entry } -> loop
-//    normal_with_blob           : { if (valid) process-entry } -> loop
+//    normal_with_blob           : { max-blob-id := max(max-blob-id, blob-ids); if (valid) process-entry } -> loop
 //    remove_entry               : { if (valid) process-entry } -> loop
 //    clear_storage              : { if (valid) process-entry } -> loop
 //    add_storage                : { if (valid) process-entry } -> loop
@@ -280,7 +280,7 @@ using namespace limestone::api;
 
 
 // scan the file, and check max epoch number in this file
-epoch_id_type dblog_scan::scan_one_pwal_file(  // NOLINT(readability-function-cognitive-complexity)
+dblog_scan::file_scan_result dblog_scan::scan_one_pwal_file(  // NOLINT(readability-function-cognitive-complexity)
         const scan_input& input, epoch_id_type ld_epoch,
         const std::function<void(log_entry&)>& add_entry,
         const error_report_func_t& report_error,
@@ -289,6 +289,7 @@ epoch_id_type dblog_scan::scan_one_pwal_file(  // NOLINT(readability-function-co
     VLOG_LP(log_debug) << "processing pwal file: " << p.filename().string();
     epoch_id_type current_epoch{UINT64_MAX};
     epoch_id_type max_epoch_of_file{0};
+    blob_id_type max_blob_id_of_file{0};
     log_entry::read_error ec{};
     int fixed = 0;
 
@@ -337,7 +338,15 @@ epoch_id_type dblog_scan::scan_one_pwal_file(  // NOLINT(readability-function-co
         case lex_token::token_type::add_storage:
         case lex_token::token_type::remove_storage:
 // normal_entry | normal_with_blob | remove_entry | clear_storage | add_storage | remove_storage : (not 1st) { if (valid) process-entry } -> loop
+// (normal_with_blob: max-blob-id := max(max-blob-id, blob-ids) before that)
             if (!first) {
+                if (tok.value() == lex_token::token_type::normal_with_blob) {
+                    // counted also in the invalid snippets: their entries are not passed to add_entry, but their
+                    // BLOB files may remain
+                    for (const blob_id_type id : e.blob_ids()) {
+                        max_blob_id_of_file = std::max(max_blob_id_of_file, id);
+                    }
+                }
                 if (valid) {
                     add_entry(e);
                 }
@@ -601,7 +610,7 @@ epoch_id_type dblog_scan::scan_one_pwal_file(  // NOLINT(readability-function-co
     }
     VLOG_LP(log_debug) << "fixed: " << fixed;
     pe.modified(fixed > 0);
-    return max_epoch_of_file;
+    return {max_epoch_of_file, max_blob_id_of_file};
 }
 
 }

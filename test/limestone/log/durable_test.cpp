@@ -185,7 +185,7 @@ std::tuple<limestone::api::log_entry::read_error, limestone::api::epoch_id_type,
                                               [&err](log_entry::read_error& e) -> bool {
             err = e;
             throw std::runtime_error("pwal file read error");
-        }, ec);
+        }, ec).max_epoch;
     } catch (std::runtime_error& re) {
     }
     return {err, durable_epoch, std::move(entries)};

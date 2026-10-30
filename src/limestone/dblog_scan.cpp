@@ -174,6 +174,7 @@ epoch_id_type dblog_scan::scan_pwal_files(  // NOLINT(readability-function-cogni
     std::atomic<dblog_scan::parse_error::code> max_error_value{dblog_scan::parse_error::code::ok};
     std::map<boost::filesystem::path, epoch_id_type> max_epoch_per_file;
     std::mutex max_epoch_per_file_mtx;
+    std::atomic<blob_id_type> max_blob_id_in_dir{0};
     // NOLINTNEXTLINE(readability-function-cognitive-complexity)
     auto process_file = [&](const scan_input& input, int worker) {
         const boost::filesystem::path& p = input.path();
@@ -182,8 +183,8 @@ epoch_id_type dblog_scan::scan_pwal_files(  // NOLINT(readability-function-cogni
             const std::function<void(log_entry&)> add_entry_of_worker = [&add_entry, worker](log_entry& e) {
                 add_entry(e, worker);
             };
-            auto rc = scan_one_pwal_file(input, ld_epoch, add_entry_of_worker, report_error, ec);
-            epoch_id_type max_epoch_of_file = rc;
+            const file_scan_result rc = scan_one_pwal_file(input, ld_epoch, add_entry_of_worker, report_error, ec);
+            epoch_id_type max_epoch_of_file = rc.max_epoch;
             auto ec_value = ec.value();
             switch (ec_value) {
             case parse_error::ok:
@@ -239,6 +240,11 @@ epoch_id_type dblog_scan::scan_pwal_files(  // NOLINT(readability-function-cogni
                    && !max_appeared_epoch.compare_exchange_weak(t, max_epoch_of_file)) {
                 /* nop */
             }
+            blob_id_type b = max_blob_id_in_dir.load();
+            while (b < rc.max_blob_id
+                   && !max_blob_id_in_dir.compare_exchange_weak(b, rc.max_blob_id)) {
+                /* nop */
+            }
             {
                 std::scoped_lock<std::mutex> lock(max_epoch_per_file_mtx);
                 max_epoch_per_file[p] = max_epoch_of_file;
@@ -289,6 +295,7 @@ epoch_id_type dblog_scan::scan_pwal_files(  // NOLINT(readability-function-cogni
         THROW_LIMESTONE_EXCEPTION("the scan is aborted");
     }
     max_epoch_per_file_ = std::move(max_epoch_per_file);
+    max_blob_id_ = max_blob_id_in_dir.load();
     if (max_parse_error_value) { *max_parse_error_value = max_error_value; }
     return max_appeared_epoch;
 }

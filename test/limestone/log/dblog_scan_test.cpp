@@ -36,6 +36,7 @@
 #include "log_entry/log_entry.h"
 
 #include "test_root.h"
+#include "limestone/log/log_entry_bytes.h"
 #include "limestone/log/testdata.h"
 
 namespace limestone::testing {
@@ -106,7 +107,7 @@ static constexpr const char* location = "/tmp/dblog_scan_test";
                                                         [&errors](const log_entry::read_error& re) {
                                                             errors.emplace_back(re);
                                                             return false;
-                                                        }, pe);
+                                                        }, pe).max_epoch;
         EXPECT_EQ(max_epoch, 0x100);
         EXPECT_EQ(entries, 3);
         EXPECT_EQ(errors.size(), 0);
@@ -135,7 +136,7 @@ static constexpr const char* location = "/tmp/dblog_scan_test";
             VLOG(30) << re.message();
             errors.emplace_back(re);
             return false;
-        }, pe);
+        }, pe).max_epoch;
 
         check(p, max_epoch, errors, pe);
         EXPECT_EQ(boost::filesystem::file_size(p), data.size());  // no size change
@@ -161,7 +162,7 @@ static constexpr const char* location = "/tmp/dblog_scan_test";
             VLOG(30) << re.message();
             errors.emplace_back(re);
             return false;
-        }, pe);
+        }, pe).max_epoch;
 
         check(p, max_epoch, errors, pe);
     }
@@ -186,7 +187,7 @@ static constexpr const char* location = "/tmp/dblog_scan_test";
             VLOG(30) << re.message();
             errors.emplace_back(re);
             return false;
-        }, pe);
+        }, pe).max_epoch;
 
         check(p, max_epoch, errors, pe);
     }
@@ -3017,6 +3018,109 @@ TEST_F(dblog_scan_test, failure_of_a_worker_wakes_the_waiting_workers) {
     }
     EXPECT_TRUE(queue.aborted());
     EXPECT_EQ(hook_calls, 0);
+}
+
+
+// helpers of the tests of the greatest BLOB ID including the invalid snippets
+namespace invalid_snippet_blob_ids {
+
+constexpr auto marker_begin = static_cast<std::uint8_t>(log_entry::entry_type::marker_begin);
+constexpr auto marker_invalidated_begin = static_cast<std::uint8_t>(log_entry::entry_type::marker_invalidated_begin);
+constexpr epoch_id_type ld_epoch = 11;  // the snippets of epoch 12 and later are not durable
+
+using log_entry_bytes::marker;
+using log_entry_bytes::normal_entry;
+using log_entry_bytes::normal_with_blob;
+
+struct scan_one_result {
+    dblog_scan::file_scan_result result{};
+    std::size_t entries{};  // the number of the entries passed to add_entry
+};
+
+/**
+ * @brief Scans one file in the mode that invalidates the snippets not made durable, as at startup
+ * @param location the directory in which the file to scan is put
+ * @param data the contents of the file
+ * @return the result of the scan, and the number of the entries passed to add_entry
+ */
+scan_one_result scan_one(const char* location, std::string_view data) {
+    const auto p = boost::filesystem::path(location) / "pwal_0000";
+    create_file(p, data);
+    dblog_scan ds{boost::filesystem::path(location)};
+    ds.set_process_at_nondurable_epoch_snippet(dblog_scan::process_at_nondurable::repair_by_mark);
+    ds.set_process_at_truncated_epoch_snippet(dblog_scan::process_at_truncated::report);
+    ds.set_process_at_damaged_epoch_snippet(dblog_scan::process_at_damaged::report);
+    ds.set_fail_fast(true);
+    dblog_scan::parse_error pe;
+    std::size_t entries = 0;
+    const auto result = ds.scan_one_pwal_file(scan_input{p}, ld_epoch, [&entries](const log_entry&) { entries++; },
+                                              [](const log_entry::read_error&) { return false; }, pe);
+    EXPECT_LE(pe.value(), dblog_scan::parse_error::repaired);  // ok, or a snippet not made durable is invalidated
+    return {result, entries};
+}
+
+}  // namespace invalid_snippet_blob_ids
+
+// without an invalid snippet, the greatest BLOB ID of the valid snippets
+TEST_F(dblog_scan_test, max_blob_id_without_invalid_snippet) {
+    using namespace invalid_snippet_blob_ids;
+    const auto [result, entries] =
+            scan_one(location, marker(marker_begin, 10) + normal_with_blob(1, "a", "a1", 10, 0, {5}));
+    EXPECT_EQ(result.max_epoch, 10U);
+    EXPECT_EQ(result.max_blob_id, 5U);
+    EXPECT_EQ(entries, 1U);
+}
+
+// with invalid snippets (not made durable, and already invalidated) without BLOBs, the greatest BLOB ID of the valid
+// snippets
+TEST_F(dblog_scan_test, max_blob_id_with_invalid_snippets_without_blob) {
+    using namespace invalid_snippet_blob_ids;
+    const auto [result, entries] = scan_one(
+            location, marker(marker_begin, 10) + normal_with_blob(1, "a", "a1", 10, 0, {5})
+                              + marker(marker_begin, 12) + normal_entry(1, "b", "b1", 12, 0)
+                              + marker(marker_invalidated_begin, 9) + normal_entry(1, "c", "c1", 9, 0));
+    EXPECT_EQ(result.max_blob_id, 5U);
+    EXPECT_EQ(entries, 1U);
+}
+
+// the BLOB IDs of a snippet not made durable are also counted. Its entries are not passed to add_entry
+TEST_F(dblog_scan_test, max_blob_id_with_nondurable_snippet) {
+    using namespace invalid_snippet_blob_ids;
+    const auto [result, entries] = scan_one(
+            location, marker(marker_begin, 10) + normal_with_blob(1, "a", "a1", 10, 0, {5})
+                              + marker(marker_begin, 12) + normal_with_blob(1, "b", "b1", 12, 0, {7, 9})
+                              + normal_with_blob(1, "c", "c1", 12, 1, {4}) + normal_entry(1, "d", "d1", 12, 2));
+    EXPECT_EQ(result.max_epoch, 12U);
+    EXPECT_EQ(result.max_blob_id, 9U);
+    EXPECT_EQ(entries, 1U);
+}
+
+// the BLOB IDs of an already invalidated snippet (whose epoch is not greater than the durable epoch) are also counted
+TEST_F(dblog_scan_test, max_blob_id_with_invalidated_snippet) {
+    using namespace invalid_snippet_blob_ids;
+    const auto [result, entries] = scan_one(
+            location, marker(marker_begin, 10) + normal_with_blob(1, "a", "a1", 10, 0, {5})
+                              + marker(marker_invalidated_begin, 9) + normal_with_blob(1, "b", "b1", 9, 0, {8}));
+    EXPECT_EQ(result.max_blob_id, 8U);
+    EXPECT_EQ(entries, 1U);
+}
+
+// scan_pwal_files returns the greatest of the values per file by get_max_blob_id(), whichever file has the greatest
+TEST_F(dblog_scan_test, max_blob_id_of_scan_pwal_files) {
+    using namespace invalid_snippet_blob_ids;
+    const auto file_with = [](blob_id_type id) {
+        return marker(marker_begin, 10) + normal_entry(1, "a", "a1", 10, 0) + marker(marker_begin, 12)
+               + normal_with_blob(1, "b", "b1", 12, 0, {id});
+    };
+    for (const auto& [id0, id1] : std::vector<std::pair<blob_id_type, blob_id_type>>{{30, 40}, {40, 30}}) {
+        create_file(boost::filesystem::path(location) / "pwal_0000", file_with(id0));
+        create_file(boost::filesystem::path(location) / "pwal_0001", file_with(id1));
+        dblog_scan ds{boost::filesystem::path(location)};
+        ds.set_thread_num(2);
+        EXPECT_EQ(ds.get_max_blob_id(), 0U);
+        (void) ds.scan_pwal_files_throws(ld_epoch, [](log_entry&, int) {});
+        EXPECT_EQ(ds.get_max_blob_id(), 40U) << id0 << ", " << id1;
+    }
 }
 
 }  // namespace limestone::testing

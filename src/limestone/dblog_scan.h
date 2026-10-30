@@ -19,6 +19,7 @@
 #include <list>
 #include <map>
 
+#include <limestone/api/blob_id_type.h>
 #include <limestone/api/datastore.h>
 #include "internal.h"
 #include "log_entry/log_entry.h"
@@ -76,6 +77,15 @@ public:
         code value_;
         bool modified_{false};
         std::streamoff fpos_{-1};
+    };
+
+    /// the result of scan_one_pwal_file
+    struct file_scan_result {
+        /// the greatest epoch in the file
+        epoch_id_type max_epoch{};
+        /// the greatest BLOB ID referred to by normal_with_blob, including those in the invalid snippets (not made
+        /// durable, or already invalidated). 0 if none
+        blob_id_type max_blob_id{};
     };
 
     using error_report_func_t = std::function<bool(log_entry::read_error&)>;
@@ -201,6 +211,15 @@ public:
     [[nodiscard]] const std::map<boost::filesystem::path, epoch_id_type>& get_max_epoch_per_file() const noexcept {
         return max_epoch_per_file_;
     }
+
+    /**
+     * @brief Returns the greatest BLOB ID referred to by normal_with_blob in the last successful scan, including
+     *        those in the invalid snippets (not made durable, or already invalidated)
+     * @return the greatest BLOB ID, or 0 if none
+     */
+    [[nodiscard]] blob_id_type get_max_blob_id() const noexcept {
+        return max_blob_id_;
+    }
     /**
      * @brief Scans the files determined at construction.
      *
@@ -240,9 +259,9 @@ public:
      * @param add_entry called with each valid entry
      * @param report_error called for each parse error
      * @param pe receives the parse error of the file
-     * @returns max epoch value in the file
+     * @returns the greatest epoch and the greatest BLOB ID in the file
      */
-    epoch_id_type scan_one_pwal_file(const scan_input& input, epoch_id_type ld_epoch,
+    file_scan_result scan_one_pwal_file(const scan_input& input, epoch_id_type ld_epoch,
         const std::function<void(log_entry&)>& add_entry,
         const error_report_func_t& report_error,
         parse_error& pe);
@@ -272,6 +291,9 @@ private:
 
     // Per-file max epoch recorded by the last successful scan.
     std::map<boost::filesystem::path, epoch_id_type> max_epoch_per_file_;
+
+    // The greatest BLOB ID in the last successful scan.
+    blob_id_type max_blob_id_{};
 
     // repair-nondurable-epoch-snippet
     //   (implemented in 1.0.0 BETA2)

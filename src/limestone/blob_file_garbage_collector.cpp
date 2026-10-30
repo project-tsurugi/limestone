@@ -107,40 +107,53 @@
  }
   
  void blob_file_garbage_collector::finalize_scan_and_cleanup() {
-     cleanup_thread_ = std::thread([this]() {
-         pthread_setname_np(pthread_self(), "lstone_cleanup");
-  
-         // Wait for the scan to complete
-         this->wait_for_blob_file_scan();
-          
-         // Calculate the difference and perform deletion operations
-         VLOG_LP(log_debug) << "Scanned blobs before diff: " << scanned_blobs_->debug_string();
-         VLOG_LP(log_debug) << "GC exempt blobs: " << gc_exempt_blob_->debug_string();
-         scanned_blobs_->diff(*gc_exempt_blob_);
-         VLOG_LP(log_debug) << "Scanned blobs after: " << scanned_blobs_->debug_string();
-
-         for (const auto &id : *scanned_blobs_) {
-            if (shutdown_requested_.load(std::memory_order_acquire)) {
-                break;
-            }
-             boost::filesystem::path file_path = resolver_->resolve_path(id);
-             boost::system::error_code ec;
-             VLOG_LP(log_trace) << "Removing blob id: " << id;
-             VLOG_LP(log_trace) << "Removing blob file: " << file_path.string();
-             file_ops_->remove(file_path, ec);
-             if (ec && ec != boost::system::errc::no_such_file_or_directory) {
-                 LOG_LP(ERROR) << "Failed to remove file: " << file_path.string()
-                               << " Error: " << ec.message();
-             }
-         }
-         state_machine_.complete_cleanup();
-         VLOG_LP(log_trace) << "Notifying cleanup_cv_";
-         {
-            std::scoped_lock<std::mutex> lock(mutex_);
-            cleanup_cv_.notify_all();
-        }
-     });
+     cleanup_thread_ = std::thread(&blob_file_garbage_collector::cleanup_blob_files, this);
  }
+
+void blob_file_garbage_collector::cleanup_blob_files() {
+    pthread_setname_np(pthread_self(), "lstone_cleanup");
+
+    // Wait for the scan to complete
+    wait_for_blob_file_scan();
+
+    // Calculate the difference and perform deletion operations
+    VLOG_LP(log_debug) << "Scanned blobs before diff: " << scanned_blobs_->debug_string();
+    VLOG_LP(log_debug) << "GC exempt blobs: " << gc_exempt_blob_->debug_string();
+    scanned_blobs_->diff(*gc_exempt_blob_);
+    VLOG_LP(log_debug) << "Scanned blobs after: " << scanned_blobs_->debug_string();
+
+    std::size_t removed = 0;
+    // also treated as interrupted if the wait for the scan returned early by shutdown()
+    bool interrupted = shutdown_requested_.load(std::memory_order_acquire);
+    for (const auto &id : *scanned_blobs_) {
+        if (shutdown_requested_.load(std::memory_order_acquire)) {
+            interrupted = true;
+            break;
+        }
+        boost::filesystem::path file_path = resolver_->resolve_path(id);
+        boost::system::error_code ec;
+        VLOG_LP(log_trace) << "Removing blob id: " << id;
+        VLOG_LP(log_trace) << "Removing blob file: " << file_path.string();
+        file_ops_->remove(file_path, ec);
+        if (ec && ec != boost::system::errc::no_such_file_or_directory) {
+            LOG_LP(ERROR) << "Failed to remove file: " << file_path.string()
+                          << " Error: " << ec.message();
+        } else if (!ec) {
+            ++removed;
+        }
+    }
+    if (interrupted) {
+        LOG_LP(INFO) << "blob files garbage collection interrupted (removed files: " << removed << ")";
+    } else {
+        LOG_LP(INFO) << "blob files garbage collection finished (removed files: " << removed << ")";
+    }
+    state_machine_.complete_cleanup();
+    VLOG_LP(log_trace) << "Notifying cleanup_cv_";
+    {
+        std::scoped_lock<std::mutex> lock(mutex_);
+        cleanup_cv_.notify_all();
+    }
+}
   
 void blob_file_garbage_collector::wait_for_blob_file_scan() {
     VLOG_LP(log_trace) << "entering wait_for_blob_file_scan";
