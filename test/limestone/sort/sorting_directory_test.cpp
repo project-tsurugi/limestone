@@ -13,6 +13,8 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
+#include <unistd.h>
+
 #include <cerrno>
 #include <fstream>
 #include <mutex>
@@ -169,6 +171,7 @@ TEST_F(sorting_directory_test, missing_parent) {
 
 // a parent directory that cannot be written fails the creation: limestone_io_exception with errno
 TEST_F(sorting_directory_test, cannot_create) {
+    if (geteuid() == 0) { GTEST_SKIP() << "skip when run by root"; }
     boost::filesystem::permissions(parent(), boost::filesystem::owner_read | boost::filesystem::owner_exe);
     try {
         sorting_directory dir(parent());
@@ -181,6 +184,7 @@ TEST_F(sorting_directory_test, cannot_create) {
 
 // a parent directory that cannot be written fails remove(): limestone_io_exception with errno
 TEST_F(sorting_directory_test, cannot_remove) {
+    if (geteuid() == 0) { GTEST_SKIP() << "skip when run by root"; }
     sorting_directory dir(parent());
     boost::filesystem::permissions(parent(), boost::filesystem::owner_read | boost::filesystem::owner_exe);
     try {
