@@ -58,9 +58,10 @@ inline std::string extract_filename(const std::string& path) {
 // NOLINTNEXTLINE(cppcoreguidelines-macro-usage)
 #define LOG_AND_THROW_IO_EXCEPTION(message, error_code) \
     { \
-        std::string full_message = limestone_io_exception::format_message((message), (error_code)); \
+        auto saved_error_code = (error_code); /* evaluated once: writing the log may change errno */ \
+        std::string full_message = limestone_io_exception::format_message((message), saved_error_code); \
         LOG_LP(ERROR) << full_message; \
-        throw limestone_io_exception(exception_type::fatal_error, full_message + " (at " + extract_filename(__FILE__) + ":" + std::to_string(__LINE__) + ")", (error_code)); \
+        throw limestone_io_exception(exception_type::fatal_error, full_message + " (at " + extract_filename(__FILE__) + ":" + std::to_string(__LINE__) + ")", saved_error_code); \
     }
 
 // Throws an I/O error that has no errno (such as wrong contents or a wrong position in a file). error_code is 0
@@ -74,9 +75,10 @@ inline std::string extract_filename(const std::string& path) {
 // NOLINTNEXTLINE(cppcoreguidelines-macro-usage)
 #define LOG_AND_THROW_BLOB_EXCEPTION(message, error_code) \
     { \
-        std::string full_message = limestone_blob_exception::format_message((message), (error_code)); \
+        auto saved_error_code = (error_code); /* evaluated once: writing the log may change errno */ \
+        std::string full_message = limestone_blob_exception::format_message((message), saved_error_code); \
         VLOG_LP(log_info) << full_message; \
-        throw limestone_blob_exception(exception_type::blob_error, full_message + " (at " + extract_filename(__FILE__) + ":" + std::to_string(__LINE__) + ")", (error_code)); \
+        throw limestone_blob_exception(exception_type::blob_error, full_message + " (at " + extract_filename(__FILE__) + ":" + std::to_string(__LINE__) + ")", saved_error_code); \
     }
 
 // NOLINTNEXTLINE(cppcoreguidelines-macro-usage)

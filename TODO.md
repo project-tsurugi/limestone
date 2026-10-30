@@ -259,7 +259,7 @@ master へのマージ前に本ファイルを削除する。
 * [x] file_operations を通していない箇所に file_operations を持たせ (datastore_impl、log_channel_impl、dblog_scan。
       filepath.cpp の rotate_pwal_file には引数で渡す。既定は real_file_operations、テスト用の差し替え口を設ける)、
       ディレクトリの fsync を入れる: pwal の新規作成とローテーションの rename、epoch ファイルの作成と rename、
-      コンパクション済み WAL とキャリーファイルの rename、location・blob・ctrl の mkdir、dblogutil の repair の
+      コンパクション済み WAL とキャリーファイルの rename、location・blob の mkdir、dblogutil の repair の
       detach の rename (dblog_scan)。(5 節)
 * [x] restore (datastore_restore): 写したファイルのデータの fsync、写し先のディレクトリの fsync、mkdir した親ディレクトリの
       fsync。(5 節)

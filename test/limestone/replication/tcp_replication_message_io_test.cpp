@@ -81,6 +81,7 @@ protected:
     }
 
 
+    directory_sync_recorder ops_;  // declared before datastore_, so that it outlives the datastore that uses it
     std::unique_ptr<api::datastore_test> datastore_;
 };
 
@@ -125,7 +126,7 @@ TEST_F(tcp_replication_message_io_test, receive_blob_synchronizes_directories) {
     std::string wire = sender.get_out_string();
 
     // the receiving datastore uses the recorder; recreate it after removing the BLOB directory
-    directory_sync_recorder ops;
+    directory_sync_recorder& ops = ops_;
     datastore_.reset();
     boost::filesystem::remove_all(path.parent_path());
     limestone::api::datastore_impl::set_file_operations_for_test(&ops);
