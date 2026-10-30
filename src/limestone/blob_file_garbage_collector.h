@@ -269,6 +269,15 @@ private:
     void scan_directory();
 
     /**
+     * @brief The function executed in the cleanup thread. Waits for the scan of the BLOB files to complete, and
+     *        removes the scanned BLOB files except the GC-exempt ones.
+     *
+     * Once shutdown() is called, it stops removing the rest. At the end, it writes the number of the removed files
+     * and whether it was interrupted to the INFO log.
+     */
+    void cleanup_blob_files();
+
+    /**
      * @brief Cleans up internal container resources.
      *
      * This method resets the smart pointers for the scanned blob ids and the GC exempt blob ids

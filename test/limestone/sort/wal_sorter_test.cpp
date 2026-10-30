@@ -100,6 +100,23 @@ protected:
         return {};
     }
     /**
+     * @brief Writes the WAL files containing normal_with_blob in invalid snippets (one of epoch 12 beyond the
+     *        boundary 11, and an already invalidated one). The BLOB ID of the valid snippet is 3, and those of the
+     *        invalid snippets are 9 and 20
+     * @return the valid entry (the output of the merge)
+     */
+    static std::string write_pwals_with_invalid_snippets() {
+        constexpr auto marker_begin = static_cast<std::uint8_t>(format::entry_type::marker_begin);
+        constexpr auto marker_invalidated_begin =
+                static_cast<std::uint8_t>(format::entry_type::marker_invalidated_begin);
+        const std::string a1 = normal_with_blob(1, "a", "a1", 10, 0, {3});
+        const std::string b1 = normal_with_blob(1, "b", "b1", 12, 0, {9});
+        const std::string c1 = normal_with_blob(1, "c", "c1", 9, 0, {20});
+        write_pwal("pwal_0000", marker(marker_begin, 10) + a1 + marker(marker_begin, 12) + b1);
+        write_pwal("pwal_0001", marker(marker_invalidated_begin, 9) + c1);
+        return a1;
+    }
+    /**
      * @brief Counts the files in the sorting directory.
      */
     static std::size_t files_in_sorting() {
@@ -173,6 +190,25 @@ TEST_F(wal_sorter_test, deletions_of_a_storage_keep_the_newest_version) {
     const auto result = sorter.scan(12, beyond_boundary_handling::invalidate, {});
     EXPECT_EQ(result.deletions, (range_deletions{{2, write_version_type{11, 3}}, {3, write_version_type{11, 2}}}));
     EXPECT_EQ(merge_output(sorter), (std::vector<std::string>{x2, y2}));
+}
+
+// both with invalidate and with skip (the online compaction), the BLOB IDs of the invalid snippets are included in
+// the maximum. Their entries are passed neither to the sort nor to the BLOB GC
+TEST_F(wal_sorter_test, max_blob_id_includes_the_blob_ids_of_invalid_snippets) {
+    for (const auto handling : {beyond_boundary_handling::invalidate, beyond_boundary_handling::skip}) {
+        const std::string a1 = write_pwals_with_invalid_snippets();  // written each time: invalidate rewrites markers
+        dblog_scan scan{boost::filesystem::path(location)};
+        wal_sorter sorter(scan, sort_settings{2, 1024 * 1024, 128}, location);
+        std::vector<std::string> with_blob;
+        std::mutex mutex;
+        const auto result = sorter.scan(11, handling, [&mutex, &with_blob](const log_entry& entry) {
+            const std::lock_guard<std::mutex> lock(mutex);
+            with_blob.emplace_back(entry.view().serialized_entry());
+        });
+        EXPECT_EQ(result.max_blob_id, 20U);
+        EXPECT_EQ(with_blob, (std::vector<std::string>{a1}));
+        EXPECT_EQ(merge_output(sorter), (std::vector<std::string>{a1}));
+    }
 }
 
 // without a WAL file, the result of the scan is empty and the merge outputs nothing

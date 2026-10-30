@@ -33,6 +33,9 @@ using namespace limestone::internal;
 class compaction_blob_gc_test : public compaction_test {
 public:
     compaction_blob_gc_test() : compaction_test("/tmp/compaction_blob_gc_test") {}
+
+protected:
+    void prepare_blob_in_nondurable_snippet();
 };
   
 
@@ -510,6 +513,90 @@ TEST_F(compaction_blob_gc_test, startup_gc_collects_the_blob_at_the_catalog_max_
     EXPECT_FALSE(boost::filesystem::exists(path2001_));
     EXPECT_FALSE(boost::filesystem::exists(path2002_));
     EXPECT_TRUE(boost::filesystem::exists(path1003_));
+}
+
+/**
+ * @brief Makes the state where k1 (BLOB 1001) is durable and k2 (BLOB 1002) is in the pwal but not durable (the
+ *        same as just after a crash). Saves the epoch file at the time when up to epoch 1 is durable, and restores
+ *        it after the shutdown
+ */
+void compaction_blob_gc_test::prepare_blob_in_nondurable_snippet() {
+    gen_datastore();
+    datastore_->switch_epoch(1);
+    lc0_->begin_session();
+    lc0_->add_entry(1, "k1", "v1", {1, 0}, {1001});
+    lc0_->end_session();
+    datastore_->switch_epoch(2);
+    path1001_ = create_dummy_blob_files(1001);
+    const boost::filesystem::path epoch_file = boost::filesystem::path(location) / std::string(epoch_file_name);
+    const std::string saved_epoch_file = read_file_bytes(epoch_file);
+
+    lc0_->begin_session();
+    lc0_->add_entry(1, "k2", "v2", {2, 0}, {1002});
+    lc0_->end_session();
+    path1002_ = create_dummy_blob_files(1002);
+    datastore_->switch_epoch(3);
+    datastore_->shutdown();
+    datastore_ = nullptr;
+
+    std::ofstream out(epoch_file.string(), std::ios::binary | std::ios::trunc);
+    out.write(saved_epoch_file.data(), static_cast<std::streamsize>(saved_epoch_file.size()));
+    out.close();
+    ASSERT_TRUE(out) << epoch_file;
+}
+
+// The scan at startup includes the BLOB IDs of the snippets not made durable in the maximum. The ID is not reused,
+// and the remaining file is collected by the GC at startup
+TEST_F(compaction_blob_gc_test, startup_gc_collects_the_blob_of_a_nondurable_snippet) {
+    ASSERT_NO_FATAL_FAILURE(prepare_blob_in_nondurable_snippet());
+
+    gen_datastore();
+    auto snapshot = datastore_->get_snapshot();
+    auto cursor = snapshot->get_cursor();
+    ASSERT_TRUE(cursor->next());
+    std::string key;
+    cursor->key(key);
+    EXPECT_EQ(key, "k1");
+    EXPECT_FALSE(cursor->next());  // k2 does not appear because it is not durable
+
+    EXPECT_EQ(datastore_->next_blob_id(), 1003);
+    EXPECT_TRUE(boost::filesystem::exists(path1001_));
+    EXPECT_FALSE(boost::filesystem::exists(path1002_));
+
+    // the second startup: the snippet of k2 is already invalidated (marker_invalidated_begin), but its BLOB ID is
+    // still counted
+    datastore_->shutdown();
+    datastore_ = nullptr;
+    gen_datastore();
+    EXPECT_EQ(datastore_->next_blob_id(), 1003);
+}
+
+// The offline compaction includes the BLOB IDs of the snippets not made durable in max_blob_id of the catalog. Even
+// after the input WAL files are gone, the ID is not reused at the next startup, and the remaining file is collected
+// by the GC at startup
+TEST_F(compaction_blob_gc_test, offline_compaction_records_the_blob_id_of_a_nondurable_snippet) {
+    ASSERT_NO_FATAL_FAILURE(prepare_blob_in_nondurable_snippet());
+
+    run_offline_compaction();
+    EXPECT_EQ(compaction_catalog::from_catalog_file(boost::filesystem::path(location)).get_max_blob_id(), 1002);
+
+    gen_datastore();
+    EXPECT_EQ(datastore_->next_blob_id(), 1003);
+    EXPECT_TRUE(boost::filesystem::exists(path1001_));
+    EXPECT_FALSE(boost::filesystem::exists(path1002_));
+}
+
+// The online compaction also includes the BLOB IDs of the invalid snippets in max_blob_id of the catalog. The snippet
+// of k2 (BLOB 1002) invalidated at startup is in the same WAL file as the snippet of k1 (BLOB 1001), and is an input
+// of the compaction
+TEST_F(compaction_blob_gc_test, online_compaction_records_the_blob_id_of_an_invalid_snippet) {
+    ASSERT_NO_FATAL_FAILURE(prepare_blob_in_nondurable_snippet());
+
+    gen_datastore();  // invalidates the snippet of k2
+    ASSERT_EQ(datastore_->next_blob_id(), 1003);
+
+    run_compact_with_epoch_switch(5);
+    EXPECT_EQ(compaction_catalog::from_catalog_file(boost::filesystem::path(location)).get_max_blob_id(), 1002);
 }
 
 // Test that blob GC is executed after a new backup has ended (using the backup API with arguments).

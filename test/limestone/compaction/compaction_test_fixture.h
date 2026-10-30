@@ -362,7 +362,7 @@ protected:
 
         // Scan the specified log file
         epoch_id_type max_epoch = scanner.scan_one_pwal_file(limestone::internal::scan_input{log_path}, UINT64_MAX,
-                                                             add_entry, report_error, pe);
+                                                             add_entry, report_error, pe).max_epoch;
 
         if (pe.value() != limestone::internal::dblog_scan::parse_error::ok) {
             std::cerr << "Parse error occurred while reading the log file: " << log_path.string() << std::endl;

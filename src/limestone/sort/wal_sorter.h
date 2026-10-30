@@ -52,7 +52,8 @@ struct wal_scan_result {
     /// the greatest epoch the scan saw (the return value of dblog_scan)
     limestone::api::epoch_id_type max_appeared_epoch{};
     /// the greatest ID of the BLOBs referred to by normal_with_blob (including the entries excluded by the removal of
-    /// duplicates and by the range deletions). 0 if none
+    /// duplicates and by the range deletions, and the entries of the invalid snippets, which are not made durable or
+    /// already invalidated) (dblog_scan::get_max_blob_id()). 0 if none
     limestone::api::blob_id_type max_blob_id{};
     /// the range deletions: the greatest write_version of clear_storage and remove_storage per storage
     range_deletions deletions{};
@@ -99,8 +100,7 @@ public:
      *        worker.
      *
      * Called only once (writes a FATAL log and aborts if called twice). A data entry goes into the buffer of the
-     * worker that read it. clear_storage and remove_storage are recorded as range deletions, and the greatest BLOB
-     * ID of normal_with_blob is recorded. add_storage is ignored.
+     * worker that read it. clear_storage and remove_storage are recorded as range deletions. add_storage is ignored.
      * @param boundary_epoch the boundary epoch of the scan. The snippets whose epoch exceeds it are not included in
      *                       the sort (the durable epoch at startup and in the offline compaction, the rotation
      *                       boundary in the online compaction)
@@ -145,8 +145,6 @@ private:
     std::vector<boost::filesystem::path> sorted_files_{};
     std::mutex deletions_mutex_{};
     range_deletions deletions_{};
-    /// the greatest BLOB ID per worker (indexed by the worker number). Each worker updates only its own slot
-    std::vector<limestone::api::blob_id_type> max_blob_ids_{};
     bool scanned_{};
     bool merged_{};
 };

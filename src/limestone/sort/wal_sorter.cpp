@@ -15,7 +15,6 @@
  */
 #include "sort/wal_sorter.h"
 
-#include <algorithm>
 #include <chrono>
 #include <utility>
 
@@ -29,7 +28,6 @@
 
 namespace limestone::internal {
 
-using limestone::api::blob_id_type;
 using limestone::api::epoch_id_type;
 using limestone::api::log_entry;
 
@@ -52,7 +50,6 @@ wal_scan_result wal_sorter::scan(epoch_id_type boundary_epoch, beyond_boundary_h
     for (int i = 0; i < settings_.threads; ++i) {
         workers_.push_back(std::make_unique<sort_worker>(*directory_, settings_.arena_size_bytes));
     }
-    max_blob_ids_.assign(static_cast<std::size_t>(settings_.threads), 0);
 
     // the hook and add_entry refer to this only during the scan; the hook is unset once the scan returns (also on
     // failure)
@@ -84,7 +81,7 @@ wal_scan_result wal_sorter::scan(epoch_id_type boundary_epoch, beyond_boundary_h
                  << settings_.arena_size_bytes << " bytes, " << sorted_files_.size() << " sorted files";
     wal_scan_result result;
     result.max_appeared_epoch = max_appeared_epoch;
-    result.max_blob_id = *std::max_element(max_blob_ids_.begin(), max_blob_ids_.end());
+    result.max_blob_id = scan_->get_max_blob_id();
     result.deletions = deletions_;
     return result;
 }
@@ -111,10 +108,6 @@ void wal_sorter::add_entry(const log_entry& entry, int worker, const owned_entry
     const log_entry_view view = entry.view();
     switch (view.type()) {
     case format::entry_type::normal_with_blob: {
-        blob_id_type& max_blob_id = max_blob_ids_[static_cast<std::size_t>(worker)];
-        for (const blob_id_type id : view.blob_ids()) {
-            max_blob_id = std::max(max_blob_id, id);
-        }
         if (on_normal_with_blob) {
             on_normal_with_blob(entry);
         }
