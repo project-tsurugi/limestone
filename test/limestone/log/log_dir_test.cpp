@@ -21,7 +21,7 @@
 #include "compaction_catalog.h"
 #include "dblog_scan.h"
 #include "internal.h"
-#include "log_entry.h"
+#include "log_entry/log_entry.h"
 #include "manifest.h"
 #include "test_root.h"
 #include "limestone/log/testdata.h"

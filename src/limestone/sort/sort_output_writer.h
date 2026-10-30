@@ -19,7 +19,7 @@
 
 #include <boost/filesystem.hpp>
 
-#include "log_entry.h"
+#include "log_entry/log_entry.h"
 #include "log_entry/log_entry_view.h"
 #include "sort/buffered_output_file.h"
 

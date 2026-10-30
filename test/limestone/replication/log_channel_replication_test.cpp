@@ -22,7 +22,7 @@
 #include "datastore_impl.h"
 #include "internal.h"
 #include "limestone/api/epoch_id_type.h"
-#include "log_entry.h"
+#include "log_entry/log_entry.h"
 #include "replication/log_channel_handler.h"
 #include "replication/replica_connector.h"
 #include "replication/replica_server.h"

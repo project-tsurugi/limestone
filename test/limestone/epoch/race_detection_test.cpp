@@ -29,7 +29,7 @@
 
 #include "dblog_scan.h"
 #include "internal.h"
-#include "log_entry.h"
+#include "log_entry/log_entry.h"
 #include "online_compaction.h"
 #include "compaction_catalog.h"
 #include "test_root.h"

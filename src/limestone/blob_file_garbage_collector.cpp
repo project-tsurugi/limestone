@@ -18,7 +18,7 @@
  #include "blob_file_scanner.h"
  #include "logging_helper.h"
  #include "cursor_impl.h"
- #include "log_entry.h"
+ #include "log_entry/log_entry.h"
  
  #include <boost/filesystem.hpp>
  #include <sstream>

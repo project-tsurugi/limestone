@@ -22,7 +22,7 @@
 #include <vector>
 #include <netinet/in.h>
 #include <boost/filesystem/path.hpp>
-#include "log_entry.h"
+#include "log_entry/log_entry.h"
 #include <gtest/gtest.h>
 #include <limestone/api/storage_id_type.h>
 #include <limestone/api/write_version_type.h>

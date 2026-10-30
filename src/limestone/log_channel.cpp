@@ -27,7 +27,7 @@
 #include "datastore_impl.h"
 #include "limestone_exception_helper.h"
 #include "log_channel_impl.h"
-#include "log_entry.h"
+#include "log_entry/log_entry.h"
 #include "logging_helper.h"
 #include "replication/message_log_entries.h"
 namespace limestone::api {

@@ -23,7 +23,7 @@
 #include <string_view>
 #include <vector>
 
-#include "log_entry.h"
+#include "log_entry/log_entry.h"
 #include "replication_message.h"
 
 namespace limestone::api {

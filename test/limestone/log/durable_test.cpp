@@ -23,7 +23,7 @@
 #include "dblog_scan.h"
 #include "scan_input.h"
 #include "internal.h"
-#include "log_entry.h"
+#include "log_entry/log_entry.h"
 #include "log_entry/log_entry_reader.h"
 
 #include "test_root.h"

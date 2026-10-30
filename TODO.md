@@ -272,7 +272,8 @@ master へのマージ前に本ファイルを削除する。
 
 ### ステップ 14: 仕上げ
 
-* [ ] 既存の log_entry 関連のファイル (log_entry.h など) を src/limestone/log_entry/ へ移すかを決め、移す場合は移す。
+* [x] 既存の log_entry 関連のファイル (log_entry.h など) を src/limestone/log_entry/ へ移すかを決め、移す場合は移す。
+      (2026-10-30: 移した。5 節)
 * [x] フルスイート、clang-tidy の警告の確認。(2026-10-30: ctest 120 件成功、CI 相当の clang-tidy は src 全体で警告なし。
       既存の cursor_impl.h:67 の blob_ids の nodiscard の警告はここで直した)
 * [ ] ステップ 10〜13 の性能への影響を測る。手順とスクリプト (~/s1-sort-compare/bin) はステップ 9 の作業ログ
@@ -899,6 +900,9 @@ master へのマージ前に本ファイルを削除する。
   対応しない。直前に rename が成功した FS での失敗なので、消す・戻す操作も当てにならず、残ったファイルは次回起動の GC が
   回収する。コピー経路が失敗時に移動先を消すのは不完全なファイルを残さないためで、rename 後の完全なファイルには
   当てはまらない。
+* 2026-10-30: ステップ 14。log_entry.h と log_entry.cpp を src/limestone/log_entry/ へ移した (git mv。include は
+  "log_entry/log_entry.h" に統一し、<log_entry.h> の 2 か所も同じ形にした)。log_entry クラスは LE の所有型として残るので、
+  10-21 の置き場所の決定 (log_entry 関連は log_entry/ に置く) に合わせた。公開ヘッダではないので外部への影響はない。
 
 ## 6. 残った課題
 

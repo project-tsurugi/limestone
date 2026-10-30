@@ -26,7 +26,7 @@
 #include "compaction_options.h"
 #include "internal.h"
 #include "limestone/log/testdata.h"
-#include "log_entry.h"
+#include "log_entry/log_entry.h"
 #include "log_entry/log_entry_reader.h"
 #include "test_root.h"
 

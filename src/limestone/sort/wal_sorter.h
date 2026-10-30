@@ -28,7 +28,7 @@
 #include <limestone/api/epoch_id_type.h>
 
 #include "dblog_scan.h"
-#include "log_entry.h"
+#include "log_entry/log_entry.h"
 #include "sort/sort_settings.h"
 #include "sort/sort_worker.h"
 #include "sort/sorted_file_merger.h"

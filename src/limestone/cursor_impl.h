@@ -24,7 +24,7 @@
 #include <optional>
 
 #include "cursor_impl_base.h"
-#include "log_entry.h"
+#include "log_entry/log_entry.h"
 #include "log_entry/log_entry_reader.h"
 #include "log_entry/log_entry_view.h"
 

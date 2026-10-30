@@ -26,7 +26,7 @@
  #include "blob_file_gc_state_machine.h"
  #include "blob_file_garbage_collector.h"
  #include "cursor_impl.h"
- #include "log_entry.h"
+ #include "log_entry/log_entry.h"
  #include "logging_helper.h"
  
  

@@ -23,7 +23,7 @@
 #include "replication/replica_server.h"
 #include "replication_test_helper.h"
 #include "blob_file_resolver.h"
-#include "log_entry.h"
+#include "log_entry/log_entry.h"
 #include "replication/tcp_replication_message_io.h"
 #include "replication/replication_message_io.h"
 #include "test_root.h"

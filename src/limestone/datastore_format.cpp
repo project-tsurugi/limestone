@@ -29,7 +29,7 @@
 #include "limestone_exception_helper.h"
 #include "compaction_catalog.h"
 #include "internal.h"
-#include "log_entry.h"
+#include "log_entry/log_entry.h"
 #include "manifest.h"
 
 

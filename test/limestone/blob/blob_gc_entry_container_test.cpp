@@ -17,7 +17,7 @@
 #include <string>
 #include <vector>
 
-#include "log_entry.h"
+#include "log_entry/log_entry.h"
 #include "blob_gc_entry.h"
 #include "log_entry/log_entry_format.h"
 #include "blob_gc_entry_container.h"

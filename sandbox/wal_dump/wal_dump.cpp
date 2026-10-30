@@ -19,7 +19,7 @@
 #include <iomanip>
 #include <string_view>
 #include <boost/filesystem.hpp>
-#include <log_entry.h>
+#include "log_entry/log_entry.h"
 #include <log_entry/log_entry_reader.h>
 
 const char* to_string(limestone::api::log_entry::entry_type type) {

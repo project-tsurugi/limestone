@@ -24,7 +24,7 @@
 #include <boost/filesystem.hpp>
 
 // Include the actual headers for log_entry and blob_gc_entry_comparator.
-#include "log_entry.h"
+#include "log_entry/log_entry.h"
 #include "blob_gc_entry.h"
 #include "log_entry/log_entry_format.h"
 #include "blob_gc_entry_comparator.h"

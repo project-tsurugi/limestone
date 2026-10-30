@@ -25,7 +25,7 @@
 #include <boost/filesystem.hpp>
 
 #include "file_operations.h"
-#include "log_entry.h"
+#include "log_entry/log_entry.h"
 #include "log_entry/file_write_state.h"
 #include "log_entry/log_entry_view.h"
 

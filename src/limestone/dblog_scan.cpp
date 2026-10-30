@@ -30,7 +30,7 @@
 #include <limestone/api/datastore.h>
 #include "internal.h"
 #include "dblog_scan.h"
-#include "log_entry.h"
+#include "log_entry/log_entry.h"
 #include "log_entry/log_entry_reader.h"
 
 namespace {

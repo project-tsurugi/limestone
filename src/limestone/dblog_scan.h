@@ -21,7 +21,7 @@
 
 #include <limestone/api/datastore.h>
 #include "internal.h"
-#include "log_entry.h"
+#include "log_entry/log_entry.h"
 #include "compaction_options.h"
 #include "input_file_queue.h"
 #include "scan_input.h"

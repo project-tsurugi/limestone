@@ -21,7 +21,7 @@
 
 #include <limestone/logging.h>
 
-#include "log_entry.h"
+#include "log_entry/log_entry.h"
 #include "logging_helper.h"
 
 namespace limestone::internal {

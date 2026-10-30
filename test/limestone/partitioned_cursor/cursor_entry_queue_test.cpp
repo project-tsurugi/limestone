@@ -20,7 +20,7 @@
 #include <fstream>
 #include <boost/filesystem.hpp>
 #include "partitioned_cursor/cursor_entry_queue.h"
-#include "log_entry.h"
+#include "log_entry/log_entry.h"
 #include "partitioned_cursor/end_marker.h"
 
 namespace limestone::testing {

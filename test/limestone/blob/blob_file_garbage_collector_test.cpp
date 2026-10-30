@@ -20,7 +20,7 @@
 #include <iomanip>
 #include <cstdlib> 
 #include "test_root.h"
-#include "log_entry.h"
+#include "log_entry/log_entry.h"
 #include "blob_file_garbage_collector.h"
 #include "limestone/logging.h"
 #include "blob_file_resolver.h"

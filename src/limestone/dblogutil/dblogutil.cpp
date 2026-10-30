@@ -27,7 +27,7 @@
 #include "limestone/api/datastore.h"
 #include "dblog_scan.h"
 #include "internal.h"
-#include "log_entry.h"
+#include "log_entry/log_entry.h"
 #include "limestone_exception_helper.h"
 #include "manifest.h"
 #include "compaction_catalog.h"

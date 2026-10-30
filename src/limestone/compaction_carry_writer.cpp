@@ -25,7 +25,7 @@
 #include <limestone/logging.h>
 
 #include "limestone_exception_helper.h"
-#include "log_entry.h"
+#include "log_entry/log_entry.h"
 #include "log_entry/log_entry_reader.h"
 #include "logging_helper.h"
 

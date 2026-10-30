@@ -13,7 +13,7 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-#include "log_entry.h"
+#include "log_entry/log_entry.h"
 
 #include <array>
 #include <cstdint>

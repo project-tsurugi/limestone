@@ -16,7 +16,7 @@
 #include <map>
 #include <unistd.h>
 #include "internal.h"
-#include "log_entry.h"
+#include "log_entry/log_entry.h"
 #include "test_root.h"
 #include "manifest.h"
 #include "limestone/api/epoch_id_type.h"

@@ -31,7 +31,7 @@
 #include "blob_file_resolver.h"
 #include "datastore_impl.h"
 #include "log_channel_impl.h"
-#include "log_entry.h"
+#include "log_entry/log_entry.h"
 #include "limestone/logging.h"
 #include "replication/replica_server.h"
 #include "replication_test_helper.h"

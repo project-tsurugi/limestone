@@ -21,7 +21,7 @@
 #include "test_root.h"
 
 #include "blob_gc_entry.h"
-#include "log_entry.h"
+#include "log_entry/log_entry.h"
 #include "limestone/log/log_entry_bytes.h"
 
 namespace limestone::testing {

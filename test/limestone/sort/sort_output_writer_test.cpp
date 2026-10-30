@@ -27,7 +27,7 @@
 #include <limestone/api/limestone_exception.h>
 
 #include "limestone/log/log_entry_bytes.h"
-#include "log_entry.h"
+#include "log_entry/log_entry.h"
 #include "sort/sort_output_writer.h"
 
 namespace limestone::testing {

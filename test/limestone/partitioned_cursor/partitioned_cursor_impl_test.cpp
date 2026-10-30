@@ -19,7 +19,7 @@
 #include "partitioned_cursor/partitioned_cursor_impl.h"
 #include "partitioned_cursor/cursor_entry_queue.h"
 #include "partitioned_cursor/end_marker.h"
-#include "log_entry.h"
+#include "log_entry/log_entry.h"
 #include <limestone/api/storage_id_type.h>
 #include <limestone/api/write_version_type.h>
 

@@ -25,7 +25,7 @@
 #include "blob_file_gc_snapshot.h"
 #include "blob_gc_entry.h"
 #include "log_entry/log_entry_format.h"
-#include "log_entry.h"
+#include "log_entry/log_entry.h"
 
 // Use the namespaces defined for the API and internal classes.
 using namespace limestone::api;

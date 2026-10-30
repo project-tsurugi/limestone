@@ -19,7 +19,7 @@
 #include <limestone/api/blob_id_type.h>
 #include <limestone/api/cursor.h>
 #include <limestone/api/storage_id_type.h>
-#include <log_entry.h>
+#include "log_entry/log_entry.h"
 
 #include <memory>
 #include <optional>

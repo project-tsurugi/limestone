@@ -19,7 +19,7 @@
 #include <limestone/logging.h>
 #include "logging_helper.h"
 #include "limestone_exception_helper.h"
-#include "log_entry.h"
+#include "log_entry/log_entry.h"
 #include "cursor_impl.h"
 
 
