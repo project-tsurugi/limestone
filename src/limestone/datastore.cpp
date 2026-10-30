@@ -1304,7 +1304,9 @@ void datastore::compact_with_online() {  // NOLINT(readability-function-cognitiv
     // boundary, the carry file) into the temporary directory. An I/O error (a full disk,
     // for instance) has no visible effect because nothing is published yet, so the
     // temporary files are removed and the retry is left to the next compaction request.
-    // A parse error (corrupted input) is unrecoverable and terminates the process.
+    // A malformed compacted WAL file of the current generation (read by the merge) is
+    // reported as an I/O error, and fails the compaction in the same way. A malformed
+    // pwal file found by the scan terminates the process, as it does at startup.
     compaction_output_result output{};
     try {
         output = create_compaction_output(options);
