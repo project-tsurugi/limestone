@@ -21,7 +21,7 @@
 #include <variant>
 #include <vector>
 
-#include "log_entry.h"
+#include "log_entry/log_entry.h"
 #include "partitioned_cursor/end_marker.h"
 
 namespace limestone::internal {

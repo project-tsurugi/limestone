@@ -1,8 +1,29 @@
+/*
+ * Copyright 2025-2026 Project Tsurugi.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
 #include <gtest/gtest.h>
 #include <boost/filesystem.hpp>
+#include <algorithm>
+#include <cerrno>
 #include <fstream>
+#include <vector>
 #include "test_root.h"
 #include "blob_file_resolver.h"
+#include "datastore_impl.h"
+#include "file_operations.h"
+#include "limestone/api/limestone_exception.h"
 #include "replication/tcp_replication_message_io.h"
 #include "limestone/api/blob_id_type.h"
 
@@ -14,6 +35,28 @@ using namespace limestone::internal;
 using namespace limestone::api;
 
 constexpr const char* base_directory = "/tmp/tcp_replication_message_io_test";
+
+namespace {
+
+// records the directories passed to fsync_directory, and makes it fail if fail is true
+class directory_sync_recorder : public limestone::internal::real_file_operations {
+public:
+    int fsync_directory(const boost::filesystem::path& dir) override {
+        synced_dirs.push_back(dir);
+        if (fail) {
+            errno = EIO;
+            return -1;
+        }
+        return real_file_operations::fsync_directory(dir);
+    }
+    [[nodiscard]] bool synced(const boost::filesystem::path& dir) const {
+        return std::find(synced_dirs.begin(), synced_dirs.end(), dir) != synced_dirs.end();
+    }
+    bool fail = false;
+    std::vector<boost::filesystem::path> synced_dirs;
+};
+
+}  // namespace
 
 class tcp_replication_message_io_test : public ::testing::Test {
 
@@ -38,6 +81,7 @@ protected:
     }
 
 
+    directory_sync_recorder ops_;  // declared before datastore_, so that it outlives the datastore that uses it
     std::unique_ptr<api::datastore_test> datastore_;
 };
 
@@ -68,6 +112,51 @@ TEST_F(tcp_replication_message_io_test, round_trip_blob) {
     std::ostringstream oss;
     oss << ifs.rdbuf();
     EXPECT_EQ(oss.str(), "limestone_blob_data");
+}
+
+// receive_blob synchronizes the parent of the created BLOB directory and the directory of the created file, and
+// throws if it fails
+TEST_F(tcp_replication_message_io_test, receive_blob_synchronizes_directories) {
+    blob_id_type blob_id = 123456789;
+    auto path = datastore_->get_blob_file(blob_id).path();
+    boost::filesystem::create_directories(path.parent_path());
+    std::ofstream(path.string(), std::ios::binary) << "limestone_blob_data";
+    tcp_replication_message_io sender("", *datastore_);
+    sender.send_blob(blob_id);
+    std::string wire = sender.get_out_string();
+
+    // the receiving datastore uses the recorder; recreate it after removing the BLOB directory
+    directory_sync_recorder& ops = ops_;
+    datastore_.reset();
+    boost::filesystem::remove_all(path.parent_path());
+    limestone::api::datastore_impl::set_file_operations_for_test(&ops);
+    limestone::api::configuration conf{};
+    conf.set_data_location(base_directory);
+    datastore_ = std::make_unique<limestone::api::datastore_test>(conf);
+    limestone::api::datastore_impl::set_file_operations_for_test(nullptr);
+
+    {
+        tcp_replication_message_io receiver(wire, *datastore_);
+        EXPECT_EQ(receiver.receive_blob(), blob_id);
+    }
+    EXPECT_TRUE(ops.synced(path.parent_path()));
+    EXPECT_TRUE(ops.synced(path.parent_path().parent_path()));
+
+    ops.fail = true;
+    {
+        tcp_replication_message_io receiver(wire, *datastore_);
+        EXPECT_THROW(receiver.receive_blob(), limestone_io_exception);
+    }
+    EXPECT_EQ(ops.synced_dirs.back(), path.parent_path());
+
+    // when the BLOB directory is created again, a failure to synchronize its parent throws
+    boost::filesystem::remove_all(path.parent_path());
+    {
+        tcp_replication_message_io receiver(wire, *datastore_);
+        EXPECT_THROW(receiver.receive_blob(), limestone_io_exception);
+    }
+    EXPECT_EQ(ops.synced_dirs.back(), path.parent_path().parent_path());
+    datastore_.reset();
 }
 
 TEST_F(tcp_replication_message_io_test, unsupported_path_type_throws) {

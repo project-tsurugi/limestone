@@ -1,5 +1,5 @@
 /*
- * Copyright 2022-2025 Project Tsurugi.
+ * Copyright 2022-2026 Project Tsurugi.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -22,6 +22,7 @@
  #include <functional> // std::reference_wrapper
  #include <boost/filesystem.hpp>
  #include "blob_file_gc_snapshot.h"
+ #include "sort/sort_settings.h"
  #include "limestone/api/epoch_id_type.h"
  #include "limestone/api/write_version_type.h"
  
@@ -96,7 +97,7 @@
      // Getter for to_dir.
      [[nodiscard]] const boost::filesystem::path& get_to_dir() const { return to_dir_; }
  
-     // Getter for num_worker.
+     // Getter for num_worker (the number of threads of the sort: the scan and the sort per thread).
      [[nodiscard]] int get_num_worker() const { return num_worker_; }
  
      // Getter for file_names.
@@ -126,6 +127,40 @@
 
      // Getter for carry_file_name.
      [[nodiscard]] const std::optional<std::string>& get_carry_file_name() const { return carry_file_name_; }
+
+     // Takes the compacted WAL file of the current generation (recorded by the catalog; nullopt = none) out of
+     // the scanned files (file_names) and makes it an input of the final merge. Does nothing if file_name is
+     // nullopt or is not in file_names (it is not an input of this compaction).
+     void set_compacted_input_file_name(const std::optional<std::string>& file_name) {
+         if (file_name.has_value() && file_names_.erase(file_name.value()) > 0) {
+             compacted_input_file_name_ = file_name;
+         }
+     }
+
+     // Getter for compacted_input_file_name (nullopt = the final merge has no compacted WAL file).
+     [[nodiscard]] const std::optional<std::string>& get_compacted_input_file_name() const {
+         return compacted_input_file_name_;
+     }
+
+     // Settings of the sort other than the threads (the threads are num_worker). The defaults of sort_settings
+     // and from_dir are used if not set. The values must have been checked at the entry point (the construction
+     // of the datastore, dblogutil).
+     void set_sort_settings(std::size_t arena_size_bytes, std::size_t merge_fanin,
+                            boost::filesystem::path work_dir_parent) {
+         sort_arena_size_bytes_ = arena_size_bytes;
+         sort_merge_fanin_ = merge_fanin;
+         sort_work_dir_parent_ = std::move(work_dir_parent);
+     }
+
+     // Getter for the settings of the sort (the threads are num_worker).
+     [[nodiscard]] sort_settings get_sort_settings() const {
+         return {num_worker_, sort_arena_size_bytes_, sort_merge_fanin_};
+     }
+
+     // Getter for the parent directory of the working directory of the sort (from_dir if not set).
+     [[nodiscard]] const boost::filesystem::path& get_sort_work_dir_parent() const {
+         return sort_work_dir_parent_.empty() ? from_dir_ : sort_work_dir_parent_;
+     }
 
      // Check if GC is enabled.
      [[nodiscard]] bool is_gc_enabled() const { return static_cast<bool>(gc_snapshot_); }
@@ -158,6 +193,14 @@
      // File names of the compaction output (nullopt = fixed name for compacted, no carry)
      std::optional<std::string> compacted_file_name_{};
      std::optional<std::string> carry_file_name_{};
+
+     // The compacted WAL file of the current generation given to the final merge (nullopt = none)
+     std::optional<std::string> compacted_input_file_name_{};
+
+     // Settings of the sort other than the threads (defaults of sort_settings; empty work dir = from_dir)
+     std::size_t sort_arena_size_bytes_{sort_settings{}.arena_size_bytes};
+     std::size_t sort_merge_fanin_{sort_settings{}.merge_fanin};
+     boost::filesystem::path sort_work_dir_parent_{};
  };
 
  }  // namespace limestone::internal

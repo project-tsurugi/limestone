@@ -1,3 +1,18 @@
+/*
+ * Copyright 2024-2026 Project Tsurugi.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
 #include <algorithm>
 #include <sstream>
 #include <limestone/logging.h>
@@ -6,7 +21,7 @@
 
 #include "dblog_scan.h"
 #include "manifest.h"
-#include "log_entry.h"
+#include "log_entry/log_entry.h"
 #include "limestone/log/testdata.h"
 #include "test_root.h"
 
@@ -219,6 +234,14 @@ TEST_F(dblogutil_test, inspect_normal2) {
     EXPECT_NE(out.find("\n" "count-durable-wal-entries: 3"), out.npos);
 }
 
+// count-durable-wal-entries also counts normal_with_blob and the storage entries
+TEST_F(dblogutil_test, inspect_counts_all_entry_types) {
+    auto [rc, out] = inspect("pwal_0000", data_all_entry_types);
+    EXPECT_EQ(rc, 0 << 8);
+    EXPECT_NE(out.find("\n" "status: OK"), out.npos);
+    EXPECT_NE(out.find("\n" "count-durable-wal-entries: 6"), out.npos);
+}
+
 TEST_F(dblogutil_test, inspect_nondurable) {
     auto [rc, out] = inspect("pwal_0000", data_nondurable);
     EXPECT_EQ(rc, 1 << 8);
@@ -266,6 +289,20 @@ TEST_F(dblogutil_test, inspect_allzero) {
     auto [rc, out] = inspect("pwal_0000", data_allzero);
     EXPECT_EQ(rc, 1 << 8);
     EXPECT_NE(out.find("\n" "status: auto-repairable"), out.npos);
+}
+
+// repair with --thread_num below 1 exits with code 64 without starting the processing (no thread of the scan would
+// do nothing)
+TEST_F(dblogutil_test, repair_rejects_thread_num_below_one) {
+    boost::filesystem::path dir{location};
+    create_file(dir / "epoch", epoch_0x100_str);
+    create_file(dir / std::string(manifest::file_name), data_manifest());
+    create_file(dir / "pwal_0000", data_normal);
+    std::string out;
+    int rc = invoke(UTIL_COMMAND " repair --thread_num -1 " + dir.string() + " 2>&1", out);
+    EXPECT_EQ(rc, 64 << 8);
+    EXPECT_TRUE(contains(out, "invalid value for --thread_num option"));
+    EXPECT_FALSE(contains(out, "dblogdir:"));
 }
 
 TEST_F(dblogutil_test, repairm_normal) {

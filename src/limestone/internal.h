@@ -1,5 +1,5 @@
 /*
- * Copyright 2023-2024 Project Tsurugi.
+ * Copyright 2023-2026 Project Tsurugi.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -61,6 +61,7 @@ bool is_unrotated_pwal_name(std::string_view filename) noexcept;
  *        the wall clock until the target name is free when it already exists
  * @note concurrent calls on the same file are not allowed; the caller must
  *       hold the exclusion (the single mutex of the rotation mechanism)
+ * @note the result of the rename is not persisted; the rotation synchronizes the directory once at its end
  * @param file the pwal file to rename
  * @param epoch the epoch part of the rotated name
  * @return the path of the renamed file

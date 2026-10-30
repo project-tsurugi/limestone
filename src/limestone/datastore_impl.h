@@ -1,5 +1,5 @@
 /*
- * Copyright 2022-2024 Project Tsurugi.
+ * Copyright 2022-2026 Project Tsurugi.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -28,6 +28,7 @@
 #include <set>
 #include <string>
 #include <sys/types.h>
+#include <cstddef>
 #include <cstdint>
 #include <functional>
 #include <vector>
@@ -36,6 +37,7 @@
 
 #include "blob_file_resolver.h"
 #include "blob_pool_impl.h"
+#include "file_operations.h"
 #include "manifest.h"
 #include "replication/replica_connector.h"
 #include "replication/replication_endpoint.h"
@@ -112,6 +114,28 @@ public:
 
     /// @brief sets the name of the current compacted file
     void set_current_compacted_file_name(std::optional<std::string> file_name);
+
+    /// @brief returns the file_operations used by the datastore and its log channels
+    [[nodiscard]] limestone::internal::file_operations& file_ops() const noexcept;
+
+    /// @brief replaces the file_operations used by the datastores created after this call (test-only)
+    /// @param ops the file_operations to use. It must be valid until the datastores using it are destroyed. nullptr
+    ///        restores the default (real_file_operations)
+    static void set_file_operations_for_test(limestone::internal::file_operations* ops) noexcept;
+
+    /// @brief sets the settings of the sort other than the threads. The datastore sets the checked values at its
+    ///        construction
+    void set_sort_settings(std::size_t arena_size_bytes, std::size_t merge_fanin,
+                           boost::filesystem::path work_dir_parent) noexcept;
+
+    /// @brief the size of the arena per thread of the sort in bytes
+    [[nodiscard]] std::size_t sort_arena_size_bytes() const noexcept;
+
+    /// @brief the merge fan-in of the sort
+    [[nodiscard]] std::size_t sort_merge_fanin() const noexcept;
+
+    /// @brief the parent directory in which the sort creates its working directory (sorting)
+    [[nodiscard]] const boost::filesystem::path& sort_work_dir_parent() const noexcept;
 
     // Increments the backup counter.
     void increment_backup_counter() noexcept;
@@ -510,6 +534,13 @@ private:
     // Shared state of the WAL rotation mechanism.
     rotation_state rotation_state_;
 
+    // the default file_operations, and the one to use (the one given by set_file_operations_for_test in tests)
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+    static inline limestone::internal::file_operations* file_ops_for_test_ = nullptr;
+    limestone::internal::real_file_operations real_file_ops_{};
+    limestone::internal::file_operations* file_ops_{
+        file_ops_for_test_ != nullptr ? file_ops_for_test_ : &real_file_ops_};
+
     // Test hooks of the rotation mechanism (no-op when unset).
     std::function<void()> on_rotate_before_rename_;
     std::function<void()> on_rotate_before_wait_;
@@ -524,6 +555,12 @@ private:
     // and right after a compaction commits.
     mutable std::mutex current_compacted_file_name_mutex_;
     std::optional<std::string> current_compacted_file_name_{};
+
+    // Settings of the sort (the threads are recover_max_parallelism_ of the datastore). Set at the construction of
+    // the datastore and never changed afterwards
+    std::size_t sort_arena_size_bytes_{};
+    std::size_t sort_merge_fanin_{};
+    boost::filesystem::path sort_work_dir_parent_{};
 
     // Atomic counter for tracking active backup operations.
     std::atomic<int> backup_counter_;

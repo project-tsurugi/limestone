@@ -1,5 +1,5 @@
 /*
- * Copyright 2022-2025 Project Tsurugi.
+ * Copyright 2022-2026 Project Tsurugi.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -18,7 +18,7 @@
  #include "blob_file_scanner.h"
  #include "logging_helper.h"
  #include "cursor_impl.h"
- #include "log_entry.h"
+ #include "log_entry/log_entry.h"
  
  #include <boost/filesystem.hpp>
  #include <sstream>

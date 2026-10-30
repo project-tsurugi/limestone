@@ -1,3 +1,18 @@
+/*
+ * Copyright 2025-2026 Project Tsurugi.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
 #include <gtest/gtest.h>
 #include <limestone/api/datastore.h>
 #include <limestone/api/blob_file.h>
@@ -617,10 +632,6 @@ TEST_F(datastore_blob_test, switch_available_boundary_version) {
  * This test reproduces the bug scenario where the same key has different entry types:
  * - First write: normal_entry (BLOB column is NULL, no blob_ids)
  * - Second write: normal_with_blob (BLOB column has data, with blob_ids)
- * 
- * The bug was in insert_entry_or_update_to_max() which incorrectly used e.type()
- * (new entry type) to determine the format of stored value, instead of reading
- * the actual stored entry type from value[0].
  * 
  * Scenario matches the issue:
  * 1. INSERT with BLOB=NULL → normal_entry

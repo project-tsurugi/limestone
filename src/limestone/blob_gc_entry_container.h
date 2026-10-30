@@ -1,5 +1,5 @@
 /*
- * Copyright 2022-2024 Project Tsurugi.
+ * Copyright 2022-2026 Project Tsurugi.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -17,28 +17,30 @@
 #pragma once
 
 #include <cstddef>
+#include <memory>
 #include <vector>
 
-#include "log_entry.h"
+#include "blob_gc_entry.h"
 
 namespace limestone::internal {
 
-using namespace limestone::api;
-
-class log_entry_container {
+/**
+ * @brief A container that collects the entries for the BLOB GC (blob_gc_entry), and sorts and merges them.
+ */
+class blob_gc_entry_container {
 public:
     // ----- Log Entry Addition (append) -----
 
-    /// @brief Adds a single log entry to the container.
-    /// @param entry The log entry to add (by copy).
+    /// @brief Adds a single entry to the container.
+    /// @param entry The entry to add.
     ///
     /// Note: When a new entry is added, the internal sorted flag is set to false.
-    void append(const log_entry& entry);
+    void append(blob_gc_entry entry);
 
     // ----- Iteration Functions -----
 
     // Only expose const iterators for external iteration.
-    using const_iterator = std::vector<log_entry>::const_iterator;
+    using const_iterator = std::vector<blob_gc_entry>::const_iterator;
 
     /// @brief Returns a const iterator to the beginning of the container.
     [[nodiscard]] const_iterator begin() const;
@@ -56,7 +58,9 @@ public:
 
     /// @brief Sorts the log entries using built-in sorting logic.
     ///
-    /// The entries are sorted in descending order based on each log_entry's key_sid().
+    /// The entries are sorted in descending order of the pair (key_sid, write_version): in descending order of
+    /// key_sid, and within the same key_sid in descending order of write_version (the reverse of
+    /// blob_gc_entry_comparator).
     /// After sorting is completed, the internal sorted flag is set to true.
     void sort_descending();
 
@@ -66,18 +70,19 @@ public:
 
     // ----- Static Merge Sort Function -----
 
-    /// @brief Merges multiple sorted log_entry_container objects into a single sorted container.
+    /// @brief Merges multiple sorted blob_gc_entry_container objects into a single sorted container.
     ///
     /// The merge is performed internally using a merge sort algorithm.
     /// The containers provided as arguments are merged, and the original containers are cleared.
     ///
-    /// @param container_list A vector of shared_ptr to log_entry_container objects to merge.
-    /// @return A single sorted log_entry_container containing all merged entries.
-    static log_entry_container merge_sorted_collections(std::vector<std::shared_ptr<log_entry_container>>& container_list);
+    /// @param container_list A vector of shared_ptr to blob_gc_entry_container objects to merge.
+    /// @return A single sorted blob_gc_entry_container containing all merged entries.
+    static blob_gc_entry_container merge_sorted_collections(
+            std::vector<std::shared_ptr<blob_gc_entry_container>>& container_list);
 
 private:
     // Internal data structure (can be replaced later for optimizations like lazy loading)
-    std::vector<log_entry> entries_;
+    std::vector<blob_gc_entry> entries_;
 
     // Internal flag: indicates whether the container is currently sorted.
     bool sorted_ = true;

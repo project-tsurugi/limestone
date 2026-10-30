@@ -1,15 +1,33 @@
+/*
+ * Copyright 2026-2026 Project Tsurugi.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
 #include "rdma_log_entries_parser.h"
 
 #include <unistd.h>
 
 #include <algorithm>
 #include <cerrno>
-#include <stdexcept>
 
 #include <boost/filesystem.hpp>
+#include <glog/logging.h>
+
+#include <limestone/logging.h>
 
 #include "datastore_impl.h"
 #include "limestone_exception_helper.h"
+#include "logging_helper.h"
 #include "message_log_entries_wire_codec.h"
 #include "primitive_wire_codec.h"
 
@@ -333,12 +351,15 @@ void rdma_log_entries_parser::add_current_entry() {
                     current_entry_.write_version,
                     current_entry_.blob_ids);
             break;
+        // the types not allowed in a message, and undefined values
         case log_entry::entry_type::this_id_is_not_used:
         case log_entry::entry_type::marker_begin:
         case log_entry::entry_type::marker_end:
         case log_entry::entry_type::marker_durable:
         case log_entry::entry_type::marker_invalidated_begin:
-            throw std::runtime_error("Invalid entry type in RDMA LOG_ENTRY parser");
+        default:
+            LOG_LP(FATAL) << "unexpected entry type " << static_cast<int>(current_entry_.type);
+            break;
     }
     --entries_remaining_;
 }
@@ -358,6 +379,10 @@ void rdma_log_entries_parser::open_current_blob_file() {
             LOG_AND_THROW_IO_EXCEPTION(
                     "Failed to create directory for RDMA blob file: " + parent.string(),
                     e.code().value());
+        }
+        // persist the name of the created directory
+        if (datastore_->get_impl()->file_ops().fsync_directory(parent.parent_path()) != 0) {
+            LOG_AND_THROW_IO_EXCEPTION("Failed to fsync the parent directory of " + parent.string(), errno);
         }
     } else if (!boost::filesystem::is_directory(parent)) {
         LOG_AND_THROW_IO_EXCEPTION(
@@ -387,6 +412,11 @@ void rdma_log_entries_parser::finish_current_blob_file() {
                         << current_blob_path_ << ": " << strerror(ec);
     }
     close_current_blob_file_noexcept();
+    // persist the name of the created file before the entry is applied
+    auto directory = boost::filesystem::path(current_blob_path_).parent_path();
+    if (datastore_->get_impl()->file_ops().fsync_directory(directory) != 0) {
+        LOG_AND_THROW_IO_EXCEPTION("Failed to fsync the directory of RDMA blob file: " + directory.string(), errno);
+    }
 }
 
 void rdma_log_entries_parser::close_current_blob_file_noexcept() noexcept {

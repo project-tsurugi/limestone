@@ -1,13 +1,39 @@
+/*
+ * Copyright 2024-2026 Project Tsurugi.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+#include <unistd.h>
 
 #include <algorithm>
+#include <array>
+#include <cerrno>
+#include <fstream>
+#include <iterator>
+#include <mutex>
+#include <set>
 #include <sstream>
 #include <limestone/logging.h>
 
 #include <boost/filesystem.hpp>
 
 #include "dblog_scan.h"
+#include "input_file_queue.h"
+#include "scan_input.h"
+#include "limestone_exception_helper.h"
 #include "internal.h"
-#include "log_entry.h"
+#include "log_entry/log_entry.h"
 
 #include "test_root.h"
 #include "limestone/log/testdata.h"
@@ -64,6 +90,31 @@ static constexpr const char* location = "/tmp/dblog_scan_test";
         return ret;
     }
 
+    // scans a read-only pwal file in the given mode, and checks that it succeeds when no rewrite is needed
+    void scan_read_only_pwal_file(const std::function<void(dblog_scan&)>& set_mode) {
+        auto p = boost::filesystem::path(location) / "pwal_0000";
+        create_file(p, data_normal2);
+        boost::filesystem::permissions(p, boost::filesystem::owner_read);  // drop file write permission
+        dblog_scan ds{boost::filesystem::path(location)};
+        ds.set_thread_num(1);
+        set_mode(ds);
+        dblog_scan::parse_error pe;
+        std::size_t entries = 0;
+        std::vector<log_entry::read_error> errors;
+        epoch_id_type max_epoch = ds.scan_one_pwal_file(scan_input{p}, 0x100,
+                                                        [&entries](const log_entry&) { entries++; },
+                                                        [&errors](const log_entry::read_error& re) {
+                                                            errors.emplace_back(re);
+                                                            return false;
+                                                        }, pe);
+        EXPECT_EQ(max_epoch, 0x100);
+        EXPECT_EQ(entries, 3);
+        EXPECT_EQ(errors.size(), 0);
+        EXPECT_EQ(pe.value(), dblog_scan::parse_error::ok);
+        EXPECT_FALSE(pe.modified());
+        boost::filesystem::permissions(p, boost::filesystem::owner_all);
+    }
+
     void scan_one_pwal_file_inspect(
         const std::string_view data,
         std::function<void(const boost::filesystem::path&, epoch_id_type, const std::vector<log_entry::read_error>&, const dblog_scan::parse_error&)> check,
@@ -78,7 +129,7 @@ static constexpr const char* location = "/tmp/dblog_scan_test";
         dblog_scan::parse_error pe;
         std::vector<log_entry::read_error> errors;
 
-        epoch_id_type max_epoch = ds.scan_one_pwal_file(p, ld_epoch, [](const log_entry& e){
+        epoch_id_type max_epoch = ds.scan_one_pwal_file(scan_input{p}, ld_epoch, [](const log_entry& e){
             VLOG(30) << static_cast<int>(e.type());
         }, [&errors](const log_entry::read_error& re){
             VLOG(30) << re.message();
@@ -104,7 +155,7 @@ static constexpr const char* location = "/tmp/dblog_scan_test";
         dblog_scan::parse_error pe;
         std::vector<log_entry::read_error> errors;
 
-        epoch_id_type max_epoch = ds.scan_one_pwal_file(p, ld_epoch, [](const log_entry& e){
+        epoch_id_type max_epoch = ds.scan_one_pwal_file(scan_input{p}, ld_epoch, [](const log_entry& e){
             VLOG(30) << static_cast<int>(e.type());
         }, [&errors](const log_entry::read_error& re){
             VLOG(30) << re.message();
@@ -129,7 +180,7 @@ static constexpr const char* location = "/tmp/dblog_scan_test";
         dblog_scan::parse_error pe;
         std::vector<log_entry::read_error> errors;
 
-        epoch_id_type max_epoch = ds.scan_one_pwal_file(p, ld_epoch, [](const log_entry& e){
+        epoch_id_type max_epoch = ds.scan_one_pwal_file(scan_input{p}, ld_epoch, [](const log_entry& e){
             VLOG(30) << static_cast<int>(e.type());
         }, [&errors](const log_entry::read_error& re){
             VLOG(30) << re.message();
@@ -2688,7 +2739,7 @@ TEST_F(dblog_scan_test, scan_for_compaction_ignores_snippets_beyond_boundary) {
     dblog_scan ds{boost::filesystem::path(location)};
     ds.set_thread_num(1);
     std::vector<log_entry> entries;
-    epoch_id_type max_epoch = ds.scan_pwal_files_for_compaction(0x100, [&entries](log_entry& e) {
+    epoch_id_type max_epoch = ds.scan_pwal_files_for_compaction(0x100, [&entries](log_entry& e, int) {
         entries.push_back(e);
     });
 
@@ -2713,7 +2764,7 @@ TEST_F(dblog_scan_test, scan_for_compaction_passes_all_entries_within_boundary) 
     dblog_scan ds{boost::filesystem::path(location)};
     ds.set_thread_num(1);
     std::vector<log_entry> entries;
-    epoch_id_type max_epoch = ds.scan_pwal_files_for_compaction(0x101, [&entries](log_entry& e) {
+    epoch_id_type max_epoch = ds.scan_pwal_files_for_compaction(0x101, [&entries](log_entry& e, int) {
         entries.push_back(e);
     });
 
@@ -2730,7 +2781,7 @@ TEST_F(dblog_scan_test, scan_records_max_epoch_per_file) {
 
     dblog_scan ds{boost::filesystem::path(location)};
     ds.set_thread_num(1);
-    ds.scan_pwal_files_for_compaction(0x100, [](log_entry&) {});
+    ds.scan_pwal_files_for_compaction(0x100, [](log_entry&, int) {});
 
     const auto& max_epochs = ds.get_max_epoch_per_file();
     ASSERT_EQ(max_epochs.size(), 2);
@@ -2738,6 +2789,234 @@ TEST_F(dblog_scan_test, scan_records_max_epoch_per_file) {
     ASSERT_NE(max_epochs.find(p2), max_epochs.end());
     EXPECT_EQ(max_epochs.at(p1), 0x101);
     EXPECT_EQ(max_epochs.at(p2), 0x100);
+}
+
+// in a non-repair mode, a read-only pwal file can be scanned
+TEST_F(dblog_scan_test, scan_one_pwal_file_read_only_inspect) {
+    // root can write files w/o permissions
+    if (geteuid() == 0) { GTEST_SKIP() << "skip when run by root"; }
+    scan_read_only_pwal_file([this](dblog_scan& ds) { set_inspect_mode(ds); });
+}
+
+// even in a repair mode, a read-only pwal file can be scanned when no rewrite is needed
+TEST_F(dblog_scan_test, scan_one_pwal_file_read_only_repair_without_marking) {
+    // root can write files w/o permissions
+    if (geteuid() == 0) { GTEST_SKIP() << "skip when run by root"; }
+    scan_read_only_pwal_file([this](dblog_scan& ds) { set_repair_by_mark_mode(ds); });
+}
+
+// in a repair mode, if the marker of a read-only pwal file must be rewritten, throws an exception with errno
+// instead of continuing as repaired; the file is unchanged
+TEST_F(dblog_scan_test, scan_one_pwal_file_read_only_repair_throws_when_marking) {
+    // root can write files w/o permissions
+    if (geteuid() == 0) { GTEST_SKIP() << "skip when run by root"; }
+    auto p = boost::filesystem::path(location) / "pwal_0000";
+    create_file(p, data_normal2);
+    boost::filesystem::permissions(p, boost::filesystem::owner_read);  // drop file write permission
+    dblog_scan ds{boost::filesystem::path(location)};
+    ds.set_thread_num(1);
+    set_repair_by_mark_mode(ds);
+    dblog_scan::parse_error pe;
+    // ld_epoch 0xf0: the snippet of epoch 0xf1 is nondurable, so its marker must be rewritten
+    try {
+        (void) ds.scan_one_pwal_file(scan_input{p}, 0xf0, [](const log_entry&) {},
+                                     [](const log_entry::read_error&) { return false; }, pe);
+        FAIL() << "no exception";
+    } catch (const limestone_io_exception& e) {
+        EXPECT_EQ(e.error_code(), EACCES);
+    }
+    std::ifstream in(p.string(), std::ios::binary);
+    std::string content((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+    EXPECT_EQ(content, data_normal2);
+    boost::filesystem::permissions(p, boost::filesystem::owner_all);
+}
+
+// in a repair-by-cut mode, if a read-only pwal file must be trimmed, throws limestone_io_exception with errno rather
+// than letting the exception of boost escape; the file is unchanged
+TEST_F(dblog_scan_test, scan_one_pwal_file_read_only_repair_by_cut_throws_when_trimming) {
+    // root can write files w/o permissions
+    if (geteuid() == 0) { GTEST_SKIP() << "skip when run by root"; }
+    auto p = boost::filesystem::path(location) / "pwal_0000";
+    create_file(p, data_truncated_invalidated_normal_entry);
+    boost::filesystem::permissions(p, boost::filesystem::owner_read);  // drop file write permission
+    dblog_scan ds{boost::filesystem::path(location)};
+    ds.set_thread_num(1);
+    set_repair_by_cut_mode(ds);
+    dblog_scan::parse_error pe;
+    try {
+        (void) ds.scan_one_pwal_file(scan_input{p}, 0x100, [](const log_entry&) {},
+                                     [](const log_entry::read_error&) { return false; }, pe);
+        FAIL() << "no exception";
+    } catch (const limestone_io_exception& e) {
+        EXPECT_EQ(e.error_code(), EACCES);
+    }
+    std::ifstream in(p.string(), std::ios::binary);
+    std::string content((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+    EXPECT_EQ(content, data_truncated_invalidated_normal_entry);
+    boost::filesystem::permissions(p, boost::filesystem::owner_all);
+}
+
+// the thread end hook is called once per worker that exhausted the input, with the number of the worker. add_entry
+// receives numbers in the same range
+TEST_F(dblog_scan_test, thread_end_hook_is_called_once_per_worker) {
+    constexpr int thread_num = 3;
+    for (int i = 0; i < 4; ++i) {
+        create_file(boost::filesystem::path(location) / ("pwal_000" + std::to_string(i)), data_normal2);
+    }
+    std::mutex mutex;
+    std::multiset<int> hook_workers;
+    std::multiset<int> entry_workers;
+    std::array<bool, thread_num> ended{};  // the workers whose hook has been called (no add_entry of them after it)
+    dblog_scan ds{boost::filesystem::path(location)};
+    ds.set_thread_num(thread_num);
+    ds.set_thread_end_hook([&mutex, &hook_workers, &ended](int worker) {
+        const std::lock_guard<std::mutex> lock(mutex);
+        hook_workers.insert(worker);
+        ended.at(static_cast<std::size_t>(worker)) = true;
+    });
+    const epoch_id_type max_epoch = ds.scan_pwal_files_throws(0x100, [&](log_entry&, int worker) {
+        const std::lock_guard<std::mutex> lock(mutex);
+        EXPECT_FALSE(ended.at(static_cast<std::size_t>(worker))) << "add_entry after the hook of worker " << worker;
+        entry_workers.insert(worker);
+    });
+    EXPECT_EQ(max_epoch, 0x100);
+    EXPECT_EQ(hook_workers, (std::multiset<int>{0, 1, 2}));
+    EXPECT_EQ(entry_workers.size(), 4U * 3);  // 4 files x 3 entries
+    for (const int worker : entry_workers) {
+        EXPECT_GE(worker, 0);
+        EXPECT_LT(worker, thread_num);
+    }
+}
+
+// nothing is called unless the hook is set (the default)
+TEST_F(dblog_scan_test, thread_end_hook_is_optional) {
+    create_file(boost::filesystem::path(location) / "pwal_0000", data_normal2);
+    dblog_scan ds{boost::filesystem::path(location)};
+    ds.set_thread_num(2);
+    EXPECT_EQ(ds.scan_pwal_files_throws(0x100, [](log_entry&, int) {}), 0x100);
+}
+
+// when the scan stops by a failure (an exception with fail_fast), the hook of that worker is not called
+TEST_F(dblog_scan_test, thread_end_hook_is_not_called_when_the_scan_fails) {
+    create_file(boost::filesystem::path(location) / "pwal_0000",
+                "\x02\xff\x00\x00\x00\x00\x00\x00\x00"
+                "\x02\x01\x01\x00\x00\x00"  // truncated
+                ""sv);
+    int hook_calls = 0;
+    dblog_scan ds{boost::filesystem::path(location)};
+    ds.set_thread_num(1);
+    ds.set_thread_end_hook([&hook_calls](int) { ++hook_calls; });
+    EXPECT_THROW(ds.scan_pwal_files_throws(0x100, [](log_entry&, int) {}), limestone_exception);
+    EXPECT_EQ(hook_calls, 0);
+}
+
+// a limestone_exception thrown by the hook is rethrown as a failure of the scan
+TEST_F(dblog_scan_test, thread_end_hook_exception_is_rethrown) {
+    create_file(boost::filesystem::path(location) / "pwal_0000", data_normal2);
+    dblog_scan ds{boost::filesystem::path(location)};
+    ds.set_thread_num(2);
+    ds.set_thread_end_hook([](int worker) {
+        THROW_LIMESTONE_EXCEPTION("hook failed in worker " + std::to_string(worker));
+    });
+    EXPECT_THROW(ds.scan_pwal_files_throws(0x100, [](log_entry&, int) {}), limestone_exception);
+}
+
+namespace {
+
+/**
+ * @brief Sets the same modes as scan_pwal_files_throws (the scan_pwal_files that takes a queue does not set them).
+ */
+void set_throwing_mode(dblog_scan& ds) {
+    ds.set_fail_fast(true);
+    ds.set_process_at_nondurable_epoch_snippet(dblog_scan::process_at_nondurable::repair_by_mark);
+    ds.set_process_at_truncated_epoch_snippet(dblog_scan::process_at_truncated::report);
+    ds.set_process_at_damaged_epoch_snippet(dblog_scan::process_at_damaged::report);
+}
+
+/**
+ * @brief A report_error that throws limestone_exception.
+ */
+bool throw_on_error(log_entry::read_error& e) {
+    THROW_LIMESTONE_EXCEPTION("this pwal file is broken: " + e.message());
+    return false;
+}
+
+}  // namespace
+
+// a scan on an aborted queue reads nothing, calls no hook, and ends with the exception of the abort
+TEST_F(dblog_scan_test, abort_before_the_scan_fails_it) {
+    const auto p = boost::filesystem::path(location) / "pwal_0000";
+    create_file(p, data_normal2);
+    input_file_queue queue;
+    queue.push(p);
+    queue.abort();
+    int entries = 0;
+    int hook_calls = 0;
+    dblog_scan ds{boost::filesystem::path(location)};
+    ds.set_thread_num(2);
+    set_throwing_mode(ds);
+    ds.set_thread_end_hook([&hook_calls](int) { ++hook_calls; });
+    try {
+        (void) ds.scan_pwal_files(queue, 0x100, [&entries](log_entry&, int) { ++entries; }, throw_on_error);
+        FAIL() << "no exception";
+    } catch (const limestone_exception& e) {
+        EXPECT_NE(std::string(e.what()).find("the scan is aborted"), std::string::npos) << e.what();
+    }
+    EXPECT_EQ(entries, 0);
+    EXPECT_EQ(hook_calls, 0);
+}
+
+// when aborted during the scan, the rest of the file on hand is not read, no hook is called, and the scan ends
+// with the exception of the abort
+TEST_F(dblog_scan_test, abort_stops_reading_the_file_on_hand) {
+    const auto p = boost::filesystem::path(location) / "pwal_0000";
+    create_file(p, std::string(data_normal2) + std::string(data_normal2));  // 6 entries
+    input_file_queue queue;
+    queue.push(p);
+    queue.close();
+    int entries = 0;
+    int hook_calls = 0;
+    dblog_scan ds{boost::filesystem::path(location)};
+    ds.set_thread_num(1);
+    set_throwing_mode(ds);
+    ds.set_thread_end_hook([&hook_calls](int) { ++hook_calls; });
+    try {
+        (void) ds.scan_pwal_files(queue, 0x100, [&entries, &queue](log_entry&, int) {
+            ++entries;
+            queue.abort();  // aborts at the first entry (seen before the next entry, as this is the thread of the scan)
+        }, throw_on_error);
+        FAIL() << "no exception";
+    } catch (const limestone_exception& e) {
+        EXPECT_NE(std::string(e.what()).find("the scan is aborted"), std::string::npos) << e.what();
+    }
+    EXPECT_EQ(entries, 1);
+    EXPECT_EQ(hook_calls, 0);
+}
+
+// the failure of a worker wakes the other workers waiting on the queue that is not closed, and the scan ends with
+// the exception of that failure (not of the abort). This test hangs if they are not woken
+TEST_F(dblog_scan_test, failure_of_a_worker_wakes_the_waiting_workers) {
+    const auto p = boost::filesystem::path(location) / "pwal_0000";
+    create_file(p,
+                "\x02\xff\x00\x00\x00\x00\x00\x00\x00"
+                "\x02\x01\x01\x00\x00\x00"  // truncated
+                ""sv);
+    input_file_queue queue;
+    queue.push(p);  // not closed
+    int hook_calls = 0;
+    dblog_scan ds{boost::filesystem::path(location)};
+    ds.set_thread_num(2);
+    set_throwing_mode(ds);
+    ds.set_thread_end_hook([&hook_calls](int) { ++hook_calls; });
+    try {
+        (void) ds.scan_pwal_files(queue, 0x100, [](log_entry&, int) {}, throw_on_error);
+        FAIL() << "no exception";
+    } catch (const limestone_exception& e) {
+        EXPECT_NE(std::string(e.what()).find("this pwal file is broken"), std::string::npos) << e.what();
+        EXPECT_EQ(std::string(e.what()).find("the scan is aborted"), std::string::npos) << e.what();
+    }
+    EXPECT_TRUE(queue.aborted());
+    EXPECT_EQ(hook_calls, 0);
 }
 
 }  // namespace limestone::testing

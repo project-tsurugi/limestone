@@ -1,5 +1,5 @@
 /*
- * Copyright 2022-2025 Project Tsurugi.
+ * Copyright 2022-2026 Project Tsurugi.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -33,8 +33,6 @@ class write_version_type {
 public:
     write_version_type();
     write_version_type(epoch_id_type epoch_number, std::uint64_t minor_write_version);
-    explicit write_version_type(const std::string& version_string);
-    explicit write_version_type(std::string_view version_string);
     bool operator==(write_version_type value) const {
         return (this->epoch_number_ == value.epoch_number_) && (this->minor_write_version_ == value.minor_write_version_);
     }

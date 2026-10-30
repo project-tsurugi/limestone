@@ -1,5 +1,5 @@
 /*
- * Copyright 2022-2024 Project Tsurugi.
+ * Copyright 2022-2026 Project Tsurugi.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -30,8 +30,10 @@
 
 #include "compaction_catalog.h"
 #include "dblog_scan.h"
+#include "scan_input.h"
 #include "internal.h"
-#include "log_entry.h"
+#include "log_entry/log_entry.h"
+#include "log_entry/log_entry_format.h"
 #include "manifest.h"
 #include "online_compaction.h"
 #include "test_root.h"
@@ -82,7 +84,11 @@ public:
     void gen_datastore() {
         limestone::api::configuration conf{};
         conf.set_data_location(location);
+        gen_datastore(conf);
+    }
 
+    // Creates the datastore with the given configuration (data_location must be set) and makes it ready.
+    void gen_datastore(const limestone::api::configuration& conf) {
         datastore_ = std::make_unique<limestone::api::datastore_test>(conf);
         lc0_ = &datastore_->create_channel();
         lc1_ = &datastore_->create_channel();
@@ -275,27 +281,25 @@ protected:
         storage_id_type storage_id = entry.storage();
         log_entry::entry_type type = entry.type();
 
-        if (type == log_entry::entry_type::normal_entry || type == log_entry::entry_type::remove_entry) {
-            entry.key(key);
+        if (limestone::internal::log_entry_format::is_data_entry(type)) {
+            key = entry.key();
         }
 
         switch (type) {
             case log_entry::entry_type::normal_entry: {
-                std::string value;
-                entry.value(value);
+                std::string value{entry.value()};
                 std::cout << "Entry Type: normal_entry, Storage ID: " << storage_id << ", Key: " << key << ", Value: " << value
-                          << ", Write Version: Epoch: " << log_entry::write_version_epoch_number(entry.value_etc())
-                          << ", Minor: " << log_entry::write_version_minor_write_version(entry.value_etc()) << std::endl;
+                          << ", Write Version: Epoch: " << entry.write_version().get_major()
+                          << ", Minor: " << entry.write_version().get_minor() << std::endl;
                 break;
             }
             case log_entry::entry_type::normal_with_blob: {
-                std::string value;
-                entry.value(value);
+                std::string value{entry.value()};
                 std::cout << "Entry Type: normal_with_blob, Storage ID: " << storage_id << ", Key: " << key << ", Value: " << value
-                          << ", Write Version: Epoch: " << log_entry::write_version_epoch_number(entry.value_etc())
-                          << ", Minor: " << log_entry::write_version_minor_write_version(entry.value_etc()) 
+                          << ", Write Version: Epoch: " << entry.write_version().get_major()
+                          << ", Minor: " << entry.write_version().get_minor()
                           << ", Blob IDs: ";
-                for (const auto& blob_id : entry.get_blob_ids()) {
+                for (const auto& blob_id : entry.blob_ids()) {
                     std::cout << blob_id << " ";
                 }
                 std::cout << std::endl;
@@ -303,18 +307,16 @@ protected:
             }
             case log_entry::entry_type::remove_entry: {
                 std::cout << "Entry Type: remove_entry, Storage ID: " << storage_id << ", Key: " << key
-                          << ", Write Version: Epoch: " << log_entry::write_version_epoch_number(entry.value_etc())
-                          << ", Minor: " << log_entry::write_version_minor_write_version(entry.value_etc()) << std::endl;
+                          << ", Write Version: Epoch: " << entry.write_version().get_major()
+                          << ", Minor: " << entry.write_version().get_minor() << std::endl;
                 break;
             }
             case log_entry::entry_type::clear_storage:
             case log_entry::entry_type::add_storage:
             case log_entry::entry_type::remove_storage: {
-                write_version_type write_version;
-                entry.write_version(write_version);
                 std::cout << "Entry Type: " << static_cast<int>(type) << ", Storage ID: " << storage_id
-                          << ", Write Version: Epoch: " << log_entry::write_version_epoch_number(entry.value_etc())
-                          << ", Minor: " << log_entry::write_version_minor_write_version(entry.value_etc()) << std::endl;
+                          << ", Write Version: Epoch: " << entry.write_version().get_major()
+                          << ", Minor: " << entry.write_version().get_minor() << std::endl;
                 break;
             }
             case log_entry::entry_type::marker_begin:
@@ -359,7 +361,8 @@ protected:
         limestone::internal::dblog_scan scanner(log_dir);
 
         // Scan the specified log file
-        epoch_id_type max_epoch = scanner.scan_one_pwal_file(log_path, UINT64_MAX, add_entry, report_error, pe);
+        epoch_id_type max_epoch = scanner.scan_one_pwal_file(limestone::internal::scan_input{log_path}, UINT64_MAX,
+                                                             add_entry, report_error, pe);
 
         if (pe.value() != limestone::internal::dblog_scan::parse_error::ok) {
             std::cerr << "Parse error occurred while reading the log file: " << log_path.string() << std::endl;
@@ -461,8 +464,7 @@ protected:
 
         // Check the key if it exists
         if (expected_key.has_value()) {
-            std::string actual_key;
-            entry.key(actual_key);
+            std::string actual_key{entry.key()};
             if (actual_key != expected_key.value()) {
                 return ::testing::AssertionFailure() << "Expected key: " << expected_key.value() << ", but got: " << actual_key;
             }
@@ -470,8 +472,7 @@ protected:
 
         // Check the value if it exists
         if (expected_value.has_value()) {
-            std::string actual_value;
-            entry.value(actual_value);
+            std::string actual_value{entry.value()};
             if (actual_value != expected_value.value()) {
                 return ::testing::AssertionFailure() << "Expected value: " << expected_value.value() << ", but got: " << actual_value;
             }
@@ -479,8 +480,8 @@ protected:
 
         // Check the write version if it exists
         if (expected_epoch_number.has_value() && expected_minor_version.has_value()) {
-            epoch_id_type actual_epoch_number = log_entry::write_version_epoch_number(entry.value_etc());
-            std::uint64_t actual_minor_version = log_entry::write_version_minor_write_version(entry.value_etc());
+            epoch_id_type actual_epoch_number = entry.write_version().get_major();
+            std::uint64_t actual_minor_version = entry.write_version().get_minor();
 
             if (actual_epoch_number != expected_epoch_number.value() || actual_minor_version != expected_minor_version.value()) {
                 return ::testing::AssertionFailure() << "Expected write version (epoch_number: " << expected_epoch_number.value()
@@ -492,7 +493,7 @@ protected:
 
         // Check the blob IDs
         if (entry.type() == log_entry::entry_type::normal_with_blob) {
-            std::vector<blob_id_type> actual_blob_ids = entry.get_blob_ids();
+            std::vector<blob_id_type> actual_blob_ids = entry.blob_ids();
             if (actual_blob_ids.size() != expected_blob_ids.size()) {
                 return ::testing::AssertionFailure() << "Expected blob IDs size: " << expected_blob_ids.size() << ", but got: " << actual_blob_ids.size();
             }

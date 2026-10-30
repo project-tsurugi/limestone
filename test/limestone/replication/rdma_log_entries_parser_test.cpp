@@ -1,13 +1,33 @@
+/*
+ * Copyright 2026-2026 Project Tsurugi.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
 #include "replication/rdma_log_entries_parser.h"
 
 #include <boost/filesystem.hpp>
 #include <arpa/inet.h>
+#include <algorithm>
+#include <cerrno>
 #include <fstream>
 #include <iterator>
 #include <string>
 #include <vector>
 
 #include "gtest/gtest.h"
+#include "datastore_impl.h"
+#include "file_operations.h"
+#include "limestone/api/limestone_exception.h"
 #include "replication/tcp_replication_message_io.h"
 #include "replication/message_log_entries.h"
 #include "replication/replication_message_io.h"
@@ -48,6 +68,24 @@ std::string read_file(boost::filesystem::path const& path) {
     }
     return content;
 }
+
+// records the directories passed to fsync_directory, and makes it fail if fail is true
+class directory_sync_recorder : public limestone::internal::real_file_operations {
+public:
+    int fsync_directory(const boost::filesystem::path& dir) override {
+        synced_dirs.push_back(dir);
+        if (fail) {
+            errno = EIO;
+            return -1;
+        }
+        return real_file_operations::fsync_directory(dir);
+    }
+    [[nodiscard]] bool synced(const boost::filesystem::path& dir) const {
+        return std::find(synced_dirs.begin(), synced_dirs.end(), dir) != synced_dirs.end();
+    }
+    bool fail = false;
+    std::vector<boost::filesystem::path> synced_dirs;
+};
 
 }  // namespace
 
@@ -383,6 +421,64 @@ TEST(rdma_log_entries_parser_test, streams_blob_body_to_replica_file) {
     boost::filesystem::remove_all(receiver_location);
 }
 
+// writing a received BLOB synchronizes the parent of the created BLOB directory and the directory of the created file,
+// and throws if it fails
+TEST(rdma_log_entries_parser_test, blob_file_synchronizes_directories) {
+    static constexpr const char* sender_location = "/tmp/rdma_log_entries_parser_blob_sync_sender_test";
+    static constexpr const char* receiver_location = "/tmp/rdma_log_entries_parser_blob_sync_receiver_test";
+    boost::filesystem::remove_all(sender_location);
+    boost::filesystem::remove_all(receiver_location);
+
+    limestone::api::configuration sender_conf{};
+    sender_conf.set_data_location(sender_location);
+    limestone::api::datastore_test sender_datastore{sender_conf};
+
+    directory_sync_recorder ops;
+    limestone::api::datastore_impl::set_file_operations_for_test(&ops);
+    limestone::api::configuration receiver_conf{};
+    receiver_conf.set_data_location(receiver_location);
+    limestone::api::datastore_test receiver_datastore{receiver_conf};
+    limestone::api::datastore_impl::set_file_operations_for_test(nullptr);
+
+    constexpr limestone::api::blob_id_type blob_id = 2468;
+    auto sender_blob_path = sender_datastore.get_blob_file(blob_id).path();
+    boost::filesystem::create_directories(sender_blob_path.parent_path());
+    std::ofstream(sender_blob_path.string(), std::ios::binary) << "rdma-blob-body";
+
+    message_log_entries original{901};
+    original.add_normal_with_blob(3, "key", "value", {4, 5}, {blob_id});
+    tcp_replication_message_io io("", sender_datastore);
+    original.send_body(io);
+    std::string body = io.get_out_string();
+
+    {
+        rdma_log_entries_parser parser{receiver_datastore};
+        EXPECT_EQ(parser.consume(body), body.size());
+        ASSERT_TRUE(parser.complete());
+    }
+    auto receiver_blob_path = receiver_datastore.get_blob_file(blob_id).path();
+    EXPECT_TRUE(ops.synced(receiver_blob_path.parent_path()));
+    EXPECT_TRUE(ops.synced(receiver_blob_path.parent_path().parent_path()));
+
+    ops.fail = true;
+    {
+        rdma_log_entries_parser parser{receiver_datastore};
+        EXPECT_THROW((void) parser.consume(body), limestone::api::limestone_io_exception);
+    }
+    EXPECT_EQ(ops.synced_dirs.back(), receiver_blob_path.parent_path());
+
+    // when the BLOB directory is created again, a failure to synchronize its parent throws
+    boost::filesystem::remove_all(receiver_blob_path.parent_path());
+    {
+        rdma_log_entries_parser parser{receiver_datastore};
+        EXPECT_THROW((void) parser.consume(body), limestone::api::limestone_io_exception);
+    }
+    EXPECT_EQ(ops.synced_dirs.back(), receiver_blob_path.parent_path().parent_path());
+
+    boost::filesystem::remove_all(sender_location);
+    boost::filesystem::remove_all(receiver_location);
+}
+
 TEST(rdma_log_entries_parser_test, streams_zero_length_blob_to_empty_replica_file) {
     // A zero-length BLOB has a header but no body bytes.  The parser still has
     // to create and close the replica file, attach the blob_id to the entry, and
@@ -627,6 +723,21 @@ TEST(rdma_log_entries_parser_test, blob_size_mismatch_larger_than_payload_leaves
 
     boost::filesystem::remove_all(sender_location);
     boost::filesystem::remove_all(receiver_location);
+}
+
+TEST(rdma_log_entries_parser_test, aborts_on_entry_type_not_allowed_in_message) {
+    // receiving a type not allowed in a message (this_id_is_not_used or a marker) aborts
+    for (auto const type : {log_entry::entry_type::this_id_is_not_used, log_entry::entry_type::marker_begin}) {
+        message_log_entries original{323};
+        original.add_clear_storage(3, {30, 31});
+        std::string body = serialize_body(original);
+        // the body has the epoch (8 bytes) and the number of entries (4 bytes), followed by the type of the first
+        // entry
+        body[12] = static_cast<char>(type);
+
+        rdma_log_entries_parser parser;
+        EXPECT_DEATH((void) parser.consume(body), "unexpected entry type") << static_cast<int>(type);
+    }
 }
 
 }  // namespace limestone::testing

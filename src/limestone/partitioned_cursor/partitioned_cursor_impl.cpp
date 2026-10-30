@@ -1,5 +1,5 @@
 /*
- * Copyright 2022-2025 Project Tsurugi.
+ * Copyright 2022-2026 Project Tsurugi.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -58,11 +58,11 @@ api::storage_id_type partitioned_cursor_impl::storage() const noexcept {
 }
 
 void partitioned_cursor_impl::key(std::string& buf) const noexcept {
-    std::get<std::vector<log_entry>>(current_).at(current_index_).key(buf);
+    buf.assign(std::get<std::vector<log_entry>>(current_).at(current_index_).key());
 }
 
 void partitioned_cursor_impl::value(std::string& buf) const noexcept {
-    std::get<std::vector<log_entry>>(current_).at(current_index_).value(buf);
+    buf.assign(std::get<std::vector<log_entry>>(current_).at(current_index_).value());
 }
 
 api::log_entry::entry_type partitioned_cursor_impl::type() const {
@@ -70,7 +70,7 @@ api::log_entry::entry_type partitioned_cursor_impl::type() const {
 }
 
 std::vector<api::blob_id_type> partitioned_cursor_impl::blob_ids() const {
-    return std::get<std::vector<log_entry>>(current_).at(current_index_).get_blob_ids();
+    return std::get<std::vector<log_entry>>(current_).at(current_index_).blob_ids();
 }
 
 log_entry& partitioned_cursor_impl::current() {

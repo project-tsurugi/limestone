@@ -1,5 +1,5 @@
 /*
- * Copyright 2022-2025 Project Tsurugi.
+ * Copyright 2022-2026 Project Tsurugi.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -29,7 +29,7 @@
 
 #include "dblog_scan.h"
 #include "internal.h"
-#include "log_entry.h"
+#include "log_entry/log_entry.h"
 #include "online_compaction.h"
 #include "compaction_catalog.h"
 #include "test_root.h"

@@ -1,0 +1,207 @@
+/*
+ * Copyright 2022-2026 Project Tsurugi.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+#include <cstdint>
+#include <sstream>
+#include <string>
+#include <string_view>
+#include <utility>
+#include <vector>
+
+#include "test_root.h"
+
+#include "log_entry/log_entry_format.h"
+#include "log_entry_bytes.h"
+
+namespace limestone::testing {
+
+using namespace std::literals;
+namespace format = limestone::internal::log_entry_format;
+
+// the sizes of each entry type match the format table
+TEST(log_entry_format_test, fixed_sizes) {
+    EXPECT_EQ(format::write_version_size, 16U);
+    EXPECT_EQ(format::normal_entry_fixed_size, 33U);
+    EXPECT_EQ(format::normal_with_blob_fixed_size, 37U);
+    EXPECT_EQ(format::remove_entry_fixed_size, 29U);
+    EXPECT_EQ(format::storage_entry_size, 25U);
+    EXPECT_EQ(format::marker_size, 9U);
+    EXPECT_EQ(format::marker_end_size, 10U);
+}
+
+// the classification functions classify each data, storage and marker type correctly
+TEST(log_entry_format_test, classification) {
+    using format::entry_type;
+    for (auto t : {entry_type::normal_entry, entry_type::normal_with_blob, entry_type::remove_entry}) {
+        EXPECT_TRUE(format::is_data_entry(t));
+        EXPECT_FALSE(format::is_storage_entry(t));
+        EXPECT_FALSE(format::is_marker(t));
+    }
+    for (auto t : {entry_type::clear_storage, entry_type::add_storage, entry_type::remove_storage}) {
+        EXPECT_FALSE(format::is_data_entry(t));
+        EXPECT_TRUE(format::is_storage_entry(t));
+        EXPECT_FALSE(format::is_marker(t));
+    }
+    for (auto t : {entry_type::marker_begin, entry_type::marker_end, entry_type::marker_durable,
+                   entry_type::marker_invalidated_begin}) {
+        EXPECT_FALSE(format::is_data_entry(t));
+        EXPECT_FALSE(format::is_storage_entry(t));
+        EXPECT_TRUE(format::is_marker(t));
+    }
+    EXPECT_FALSE(format::is_data_entry(entry_type::this_id_is_not_used));
+    EXPECT_FALSE(format::is_storage_entry(entry_type::this_id_is_not_used));
+    EXPECT_FALSE(format::is_marker(entry_type::this_id_is_not_used));
+}
+
+// only 1 to 10 are valid entry type values
+TEST(log_entry_format_test, is_valid_entry_type) {
+    for (int value = 0; value <= 0xff; ++value) {
+        EXPECT_EQ(format::is_valid_entry_type(static_cast<std::uint8_t>(value)), 1 <= value && value <= 10) << value;
+    }
+}
+
+// equal key_sids compare as 0
+TEST(log_entry_format_test, compare_key_sid_equal) {
+    EXPECT_EQ(format::compare_key_sid("\x01\x00" "abc"sv, "\x01\x00" "abc"sv), 0);
+}
+
+// the first byte decides, not the numeric order of storage_ids: 256 (00 01) comes before 1 (01 00)
+TEST(log_entry_format_test, compare_key_sid_first_byte) {
+    auto sid_256 = "\x00\x01\x00\x00\x00\x00\x00\x00"sv;
+    auto sid_1 = "\x01\x00\x00\x00\x00\x00\x00\x00"sv;
+    EXPECT_LT(format::compare_key_sid(sid_256, sid_1), 0);
+    EXPECT_GT(format::compare_key_sid(sid_1, sid_256), 0);
+}
+
+// each byte is compared as unsigned: 0x80 comes after 0x01
+TEST(log_entry_format_test, compare_key_sid_unsigned_bytes) {
+    EXPECT_LT(format::compare_key_sid("\x01"sv, "\x80"sv), 0);
+    EXPECT_LT(format::compare_key_sid("\x7f"sv, "\xff"sv), 0);
+    EXPECT_GT(format::compare_key_sid("\xff"sv, "\x00"sv), 0);
+}
+
+// if one is a prefix of the other, the shorter one comes first
+TEST(log_entry_format_test, compare_key_sid_prefix) {
+    EXPECT_LT(format::compare_key_sid("\x01\x00" "ab"sv, "\x01\x00" "abc"sv), 0);
+    EXPECT_GT(format::compare_key_sid("\x01\x00" "abc"sv, "\x01\x00" "ab"sv), 0);
+}
+
+// the order matches the order of key_sids by std::string::operator<
+TEST(log_entry_format_test, compare_key_sid_matches_string_order) {
+    const std::vector<std::string> key_sids{
+        std::string("\x00\x01\x00\x00\x00\x00\x00\x00"sv), std::string("\x01\x00\x00\x00\x00\x00\x00\x00"sv),
+        "\x01"s, "\x7f"s, "\x80"s, "\xff"s, std::string("\x00"sv),
+        std::string("\x01\x00" "ab"sv), std::string("\x01\x00" "abc"sv), ""s,
+    };
+    for (const auto& a : key_sids) {
+        for (const auto& b : key_sids) {
+            const int c = format::compare_key_sid(a, b);
+            EXPECT_EQ(c < 0, a < b) << ::testing::PrintToString(a) << " " << ::testing::PrintToString(b);
+            EXPECT_EQ(c == 0, a == b) << ::testing::PrintToString(a) << " " << ::testing::PrintToString(b);
+        }
+    }
+}
+
+// the oldest write_version is (0,0) and is older than any other version
+TEST(log_entry_format_test, oldest_write_version) {
+    using limestone::api::write_version_type;
+    const write_version_type oldest = format::oldest_write_version();
+    EXPECT_EQ(oldest.get_major(), 0U);
+    EXPECT_EQ(oldest.get_minor(), 0U);
+    for (const auto& other : {write_version_type{0, 1}, write_version_type{1, 0},
+                              write_version_type{UINT64_MAX, UINT64_MAX}}) {
+        EXPECT_LT(oldest, other) << other.get_major() << "," << other.get_minor();
+    }
+}
+
+// load_uint32le and load_uint64le read the first bytes as little-endian and ignore the rest
+TEST(log_entry_format_test, load_little_endian) {
+    const std::string bytes = "\x78\x56\x34\x12\xf0\xde\xbc\x9a\xff\xff"s;
+    EXPECT_EQ(format::load_uint32le(bytes), 0x12345678U);
+    EXPECT_EQ(format::load_uint64le(bytes), 0x9abcdef012345678ULL);
+    EXPECT_EQ(format::load_uint32le(bytes.substr(4)), 0x9abcdef0U);
+    EXPECT_EQ(format::load_uint64le("\x01\x00\x00\x00\x00\x00\x00\x80"s), 0x8000000000000001ULL);
+}
+
+// the position of key_sid follows the format table; it is FATAL for markers and the unused type
+TEST(log_entry_format_test, key_sid_offset) {
+    using format::entry_type;
+    EXPECT_EQ(format::key_sid_offset(entry_type::normal_entry), 9U);
+    EXPECT_EQ(format::key_sid_offset(entry_type::normal_with_blob), 9U);
+    EXPECT_EQ(format::key_sid_offset(entry_type::remove_entry), 5U);
+    EXPECT_EQ(format::key_sid_offset(entry_type::clear_storage), 1U);
+    EXPECT_EQ(format::key_sid_offset(entry_type::add_storage), 1U);
+    EXPECT_EQ(format::key_sid_offset(entry_type::remove_storage), 1U);
+    for (auto t : {entry_type::marker_begin, entry_type::marker_end, entry_type::marker_durable,
+                   entry_type::marker_invalidated_begin, entry_type::this_id_is_not_used}) {
+        EXPECT_DEATH((void) format::key_sid_offset(t), "log_entry_format:key_sid_offset not valid for entry type");
+    }
+}
+
+// data_entry_key_sid and data_entry_write_version take the keys of each data entry type, including an empty key,
+// without parsing the whole entry
+TEST(log_entry_format_test, data_entry_keys) {
+    using log_entry_bytes::u64le;
+    const std::string normal = log_entry_bytes::normal_entry(0x0102030405060708, "key", "value", 10, 20);
+    const std::string with_blob = log_entry_bytes::normal_with_blob(1, "k", "v", 11, 21, {100, 200});
+    const std::string remove = log_entry_bytes::remove_entry(2, "removed", 12, 22);
+    const std::string empty_key = log_entry_bytes::remove_entry(3, "", 13, 23);
+
+    EXPECT_EQ(format::data_entry_key_sid(normal), u64le(0x0102030405060708) + "key");
+    EXPECT_EQ(format::data_entry_key_sid(with_blob), u64le(1) + "k");
+    EXPECT_EQ(format::data_entry_key_sid(remove), u64le(2) + "removed");
+    EXPECT_EQ(format::data_entry_key_sid(empty_key), u64le(3));
+    // the returned view points into the entry
+    EXPECT_EQ(format::data_entry_key_sid(normal).data(), normal.data() + 9);
+    EXPECT_EQ(format::data_entry_key_sid(remove).data(), remove.data() + 5);
+
+    EXPECT_EQ(format::data_entry_write_version(normal), (format::write_version_type{10, 20}));
+    EXPECT_EQ(format::data_entry_write_version(with_blob), (format::write_version_type{11, 21}));
+    EXPECT_EQ(format::data_entry_write_version(remove), (format::write_version_type{12, 22}));
+    EXPECT_EQ(format::data_entry_write_version(empty_key), (format::write_version_type{13, 23}));
+
+    // bytes following the entry are not read (the same result with trailing bytes)
+    const std::string followed = normal + "trailing";
+    EXPECT_EQ(format::data_entry_key_sid(followed), u64le(0x0102030405060708) + "key");
+    EXPECT_EQ(format::data_entry_write_version(followed), (format::write_version_type{10, 20}));
+}
+
+// returns the name of each entry type and "unknown" for an undefined value; operator<< writes the same string
+TEST(log_entry_format_test, entry_type_to_string_view) {
+    using entry_type = format::entry_type;
+    const std::vector<std::pair<entry_type, std::string_view>> cases{
+        {entry_type::this_id_is_not_used, "this_id_is_not_used"},
+        {entry_type::normal_entry, "normal_entry"},
+        {entry_type::normal_with_blob, "normal_with_blob"},
+        {entry_type::remove_entry, "remove_entry"},
+        {entry_type::marker_begin, "marker_begin"},
+        {entry_type::marker_end, "marker_end"},
+        {entry_type::marker_durable, "marker_durable"},
+        {entry_type::marker_invalidated_begin, "marker_invalidated_begin"},
+        {entry_type::clear_storage, "clear_storage"},
+        {entry_type::add_storage, "add_storage"},
+        {entry_type::remove_storage, "remove_storage"},
+        {static_cast<entry_type>(11), "unknown"},
+    };
+    for (const auto& [type, name] : cases) {
+        EXPECT_EQ(format::to_string_view(type), name);
+        std::ostringstream out;
+        out << type;
+        EXPECT_EQ(out.str(), name);
+    }
+}
+
+}  // namespace limestone::testing

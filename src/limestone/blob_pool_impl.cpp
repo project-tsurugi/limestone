@@ -1,5 +1,5 @@
 /*
- * Copyright 2022-2025 Project Tsurugi.
+ * Copyright 2022-2026 Project Tsurugi.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -25,6 +25,8 @@
 #include <cstdio>
 #include <memory>
 #include <cstring>
+#include <vector>
+#include <fcntl.h>
 
 #include <openssl/hmac.h>
 #include <openssl/evp.h>
@@ -155,6 +157,12 @@ blob_id_type blob_pool_impl::duplicate_data(blob_id_type reference) {
     if (ec) {
         LOG_AND_THROW_BLOB_EXCEPTION("Failed to create hard link from " + existing_path.string() + " to " + link_path.string(), ec.value());
     }
+    // persist the name of the link
+    if (file_ops_->fsync_directory(destination_dir) != 0) {
+        int error_code = errno;
+        LOG_AND_THROW_BLOB_EXCEPTION("Failed to synchronize the directory of the hard link: "
+                                     + destination_dir.string(), error_code);
+    }
 
     // Add the blob_id to the internal list
     {
@@ -241,6 +249,13 @@ void blob_pool_impl::copy_file(const boost::filesystem::path& source, const boos
             LOG_AND_THROW_BLOB_EXCEPTION("Failed to synchronize destination file to disk: " + destination.string(), error_code);
         }
 
+        // persist the name of the created file
+        if (file_ops_->fsync_directory(destination_dir) != 0) {
+            int error_code = errno;
+            LOG_AND_THROW_BLOB_EXCEPTION("Failed to synchronize the directory of the destination file: "
+                                         + destination_dir.string(), error_code);
+        }
+
     } catch (...) {
         boost::system::error_code ec;
         file_ops_->remove(destination, ec);
@@ -260,6 +275,30 @@ void blob_pool_impl::move_file(const boost::filesystem::path& source, const boos
 
     file_ops_->rename(source, destination, ec);
     if (!ec) {
+        // the moved file was written by the caller, and nobody has synchronized its data. Persist it before returning,
+        // as the copy path does
+        int fd = file_ops_->open(destination.string().c_str(), O_RDONLY);
+        if (fd < 0) {
+            int error_code = errno;
+            LOG_AND_THROW_BLOB_EXCEPTION("Failed to open the moved file to synchronize it: " + destination.string(),
+                                         error_code);
+        }
+        if (file_ops_->fsync(fd) != 0) {
+            int error_code = errno;
+            file_ops_->close(fd);
+            LOG_AND_THROW_BLOB_EXCEPTION("Failed to synchronize the moved file to disk: " + destination.string(),
+                                         error_code);
+        }
+        if (file_ops_->close(fd) != 0) {
+            int error_code = errno;
+            LOG_AND_THROW_BLOB_EXCEPTION("Failed to close the moved file: " + destination.string(), error_code);
+        }
+        // persist the name of the destination
+        if (file_ops_->fsync_directory(destination_dir) != 0) {
+            int error_code = errno;
+            LOG_AND_THROW_BLOB_EXCEPTION("Failed to synchronize the directory of the moved file: "
+                                         + destination_dir.string(), error_code);
+        }
         return;
     }
 
@@ -280,9 +319,22 @@ void blob_pool_impl::create_directories_if_needed(const boost::filesystem::path&
     boost::system::error_code ec;
 
     if (!file_ops_->exists(path, ec)) {
+        // list the directories to be created (path and its missing ancestors) from the top
+        std::vector<boost::filesystem::path> created;
+        for (boost::filesystem::path p = path; !p.empty() && !file_ops_->exists(p, ec); p = p.parent_path()) {
+            created.insert(created.begin(), p);
+        }
         file_ops_->create_directories(path, ec);
         if (ec) {
             LOG_AND_THROW_BLOB_EXCEPTION("Failed to create directories: " + path.string(), ec.value());
+        }
+        // persist the name of each created directory by synchronizing its parent directory
+        for (const boost::filesystem::path& dir : created) {
+            if (file_ops_->fsync_directory(dir.parent_path()) != 0) {
+                int error_code = errno;
+                LOG_AND_THROW_BLOB_EXCEPTION("Failed to synchronize the parent directory of a created directory: "
+                                             + dir.string(), error_code);
+            }
         }
     }
 }
@@ -330,6 +382,13 @@ blob_id_type blob_pool_impl::register_data(std::string_view data) {
         if (file_ops_->fsync(file_ops_->fileno(dest_file.get())) != 0) {
             int error_code = errno;
             LOG_AND_THROW_BLOB_EXCEPTION("Failed to synchronize destination file: " + target_path.string(), error_code);
+        }
+
+        // persist the name of the created file
+        if (file_ops_->fsync_directory(destination_dir) != 0) {
+            int error_code = errno;
+            LOG_AND_THROW_BLOB_EXCEPTION("Failed to synchronize the directory of the destination file: "
+                                         + destination_dir.string(), error_code);
         }
     } catch (...) {
         // Ensure file is removed in case of an exception

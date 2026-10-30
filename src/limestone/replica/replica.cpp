@@ -1,5 +1,5 @@
 /*
- * Copyright 2022-2025 Project Tsurugi.
+ * Copyright 2022-2026 Project Tsurugi.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -19,7 +19,10 @@
 #include <boost/filesystem.hpp>
 #include <string>
 #include <thread>
+#include <limestone/api/configuration.h>
+#include <limestone/api/limestone_exception.h>
 #include <replication/replication_config_loader.h>
+#include "replication/sort_config_loader.h"
 #include "replication/replication_endpoint.h"
 #include "replication/replica_server.h"
 
@@ -31,6 +34,30 @@ void show_usage(const std::string& program_name) {
     std::cerr << "Usage: " << program_name << " <logdir>" << std::endl;
     std::cerr << "Note: The environment variable TSURUGI_REPLICATION_ENDPOINT must be set with the endpoint URL." << std::endl;
     std::cerr << "      For example: tcp://localhost:1234" << std::endl;
+    std::cerr << "      The sort at startup can be configured with LIMESTONE_SORT_THREADS," << std::endl;
+    std::cerr << "      LIMESTONE_SORT_ARENA_SIZE_MB, LIMESTONE_SORT_WORK_DIR and LIMESTONE_SORT_MERGE_FANIN."
+              << std::endl;
+    std::cerr << "      The sort creates its working directory sorting-XXXXXX under LIMESTONE_SORT_WORK_DIR"
+              << " and removes it when it ends (a crash may leave it)." << std::endl;
+}
+
+/**
+ * @brief Initializes the replica_server. If the checks of the construction of the datastore fail, writes the reason
+ *        to stderr and returns false.
+ * @param server the server to initialize
+ * @param log_dir_path the log directory
+ * @param conf the configuration of the datastore
+ * @return whether it succeeded
+ */
+bool initialize_server(limestone::replication::replica_server& server, const boost::filesystem::path& log_dir_path,
+                       const limestone::api::configuration& conf) {
+    try {
+        server.initialize(log_dir_path, conf);
+    } catch (const limestone::api::limestone_exception& e) {
+        std::cerr << "Error: failed to initialize the replica: " << e.what() << std::endl;
+        return false;
+    }
+    return true;
 }
 
 } // namespace
@@ -68,9 +95,23 @@ int main(int argc, char* argv[]) {
         return 1;
     }
     limestone::replication::replication_config const& config = config_result.config;
+
+    // The settings of the sort (environment variables). The ranges of the values are checked at the construction of
+    // the datastore, and initialize() throws if they are invalid.
+    auto const sort_result = limestone::replication::load_sort_config_from_environment();
+    if (!sort_result.ok) {
+        std::cerr << "Error: invalid sort configuration: " << sort_result.error_message << std::endl;
+        show_usage(program_name);
+        return 1;
+    }
+    limestone::api::configuration conf{};
+    limestone::replication::apply_sort_config(sort_result.config, conf);
+
     if (config.mode() == limestone::replication::replication_mode::rdma) {
         limestone::replication::replica_server server{};
-        server.initialize(log_dir_path);
+        if (!initialize_server(server, log_dir_path, conf)) {
+            return 1;
+        }
 
         std::cout << "[replica] waiting for the master on the handshake daemon: "
                   << config.handshake_socket_path() << std::endl;
@@ -105,7 +146,9 @@ int main(int argc, char* argv[]) {
 
     limestone::replication::replica_server server{};
 
-    server.initialize(log_dir_path);        
+    if (!initialize_server(server, log_dir_path, conf)) {
+        return 1;
+    }
 
     bool success = server.start_listener(endpoint.get_sockaddr());
     if (!success) {

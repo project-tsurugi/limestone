@@ -1,3 +1,18 @@
+/*
+ * Copyright 2025-2026 Project Tsurugi.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
 #include "replication/message_log_entries.h"
 
 #include <gtest/gtest.h>
@@ -8,7 +23,7 @@
 #include "replication/replica_server.h"
 #include "replication_test_helper.h"
 #include "blob_file_resolver.h"
-#include "log_entry.h"
+#include "log_entry/log_entry.h"
 #include "replication/tcp_replication_message_io.h"
 #include "replication/replication_message_io.h"
 #include "test_root.h"
@@ -361,10 +376,10 @@ TEST_F(message_log_entries_test, post_receive) {
     EXPECT_EQ(log_entries.size(), 6);
     EXPECT_TRUE(AssertLogEntry(log_entries[0], 1, "key1", "value1", 100, 1, {}, log_entry::entry_type::normal_entry));
     EXPECT_TRUE(AssertLogEntry(log_entries[1], 2, "key2", "value2", 200, 2, {99}, log_entry::entry_type::normal_with_blob));
-    EXPECT_TRUE(AssertLogEntry(log_entries[2], 3, "key3", "", 300, 3, {}, log_entry::entry_type::remove_entry));
-    EXPECT_TRUE(AssertLogEntry(log_entries[3], 4, "", "", 400, 4, {}, log_entry::entry_type::clear_storage));
-    EXPECT_TRUE(AssertLogEntry(log_entries[4], 5, "", "", 500, 5, {}, log_entry::entry_type::add_storage));
-    EXPECT_TRUE(AssertLogEntry(log_entries[5], 6, "", "", 600, 6, {}, log_entry::entry_type::remove_storage));
+    EXPECT_TRUE(AssertLogEntry(log_entries[2], 3, "key3", std::nullopt, 300, 3, {}, log_entry::entry_type::remove_entry));
+    EXPECT_TRUE(AssertLogEntry(log_entries[3], 4, std::nullopt, std::nullopt, 400, 4, {}, log_entry::entry_type::clear_storage));
+    EXPECT_TRUE(AssertLogEntry(log_entries[4], 5, std::nullopt, std::nullopt, 500, 5, {}, log_entry::entry_type::add_storage));
+    EXPECT_TRUE(AssertLogEntry(log_entries[5], 6, std::nullopt, std::nullopt, 600, 6, {}, log_entry::entry_type::remove_storage));
 
     auto ack_str = io.get_out_string();
     auto ack = replication_message::receive(io);
@@ -464,10 +479,35 @@ TEST_F(message_log_entries_test, write_all_entry_type_to_pwal_via_replication_ch
     EXPECT_EQ(log_entries.size(), 6);
     EXPECT_TRUE(AssertLogEntry(log_entries[0], 1, "key1", "value1", 100, 1, {}, log_entry::entry_type::normal_entry));
     EXPECT_TRUE(AssertLogEntry(log_entries[1], 2, "key2", "value2", 200, 2, {99}, log_entry::entry_type::normal_with_blob));
-    EXPECT_TRUE(AssertLogEntry(log_entries[2], 3, "key3", "", 300, 3, {}, log_entry::entry_type::remove_entry));
-    EXPECT_TRUE(AssertLogEntry(log_entries[3], 4, "", "", 400, 4, {}, log_entry::entry_type::clear_storage));
-    EXPECT_TRUE(AssertLogEntry(log_entries[4], 5, "", "", 500, 5, {}, log_entry::entry_type::add_storage));
-    EXPECT_TRUE(AssertLogEntry(log_entries[5], 6, "", "", 600, 6, {}, log_entry::entry_type::remove_storage));
+    EXPECT_TRUE(AssertLogEntry(log_entries[2], 3, "key3", std::nullopt, 300, 3, {}, log_entry::entry_type::remove_entry));
+    EXPECT_TRUE(AssertLogEntry(log_entries[3], 4, std::nullopt, std::nullopt, 400, 4, {}, log_entry::entry_type::clear_storage));
+    EXPECT_TRUE(AssertLogEntry(log_entries[4], 5, std::nullopt, std::nullopt, 500, 5, {}, log_entry::entry_type::add_storage));
+    EXPECT_TRUE(AssertLogEntry(log_entries[5], 6, std::nullopt, std::nullopt, 600, 6, {}, log_entry::entry_type::remove_storage));
+}
+
+TEST_F(message_log_entries_test, post_receive_aborts_on_entry_type_not_allowed_in_message) {
+    // receiving a type not allowed in a message (a marker) aborts before writing to the log channel
+    message_log_entries original{100};
+    original.add_clear_storage(4, {400, 4});
+    replication_message_io out("");
+    original.send_body(out);
+    std::string body = out.get_out_string();
+    // the body has the epoch (8 bytes) and the number of entries (4 bytes), followed by the type of the first entry
+    body[12] = static_cast<char>(log_entry::entry_type::marker_end);
+
+    message_log_entries received{0};
+    replication_message_io in(body);
+    received.receive_body(in);
+
+    auto& lc = datastore_->create_channel();
+    datastore_->ready();
+    replication_message_io io("");
+    log_channel_handler_resources resources(io, lc);
+    // The datastore threads are running, so use the threadsafe style for the death test
+    const std::string saved_style = ::testing::FLAGS_gtest_death_test_style;
+    ::testing::FLAGS_gtest_death_test_style = "threadsafe";
+    EXPECT_DEATH(received.post_receive(resources), "unexpected entry type");
+    ::testing::FLAGS_gtest_death_test_style = saved_style;
 }
 
 }  // namespace limestone::testing

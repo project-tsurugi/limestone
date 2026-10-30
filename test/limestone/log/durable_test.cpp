@@ -1,3 +1,18 @@
+/*
+ * Copyright 2023-2026 Project Tsurugi.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
 
 #include <algorithm>
 #include <sstream>
@@ -6,8 +21,10 @@
 #include <boost/filesystem.hpp>
 
 #include "dblog_scan.h"
+#include "scan_input.h"
 #include "internal.h"
-#include "log_entry.h"
+#include "log_entry/log_entry.h"
+#include "log_entry/log_entry_reader.h"
 
 #include "test_root.h"
 
@@ -151,6 +168,7 @@ TEST_F(durable_test, invalidated_entries_are_never_reused) {
 
 std::tuple<limestone::api::log_entry::read_error, limestone::api::epoch_id_type, std::vector<limestone::api::log_entry>> scan_one_pwal_file(const boost::filesystem::path& p, limestone::api::epoch_id_type ld_epoch) {
     using limestone::internal::dblog_scan;
+    using limestone::internal::scan_input;
     using limestone::api::log_entry;
     dblog_scan ds{""};  // dummy
     dblog_scan::parse_error ec;
@@ -162,7 +180,9 @@ std::tuple<limestone::api::log_entry::read_error, limestone::api::epoch_id_type,
     std::vector<log_entry> entries;
     limestone::api::epoch_id_type durable_epoch = UINT64_MAX;
     try {
-        durable_epoch = ds.scan_one_pwal_file(p, ld_epoch, [&entries](log_entry& e){ entries.emplace_back(e); }, [&err](log_entry::read_error& e) -> bool {
+        durable_epoch = ds.scan_one_pwal_file(scan_input{p}, ld_epoch,
+                                              [&entries](log_entry& e){ entries.emplace_back(e); },
+                                              [&err](log_entry::read_error& e) -> bool {
             err = e;
             throw std::runtime_error("pwal file read error");
         }, ec);
@@ -190,19 +210,15 @@ TEST_F(durable_test, ut_scan_one_pwal_file_nondurable_entry) {
     EXPECT_EQ(last_epoch, 43);
     EXPECT_EQ(entries.size(), 1);
     {  // check (marked) pwal file after scan
-        std::ifstream in;
-        log_entry e;
-        in.open(pwal, std::ios::in | std::ios::binary);
-        ASSERT_TRUE(e.read(in));
-        EXPECT_EQ(e.type(), log_entry::entry_type::marker_begin);
-        ASSERT_TRUE(e.read(in));
-        EXPECT_EQ(e.type(), log_entry::entry_type::normal_entry);
-        ASSERT_TRUE(e.read(in));
-        EXPECT_EQ(e.type(), log_entry::entry_type::marker_invalidated_begin);
-        ASSERT_TRUE(e.read(in));
-        EXPECT_EQ(e.type(), log_entry::entry_type::normal_entry);
-        ASSERT_FALSE(e.read(in));
-        in.close();
+        using limestone::internal::log_entry_read_result;
+        limestone::internal::log_entry_reader reader(pwal);
+        for (auto expected : {log_entry::entry_type::marker_begin, log_entry::entry_type::normal_entry,
+                              log_entry::entry_type::marker_invalidated_begin, log_entry::entry_type::normal_entry}) {
+            const auto read_result = reader.next();
+            ASSERT_EQ(read_result.result(), log_entry_read_result::status::ok);
+            EXPECT_EQ(read_result.view().type(), expected);
+        }
+        EXPECT_EQ(reader.next().result(), log_entry_read_result::status::end);
     }
 }
 
@@ -247,6 +263,24 @@ TEST_F(durable_test, ut_scan_one_pwal_file_broken_entry_trimmed) {
 
     auto [err, last_epoch, entries] = scan_one_pwal_file(pwal, 43);
     ASSERT_EQ(err.value(), log_entry::read_error::short_entry);
+}
+
+// a short entry at the head of the file is reported as unexpected_type with the type of that entry
+TEST_F(durable_test, ut_scan_one_pwal_file_short_entry_at_head) {
+    using namespace limestone::api;
+
+    boost::filesystem::path pwal(location);
+    pwal /= "pwal";
+    {  // make pwal file for test
+        FILE *f = fopen(pwal.c_str(), "w");
+        // make broken entry
+        fputc(static_cast<int>(log_entry::entry_type::normal_entry), f);
+        fputc(99, f);  // the end of file is missing
+        fclose(f);
+    }
+    auto [err, last_epoch, entries] = scan_one_pwal_file(pwal, 42);
+    ASSERT_EQ(err.value(), log_entry::read_error::unexpected_type);
+    EXPECT_EQ(err.entry_type(), log_entry::entry_type::normal_entry);
 }
 
 TEST_F(durable_test, ut_scan_one_pwal_file_broken_entry_type0) {

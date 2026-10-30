@@ -1,5 +1,7 @@
 file(GLOB SOURCES
         "limestone/*.cpp"
+        "limestone/log_entry/*.cpp"
+        "limestone/sort/*.cpp"
         "limestone/replication/*.cpp"
         "limestone/partitioned_cursor/*.cpp"
         "limestone/rdma/*.cpp"
@@ -25,22 +27,11 @@ target_include_directories(${package_name}
         PRIVATE ./limestone
 )
 
-if(${RECOVERY_SORTER_KVSLIB_UPPERCASE} STREQUAL "ROCKSDB")
-    set(sort_lib RocksDB::RocksDB)
-    target_compile_options(${package_name} PUBLIC -DSORT_METHOD_USE_ROCKSDB)
-else()
-    set(sort_lib leveldb)
-endif()
-if(RECOVERY_SORTER_PUT_ONLY)
-    target_compile_options(${package_name} PRIVATE -DSORT_METHOD_PUT_ONLY)
-endif()
-
 target_link_libraries(${package_name}
         PUBLIC limestone-api
         PRIVATE Boost::boost
         PRIVATE Boost::filesystem
         PRIVATE glog::glog
-        PRIVATE ${sort_lib}
         PRIVATE nlohmann_json::nlohmann_json
         PRIVATE OpenSSL::SSL
         PRIVATE OpenSSL::Crypto
@@ -99,7 +90,6 @@ target_link_libraries(limestone-impl
         INTERFACE Boost::boost
         INTERFACE Boost::filesystem
         INTERFACE glog::glog
-        INTERFACE ${sort_lib}
         INTERFACE nlohmann_json::nlohmann_json
         INTERFACE OpenSSL::SSL
         INTERFACE OpenSSL::Crypto

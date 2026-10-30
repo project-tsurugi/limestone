@@ -1,3 +1,18 @@
+/*
+ * Copyright 2026-2026 Project Tsurugi.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
 #include "tcp_replication_message_io.h"
 
 #include <unistd.h>
@@ -55,6 +70,10 @@ blob_id_type tcp_replication_message_io::receive_blob() {
                 e.code().value()
             );
         }
+        // persist the name of the created directory
+        if (datastore_.get_impl()->file_ops().fsync_directory(parent.parent_path()) != 0) {
+            LOG_AND_THROW_IO_EXCEPTION("Failed to fsync the parent directory of " + parent.string(), errno);
+        }
     } else if (!boost::filesystem::is_directory(parent)) {
         LOG_AND_THROW_IO_EXCEPTION(
             "Expected directory at path for blob file: " + parent.string(),
@@ -95,6 +114,10 @@ blob_id_type tcp_replication_message_io::receive_blob() {
         LOG_LP(WARNING) << "fsync failed: " << strerror(ec);
     }
     safe_close(fp);
+    // persist the name of the created file before the entries referring to the BLOB are applied
+    if (datastore_.get_impl()->file_ops().fsync_directory(parent) != 0) {
+        LOG_AND_THROW_IO_EXCEPTION("Failed to fsync the directory of blob file: " + parent.string(), errno);
+    }
 
     return blob_id;
 }

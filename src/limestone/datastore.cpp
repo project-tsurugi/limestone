@@ -1,5 +1,5 @@
 /*
- * Copyright 2022-2024 Project Tsurugi.
+ * Copyright 2022-2026 Project Tsurugi.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -39,10 +39,12 @@
 
 #include <limestone/api/datastore.h>
 #include "internal.h"
-#include "log_entry.h"
+#include "log_entry/log_entry.h"
 #include "online_compaction.h"
 #include "compaction_catalog.h"
 #include "compaction_options.h"
+#include "sort/sort_buffer.h"
+#include "sort/sort_settings.h"
 #include "blob_file_resolver.h"
 #include "blob_pool_impl.h"
 #include "blob_file_garbage_collector.h"
@@ -129,6 +131,45 @@ datastore::datastore(configuration const& conf) : location_(conf.data_location_)
             LOG_LP(ERROR) << err_msg;
             throw limestone_exception(exception_type::initialization_failure, err_msg);
         }
+        // the items of the settings of the sort that are not set are filled in with the defaults of sort_settings
+        constexpr std::size_t mib = std::size_t{1024} * 1024;
+        const sort_settings sort_defaults{};
+        const int sort_threads = conf.recover_max_parallelism_.value_or(sort_defaults.threads);
+        const std::size_t sort_arena_size_mb = conf.sort_arena_size_mb_.value_or(sort_defaults.arena_size_bytes / mib);
+        const std::size_t sort_merge_fanin = conf.sort_merge_fanin_.value_or(sort_defaults.merge_fanin);
+        // recover_max_parallelism is the number of threads of the sort; a value below 1 is a misconfiguration. It is
+        // checked before the lock of the log directory is taken (a throw after that would not release the lock)
+        if (sort_threads < 1) {
+            std::string err_msg = "recover_max_parallelism must be at least 1: " + std::to_string(sort_threads);
+            LOG_LP(ERROR) << err_msg;
+            throw limestone_exception(exception_type::initialization_failure, err_msg);
+        }
+        // The settings of the sort are checked before the lock as well. The upper bound of the arena is that of
+        // sort_buffer (4 GiB)
+        constexpr std::size_t max_sort_arena_size_mb = sort_buffer::max_arena_size_bytes / mib;
+        if (sort_arena_size_mb < 1 || sort_arena_size_mb > max_sort_arena_size_mb) {
+            std::string err_msg = "sort_arena_size_mb must be between 1 and " + std::to_string(max_sort_arena_size_mb)
+                                  + ": " + std::to_string(sort_arena_size_mb);
+            LOG_LP(ERROR) << err_msg;
+            throw limestone_exception(exception_type::initialization_failure, err_msg);
+        }
+        if (sort_merge_fanin < 2) {
+            std::string err_msg = "sort_merge_fanin must be at least 2: " + std::to_string(sort_merge_fanin);
+            LOG_LP(ERROR) << err_msg;
+            throw limestone_exception(exception_type::initialization_failure, err_msg);
+        }
+        boost::system::error_code sort_work_dir_error;
+        if (! conf.sort_work_dir_.empty()
+            && ! boost::filesystem::is_directory(conf.sort_work_dir_, sort_work_dir_error)) {
+            std::string err_msg = "sort_work_dir is not an existing directory: " + conf.sort_work_dir_.string();
+            LOG_LP(ERROR) << err_msg;
+            throw limestone_exception(exception_type::initialization_failure, err_msg);
+        }
+        impl_->set_sort_settings(sort_arena_size_mb * mib, sort_merge_fanin,
+                                 conf.sort_work_dir_.empty() ? location_ : conf.sort_work_dir_);
+        LOG(INFO) << "/:limestone:config:datastore setting the sort: arena size = " << sort_arena_size_mb
+                  << " MiB, merge fanin = " << sort_merge_fanin
+                  << ", work dir = " << impl_->sort_work_dir_parent().string();
         LOG(INFO) << "/:limestone:config:datastore setting log location = " << location_.string();
         boost::system::error_code error;
         const bool result_check = boost::filesystem::exists(location_, error);
@@ -138,6 +179,17 @@ datastore::datastore(configuration const& conf) : location_(conf.data_location_)
             const bool result_mkdir = boost::filesystem::create_directory(location_, error);
             if (!result_mkdir || error) {
                 LOG_AND_THROW_IO_EXCEPTION("fail to create directory: " + location_.string(), error);
+            }
+            // persist the name of the created directory. location_.parent_path() is empty for a relative location of
+            // one element such as "data" and is the location itself for "data/", so the created directory is made
+            // canonical and its trailing separators are removed before taking the parent
+            boost::filesystem::path created = boost::filesystem::canonical(location_, error);
+            if (error) {
+                LOG_AND_THROW_IO_EXCEPTION("fail to resolve the created directory: " + location_.string(), error);
+            }
+            internal::remove_trailing_dir_separators(created);
+            if (impl_->file_ops().fsync_directory(created.parent_path()) != 0) {
+                LOG_AND_THROW_IO_EXCEPTION("fail to fsync the parent directory of " + created.string(), errno);
             }
             internal::setup_initial_logdir(location_);
             add_file(manifest_path);
@@ -266,6 +318,10 @@ datastore::datastore(configuration const& conf) : location_(conf.data_location_)
             if (fclose(strm) != 0) {  // NOLINT(*-owning-memory)
                 LOG_AND_THROW_IO_EXCEPTION("fclose failed", errno);
             }
+            // persist the name of the created epoch file
+            if (impl_->file_ops().fsync_directory(location_) != 0) {
+                LOG_AND_THROW_IO_EXCEPTION("fail to fsync directory: " + location_.string(), errno);
+            }
             add_file(epoch_file_path_);
         }
 
@@ -277,7 +333,7 @@ datastore::datastore(configuration const& conf) : location_(conf.data_location_)
             }
         }
 
-        recover_max_parallelism_ = conf.recover_max_parallelism_;
+        recover_max_parallelism_ = sort_threads;
         LOG(INFO) << "/:limestone:config:datastore setting the number of recover process thread = " << recover_max_parallelism_;
 
         impl_->initialize_blob_file_resolver(location_);
@@ -288,6 +344,26 @@ datastore::datastore(configuration const& conf) : location_(conf.data_location_)
             if (!result_mkdir || error) {
                 LOG_AND_THROW_IO_EXCEPTION("fail to create directory: " + blob_root.string(), error);
             }
+            // persist the name of the created directory (blob_root is right under the location)
+            if (impl_->file_ops().fsync_directory(blob_root.parent_path()) != 0) {
+                LOG_AND_THROW_IO_EXCEPTION("fail to fsync the parent directory of " + blob_root.string(), errno);
+            }
+        }
+        // create the subdirectories for the BLOB files here and synchronize their parent once. Creating one when the
+        // first BLOB is registered or received lets another thread see it before its parent is synchronized, and
+        // return as if the name were persisted
+        bool subdirectory_created = false;
+        for (const boost::filesystem::path& subdirectory : impl_->blob_file_resolver().get_subdirectories()) {
+            if (boost::filesystem::exists(subdirectory, error)) {
+                continue;
+            }
+            if (!boost::filesystem::create_directory(subdirectory, error) || error) {
+                LOG_AND_THROW_IO_EXCEPTION("fail to create directory: " + subdirectory.string(), error);
+            }
+            subdirectory_created = true;
+        }
+        if (subdirectory_created && impl_->file_ops().fsync_directory(blob_root) != 0) {
+            LOG_AND_THROW_IO_EXCEPTION("fail to fsync the blob directory: " + blob_root.string(), errno);
         }
         VLOG_LP(log_debug) << "datastore is created, location = " << location_.string();
     } catch (...) {
@@ -325,6 +401,11 @@ void datastore::persist_epoch_id(epoch_id_type epoch_id) {
             if (::rename(tmp_epoch_file_path_.c_str(), epoch_file_path_.c_str()) != 0) {
                 TRACE_ABORT;
                 LOG_AND_THROW_IO_EXCEPTION("Failed to rename temp file: " + tmp_epoch_file_path_.string() + " to " + epoch_file_path_.string(), errno);
+            }
+            // persist the result of the rename before declaring the epoch durable
+            if (impl_->file_ops().fsync_directory(location_) != 0) {
+                TRACE_ABORT;
+                LOG_AND_THROW_IO_EXCEPTION("Failed to fsync directory: " + location_.string(), errno);
             }
             boost::filesystem::remove(tmp_epoch_file_path_, ec);
             if (ec) {
@@ -464,6 +545,7 @@ void datastore::ready() {
         if (migration_info.has_value() && migration_info->requires_rotation()) {
             LOG(INFO) << "Manifest migration requires WAL rotation.";
             dblog_scan ds(location_);
+            ds.set_file_operations(impl_->file_ops());
             ds.detach_wal_files();
             LOG(INFO) << "WAL rotation completed.";
         }
@@ -966,6 +1048,13 @@ rotation_result datastore::rotate_log_files() {  // NOLINT(readability-function-
             }
         }
         if (!aborted_by_shutdown) {
+            // persist the results of all the renames by synchronizing the directory once here, not after every
+            // rename: that would run under rotation_state.mutex and stall begin_session and end_session of all the
+            // channels. A give-up does not synchronize; a pwal is handled at the next startup under either name
+            if (impl_->file_ops().fsync_directory(location_) != 0) {
+                LOG_AND_THROW_IO_EXCEPTION(
+                    "Failed to fsync the log directory after the rotation: " + location_.string(), errno);
+            }
             auto wait_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
                 std::chrono::steady_clock::now() - wait_begin).count();
             VLOG_LP(log_info) << "rotation request completed: boundary epoch = " << epoch_id
@@ -1016,6 +1105,10 @@ void datastore::rotate_epoch_file() {
         LOG_AND_THROW_IO_EXCEPTION("does not have write permission for the log_location directory, path: " + location_.string(), errno);
     }
     strm.close();
+    // persist the rename and the creation of the new epoch file
+    if (impl_->file_ops().fsync_directory(location_) != 0) {
+        LOG_AND_THROW_IO_EXCEPTION("Failed to fsync directory: " + location_.string(), errno);
+    }
 }
 
 void datastore::add_file(const boost::filesystem::path& file) noexcept {
@@ -1191,6 +1284,9 @@ void datastore::compact_with_online() {  // NOLINT(readability-function-cognitiv
     // rotated files, so "every entry at or below the boundary is in the inputs" would
     // not hold for it.
     options.set_boundary_epoch(result.get_epoch_id());
+    // The compacted WAL file of the current generation is not scanned but is given to the final merge.
+    options.set_compacted_input_file_name(current_compacted_file_name);
+    options.set_sort_settings(impl_->sort_arena_size_bytes(), impl_->sort_merge_fanin(), impl_->sort_work_dir_parent());
 
     // Determine the file names of the new generation. The generation number increases
     // monotonically across online and offline compactions.
@@ -1208,7 +1304,9 @@ void datastore::compact_with_online() {  // NOLINT(readability-function-cognitiv
     // boundary, the carry file) into the temporary directory. An I/O error (a full disk,
     // for instance) has no visible effect because nothing is published yet, so the
     // temporary files are removed and the retry is left to the next compaction request.
-    // A parse error (corrupted input) is unrecoverable and terminates the process.
+    // A malformed compacted WAL file of the current generation (read by the merge) is
+    // reported as an I/O error, and fails the compaction in the same way. A malformed
+    // pwal file found by the scan terminates the process, as it does at startup.
     compaction_output_result output{};
     try {
         output = create_compaction_output(options);
@@ -1244,6 +1342,10 @@ void datastore::compact_with_online() {  // NOLINT(readability-function-cognitiv
         safe_rename(compaction_temp_dir / compacted_file_name, compacted_file);
         if (output.carry_written) {
             safe_rename(compaction_temp_dir / carry_file_name, location_ / carry_file_name);
+        }
+        // persist the result of the renames before recording them in the catalog
+        if (impl_->file_ops().fsync_directory(location_) != 0) {
+            LOG_AND_THROW_IO_EXCEPTION("Failed to fsync directory: " + location_.string(), errno);
         }
         impl_->on_compaction_after_publish();  // for testing
 
@@ -1320,10 +1422,10 @@ void datastore::compact_with_online() {  // NOLINT(readability-function-cognitiv
     if (options.is_gc_enabled() && !impl_->is_backup_in_progress()) {
         LOG_LP(INFO) << "start blob files garbage collection";
         blob_file_garbage_collector_->scan_blob_files(blob_gc_boundary);
-        log_entry_container log_entries = options.get_gc_snapshot().finalize_snapshot();
+        const blob_gc_entry_container& gc_entries = options.get_gc_snapshot().finalize_snapshot();
         blob_file_garbage_collector_->start_add_gc_exempt_blob_ids();
-        for (const auto& entry : log_entries) {
-            for (const auto& blob_id : entry.get_blob_ids()) {
+        for (const auto& entry : gc_entries) {
+            for (const auto& blob_id : entry.blob_ids()) {
                 blob_file_garbage_collector_->add_gc_exempt_blob_id(blob_id);
             }
         }

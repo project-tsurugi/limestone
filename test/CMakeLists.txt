@@ -90,6 +90,7 @@ file(GLOB SRCS
         "limestone/log/*.cpp"
         "limestone/replication/*.cpp"
         "limestone/snapshot/*.cpp"
+        "limestone/sort/*.cpp"
         "limestone/utils/*.cpp"
         "limestone/partitioned_cursor/*.cpp"
         )

@@ -1,5 +1,5 @@
 /*
- * Copyright 2022-2023 Project Tsurugi.
+ * Copyright 2022-2026 Project Tsurugi.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -19,7 +19,7 @@
 #include <limestone/logging.h>
 #include "logging_helper.h"
 #include "limestone_exception_helper.h"
-#include "log_entry.h"
+#include "log_entry/log_entry.h"
 #include "cursor_impl.h"
 
 

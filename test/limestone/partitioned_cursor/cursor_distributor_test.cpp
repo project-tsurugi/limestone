@@ -1,3 +1,18 @@
+/*
+ * Copyright 2025-2026 Project Tsurugi.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
 #include "partitioned_cursor/cursor_distributor.h"
 
 #include <gtest/gtest.h>
@@ -41,11 +56,11 @@ public:
     }
 
     void key(std::string& buf) const noexcept override {
-        current_.key(buf);
+        buf.assign(current_.key());
     }
 
     void value(std::string& buf) const noexcept override {
-        current_.value(buf);
+        buf.assign(current_.value());
     }
 
     api::log_entry::entry_type type() const override {
@@ -53,7 +68,7 @@ public:
     }
 
     std::vector<api::blob_id_type> blob_ids() const override {
-        return current_.get_blob_ids();
+        return current_.blob_ids();
     }
 
     void close() override {}

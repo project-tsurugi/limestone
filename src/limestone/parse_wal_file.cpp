@@ -1,5 +1,5 @@
 /*
- * Copyright 2024-2024 Project Tsurugi.
+ * Copyright 2024-2026 Project Tsurugi.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -14,8 +14,13 @@
  * limitations under the License.
  */
 
-#include <boost/filesystem/fstream.hpp>
+#include <fcntl.h>
+#include <unistd.h>
+
+#include <cassert>
+#include <cerrno>
 #include <cstdlib>
+#include <optional>
 
 #include <glog/logging.h>
 #include <limestone/logging.h>
@@ -24,24 +29,43 @@
 
 #include <limestone/api/datastore.h>
 #include "dblog_scan.h"
-#include "log_entry.h"
+#include "log_entry/log_entry.h"
+#include "log_entry/log_entry_reader.h"
 
 namespace {
 
 using namespace limestone;
 using namespace limestone::api;
 
-void invalidate_epoch_snippet(boost::filesystem::fstream& strm, std::streampos fpos_head_of_epoch_snippet) {
-    auto pos = strm.tellg();
-    strm.seekp(fpos_head_of_epoch_snippet, std::ios::beg);
-    char buf = static_cast<char>(log_entry::entry_type::marker_invalidated_begin);
-    strm.write(&buf, sizeof(char));
-    strm.flush();
-    // TODO fsync
-    strm.seekg(pos, std::ios::beg);  // restore position
-    if (!strm) {
-        LOG_LP(ERROR) << "I/O error at marking epoch snippet header";
+/**
+ * @brief Rewrites the marker at the head of an invalid epoch snippet to marker_invalidated_begin, and fsyncs.
+ *
+ * Opens the file for writing separately from reading, writes at the position, and closes it.
+ * @param file the pwal file
+ * @param fpos_head_of_epoch_snippet the position of the marker at the head of the snippet
+ * @throws limestone_io_exception if the file cannot be opened, written, or fsynced (with errno)
+ */
+void invalidate_epoch_snippet(const boost::filesystem::path& file, std::streamoff fpos_head_of_epoch_snippet) {
+    // throw if the marker cannot be rewritten: if scanning continued as repaired without the rewrite, a snippet that
+    // should be invalid could be treated as valid data at a later startup, after the durable epoch has advanced
+    const int fd = ::open(file.c_str(), O_WRONLY);  // NOLINT(cppcoreguidelines-pro-type-vararg,hicpp-vararg)
+    if (fd < 0) {
+        const int err = errno;
+        LOG_AND_THROW_IO_EXCEPTION("cannot open pwal file: " + file.string(), err);
     }
+    const char buf = static_cast<char>(log_entry::entry_type::marker_invalidated_begin);
+    errno = 0;  // so that a stale errno is not reported if pwrite returns 0
+    if (::pwrite(fd, &buf, sizeof(char), static_cast<off_t>(fpos_head_of_epoch_snippet)) != 1) {
+        const int err = errno;
+        ::close(fd);
+        LOG_AND_THROW_IO_EXCEPTION("cannot write pwal file: " + file.string(), err);
+    }
+    if (::fsync(fd) != 0) {
+        const int err = errno;
+        ::close(fd);
+        LOG_AND_THROW_IO_EXCEPTION("cannot fsync pwal file: " + file.string(), err);
+    }
+    ::close(fd);
 }
 } // namespace
 
@@ -160,14 +184,14 @@ using namespace limestone::api;
             UNKNOWN_TYPE_entry = 1001,
         };
 
-        lex_token(log_entry::read_error& ec, bool data_remains, log_entry& e) {
-            set(ec, data_remains, e);
+        explicit lex_token(const log_entry_read_result& read_result) {
+            set(read_result);
         }
-        void set(log_entry::read_error& ec, bool data_remains, log_entry& e) {
-            if (ec.value() == 0) {
-                if (!data_remains) {
+        void set(const log_entry_read_result& read_result) {
+            if (read_result.result() != log_entry_read_result::status::error) {
+                if (read_result.result() == log_entry_read_result::status::end) {
                     value_ = token_type::eof;
-                } else switch (e.type()) {  // NOLINT(*braces-around-statements)
+                } else switch (read_result.view().type()) {  // NOLINT(*braces-around-statements)
                 case log_entry::entry_type::normal_entry:             value_ = token_type::normal_entry; break;
                 case log_entry::entry_type::normal_with_blob:         value_ = token_type::normal_with_blob; break;
                 case log_entry::entry_type::marker_begin:             value_ = token_type::marker_begin; break;
@@ -180,8 +204,8 @@ using namespace limestone::api;
                 case log_entry::entry_type::remove_storage:           value_ = token_type::remove_storage; break;
                 default: assert(false);
                 }
-            } else if (ec.value() == log_entry::read_error::short_entry) {
-                switch (e.type()) {
+            } else if (read_result.error().value() == log_entry::read_error::short_entry) {
+                switch (read_result.error().entry_type()) {
                 case log_entry::entry_type::normal_entry:             value_ = token_type::SHORT_normal_entry; break;
                 case log_entry::entry_type::normal_with_blob:         value_ = token_type::SHORT_normal_with_blob; break;
                 case log_entry::entry_type::marker_begin:             value_ = token_type::SHORT_marker_begin; break;
@@ -194,7 +218,7 @@ using namespace limestone::api;
                 case log_entry::entry_type::remove_storage:           value_ = token_type::SHORT_remove_storage; break;
                 default: assert(false);
                 }
-            } else if (ec.value() == log_entry::read_error::unknown_type) {
+            } else if (read_result.error().value() == log_entry::read_error::unknown_type) {
                 value_ = token_type::UNKNOWN_TYPE_entry;
             } else {
                 assert(false);
@@ -257,10 +281,11 @@ using namespace limestone::api;
 
 // scan the file, and check max epoch number in this file
 epoch_id_type dblog_scan::scan_one_pwal_file(  // NOLINT(readability-function-cognitive-complexity)
-        const boost::filesystem::path& p, epoch_id_type ld_epoch,
+        const scan_input& input, epoch_id_type ld_epoch,
         const std::function<void(log_entry&)>& add_entry,
         const error_report_func_t& report_error,
         parse_error& pe) {
+    const boost::filesystem::path& p = input.path();
     VLOG_LP(log_debug) << "processing pwal file: " << p.filename().string();
     epoch_id_type current_epoch{UINT64_MAX};
     epoch_id_type max_epoch_of_file{0};
@@ -271,26 +296,37 @@ epoch_id_type dblog_scan::scan_one_pwal_file(  // NOLINT(readability-function-co
     auto err_unexpected = [&](){
         log_entry::read_error ectmp{};
         ectmp.value(log_entry::read_error::unexpected_type);
-        ectmp.entry_type(e.type());
+        ectmp.entry_type(ec ? ec.entry_type() : e.type());
         report_error(ectmp);
     };
-    boost::filesystem::fstream strm;
-    strm.open(p, std::ios_base::in | std::ios_base::out | std::ios_base::binary);
-    if (!strm) {
-        LOG_AND_THROW_IO_EXCEPTION("cannot open pwal file: " + p.string(), errno);
-    }
+    // the file is opened read-only for reading. Rewriting the marker of an invalid epoch snippet opens it for writing
+    // separately. The reader is held in an optional so that its lifetime can be ended explicitly to close the file
+    // before trimming (resize_file)
+    std::optional<log_entry_reader> reader{std::in_place, p};
     bool valid = true;  // scanning in the normal (not-invalidated) epoch snippet
     [[maybe_unused]]
     bool invalidated_wrote = true;  // invalid mark is wrote, so no need to mark again
     bool marked_before_scan{};  // scanning epoch-snippet already marked before this scan
     bool first = true;
     ec.value(log_entry::read_error::ok);
-    std::streampos fpos_epoch_snippet;
+    std::streamoff fpos_epoch_snippet{};
     while (true) {
-        auto fpos_before_read_entry = strm.tellg();
-        bool data_remains = e.read_entry_from(strm, ec);
-        VLOG_LP(45) << "read: { ec:" << ec.value() << " : " << ec.message() << ", data_remains:" << data_remains << ", e:" << static_cast<int>(e.type()) << "}";
-        lex_token tok{ec, data_remains, e};
+        if (input.stopped()) {
+            break;  // the scan is aborted: leaves the rest unread and returns after the cleanup only
+        }
+        const auto read_result = reader->next();
+        const auto fpos_before_read_entry = static_cast<std::streamoff>(read_result.offset());
+        if (read_result.result() == log_entry_read_result::status::ok) {
+            e = log_entry{read_result.view()};
+            ec = log_entry::read_error{};
+        } else {
+            e = log_entry{};
+            ec = read_result.result() == log_entry_read_result::status::error ? read_result.error()
+                                                                              : log_entry::read_error{};
+        }
+        VLOG_LP(45) << "read: { result:" << read_result.result() << ", ec:" << ec.value() << " : " << ec.message()
+                    << ", e:" << static_cast<int>(e.type()) << "}";
+        lex_token tok{read_result};
         VLOG_LP(45) << "token: " << static_cast<int>(tok.value());
         bool aborted = false;
         switch (tok.value()) {
@@ -331,7 +367,7 @@ epoch_id_type dblog_scan::scan_one_pwal_file(  // NOLINT(readability-function-co
                     invalidated_wrote = false;
                     break;
                 case process_at_nondurable::repair_by_mark:
-                    invalidate_epoch_snippet(strm, fpos_epoch_snippet);
+                    invalidate_epoch_snippet(p, fpos_epoch_snippet);
                     VLOG_LP(0) << "marked invalid " << p << " at offset " << fpos_epoch_snippet;
                     fixed++;
                     invalidated_wrote = true;
@@ -385,9 +421,8 @@ epoch_id_type dblog_scan::scan_one_pwal_file(  // NOLINT(readability-function-co
                 case process_at_truncated::ignore:
                     break;
                 case process_at_truncated::repair_by_mark:
-                    strm.clear();  // reset eof
                     if (valid) {
-                        invalidate_epoch_snippet(strm, fpos_epoch_snippet);
+                        invalidate_epoch_snippet(p, fpos_epoch_snippet);
                         fixed++;
                         VLOG_LP(0) << "marked invalid " << p << " at offset " << fpos_epoch_snippet;
                         // quitting loop just after this, so no need to change 'valid', but...
@@ -431,8 +466,7 @@ epoch_id_type dblog_scan::scan_one_pwal_file(  // NOLINT(readability-function-co
                     case process_at_truncated::ignore:
                         break;
                     case process_at_truncated::repair_by_mark:
-                        strm.clear();  // reset eof
-                        invalidate_epoch_snippet(strm, fpos_epoch_snippet);
+                        invalidate_epoch_snippet(p, fpos_epoch_snippet);
                         fixed++;
                         VLOG_LP(0) << "marked invalid " << p << " at offset " << fpos_epoch_snippet;
                         pe = parse_error(parse_error::broken_after_marked, fpos_epoch_snippet);
@@ -469,8 +503,7 @@ epoch_id_type dblog_scan::scan_one_pwal_file(  // NOLINT(readability-function-co
                     break;
 
                 case process_at_damaged::repair_by_mark:
-                    strm.clear();  // reset eof
-                    invalidate_epoch_snippet(strm, fpos_epoch_snippet);
+                    invalidate_epoch_snippet(p, fpos_epoch_snippet);
                     fixed++;
                     VLOG_LP(0) << "marked invalid " << p << " at offset " << fpos_epoch_snippet;
                     if (pe.value() < parse_error::broken_after_marked) {
@@ -496,9 +529,8 @@ epoch_id_type dblog_scan::scan_one_pwal_file(  // NOLINT(readability-function-co
                 case process_at_damaged::ignore:
                     break;
                 case process_at_damaged::repair_by_mark:
-                    strm.clear();  // reset eof
                     if (valid) {
-                        invalidate_epoch_snippet(strm, fpos_epoch_snippet);
+                        invalidate_epoch_snippet(p, fpos_epoch_snippet);
                         fixed++;
                         VLOG_LP(0) << "marked invalid " << p << " at offset " << fpos_epoch_snippet;
                         // quitting loop just after this, so no need to change 'valid', but...
@@ -552,11 +584,17 @@ epoch_id_type dblog_scan::scan_one_pwal_file(  // NOLINT(readability-function-co
         }
         if (aborted) break;
     }
-    strm.close();
+    reader.reset();  // close the file before trimming
     if (pe.value() == parse_error::broken_after_tobe_cut) {
         // DO trim
         // TODO: check byte at fpos is 0x02 or 0x06
-        boost::filesystem::resize_file(p, pe.fpos());
+        // throw limestone_io_exception if the file cannot be trimmed: the exception of boost would not be caught by
+        // the worker threads of the scan
+        boost::system::error_code error;
+        boost::filesystem::resize_file(p, pe.fpos(), error);
+        if (error) {
+            LOG_AND_THROW_IO_EXCEPTION("cannot trim pwal file: " + p.string(), error);
+        }
         VLOG_LP(0) << "trimmed " << p << " at offset " << pe.fpos();
         pe.value(parse_error::repaired);
         fixed++;

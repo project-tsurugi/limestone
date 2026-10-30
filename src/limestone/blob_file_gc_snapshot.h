@@ -1,5 +1,5 @@
 /*
- * Copyright 2022-2025 Project Tsurugi.
+ * Copyright 2022-2026 Project Tsurugi.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -19,10 +19,14 @@
 #include <vector>
 #include <memory>
 #include <mutex>
-#include "log_entry_container.h"
+#include "log_entry/log_entry_view.h"
+#include "blob_gc_entry_container.h"
 #include "limestone/api/blob_id_type.h"
+#include "limestone/api/write_version_type.h"
 
 namespace limestone::internal {
+
+using limestone::api::write_version_type;
 
 /*
  * blob_file_gc_snapshot
@@ -59,14 +63,14 @@ public:
      * Sanitizes and adds a log entry to the snapshot.
      *
      * Only entries of type normal_with_blob are processed.
-     * The method clears the payload from the entry’s value_etc (keeping the write_version header)
-     * and adds the entry into the appropriate container based on its write_version:
+     * The method takes the key_sid, the write_version and the blob_ids of the entry (blob_gc_entry)
+     * and adds them into the appropriate container based on its write_version:
      *   - write_version below boundary_version goes to the low entries container.
      *   - write_version greater than or equal to boundary_version goes to the high entries container.
      *
-     * @param entry The log_entry to be processed and potentially added.
+     * @param entry The entry to be processed and potentially added.
      */
-    void sanitize_and_add_entry(const log_entry& entry);
+    void sanitize_and_add_entry(const log_entry_view& entry);
 
     /* 
      * Notifies that the add_entry operations in the current thread are complete,
@@ -81,9 +85,9 @@ public:
      * This method calls the two protected methods finalize_low_entries_impl() and
      * finalize_high_entries_impl() sequentially, and combines their results.
      *
-     * @return const log_entry_container& The finalized snapshot of log entries.
+     * @return const blob_gc_entry_container& The finalized snapshot of log entries.
      */
-    const log_entry_container& finalize_snapshot();
+    const blob_gc_entry_container& finalize_snapshot();
     
     /* 
      * Resets the internal state for a new garbage collection cycle.
@@ -103,40 +107,40 @@ protected:
     /**
      * @brief Finalizes low entries: merges, sorts and removes duplicates.
      *
-     * @return log_entry_container The merged low entries container.
+     * @return blob_gc_entry_container The merged low entries container.
      */
-    log_entry_container finalize_low_entries_impl();
+    blob_gc_entry_container finalize_low_entries_impl();
 
     /**
      * @brief Finalizes high entries: appends all high container entries.
      *
-     * @return log_entry_container The container holding all high entries.
+     * @return blob_gc_entry_container The container holding all high entries.
      */
-    log_entry_container finalize_high_entries_impl();
+    blob_gc_entry_container finalize_high_entries_impl();
 
 private:
-    // Thread-local pointer to each thread's low log_entry_container.
+    // Thread-local pointer to each thread's low blob_gc_entry_container.
     // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
-    static thread_local std::shared_ptr<log_entry_container> tls_low_container_;
+    static thread_local std::shared_ptr<blob_gc_entry_container> tls_low_container_;
 
-    // Thread-local pointer to each thread's high log_entry_container.
+    // Thread-local pointer to each thread's high blob_gc_entry_container.
     // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
-    static thread_local std::shared_ptr<log_entry_container> tls_high_container_;
+    static thread_local std::shared_ptr<blob_gc_entry_container> tls_high_container_;
 
     // The boundary version for write_version used in garbage collection.
     write_version_type boundary_version_;
 
     // Final snapshot after merging low containers (with deduplication) and appending high entries.
-    log_entry_container aggregated_entries;
+    blob_gc_entry_container aggregated_entries;
 
     // Global mutex to ensure thread-safe access to thread-local container vectors.
     mutable std::mutex global_mtx_;
 
     // List of thread-local low containers to be merged into the final snapshot.
-    std::vector<std::shared_ptr<log_entry_container>> thread_low_containers_;
+    std::vector<std::shared_ptr<blob_gc_entry_container>> thread_low_containers_;
 
     // List of thread-local high containers whose entries are directly appended.
-    std::vector<std::shared_ptr<log_entry_container>> thread_high_containers_;
+    std::vector<std::shared_ptr<blob_gc_entry_container>> thread_high_containers_;
 };
 
 } // namespace limestone::internal

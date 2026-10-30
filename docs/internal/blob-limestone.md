@@ -695,16 +695,18 @@ log_channel.hに更新しているが、だれも参照していないpriavte fi
 * エントリを登録するメソッド
 
 ```    
-    /* 
-    * Sanitizes and adds a log entry to the snapshot.
-    *
-    * Only entries of type normal_with_blob are processed.
-    * The method clears the payload from the entry’s value_etc (keeping the write_version header)
-    * and adds the entry if its write_version is below the boundary_version.
-    *
-    * @param entry The log_entry to be processed and potentially added.
-    */
-    void sanitize_and_add_entry(const log_entry& entry);
+    /*
+     * Sanitizes and adds a log entry to the snapshot.
+     *
+     * Only entries of type normal_with_blob are processed.
+     * The method takes the key_sid, the write_version and the blob_ids of the entry (blob_gc_entry)
+     * and adds them into the appropriate container based on its write_version:
+     *   - write_version below boundary_version goes to the low entries container.
+     *   - write_version greater than or equal to boundary_version goes to the high entries container.
+     *
+     * @param entry The entry to be processed and potentially added.
+     */
+    void sanitize_and_add_entry(const log_entry_view& entry);
 ```
 
 * 当該スレッドのエントリ追加が終了したことを通知するメソッド
@@ -729,9 +731,9 @@ log_channel.hに更新しているが、だれも参照していないpriavte fi
      *
      * Merges thread-local containers, sorts them in descending order, and removes duplicate entries.
      *
-     * @return const log_entry_container& The finalized snapshot of log entries.
+     * @return const blob_gc_entry_container& The finalized snapshot of the entries for the BLOB GC.
      */
-    const log_entry_container& finalize_snapshot();
+    const blob_gc_entry_container& finalize_snapshot();
 ```    
 
 * 内部に保持していた情報をクリアしメモリを開放する。

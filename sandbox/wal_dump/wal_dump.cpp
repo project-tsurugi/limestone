@@ -1,9 +1,26 @@
+/*
+ * Copyright 2025-2026 Project Tsurugi.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
 #include <iostream>
 #include <filesystem>
-#include <fstream>
 #include <optional>
 #include <iomanip>
-#include <log_entry.h>
+#include <string_view>
+#include <boost/filesystem.hpp>
+#include "log_entry/log_entry.h"
+#include <log_entry/log_entry_reader.h>
 
 const char* to_string(limestone::api::log_entry::entry_type type) {
     using E = limestone::api::log_entry::entry_type;
@@ -40,7 +57,7 @@ bool is_valid_utf8(const std::string& str) {
     return expected == 0;
 }
 
-std::string format_preview_ascii(const std::string& data, std::size_t limit = 20) {
+std::string format_preview_ascii(std::string_view data, std::size_t limit = 20) {
     std::ostringstream oss;
     std::size_t count = 0;
     for (unsigned char c : data) {
@@ -146,18 +163,13 @@ void print_entry(const limestone::api::log_entry& entry, std::optional<limestone
     switch (entry.type()) {
 case E::normal_entry:
 case E::normal_with_blob: {
-    std::string k, v;
-    entry.key(k);
-    entry.value(v);
-    std::cout << " key=" << format_preview_ascii(k)
-              << " value=" << format_preview_ascii(v);
+    std::cout << " key=" << format_preview_ascii(entry.key())
+              << " value=" << format_preview_ascii(entry.value());
     break;
 }
 
 case E::remove_entry: {
-    std::string k;
-    entry.key(k);
-    std::cout << " key=" << format_preview_ascii(k);
+    std::cout << " key=" << format_preview_ascii(entry.key());
     break;
 }
 
@@ -169,21 +181,22 @@ case E::remove_entry: {
 }
 
 void dump_wal(const std::filesystem::path& file_path) {
-    std::ifstream in(file_path, std::ios::binary);
-    if (!in) {
-        std::cerr << "Error: Cannot open file '" << file_path << "'" << std::endl;
-        return;
-    }
-
+    using limestone::internal::log_entry_read_result;
     std::size_t count = 0;
     std::optional<limestone::api::epoch_id_type> current_epoch;
     try {
+        limestone::internal::log_entry_reader reader(boost::filesystem::path(file_path.string()));
         while (true) {
-            limestone::api::log_entry entry;
-            bool success = entry.read(in);
-            if (!success) {
+            const auto read_result = reader.next();
+            if (read_result.result() == log_entry_read_result::status::end) {
                 break;
             }
+            if (read_result.result() == log_entry_read_result::status::error) {
+                std::cerr << "Error reading log entry at offset " << read_result.offset() << ": "
+                          << read_result.error().message() << std::endl;
+                break;
+            }
+            limestone::api::log_entry entry{read_result.view()};
             if (entry.type() == limestone::api::log_entry::entry_type::marker_begin ||
                 entry.type() == limestone::api::log_entry::entry_type::marker_invalidated_begin) {
                 current_epoch = entry.epoch_id();
@@ -191,9 +204,9 @@ void dump_wal(const std::filesystem::path& file_path) {
             print_entry(entry, current_epoch);
             ++count;
         }
-    } catch (limestone::api::limestone_exception) {
-        // Handle limestone exceptions, such as read errors
-        std::cerr << "Error reading log entry: " << limestone::api::log_entry::read_error().message() << std::endl;
+    } catch (const limestone::api::limestone_exception& e) {
+        // Handle limestone exceptions, such as errors opening or reading the file
+        std::cerr << "Error: " << e.what() << std::endl;
     }
     std::cerr << "Total entries: " << count << std::endl;
 }

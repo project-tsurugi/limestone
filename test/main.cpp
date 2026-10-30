@@ -1,5 +1,5 @@
 /*
- * Copyright 2022-2023 Project Tsurugi.
+ * Copyright 2022-2026 Project Tsurugi.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -20,6 +20,7 @@
 
 #ifdef LIMESTONE_ENABLE_RDMA
 #include <filesystem>
+#include <string_view>
 #include <string>
 #include <system_error>
 #endif
@@ -55,6 +56,21 @@ void remove_vendor_mock_shm() {
     }
 }
 
+/**
+ * @brief Returns whether the invocation only lists the tests (--gtest_list_tests), without running any.
+ *
+ * Listing does not touch the mock, so the segments are not wiped for it. An editor's test explorer lists the tests
+ * whenever the binary changes, and a wipe at that moment would fail an RDMA suite being run by ctest concurrently.
+ */
+bool lists_tests_only(int argc, char** argv) {
+    for (int i = 1; i < argc; ++i) {
+        if (std::string_view(argv[i]).rfind("--gtest_list_tests", 0) == 0) {  // NOLINT(*-pointer-arithmetic)
+            return true;
+        }
+    }
+    return false;
+}
+
 } // namespace
 #endif // LIMESTONE_ENABLE_RDMA
 
@@ -62,7 +78,9 @@ int main(int argc, char **argv) {
     google::InitGoogleLogging("limestone tests");
     FLAGS_logtostderr = true;
 #ifdef LIMESTONE_ENABLE_RDMA
-    remove_vendor_mock_shm();
+    if (! lists_tests_only(argc, argv)) {
+        remove_vendor_mock_shm();
+    }
 #endif
     ::testing::InitGoogleTest(&argc, argv);
     return RUN_ALL_TESTS();

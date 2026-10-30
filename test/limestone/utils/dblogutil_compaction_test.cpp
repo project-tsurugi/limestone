@@ -1,3 +1,18 @@
+/*
+ * Copyright 2024-2026 Project Tsurugi.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
 
 #include <algorithm>
 #include <sstream>
@@ -7,7 +22,7 @@
 
 #include "dblog_scan.h"
 #include "manifest.h"
-#include "log_entry.h"
+#include "log_entry/log_entry.h"
 
 #include "test_root.h"
 
@@ -169,6 +184,92 @@ TEST_F(dblogutil_compaction_test, nondblogdir) {
     EXPECT_GE(rc, 64 << 8);
     EXPECT_TRUE(contains_line_starts_with(out, "E"));  // LOG(ERROR)
     EXPECT_TRUE(contains(out, "unsupport"));
+}
+
+// the number of threads of the sort is 8 without --thread_num and the given value with it (1, the default of gflags,
+// is kept when given explicitly); a value below 1 exits with code 64 without starting the processing
+TEST_F(dblogutil_compaction_test, thread_num_option) {
+    boost::filesystem::path dir{location};
+    dir /= "log";
+    boost::filesystem::create_directory(dir);
+    create_file(dir / "epoch", data_case1_epoch);
+    create_file(dir / std::string(manifest::file_name), data_manifest());
+    create_file(dir / "pwal_0000", data_case1_pwal0);
+    create_file(dir / "pwal_0001", data_case1_pwal1);
+
+    std::string out;
+    int rc = invoke(UTIL_COMMAND " compaction --force --dry_run " + dir.string() + " 2>&1", out);
+    EXPECT_EQ(rc, 0);
+    EXPECT_TRUE(contains_line_starts_with(out, "sort-threads: 8")) << out;
+
+    rc = invoke(UTIL_COMMAND " compaction --force --dry_run --thread_num 2 " + dir.string() + " 2>&1", out);
+    EXPECT_EQ(rc, 0);
+    EXPECT_TRUE(contains_line_starts_with(out, "sort-threads: 2")) << out;
+
+    rc = invoke(UTIL_COMMAND " compaction --force --dry_run --thread_num 1 " + dir.string() + " 2>&1", out);
+    EXPECT_EQ(rc, 0);
+    EXPECT_TRUE(contains_line_starts_with(out, "sort-threads: 1")) << out;
+
+    rc = invoke(UTIL_COMMAND " compaction --force --thread_num 0 " + dir.string() + " 2>&1", out);
+    EXPECT_EQ(rc, 64 << 8);
+    EXPECT_TRUE(contains_line_starts_with(out, "E"));  // LOG(ERROR)
+    EXPECT_TRUE(contains(out, "invalid value for --thread_num option")) << out;
+    EXPECT_FALSE(contains(out, "dblogdir:")) << out;  // exits before starting the processing
+    EXPECT_EQ(list_dir(dir).size(), 2U);  // the log directory is untouched
+}
+
+// --sort_arena_size_mb, --sort_merge_fanin and --sort_work_dir: an invalid value exits with code 64 without starting
+// the processing; the lower boundary values are accepted
+TEST_F(dblogutil_compaction_test, sort_options) {
+    boost::filesystem::path dir{location};
+    dir /= "log";
+    boost::filesystem::create_directory(dir);
+    create_file(dir / "epoch", data_case1_epoch);
+    create_file(dir / std::string(manifest::file_name), data_manifest());
+    create_file(dir / "pwal_0000", data_case1_pwal0);
+    create_file(dir / "pwal_0001", data_case1_pwal1);
+    boost::filesystem::path work_dir{location};
+    work_dir /= "work";
+    boost::filesystem::create_directory(work_dir);
+
+    std::string out;
+    for (const std::string& option : {std::string("--sort_arena_size_mb 0"), std::string("--sort_arena_size_mb 4097"),
+                                      std::string("--sort_merge_fanin 1"),
+                                      "--sort_work_dir " + (boost::filesystem::path(location) / "missing").string()}) {
+        int rc = invoke(UTIL_COMMAND " compaction --force " + option + " " + dir.string() + " 2>&1", out);
+        EXPECT_EQ(rc, 64 << 8) << option;
+        EXPECT_TRUE(contains(out, "invalid value for --sort_")) << option << "\n" << out;
+        EXPECT_FALSE(contains(out, "dblogdir:")) << option << "\n" << out;  // exits before starting the processing
+    }
+    EXPECT_EQ(list_dir(dir).size(), 2U);  // the log directory is untouched
+
+    int rc = invoke(UTIL_COMMAND " compaction --force --dry_run --sort_arena_size_mb 1 --sort_merge_fanin 2"
+                    " --sort_work_dir " + work_dir.string() + " " + dir.string() + " 2>&1", out);
+    EXPECT_EQ(rc, 0) << out;
+    EXPECT_TRUE(contains(out, "compaction will be successfully completed (dry-run mode)")) << out;
+}
+
+// --sort_work_dir is used by the sort: with a directory that cannot be written, sorting cannot be created under it
+// and the compaction fails
+TEST_F(dblogutil_compaction_test, sort_work_dir_is_used_by_the_sort) {
+    if (geteuid() == 0) { GTEST_SKIP() << "skip when run by root"; }
+    boost::filesystem::path dir{location};
+    dir /= "log";
+    boost::filesystem::create_directory(dir);
+    create_file(dir / "epoch", data_case1_epoch);
+    create_file(dir / std::string(manifest::file_name), data_manifest());
+    create_file(dir / "pwal_0000", data_case1_pwal0);
+    boost::filesystem::path readonly{location};
+    readonly /= "readonly";
+    boost::filesystem::create_directory(readonly);
+    boost::filesystem::permissions(readonly, boost::filesystem::owner_read | boost::filesystem::owner_exe);
+
+    std::string out;
+    int rc = invoke(UTIL_COMMAND " compaction --force --dry_run --sort_work_dir " + readonly.string() + " "
+                    + dir.string() + " 2>&1", out);
+    boost::filesystem::permissions(readonly, boost::filesystem::owner_all);
+    EXPECT_EQ(rc, 64 << 8) << out;
+    EXPECT_TRUE(contains(out, "cannot create sorting directory: " + (readonly / "sorting-").string())) << out;
 }
 
 TEST_F(dblogutil_compaction_test, rejects_symlink) {

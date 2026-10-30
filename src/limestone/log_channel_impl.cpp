@@ -1,3 +1,18 @@
+/*
+ * Copyright 2025-2026 Project Tsurugi.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
 #include "log_channel_impl.h"
 #include <cerrno>
 #include <chrono>
@@ -14,7 +29,7 @@
 #include "datastore_impl.h"
 #include "limestone/logging.h"
 #include "limestone_exception_helper.h"
-#include "log_entry.h"
+#include "log_entry/log_entry.h"
 #include "logging_helper.h"
 
 namespace limestone::api {
@@ -44,9 +59,16 @@ void log_channel_impl::begin_session_at(epoch_id_type epoch) {
         activate_session_and_consume_rotation_request();
 
         auto log_file = channel.file_path();
+        // an unregistered file is opened by the first session after the channel is created or rotated, and may be
+        // created
+        const bool may_create = !channel.registered_;
         channel.strm_ = fopen(log_file.c_str(), "a");  // NOLINT(*-owning-memory)
         if (!channel.strm_) {
             LOG_AND_THROW_IO_EXCEPTION("cannot make file on " + channel.location_.string(), errno);
+        }
+        // persist the name of the created file before this session becomes durable
+        if (may_create && datastore_->get_impl()->file_ops().fsync_directory(channel.location_) != 0) {
+            LOG_AND_THROW_IO_EXCEPTION("fail to fsync directory: " + channel.location_.string(), errno);
         }
         setvbuf(channel.strm_, nullptr, _IOFBF, 128L * 1024L);  // NOLINT, NB. glibc may ignore size when _IOFBF and buffer=NULL
         channel.register_session_file(log_file);

@@ -131,6 +131,15 @@ public:
         return blob_directory_;
     }
 
+    /**
+     * @brief Returns the subdirectories of the blob directory that the BLOB files are distributed to.
+     *
+     * @return The paths of the subdirectories.
+     */
+    [[nodiscard]] const std::vector<boost::filesystem::path>& get_subdirectories() const noexcept {
+        return directory_cache_;
+    }
+
 private:
     /**
      * @brief Precomputes all directory paths and stores them in the cache.

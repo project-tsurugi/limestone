@@ -1,3 +1,18 @@
+/*
+ * Copyright 2025-2026 Project Tsurugi.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
 #pragma once
 
 #include <string_view>
@@ -25,6 +40,18 @@ inline constexpr const std::string_view data_normal2 =
     // XXX: epoch footer...
     "\x02\x00\x01\x00\x00\x00\x00\x00\x00"  // marker_begin 0x100
     "\x01\x04\x00\x00\x00\x04\x00\x00\x00" "storage1" "1236" "vermajor" "verminor" "1236"  // normal_entry
+    // XXX: epoch footer...
+    ""sv;
+// contains one entry of each of the three data types and the three storage types
+inline constexpr const std::string_view data_all_entry_types =
+    "\x02\xf0\x00\x00\x00\x00\x00\x00\x00"  // marker_begin 0xf0
+    "\x01\x04\x00\x00\x00\x04\x00\x00\x00" "storage1" "1234" "vermajor" "verminor" "1234"  // normal_entry
+    "\x0a\x04\x00\x00\x00\x04\x00\x00\x00" "storage1" "1235" "vermajor" "verminor" "1235"
+        "\x01\x00\x00\x00" "blobid01"  // normal_with_blob (one BLOB)
+    "\x05\x04\x00\x00\x00" "storage1" "1236" "vermajor" "verminor"  // remove_entry
+    "\x07" "storage2" "vermajor" "verminor"  // clear_storage
+    "\x08" "storage3" "vermajor" "verminor"  // add_storage
+    "\x09" "storage4" "vermajor" "verminor"  // remove_storage
     // XXX: epoch footer...
     ""sv;
 inline constexpr const std::string_view data_nondurable =

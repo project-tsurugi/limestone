@@ -316,7 +316,7 @@ TEST_P(compaction_scenario_test, remove_storage_semantics) {
     ASSERT_EQ(log_entries.size(), 4);
     EXPECT_TRUE(AssertLogEntry(log_entries[0], 2, "key3", "value3", 1, 0, {}, log_entry::entry_type::normal_entry));
     EXPECT_TRUE(AssertLogEntry(log_entries[1], 2, "key4", "value4", 1, 1, {}, log_entry::entry_type::normal_entry));
-    EXPECT_TRUE(AssertLogEntry(log_entries[2], 2, "", "", 2, 0, {}, log_entry::entry_type::remove_storage));
+    EXPECT_TRUE(AssertLogEntry(log_entries[2], 2, std::nullopt, std::nullopt, 2, 0, {}, log_entry::entry_type::remove_storage));
     EXPECT_TRUE(AssertLogEntry(log_entries[3], 2, "key8", "value8", 3, 0, {}, log_entry::entry_type::normal_entry));
 
     log_entries = read_log_file("pwal_0002", location);
@@ -408,7 +408,7 @@ TEST_P(compaction_scenario_test, remove_storage_semantics) {
     ASSERT_EQ(log_entries.size(), 4);
     EXPECT_TRUE(AssertLogEntry(log_entries[0], 2, "key13", "value3", 4, 0, {}, log_entry::entry_type::normal_entry));
     EXPECT_TRUE(AssertLogEntry(log_entries[1], 2, "key14", "value4", 4, 1, {}, log_entry::entry_type::normal_entry));
-    EXPECT_TRUE(AssertLogEntry(log_entries[2], 1, "", "", 5, 0, {}, log_entry::entry_type::remove_storage));
+    EXPECT_TRUE(AssertLogEntry(log_entries[2], 1, std::nullopt, std::nullopt, 5, 0, {}, log_entry::entry_type::remove_storage));
     EXPECT_TRUE(AssertLogEntry(log_entries[3], 2, "key18", "value8", 6, 0, {}, log_entry::entry_type::normal_entry));
 
     log_entries = read_log_file("pwal_0002", location);

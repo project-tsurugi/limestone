@@ -1,5 +1,5 @@
 /*
- * Copyright 2022-2024 Project Tsurugi.
+ * Copyright 2022-2026 Project Tsurugi.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -46,7 +46,6 @@ public:
     using cursor_impl::cursor_impl;
     using cursor_impl::next;
     using cursor_impl::validate_and_read_stream;
-    using cursor_impl::open;
     using cursor_impl::close;
     using cursor_impl::storage;
     using cursor_impl::key;    
@@ -330,10 +329,9 @@ TEST_F(cursor_impl_test, validate_stream_eof) {
         ofs.close();
     }
 
-    // Open the empty file into a stream.
-    std::optional<boost::filesystem::ifstream> stream;
-    stream.emplace(empty_file, std::ios::binary);
-    ASSERT_TRUE(stream->is_open());
+    // Open the empty file with a reader.
+    std::optional<limestone::internal::log_entry_reader> reader;
+    reader.emplace(empty_file);
 
     // Create dummy log_entry and previous key to pass to validate_and_read_stream.
     std::optional<limestone::api::log_entry> log_entry;
@@ -341,15 +339,16 @@ TEST_F(cursor_impl_test, validate_stream_eof) {
 
     // Use cursor_impl_testable to call validate_and_read_stream.
     cursor_impl_testable test_cursor(empty_file);
-    test_cursor.validate_and_read_stream(stream, "empty_stream", log_entry, previous_key);
+    test_cursor.validate_and_read_stream(reader, "empty_stream", log_entry, previous_key);
 
-    // Expect that the stream is closed and reset to nullopt due to EOF.
-    EXPECT_FALSE(stream.has_value()) << "stream should be closed and reset when EOF is reached";
+    // Expect that the reader is reset to nullopt due to EOF.
+    EXPECT_FALSE(reader.has_value()) << "reader should be reset when EOF is reached";
+    EXPECT_FALSE(log_entry.has_value());
 }
 
-// Validate stream closure when stream is not good
-TEST_F(cursor_impl_test, validate_stream_not_good) {
-    // Create a file with dummy content.
+// Validate that a file not matching the format throws
+TEST_F(cursor_impl_test, validate_stream_broken) {
+    // Create a file with dummy content. The first byte 'd' is not a valid entry type.
     boost::filesystem::path bad_file = boost::filesystem::path(location) / "bad_file";
     {
         std::ofstream ofs(bad_file.string());
@@ -357,13 +356,8 @@ TEST_F(cursor_impl_test, validate_stream_not_good) {
         ofs.close();
     }
 
-    // Open the file into a stream.
-    std::optional<boost::filesystem::ifstream> stream;
-    stream.emplace(bad_file, std::ios::binary);
-    ASSERT_TRUE(stream->is_open());
-
-    // Force the stream into a bad state.
-    stream->setstate(std::ios::failbit);
+    std::optional<limestone::internal::log_entry_reader> reader;
+    reader.emplace(bad_file);
 
     // Prepare dummy log_entry and previous key.
     std::optional<limestone::api::log_entry> log_entry;
@@ -371,10 +365,14 @@ TEST_F(cursor_impl_test, validate_stream_not_good) {
 
     // Use cursor_impl_testable to call validate_and_read_stream.
     cursor_impl_testable test_cursor(bad_file);
-    test_cursor.validate_and_read_stream(stream, "bad_stream", log_entry, previous_key);
-
-    // Expect that the stream is closed and reset to nullopt due to not being in a good state.
-    EXPECT_FALSE(stream.has_value()) << "stream should be closed and reset when not in a good state";
+    try {
+        test_cursor.validate_and_read_stream(reader, "bad_stream", log_entry, previous_key);
+        FAIL() << "expected limestone_exception";
+    } catch (const limestone::limestone_exception& e) {
+        // the message names the broken file
+        EXPECT_NE(std::string(e.what()).find(bad_file.string()), std::string::npos) << e.what();
+    }
+    EXPECT_FALSE(log_entry.has_value());
 }
 
 // Verify while loop processes multiple entries with sorted keys
@@ -745,20 +743,37 @@ TEST_F(cursor_impl_test, current_returns_latest_entry_after_next) {
 
     ASSERT_TRUE(cursor.next());
     const auto& entry1 = cursor.current();
-    std::string key;
-    std::string value;
-    entry1.key(key);
-    entry1.value(value);
-    EXPECT_EQ(key, "key1");
-    EXPECT_EQ(value, "value1");
+    EXPECT_EQ(entry1.key(), "key1");
+    EXPECT_EQ(entry1.value(), "value1");
 
     ASSERT_TRUE(cursor.next());
     const auto& entry2 = cursor.current();
-    entry2.key(key);
-    entry2.value(value);
-    EXPECT_EQ(key, "key2");
-    EXPECT_EQ(value, "value2"); 
+    EXPECT_EQ(entry2.key(), "key2");
+    EXPECT_EQ(entry2.value(), "value2");
 
+    EXPECT_FALSE(cursor.next());
+}
+
+// Verify that after moving from current(), the current entry is in the default-constructed state until next()
+TEST_F(cursor_impl_test, current_after_move_is_default_constructed) {
+    create_log_file("snapshot", entry_maker_.get_default_entries());
+    boost::filesystem::path snapshot_file = boost::filesystem::path(location) / "snapshot";
+
+    cursor_impl_testable cursor(snapshot_file);
+
+    ASSERT_TRUE(cursor.next());
+    limestone::api::log_entry taken = std::move(cursor.current());
+    EXPECT_EQ(taken.key(), "key1");
+    EXPECT_EQ(cursor.type(), limestone::api::log_entry::entry_type::this_id_is_not_used);
+    // The datastore threads are running, so use the threadsafe style for the death test
+    const std::string saved_style = ::testing::FLAGS_gtest_death_test_style;
+    ::testing::FLAGS_gtest_death_test_style = "threadsafe";
+    EXPECT_DEATH((void) cursor.storage(), "log_entry_view:storage not valid");
+    ::testing::FLAGS_gtest_death_test_style = saved_style;
+
+    // next() moves to the next entry as usual
+    ASSERT_TRUE(cursor.next());
+    EXPECT_EQ(cursor.current().key(), "key2");
     EXPECT_FALSE(cursor.next());
 }
 

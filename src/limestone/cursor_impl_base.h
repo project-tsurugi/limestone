@@ -1,5 +1,5 @@
 /*
- * Copyright 2022-2025 Project Tsurugi.
+ * Copyright 2022-2026 Project Tsurugi.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -20,7 +20,7 @@
 #include <vector>
 #include <limestone/api/storage_id_type.h>
 #include <limestone/api/blob_id_type.h>
-#include "log_entry.h"
+#include "log_entry/log_entry.h"
 
 namespace limestone::internal {
 
@@ -72,17 +72,18 @@ public:
     /**
      * @brief Returns the list of blob IDs associated with the current entry.
      * @return a vector of blob IDs.
-     * @note Only valid after a successful call to `next()`.
+     * @note Only valid for a normal_with_blob entry, after a successful call to `next()`.
      */
     [[nodiscard]] virtual std::vector<api::blob_id_type> blob_ids() const = 0;
 
     /**
      * @brief Returns the current entry.
-     * @return the current log_entry, typically moved.
-     * @details Only valid after a successful call to `next()`.
-     *          The returned object is intended to be moved.
-     *          After calling this method, the cursor may enter an unspecified internal state,
-     *          and calling any method other than `next()` may result in undefined behavior.
+     *
+     * Valid only after next() returns true. The caller may move from the returned object. After that, until next() is
+     * called, the current entry is in the default-constructed state (type this_id_is_not_used, with all values
+     * invalid): type() returns this_id_is_not_used, and storage(), key(), value() and blob_ids() write a FATAL log and
+     * abort.
+     * @return the current entry
      */
     [[nodiscard]] virtual log_entry& current() = 0;
 

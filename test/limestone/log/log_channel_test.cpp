@@ -1,5 +1,5 @@
 /*
- * Copyright 2022-2024 Project Tsurugi.
+ * Copyright 2022-2026 Project Tsurugi.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -16,7 +16,7 @@
 #include <map>
 #include <unistd.h>
 #include "internal.h"
-#include "log_entry.h"
+#include "log_entry/log_entry.h"
 #include "test_root.h"
 #include "manifest.h"
 #include "limestone/api/epoch_id_type.h"

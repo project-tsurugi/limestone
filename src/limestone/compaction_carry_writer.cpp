@@ -25,7 +25,8 @@
 #include <limestone/logging.h>
 
 #include "limestone_exception_helper.h"
-#include "log_entry.h"
+#include "log_entry/log_entry.h"
+#include "log_entry/log_entry_reader.h"
 #include "logging_helper.h"
 
 namespace limestone::internal {
@@ -43,28 +44,30 @@ compaction_carry_writer::compaction_carry_writer(epoch_id_type boundary_epoch, b
 std::vector<compaction_carry_writer::snippet_span>
 compaction_carry_writer::collect_carry_spans(const boost::filesystem::path& input) const {
     std::vector<snippet_span> spans;
-    std::ifstream in(input.string(), std::ios::in | std::ios::binary);
-    if (!in) {
-        LOG_AND_THROW_IO_EXCEPTION("cannot open the input file of the carry pass: " + input.string(), errno);
-    }
-    log_entry e;
+    log_entry_reader reader(input);  // throws limestone_io_exception if the file cannot be opened
     bool carrying = false;
     std::streamoff carry_start = 0;
     for (;;) {
-        std::streamoff pos = in.tellg();
-        if (!e.read(in)) {  // a broken entry makes log_entry::read throw
+        const auto read_result = reader.next();
+        if (read_result.result() == log_entry_read_result::status::error) {
+            LOG_AND_THROW_EXCEPTION("the input file of the carry pass is broken: " + input.string() + " at offset "
+                                    + std::to_string(read_result.offset()) + ": " + read_result.error().message());
+        }
+        const auto pos = static_cast<std::streamoff>(read_result.offset());
+        if (read_result.result() == log_entry_read_result::status::end) {
             if (carrying) {
                 spans.push_back({carry_start, pos - carry_start});
             }
             break;
         }
-        if (e.type() == log_entry::entry_type::marker_begin ||
-            e.type() == log_entry::entry_type::marker_invalidated_begin) {
+        const auto entry = read_result.view();
+        if (entry.type() == log_entry::entry_type::marker_begin ||
+            entry.type() == log_entry::entry_type::marker_invalidated_begin) {
             if (carrying) {
                 spans.push_back({carry_start, pos - carry_start});
                 carrying = false;
             }
-            if (e.type() == log_entry::entry_type::marker_begin && e.epoch_id() > boundary_epoch_) {
+            if (entry.type() == log_entry::entry_type::marker_begin && entry.epoch_id() > boundary_epoch_) {
                 carrying = true;
                 carry_start = pos;
             }

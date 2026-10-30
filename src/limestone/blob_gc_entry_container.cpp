@@ -1,5 +1,5 @@
 /*
- * Copyright 2022-2024 Project Tsurugi.
+ * Copyright 2022-2026 Project Tsurugi.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -14,37 +14,38 @@
  * limitations under the License.
  */
 
- #include "log_entry_container.h"
- #include "log_entry_comparator.h"
+ #include "blob_gc_entry_container.h"
+ #include "blob_gc_entry_comparator.h"
  #include <boost/heap/binomial_heap.hpp>
   #include <algorithm>   // for std::sort
  #include <iterator>    // for std::back_inserter
+ #include <utility>     // for std::move
  
  namespace limestone::internal {
  
  // ----- Log Entry Addition (append) -----
  
- void log_entry_container::append(const log_entry& entry) {
-     entries_.push_back(entry);
+ void blob_gc_entry_container::append(blob_gc_entry entry) {
+     entries_.push_back(std::move(entry));
      // When a new entry is added, the collection is no longer sorted.
      sorted_ = false;
  }
  
  // ----- Iteration Functions -----
  
- log_entry_container::const_iterator log_entry_container::begin() const {
+ blob_gc_entry_container::const_iterator blob_gc_entry_container::begin() const {
      return entries_.begin();
  }
  
- log_entry_container::const_iterator log_entry_container::end() const {
+ blob_gc_entry_container::const_iterator blob_gc_entry_container::end() const {
      return entries_.end();
  }
  
- std::size_t log_entry_container::size() const noexcept {
+ std::size_t blob_gc_entry_container::size() const noexcept {
      return entries_.size();
  }
  
- void log_entry_container::clear() noexcept {
+ void blob_gc_entry_container::clear() noexcept {
      entries_.clear();
      // An empty collection is considered sorted.
      sorted_ = true;
@@ -52,17 +53,17 @@
  
  // ----- Sorting Functions -----
  
- void log_entry_container::sort_descending() {
+ void blob_gc_entry_container::sort_descending() {
     if (!sorted_) {
         // Reverse the order by swapping the operands in the comparator.
-        std::sort(entries_.begin(), entries_.end(), [](const log_entry& a, const log_entry& b) {
-            return log_entry_comparator()(b, a);
+        std::sort(entries_.begin(), entries_.end(), [](const blob_gc_entry& a, const blob_gc_entry& b) {
+            return blob_gc_entry_comparator()(b, a);
         });
         sorted_ = true;
     }
 }
  
- bool log_entry_container::is_sorted() const noexcept {
+ bool blob_gc_entry_container::is_sorted() const noexcept {
      return sorted_;
  }
  
@@ -70,23 +71,23 @@
  
  // Structure to hold the current iterator and the end iterator for a collection.
  struct iterator_range {
-     std::vector<log_entry>::const_iterator current;
-     std::vector<log_entry>::const_iterator end;
+     std::vector<blob_gc_entry>::const_iterator current;
+     std::vector<blob_gc_entry>::const_iterator end;
  };
  
  // Comparator for the heap: ensures that the largest key_sid is at the top.
  struct iterator_range_compare {
     bool operator()(const iterator_range& a, const iterator_range& b) const {
-        return log_entry_comparator()(*a.current, *b.current);
+        return blob_gc_entry_comparator()(*a.current, *b.current);
     }
 };
 
  
  // Static merge function using a multi-way merge algorithm with Boost's binomial_heap.
-log_entry_container log_entry_container::merge_sorted_collections(
-    std::vector<std::shared_ptr<log_entry_container>>& container_list) {
+blob_gc_entry_container blob_gc_entry_container::merge_sorted_collections(
+    std::vector<std::shared_ptr<blob_gc_entry_container>>& container_list) {
 
-    log_entry_container merged;
+    blob_gc_entry_container merged;
 
     // First, ensure that each collection is sorted.
     for (auto& container_ptr : container_list) {

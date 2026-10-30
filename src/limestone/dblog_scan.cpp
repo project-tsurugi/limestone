@@ -1,5 +1,5 @@
 /*
- * Copyright 2024-2024 Project Tsurugi.
+ * Copyright 2024-2026 Project Tsurugi.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -14,10 +14,12 @@
  * limitations under the License.
  */
 
+#include <cassert>
 #include <iomanip>
 #include <map>
 #include <mutex>
 #include <set>
+#include <utility>
 #include <boost/filesystem.hpp>
 
 #include <glog/logging.h>
@@ -28,8 +30,8 @@
 #include <limestone/api/datastore.h>
 #include "internal.h"
 #include "dblog_scan.h"
-#include "log_entry.h"
-#include "sortdb_wrapper.h"
+#include "log_entry/log_entry.h"
+#include "log_entry/log_entry_reader.h"
 
 namespace {
 using namespace limestone;
@@ -53,22 +55,27 @@ using namespace limestone::api;
 std::optional<epoch_id_type> last_durable_epoch(const boost::filesystem::path& file) {
     std::optional<epoch_id_type> rv;
 
-    boost::filesystem::ifstream istrm;
-    log_entry e;
     // ASSERT: file exists
-    istrm.open(file, std::ios_base::in | std::ios_base::binary);
-    if (!istrm) {  // permission?
-        LOG_AND_THROW_IO_EXCEPTION("cannot read epoch file: " + file.string(), errno);
-    }
-    while (e.read(istrm)) {
-        if (e.type() != log_entry::entry_type::marker_durable) {
-            LOG_AND_THROW_EXCEPTION("this epoch file is broken: unexpected log_entry type: " + std::to_string(static_cast<int>(e.type())));
+    log_entry_reader reader(file);
+    while (true) {
+        const auto read_result = reader.next();
+        if (read_result.result() == log_entry_read_result::status::end) {
+            break;
         }
-        if (!rv.has_value() || e.epoch_id() > rv) {
-            rv = e.epoch_id();
+        if (read_result.result() == log_entry_read_result::status::error) {
+            LOG_AND_THROW_EXCEPTION("this epoch file is broken: " + file.string() + " at offset "
+                                    + std::to_string(read_result.offset()) + ": " + read_result.error().message());
+        }
+        const auto entry = read_result.view();
+        if (entry.type() != log_entry::entry_type::marker_durable) {
+            LOG_AND_THROW_EXCEPTION("this epoch file is broken: " + file.string() + " at offset "
+                                    + std::to_string(read_result.offset()) + ": unexpected log_entry type: "
+                                    + std::to_string(static_cast<int>(entry.type())));
+        }
+        if (!rv.has_value() || entry.epoch_id() > rv) {
+            rv = entry.epoch_id();
         }
     }
-    istrm.close();
     return rv;
 }
 
@@ -119,6 +126,9 @@ void dblog_scan::detach_wal_files(bool skip_empty_files) {
             attached_files.emplace_back(p);
         }
     }
+    if (attached_files.empty()) {
+        return;
+    }
     for (const boost::filesystem::path& p : attached_files) {
         std::stringstream ssbase;
         auto unix_epoch = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::system_clock::now().time_since_epoch()).count();
@@ -133,20 +143,46 @@ void dblog_scan::detach_wal_files(bool skip_empty_files) {
             }
         }
     }
+    // persist the result of the renames
+    real_file_operations default_ops;
+    file_operations& ops = file_ops_ != nullptr ? *file_ops_ : default_ops;
+    if (ops.fsync_directory(dblogdir_) != 0) {
+        LOG_AND_THROW_IO_EXCEPTION("Failed to fsync directory: " + dblogdir_.string(), errno);
+    }
+}
+
+void dblog_scan::set_file_operations(file_operations& ops) noexcept {
+    file_ops_ = &ops;
+}
+
+epoch_id_type dblog_scan::scan_pwal_files(epoch_id_type ld_epoch, const add_entry_func_t& add_entry,
+                                          const error_report_func_t& report_error,
+                                          dblog_scan::parse_error::code* max_parse_error_value) {
+    input_file_queue queue;
+    for (const auto& p : path_list_) {
+        queue.push(p);
+    }
+    queue.close();
+    return scan_pwal_files(queue, ld_epoch, add_entry, report_error, max_parse_error_value);
 }
 
 epoch_id_type dblog_scan::scan_pwal_files(  // NOLINT(readability-function-cognitive-complexity)
-        epoch_id_type ld_epoch, const std::function<void(log_entry&)>& add_entry,
+        input_file_queue& queue, epoch_id_type ld_epoch, const add_entry_func_t& add_entry,
         const error_report_func_t& report_error, dblog_scan::parse_error::code* max_parse_error_value) {
     std::atomic<epoch_id_type> max_appeared_epoch{ld_epoch};
     if (max_parse_error_value) { *max_parse_error_value = dblog_scan::parse_error::failed; }
     std::atomic<dblog_scan::parse_error::code> max_error_value{dblog_scan::parse_error::code::ok};
     std::map<boost::filesystem::path, epoch_id_type> max_epoch_per_file;
     std::mutex max_epoch_per_file_mtx;
-    auto process_file = [&](const boost::filesystem::path& p) {  // NOLINT(readability-function-cognitive-complexity)
+    // NOLINTNEXTLINE(readability-function-cognitive-complexity)
+    auto process_file = [&](const scan_input& input, int worker) {
+        const boost::filesystem::path& p = input.path();
         if (is_wal(p)) {
             parse_error ec;
-            auto rc = scan_one_pwal_file(p, ld_epoch, add_entry, report_error, ec);
+            const std::function<void(log_entry&)> add_entry_of_worker = [&add_entry, worker](log_entry& e) {
+                add_entry(e, worker);
+            };
+            auto rc = scan_one_pwal_file(input, ld_epoch, add_entry_of_worker, report_error, ec);
             epoch_id_type max_epoch_of_file = rc;
             auto ec_value = ec.value();
             switch (ec_value) {
@@ -210,43 +246,36 @@ epoch_id_type dblog_scan::scan_pwal_files(  // NOLINT(readability-function-cogni
         }
     };
 
-    std::mutex list_mtx;
+    std::mutex ex_mtx;
     std::exception_ptr ex_ptr{};
-    bool done = false;
-    
-    auto temp_list = path_list_;
+
     std::vector<std::thread> workers;
     workers.reserve(thread_num_);
     for (int i = 0; i < thread_num_; i++) {
-        workers.emplace_back([&](){
-            for (;;) {
-                boost::filesystem::path p;
-                {
-                    std::scoped_lock<std::mutex> lock(list_mtx);
-                    if (temp_list.empty() || done) break; 
-                    p = temp_list.front();
-                    temp_list.pop_front();
-                }
-
-                try {
-                    process_file(p);
+        workers.emplace_back([&, i](){
+            try {
+                while (const auto p = queue.pop()) {
+                    process_file(*p, i);
                     if (options_.has_value()) {
                         compaction_options &opts = options_.value().get();
                         if (opts.is_gc_enabled()) {
                             opts.get_gc_snapshot().finalize_local_entries();
                         }
                     }
-                } catch (limestone_exception& ex) {
-                    VLOG(log_info) << "/:limestone catch runtime_error(" << ex.what() << ")";
-                    {
-                        std::scoped_lock<std::mutex> lock(list_mtx);
-                        if (!ex_ptr) {  // only save one
-                            ex_ptr = std::current_exception();
-                        }
-                        done = true;
-                    }
-                    break;
                 }
+                // the hook is called only when the input is exhausted (not when stopped by another thread's failure)
+                if (!queue.aborted() && thread_end_hook_) {
+                    thread_end_hook_(i);
+                }
+            } catch (limestone_exception& ex) {
+                VLOG(log_info) << "/:limestone catch runtime_error(" << ex.what() << ")";
+                {
+                    std::scoped_lock<std::mutex> lock(ex_mtx);
+                    if (!ex_ptr) {  // only save one
+                        ex_ptr = std::current_exception();
+                    }
+                }
+                queue.abort();  // stops the other workers
             }
         });
     }
@@ -256,6 +285,9 @@ epoch_id_type dblog_scan::scan_pwal_files(  // NOLINT(readability-function-cogni
     if (ex_ptr) {
         std::rethrow_exception(ex_ptr);
     }
+    if (queue.aborted()) {  // aborted by the producer
+        THROW_LIMESTONE_EXCEPTION("the scan is aborted");
+    }
     max_epoch_per_file_ = std::move(max_epoch_per_file);
     if (max_parse_error_value) { *max_parse_error_value = max_error_value; }
     return max_appeared_epoch;
@@ -263,7 +295,7 @@ epoch_id_type dblog_scan::scan_pwal_files(  // NOLINT(readability-function-cogni
 
 // called from datastore::create_snapshot
 // db_startup mode
-epoch_id_type dblog_scan::scan_pwal_files_throws(epoch_id_type ld_epoch, const std::function<void(log_entry&)>& add_entry) {
+epoch_id_type dblog_scan::scan_pwal_files_throws(epoch_id_type ld_epoch, const add_entry_func_t& add_entry) {
     set_fail_fast(true);
     set_process_at_nondurable_epoch_snippet(process_at_nondurable::repair_by_mark);
     set_process_at_truncated_epoch_snippet(process_at_truncated::report);
@@ -275,12 +307,17 @@ epoch_id_type dblog_scan::scan_pwal_files_throws(epoch_id_type ld_epoch, const s
 // Snippets beyond the boundary are skipped in the ignore mode (files stay unmodified).
 // The parser treats such a snippet as valid = false, so none of its entries reaches
 // add_entry.
-epoch_id_type dblog_scan::scan_pwal_files_for_compaction(epoch_id_type boundary_epoch, const std::function<void(log_entry&)>& add_entry) {
+epoch_id_type dblog_scan::scan_pwal_files_for_compaction(epoch_id_type boundary_epoch,
+                                                          const add_entry_func_t& add_entry) {
     set_fail_fast(true);
     set_process_at_nondurable_epoch_snippet(process_at_nondurable::ignore);
     set_process_at_truncated_epoch_snippet(process_at_truncated::report);
     set_process_at_damaged_epoch_snippet(process_at_damaged::report);
     return scan_pwal_files(boundary_epoch, add_entry, log_error_and_throw);
+}
+
+void dblog_scan::set_thread_end_hook(thread_end_hook_t hook) {
+    thread_end_hook_ = std::move(hook);
 }
 
 void dblog_scan::rescan_directory_paths() {

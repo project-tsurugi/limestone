@@ -1,5 +1,5 @@
 /*
- * Copyright 2024-2024 Project Tsurugi.
+ * Copyright 2024-2026 Project Tsurugi.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -14,7 +14,11 @@
  * limitations under the License.
  */
 
+#include <fcntl.h>
+#include <unistd.h>
+
 #include <iostream>
+#include <string>
 #include <stdlib.h>  // NOLINT(*-deprecated-headers): <cstdlib> does not provide std::mkdtemp
 #include <glog/logging.h>
 #include <limestone/logging.h>
@@ -23,10 +27,12 @@
 #include "limestone/api/datastore.h"
 #include "dblog_scan.h"
 #include "internal.h"
-#include "log_entry.h"
+#include "log_entry/log_entry.h"
 #include "limestone_exception_helper.h"
 #include "manifest.h"
 #include "compaction_catalog.h"
+#include "sort/sort_buffer.h"
+#include "sort/sort_settings.h"
 
 // NOLINTBEGIN(performance-avoid-endl)
 
@@ -35,7 +41,11 @@ using namespace limestone::internal;
 
 // common options
 DEFINE_string(epoch, "", "specify valid epoch upper limit");
-DEFINE_int32(thread_num, 1, "specify thread num of scanning wal file");
+// the help of gflags is a const char*, so the string holding the default of compaction (sort_settings) is built first
+static const std::string thread_num_help =  // NOLINT(cert-err58-cpp)
+    "specify thread num of scanning wal file (subcommand compaction: the number of threads of the sort, default "
+    + std::to_string(limestone::internal::sort_settings{}.threads) + ")";
+DEFINE_int32(thread_num, 1, thread_num_help.c_str());
 DEFINE_bool(h, false, "display help message");
 DEFINE_bool(verbose, false, "verbose");
 
@@ -48,6 +58,13 @@ DEFINE_string(output_format, "human-readable", "format of output (human-readable
 DEFINE_bool(force, false, "(subcommand compaction) skip start prompt");
 DEFINE_bool(dry_run, false, "(subcommand compaction) dry run");
 DEFINE_bool(make_backup, false, "(subcommand compaction) make backup of target dblogdir");
+DEFINE_uint64(sort_arena_size_mb, limestone::internal::sort_settings{}.arena_size_bytes / (std::uint64_t{1024} * 1024),
+              "(subcommand compaction) size of the buffer per thread of the sort in MiB (1 to 4096)");
+DEFINE_string(sort_work_dir, "",
+              "(subcommand compaction) directory under which the sort creates its working directory sorting-XXXXXX, "
+              "removed when the sort ends (a crash may leave it) (default: dblogdir)");
+DEFINE_uint64(sort_merge_fanin, limestone::internal::sort_settings{}.merge_fanin,
+              "(subcommand compaction) number of sorted files the sort merges at once (at least 2)");
 
 enum class subcommand {
     cmd_inspect,
@@ -64,6 +81,48 @@ void log_and_exit(int error) {
     exit(error);
 }
 
+/**
+ * @brief The settings of the sort of compaction (from the --thread_num and --sort_* options).
+ */
+struct sort_options {
+    limestone::internal::sort_settings settings{};
+    boost::filesystem::path work_dir_parent{};  // dblogdir if empty
+};
+
+/**
+ * @brief Checks the --sort_* options and makes the settings of the sort. A violation writes a LOG(ERROR) and exits
+ *        with code 64.
+ * @param thread_num the checked number of threads
+ * @return the settings of the sort
+ */
+sort_options parse_sort_options(int thread_num) {
+    constexpr std::uint64_t mib = std::uint64_t{1024} * 1024;
+    constexpr std::uint64_t max_arena_size_mb = limestone::internal::sort_buffer::max_arena_size_bytes / mib;
+    if (FLAGS_sort_arena_size_mb < 1 || FLAGS_sort_arena_size_mb > max_arena_size_mb) {
+        LOG(ERROR) << "invalid value for --sort_arena_size_mb option: " << FLAGS_sort_arena_size_mb
+                   << " (must be between 1 and " << max_arena_size_mb << ")";
+        log_and_exit(64);
+    }
+    if (FLAGS_sort_merge_fanin < 2) {
+        LOG(ERROR) << "invalid value for --sort_merge_fanin option: " << FLAGS_sort_merge_fanin
+                   << " (must be at least 2)";
+        log_and_exit(64);
+    }
+    boost::filesystem::path work_dir_parent{FLAGS_sort_work_dir};
+    boost::system::error_code ec;
+    if (! work_dir_parent.empty() && ! boost::filesystem::is_directory(work_dir_parent, ec)) {
+        LOG(ERROR) << "invalid value for --sort_work_dir option: " << work_dir_parent.string()
+                   << " (must be an existing directory)";
+        log_and_exit(64);
+    }
+    sort_options sort{};
+    sort.settings.threads = thread_num;
+    sort.settings.arena_size_bytes = FLAGS_sort_arena_size_mb * mib;
+    sort.settings.merge_fanin = FLAGS_sort_merge_fanin;
+    sort.work_dir_parent = std::move(work_dir_parent);
+    return sort;
+}
+
 void inspect(dblog_scan &ds, std::optional<epoch_id_type> epoch) {
     std::cout << "persistent-format-version: 1" << std::endl;
     epoch_id_type ld_epoch{};
@@ -76,27 +135,39 @@ void inspect(dblog_scan &ds, std::optional<epoch_id_type> epoch) {
     std::cout << "durable-epoch: " << ld_epoch << std::endl;
     std::atomic_size_t count_normal_entry = 0;
     std::atomic_size_t count_remove_entry = 0;
+    std::atomic_size_t count_storage_entry = 0;
     ds.set_process_at_nondurable_epoch_snippet(dblog_scan::process_at_nondurable::report);
     ds.set_process_at_truncated_epoch_snippet(dblog_scan::process_at_truncated::report);
     ds.set_process_at_damaged_epoch_snippet(dblog_scan::process_at_damaged::report);
     ds.set_fail_fast(false);
     dblog_scan::parse_error::code max_ec{};
-    epoch_id_type max_appeared_epoch = ds.scan_pwal_files(epoch.value_or(ld_epoch), [&](log_entry& e){
-        if (e.type() == log_entry::entry_type::normal_entry) {
+    epoch_id_type max_appeared_epoch = ds.scan_pwal_files(epoch.value_or(ld_epoch), [&](log_entry& e, int){
+        switch (e.type()) {
+        case log_entry::entry_type::normal_entry:
+        case log_entry::entry_type::normal_with_blob:
             VLOG(50) << "normal";
             count_normal_entry++;
-        } else if (e.type() == log_entry::entry_type::remove_entry) {
+            break;
+        case log_entry::entry_type::remove_entry:
             VLOG(50) << "remove";
             count_remove_entry++;
-        } else {
+            break;
+        case log_entry::entry_type::clear_storage:
+        case log_entry::entry_type::add_storage:
+        case log_entry::entry_type::remove_storage:
+            VLOG(50) << "storage";
+            count_storage_entry++;
+            break;
+        default:
             LOG(ERROR) << static_cast<int>(e.type());
+            break;
         }
     }, [](log_entry::read_error& ec){
         VLOG(30) << "ERROR " << ec.value() << " : " << ec.message();
         return false;
     }, &max_ec);
     std::cout << "max-appeared-epoch: " << max_appeared_epoch << std::endl;
-    std::cout << "count-durable-wal-entries: " << (count_normal_entry + count_remove_entry) << std::endl;
+    std::cout << "count-durable-wal-entries: " << (count_normal_entry + count_remove_entry + count_storage_entry) << std::endl;
     VLOG(10) << "scan_pwal_files done, max_ec = " << max_ec;
     switch (max_ec) {
     case dblog_scan::parse_error::ok:
@@ -143,7 +214,8 @@ void repair(dblog_scan &ds, std::optional<epoch_id_type> epoch) {
     ds.rescan_directory_paths();
     std::atomic_size_t count_wal_entry = 0;
     dblog_scan::parse_error::code max_ec{};
-    ds.scan_pwal_files(ld_epoch, [&count_wal_entry](log_entry&){ count_wal_entry++; }, [](log_entry::read_error& e) -> bool {
+    ds.scan_pwal_files(ld_epoch, [&count_wal_entry](log_entry&, int){ count_wal_entry++; },
+                       [](log_entry::read_error& e) -> bool {
         LOG_LP(ERROR) << "this pwal file is broken: " << e.message();
         return false;
     }, &max_ec);
@@ -179,6 +251,58 @@ boost::filesystem::path make_work_dir_next_to(const boost::filesystem::path& tar
 
 boost::filesystem::path make_backup_dir_next_to(const boost::filesystem::path& target_dir) {
     return make_tmp_dir_next_to(target_dir, ".backup_XXXXXX");
+}
+
+// synchronizes the data of file to disk
+void sync_file(const boost::filesystem::path& file) {
+    int fd = ::open(file.c_str(), O_RDONLY);  // NOLINT(cppcoreguidelines-pro-type-vararg,hicpp-vararg)
+    if (fd < 0) {
+        LOG_AND_THROW_IO_EXCEPTION("failed to open the file to synchronize it: " + file.string(), errno);
+    }
+    if (::fsync(fd) != 0) {
+        int error_code = errno;
+        ::close(fd);
+        LOG_AND_THROW_IO_EXCEPTION("failed to synchronize the file: " + file.string(), error_code);
+    }
+    if (::close(fd) != 0) {
+        LOG_AND_THROW_IO_EXCEPTION("failed to close the synchronized file: " + file.string(), errno);
+    }
+}
+
+// synchronizes the entries of dir to disk
+void sync_directory(const boost::filesystem::path& dir) {
+    real_file_operations ops;
+    if (ops.fsync_directory(dir) != 0) {
+        LOG_AND_THROW_IO_EXCEPTION("failed to synchronize the directory: " + dir.string(), errno);
+    }
+}
+
+// synchronizes the data of every file and the entries of every directory under dir, recursively
+void sync_tree(const boost::filesystem::path& dir) {
+    boost::system::error_code ec;
+    for (boost::filesystem::recursive_directory_iterator it(dir, ec), end; it != end && !ec; it.increment(ec)) {
+        if (boost::filesystem::is_directory(it->path())) {
+            sync_directory(it->path());
+        } else if (boost::filesystem::is_regular_file(it->path())) {
+            sync_file(it->path());
+        }
+    }
+    if (ec) {
+        LOG_AND_THROW_IO_EXCEPTION("failed to scan the directory to synchronize it: " + dir.string(), ec);
+    }
+    sync_directory(dir);
+}
+
+// persists the contents of the work directory tmp before the swap, as tmp becomes from_dir itself. The catalog, the
+// epoch file and the compacted file were synchronized when written; the copied manifest and (with a backup) the
+// copied BLOB files were not, so they are synchronized here. Otherwise the BLOB directory was moved by rename and its
+// contents are durable already, so synchronizing the entries of tmp is enough
+void sync_work_directory(const boost::filesystem::path& tmp, bool blob_copied) {
+    sync_file(tmp / std::string(manifest::file_name));
+    if (blob_copied && boost::filesystem::exists(tmp / "blob")) {
+        sync_tree(tmp / "blob");
+    }
+    sync_directory(tmp);
 }
 
 /**
@@ -342,7 +466,7 @@ void carry_over_blob_directory(
     }
 }
 
-void compaction(dblog_scan &ds) {
+void compaction(dblog_scan &ds, const sort_options& sort) {
     // The --epoch option is not meaningful for compaction: it never restricts the
     // compacted data, so it is ignored here (consistent with other options that do
     // not apply to a given subcommand). The durable epoch recorded in the log
@@ -355,6 +479,7 @@ void compaction(dblog_scan &ds) {
         log_and_exit(64);
     }
     std::cout << "durable-epoch: " << ld_epoch << std::endl;
+    std::cout << "sort-threads: " << sort.settings.threads << std::endl;
     auto from_dir = ds.get_dblogdir();
     {
         auto p = from_dir;  // make copy
@@ -431,9 +556,12 @@ void compaction(dblog_scan &ds) {
     blob_id_type max_blob_id{};
     if (compacted_file_created) {
         VLOG_LP(log_info) << "making compact pwal file to " << tmp;
-        compaction_options options{from_dir, tmp, FLAGS_thread_num, input_file_names};
+        compaction_options options{from_dir, tmp, sort.settings.threads, input_file_names};
         options.set_output_file_names(compaction_catalog::get_compacted_filename_for_generation(new_generation),
                                       compaction_catalog::get_carry_filename_for_generation(new_generation));
+        options.set_sort_settings(sort.settings.arena_size_bytes, sort.settings.merge_fanin, sort.work_dir_parent);
+        // The compacted WAL file of the current generation is not scanned but is given to the final merge.
+        options.set_compacted_input_file_name(catalog.get_current_compacted_file_name());
         max_blob_id = create_compaction_output(options).max_blob_id;
     } else {
         VLOG_LP(log_info) << "no pwal file to compact in " << from_dir;
@@ -482,6 +610,9 @@ void compaction(dblog_scan &ds) {
     // touches from_dir, and right before the directory swap below.
     carry_over_blob_directory(from_dir, tmp, FLAGS_make_backup);
 
+    VLOG_LP(log_info) << "synchronizing the work directory " << tmp;
+    sync_work_directory(tmp, FLAGS_make_backup);
+
     if (FLAGS_make_backup) {
         auto bkdir = make_backup_dir_next_to(from_dir);
         VLOG_LP(log_info) << "renaming " << from_dir << " to " << bkdir << " for backup";
@@ -495,6 +626,9 @@ void compaction(dblog_scan &ds) {
     }
     VLOG_LP(log_info) << "renaming " << tmp << " to " << from_dir;
     boost::filesystem::rename(tmp, from_dir);
+    // persist the renames of the swap (and the removal of from_dir) before reporting the success. tmp is created
+    // as a normalized absolute path, so its parent is the parent of from_dir
+    sync_directory(tmp.parent_path());
 
     std::cout << "compaction was successfully completed: " << from_dir << std::endl;
 }
@@ -529,6 +663,22 @@ int main(char *dir, subcommand mode) {  // NOLINT
             log_and_exit(64);
         }
     }
+    // --thread_num: the number of threads of the scan (inspect, repair) or of the sort (compaction). gflags has one
+    // default, so compaction without the option uses the default of the sort. A value below 1 is a misconfiguration,
+    // and the process exits without starting the processing
+    int thread_num = FLAGS_thread_num;
+    if (mode == subcommand::cmd_compaction && gflags::GetCommandLineFlagInfoOrDie("thread_num").is_default) {
+        thread_num = sort_settings{}.threads;
+    }
+    if (thread_num < 1) {
+        LOG(ERROR) << "invalid value for --thread_num option: " << thread_num << " (must be at least 1)";
+        log_and_exit(64);
+    }
+    // --sort_* is used only by compaction (not even checked for the other subcommands, as with --epoch)
+    sort_options sort{};
+    if (mode == subcommand::cmd_compaction) {
+        sort = parse_sort_options(thread_num);
+    }
     boost::filesystem::path p(dir);
     std::cout << "dblogdir: " << p << std::endl;
     if (!boost::filesystem::exists(p)) {
@@ -544,10 +694,10 @@ int main(char *dir, subcommand mode) {  // NOLINT
             log_and_exit(64);
         }
         dblog_scan ds(p);
-        ds.set_thread_num(FLAGS_thread_num);
+        ds.set_thread_num(thread_num);
         if (mode == subcommand::cmd_inspect) inspect(ds, opt_epoch);
         if (mode == subcommand::cmd_repair) repair(ds, opt_epoch);
-        if (mode == subcommand::cmd_compaction) compaction(ds);
+        if (mode == subcommand::cmd_compaction) compaction(ds, sort);
         close(lock_fd);
     } catch (limestone_exception& e) {
         LOG(ERROR) << e.what();

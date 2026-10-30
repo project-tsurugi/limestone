@@ -1,9 +1,28 @@
+/*
+ * Copyright 2025-2026 Project Tsurugi.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
 #include "message_log_entries.h"
 
 #include <algorithm>
 #include <cassert>
 
-#include "limestone_exception_helper.h"
+#include <glog/logging.h>
+
+#include <limestone/logging.h>
+
+#include "logging_helper.h"
 #include "replication_message_io.h"
 #include "log_channel_handler_resources.h"
 #include "log_channel_impl.h"
@@ -208,13 +227,14 @@ void message_log_entries::apply_to(limestone::api::log_channel& channel) const {
             case log_entry::entry_type::remove_storage:
                 channel.remove_storage(entry.storage_id, entry.write_version);
                 break;
+            // the types not allowed in a message, and undefined values
             case log_entry::entry_type::this_id_is_not_used:
             case log_entry::entry_type::marker_begin:
             case log_entry::entry_type::marker_end:
             case log_entry::entry_type::marker_durable:
             case log_entry::entry_type::marker_invalidated_begin:
-                std::string msg = "Invalid entry type: " + std::to_string(static_cast<int>(entry.type));
-                LOG_AND_THROW_EXCEPTION(msg);
+            default:
+                LOG_LP(FATAL) << "unexpected entry type " << static_cast<int>(entry.type);
                 break;
         }
     }

@@ -26,7 +26,8 @@
 #include "compaction_options.h"
 #include "internal.h"
 #include "limestone/log/testdata.h"
-#include "log_entry.h"
+#include "log_entry/log_entry.h"
+#include "log_entry/log_entry_reader.h"
 #include "test_root.h"
 
 namespace limestone::testing {
@@ -38,7 +39,7 @@ using limestone::internal::compaction_options;
 // Verifies the boundary behavior of the compaction scan (its first pass) by calling
 // create_compaction_output directly with the boundary epoch set on
 // compaction_options: entries of the snippets beyond the boundary must not reach the
-// compacted file (the sortdb).
+// compacted file.
 class compaction_boundary_scan_test : public ::testing::Test {
 public:
     static constexpr const char* location = "/tmp/compaction_boundary_scan_test";
@@ -65,10 +66,15 @@ public:
     // Reads all physical entries of the file without interpreting snippet validity.
     static std::vector<log_entry> read_raw_entries(const boost::filesystem::path& path) {
         std::vector<log_entry> entries;
-        std::ifstream in(path.string(), std::ios::in | std::ios::binary);
-        log_entry e;
-        while (e.read(in)) {
-            entries.push_back(e);
+        limestone::internal::log_entry_reader reader(path);
+        while (true) {
+            const auto read_result = reader.next();
+            if (read_result.result() != limestone::internal::log_entry_read_result::status::ok) {
+                EXPECT_EQ(read_result.result(), limestone::internal::log_entry_read_result::status::end)
+                    << "at offset " << read_result.offset();
+                break;
+            }
+            entries.emplace_back(read_result.view());
         }
         return entries;
     }
@@ -77,9 +83,7 @@ public:
         std::set<std::string> keys;
         for (const log_entry& e : entries) {
             if (e.type() == log_entry::entry_type::normal_entry) {
-                std::string k;
-                e.key(k);
-                keys.insert(k);
+                keys.emplace(e.key());
             }
         }
         return keys;

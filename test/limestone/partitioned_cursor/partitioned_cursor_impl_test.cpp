@@ -1,10 +1,25 @@
+/*
+ * Copyright 2025-2026 Project Tsurugi.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
 #include <gtest/gtest.h>
 #include <memory>
 #include <vector>
 #include "partitioned_cursor/partitioned_cursor_impl.h"
 #include "partitioned_cursor/cursor_entry_queue.h"
 #include "partitioned_cursor/end_marker.h"
-#include "log_entry.h"
+#include "log_entry/log_entry.h"
 #include <limestone/api/storage_id_type.h>
 #include <limestone/api/write_version_type.h>
 
@@ -17,43 +32,15 @@ using limestone::api::log_entry;
 using limestone::api::storage_id_type;
 using limestone::api::write_version_type;
 
-static const std::string tmp_file_path = "/tmp/partitioned_cursor_impl_test_log_entry.tmp";
-
 class partitioned_cursor_impl_test : public ::testing::Test {
 protected:
     void SetUp() override {}
-    void TearDown() override {
-        // Clean up the temporary file after each test
-        boost::filesystem::remove(tmp_file_path);
-    }
+    void TearDown() override {}
 
-    // Create a log_entry instance by writing a normal entry into a temporary file
-    // and reading it back. Uses the log_entry::write() and log_entry::read() methods.
+    // Create a log_entry instance of a normal entry.
     std::vector<log_entry> create_singleton_log_entry_batch(storage_id_type storage, const std::string& key, const std::string& value,
                                                    const write_version_type& wversion) {
-        FILE* out = std::fopen(tmp_file_path.c_str(), "wb");
-        if (!out) {
-            throw std::runtime_error("Failed to open temporary file for writing.");
-        }
-
-        log_entry::write(out, storage, key, value, wversion);
-        std::fclose(out);
-
-        std::ifstream in(tmp_file_path, std::ios::binary);
-        if (!in.is_open()) {
-            throw std::runtime_error("Failed to open temporary file for reading.");
-        }
-
-        log_entry entry;
-        bool rc = entry.read(in);
-        in.close();
-        boost::filesystem::remove(tmp_file_path);
-
-        if (!rc) {
-            throw std::runtime_error("Failed to read log entry from temporary file.");
-        }
-
-        return {std::move(entry)};  // Return as vector<log_entry>
+        return {log_entry::make_normal_entry(storage, key, value, wversion)};  // Return as vector<log_entry>
     }
 
     // Create a batch of log_entry instances from a list of tuples.
@@ -80,7 +67,6 @@ TEST_F(partitioned_cursor_impl_test, single_entry_and_end_marker) {
     EXPECT_TRUE(cursor.next());
     EXPECT_EQ(cursor.storage(), 123);
     EXPECT_EQ(cursor.type(), log_entry::entry_type::normal_entry);
-    EXPECT_EQ(cursor.blob_ids().size(), 0);
     std::string key;
     cursor.key(key);
     EXPECT_EQ(key, "key");
@@ -117,21 +103,50 @@ TEST_F(partitioned_cursor_impl_test, current_returns_last_entry_after_next) {
     ASSERT_TRUE(cursor.next());
     const log_entry& current1 = cursor.current();
     EXPECT_EQ(current1.storage(), 123);
-    std::string key1, value1;
-    current1.key(key1);
-    current1.value(value1);
-    EXPECT_EQ(key1, "k1");
-    EXPECT_EQ(value1, "v1");
+    EXPECT_EQ(current1.key(), "k1");
+    EXPECT_EQ(current1.value(), "v1");
 
     ASSERT_TRUE(cursor.next());
     const log_entry& current2 = cursor.current();
     EXPECT_EQ(current2.storage(), 456);
-    std::string key2, value2;
-    current2.key(key2);
-    current2.value(value2);
-    EXPECT_EQ(key2, "k2");
-    EXPECT_EQ(value2, "v2");
+    EXPECT_EQ(current2.key(), "k2");
+    EXPECT_EQ(current2.value(), "v2");
 
+    EXPECT_FALSE(cursor.next());
+}
+
+// Verify that blob_ids() returns the BLOB IDs of a normal_with_blob entry
+TEST_F(partitioned_cursor_impl_test, blob_ids_of_normal_with_blob) {
+    auto queue = std::make_shared<cursor_entry_queue>(8);
+    partitioned_cursor_impl cursor(queue);
+
+    std::vector<log_entry> batch{log_entry::make_normal_with_blob(123, "k1", "v1", {1, 0}, {11, 12})};
+    EXPECT_TRUE(queue->push(batch));
+    EXPECT_TRUE(queue->push(end_marker{true, ""}));
+
+    ASSERT_TRUE(cursor.next());
+    EXPECT_EQ(cursor.type(), log_entry::entry_type::normal_with_blob);
+    EXPECT_EQ(cursor.blob_ids(), (std::vector<limestone::api::blob_id_type>{11, 12}));
+    EXPECT_FALSE(cursor.next());
+}
+
+// Verify that after moving from current(), the current entry is in the default-constructed state until next()
+TEST_F(partitioned_cursor_impl_test, current_after_move_is_default_constructed) {
+    auto queue = std::make_shared<cursor_entry_queue>(8);
+    partitioned_cursor_impl cursor(queue);
+
+    EXPECT_TRUE(queue->push(create_log_entry_batch({{123, "k1", "v1", {1, 0}}, {456, "k2", "v2", {2, 0}}})));
+    EXPECT_TRUE(queue->push(end_marker{true, ""}));
+
+    ASSERT_TRUE(cursor.next());
+    log_entry taken = std::move(cursor.current());
+    EXPECT_EQ(taken.key(), "k1");
+    EXPECT_EQ(cursor.type(), log_entry::entry_type::this_id_is_not_used);
+    EXPECT_DEATH((void) cursor.storage(), "log_entry_view:storage not valid");
+
+    // next() moves to the next entry as usual
+    ASSERT_TRUE(cursor.next());
+    EXPECT_EQ(cursor.current().key(), "k2");
     EXPECT_FALSE(cursor.next());
 }
 

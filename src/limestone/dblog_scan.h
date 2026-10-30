@@ -1,5 +1,5 @@
 /*
- * Copyright 2024-2025 Project Tsurugi.
+ * Copyright 2024-2026 Project Tsurugi.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -21,8 +21,10 @@
 
 #include <limestone/api/datastore.h>
 #include "internal.h"
-#include "log_entry.h"
+#include "log_entry/log_entry.h"
 #include "compaction_options.h"
+#include "input_file_queue.h"
+#include "scan_input.h"
 
 
 namespace limestone::internal {
@@ -78,6 +80,13 @@ public:
 
     using error_report_func_t = std::function<bool(log_entry::read_error&)>;
 
+    /// the type of add_entry of the scan_pwal_files family. Receives an entry and the number of the worker that read
+    /// it (0 to thread_num - 1)
+    using add_entry_func_t = std::function<void(log_entry&, int)>;
+
+    /// the type of the thread end hook. Receives the number of the worker (the same as the one passed to add_entry)
+    using thread_end_hook_t = std::function<void(int)>;
+
     /**
      * @brief Constructor that initializes the dblog_scan with the specified log directory.
      *
@@ -111,7 +120,28 @@ public:
 
     const boost::filesystem::path& get_dblogdir() { return dblogdir_; }
     void set_thread_num(int thread_num) noexcept { thread_num_ = thread_num; }
+
+    /**
+     * @brief Sets the function called once in each worker thread when the thread finishes after exhausting the
+     *        input.
+     *
+     * In a scan of the scan_pwal_files family, each worker calls it with its worker number after no file is left to
+     * take and before the thread ends. It is not called when the scan stops by a failure (an exception in the
+     * thread itself, or the thread stopping on seeing the failure of another thread). However, a thread that
+     * exhausted the input before the failure of another thread calls it.
+     * A limestone_exception thrown by the hook is rethrown from the scan_pwal_files family as a failure of the scan.
+     * @param hook the function to call. Not called if empty (the default)
+     */
+    void set_thread_end_hook(thread_end_hook_t hook);
     void set_fail_fast(bool fail_fast) noexcept { fail_fast_ = fail_fast; }
+
+    /**
+     * @brief Sets the file_operations that detach_wal_files uses to synchronize the directory. If not set,
+     *        real_file_operations is used
+     * @param ops the file_operations to use. It must be valid until this object is no longer used
+     */
+    void set_file_operations(file_operations& ops) noexcept;
+
     void detach_wal_files(bool skip_empty_files = true);
 
     enum class process_at_nondurable {
@@ -150,7 +180,7 @@ public:
      * @returns max epoch value in directory
      * @throws exception on error
      */
-    epoch_id_type scan_pwal_files_throws(epoch_id_type ld_epoch, const std::function<void(log_entry&)>& add_entry);
+    epoch_id_type scan_pwal_files_throws(epoch_id_type ld_epoch, const add_entry_func_t& add_entry);
 
     /**
      * @brief scan for the compaction path: snippets beyond the boundary epoch are
@@ -160,7 +190,7 @@ public:
      * @returns max epoch in the directory, including the snippets beyond the boundary
      * @throws exception on error
      */
-    epoch_id_type scan_pwal_files_for_compaction(epoch_id_type boundary_epoch, const std::function<void(log_entry&)>& add_entry);
+    epoch_id_type scan_pwal_files_for_compaction(epoch_id_type boundary_epoch, const add_entry_func_t& add_entry);
 
     /**
      * @brief returns the per-file max epoch recorded by the last successful scan
@@ -172,12 +202,47 @@ public:
         return max_epoch_per_file_;
     }
     /**
+     * @brief Scans the files determined at construction.
+     *
+     * The same as calling the scan_pwal_files that takes a queue, with a queue closed after all the files are
+     * pushed.
      * @returns max epoch value in directory
      */
-    epoch_id_type scan_pwal_files(epoch_id_type ld_epoch, const std::function<void(log_entry&)>& add_entry,
+    epoch_id_type scan_pwal_files(epoch_id_type ld_epoch, const add_entry_func_t& add_entry,
         const error_report_func_t& report_error, dblog_scan::parse_error::code* max_parse_error_value = nullptr);
 
-    epoch_id_type scan_one_pwal_file(const boost::filesystem::path& p, epoch_id_type ld_epoch,
+    /**
+     * @brief Scans the files taken out of a queue.
+     *
+     * thread_num workers take the paths out of the queue one by one and scan them. A worker waits if the queue is
+     * empty and not closed. Once the queue is closed and empty, each worker calls the thread end hook and ends.
+     * A failure of a worker (limestone_exception) aborts the queue to stop the other workers, and is rethrown
+     * after all the workers end. If the producer aborts the queue, the workers stop reading the files they are
+     * on, and the scan fails with a limestone_exception after all the workers end.
+     * Only the files whose names start with pwal (is_wal) are scanned.
+     * @param queue the queue of the input files. The scan does not end until the producer closes or aborts it
+     * @param ld_epoch the durable epoch (or the boundary epoch of the compaction)
+     * @param add_entry called with each valid entry and the number of the worker that read it
+     * @param report_error called for each parse error
+     * @param max_parse_error_value if not null, receives the maximum parse error of the files
+     * @returns max epoch value in the files
+     */
+    epoch_id_type scan_pwal_files(input_file_queue& queue, epoch_id_type ld_epoch, const add_entry_func_t& add_entry,
+        const error_report_func_t& report_error, dblog_scan::parse_error::code* max_parse_error_value = nullptr);
+
+    /**
+     * @brief Scans the WAL file of one input.
+     *
+     * Once stopped() of the input becomes true, reading stops there (checked for every entry). In that case the
+     * return value and pe are those of the part read.
+     * @param input the input to scan
+     * @param ld_epoch the durable epoch (or the boundary epoch of the compaction)
+     * @param add_entry called with each valid entry
+     * @param report_error called for each parse error
+     * @param pe receives the parse error of the file
+     * @returns max epoch value in the file
+     */
+    epoch_id_type scan_one_pwal_file(const scan_input& input, epoch_id_type ld_epoch,
         const std::function<void(log_entry&)>& add_entry,
         const error_report_func_t& report_error,
         parse_error& pe);
@@ -201,7 +266,9 @@ private:
     std::optional<std::reference_wrapper<compaction_options>> options_;
     std::list<boost::filesystem::path> path_list_;
     int thread_num_{1};
+    thread_end_hook_t thread_end_hook_{};
     bool fail_fast_{false};
+    file_operations* file_ops_{};
 
     // Per-file max epoch recorded by the last successful scan.
     std::map<boost::filesystem::path, epoch_id_type> max_epoch_per_file_;

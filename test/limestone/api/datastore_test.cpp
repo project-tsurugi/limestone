@@ -1,5 +1,21 @@
+/*
+ * Copyright 2022-2026 Project Tsurugi.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
 
 #include <atomic>
+#include <functional>
 #include <filesystem>
 #include <fstream>
 #include <sstream>
@@ -10,6 +26,8 @@
 #include "test_root.h"
 #include "internal.h"
 #include "datastore_impl.h"
+#include "limestone_exception_helper.h"
+#include "limestone/log/testdata.h"
 #include <limestone/api/limestone_exception.h>
 
 #ifdef ENABLE_ALTIMETER
@@ -34,6 +52,7 @@ public:
 
     virtual void TearDown() {
         datastore_ = nullptr;
+        limestone::testing::enable_exception_throwing = false;  // in case a test left it set
         unsetenv("TSURUGI_REPLICATION_ENDPOINT");
         if (system("rm -rf /tmp/datastore_test") != 0) {
             std::cerr << "cannot remove directory" << std::endl;
@@ -231,6 +250,129 @@ TEST_F(datastore_test, remove_persistent_callback_test) { // NOLINT
     // on the current implementation (and test setup) where switch_epoch() synchronously runs the
     // callback before returning. If that behavior changes, this test will stop being valid.
     EXPECT_EQ(previous_epoch, get_durable_epoch());
+}
+
+// constructing with recover_max_parallelism (the number of threads of the sort) below 1 is initialization_failure;
+// 1 is accepted
+TEST_F(datastore_test, rejects_recover_max_parallelism_below_one) { // NOLINT
+    if (system("rm -rf /tmp/datastore_test") != 0) {
+        std::cerr << "cannot remove directory" << std::endl;
+    }
+    if (system("mkdir -p /tmp/datastore_test/data_location") != 0) {
+        std::cerr << "cannot make directory" << std::endl;
+    }
+    for (const int threads : {0, -1}) {
+        limestone::api::configuration conf{};
+        conf.set_data_location(data_location);
+        conf.set_recover_max_parallelism(threads);
+        try {
+            auto ds = std::make_unique<limestone::api::datastore_test>(conf);
+            FAIL() << "no exception for recover_max_parallelism " << threads;
+        } catch (const limestone_exception& e) {
+            EXPECT_EQ(e.type(), exception_type::initialization_failure);
+            EXPECT_NE(std::string(e.what()).find("recover_max_parallelism must be at least 1"), std::string::npos)
+                << e.what();
+        }
+    }
+    limestone::api::configuration conf{};
+    conf.set_data_location(data_location);
+    conf.set_recover_max_parallelism(1);
+    auto ds = std::make_unique<limestone::api::datastore_test>(conf);
+    ds->ready();
+    ds->shutdown();
+}
+
+// the checks of the settings of the sort: the arena is 1 to 4096 MiB, the merge fan-in is at least 2, and the work
+// dir is an existing directory. A violation is initialization_failure; the boundary values are accepted
+TEST_F(datastore_test, rejects_invalid_sort_settings) { // NOLINT
+    if (system("rm -rf /tmp/datastore_test") != 0) {
+        std::cerr << "cannot remove directory" << std::endl;
+    }
+    if (system("mkdir -p /tmp/datastore_test/data_location") != 0) {
+        std::cerr << "cannot make directory" << std::endl;
+    }
+    struct invalid_case {
+        std::function<void(limestone::api::configuration&)> apply;
+        const char* message;
+    };
+    const std::vector<invalid_case> cases{
+        {[](auto& c) { c.set_sort_arena_size_mb(0); }, "sort_arena_size_mb must be between 1 and 4096: 0"},
+        {[](auto& c) { c.set_sort_arena_size_mb(4097); }, "sort_arena_size_mb must be between 1 and 4096: 4097"},
+        {[](auto& c) { c.set_sort_merge_fanin(1); }, "sort_merge_fanin must be at least 2: 1"},
+        {[](auto& c) { c.set_sort_work_dir("/tmp/datastore_test/missing"); },
+         "sort_work_dir is not an existing directory: /tmp/datastore_test/missing"},
+    };
+    for (const auto& c : cases) {
+        limestone::api::configuration conf{};
+        conf.set_data_location(data_location);
+        c.apply(conf);
+        try {
+            auto ds = std::make_unique<limestone::api::datastore_test>(conf);
+            FAIL() << "no exception: " << c.message;
+        } catch (const limestone_exception& e) {
+            EXPECT_EQ(e.type(), exception_type::initialization_failure);
+            EXPECT_NE(std::string(e.what()).find(c.message), std::string::npos) << e.what();
+        }
+    }
+    limestone::api::configuration conf{};
+    conf.set_data_location(data_location);
+    conf.set_sort_arena_size_mb(1);
+    conf.set_sort_merge_fanin(2);
+    conf.set_sort_work_dir(parent_directory);
+    auto ds = std::make_unique<limestone::api::datastore_test>(conf);
+    ds->ready();
+    ds->shutdown();
+}
+
+// the work dir given is used by the sort at startup: with a directory that cannot be written, sorting cannot be
+// created under it and the startup fails
+TEST_F(datastore_test, sort_work_dir_is_used_by_the_sort) { // NOLINT
+    if (geteuid() == 0) { GTEST_SKIP() << "skip when run by root"; }
+    if (system("rm -rf /tmp/datastore_test") != 0) {
+        std::cerr << "cannot remove directory" << std::endl;
+    }
+    if (system("mkdir -p /tmp/datastore_test/data_location /tmp/datastore_test/readonly") != 0) {
+        std::cerr << "cannot make directory" << std::endl;
+    }
+    boost::filesystem::permissions("/tmp/datastore_test/readonly",
+                                   boost::filesystem::owner_read | boost::filesystem::owner_exe);
+    limestone::api::configuration conf{};
+    conf.set_data_location(data_location);
+    conf.set_sort_work_dir("/tmp/datastore_test/readonly");
+    auto ds = std::make_unique<limestone::api::datastore_test>(conf);
+    ASSERT_DEATH(ds->ready(), "cannot create sorting directory: /tmp/datastore_test/readonly/sorting-");
+    boost::filesystem::permissions("/tmp/datastore_test/readonly", boost::filesystem::owner_all);
+}
+
+// a corrupted WAL at startup (a truncated entry in a durable snippet) fails ready() with "dblogdir is corrupted"
+TEST_F(datastore_test, corrupted_wal_at_startup_is_reported_as_corrupted) { // NOLINT
+    if (system("rm -rf /tmp/datastore_test") != 0) {
+        std::cerr << "cannot remove directory" << std::endl;
+    }
+    if (system("mkdir -p /tmp/datastore_test/data_location") != 0) {
+        std::cerr << "cannot make directory" << std::endl;
+    }
+    limestone::api::configuration conf{};
+    conf.set_data_location(data_location);
+    auto ds = std::make_unique<limestone::api::datastore_test>(conf);
+    // the durable epoch is 0x101 so that the snippet of epoch 0x101 holding the truncated entry is durable (an error
+    // to report, not a nondurable snippet to invalidate)
+    {
+        std::ofstream epoch(std::string(data_location) + "/epoch", std::ios::binary | std::ios::trunc);
+        epoch << "\x04\x01\x01\x00\x00\x00\x00\x00\x00"sv;
+    }
+    {
+        std::ofstream pwal(std::string(data_location) + "/pwal_0000", std::ios::binary);
+        pwal << data_truncated_normal_entry;
+    }
+    limestone::testing::enable_exception_throwing = true;  // ready() rethrows instead of aborting
+    try {
+        ds->ready();
+        FAIL() << "no exception";
+    } catch (const limestone_exception& e) {
+        EXPECT_NE(std::string(e.what()).find("dblogdir is corrupted"), std::string::npos) << e.what();
+    }
+    limestone::testing::enable_exception_throwing = false;
 }
 
 TEST_F(datastore_test, prevent_double_start_test) { // NOLINT

@@ -1,3 +1,18 @@
+/*
+ * Copyright 2023-2026 Project Tsurugi.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
 #include <limestone/logging.h>
 
 #include <boost/filesystem.hpp>
@@ -6,7 +21,7 @@
 #include "compaction_catalog.h"
 #include "dblog_scan.h"
 #include "internal.h"
-#include "log_entry.h"
+#include "log_entry/log_entry.h"
 #include "manifest.h"
 #include "test_root.h"
 #include "limestone/log/testdata.h"
@@ -47,7 +62,7 @@ const boost::filesystem::path compaction_catalog_path = boost::filesystem::path(
 
     static bool starts_with(std::string a, std::string b) { return a.substr(0, b.length()) == b; }
     static bool is_pwal(const boost::filesystem::path& p) { return starts_with(p.filename().string(), "pwal"); }
-    static void ignore_entry(limestone::api::log_entry&) {}
+    static void ignore_entry(limestone::api::log_entry&, int) {}
 
     void create_manifest_file(int persistent_format_version = 1) {
         create_file(manifest_path, data_manifest(persistent_format_version));

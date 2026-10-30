@@ -1,5 +1,5 @@
 /*
- * Copyright 2022-2024 Project Tsurugi.
+ * Copyright 2022-2026 Project Tsurugi.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -139,6 +139,33 @@ void datastore_impl::set_current_compacted_file_name(std::optional<std::string> 
         std::scoped_lock<std::mutex> lock(current_compacted_file_name_mutex_);
         current_compacted_file_name_ = std::move(file_name);
     }
+}
+
+limestone::internal::file_operations& datastore_impl::file_ops() const noexcept {
+    return *file_ops_;
+}
+
+void datastore_impl::set_file_operations_for_test(limestone::internal::file_operations* ops) noexcept {
+    file_ops_for_test_ = ops;
+}
+
+void datastore_impl::set_sort_settings(std::size_t arena_size_bytes, std::size_t merge_fanin,
+                                       boost::filesystem::path work_dir_parent) noexcept {
+    sort_arena_size_bytes_ = arena_size_bytes;
+    sort_merge_fanin_ = merge_fanin;
+    sort_work_dir_parent_ = std::move(work_dir_parent);
+}
+
+std::size_t datastore_impl::sort_arena_size_bytes() const noexcept {
+    return sort_arena_size_bytes_;
+}
+
+std::size_t datastore_impl::sort_merge_fanin() const noexcept {
+    return sort_merge_fanin_;
+}
+
+const boost::filesystem::path& datastore_impl::sort_work_dir_parent() const noexcept {
+    return sort_work_dir_parent_;
 }
 
 // Increments the backup counter.
