@@ -273,7 +273,8 @@ master へのマージ前に本ファイルを削除する。
 ### ステップ 14: 仕上げ
 
 * [ ] 既存の log_entry 関連のファイル (log_entry.h など) を src/limestone/log_entry/ へ移すかを決め、移す場合は移す。
-* [ ] フルスイート、clang-tidy の警告の確認。
+* [x] フルスイート、clang-tidy の警告の確認。(2026-10-30: ctest 120 件成功、CI 相当の clang-tidy は src 全体で警告なし。
+      既存の cursor_impl.h:67 の blob_ids の nodiscard の警告はここで直した)
 * [ ] ステップ 10〜13 の性能への影響を測る。手順とスクリプト (~/s1-sort-compare/bin) はステップ 9 の作業ログ
       (nt-tsurugi-internal の 11-test/20261029-instant-recovery-s1-sort-performance.md) と同じ。測定は各条件 1 回とし、
       ばらつきで判断がつかないときだけ回数を増やす。結果は 5 節と、新しい日付の作業ログに記録する。

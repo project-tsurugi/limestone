@@ -64,7 +64,7 @@ protected:
     [[nodiscard]] limestone::api::storage_id_type storage() const noexcept override;
     void key(std::string& buf) const noexcept override;
     void value(std::string& buf) const noexcept override;
-    std::vector<limestone::api::blob_id_type> blob_ids() const override;
+    [[nodiscard]] std::vector<limestone::api::blob_id_type> blob_ids() const override;
     [[nodiscard]] limestone::api::log_entry::entry_type type() const override;
     bool is_relevant_entry(const log_entry_view& entry);
     [[nodiscard]] log_entry& current() override;
