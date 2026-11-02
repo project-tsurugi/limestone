@@ -301,16 +301,16 @@ TEST(log_entry_test, typed_writers_length_exceeds_32bit) {
         {[&](FILE* fp) { log_entry::write_with_blob(fp, 1, "", huge, wv, {11}); }, "value length"},
         {[&](FILE* fp) { log_entry::write_remove(fp, 1, huge, wv); }, "key length"},
     };
-    for (const auto& [write, message] : cases) {
+    for (const auto& c : cases) {
         const std::string written = written_by([&](FILE* fp) {
             try {
-                write(fp);
-                ADD_FAILURE() << "no exception: " << message;
+                c.first(fp);
+                ADD_FAILURE() << "no exception: " << c.second;
             } catch (const limestone::api::limestone_exception& e) {
-                EXPECT_NE(std::string_view{e.what()}.find(message), std::string_view::npos) << e.what();
+                EXPECT_NE(std::string_view{e.what()}.find(c.second), std::string_view::npos) << e.what();
             }
         });
-        EXPECT_TRUE(written.empty()) << message;
+        EXPECT_TRUE(written.empty()) << c.second;
     }
 }
 
@@ -387,8 +387,9 @@ TEST(log_entry_test, write_serialized_matches_typed_writers) {
         {log_entry::make_marker_invalidated_begin(13),
          written_by([](FILE* fp) { log_entry::invalidated_begin(fp, 13); })},
     };
-    for (const auto& [e, typed] : cases) {
-        EXPECT_EQ(written_by([&](FILE* fp) { log_entry::write_serialized(fp, e.view()); }), typed) << e.type();
+    for (const auto& c : cases) {
+        EXPECT_EQ(written_by([&](FILE* fp) { log_entry::write_serialized(fp, c.first.view()); }), c.second)
+            << c.first.type();
     }
 }
 
