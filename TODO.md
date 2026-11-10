@@ -78,13 +78,13 @@ master へのマージ前に本ファイルを削除する。
 
 ロケータファイルがまだ存在しない状態で入れても既存の動作を変えないので、公開 (ステップ 4) より先に入れる。
 
-* [ ] dblog_scan::is_wal を、locator_format の判定で .loc で終わる名前を除くように変える。
-* [ ] select_files_for_compaction で .loc で終わる名前を除く。
-* [ ] compaction_catalog::is_orphan_compaction_file を、コンパクション出力の名前に .loc を付けた名前も対象にし、カタログに
+* [x] dblog_scan::is_wal を、locator_format の判定で .loc で終わる名前を除くように変える。
+* [x] select_files_for_compaction で .loc で終わる名前を除く。
+* [x] compaction_catalog::is_orphan_compaction_file を、コンパクション出力の名前に .loc を付けた名前も対象にし、カタログに
       登録されたコンパクション済み WAL ファイルのロケータファイル以外を孤児とするように変える (ロケーティファイルの
       有無によらない)。is_compaction_output_filename は世代の接尾辞が数字だけであることを求めるので、.loc 付きの名前を
       通す変更が要る。
-* [ ] UT: is_wal がロケータファイルを除くこと、inspect が無視すること、通常の起動で .loc がソートの入力に入らず起動に
+* [x] UT: is_wal がロケータファイルを除くこと、inspect が無視すること、通常の起動で .loc がソートの入力に入らず起動に
       失敗しないこと、コンパクションの入力にロケータファイルが選ばれないこと (入力が現行のコンパクション済み WAL
       ファイル 1 つだけなら実行しないこと)、未登録のロケータファイルがロケーティファイルの有無によらず削除されること。
 

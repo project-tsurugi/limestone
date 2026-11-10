@@ -32,6 +32,14 @@ TEST(locator_format_test, locator_file_name_appends_suffix) {
     EXPECT_EQ(lf::locator_file_name("snapshot"), "snapshot.loc");
 }
 
+// ロケータファイルの名前から .loc を除く。.loc で終わらない名前は abort する
+TEST(locator_format_test, locatee_file_name_removes_suffix) {
+    EXPECT_EQ(lf::locatee_file_name("pwal_0000.compacted.3.loc"), "pwal_0000.compacted.3");
+    EXPECT_EQ(lf::locatee_file_name("snapshot.loc"), "snapshot");
+    EXPECT_EQ(lf::locatee_file_name(".loc"), "");
+    EXPECT_DEATH(lf::locatee_file_name("pwal_0000.compacted.3"), "not a locator file name");
+}
+
 // パスはディレクトリを保ち、名前だけに .loc を付ける
 TEST(locator_format_test, locator_file_path_keeps_directory) {
     const boost::filesystem::path locatee("/var/log/dir/pwal_0000.compacted.3");

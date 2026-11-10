@@ -266,7 +266,13 @@ public:
         const error_report_func_t& report_error,
         parse_error& pe);
 
-    static bool is_wal(const boost::filesystem::path& p) { return p.filename().string().rfind(log_channel_prefix, 0) == 0; }
+    /**
+     * @brief ファイルが WAL ファイル (スキャンの対象) かを返す。名前が pwal で始まり、ロケータファイルの名前 (.loc で終わる)
+     *        でないもの
+     * @param p ファイルのパス
+     * @return WAL ファイルなら true
+     */
+    static bool is_wal(const boost::filesystem::path& p);
     static bool is_detached_wal(const boost::filesystem::path& p) {
         auto filename = p.filename().string();
         return (filename.length() > 9 && filename.rfind(log_channel_prefix, 0) == 0);

@@ -27,6 +27,7 @@
 
 
 #include "compaction_catalog.h"
+#include "locator/locator_format.h"
 #include "logging_helper.h"
 #include "limestone/api/epoch_id_type.h"
 #include "limestone_exception_helper.h"
@@ -407,13 +408,20 @@ bool compaction_catalog::is_compaction_output_filename(const std::string& filena
 }
 
 bool compaction_catalog::is_orphan_compaction_file(const std::string& filename) const {
-    if (!is_compaction_output_filename(filename)) {
+    // ロケータファイルは .loc を除いた名前 (ロケーティファイルの名前) で判定する。カタログに登録されたコンパクション済み
+    // WAL ファイルのロケータファイルだけが孤児でなく、ロケーティファイルの有無は見ない
+    const bool is_locator = locator_format::is_locator_file_name(filename);
+    const std::string target = is_locator ? locator_format::locatee_file_name(filename) : filename;
+    if (!is_compaction_output_filename(target)) {
         return false;
     }
     for (const compacted_file_info& info : compacted_files_) {
-        if (info.get_file_name() == filename) {
+        if (info.get_file_name() == target) {
             return false;
         }
+    }
+    if (is_locator) {
+        return true;  // carry ファイルにロケータファイルはない
     }
     return !(carry_file_.has_value() && carry_file_.value() == filename);
 }

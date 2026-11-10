@@ -15,10 +15,23 @@
  */
 #include "locator/locator_format.h"
 
+#include <glog/logging.h>
+
+#include <limestone/logging.h>
+
+#include "logging_helper.h"
+
 namespace limestone::internal::locator_format {
 
 std::string locator_file_name(std::string_view locatee_name) {
     return std::string(locatee_name) + std::string(suffix);
+}
+
+std::string locatee_file_name(std::string_view locator_name) {
+    if (! is_locator_file_name(locator_name)) {
+        LOG_LP(FATAL) << "not a locator file name: " << locator_name;
+    }
+    return std::string(locator_name.substr(0, locator_name.size() - suffix.size()));
 }
 
 boost::filesystem::path locator_file_path(const boost::filesystem::path& locatee) {

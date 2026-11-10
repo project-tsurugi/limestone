@@ -53,6 +53,13 @@ constexpr std::string_view suffix = ".loc";
 [[nodiscard]] std::string locator_file_name(std::string_view locatee_name);
 
 /**
+ * @brief ロケータファイルの名前からロケーティファイルの名前を作る。
+ * @param locator_name ロケータファイルの名前 (.loc で終わること。そうでなければ FATAL ログを書いて abort する)
+ * @return 名前から .loc を除いたもの
+ */
+[[nodiscard]] std::string locatee_file_name(std::string_view locator_name);
+
+/**
  * @brief ロケーティファイルのパスからロケータファイルのパスを作る。同じディレクトリで、名前に .loc を付けたもの。
  * @param locatee ロケーティファイルのパス
  * @return ロケータファイルのパス

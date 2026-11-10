@@ -655,7 +655,8 @@ TEST_F(compaction_test, safe_rename_throws_exception) {
 TEST_F(compaction_test, select_files_for_compaction) {
     std::set<boost::filesystem::path> rotation_end_files = {boost::filesystem::path(location) / "pwal_0001.0123456",
                                                             boost::filesystem::path(location) / "pwal_0002.0123456",
-                                                            boost::filesystem::path(location) / "pwal_0003", boost::filesystem::path(location) / "other_file"};
+                                                            boost::filesystem::path(location) / "pwal_0003", boost::filesystem::path(location) / "other_file",
+                                                            boost::filesystem::path(location) / "pwal_0000.compacted.1.loc"};
     std::set<std::string> detached_pwals = {"pwal_0002.0123456"};
     std::set<std::string> expected = {"pwal_0001.0123456"};
 

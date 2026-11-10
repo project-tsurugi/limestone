@@ -30,6 +30,7 @@
 #include <limestone/api/datastore.h>
 #include "internal.h"
 #include "dblog_scan.h"
+#include "locator/locator_format.h"
 #include "log_entry/log_entry.h"
 #include "log_entry/log_entry_reader.h"
 
@@ -153,6 +154,11 @@ void dblog_scan::detach_wal_files(bool skip_empty_files) {
 
 void dblog_scan::set_file_operations(file_operations& ops) noexcept {
     file_ops_ = &ops;
+}
+
+bool dblog_scan::is_wal(const boost::filesystem::path& p) {
+    const std::string filename = p.filename().string();
+    return filename.rfind(log_channel_prefix, 0) == 0 && ! locator_format::is_locator_file_name(filename);
 }
 
 epoch_id_type dblog_scan::scan_pwal_files(epoch_id_type ld_epoch, const add_entry_func_t& add_entry,

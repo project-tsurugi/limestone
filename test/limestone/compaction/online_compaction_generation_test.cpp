@@ -410,6 +410,44 @@ TEST_F(online_compaction_generation_test, orphan_old_generation_from_commit_remo
     EXPECT_EQ(kv_list.size(), 2);
 }
 
+// ロケータファイル (.loc) の起動時の扱い: カタログに登録されたコンパクション済み WAL ファイルのロケータファイルは残り、
+// 登録のない名前のロケータファイルはロケーティファイルの有無によらず孤児として削除される。ロケータファイルは WAL
+// ファイルとして読まれないので、内容が WAL の形式でなくても起動は失敗しない
+TEST_F(online_compaction_generation_test, locator_files_follow_the_catalog_at_startup) {
+    gen_datastore();
+    datastore_->switch_epoch(1);
+    write_and_make_durable("k1", "v1", 1);
+    run_compact_with_epoch_switch(3);  // generation 1
+    datastore_->shutdown();
+    datastore_ = nullptr;
+
+    boost::filesystem::path dir{location};
+    const std::string registered = "pwal_0000.compacted.1";
+    ASSERT_TRUE(boost::filesystem::exists(dir / registered));
+    auto write_non_wal = [&dir](const std::string& name) {
+        std::ofstream ofs((dir / name).string());
+        ofs << "not a wal file";
+    };
+    write_non_wal(registered + ".loc");                                              // 登録済みのロケータファイル
+    write_non_wal("pwal_0000.compacted.7.loc");                                      // ロケーティファイルのない孤児
+    boost::filesystem::copy_file(dir / registered, dir / "pwal_0000.compacted.8");  // 登録のない世代
+    write_non_wal("pwal_0000.compacted.8.loc");                                      // そのロケータファイル
+    write_non_wal("pwal_0000.carry.7.loc");                                          // carry の名前のロケータファイル
+
+    gen_datastore();
+
+    EXPECT_TRUE(boost::filesystem::exists(dir / (registered + ".loc")));
+    EXPECT_FALSE(boost::filesystem::exists(dir / "pwal_0000.compacted.7.loc"));
+    EXPECT_FALSE(boost::filesystem::exists(dir / "pwal_0000.compacted.8"));
+    EXPECT_FALSE(boost::filesystem::exists(dir / "pwal_0000.compacted.8.loc"));
+    EXPECT_FALSE(boost::filesystem::exists(dir / "pwal_0000.carry.7.loc"));
+
+    std::vector<std::pair<std::string, std::string>> kv_list = restart_datastore_and_read_snapshot();
+    ASSERT_EQ(kv_list.size(), 1);
+    EXPECT_EQ(kv_list[0].first, "k1");
+    EXPECT_EQ(kv_list[0].second, "v1");
+}
+
 // Migration startup: starting from a crash remnant of an old binary (a ".prev" file
 // plus the registered generation-0 file), the ".prev" file and an unregistered
 // carry-named remnant are removed as orphans, the registered generation-0 file stays,
