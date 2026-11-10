@@ -133,7 +133,7 @@ compaction_output_result create_compaction_output(compaction_options &options) {
     // and the retry on the next request are left to the caller. close() performs fsync so that the content reaches
     // the disk before the publishing rename.
     sort_output_writer output(compacted_file, "compacted file",
-                              {log_entry::write_version_handling::oldest, false, true});
+                              {log_entry::write_version_handling::oldest, false, true}, std::nullopt);
     // The compacted WAL file of the current generation is not scanned but is an input of the final merge. Its
     // normal_with_blob entries are also recorded for the BLOB GC (called in this thread)
     std::optional<sorted_file_merger::compacted_wal_input> compacted{};
@@ -291,7 +291,8 @@ blob_id_type datastore::create_snapshot_and_get_max_blob_id() {
     // if there is no compacted WAL file
     const bool should_write_remove_entry = !compaction_catalog_->get_compacted_files().empty();
     sort_output_writer output(snapshot_file, "snapshot file",
-                              {log_entry::write_version_handling::keep, should_write_remove_entry, false});
+                              {log_entry::write_version_handling::keep, should_write_remove_entry, false},
+                              std::nullopt);
     sorter.merge(std::nullopt, [&output](const log_entry_view& entry) { output.write(entry); });
     output.close();
 

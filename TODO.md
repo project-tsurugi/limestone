@@ -67,11 +67,11 @@ master へのマージ前に本ファイルを削除する。
 
 ### ステップ 2: sort_output_writer の拡張 (S2 メモ 5.1 節の書き出し)
 
-* [ ] ロケータファイルのパスと記録間隔を任意で与えられるようにする。write() はデータ系のエントリを書く前に、それまでに
+* [x] ロケータファイルのパスと記録間隔を任意で与えられるようにする。write() はデータ系のエントリを書く前に、それまでに
       書いたバイト数 (marker_begin を含む) を note_entry に渡す。keep_remove_entry が偽で書かない remove_entry は渡さない。
       close() はロケーティファイルを閉じた後にロケータファイルを close(書いたバイト数) する (fsync は locator_writer が
       行う。buffered_output_file は ::fsync を直接呼ぶので UT では観測せず、sync_and_close を通ることをコードで確認する)。
-* [ ] UT: 各レコードの位置から log_entry_reader で読むとデータ系のエントリが得られること、remove_entry を書かないときに
+* [x] UT: 各レコードの位置から log_entry_reader で読むとデータ系のエントリが得られること、remove_entry を書かないときに
       位置がずれないこと。
 
 ### ステップ 3: 名前の判定 (S2 メモ 5.1 節の名前の判定と起動時の検査)

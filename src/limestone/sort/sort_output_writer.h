@@ -15,11 +15,15 @@
  */
 #pragma once
 
+#include <cstdint>
+#include <optional>
 #include <string>
 
 #include <boost/filesystem.hpp>
 
+#include "locator/locator_writer.h"
 #include "log_entry/log_entry.h"
+#include "log_entry/log_entry_format.h"
 #include "log_entry/log_entry_view.h"
 #include "sort/buffered_output_file.h"
 
@@ -31,6 +35,10 @@ namespace limestone::internal {
  * The output begins with a marker_begin of epoch 0, followed by data entries. The result of the final merge is passed
  * to write() entry by entry (the order is not checked and duplicates are not removed). How the write_version is
  * written, whether remove_entries are written, and whether fsync is performed at close are specified by format.
+ *
+ * ロケータファイルの出力を指定すると、書き出しに合わせてロケータファイルも生成する。書いたデータ系のエントリの開始位置
+ * (marker_begin を含む、それまでに書いたバイト数) を locator_writer に渡し、close() でロケーティファイルを閉じた後に
+ * ロケータファイルの終端を書いて fsync して閉じる。
  *
  * Not thread-safe (used from one thread).
  */
@@ -46,14 +54,28 @@ public:
         bool sync_on_close;
     };
 
+    /// ロケータファイルの出力
+    struct locator_output {
+        /// ロケータファイル。存在すれば切り詰める
+        boost::filesystem::path file;
+        /// 記録間隔 (バイト)
+        std::uint64_t record_interval_bytes;
+    };
+
     /**
      * @brief Creates and opens the file, and writes a marker_begin of epoch 0.
+     *
+     * ロケータファイルの出力を指定すると、ロケータファイルも作ってヘッダを書く。
      * @param file the file to write. If it exists, it is truncated
      * @param label the name of the kind of the file used in error messages (for example "snapshot file")
      * @param output_format the format of the output
-     * @throws limestone_io_exception if the file cannot be opened or the marker_begin cannot be written (with errno)
+     * @param locator ロケータファイルの出力。std::nullopt ならロケータファイルを生成しない。記録間隔が 0 なら FATAL
+     *                ログを書いて abort する
+     * @throws limestone_io_exception if the file cannot be opened or the marker_begin cannot be written (with errno).
+     *         ロケータファイルを作れないか、そのヘッダを書けないときも同様
      */
-    sort_output_writer(boost::filesystem::path file, std::string label, const format& output_format);
+    sort_output_writer(boost::filesystem::path file, std::string label, const format& output_format,
+                       const std::optional<locator_output>& locator);
 
     /**
      * @brief Closes the file if close() has not been called (a failure is ignored).
@@ -67,6 +89,9 @@ public:
 
     /**
      * @brief Writes the entry according to format.
+     *
+     * ロケータファイルを出力するときは、エントリを書く前に、その開始位置 (それまでに書いたバイト数) をロケータファイルに
+     * 記録する。format により書かない remove_entry は記録しない。
      * @param entry a data entry. Writes a FATAL log and aborts if it is not a data entry. Also writes a FATAL log and
      *              aborts if called after close()
      * @throws limestone_io_exception if writing fails (with errno)
@@ -79,13 +104,22 @@ public:
      * The file is closed even on failure. If called after the file is closed, writes a WARNING log and does nothing.
      * However, with sync_on_close, if the previous close() failed and the contents are not fsynced, writes a FATAL
      * log and aborts.
-     * @throws limestone_io_exception if fflush, fsync or fclose fails (with errno)
+     *
+     * ロケータファイルを出力するときは、ファイルを閉じた後に、書いたバイト数を終端に書いてロケータファイルを fsync して
+     * 閉じる。ファイルを閉じるのに失敗したときはロケータファイルを閉じず、2 回目以降の呼び出しではロケータファイルに
+     * 何もしない。このとき、ロケータファイルは不完全なまま残る (呼び出し側が削除する)。
+     * @throws limestone_io_exception if fflush, fsync or fclose fails (with errno). ロケータファイルの終端を書けないか、
+     *         閉じられないときも同様
      */
     void close();
 
 private:
     buffered_output_file file_;
     format format_;
+    // ロケータファイルの書き出し。出力を指定されたときだけ持つ
+    std::optional<locator_writer> locator_{};
+    // これまでに書いたバイト数 (marker_begin を含む)。次に書くエントリの開始位置
+    std::uint64_t written_bytes_{log_entry_format::marker_size};
 };
 
 }  // namespace limestone::internal

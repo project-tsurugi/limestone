@@ -28,9 +28,13 @@ namespace limestone::internal {
 
 using limestone::api::log_entry;
 
-sort_output_writer::sort_output_writer(boost::filesystem::path file, std::string label, const format& output_format)
+sort_output_writer::sort_output_writer(boost::filesystem::path file, std::string label, const format& output_format,
+                                       const std::optional<locator_output>& locator)
     : file_(std::move(file), std::move(label)), format_(output_format) {
     log_entry::begin_session(file_.stream(), 0);
+    if (locator.has_value()) {
+        locator_.emplace(locator->file, locator->record_interval_bytes);
+    }
 }
 
 void sort_output_writer::write(const log_entry_view& entry) {
@@ -43,14 +47,23 @@ void sort_output_writer::write(const log_entry_view& entry) {
     if (entry.type() == log_entry_format::entry_type::remove_entry && ! format_.keep_remove_entry) {
         return;
     }
+    if (locator_.has_value()) {
+        locator_->note_entry(written_bytes_);
+    }
     log_entry::write_serialized(file_.stream(), entry, format_.write_version);
+    // write_version の置き換え (oldest) は同じ長さなので、書いた長さはビューの長さに等しい
+    written_bytes_ += entry.serialized_entry().size();
 }
 
 void sort_output_writer::close() {
+    const bool was_open = file_.is_open();
     if (format_.sync_on_close) {
         file_.sync_and_close();
     } else {
         file_.close();
+    }
+    if (was_open && locator_.has_value()) {
+        locator_->close(written_bytes_);
     }
 }
 
