@@ -238,7 +238,7 @@ public:
      * A failure of a worker (limestone_exception) aborts the queue to stop the other workers, and is rethrown
      * after all the workers end. If the producer aborts the queue, the workers stop reading the files they are
      * on, and the scan fails with a limestone_exception after all the workers end.
-     * Only the files whose names start with pwal (is_wal) are scanned.
+     * Only the files satisfying is_wal are scanned.
      * @param queue the queue of the input files. The scan does not end until the producer closes or aborts it
      * @param ld_epoch the durable epoch (or the boundary epoch of the compaction)
      * @param add_entry called with each valid entry and the number of the worker that read it
@@ -267,7 +267,7 @@ public:
         parse_error& pe);
 
     /**
-     * @brief ファイルが WAL ファイル (スキャンの対象) かを返す。名前が pwal で始まり、ロケータファイルの名前 (.loc で終わる)
+     * @brief ファイルが WAL ファイル (スキャンの対象) かを返す。名前が pwal_ で始まり、ロケータファイルの名前 (.loc で終わる)
      *        でないもの
      * @param p ファイルのパス
      * @return WAL ファイルなら true

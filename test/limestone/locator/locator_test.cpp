@@ -113,7 +113,7 @@ protected:
      * @return 書いたバイト列
      */
     static std::string write_valid(const std::vector<std::uint64_t>& positions, std::uint64_t locatee_size) {
-        locator_writer writer(file(), 1);
+        locator_writer writer(file(), 1, true);
         for (const std::uint64_t p : positions) {
             writer.note_entry(p);
         }

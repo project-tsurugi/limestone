@@ -33,7 +33,7 @@ sort_output_writer::sort_output_writer(boost::filesystem::path file, std::string
     : file_(std::move(file), std::move(label)), format_(output_format) {
     log_entry::begin_session(file_.stream(), 0);
     if (locator.has_value()) {
-        locator_.emplace(locator->file, locator->record_interval_bytes);
+        locator_.emplace(locator->file, locator->record_interval_bytes, format_.sync_on_close);
     }
 }
 

@@ -28,7 +28,7 @@ namespace limestone::internal {
  * @brief ロケータファイルを書き出す。
  *
  * 構築時にファイルを作ってヘッダを書き、ロケーティファイルの書き出しに合わせて note_entry() でデータ系のエントリの
- * 開始位置を受け取り、記録間隔の規則に従ってレコードを書く。close() で終端を書き、fsync して閉じる。
+ * 開始位置を受け取り、記録間隔の規則に従ってレコードを書く。close() で終端を書いて閉じる (fsync の有無は構築時に指定する)。
  * close() せずに破棄すると、書きかけのファイルが残る (呼び出し側が削除する)。
  *
  * スレッドセーフではない (1 つのスレッドから使う)。
@@ -39,9 +39,10 @@ public:
      * @brief ロケータファイルを作り、ヘッダを書く。
      * @param file ロケータファイル。存在すれば切り詰める
      * @param record_interval_bytes 記録間隔 (バイト)。0 なら FATAL ログを書いて abort する
+     * @param sync_on_close close() で fsync するかどうか
      * @throws limestone_io_exception ファイルを作れないか、ヘッダを書けないとき (errno 付き)
      */
-    locator_writer(boost::filesystem::path file, std::uint64_t record_interval_bytes);
+    locator_writer(boost::filesystem::path file, std::uint64_t record_interval_bytes, bool sync_on_close);
 
     /**
      * @brief close() されていなければファイルを閉じる (失敗は無視する)。
@@ -65,7 +66,8 @@ public:
     void note_entry(std::uint64_t offset);
 
     /**
-     * @brief 終端を書き、fsync してファイルを閉じる。close() の後に呼ぶと FATAL ログを書いて abort する。
+     * @brief 終端を書き、構築時に指定されていれば fsync して、ファイルを閉じる。close() の後に呼ぶと FATAL ログを書いて
+     *        abort する。
      * @param locatee_size ロケーティファイルの大きさ (バイト)。最後に note_entry() に渡した位置より小さければ FATAL
      *                     ログを書いて abort する
      * @throws limestone_io_exception 終端を書けないか、fflush、fsync、fclose に失敗したとき (errno 付き)
@@ -80,7 +82,8 @@ public:
     /**
      * @brief 既存のロケーティファイルを先頭から読み、そのロケータファイルを生成する。
      *
-     * データ系のエントリの開始位置を note_entry() に渡し、末尾に達したら close() する。書き出し時に生成するのと同じ内容になる。
+     * データ系のエントリの開始位置を note_entry() に渡し、末尾に達したら close() する (fsync する)。書き出し時に生成するのと
+     * 同じ内容になる。
      * @param locatee ロケーティファイル。先頭から末尾までエントリが途切れなく並んでいること
      * @param file 生成するロケータファイル。存在すれば切り詰める
      * @param record_interval_bytes 記録間隔 (バイト)
@@ -94,6 +97,7 @@ public:
 private:
     buffered_output_file file_;
     std::uint64_t record_interval_bytes_;
+    bool sync_on_close_;
     // 次にレコードを記録する位置の閾値
     std::uint64_t next_threshold_{};
     // 前回 note_entry() に渡された位置。位置が戻っていないことの検査に使う

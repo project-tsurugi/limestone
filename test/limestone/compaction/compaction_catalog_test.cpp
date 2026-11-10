@@ -155,6 +155,25 @@ TEST_F(compaction_catalog_test, create_catalog) {
 
 
 
+// ロケータファイル (.loc) の孤児判定: 登録されたコンパクション済み WAL ファイルのロケータファイルだけが孤児でない。
+// 登録済みの carry ファイルのロケータファイルは孤児 (carry ファイルにロケータファイルはない)
+TEST_F(compaction_catalog_test, is_orphan_compaction_file_for_locator_files) {
+    compaction_catalog catalog(test_dir);
+    catalog.update_catalog_file(10, 0, 3, {compacted_file_info{"pwal_0000.compacted.3", 1}},
+                                std::string("pwal_0000.carry.3"), {});
+
+    EXPECT_FALSE(catalog.is_orphan_compaction_file("pwal_0000.compacted.3"));
+    EXPECT_FALSE(catalog.is_orphan_compaction_file("pwal_0000.compacted.3.loc"));
+    EXPECT_FALSE(catalog.is_orphan_compaction_file("pwal_0000.carry.3"));
+    EXPECT_TRUE(catalog.is_orphan_compaction_file("pwal_0000.carry.3.loc"));
+    EXPECT_TRUE(catalog.is_orphan_compaction_file("pwal_0000.compacted.4.loc"));
+    EXPECT_TRUE(catalog.is_orphan_compaction_file("pwal_0000.compacted.loc"));
+    EXPECT_TRUE(catalog.is_orphan_compaction_file("pwal_0000.compacted.prev.loc"));
+    // 名前の規則に合わないものは対象外
+    EXPECT_FALSE(catalog.is_orphan_compaction_file(".loc"));
+    EXPECT_FALSE(catalog.is_orphan_compaction_file("pwal_0000.compacted.3.loc.loc"));
+}
+
 TEST_F(compaction_catalog_test, update_catalog) {
     testable_compaction_catalog catalog(test_dir);
 

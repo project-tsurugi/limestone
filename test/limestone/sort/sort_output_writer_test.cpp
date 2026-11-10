@@ -99,6 +99,7 @@ protected:
     static boost::filesystem::path file() {
         return boost::filesystem::path(location) / "output";
     }
+    /// ロケータファイルのパス
     static boost::filesystem::path locator_file() {
         return boost::filesystem::path(location) / "output.loc";
     }

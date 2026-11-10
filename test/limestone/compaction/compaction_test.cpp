@@ -656,12 +656,16 @@ TEST_F(compaction_test, select_files_for_compaction) {
     std::set<boost::filesystem::path> rotation_end_files = {boost::filesystem::path(location) / "pwal_0001.0123456",
                                                             boost::filesystem::path(location) / "pwal_0002.0123456",
                                                             boost::filesystem::path(location) / "pwal_0003", boost::filesystem::path(location) / "other_file",
+                                                            boost::filesystem::path(location) / "pwal_0000.compacted.1",
                                                             boost::filesystem::path(location) / "pwal_0000.compacted.1.loc"};
     std::set<std::string> detached_pwals = {"pwal_0002.0123456"};
-    std::set<std::string> expected = {"pwal_0001.0123456"};
+    std::set<std::string> expected = {"pwal_0001.0123456", "pwal_0000.compacted.1"};
 
     std::set<std::string> result = select_files_for_compaction(rotation_end_files, detached_pwals);
     ASSERT_EQ(result, expected);
+    // the locator file is not selected and does not enter detached_pwals either
+    std::set<std::string> expected_detached = {"pwal_0002.0123456", "pwal_0001.0123456", "pwal_0000.compacted.1"};
+    ASSERT_EQ(detached_pwals, expected_detached);
 }
 
 TEST_F(compaction_test, ensure_directory_exists_directory_exists) {

@@ -54,8 +54,8 @@ std::string header_bytes() {
 
 }  // namespace
 
-locator_writer::locator_writer(boost::filesystem::path file, std::uint64_t record_interval_bytes)
-    : file_(std::move(file), "locator file"), record_interval_bytes_(record_interval_bytes) {
+locator_writer::locator_writer(boost::filesystem::path file, std::uint64_t record_interval_bytes, bool sync_on_close)
+    : file_(std::move(file), "locator file"), record_interval_bytes_(record_interval_bytes), sync_on_close_(sync_on_close) {
     if (record_interval_bytes_ == 0) {
         LOG_LP(FATAL) << "the record interval must not be 0: " << file_.file();
     }
@@ -95,7 +95,11 @@ void locator_writer::close(std::uint64_t locatee_size) {
     if (fwrite(footer.data(), 1, footer.size(), file_.stream()) != footer.size()) {
         LOG_AND_THROW_IO_EXCEPTION("cannot write the footer of locator file: " + file_.file().string(), errno);
     }
-    file_.sync_and_close();
+    if (sync_on_close_) {
+        file_.sync_and_close();
+    } else {
+        file_.close();
+    }
 }
 
 std::size_t locator_writer::record_count() const noexcept {
@@ -106,7 +110,7 @@ std::size_t locator_writer::build_from_file(const boost::filesystem::path& locat
                                             std::uint64_t record_interval_bytes) {
     using status = log_entry_read_result::status;
     log_entry_reader reader(locatee);
-    locator_writer writer(file, record_interval_bytes);
+    locator_writer writer(file, record_interval_bytes, true);
     while (true) {
         const log_entry_read_result result = reader.next();
         if (result.result() == status::ok) {

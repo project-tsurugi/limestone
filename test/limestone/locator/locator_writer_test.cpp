@@ -103,7 +103,7 @@ protected:
 
 // レコードがなくてもヘッダと終端が書かれる。ヘッダはマジック、形式バージョン、0 の予約領域
 TEST_F(locator_writer_test, zero_records_have_header_and_footer) {
-    locator_writer writer(file(), 100);
+    locator_writer writer(file(), 100, true);
     writer.close(0);
     EXPECT_EQ(writer.record_count(), 0U);
     const std::string bytes = read_file(file());
@@ -113,7 +113,7 @@ TEST_F(locator_writer_test, zero_records_have_header_and_footer) {
 
 // 閾値に達した位置を記録し、閾値を次の倍数に進める。倍数ちょうどの位置も記録する
 TEST_F(locator_writer_test, records_follow_the_interval) {
-    locator_writer writer(file(), 100);
+    locator_writer writer(file(), 100, true);
     writer.note_entry(0);    // 閾値 0 → 記録、閾値 100
     writer.note_entry(50);
     writer.note_entry(99);
@@ -129,7 +129,7 @@ TEST_F(locator_writer_test, records_follow_the_interval) {
 
 // 最初に受け取った位置が 0 でなくてもレコード 0 になる
 TEST_F(locator_writer_test, first_entry_is_record_0) {
-    locator_writer writer(file(), 100);
+    locator_writer writer(file(), 100, true);
     writer.note_entry(9);    // 記録、閾値 100
     writer.note_entry(99);
     writer.note_entry(100);  // 記録
@@ -139,7 +139,7 @@ TEST_F(locator_writer_test, first_entry_is_record_0) {
 
 // 1 つのエントリで複数の倍数を越えても記録は 1 つ。閾値は越えた位置の次の倍数になる
 TEST_F(locator_writer_test, crossing_multiple_multiples_records_once) {
-    locator_writer writer(file(), 100);
+    locator_writer writer(file(), 100, true);
     writer.note_entry(0);     // 記録、閾値 100
     writer.note_entry(1000);  // 記録 (100〜1000 の倍数をまとめて越える)、閾値 1100
     writer.note_entry(1050);
@@ -150,7 +150,7 @@ TEST_F(locator_writer_test, crossing_multiple_multiples_records_once) {
 
 // 同じ位置を続けて受け取っても戻りとは扱わない (記録は 1 つ)
 TEST_F(locator_writer_test, same_offset_twice_is_allowed) {
-    locator_writer writer(file(), 100);
+    locator_writer writer(file(), 100, true);
     writer.note_entry(0);
     writer.note_entry(0);
     writer.close(10);
@@ -159,7 +159,7 @@ TEST_F(locator_writer_test, same_offset_twice_is_allowed) {
 
 // 位置が戻ると abort する。close の後の note_entry も abort する
 TEST_F(locator_writer_test, aborts_on_misuse) {
-    locator_writer writer(file(), 100);
+    locator_writer writer(file(), 100, true);
     writer.note_entry(10);
     EXPECT_DEATH(writer.note_entry(9), "went backward");
     writer.close(20);
@@ -168,19 +168,19 @@ TEST_F(locator_writer_test, aborts_on_misuse) {
 
 // close() に最後の位置より小さいロケーティファイルの大きさを渡すと abort する
 TEST_F(locator_writer_test, aborts_when_locatee_size_is_smaller_than_last_offset) {
-    locator_writer writer(file(), 100);
+    locator_writer writer(file(), 100, true);
     writer.note_entry(50);
     EXPECT_DEATH(writer.close(49), "smaller than the last offset");
 }
 
 // 記録間隔 0 は abort する
 TEST_F(locator_writer_test, aborts_on_zero_interval) {
-    EXPECT_DEATH(locator_writer(file(), 0), "must not be 0");
+    EXPECT_DEATH(locator_writer(file(), 0, true), "must not be 0");
 }
 
 // 作れない場所に指定すると limestone_io_exception
 TEST_F(locator_writer_test, throws_when_file_cannot_be_created) {
-    EXPECT_THROW(locator_writer(boost::filesystem::path(location) / "no_such_dir" / "x.loc", 100),
+    EXPECT_THROW(locator_writer(boost::filesystem::path(location) / "no_such_dir" / "x.loc", 100, true),
                  limestone_io_exception);
 }
 
@@ -201,7 +201,7 @@ TEST_F(locator_writer_test, build_from_file_matches_writing) {
 
     // 同じ位置の列を note_entry に渡した結果と一致する
     const boost::filesystem::path expected_file = boost::filesystem::path(location) / "expected.loc";
-    locator_writer writer(expected_file, interval);
+    locator_writer writer(expected_file, interval, true);
     std::uint64_t offset = m.size();
     writer.note_entry(offset);
     offset += e1.size() + s1.size();

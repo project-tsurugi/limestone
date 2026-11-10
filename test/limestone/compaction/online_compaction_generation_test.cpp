@@ -448,6 +448,37 @@ TEST_F(online_compaction_generation_test, locator_files_follow_the_catalog_at_st
     EXPECT_EQ(kv_list[0].second, "v1");
 }
 
+// 登録済みのロケータファイルは起動時に datastore のファイルの集合に入るが、コンパクションの入力には選ばれない。
+// 入力が現行のコンパクション済み WAL ファイルだけになるので、コンパクションは実行されず世代は進まない
+TEST_F(online_compaction_generation_test, locator_file_alone_does_not_trigger_compaction) {
+    gen_datastore();
+    datastore_->switch_epoch(1);
+    write_and_make_durable("k1", "v1", 1);
+    run_compact_with_epoch_switch(3);  // generation 1
+    datastore_->shutdown();
+    datastore_ = nullptr;
+
+    boost::filesystem::path dir{location};
+    {
+        std::ofstream ofs((dir / "pwal_0000.compacted.1.loc").string());
+        ofs << "not a wal file";
+    }
+
+    gen_datastore();
+    datastore_->switch_epoch(4);
+    run_compact_with_epoch_switch(6);
+
+    {
+        compaction_catalog catalog = compaction_catalog::from_catalog_file(dir);
+        EXPECT_EQ(catalog.get_generation(), 1);
+        ASSERT_TRUE(catalog.get_current_compacted_file_name().has_value());
+        EXPECT_EQ(catalog.get_current_compacted_file_name().value(), "pwal_0000.compacted.1");
+        EXPECT_EQ(catalog.get_detached_pwals().count("pwal_0000.compacted.1.loc"), 0);
+    }
+    EXPECT_FALSE(boost::filesystem::exists(dir / "pwal_0000.compacted.2"));
+    EXPECT_TRUE(boost::filesystem::exists(dir / "pwal_0000.compacted.1.loc"));
+}
+
 // Migration startup: starting from a crash remnant of an old binary (a ".prev" file
 // plus the registered generation-0 file), the ".prev" file and an unregistered
 // carry-named remnant are removed as orphans, the registered generation-0 file stays,
