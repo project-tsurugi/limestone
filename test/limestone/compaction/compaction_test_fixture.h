@@ -32,6 +32,7 @@
 #include "dblog_scan.h"
 #include "scan_input.h"
 #include "internal.h"
+#include "locator/locator_format.h"
 #include "log_entry/log_entry.h"
 #include "log_entry/log_entry_format.h"
 #include "manifest.h"
@@ -430,13 +431,14 @@ protected:
         }
     }
 
+    // datastore が登録しているファイルのうち pwal で始まる名前 (ロケータファイルは除く)
     std::set<std::string> extract_pwal_files_from_datastore() {
         std::set<boost::filesystem::path> files = datastore_->files();
 
         std::set<std::string> pwal_file_names;
         for (const auto& file : files) {
             std::string filename = file.filename().string();
-            if (filename.find("pwal") == 0) {
+            if (filename.find("pwal") == 0 && !limestone::internal::locator_format::is_locator_file_name(filename)) {
                 pwal_file_names.insert(filename);
             }
         }

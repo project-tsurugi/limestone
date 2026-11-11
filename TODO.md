@@ -90,16 +90,18 @@ master へのマージ前に本ファイルを削除する。
 
 ### ステップ 4: 出力の公開 (S2 メモ 4 節、5.1 節の書き出しと出力の公開)
 
-* [ ] datastore_impl に locator_settings とテスト用の設定を加え、create_snapshot_and_get_max_blob_id と
+* [x] datastore_impl に locator_settings とテスト用の設定を加え、create_snapshot_and_get_max_blob_id と
       compact_with_online が作る compaction_options に渡す (ソートの設定と同じ経路)。dblogutil は既定値。
-* [ ] compaction_options にロケータファイルの名前と locator_settings を加える。create_compaction_output() は to_dir に
-      一緒に書く。
-* [ ] create_snapshot_and_get_max_blob_id(): data/snapshot.loc を指定する。スナップショットファイルと同じく add_file しない。
-* [ ] datastore::compact_with_online(): 一時ファイルの失敗時の削除にロケータファイルを加える。公開の rename はロケータ
+* [x] compaction_options に locator_settings を加える。create_compaction_output() は to_dir に一緒に書く。ロケータファイルの
+      名前は compaction_options に持たせず、コンパクション済み WAL ファイルの名前から locator_file_name で導く (名前の
+      不整合を作らない。compact_with_online も同じ関数で導く)。
+* [x] create_snapshot_and_get_max_blob_id(): data/snapshot.loc を指定する。スナップショットファイルと同じく add_file しない。
+* [x] datastore::compact_with_online(): 一時ファイルの失敗時の削除にロケータファイルを加える。公開の rename はロケータ
       ファイル、コンパクション済み WAL ファイルの順。カタログの更新の後の add_file にロケータファイルを加える。
       旧世代の削除はロケータファイルを先に削除して subtract_file し、次にコンパクション済み WAL ファイル。
-* [ ] dblogutil の compaction: 出力の名前の指定を加える (作業ディレクトリごと rename なので他は変えない)。
-* [ ] UT: compaction_test、online_compaction_generation_test (公開後にロケータファイルがあり add_file されていること、
+* [x] dblogutil の compaction: 変更なし (ロケータファイルの名前は出力の名前から導くので、指定は要らない。作業ディレクトリ
+      ごと rename なので他も変えない)。
+* [x] UT: compaction_test、online_compaction_generation_test (公開後にロケータファイルがあり add_file されていること、
       旧世代のロケータファイルが削除されること、失敗時にロケータファイルも削除されること、テスト用の設定で記録間隔を
       小さくできること)、dblogutil_compaction_test (出力にロケータファイルがあること)、スナップショット作成でロケータ
       ファイルができること、バックアップにロケータファイルが含まれること。

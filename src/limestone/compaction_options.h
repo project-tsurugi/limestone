@@ -22,6 +22,7 @@
  #include <functional> // std::reference_wrapper
  #include <boost/filesystem.hpp>
  #include "blob_file_gc_snapshot.h"
+ #include "locator/locator_settings.h"
  #include "sort/sort_settings.h"
  #include "limestone/api/epoch_id_type.h"
  #include "limestone/api/write_version_type.h"
@@ -162,6 +163,13 @@
          return sort_work_dir_parent_.empty() ? from_dir_ : sort_work_dir_parent_;
      }
 
+     // コンパクション済み WAL ファイルと一緒に書くロケータファイルの設定を置き換える。この関数を呼ばなければ
+     // locator_settings の既定値のまま
+     void set_locator_settings(const locator_settings& settings) { locator_settings_ = settings; }
+
+     // Getter for the settings of the locator file.
+     [[nodiscard]] const locator_settings& get_locator_settings() const { return locator_settings_; }
+
      // Check if GC is enabled.
      [[nodiscard]] bool is_gc_enabled() const { return static_cast<bool>(gc_snapshot_); }
 
@@ -201,6 +209,9 @@
      std::size_t sort_arena_size_bytes_{sort_settings{}.arena_size_bytes};
      std::size_t sort_merge_fanin_{sort_settings{}.merge_fanin};
      boost::filesystem::path sort_work_dir_parent_{};
+
+     // ロケータファイルの設定 (既定値は locator_settings)
+     locator_settings locator_settings_{};
  };
 
  }  // namespace limestone::internal

@@ -43,6 +43,7 @@
 #include "online_compaction.h"
 #include "compaction_catalog.h"
 #include "compaction_options.h"
+#include "locator/locator_format.h"
 #include "sort/sort_buffer.h"
 #include "sort/sort_settings.h"
 #include "blob_file_resolver.h"
@@ -1287,6 +1288,7 @@ void datastore::compact_with_online() {  // NOLINT(readability-function-cognitiv
     // The compacted WAL file of the current generation is not scanned but is given to the final merge.
     options.set_compacted_input_file_name(current_compacted_file_name);
     options.set_sort_settings(impl_->sort_arena_size_bytes(), impl_->sort_merge_fanin(), impl_->sort_work_dir_parent());
+    options.set_locator_settings(impl_->get_locator_settings());
 
     // Determine the file names of the new generation. The generation number increases
     // monotonically across online and offline compactions.
@@ -1294,6 +1296,8 @@ void datastore::compact_with_online() {  // NOLINT(readability-function-cognitiv
     std::string compacted_file_name = compaction_catalog::get_compacted_filename_for_generation(new_generation);
     std::string carry_file_name = compaction_catalog::get_carry_filename_for_generation(new_generation);
     options.set_output_file_names(compacted_file_name, carry_file_name);
+    // コンパクション済み WAL ファイルのロケータファイル (create_compaction_output が同じ名前の規則で書く)
+    std::string locator_file_name = locator_format::locator_file_name(compacted_file_name);
 
     // Keep the file names of the old generation; they are removed after the commit
     // (the old generation leaves by removal, not by becoming a detached pwal).
@@ -1313,7 +1317,7 @@ void datastore::compact_with_online() {  // NOLINT(readability-function-cognitiv
     } catch (const limestone_io_exception& e) {
         LOG_LP(ERROR) << "online compaction failed while writing the temporary files"
                       << " (will be retried on the next compaction request): " << e.what();
-        for (const std::string& name : {compacted_file_name, carry_file_name}) {
+        for (const std::string& name : {compacted_file_name, locator_file_name, carry_file_name}) {
             boost::system::error_code remove_error;
             boost::filesystem::remove(compaction_temp_dir / name, remove_error);
             if (remove_error) {
@@ -1339,6 +1343,9 @@ void datastore::compact_with_online() {  // NOLINT(readability-function-cognitiv
     try {
         // Publish: rename from the temporary directory into the log directory (the
         // generation-suffixed name is unique, so nothing is overwritten).
+        // ロケータファイルを先に公開する (途中で停止しても、コンパクション済み WAL ファイルだけがあってロケータファイルが
+        // ない状態を作らない。ロケータファイルだけが残れば、起動時に孤児として削除される)
+        safe_rename(compaction_temp_dir / locator_file_name, location_ / locator_file_name);
         safe_rename(compaction_temp_dir / compacted_file_name, compacted_file);
         if (output.carry_written) {
             safe_rename(compaction_temp_dir / carry_file_name, location_ / carry_file_name);
@@ -1387,6 +1394,7 @@ void datastore::compact_with_online() {  // NOLINT(readability-function-cognitiv
         // Refresh the synchronized copy of the compacted file name right after the commit.
         impl_->set_current_compacted_file_name(compaction_catalog_->get_current_compacted_file_name());
         add_file(compacted_file);
+        add_file(location_ / locator_file_name);
         if (output.carry_written) {
             add_file(location_ / carry_file_name);
         }
@@ -1398,7 +1406,14 @@ void datastore::compact_with_online() {  // NOLINT(readability-function-cognitiv
         // after a failure would let the old compacted file be selected as an input of
         // the next compaction by the shape of its name, which could merge two baseline
         // generations.
-        for (const std::optional<std::string>& old_name : {old_compacted_file_name, old_carry_file_name}) {
+        // 旧世代のロケータファイルをコンパクション済み WAL ファイルより先に削除する (ロケータファイルだけが残る状態を
+        // 作らない)。旧世代にロケータファイルがないことがあるが (移行前のデータ)、存在しないファイルの削除は失敗しない
+        std::optional<std::string> old_locator_file_name{};
+        if (old_compacted_file_name.has_value()) {
+            old_locator_file_name = locator_format::locator_file_name(old_compacted_file_name.value());
+        }
+        for (const std::optional<std::string>& old_name :
+             {old_locator_file_name, old_compacted_file_name, old_carry_file_name}) {
             if (!old_name.has_value()) {
                 continue;
             }

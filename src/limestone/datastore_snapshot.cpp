@@ -27,6 +27,7 @@
 #include "limestone_exception_helper.h"
 #include "compaction_carry_writer.h"
 #include "compaction_catalog.h"
+#include "locator/locator_format.h"
 #include "datastore_impl.h"
 #include "dblog_scan.h"
 #include "internal.h"
@@ -132,8 +133,12 @@ compaction_output_result create_compaction_output(compaction_options &options) {
     // On a failure of the writing, the destruction of the writer closes the file; the removal of the temporary file
     // and the retry on the next request are left to the caller. close() performs fsync so that the content reaches
     // the disk before the publishing rename.
+    // ロケータファイルはコンパクション済み WAL ファイルと同じディレクトリに、その名前に .loc を付けた名前で書く
+    boost::filesystem::path locator_file = to_dir / locator_format::locator_file_name(compacted_file_name);
     sort_output_writer output(compacted_file, "compacted file",
-                              {log_entry::write_version_handling::oldest, false, true}, std::nullopt);
+                              {log_entry::write_version_handling::oldest, false, true},
+                              sort_output_writer::locator_output{locator_file,
+                                                                 options.get_locator_settings().record_interval_bytes});
     // The compacted WAL file of the current generation is not scanned but is an input of the final merge. Its
     // normal_with_blob entries are also recorded for the BLOB GC (called in this thread)
     std::optional<sorted_file_merger::compacted_wal_input> compacted{};
@@ -290,9 +295,12 @@ blob_id_type datastore::create_snapshot_and_get_max_blob_id() {
     // remove_entries are needed for the cursor to hide the old values in the compacted WAL file. They are not written
     // if there is no compacted WAL file
     const bool should_write_remove_entry = !compaction_catalog_->get_compacted_files().empty();
+    // スナップショットファイルのロケータファイル (data/snapshot.loc)。スナップショットファイルと同じく add_file しない
+    boost::filesystem::path snapshot_locator_file = sub_dir / locator_format::locator_file_name(snapshot::file_name_);
     sort_output_writer output(snapshot_file, "snapshot file",
                               {log_entry::write_version_handling::keep, should_write_remove_entry, false},
-                              std::nullopt);
+                              sort_output_writer::locator_output{snapshot_locator_file,
+                                                                 impl_->get_locator_settings().record_interval_bytes});
     sorter.merge(std::nullopt, [&output](const log_entry_view& entry) { output.write(entry); });
     output.close();
 

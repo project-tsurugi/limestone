@@ -21,6 +21,7 @@
 #include <boost/filesystem.hpp>
 
 #include "dblog_scan.h"
+#include "locator/locator.h"
 #include "manifest.h"
 #include "log_entry/log_entry.h"
 
@@ -136,6 +137,13 @@ TEST_F(dblogutil_compaction_test, case1force) {
     EXPECT_TRUE(contains(out, "compaction was successfully completed: "));
     EXPECT_EQ(read_entire_file(list_dir(dir)[0]), data_case1_pwalcompact);
     EXPECT_EQ(read_entire_file(dir / "epoch"), data_case1_epochcompact);
+    // コンパクション済み WAL ファイルのロケータファイルも出力され、その大きさと整合する
+    const boost::filesystem::path compacted = list_dir(dir)[0];
+    const boost::filesystem::path locator_file = dir / (compacted.filename().string() + ".loc");
+    ASSERT_TRUE(boost::filesystem::exists(locator_file));
+    limestone::internal::locator loc(locator_file, boost::filesystem::file_size(compacted));
+    EXPECT_EQ(loc.locatee_size(), data_case1_pwalcompact.size());
+    EXPECT_EQ(loc.record_count(), 1);
 }
 
 TEST_F(dblogutil_compaction_test, case1prompt) {

@@ -23,6 +23,8 @@
 
 #include "compaction_test_fixture.h"
 #include "datastore_impl.h"
+#include "locator/locator.h"
+#include "locator/locator_settings.h"
 
 namespace limestone::testing {
 
@@ -604,6 +606,128 @@ TEST_F(online_compaction_generation_test, startup_fails_when_orphan_removal_fail
 
     // Cleanup (no datastore was created, so TearDown can remove the location).
     boost::filesystem::remove_all(orphan_dir);
+}
+
+// 公開後にコンパクション済み WAL ファイルのロケータファイルがあり、datastore に登録されている (バックアップの対象に
+// 含まれる)。次の世代の公開で旧世代のロケータファイルは削除され、登録からも外れる。
+TEST_F(online_compaction_generation_test, locator_file_is_published_and_the_old_one_is_removed) {
+    gen_datastore();
+    datastore_->switch_epoch(1);
+    write_and_make_durable("k1", "v1", 1);
+    run_compact_with_epoch_switch(3);
+
+    const boost::filesystem::path compacted_1 = boost::filesystem::path(location) / "pwal_0000.compacted.1";
+    const boost::filesystem::path locator_1 = boost::filesystem::path(location) / "pwal_0000.compacted.1.loc";
+    ASSERT_TRUE(boost::filesystem::exists(compacted_1));
+    ASSERT_TRUE(boost::filesystem::exists(locator_1));
+    {
+        // 終端のロケーティファイルの大きさが公開されたコンパクション済み WAL ファイルの大きさと一致する (読み込みの検査を通る)
+        locator loc(locator_1, boost::filesystem::file_size(compacted_1));
+        EXPECT_EQ(loc.locatee_size(), boost::filesystem::file_size(compacted_1));
+        EXPECT_EQ(loc.record_count(), 1);  // 既定の記録間隔より小さいのでレコード 0 だけ
+    }
+    EXPECT_NE(datastore_->files().find(locator_1), datastore_->files().end());
+    {
+        auto backup = begin_backup_with_epoch_switch(backup_type::standard, 4);
+        bool found = false;
+        for (const auto& entry : backup->entries()) {
+            found = found || entry.source_path() == locator_1;
+        }
+        EXPECT_TRUE(found);
+        backup->notify_end_backup();  // 終えないと次のコンパクションがスキップされる
+    }
+
+    write_and_make_durable("k2", "v2", 4);
+    run_compact_with_epoch_switch(6);
+
+    const boost::filesystem::path compacted_2 = boost::filesystem::path(location) / "pwal_0000.compacted.2";
+    const boost::filesystem::path locator_2 = boost::filesystem::path(location) / "pwal_0000.compacted.2.loc";
+    EXPECT_FALSE(boost::filesystem::exists(compacted_1));
+    EXPECT_FALSE(boost::filesystem::exists(locator_1));
+    EXPECT_EQ(datastore_->files().find(locator_1), datastore_->files().end());
+    ASSERT_TRUE(boost::filesystem::exists(locator_2));
+    EXPECT_NE(datastore_->files().find(locator_2), datastore_->files().end());
+    locator loc(locator_2, boost::filesystem::file_size(compacted_2));
+    EXPECT_EQ(loc.locatee_size(), boost::filesystem::file_size(compacted_2));
+}
+
+// ロケータファイルの一時ファイルを作れないとき (同じ名前のディレクトリを置く)、書きかけのコンパクション済み WAL ファイルと
+// ロケータファイルの一時ファイルはどちらも削除され、次の要求で成功する。
+TEST_F(online_compaction_generation_test, locator_temp_write_failure_is_retried_on_the_next_request) {
+    gen_datastore();
+    datastore_->switch_epoch(1);
+    write_and_make_durable("k1", "v1", 1);
+
+    boost::filesystem::path temp_dir =
+        boost::filesystem::path(location) / compaction_catalog::get_compaction_temp_dirname();
+    boost::filesystem::create_directories(temp_dir / "pwal_0000.compacted.1.loc");
+
+    run_compact_with_epoch_switch(3);
+
+    {
+        compaction_catalog catalog = compaction_catalog::from_catalog_file(boost::filesystem::path(location));
+        EXPECT_EQ(catalog.get_generation(), 0);
+    }
+    EXPECT_FALSE(boost::filesystem::exists(temp_dir / "pwal_0000.compacted.1"));
+    EXPECT_FALSE(boost::filesystem::exists(temp_dir / "pwal_0000.compacted.1.loc"));
+    EXPECT_FALSE(boost::filesystem::exists(boost::filesystem::path(location) / "pwal_0000.compacted.1.loc"));
+
+    run_compact_with_epoch_switch(4);
+    {
+        compaction_catalog catalog = compaction_catalog::from_catalog_file(boost::filesystem::path(location));
+        EXPECT_EQ(catalog.get_generation(), 1);
+    }
+    EXPECT_TRUE(boost::filesystem::exists(boost::filesystem::path(location) / "pwal_0000.compacted.1.loc"));
+}
+
+// テスト用の設定で記録間隔を小さくすると、少ないデータで複数のレコードが記録される (設定がオンラインコンパクションに届く)。
+TEST_F(online_compaction_generation_test, locator_settings_for_test_reach_the_compaction) {
+    gen_datastore();
+    datastore_->get_impl()->set_locator_settings_for_test({64, 1});
+    datastore_->switch_epoch(1);
+    write_and_make_durable("k1", "v1", 1);
+    write_and_make_durable("k2", "v2", 2);
+    write_and_make_durable("k3", "v3", 3);
+    write_and_make_durable("k4", "v4", 4);
+    run_compact_with_epoch_switch(6);
+
+    const boost::filesystem::path compacted_1 = boost::filesystem::path(location) / "pwal_0000.compacted.1";
+    const boost::filesystem::path locator_1 = boost::filesystem::path(location) / "pwal_0000.compacted.1.loc";
+    ASSERT_TRUE(boost::filesystem::exists(locator_1));
+    locator loc(locator_1, boost::filesystem::file_size(compacted_1));
+    // 1 エントリは 64 バイト未満なので、記録間隔 64 バイトごとに最初に始まるエントリが記録される
+    EXPECT_GE(loc.record_count(), 2);
+    EXPECT_LT(loc.record_count(), 4);  // 1 つのエントリで複数の倍数を越えても記録は 1 つ
+    EXPECT_EQ(loc.position(0), 9);  // marker_begin の直後
+}
+
+// 起動時のスナップショットの作成で data/snapshot.loc ができ、スナップショットファイルの大きさと整合する。テスト用の設定は
+// ready() の前に与えるとスナップショットに届く。スナップショットファイルと同じく datastore には登録されない。
+TEST_F(online_compaction_generation_test, snapshot_locator_file_is_created_at_startup) {
+    gen_datastore();
+    datastore_->switch_epoch(1);
+    write_and_make_durable("k1", "v1", 1);
+    write_and_make_durable("k2", "v2", 2);
+    write_and_make_durable("k3", "v3", 3);
+    datastore_->shutdown();
+    datastore_ = nullptr;
+
+    limestone::api::configuration conf{};
+    conf.set_data_location(location);
+    datastore_ = std::make_unique<limestone::api::datastore_test>(conf);
+    datastore_->get_impl()->set_locator_settings_for_test({64, 1});
+    lc0_ = &datastore_->create_channel();
+    datastore_->ready();
+    datastore_->wait_for_blob_file_garbace_collector();
+
+    const boost::filesystem::path snapshot_file = boost::filesystem::path(location) / "data" / "snapshot";
+    const boost::filesystem::path snapshot_locator = boost::filesystem::path(location) / "data" / "snapshot.loc";
+    ASSERT_TRUE(boost::filesystem::exists(snapshot_file));
+    ASSERT_TRUE(boost::filesystem::exists(snapshot_locator));
+    locator loc(snapshot_locator, boost::filesystem::file_size(snapshot_file));
+    EXPECT_EQ(loc.locatee_size(), boost::filesystem::file_size(snapshot_file));
+    EXPECT_GE(loc.record_count(), 2);
+    EXPECT_EQ(datastore_->files().find(snapshot_locator), datastore_->files().end());
 }
 
 } // namespace limestone::testing

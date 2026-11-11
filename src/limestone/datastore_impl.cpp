@@ -168,6 +168,14 @@ const boost::filesystem::path& datastore_impl::sort_work_dir_parent() const noex
     return sort_work_dir_parent_;
 }
 
+void datastore_impl::set_locator_settings_for_test(const limestone::internal::locator_settings& settings) noexcept {
+    locator_settings_ = settings;
+}
+
+const limestone::internal::locator_settings& datastore_impl::get_locator_settings() const noexcept {
+    return locator_settings_;
+}
+
 // Increments the backup counter.
 void datastore_impl::increment_backup_counter() noexcept {
     backup_counter_.fetch_add(1, std::memory_order_acq_rel);
