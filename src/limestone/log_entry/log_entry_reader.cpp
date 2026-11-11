@@ -135,11 +135,11 @@ void log_entry_reader::open_file(std::uint64_t start_offset) {
         file_ops_->close(fd_);
         LOG_AND_THROW_IO_EXCEPTION("cannot get the file status: " + file_.string(), err);
     }
-    file_size_ = static_cast<std::uint64_t>(st.st_size);
-    if (start_offset > file_size_) {
+    end_offset_ = static_cast<std::uint64_t>(st.st_size);
+    if (start_offset > end_offset_) {
         file_ops_->close(fd_);
         LOG_AND_THROW_IO_EXCEPTION_NO_ERRNO("start offset " + std::to_string(start_offset) + " exceeds the file size "
-                                            + std::to_string(file_size_) + ": " + file_.string());
+                                            + std::to_string(end_offset_) + ": " + file_.string());
     }
     buffer_offset_ = start_offset;
 }
@@ -158,7 +158,7 @@ bool log_entry_reader::open_if_exists() {
 
 void log_entry_reader::refresh_file_size() {
     if (fd_ < 0 && ! open_if_exists()) {
-        file_size_ = 0;
+        end_offset_ = 0;
         return;
     }
     struct stat st{};
@@ -166,7 +166,7 @@ void log_entry_reader::refresh_file_size() {
         const int err = errno;
         LOG_AND_THROW_IO_EXCEPTION("cannot get the file status: " + file_.string(), err);
     }
-    file_size_ = static_cast<std::uint64_t>(st.st_size);
+    end_offset_ = static_cast<std::uint64_t>(st.st_size);
 }
 
 void log_entry_reader::update_write_state() {
@@ -187,9 +187,9 @@ void log_entry_reader::update_write_state() {
     refresh_file_size();
     // if the start position or the end of the range already read exceeds the size of the completed file, the start
     // position is wrong or the file has shrunk, and the rest cannot be read
-    if (buffer_offset_ + end_ > file_size_) {
+    if (buffer_offset_ + end_ > end_offset_) {
         LOG_AND_THROW_IO_EXCEPTION_NO_ERRNO("the read position " + std::to_string(buffer_offset_ + end_)
-                                            + " exceeds the file size " + std::to_string(file_size_) + ": "
+                                            + " exceeds the file size " + std::to_string(end_offset_) + ": "
                                             + file_.string());
     }
     // switch to the handling for a file not being written only after all the checks pass. If one of them throws,
@@ -204,7 +204,7 @@ void log_entry_reader::wait_and_read(std::size_t required) {
     if (required > buffer_.size()) {
         while (true) {
             refresh_file_size();
-            if (required <= remaining_file_size()) {
+            if (required <= remaining_size()) {
                 break;
             }
             update_write_state();
@@ -258,7 +258,7 @@ log_entry_read_result log_entry_reader::next() {
         }
         // if the lower bound exceeds the rest of the file, the rest cannot be read. Even if a length field is broken,
         // no large allocation is made
-        if (parsed.required() > remaining_file_size()) {
+        if (parsed.required() > remaining_size()) {
             return end_or_short_entry();
         }
         prepare_buffer(parsed.required());
@@ -279,7 +279,7 @@ log_entry_read_result log_entry_reader::end_or_short_entry() noexcept {
         offset);
     // empty the buffer and move the read position to the end of the file, so that the next call returns end.
     // std::max is defensive.
-    buffer_offset_ = std::max(file_size_, buffer_offset_ + end_);
+    buffer_offset_ = std::max(end_offset_, buffer_offset_ + end_);
     begin_ = 0;
     end_ = 0;
     return result;
@@ -323,9 +323,9 @@ std::size_t log_entry_reader::read_into_buffer() {
     }
 }
 
-std::uint64_t log_entry_reader::remaining_file_size() const noexcept {
+std::uint64_t log_entry_reader::remaining_size() const noexcept {
     const std::uint64_t position = buffer_offset_ + begin_;
-    return file_size_ > position ? file_size_ - position : 0;
+    return end_offset_ > position ? end_offset_ - position : 0;
 }
 
 }  // namespace limestone::internal

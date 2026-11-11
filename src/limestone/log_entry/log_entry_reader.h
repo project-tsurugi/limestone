@@ -310,10 +310,9 @@ private:
     std::size_t read_into_buffer();
 
     /**
-     * @brief Returns the remaining size of the file (the size of the file minus the position of the beginning of the
-     *        unparsed part).
+     * @brief 読み終える位置までの残りの大きさ (end_offset_ から未解析の部分の先頭の位置を引いた値) を返す。
      */
-    [[nodiscard]] std::uint64_t remaining_file_size() const noexcept;
+    [[nodiscard]] std::uint64_t remaining_size() const noexcept;
 
     real_file_operations real_file_ops_{};
     file_operations* file_ops_{};
@@ -324,7 +323,8 @@ private:
     /// whether the state function returned failed. If true, next() throws without calling the state function
     bool failed_{};
     int fd_{-1};
-    std::uint64_t file_size_{};
+    /// 読み終える位置。ファイルの大きさ (書き込み中のファイルでは、取得し直すたびに更新する)
+    std::uint64_t end_offset_{};
 
     std::string buffer_{};
     /// the file position of the beginning of buffer_
