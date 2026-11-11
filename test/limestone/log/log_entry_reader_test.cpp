@@ -308,7 +308,7 @@ TEST_F(log_entry_reader_test, length_beyond_file_does_not_allocate) {
     }
 }
 
-// refill branches: expands for an entry larger than the normal size, and shrinks to the normal size for a small
+// refill branches: expands for an entry larger than the buffer size, and shrinks to the buffer size for a small
 // entry after it
 TEST_F(log_entry_reader_test, buffer_expands_and_shrinks) {
     std::string large = normal_entry(1, "key", std::string(buffer_size + 100, 'v'), 7, 1);
@@ -319,8 +319,8 @@ TEST_F(log_entry_reader_test, buffer_expands_and_shrinks) {
     expect_entry(reader, large, 0);
     expect_entry(reader, small, large.size());
     expect_end(reader, large.size() + small.size());
-    // 1st: reads the normal size. 2nd: expands to the size of the entry, and reads the rest.
-    // 3rd: reads the whole free space of the buffer shrunk to the normal size (without shrinking, the free space would
+    // 1st: reads the buffer size. 2nd: expands to the size of the entry, and reads the rest.
+    // 3rd: reads the whole free space of the buffer shrunk to the buffer size (without shrinking, the free space would
     // be the size of the entry)
     ASSERT_GE(ops.requests().size(), 3U);
     EXPECT_EQ(ops.requests()[0], buffer_size);
@@ -328,7 +328,7 @@ TEST_F(log_entry_reader_test, buffer_expands_and_shrinks) {
     EXPECT_EQ(ops.requests()[2], buffer_size);
 }
 
-// refill branches: for an entry across the boundary of the normal size, moves the unparsed part to the beginning
+// refill branches: for an entry across the boundary of the buffer size, moves the unparsed part to the beginning
 TEST_F(log_entry_reader_test, buffer_moves_unparsed_to_front) {
     // the first entry fills up to 10 bytes before the boundary, so that the second entry crosses the boundary
     std::string first = normal_entry(1, "key", "", 7, 1);
@@ -340,13 +340,13 @@ TEST_F(log_entry_reader_test, buffer_moves_unparsed_to_front) {
     expect_entry(reader, first, 0);
     expect_entry(reader, second, first.size());
     expect_end(reader, first.size() + second.size());
-    // 2nd: moves the unparsed 10 bytes to the beginning, and reads the rest of the normal-size buffer
+    // 2nd: moves the unparsed 10 bytes to the beginning, and reads the rest of the buffer
     ASSERT_GE(ops.requests().size(), 2U);
     EXPECT_EQ(ops.requests()[0], buffer_size);
     EXPECT_EQ(ops.requests()[1], buffer_size - 10);
 }
 
-// returns short_entry without expanding the buffer if an entry larger than the normal size is cut in the middle
+// returns short_entry without expanding the buffer if an entry larger than the buffer size is cut in the middle
 TEST_F(log_entry_reader_test, truncated_large_entry_does_not_expand) {
     std::string large = normal_entry(1, "key", std::string(buffer_size + 100, 'v'), 7, 1);
     auto p = write_file(large.substr(0, large.size() - 50));
@@ -367,7 +367,7 @@ TEST_F(log_entry_reader_test, buffer_expands_twice_for_blob_ids) {
     log_entry_reader reader(p, 0, nullptr, ops);
     expect_entry(reader, large, 0);
     expect_end(reader, large.size());
-    // 1st: reads the normal size. 2nd: expands up to the end of the BLOB count field, and reads the rest.
+    // 1st: reads the buffer size. 2nd: expands up to the end of the BLOB count field, and reads the rest.
     // 3rd: expands to the size of the entry, and reads the BLOB IDs
     const std::size_t through_blob_count = large.size() - blob_ids.size() * sizeof(std::uint64_t);
     ASSERT_GE(ops.requests().size(), 3U);
@@ -381,7 +381,7 @@ TEST_F(log_entry_reader_test, short_reads_after_expansion) {
     std::string large = normal_entry(1, "key", std::string(buffer_size + 100, 'v'), 7, 1);
     std::string small = remove_entry(1, "key", 7, 2);
     auto p = write_file(large + small);
-    // an amount that does not divide the normal size, so that read boundaries differ from entry boundaries
+    // an amount that does not divide the buffer size, so that read boundaries differ from entry boundaries
     recording_file_operations ops(1000003);
     log_entry_reader reader(p, 0, nullptr, ops);
     expect_entry(reader, large, 0);
@@ -389,7 +389,7 @@ TEST_F(log_entry_reader_test, short_reads_after_expansion) {
     expect_end(reader, large.size() + small.size());
 }
 
-// for an entry that starts in the middle of the buffer and does not fit in the normal size, moves the unparsed part
+// for an entry that starts in the middle of the buffer and does not fit in the buffer size, moves the unparsed part
 // to the beginning of the expanded buffer
 TEST_F(log_entry_reader_test, buffer_expands_from_middle) {
     std::string e1 = marker(2, 7);
@@ -618,9 +618,9 @@ TEST_F(log_entry_reader_test, writing_does_not_allocate_while_waiting) {
     log_entry_reader reader(p, 0, writer.function(), ops);
     expect_entry(reader, large, 0);
     expect_end(reader, large.size());
-    // 1st: reads the normal size (only 100 bytes have arrived). No read while waiting.
+    // 1st: reads the buffer size (only 100 bytes have arrived). No read while waiting.
     // 2nd: after everything arrives, expands to the size of the entry and reads the rest. 3rd: reads into the buffer
-    // shrunk to the normal size
+    // shrunk to the buffer size
     ASSERT_EQ(ops.requests().size(), 3U);
     EXPECT_EQ(ops.requests()[0], buffer_size);
     EXPECT_EQ(ops.requests()[1], large.size() - 100);

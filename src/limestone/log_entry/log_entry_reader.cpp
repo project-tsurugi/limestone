@@ -335,7 +335,7 @@ log_entry_read_result log_entry_reader::end_or_short_entry() noexcept {
 
 void log_entry_reader::prepare_buffer(std::size_t required) {
     const std::size_t unparsed_size = end_ - begin_;
-    // required is greater than the size of the unparsed part (the contract of parse()). If required fits in the normal
+    // required is greater than the size of the unparsed part (the contract of parse()). If required fits in the buffer
     // size, so does the unparsed part
     if (required > buffer_.size()) {
         // expand
@@ -343,7 +343,7 @@ void log_entry_reader::prepare_buffer(std::size_t required) {
         std::memcpy(expanded.data(), &buffer_[begin_], unparsed_size);
         buffer_ = std::move(expanded);
     } else if (buffer_.size() > buffer_size_ && required <= buffer_size_) {
-        // shrink to the normal size
+        // shrink to the buffer size
         std::string shrunk(buffer_size_, '\0');
         std::memcpy(shrunk.data(), &buffer_[begin_], unparsed_size);
         buffer_ = std::move(shrunk);
