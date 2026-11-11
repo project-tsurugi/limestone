@@ -15,6 +15,7 @@
  */
 
 #include "compaction_scenario_test_fixture.h"
+#include "locator/locator_format.h"
 
 namespace limestone::testing {
 
@@ -776,7 +777,8 @@ TEST_P(compaction_scenario_test, compaction_without_new_pwals_keeps_compacted_fi
     for (boost::filesystem::directory_iterator it{boost::filesystem::path(location)}, end;
          it != end; ++it) {
         std::string name = it->path().filename().string();
-        if (starts_with(name, "pwal_") && name != compacted_filename()) {
+        if (starts_with(name, "pwal_") && name != compacted_filename()
+            && name != locator_format::locator_file_name(compacted_filename())) {
             boost::filesystem::remove(it->path());
         }
     }

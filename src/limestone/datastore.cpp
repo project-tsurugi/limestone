@@ -304,6 +304,30 @@ datastore::datastore(configuration const& conf) : location_(conf.data_location_)
                     throw limestone_exception(exception_type::initialization_failure, err_msg);
                 }
             }
+
+            // カタログに登録されたコンパクション済み WAL ファイルには、ロケータファイルが必ず対になる。欠けていれば
+            // 起動を失敗させる。形式バージョンの移行で生成したロケータファイルは、上のディレクトリの走査の後にできたので、
+            // ここでファイルの集合に加える
+            for (auto const& info : compaction_catalog_->get_compacted_files()) {
+                const boost::filesystem::path locator_path =
+                    location_ / internal::locator_format::locator_file_name(info.get_file_name());
+                boost::system::error_code locator_exists_error;
+                bool locator_exists = boost::filesystem::exists(locator_path, locator_exists_error);
+                if (locator_exists_error && locator_exists_error != boost::system::errc::no_such_file_or_directory) {
+                    std::string err_msg = "failed to check existence of the locator file '"
+                        + locator_path.string() + "': " + locator_exists_error.message();
+                    LOG(ERROR) << "/:limestone:config:datastore " << err_msg;
+                    throw limestone_exception(exception_type::initialization_failure, err_msg);
+                }
+                if (!locator_exists) {
+                    std::string err_msg = "the locator file '" + locator_path.filename().string()
+                        + "' of the compacted file registered in the catalog does not exist, log directory: "
+                        + location_.string();
+                    LOG(ERROR) << "/:limestone:config:datastore " << err_msg;
+                    throw limestone_exception(exception_type::initialization_failure, err_msg);
+                }
+                add_file(locator_path);
+            }
         }
 
         impl_->set_current_compacted_file_name(compaction_catalog_->get_current_compacted_file_name());

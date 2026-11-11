@@ -24,6 +24,7 @@
 #include "compaction_test_fixture.h"
 #include "datastore_impl.h"
 #include "locator/locator.h"
+#include "locator/locator_format.h"
 #include "locator/locator_settings.h"
 
 namespace limestone::testing {
@@ -195,6 +196,8 @@ TEST_F(online_compaction_generation_test, migrates_from_generation_zero_legacy_n
     boost::filesystem::path dir{location};
     boost::filesystem::rename(dir / "pwal_0000.compacted.1",
                               dir / compaction_catalog::get_compacted_filename());
+    boost::filesystem::rename(dir / "pwal_0000.compacted.1.loc",
+                              dir / locator_format::locator_file_name(compaction_catalog::get_compacted_filename()));
     {
         compaction_catalog catalog = compaction_catalog::from_catalog_file(dir);
         compaction_catalog rewritten{dir};
@@ -326,6 +329,8 @@ TEST_F(online_compaction_generation_test, double_read_of_migration_window_is_ide
     boost::filesystem::path dir{location};
     boost::filesystem::rename(dir / "pwal_0000.compacted.1",
                               dir / compaction_catalog::get_compacted_filename());
+    boost::filesystem::rename(dir / "pwal_0000.compacted.1.loc",
+                              dir / locator_format::locator_file_name(compaction_catalog::get_compacted_filename()));
     {
         compaction_catalog catalog = compaction_catalog::from_catalog_file(dir);
         compaction_catalog rewritten{dir};
@@ -519,6 +524,8 @@ TEST_F(online_compaction_generation_test, prev_remnant_and_unregistered_carry_ar
     boost::filesystem::path dir{location};
     boost::filesystem::rename(dir / "pwal_0000.compacted.1",
                               dir / compaction_catalog::get_compacted_filename());
+    boost::filesystem::rename(dir / "pwal_0000.compacted.1.loc",
+                              dir / locator_format::locator_file_name(compaction_catalog::get_compacted_filename()));
     {
         compaction_catalog catalog = compaction_catalog::from_catalog_file(dir);
         compaction_catalog rewritten{dir};
@@ -822,6 +829,31 @@ TEST_F(online_compaction_generation_test, datastore_starts_on_v8_and_generates_t
     EXPECT_EQ(read_persistent_format_version(), 9);
     locator loc(locator_file, boost::filesystem::file_size(dir / "pwal_0000.compacted.1"));
     EXPECT_EQ(loc.record_count(), 1);
+}
+
+// 登録されたコンパクション済み WAL ファイルのロケータファイルが欠けていると、起動に失敗する。
+TEST_F(online_compaction_generation_test, datastore_fails_to_start_without_the_locator_file) {
+    make_generation_one_logdir_of_version(9);
+    boost::filesystem::remove(boost::filesystem::path(location) / "pwal_0000.compacted.1.loc");
+
+    EXPECT_THROW(gen_datastore(), limestone_exception);
+}
+
+// 移行で生成したロケータファイルは、起動の直後に取ったバックアップに含まれる。
+TEST_F(online_compaction_generation_test, backup_after_the_migration_contains_the_locator_file) {
+    make_generation_one_logdir_of_version(8);
+    const boost::filesystem::path locator_file = boost::filesystem::path(location) / "pwal_0000.compacted.1.loc";
+    boost::filesystem::remove(locator_file);
+
+    gen_datastore();
+    EXPECT_NE(datastore_->files().find(locator_file), datastore_->files().end());
+    auto backup = begin_backup_with_epoch_switch(backup_type::standard, 5);
+    bool found = false;
+    for (const auto& entry : backup->entries()) {
+        found = found || entry.source_path() == locator_file;
+    }
+    EXPECT_TRUE(found);
+    backup->notify_end_backup();
 }
 
 // dblogutil のサブコマンドも移行を通り、ロケータファイルを生成する。

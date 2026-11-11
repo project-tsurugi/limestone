@@ -132,14 +132,14 @@ master へのマージ前に本ファイルを削除する。
 
 移行 (ステップ 5) の後に入れる。移行で生成したロケータファイルはここで add_file する。
 
-* [ ] 起動時の存在検査 (datastore の構築) で、登録されたコンパクション済み WAL ファイルのロケータファイルの存在を確かめ、
+* [x] 起動時の存在検査 (datastore の構築) で、登録されたコンパクション済み WAL ファイルのロケータファイルの存在を確かめ、
       欠けていれば ERROR ログを出して起動を失敗させ、あれば add_file する。
-* [ ] 手作りのコンパクション済み WAL ファイルとカタログで datastore を構築する既存テストのフィクスチャにロケータファイルを
-      足す (build_from_file を使うテスト補助を 1 つ置く)。候補: compaction_test_fixture.h、offline_compaction_test、
-      online_compaction_generation_test、log_dir_test、assemble_snapshot_input_filenames_test、compaction_scenario_test、
-      compaction_catalog_test。datastore を構築するものを作業時に絞る。
-* [ ] UT: 登録済みのロケータファイルが欠けると起動に失敗すること、移行直後に取ったバックアップにロケータファイルが
-      含まれること。
+* [x] 手作りのコンパクション済み WAL ファイルとカタログで datastore を構築する既存テストを直す。落ちたのは 4 件だけで、
+      どれも実物のコンパクションの出力を加工するテストだった。世代 0 の状態を作る 3 件 (online_compaction_generation_test)
+      はロケータファイルも一緒に改名し、pwal_ で始まるファイルを消す 1 件 (compaction_scenario_test) はロケータファイルを
+      残す。build_from_file を使うテスト補助は不要だったので置いていない。
+* [x] UT (online_compaction_generation_test): 登録済みのロケータファイルが欠けると起動に失敗すること、移行直後に取った
+      バックアップにロケータファイルが含まれること。
 
 ### ステップ 7: R2 の区切り
 
@@ -191,7 +191,7 @@ master へのマージ前に本ファイルを削除する。
 * [ ] R (region_records) を datastore_impl から snapshot の private 構築子 (公開ヘッダ) を通して snapshot_impl に渡す。
       公開ヘッダから内部ヘッダの locator_settings は include できないので、R だけを std::size_t で渡す。テスト用の設定で
       小さい値を与えられるようにする。
-* [ ] 既存の snapshot_impl_test の手作りファイルにロケータファイルを足す (ステップ 6 のテスト補助を使う)。
+* [ ] 既存の snapshot_impl_test の手作りファイルにロケータファイルを足す (build_from_file で作る。ステップ 6 ではテスト補助を置かなかった)。
 * [ ] get_cursor() と BLOB GC の my_cursor は変えない。
 
 ### ステップ 12: 分配の機構の削除 (S2 メモ 5.2 節)
