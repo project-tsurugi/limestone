@@ -787,7 +787,7 @@ TEST_F(online_compaction_generation_test, migration_from_v8_generates_the_locato
     EXPECT_FALSE(boost::filesystem::exists(snapshot_locator));
 }
 
-// The migration from 7 or less also generates it, and the manifest is rewritten only once, to 9.
+// The migration from 7 or less also generates it and makes the manifest 9.
 TEST_F(online_compaction_generation_test, migration_from_v7_generates_the_locator_file) {
     make_generation_one_logdir_of_version(7);
     const boost::filesystem::path dir{location};

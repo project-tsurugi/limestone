@@ -61,18 +61,12 @@ manifest::migration_info check_and_migrate_logdir_format(const boost::filesystem
         // A log directory of an older version has no locator file for the compacted WAL file recorded by the catalog.
         // Generate it before rewriting the manifest. If the process stops during the generation, the manifest keeps
         // the old version and the next startup generates it again (an existing locator file may be incomplete, so
-        // it is discarded)
+        // it is overwritten)
         const compaction_catalog catalog = compaction_catalog::from_catalog_file(logdir);
         bool generated = false;
         for (const auto& info : catalog.get_compacted_files()) {
             const boost::filesystem::path locatee = logdir / info.get_file_name();
-            const boost::filesystem::path locator_file =
-                logdir / locator_format::locator_file_name(info.get_file_name());
-            boost::system::error_code ec;
-            boost::filesystem::remove(locator_file, ec);
-            if (ec) {
-                LOG_AND_THROW_IO_EXCEPTION("failed to remove the locator file: " + locator_file.string(), ec);
-            }
+            const boost::filesystem::path locator_file = locator_format::locator_file_path(locatee);
             const std::size_t records =
                 locator_writer::build_from_file(locatee, locator_file, locator_settings{}.record_interval_bytes);
             LOG_LP(INFO) << "generated the locator file: " << locator_file.string() << " (records: " << records << ")";

@@ -112,8 +112,9 @@ master へのマージ前に本ファイルを削除する。
 同じステップ (1 コミット) で行う。分けると、8 のまま生成だけが動く中間状態になるか、UT が書けない。
 
 * [x] manifest::check_and_migrate を「検査」(check_and_repair。修復、読み込み、対応バージョンの検査。旧バージョンの
-      マニフェストを返す) と「書き換え」(既存の migrate_manifest を public にして使う) に分ける。check_and_migrate は 2 つを合成した関数として残し、既存の manifest_test は
-      そのまま通す。
+      マニフェストを返す) と「書き換え」(既存の migrate_manifest を public にして使う) に分ける。check_and_migrate は
+      削除し、manifest_test は check_and_repair、migrate_manifest、check_and_migrate_logdir_format を呼ぶ形に書き換える
+      (誤って呼ぶとロケータファイルを作らずにマニフェストが 9 になるため。レビューの指摘)。
 * [x] check_and_migrate_logdir_format: 検査 → ensure_compaction_catalog → カタログの読み込み → 旧バージョンが
       default_persistent_format_version 未満なら、登録されたコンパクション済み WAL ファイルごとに既存のロケータファイルを
       削除して build_from_file で生成し、ファイルとディレクトリを fsync し、その後にマニフェストを書き換える。既定以上なら

@@ -14,6 +14,7 @@
  * limitations under the License.
  */
 #include "manifest.h"
+#include "internal.h"
 
 #include <gtest/gtest.h>
 
@@ -140,8 +141,8 @@ TEST_F(manifest_test, create_initial_synchronizes_directory) {
     }
 }
 
-// check_and_migrate synchronizes the directory after the rename from the backup, and throws if it fails
-TEST_F(manifest_test, check_and_migrate_rename_backup_synchronizes_directory) {
+// check_and_repair synchronizes the directory after the rename from the backup, and throws if it fails
+TEST_F(manifest_test, check_and_repair_rename_backup_synchronizes_directory) {
     auto backup_path = logdir / std::string(manifest::backup_file_name);
     nlohmann::json j = { {"format_version", "1.0"}, {"persistent_format_version", 4} };
     std::ofstream(backup_path.string()) << j.dump();
@@ -149,7 +150,7 @@ TEST_F(manifest_test, check_and_migrate_rename_backup_synchronizes_directory) {
     directory_sync_recorder failing_ops;
     failing_ops.fail = true;
     try {
-        manifest::check_and_migrate(logdir, failing_ops);
+        manifest::check_and_repair(logdir, failing_ops);
         FAIL() << "Expected limestone_io_exception";
     } catch (const limestone::api::limestone_io_exception& e) {
         EXPECT_NE(std::string(e.what()).find("Failed to sync directory to disk"), std::string::npos) << e.what();
@@ -356,7 +357,7 @@ TEST_F(manifest_test, is_supported_version_returns_zero_when_file_not_openable) 
 }
 
 
-TEST_F(manifest_test, check_and_migrate_uses_backup_when_manifest_missing) {
+TEST_F(manifest_test, check_and_repair_uses_backup_when_manifest_missing) {
     // Prepare: only backup file exists
     auto backup_path = logdir / std::string(manifest::backup_file_name);
     nlohmann::json j = { {"format_version", "1.0"}, {"persistent_format_version", 4} };
@@ -365,12 +366,13 @@ TEST_F(manifest_test, check_and_migrate_uses_backup_when_manifest_missing) {
     ASSERT_TRUE(boost::filesystem::exists(backup_path));
 
     // Act: should rename backup -> manifest, and remove backup
-    EXPECT_NO_THROW(manifest::check_and_migrate(logdir));
+    real_file_operations ops;
+    EXPECT_NO_THROW(manifest::check_and_repair(logdir, ops));
     EXPECT_TRUE(boost::filesystem::exists(logdir / std::string(manifest::file_name)));
     EXPECT_FALSE(boost::filesystem::exists(backup_path));
 }
 
-TEST_F(manifest_test, check_and_migrate_removes_backup_when_both_exist) {
+TEST_F(manifest_test, check_and_repair_removes_backup_when_both_exist) {
     // Prepare: both manifest and backup exist
     auto manifest_path = logdir / std::string(manifest::file_name);
     auto backup_path   = logdir / std::string(manifest::backup_file_name);
@@ -381,24 +383,26 @@ TEST_F(manifest_test, check_and_migrate_removes_backup_when_both_exist) {
     ASSERT_TRUE(boost::filesystem::exists(backup_path));
 
     // Act: should remove backup, leave manifest untouched
-    EXPECT_NO_THROW(manifest::check_and_migrate(logdir));
+    real_file_operations ops;
+    EXPECT_NO_THROW(manifest::check_and_repair(logdir, ops));
     EXPECT_TRUE(boost::filesystem::exists(manifest_path));
     EXPECT_FALSE(boost::filesystem::exists(backup_path));
 }
 
-TEST_F(manifest_test, check_and_migrate_throws_when_no_manifest_or_backup) {
+TEST_F(manifest_test, check_and_repair_throws_when_no_manifest_or_backup) {
     // Nothing in logdir
     ASSERT_FALSE(boost::filesystem::exists(logdir / std::string(manifest::file_name)));
     ASSERT_FALSE(boost::filesystem::exists(logdir / std::string(manifest::backup_file_name)));
 
     // Act & Assert: should throw fatal limestone_exception due to missing manifest
+    real_file_operations ops;
     EXPECT_THROW(
-        manifest::check_and_migrate(logdir),
+        manifest::check_and_repair(logdir, ops),
         limestone::api::limestone_exception
     );
 }
 
-TEST_F(manifest_test, check_and_migrate_throws_on_unsupported_version) {
+TEST_F(manifest_test, check_and_repair_throws_on_unsupported_version) {
     // Write manifest with version 0 (unsupported)
     auto manifest_path = logdir / std::string(manifest::file_name);
     nlohmann::json j = { {"format_version", "1.0"}, {"persistent_format_version", 0} };
@@ -408,8 +412,9 @@ TEST_F(manifest_test, check_and_migrate_throws_on_unsupported_version) {
     ASSERT_EQ(vc, 0);
 
     // Act & Assert: version mismatch leads to limestone_exception
+    real_file_operations ops;
     EXPECT_THROW(
-        manifest::check_and_migrate(logdir),
+        manifest::check_and_repair(logdir, ops),
         limestone::api::limestone_exception
     );
 }
@@ -421,7 +426,7 @@ TEST_F(manifest_test, check_and_migrate_migrates_old_version_to_latest) {
     std::ofstream(manifest_path.string()) << old.dump();
 
     // Act: migration should succeed
-    EXPECT_NO_THROW(manifest::check_and_migrate(logdir));
+    EXPECT_NO_THROW(internal::check_and_migrate_logdir_format(logdir));
 
     // After migration: new manifest has version 4, backup removed
     std::ifstream ifs((logdir / std::string(manifest::file_name)).string());
@@ -464,7 +469,7 @@ public:
 };
 
 // rename backup->manifest fails
-TEST_F(manifest_test, check_and_migrate_rename_backup_to_manifest_failure) {
+TEST_F(manifest_test, check_and_repair_rename_backup_to_manifest_failure) {
     // Prepare: only backup exists
     auto backup_path = logdir / std::string(manifest::backup_file_name);
     nlohmann::json j = { {"format_version", "1.0"}, {"persistent_format_version", 4} };
@@ -473,7 +478,7 @@ TEST_F(manifest_test, check_and_migrate_rename_backup_to_manifest_failure) {
     migrate_file_ops ops;
     ops.fail_rename_backup_to_manifest = true;
     try {
-        manifest::check_and_migrate(logdir, ops);
+        manifest::check_and_repair(logdir, ops);
         FAIL() << "Expected limestone_io_exception";
     } catch (const limestone::api::limestone_io_exception& e) {
         std::string what = e.what();
@@ -483,7 +488,7 @@ TEST_F(manifest_test, check_and_migrate_rename_backup_to_manifest_failure) {
 }
 
 // remove backup when both exist fails
-TEST_F(manifest_test, check_and_migrate_remove_backup_failure_when_both_exist) {
+TEST_F(manifest_test, check_and_repair_remove_backup_failure_when_both_exist) {
     // Prepare: both manifest and backup exist
     auto manifest_path = logdir / std::string(manifest::file_name);
     auto backup_path   = logdir / std::string(manifest::backup_file_name);
@@ -494,7 +499,7 @@ TEST_F(manifest_test, check_and_migrate_remove_backup_failure_when_both_exist) {
     migrate_file_ops ops;
     ops.fail_remove_backup_after_both_exist = true;
     try {
-        manifest::check_and_migrate(logdir, ops);
+        manifest::check_and_repair(logdir, ops);
         FAIL() << "Expected limestone_io_exception";
     } catch (const limestone::api::limestone_io_exception& e) {
         std::string what = e.what();
@@ -504,7 +509,7 @@ TEST_F(manifest_test, check_and_migrate_remove_backup_failure_when_both_exist) {
 }
 
 // remove backup after migration fails
-TEST_F(manifest_test, check_and_migrate_remove_backup_after_migration_failure) {
+TEST_F(manifest_test, migrate_manifest_remove_backup_after_migration_failure) {
     // Prepare: manifest with older version
     auto manifest_path = logdir / std::string(manifest::file_name);
     nlohmann::json j = { {"format_version", "1.0"}, {"persistent_format_version", 2} };
@@ -513,7 +518,8 @@ TEST_F(manifest_test, check_and_migrate_remove_backup_after_migration_failure) {
     migrate_file_ops ops;
     ops.fail_remove_backup_after_migration = true;
     try {
-        manifest::check_and_migrate(logdir, ops);
+        const manifest old_manifest = manifest::check_and_repair(logdir, ops);
+        manifest::migrate_manifest(manifest_path, logdir / std::string(manifest::backup_file_name), old_manifest, ops);
         FAIL() << "Expected limestone_io_exception";
     } catch (const limestone::api::limestone_io_exception& e) {
         std::string what = e.what();
@@ -522,8 +528,8 @@ TEST_F(manifest_test, check_and_migrate_remove_backup_after_migration_failure) {
     }
 }
 
-// Test check_and_migrate throws when is_supported_version returns negative (corrupted manifest)
-TEST_F(manifest_test, check_and_migrate_throws_on_corrupted_manifest) {
+// Test check_and_repair throws when is_supported_version returns negative (corrupted manifest)
+TEST_F(manifest_test, check_and_repair_throws_on_corrupted_manifest) {
     // Write invalid JSON to cause parse error
     auto manifest_path = logdir / std::string(manifest::file_name);
     std::ofstream ofs(manifest_path.string());
@@ -532,7 +538,8 @@ TEST_F(manifest_test, check_and_migrate_throws_on_corrupted_manifest) {
 
     // Expect: corrupted manifest leads to limestone_exception("logdir corrupted")
     try {
-        manifest::check_and_migrate(logdir);
+        real_file_operations ops;
+        manifest::check_and_repair(logdir, ops);
         FAIL() << "Expected limestone_exception for corrupted manifest";
     } catch (const limestone::api::limestone_exception& e) {
         std::string what = e.what();
@@ -774,7 +781,7 @@ TEST_F(manifest_test, load_manifest_from_path_returns_none_if_open_ifstream_fail
     EXPECT_FALSE(loaded);
 }
 
-// Test that check_and_migrate reports migration performed
+// Test that check_and_migrate_logdir_format reports migration performed
 TEST_F(manifest_test, check_and_migrate_reports_migration_performed) {
     // Write old manifest (version 2) to simulate migration
     auto manifest_path = logdir / std::string(manifest::file_name);
@@ -785,14 +792,14 @@ TEST_F(manifest_test, check_and_migrate_reports_migration_performed) {
     std::ofstream(manifest_path.string()) << j.dump();
 
     // Act
-    auto migration_result = manifest::check_and_migrate(logdir);
+    auto migration_result = internal::check_and_migrate_logdir_format(logdir);
 
     // Assert
     EXPECT_EQ(migration_result.get_old_version(), 2);
     EXPECT_EQ(migration_result.get_new_version(), manifest::default_persistent_format_version);
 }
 
-// Test that check_and_migrate reports no migration performed
+// Test that check_and_migrate_logdir_format reports no migration performed
 TEST_F(manifest_test, check_and_migrate_reports_no_migration_needed) {
     // Write up-to-date manifest (version == default)
     auto manifest_path = logdir / std::string(manifest::file_name);
@@ -803,7 +810,7 @@ TEST_F(manifest_test, check_and_migrate_reports_no_migration_needed) {
     std::ofstream(manifest_path.string()) << j.dump();
 
     // Act
-    auto migration_result = manifest::check_and_migrate(logdir);
+    auto migration_result = internal::check_and_migrate_logdir_format(logdir);
 
     // Assert
     EXPECT_EQ(migration_result.get_old_version(), manifest::default_persistent_format_version);

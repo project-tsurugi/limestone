@@ -177,7 +177,7 @@ public:
 
     /**
      * @brief Checks the manifest: repairs it from the backup, loads it, and checks that the version is supported.
-     *        Does not rewrite it.
+     *        Does not migrate it (the version is left as is).
      *
      * @param logdir Path to the log directory containing the manifest file.
      * @param ops    the file operations
@@ -198,26 +198,6 @@ public:
      */
     static void migrate_manifest(const boost::filesystem::path& manifest_path, const boost::filesystem::path& manifest_backup_path,
                                  const manifest& old_manifest, file_operations& ops);
-
-    /**
-     * @brief Validates the manifest file in the specified log directory and performs repair or migration if necessary.
-     *
-     * @param logdir Path to the log directory containing the manifest file.
-     * @return migration_info containing information about the migration performed.
-     */
-    static migration_info check_and_migrate(const boost::filesystem::path& logdir);
-
-    /**
-     * @brief Validates and migrates the manifest file, with injectable I/O backend.
-     *
-     * @note This overload is intended for unit tests or special environments
-     *       where file-system operations (rename/remove) must be stubbed or mocked.
-     *
-     * @param logdir Path to the log directory containing the manifest file.
-     * @param ops    Custom file_operations implementation (e.g. a test stub).
-     * @return migration_info containing information about the migration performed.
-     */ 
-    static migration_info check_and_migrate(const boost::filesystem::path& logdir, file_operations& ops);
 
     /**
      * @brief Converts the current object state to a JSON formatted string.

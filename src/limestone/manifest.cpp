@@ -146,22 +146,6 @@ int manifest::is_supported_version(const boost::filesystem::path& manifest_path,
     }
 }
 
-manifest::migration_info manifest::check_and_migrate(const boost::filesystem::path& logdir) {
-    real_file_operations default_ops;
-    return check_and_migrate(logdir, default_ops);
-}
-
-manifest::migration_info manifest::check_and_migrate(const boost::filesystem::path& logdir, file_operations& ops) {
-    const manifest old_manifest = check_and_repair(logdir, ops);
-    const int persistent_version = old_manifest.get_persistent_format_version();
-    if (persistent_version < default_persistent_format_version) {
-        VLOG_LP(log_info) << "Migrating manifest file (safe double-write: backup then main)"
-                          << " from version " << persistent_version << " to " << default_persistent_format_version;
-        migrate_manifest(logdir / std::string(file_name), logdir / std::string(backup_file_name), old_manifest, ops);
-    }
-    return {persistent_version, default_persistent_format_version};
-}
-
 manifest manifest::check_and_repair(const boost::filesystem::path& logdir, file_operations& ops) {
     boost::filesystem::path manifest_path = logdir / std::string(file_name);
     boost::filesystem::path manifest_backup_path = logdir / std::string(backup_file_name);

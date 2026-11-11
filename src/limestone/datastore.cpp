@@ -1431,8 +1431,7 @@ void datastore::compact_with_online() {  // NOLINT(readability-function-cognitiv
         // the next compaction by the shape of its name, which could merge two baseline
         // generations.
         // Remove the locator file of the old generation before the compacted WAL file (this never leaves the
-        // locator file alone). The old generation may have no locator file (data before the migration), but
-        // removing a file that does not exist does not fail
+        // locator file alone)
         std::optional<std::string> old_locator_file_name{};
         if (old_compacted_file_name.has_value()) {
             old_locator_file_name = locator_format::locator_file_name(old_compacted_file_name.value());
