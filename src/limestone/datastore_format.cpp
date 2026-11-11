@@ -28,7 +28,11 @@
 
 #include "limestone_exception_helper.h"
 #include "compaction_catalog.h"
+#include "file_operations.h"
 #include "internal.h"
+#include "locator/locator_format.h"
+#include "locator/locator_settings.h"
+#include "locator/locator_writer.h"
 #include "log_entry/log_entry.h"
 #include "manifest.h"
 
@@ -49,9 +53,39 @@ void setup_initial_logdir(const boost::filesystem::path& logdir) {
 
 
 manifest::migration_info check_and_migrate_logdir_format(const boost::filesystem::path& logdir) {
-    auto result = manifest::check_and_migrate(logdir);
+    real_file_operations ops;
+    const manifest old_manifest = manifest::check_and_repair(logdir, ops);
     ensure_compaction_catalog(logdir);
-    return result;
+    const int old_version = old_manifest.get_persistent_format_version();
+    if (old_version < manifest::default_persistent_format_version) {
+        // 旧バージョンの永続化データには、登録されたコンパクション済み WAL ファイルのロケータファイルがない。マニフェストを
+        // 書き換える前に生成する。生成の途中で停止するとマニフェストは旧バージョンのままなので、次の起動で作り直す
+        // (既存のロケータファイルは書きかけかもしれないので捨てる)
+        const compaction_catalog catalog = compaction_catalog::from_catalog_file(logdir);
+        bool generated = false;
+        for (const auto& info : catalog.get_compacted_files()) {
+            const boost::filesystem::path locatee = logdir / info.get_file_name();
+            const boost::filesystem::path locator_file =
+                logdir / locator_format::locator_file_name(info.get_file_name());
+            boost::system::error_code ec;
+            boost::filesystem::remove(locator_file, ec);
+            if (ec) {
+                LOG_AND_THROW_IO_EXCEPTION("failed to remove the locator file: " + locator_file.string(), ec);
+            }
+            const std::size_t records =
+                locator_writer::build_from_file(locatee, locator_file, locator_settings{}.record_interval_bytes);
+            LOG_LP(INFO) << "generated the locator file: " << locator_file.string() << " (records: " << records << ")";
+            generated = true;
+        }
+        if (generated && ops.fsync_directory(logdir) != 0) {
+            LOG_AND_THROW_IO_EXCEPTION("failed to fsync directory: " + logdir.string(), errno);
+        }
+        VLOG_LP(log_info) << "Migrating manifest file (safe double-write: backup then main)"
+                          << " from version " << old_version << " to " << manifest::default_persistent_format_version;
+        manifest::migrate_manifest(logdir / std::string(manifest::file_name),
+                                   logdir / std::string(manifest::backup_file_name), old_manifest, ops);
+    }
+    return {old_version, manifest::default_persistent_format_version};
 }
 
 void ensure_compaction_catalog(const boost::filesystem::path& logdir) {

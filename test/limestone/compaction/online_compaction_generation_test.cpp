@@ -101,6 +101,27 @@ public:
         test_datastore->on_rotate_log_files_callback = nullptr;
     }
 
+    // 世代 1 のコンパクション済み WAL ファイルを持つ永続化データを作って datastore を止め、マニフェストを指定した形式
+    // バージョンに書き換える (旧バージョンの永続化データを模す)。
+    void make_generation_one_logdir_of_version(int persistent_format_version) {
+        gen_datastore();
+        datastore_->switch_epoch(1);
+        write_and_make_durable("k1", "v1", 1);
+        write_and_make_durable("k2", "v2", 2);
+        run_compact_with_epoch_switch(4);
+        datastore_->shutdown();
+        datastore_ = nullptr;
+        create_file(manifest_path, data_manifest(persistent_format_version));
+    }
+
+    // マニフェストの永続化データの形式バージョンを読む。
+    int read_persistent_format_version() {
+        std::ifstream ifs(manifest_path.string());
+        nlohmann::json j;
+        ifs >> j;
+        return j["persistent_format_version"].get<int>();
+    }
+
     // Puts the captured crash state back into location so that a datastore can start on it.
     void restore_crash_state(const boost::filesystem::path& copy_from) {
         datastore_->shutdown();
@@ -728,6 +749,115 @@ TEST_F(online_compaction_generation_test, snapshot_locator_file_is_created_at_st
     EXPECT_EQ(loc.locatee_size(), boost::filesystem::file_size(snapshot_file));
     EXPECT_GE(loc.record_count(), 2);
     EXPECT_EQ(datastore_->files().find(snapshot_locator), datastore_->files().end());
+}
+
+// 8 からの移行で、登録されたコンパクション済み WAL ファイルのロケータファイルが生成され、マニフェストが 9 になる。既存の
+// ロケータファイル (生成の途中で停止した書きかけを含む) は捨てて作り直す。スナップショットのロケータファイルは作らない。
+TEST_F(online_compaction_generation_test, migration_from_v8_generates_the_locator_file) {
+    make_generation_one_logdir_of_version(8);
+    const boost::filesystem::path dir{location};
+    const boost::filesystem::path compacted = dir / "pwal_0000.compacted.1";
+    const boost::filesystem::path locator_file = dir / "pwal_0000.compacted.1.loc";
+    const boost::filesystem::path snapshot_locator = dir / "data" / "snapshot.loc";
+    { std::ofstream ofs(locator_file.string(), std::ios::trunc); ofs << "half-written"; }
+    boost::filesystem::remove(snapshot_locator);
+
+    manifest::migration_info info = check_and_migrate_logdir_format(dir);
+
+    EXPECT_EQ(info.get_old_version(), 8);
+    EXPECT_EQ(info.get_new_version(), 9);
+    EXPECT_EQ(read_persistent_format_version(), 9);
+    locator loc(locator_file, boost::filesystem::file_size(compacted));
+    EXPECT_EQ(loc.record_count(), 1);
+    EXPECT_EQ(loc.position(0), 9);
+    EXPECT_FALSE(boost::filesystem::exists(snapshot_locator));
+}
+
+// 7 以下からの移行でも生成され、マニフェストの書き換えは 9 への一度だけである。
+TEST_F(online_compaction_generation_test, migration_from_v7_generates_the_locator_file) {
+    make_generation_one_logdir_of_version(7);
+    const boost::filesystem::path dir{location};
+    const boost::filesystem::path locator_file = dir / "pwal_0000.compacted.1.loc";
+    boost::filesystem::remove(locator_file);
+
+    manifest::migration_info info = check_and_migrate_logdir_format(dir);
+
+    EXPECT_EQ(info.get_old_version(), 7);
+    EXPECT_EQ(info.get_new_version(), 9);
+    EXPECT_EQ(read_persistent_format_version(), 9);
+    locator loc(locator_file, boost::filesystem::file_size(dir / "pwal_0000.compacted.1"));
+    EXPECT_EQ(loc.record_count(), 1);
+}
+
+// 9 の永続化データでは生成も書き換えもしない (既存のロケータファイルに触れない)。
+TEST_F(online_compaction_generation_test, migration_does_nothing_on_v9) {
+    make_generation_one_logdir_of_version(9);
+    const boost::filesystem::path dir{location};
+    const boost::filesystem::path locator_file = dir / "pwal_0000.compacted.1.loc";
+    { std::ofstream ofs(locator_file.string(), std::ios::trunc); ofs << "untouched"; }
+
+    manifest::migration_info info = check_and_migrate_logdir_format(dir);
+
+    EXPECT_EQ(info.get_old_version(), 9);
+    EXPECT_EQ(info.get_new_version(), 9);
+    EXPECT_EQ(boost::filesystem::file_size(locator_file), 9);  // "untouched"
+}
+
+// 8 の永続化データで datastore を起動すると、ロケータファイルが生成され、データを読める。
+TEST_F(online_compaction_generation_test, datastore_starts_on_v8_and_generates_the_locator_file) {
+    make_generation_one_logdir_of_version(8);
+    const boost::filesystem::path dir{location};
+    const boost::filesystem::path locator_file = dir / "pwal_0000.compacted.1.loc";
+    boost::filesystem::remove(locator_file);
+
+    gen_datastore();
+    std::unique_ptr<snapshot> snapshot = datastore_->get_snapshot();
+    std::unique_ptr<cursor> cursor = snapshot->get_cursor();
+    std::size_t entries = 0;
+    while (cursor->next()) {
+        ++entries;
+    }
+
+    EXPECT_EQ(entries, 2);
+    EXPECT_EQ(read_persistent_format_version(), 9);
+    locator loc(locator_file, boost::filesystem::file_size(dir / "pwal_0000.compacted.1"));
+    EXPECT_EQ(loc.record_count(), 1);
+}
+
+// dblogutil のサブコマンドも移行を通り、ロケータファイルを生成する。
+TEST_F(online_compaction_generation_test, dblogutil_generates_the_locator_file_on_v8) {
+    for (const std::string subcommand : {"inspect", "repair --epoch=3"}) {
+        make_generation_one_logdir_of_version(8);
+        const boost::filesystem::path dir{location};
+        const boost::filesystem::path locator_file = dir / "pwal_0000.compacted.1.loc";
+        boost::filesystem::remove(locator_file);
+
+        std::string out;
+        invoke(std::string(util_command) + " " + subcommand + " " + dir.string() + " 2>&1", out);
+
+        EXPECT_EQ(read_persistent_format_version(), 9) << subcommand << "\n" << out;
+        EXPECT_TRUE(boost::filesystem::exists(locator_file)) << subcommand << "\n" << out;
+        boost::filesystem::remove_all(dir);
+        boost::filesystem::create_directory(dir);
+    }
+}
+
+// dblogutil は flock を取れなければ移行しない (他のプロセスが使っている永続化データを書き換えない)。
+TEST_F(online_compaction_generation_test, dblogutil_does_not_migrate_without_the_lock) {
+    make_generation_one_logdir_of_version(8);
+    const boost::filesystem::path dir{location};
+    const boost::filesystem::path locator_file = dir / "pwal_0000.compacted.1.loc";
+    boost::filesystem::remove(locator_file);
+    int lock_fd = manifest::acquire_lock(dir);
+    ASSERT_NE(lock_fd, -1);
+
+    std::string out;
+    invoke(std::string(util_command) + " inspect " + dir.string() + " 2>&1", out);
+    close(lock_fd);
+
+    EXPECT_NE(out.find("already in use"), std::string::npos) << out;
+    EXPECT_EQ(read_persistent_format_version(), 8);
+    EXPECT_FALSE(boost::filesystem::exists(locator_file));
 }
 
 } // namespace limestone::testing

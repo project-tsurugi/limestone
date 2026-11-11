@@ -98,7 +98,7 @@ public:
      * @brief Default persistent format version for new manifest files.
      * @note Update this value when upgrading the manifest persistent format version.
      */
-    static constexpr int default_persistent_format_version = 8;
+    static constexpr int default_persistent_format_version = 9;
 
     /**
      * @brief Constructs a manifest object with the default version information.
@@ -174,6 +174,29 @@ public:
      */
     static int is_supported_version(const boost::filesystem::path& manifest_path, std::string& errmsg);
 
+
+    /**
+     * @brief マニフェストを検査する。バックアップからの修復、読み込み、対応バージョンの検査を行い、書き換えはしない。
+     *
+     * @param logdir Path to the log directory containing the manifest file.
+     * @param ops    ファイル操作
+     * @return 読み込んだマニフェスト (書き換える前のバージョンを持つ)
+     * @throws limestone_io_exception 修復のファイル操作に失敗したとき、マニフェストを読めないとき
+     * @throws limestone_exception 対応していないバージョンのとき
+     */
+    static manifest check_and_repair(const boost::filesystem::path& logdir, file_operations& ops);
+
+    /**
+     * @brief マニフェストを default_persistent_format_version に書き換える。
+     *
+     * @param manifest_path マニフェストファイルのパス
+     * @param manifest_backup_path マニフェストのバックアップファイルのパス
+     * @param old_manifest check_and_repair() が返した、書き換える前のマニフェスト
+     * @param ops    ファイル操作
+     * @throws limestone_io_exception ファイル操作に失敗したとき
+     */
+    static void migrate_manifest(const boost::filesystem::path& manifest_path, const boost::filesystem::path& manifest_backup_path,
+                                 const manifest& old_manifest, file_operations& ops);
 
     /**
      * @brief Validates the manifest file in the specified log directory and performs repair or migration if necessary.
@@ -272,8 +295,6 @@ protected:
 private:
     static bool exists_path(const boost::filesystem::path& path);
     static void write_file_safely(const boost::filesystem::path& file_path, const manifest& m, file_operations& ops); // safe atomic write for manifest
-    static void migrate_manifest(const boost::filesystem::path& manifest_path, const boost::filesystem::path& manifest_backup_path,
-                                 const manifest& old_manifest, file_operations& ops);
     static std::string generate_instance_uuid();
 
     std::string format_version_;

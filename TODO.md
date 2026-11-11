@@ -111,19 +111,19 @@ master へのマージ前に本ファイルを削除する。
 生成の条件と書き換えの条件はどちらも「旧バージョンが default_persistent_format_version 未満」なので、既定を 9 に上げるのと
 同じステップ (1 コミット) で行う。分けると、8 のまま生成だけが動く中間状態になるか、UT が書けない。
 
-* [ ] manifest::check_and_migrate を「検査」(修復、読み込み、対応バージョンの検査。旧バージョンのマニフェストを返す) と
-      「書き換え」(migrate_manifest) に分ける。check_and_migrate は 2 つを合成した関数として残し、既存の manifest_test は
+* [x] manifest::check_and_migrate を「検査」(check_and_repair。修復、読み込み、対応バージョンの検査。旧バージョンの
+      マニフェストを返す) と「書き換え」(既存の migrate_manifest を public にして使う) に分ける。check_and_migrate は 2 つを合成した関数として残し、既存の manifest_test は
       そのまま通す。
-* [ ] check_and_migrate_logdir_format: 検査 → ensure_compaction_catalog → カタログの読み込み → 旧バージョンが
+* [x] check_and_migrate_logdir_format: 検査 → ensure_compaction_catalog → カタログの読み込み → 旧バージョンが
       default_persistent_format_version 未満なら、登録されたコンパクション済み WAL ファイルごとに既存のロケータファイルを
       削除して build_from_file で生成し、ファイルとディレクトリを fsync し、その後にマニフェストを書き換える。既定以上なら
       生成も書き換えもしない。スナップショットファイルは生成の対象にしない。INFO ログ (ファイル名、レコード数)。
-* [ ] dblogutil の main で、check_and_migrate_logdir_format を flock の取得の成否の確認の後に移す。
-* [ ] default_persistent_format_version を 9 にする。migration_info (ローテーションの要否は 5 以下から) は変えない。
-* [ ] 8 を最新、9 を未対応と仮定するテストを直す (未対応の例は 10 にする): log_dir_test の accept_manifest_version_v8、
+* [x] dblogutil の main で、check_and_migrate_logdir_format を flock の取得の成否の確認の後に移す。
+* [x] default_persistent_format_version を 9 にする。migration_info (ローテーションの要否は 5 以下から) は変えない。
+* [x] 8 を最新、9 を未対応と仮定するテストを直す (未対応の例は 10 にする): log_dir_test の accept_manifest_version_v8、
       reject_manifest_version_v9、rotate_old_rejects_unsupported_data (data_manifest(9))、datastore_impl_test の
       migration_info と get_new_version の期待値。テストデータの既定 (data_manifest(1)) は変えない。
-* [ ] UT: log_dir_test、manifest_test、dblogutil_test (8 と 7 以下からの起動で生成されマニフェストが 9 になること、
+* [x] UT: log_dir_test、online_compaction_generation_test (世代 1 の永続化データを作る fixture があるため。8 と 7 以下からの起動で生成されマニフェストが 9 になること、
       移行でスナップショットのロケータファイルを作らないこと、生成の途中で停止した状態からの再起動で作り直されること、
       既存のロケータファイルが捨てられること、dblogutil の各サブコマンドでも生成されること、flock に失敗したときは
       移行しないこと、9 の永続化データでは何もしないこと)。
