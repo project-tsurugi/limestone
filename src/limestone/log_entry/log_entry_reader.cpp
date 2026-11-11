@@ -116,6 +116,25 @@ log_entry_reader::log_entry_reader(boost::filesystem::path file, std::uint64_t s
     }
 }
 
+log_entry_reader::log_entry_reader(int fd, boost::filesystem::path file, std::uint64_t start_offset,
+                                   std::optional<std::uint64_t> end_offset, std::size_t buffer_size)
+    : file_ops_(&real_file_ops_), file_(std::move(file)), buffer_size_(buffer_size) {
+    if (buffer_size_ == 0) {
+        LOG_LP(FATAL) << "buffer size is 0";
+    }
+    open_duplicate(fd, start_offset, end_offset);
+}
+
+log_entry_reader::log_entry_reader(int fd, boost::filesystem::path file, std::uint64_t start_offset,
+                                   std::optional<std::uint64_t> end_offset, std::size_t buffer_size,
+                                   file_operations& file_ops)
+    : file_ops_(&file_ops), file_(std::move(file)), buffer_size_(buffer_size) {
+    if (buffer_size_ == 0) {
+        LOG_LP(FATAL) << "buffer size is 0";
+    }
+    open_duplicate(fd, start_offset, end_offset);
+}
+
 log_entry_reader::~log_entry_reader() {
     // the file is only read, so a failure of close is ignored
     if (fd_ >= 0) {
@@ -139,6 +158,35 @@ void log_entry_reader::open_file(std::uint64_t start_offset) {
     if (start_offset > end_offset_) {
         file_ops_->close(fd_);
         LOG_AND_THROW_IO_EXCEPTION_NO_ERRNO("start offset " + std::to_string(start_offset) + " exceeds the file size "
+                                            + std::to_string(end_offset_) + ": " + file_.string());
+    }
+    buffer_offset_ = start_offset;
+}
+
+void log_entry_reader::open_duplicate(int fd, std::uint64_t start_offset, std::optional<std::uint64_t> end_offset) {
+    fd_ = file_ops_->dup(fd);
+    if (fd_ < 0) {
+        const int err = errno;
+        LOG_AND_THROW_IO_EXCEPTION("cannot duplicate the file descriptor: " + file_.string(), err);
+    }
+    struct stat st{};
+    if (file_ops_->fstat(fd_, &st) != 0) {
+        const int err = errno;
+        file_ops_->close(fd_);
+        LOG_AND_THROW_IO_EXCEPTION("cannot get the file status: " + file_.string(), err);
+    }
+    const auto file_size = static_cast<std::uint64_t>(st.st_size);
+    if (end_offset.has_value() && end_offset.value() > file_size) {
+        file_ops_->close(fd_);
+        LOG_AND_THROW_IO_EXCEPTION_NO_ERRNO("end offset " + std::to_string(end_offset.value())
+                                            + " exceeds the file size " + std::to_string(file_size) + ": "
+                                            + file_.string());
+    }
+    end_offset_ = end_offset.value_or(file_size);
+    end_offset_specified_ = end_offset.has_value();
+    if (start_offset > end_offset_) {
+        file_ops_->close(fd_);
+        LOG_AND_THROW_IO_EXCEPTION_NO_ERRNO("start offset " + std::to_string(start_offset) + " exceeds the end offset "
                                             + std::to_string(end_offset_) + ": " + file_.string());
     }
     buffer_offset_ = start_offset;
@@ -291,12 +339,12 @@ void log_entry_reader::prepare_buffer(std::size_t required) {
     // size, so does the unparsed part
     if (required > buffer_.size()) {
         // expand
-        std::string expanded(std::max(required, buffer_size), '\0');
+        std::string expanded(std::max(required, buffer_size_), '\0');
         std::memcpy(expanded.data(), &buffer_[begin_], unparsed_size);
         buffer_ = std::move(expanded);
-    } else if (buffer_.size() > buffer_size && required <= buffer_size) {
+    } else if (buffer_.size() > buffer_size_ && required <= buffer_size_) {
         // shrink to the normal size
-        std::string shrunk(buffer_size, '\0');
+        std::string shrunk(buffer_size_, '\0');
         std::memcpy(shrunk.data(), &buffer_[begin_], unparsed_size);
         buffer_ = std::move(shrunk);
     } else if (begin_ != 0) {
@@ -309,9 +357,18 @@ void log_entry_reader::prepare_buffer(std::size_t required) {
 }
 
 std::size_t log_entry_reader::read_into_buffer() {
+    std::size_t count = buffer_.size() - end_;
+    if (end_offset_specified_) {
+        // 読み終える位置より後ろを読まない
+        const std::uint64_t position = buffer_offset_ + end_;
+        const std::uint64_t rest = end_offset_ > position ? end_offset_ - position : 0;
+        if (rest == 0) {
+            return 0;
+        }
+        count = static_cast<std::size_t>(std::min<std::uint64_t>(count, rest));
+    }
     while (true) {
-        const ssize_t n = file_ops_->pread(fd_, &buffer_[end_], buffer_.size() - end_,
-                                           static_cast<off_t>(buffer_offset_ + end_));
+        const ssize_t n = file_ops_->pread(fd_, &buffer_[end_], count, static_cast<off_t>(buffer_offset_ + end_));
         if (n >= 0) {
             end_ += static_cast<std::size_t>(n);
             return static_cast<std::size_t>(n);

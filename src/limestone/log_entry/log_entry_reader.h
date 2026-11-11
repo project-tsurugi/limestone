@@ -18,6 +18,7 @@
 #include <chrono>
 #include <cstddef>
 #include <cstdint>
+#include <optional>
 #include <ostream>
 #include <string>
 #include <string_view>
@@ -160,8 +161,8 @@ std::ostream& operator<<(std::ostream& out, log_entry_read_result::status result
  */
 class log_entry_reader {
 public:
-    /// The normal size of the buffer (the size read by one read).
-    static constexpr std::size_t buffer_size = std::size_t{16} * 1024 * 1024;
+    /// The default size of the buffer (the size read by one read). コンストラクタでバッファの大きさを指定しないときの値
+    static constexpr std::size_t default_buffer_size = std::size_t{16} * 1024 * 1024;
 
     /// The interval of waiting for more data in a file being written. The state function is called at each wait.
     static constexpr std::chrono::milliseconds wait_interval{10};
@@ -200,6 +201,42 @@ public:
      * @throws limestone_io_exception the same as the first or the second constructor, depending on state
      */
     log_entry_reader(boost::filesystem::path file, std::uint64_t start_offset, file_write_state_function state,
+                     file_operations& file_ops);
+
+    /**
+     * @brief 開いているファイル記述子から、読む範囲とバッファの大きさを指定して reader を作る。
+     *
+     * fd は複製して使う。呼び出し側は構築の後に fd を閉じてよく、ファイルの名前が削除されていても読める。ファイルは
+     * 読んでいる間に変化しないものとして扱う。
+     * end_offset を指定すると、その位置より後ろは読まず、その位置に達したら end を返す (end の offset は end_offset に
+     * なる)。end_offset がエントリの途中なら、そのエントリは short_entry になる。
+     * @param fd 読むファイルの記述子
+     * @param file ファイルのパス。メッセージと file() にだけ使う
+     * @param start_offset 読み始める位置。エントリの先頭であること
+     * @param end_offset 読み終える位置。エントリの境界 (次のエントリの先頭かファイルの末尾) であること。std::nullopt なら
+     *                   ファイルの末尾まで読む
+     * @param buffer_size バッファの大きさ (バイト)。1 回の読み込みの大きさであり、これを超えるエントリには一時的に
+     *                    拡張する。0 なら FATAL ログを書いて abort する
+     * @throws limestone_io_exception fd を複製できないか、ファイルの状態を取得できないとき (errno 付き)。end_offset が
+     *         ファイルの大きさを超えるか、start_offset が読み終える位置を超えるとき (errno なし)
+     */
+    log_entry_reader(int fd, boost::filesystem::path file, std::uint64_t start_offset,
+                     std::optional<std::uint64_t> end_offset, std::size_t buffer_size);
+
+    /**
+     * @brief ファイル操作を差し替えて、開いているファイル記述子から読む reader を作る。テスト専用であり、
+     *        プロダクトコードから使わない。
+     * @param fd 読むファイルの記述子
+     * @param file ファイルのパス。メッセージと file() にだけ使う
+     * @param start_offset 読み始める位置。エントリの先頭であること
+     * @param end_offset 読み終える位置。エントリの境界 (次のエントリの先頭かファイルの末尾) であること。std::nullopt なら
+     *                   ファイルの末尾まで読む
+     * @param buffer_size バッファの大きさ (バイト)。0 なら FATAL ログを書いて abort する
+     * @param file_ops ファイル操作。このオブジェクトが破棄されるまで有効であること
+     * @throws limestone_io_exception ファイル操作を差し替えないコンストラクタと同じ
+     */
+    log_entry_reader(int fd, boost::filesystem::path file, std::uint64_t start_offset,
+                     std::optional<std::uint64_t> end_offset, std::size_t buffer_size,
                      file_operations& file_ops);
 
     /**
@@ -249,6 +286,15 @@ private:
      * @throws limestone_io_exception the same as the constructors. The file is closed before throwing
      */
     void open_file(std::uint64_t start_offset);
+
+    /**
+     * @brief ファイル記述子を複製し、ファイルの大きさを取得して、読む範囲を設定する。コンストラクタからだけ呼ぶ。
+     * @param fd 複製するファイル記述子
+     * @param start_offset 読み始める位置
+     * @param end_offset 読み終える位置。std::nullopt ならファイルの末尾
+     * @throws limestone_io_exception コンストラクタと同じ。例外を投げる前に、複製したファイル記述子を閉じる
+     */
+    void open_duplicate(int fd, std::uint64_t start_offset, std::optional<std::uint64_t> end_offset);
 
     /**
      * @brief Opens the file if it exists. Used for a file being written.
@@ -303,7 +349,7 @@ private:
     void prepare_buffer(std::size_t required);
 
     /**
-     * @brief Reads into the whole free space of the buffer.
+     * @brief Reads into the whole free space of the buffer. 読み終える位置を指定されたときは、その位置までに限る。
      * @return the number of bytes read. 0 means the end of the file
      * @throws limestone_io_exception if reading fails (with errno)
      */
@@ -323,8 +369,13 @@ private:
     /// whether the state function returned failed. If true, next() throws without calling the state function
     bool failed_{};
     int fd_{-1};
-    /// 読み終える位置。ファイルの大きさ (書き込み中のファイルでは、取得し直すたびに更新する)
+    /// 読み終える位置。コンストラクタで指定された位置か、指定がなければファイルの大きさ (書き込み中のファイルでは、
+    /// 取得し直すたびに更新する)
     std::uint64_t end_offset_{};
+    /// 読み終える位置をコンストラクタで指定されたかどうか。true なら、読み込みの量を end_offset_ までに限る
+    bool end_offset_specified_{};
+    /// 指定されたバッファの大きさ。buffer_ はこれを超えるエントリを読む間だけ、これより大きくなる
+    std::size_t buffer_size_{default_buffer_size};
 
     std::string buffer_{};
     /// the file position of the beginning of buffer_

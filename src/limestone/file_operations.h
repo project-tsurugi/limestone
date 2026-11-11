@@ -93,6 +93,9 @@ public:
     // close system call for file closing
     virtual int close(int fd) = 0;
 
+    // dup システムコール: ファイル記述子を複製する
+    virtual int dup(int fd) = 0;
+
     // pread system call: reads at the given position (does not move the file position)
     virtual ssize_t pread(int fd, void* buf, size_t count, off_t offset) = 0;
 
@@ -167,6 +170,7 @@ public:
     int flock(int fd, int operation) override;
     int open(const char* filename, int flags) override;
     int close(int fd) override;
+    int dup(int fd) override;
     ssize_t pread(int fd, void* buf, size_t count, off_t offset) override;
     int fstat(int fd, struct stat* buf) override;
     int fsync_directory(const boost::filesystem::path& dir) override;
