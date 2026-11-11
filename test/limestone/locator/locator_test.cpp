@@ -47,7 +47,7 @@ using log_entry_bytes::u64le;
 namespace {
 
 /**
- * @brief ファイルの内容を全部読む。
+ * @brief Reads the whole content of the file.
  */
 std::string read_file(const boost::filesystem::path& p) {
     std::ifstream in(p.string(), std::ios::binary);
@@ -56,7 +56,7 @@ std::string read_file(const boost::filesystem::path& p) {
 }
 
 /**
- * @brief ファイルにバイト列を書く。
+ * @brief Writes the bytes to the file.
  */
 void write_file(const boost::filesystem::path& p, const std::string& bytes) {
     std::ofstream out(p.string(), std::ios::binary);
@@ -64,12 +64,12 @@ void write_file(const boost::filesystem::path& p, const std::string& bytes) {
 }
 
 /**
- * @brief ロケータファイルが不正と判定されることを確かめる。I/O の例外ではなく、メッセージに expected を含む
- *        limestone_exception が投げられること
- * @param file ロケータファイル
- * @param locatee_size locator に与えるロケーティファイルの大きさ
- * @param ops locator に与えるファイル操作
- * @param expected メッセージに含まれるべき部分文字列
+ * @brief Verifies that the locator file is judged invalid: not an I/O exception, but a limestone_exception whose
+ *        message contains expected is thrown
+ * @param file the locator file
+ * @param locatee_size the size of the locatee file given to locator
+ * @param ops the file operations given to locator
+ * @param expected the substring that the message must contain
  */
 void expect_invalid(const boost::filesystem::path& file, std::uint64_t locatee_size, file_operations& ops,
                     const std::string& expected) {
@@ -84,7 +84,7 @@ void expect_invalid(const boost::filesystem::path& file, std::uint64_t locatee_s
 }
 
 /**
- * @brief 実際のファイル操作で expect_invalid() を行う。
+ * @brief Performs expect_invalid() with the real file operations.
  */
 void expect_invalid(const boost::filesystem::path& file, std::uint64_t locatee_size, const std::string& expected) {
     real_file_operations ops{};
@@ -107,10 +107,10 @@ protected:
         return boost::filesystem::path(location) / "output.loc";
     }
     /**
-     * @brief locator_writer で正しいロケータファイルを作り、その内容を返す。
-     * @param positions レコードの値
-     * @param locatee_size 終端に書くロケーティファイルの大きさ
-     * @return 書いたバイト列
+     * @brief Makes a valid locator file with locator_writer and returns its content.
+     * @param positions the values of the records
+     * @param locatee_size the size of the locatee file written to the footer
+     * @return the bytes written
      */
     static std::string write_valid(const std::vector<std::uint64_t>& positions, std::uint64_t locatee_size) {
         locator_writer writer(file(), 1, true);
@@ -122,7 +122,7 @@ protected:
     }
 };
 
-// locator_writer が書いたものを読み戻せる
+// What locator_writer wrote can be read back
 TEST_F(locator_test, reads_what_writer_wrote) {
     write_valid({0, 100, 250}, 400);
     locator loc(file(), 400);
@@ -135,7 +135,7 @@ TEST_F(locator_test, reads_what_writer_wrote) {
     EXPECT_EQ(loc.file(), file());
 }
 
-// レコード 0 個のロケータファイルも読める
+// A locator file with 0 records can also be read
 TEST_F(locator_test, reads_zero_records) {
     write_valid({}, 9);
     locator loc(file(), 9);
@@ -144,14 +144,14 @@ TEST_F(locator_test, reads_zero_records) {
     EXPECT_EQ(loc.locatee_size(), 9U);
 }
 
-// 範囲外のレコード番号は abort する
+// A record number out of range aborts
 TEST_F(locator_test, position_out_of_range_aborts) {
     write_valid({0}, 9);
     locator loc(file(), 9);
     EXPECT_DEATH(static_cast<void>(loc.position(1)), "out of range");
 }
 
-// ヘッダのマジックが一致しないと不正
+// Invalid if the magic of the header does not match
 TEST_F(locator_test, rejects_wrong_header_magic) {
     std::string bytes = write_valid({0}, 9);
     bytes[0] = 'X';
@@ -159,7 +159,7 @@ TEST_F(locator_test, rejects_wrong_header_magic) {
     expect_invalid(file(), 9, "the magic of the header");
 }
 
-// ヘッダの形式バージョンが 1 でないと不正
+// Invalid if the format version of the header is not 1
 TEST_F(locator_test, rejects_wrong_format_version) {
     std::string bytes = write_valid({0}, 9);
     bytes.replace(8, 8, u64le(2));
@@ -167,15 +167,15 @@ TEST_F(locator_test, rejects_wrong_format_version) {
     expect_invalid(file(), 9, "the format version 2 is not 1");
 }
 
-// 大きさからヘッダと終端を引いた値が 8 で割り切れないと不正
+// Invalid if the size minus the header and the footer is not a multiple of 8
 TEST_F(locator_test, rejects_size_not_multiple_of_record) {
     std::string bytes = write_valid({0, 100}, 200);
-    bytes.insert(lf::header_size, "\0", 1);  // レコードの列に 1 バイト挿入
+    bytes.insert(lf::header_size, "\0", 1);  // insert 1 byte into the records
     write_file(file(), bytes);
     expect_invalid(file(), 200, "is not header + records + footer");
 }
 
-// ヘッダと終端の長さに満たないと不正
+// Invalid if shorter than the header and the footer
 TEST_F(locator_test, rejects_too_short_file) {
     const std::string bytes = write_valid({}, 9);
     write_file(file(), bytes.substr(0, bytes.size() - 8));
@@ -184,7 +184,7 @@ TEST_F(locator_test, rejects_too_short_file) {
     expect_invalid(file(), 9, "shorter than the header");
 }
 
-// 終端のマジックが一致しないと不正 (書き途中で止まった形)
+// Invalid if the magic of the footer does not match (the shape left by a stop during the write)
 TEST_F(locator_test, rejects_wrong_footer_magic) {
     std::string bytes = write_valid({0}, 9);
     bytes.back() = '\0';
@@ -192,7 +192,7 @@ TEST_F(locator_test, rejects_wrong_footer_magic) {
     expect_invalid(file(), 9, "the magic of the footer");
 }
 
-// 終端が丸ごとなく、大きさの条件だけは満たす形 (レコード 2 個分が終端に見える) も不正
+// Also invalid if the footer is missing entirely while the size condition holds (2 records look like the footer)
 TEST_F(locator_test, rejects_missing_footer) {
     std::string bytes = write_valid({0, 100}, 200);
     bytes.resize(bytes.size() - lf::footer_size);
@@ -200,19 +200,19 @@ TEST_F(locator_test, rejects_missing_footer) {
     expect_invalid(file(), 200, "the magic of the footer");
 }
 
-// 終端のロケーティファイルの大きさが与えた大きさと一致しないと不正
+// Invalid if the size of the locatee file in the footer does not match the given size
 TEST_F(locator_test, rejects_locatee_size_mismatch) {
     write_valid({0}, 9);
     expect_invalid(file(), 10, "the locatee size 9 in the footer does not match the actual size 10");
     EXPECT_NO_THROW(locator(file(), 9));
 }
 
-// ファイルがなければ limestone_io_exception
+// limestone_io_exception if the file does not exist
 TEST_F(locator_test, throws_when_file_is_missing) {
     EXPECT_THROW(locator(file(), 0), limestone_io_exception);
 }
 
-// ディレクトリなら開けるが読めないので limestone_io_exception (ヘッダの読み込みの誤り)
+// A directory can be opened but not read, so limestone_io_exception (an error of reading the header)
 TEST_F(locator_test, throws_when_file_is_a_directory) {
     try {
         locator loc(location, 0);
@@ -222,7 +222,7 @@ TEST_F(locator_test, throws_when_file_is_a_directory) {
     }
 }
 
-// fstat が失敗すれば errno 付きの limestone_io_exception
+// limestone_io_exception with errno if fstat fails
 TEST_F(locator_test, throws_when_fstat_fails) {
     class : public real_file_operations {
     public:
@@ -240,7 +240,7 @@ TEST_F(locator_test, throws_when_fstat_fails) {
     }
 }
 
-// ヘッダの後の読み込みが誤りになれば errno 付きの limestone_io_exception
+// limestone_io_exception with errno if the read after the header fails
 TEST_F(locator_test, throws_when_reading_after_the_header_fails) {
     class : public real_file_operations {
     public:
@@ -264,7 +264,7 @@ TEST_F(locator_test, throws_when_reading_after_the_header_fails) {
     }
 }
 
-// fstat の後にファイルが縮めば (読み込みが短く終わり誤りでもなければ) limestone_exception
+// limestone_exception if the file shrinks after fstat (the read ends short without an error)
 TEST_F(locator_test, rejects_file_shrunk_after_fstat) {
     class : public real_file_operations {
     public:

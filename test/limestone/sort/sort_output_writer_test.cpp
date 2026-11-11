@@ -99,29 +99,30 @@ protected:
     static boost::filesystem::path file() {
         return boost::filesystem::path(location) / "output";
     }
-    /// ロケータファイルのパス
+    /// The path of the locator file
     static boost::filesystem::path locator_file() {
         return boost::filesystem::path(location) / "output.loc";
     }
     /**
-     * @brief 記録間隔を指定したロケータファイルの出力を作る。
-     * @param interval 記録間隔 (バイト)
-     * @return ロケータファイルの出力
+     * @brief Makes the output of the locator file with the given record interval.
+     * @param interval the record interval (bytes)
+     * @return the output of the locator file
      */
     static sort_output_writer::locator_output locator_output(std::uint64_t interval) {
         return {locator_file(), interval};
     }
     /**
-     * @brief 出力したロケータファイルを読む。終端の大きさは出力したファイルの実際の大きさと照合する。
-     * @return 読んだロケータファイル
+     * @brief Reads the locator file that was output. The size in the footer is compared with the actual size of the
+     *        output file.
+     * @return the locator file read
      */
     static locator read_locator() {
         return {locator_file(), boost::filesystem::file_size(file())};
     }
     /**
-     * @brief 出力したファイルの位置から 1 つのエントリを読み、そのバイト列を返す。
-     * @param position エントリの開始位置
-     * @return エントリのバイト列。読めなければテストを失敗させて空を返す
+     * @brief Reads one entry at the position of the output file and returns its bytes.
+     * @param position the start position of the entry
+     * @return the bytes of the entry. Fails the test and returns an empty string if it cannot be read
      */
     static std::string entry_at(std::uint64_t position) {
         log_entry_reader reader(file(), position);
@@ -134,8 +135,8 @@ protected:
     }
 };
 
-// the output begins with a marker_begin of epoch 0 even without entries. ロケータファイルの出力を指定しなければ
-// ロケータファイルは作られない
+// the output begins with a marker_begin of epoch 0 even without entries. No locator file is created unless the
+// output of the locator file is specified
 TEST_F(sort_output_writer_test, empty_output_has_marker_begin) {
     sort_output_writer writer(file(), "test file", keep_all, std::nullopt);
     writer.close();
@@ -239,8 +240,9 @@ TEST_F(sort_output_writer_test, second_close_does_nothing) {
     }
 }
 
-// ロケータファイルのレコードは、書いたデータ系のエントリの開始位置 (marker_begin を含む、それまでに書いたバイト数)。
-// 記録間隔 1 ですべてのエントリが記録され、各位置から読むとそのエントリが得られる。終端は出力したファイルの大きさ
+// A record of the locator file is the start position of a written data entry (the bytes written so far, including
+// the marker_begin). With the record interval of 1, every entry is recorded, and reading at each position yields
+// that entry. The footer holds the size of the output file
 TEST_F(sort_output_writer_test, locator_records_the_positions_of_the_data_entries) {
     const std::string e1 = normal_entry(1, "a", "value", 10, 1);
     const std::string e2 = normal_with_blob(1, "b", "v", 11, 2, {100, 200});
@@ -263,9 +265,9 @@ TEST_F(sort_output_writer_test, locator_records_the_positions_of_the_data_entrie
     EXPECT_EQ(entry_at(p3), e3);
 }
 
-// コンパクションの形式 (remove_entry をファイルに書かない) では、ファイルに書かなかった remove_entry はロケータにも
-// 記録されず、その後のエントリの位置もずれない。write_version を最も古いものに置き換えても長さは変わらないので、
-// 位置はそのまま
+// In the compaction format (remove_entries are not written to the file), a remove_entry not written to the file is
+// not recorded in the locator either, and the positions of the following entries do not shift. Replacing the
+// write_version with the oldest one keeps the length, so the positions stay the same
 TEST_F(sort_output_writer_test, locator_skips_the_remove_entries_not_written) {
     const std::string e1 = normal_entry(1, "a", "value", 10, 1);
     const std::string e2 = remove_entry(1, "b", 11, 2);
@@ -286,11 +288,13 @@ TEST_F(sort_output_writer_test, locator_skips_the_remove_entries_not_written) {
     EXPECT_EQ(entry_at(p3), normal_with_blob(1, "c", "v", 0, 0, {100}));
 }
 
-// 記録間隔に従って記録される。位置はエントリの開始位置であり、閾値に達したエントリだけが記録される
+// Recorded according to the record interval. A position is the start position of an entry, and only the entries
+// that reach the threshold are recorded
 TEST_F(sort_output_writer_test, locator_follows_the_record_interval) {
-    const std::string e = normal_entry(1, "a", "v", 1, 1);  // 35 バイト
+    const std::string e = normal_entry(1, "a", "v", 1, 1);  // 35 bytes
     ASSERT_EQ(e.size(), 35U);
-    // 位置は 9、44、79、114、149。間隔 40 では 9 (閾値 40)、44 (閾値 80)、114 (閾値 120)、149 (閾値 160) が記録される
+    // The positions are 9, 44, 79, 114 and 149. With the interval of 40, 9 (threshold 40), 44 (threshold 80), 114
+    // (threshold 120) and 149 (threshold 160) are recorded
     sort_output_writer writer(file(), "test file", keep_all, locator_output(40));
     for (int i = 0; i < 5; ++i) {
         writer.write(view_of(e));
@@ -305,7 +309,7 @@ TEST_F(sort_output_writer_test, locator_follows_the_record_interval) {
     }
 }
 
-// エントリがなければレコードは 0 個で、終端は marker_begin の大きさ
+// Without entries, there are 0 records and the footer holds the size of the marker_begin
 TEST_F(sort_output_writer_test, locator_of_empty_output_has_no_records) {
     sort_output_writer writer(file(), "test file", compaction, locator_output(1));
     writer.close();
@@ -314,14 +318,14 @@ TEST_F(sort_output_writer_test, locator_of_empty_output_has_no_records) {
     EXPECT_EQ(loc.locatee_size(), limestone::internal::log_entry_format::marker_size);
 }
 
-// ロケータファイルを作れなければ limestone_io_exception
+// limestone_io_exception if the locator file cannot be created
 TEST_F(sort_output_writer_test, cannot_create_locator_file) {
     const boost::filesystem::path missing = boost::filesystem::path(location) / "missing" / "output.loc";
     EXPECT_THROW(sort_output_writer(file(), "test file", keep_all, sort_output_writer::locator_output{missing, 1}),
                  limestone_io_exception);
 }
 
-// close() せずに破棄するとロケータファイルは終端のない不完全なまま残り、読むと不正になる
+// If destroyed without close(), the locator file remains incomplete without the footer, and reading it is invalid
 TEST_F(sort_output_writer_test, destructor_leaves_the_locator_file_unfinished) {
     {
         sort_output_writer writer(file(), "test file", keep_all, locator_output(1));
@@ -331,7 +335,7 @@ TEST_F(sort_output_writer_test, destructor_leaves_the_locator_file_unfinished) {
     EXPECT_THROW(read_locator(), limestone_exception);
 }
 
-// ロケータファイルがあっても 2 回目の close() は何もしない (abort せず、内容は残る)
+// Even with a locator file, the second close() does nothing (it does not abort, and the content remains)
 TEST_F(sort_output_writer_test, second_close_with_locator_does_nothing) {
     const std::string e = normal_entry(1, "a", "v", 1, 0);
     sort_output_writer writer(file(), "test file", compaction, locator_output(1));

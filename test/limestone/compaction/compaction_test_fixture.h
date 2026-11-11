@@ -431,7 +431,7 @@ protected:
         }
     }
 
-    // datastore が登録しているファイルのうち pwal で始まる名前 (ロケータファイルは除く)
+    // The names beginning with pwal among the files registered in the datastore (locator files are excluded)
     std::set<std::string> extract_pwal_files_from_datastore() {
         std::set<boost::filesystem::path> files = datastore_->files();
 

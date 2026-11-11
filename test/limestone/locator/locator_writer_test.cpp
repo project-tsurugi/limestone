@@ -45,9 +45,9 @@ using log_entry_bytes::u64le;
 namespace {
 
 /**
- * @brief ファイルの内容を全部読む。
- * @param p ファイル
- * @return 内容
+ * @brief Reads the whole content of the file.
+ * @param p the file
+ * @return the content
  */
 std::string read_file(const boost::filesystem::path& p) {
     std::ifstream in(p.string(), std::ios::binary);
@@ -56,10 +56,10 @@ std::string read_file(const boost::filesystem::path& p) {
 }
 
 /**
- * @brief 期待するロケータファイルのバイト列を作る。
- * @param positions レコードの値
- * @param locatee_size 終端に書くロケーティファイルの大きさ
- * @return バイト列
+ * @brief Makes the expected bytes of a locator file.
+ * @param positions the values of the records
+ * @param locatee_size the size of the locatee file written to the footer
+ * @return the bytes
  */
 std::string expected_bytes(const std::vector<std::uint64_t>& positions, std::uint64_t locatee_size) {
     std::string s = std::string("LIMELOC\0", 8) + u64le(lf::format_version);
@@ -72,9 +72,9 @@ std::string expected_bytes(const std::vector<std::uint64_t>& positions, std::uin
 }
 
 /**
- * @brief ファイルにバイト列を書く。
- * @param p ファイル
- * @param bytes 内容
+ * @brief Writes the bytes to the file.
+ * @param p the file
+ * @param bytes the content
  */
 void write_file(const boost::filesystem::path& p, const std::string& bytes) {
     std::ofstream out(p.string(), std::ios::binary);
@@ -101,7 +101,8 @@ protected:
     }
 };
 
-// レコードがなくてもヘッダと終端が書かれる。ヘッダはマジック、形式バージョン、0 の予約領域
+// The header and the footer are written even without records. The header is the magic, the format version, and
+// the reserved area of 0
 TEST_F(locator_writer_test, zero_records_have_header_and_footer) {
     locator_writer writer(file(), 100, true);
     writer.close(0);
@@ -111,44 +112,46 @@ TEST_F(locator_writer_test, zero_records_have_header_and_footer) {
     EXPECT_EQ(bytes, expected_bytes({}, 0));
 }
 
-// 閾値に達した位置を記録し、閾値を次の倍数に進める。倍数ちょうどの位置も記録する
+// Records a position that reaches the threshold and advances the threshold to the next multiple. A position
+// exactly at a multiple is also recorded
 TEST_F(locator_writer_test, records_follow_the_interval) {
     locator_writer writer(file(), 100, true);
-    writer.note_entry(0);    // 閾値 0 → 記録、閾値 100
+    writer.note_entry(0);    // threshold 0 -> recorded, threshold 100
     writer.note_entry(50);
     writer.note_entry(99);
-    writer.note_entry(100);  // 記録、閾値 200
+    writer.note_entry(100);  // recorded, threshold 200
     writer.note_entry(150);
-    writer.note_entry(250);  // 記録 (200 を越えた最初)、閾値 300
+    writer.note_entry(250);  // recorded (the first beyond 200), threshold 300
     writer.note_entry(299);
-    writer.note_entry(300);  // 記録、閾値 400
+    writer.note_entry(300);  // recorded, threshold 400
     writer.close(400);
     EXPECT_EQ(writer.record_count(), 4U);
     EXPECT_EQ(read_file(file()), expected_bytes({0, 100, 250, 300}, 400));
 }
 
-// 最初に受け取った位置が 0 でなくてもレコード 0 になる
+// The first position received becomes record 0 even if it is not 0
 TEST_F(locator_writer_test, first_entry_is_record_0) {
     locator_writer writer(file(), 100, true);
-    writer.note_entry(9);    // 記録、閾値 100
+    writer.note_entry(9);    // recorded, threshold 100
     writer.note_entry(99);
-    writer.note_entry(100);  // 記録
+    writer.note_entry(100);  // recorded
     writer.close(200);
     EXPECT_EQ(read_file(file()), expected_bytes({9, 100}, 200));
 }
 
-// 1 つのエントリで複数の倍数を越えても記録は 1 つ。閾値は越えた位置の次の倍数になる
+// An entry that crosses several multiples still yields one record. The threshold becomes the next multiple of
+// the position that crossed
 TEST_F(locator_writer_test, crossing_multiple_multiples_records_once) {
     locator_writer writer(file(), 100, true);
-    writer.note_entry(0);     // 記録、閾値 100
-    writer.note_entry(1000);  // 記録 (100〜1000 の倍数をまとめて越える)、閾値 1100
+    writer.note_entry(0);     // recorded, threshold 100
+    writer.note_entry(1000);  // recorded (crosses the multiples from 100 to 1000 at once), threshold 1100
     writer.note_entry(1050);
-    writer.note_entry(1100);  // 記録
+    writer.note_entry(1100);  // recorded
     writer.close(1200);
     EXPECT_EQ(read_file(file()), expected_bytes({0, 1000, 1100}, 1200));
 }
 
-// 同じ位置を続けて受け取っても戻りとは扱わない (記録は 1 つ)
+// Receiving the same position again is not treated as going back (one record)
 TEST_F(locator_writer_test, same_offset_twice_is_allowed) {
     locator_writer writer(file(), 100, true);
     writer.note_entry(0);
@@ -157,7 +160,7 @@ TEST_F(locator_writer_test, same_offset_twice_is_allowed) {
     EXPECT_EQ(read_file(file()), expected_bytes({0}, 10));
 }
 
-// 位置が戻ると abort する。close の後の note_entry も abort する
+// A position that goes back aborts. note_entry after close also aborts
 TEST_F(locator_writer_test, aborts_on_misuse) {
     locator_writer writer(file(), 100, true);
     writer.note_entry(10);
@@ -166,32 +169,32 @@ TEST_F(locator_writer_test, aborts_on_misuse) {
     EXPECT_DEATH(writer.note_entry(20), "already closed");
 }
 
-// close() に最後の位置より小さいロケーティファイルの大きさを渡すと abort する
+// Passing close() a size of the locatee file less than the last position aborts
 TEST_F(locator_writer_test, aborts_when_locatee_size_is_smaller_than_last_offset) {
     locator_writer writer(file(), 100, true);
     writer.note_entry(50);
     EXPECT_DEATH(writer.close(49), "smaller than the last offset");
 }
 
-// 記録間隔 0 は abort する
+// The record interval of 0 aborts
 TEST_F(locator_writer_test, aborts_on_zero_interval) {
     EXPECT_DEATH(locator_writer(file(), 0, true), "must not be 0");
 }
 
-// 作れない場所に指定すると limestone_io_exception
+// limestone_io_exception if the file is specified where it cannot be created
 TEST_F(locator_writer_test, throws_when_file_cannot_be_created) {
     EXPECT_THROW(locator_writer(boost::filesystem::path(location) / "no_such_dir" / "x.loc", 100, true),
                  limestone_io_exception);
 }
 
-// build_from_file は、ロケーティファイルのデータ系のエントリの位置を書き出し時と同じ規則で記録する。
-// marker とストレージ系のエントリは記録の対象にならないが、位置は進む
+// build_from_file records the positions of the data entries of the locatee file by the same rule as while it is
+// written. The marker and the storage entries are not recorded, but the position advances
 TEST_F(locator_writer_test, build_from_file_matches_writing) {
-    const std::string m = marker(2, 0);                              // 9 バイト、位置 0
-    const std::string e1 = normal_entry(1, "a", "v", 1, 1);          // データ系
-    const std::string s1 = storage_entry(8, 1, 1, 1);                // add_storage (対象外)
-    const std::string e2 = remove_entry(1, "b", 1, 2);               // データ系
-    const std::string e3 = normal_with_blob(1, "c", "v", 1, 3, {7}); // データ系
+    const std::string m = marker(2, 0);                              // 9 bytes, position 0
+    const std::string e1 = normal_entry(1, "a", "v", 1, 1);          // a data entry
+    const std::string s1 = storage_entry(8, 1, 1, 1);                // add_storage (not recorded)
+    const std::string e2 = remove_entry(1, "b", 1, 2);               // a data entry
+    const std::string e3 = normal_with_blob(1, "c", "v", 1, 3, {7}); // a data entry
     const std::string e4 = normal_entry(1, "d", "vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv", 1, 4);
     const std::string contents = m + e1 + s1 + e2 + e3 + e4;
     write_file(locatee(), contents);
@@ -199,7 +202,7 @@ TEST_F(locator_writer_test, build_from_file_matches_writing) {
     const std::uint64_t interval = 40;
     const std::size_t count = locator_writer::build_from_file(locatee(), file(), interval);
 
-    // 同じ位置の列を note_entry に渡した結果と一致する
+    // Matches the result of passing the same positions to note_entry
     const boost::filesystem::path expected_file = boost::filesystem::path(location) / "expected.loc";
     locator_writer writer(expected_file, interval, true);
     std::uint64_t offset = m.size();
@@ -215,26 +218,26 @@ TEST_F(locator_writer_test, build_from_file_matches_writing) {
     EXPECT_EQ(offset, contents.size());
     EXPECT_EQ(count, writer.record_count());
     EXPECT_EQ(read_file(file()), read_file(expected_file));
-    // データ系のエントリは 9、69、99、146 から始まり、間隔 40 ではすべて記録される
+    // The data entries begin at 9, 69, 99 and 146, and all are recorded with the interval of 40
     EXPECT_EQ(count, 4U);
     EXPECT_EQ(read_file(file()), expected_bytes({9, 69, 99, 146}, 220));
 }
 
-// marker しかないロケーティファイルではレコードは 0 個で、終端の大きさはファイルの大きさ
+// A locatee file with only the marker has 0 records, and the size in the footer is the size of the file
 TEST_F(locator_writer_test, build_from_file_of_marker_only) {
     write_file(locatee(), marker(2, 0));
     EXPECT_EQ(locator_writer::build_from_file(locatee(), file(), 100), 0U);
     EXPECT_EQ(read_file(file()), expected_bytes({}, 9));
 }
 
-// ロケーティファイルがエントリの途中で終わっていると limestone_io_exception
+// limestone_io_exception if the locatee file ends in the middle of an entry
 TEST_F(locator_writer_test, build_from_file_throws_on_broken_locatee) {
     const std::string e = normal_entry(1, "a", "v", 1, 1);
     write_file(locatee(), marker(2, 0) + e.substr(0, 3));
     EXPECT_THROW(locator_writer::build_from_file(locatee(), file(), 100), limestone_io_exception);
 }
 
-// ロケーティファイルがなければ limestone_io_exception
+// limestone_io_exception if the locatee file does not exist
 TEST_F(locator_writer_test, build_from_file_throws_when_locatee_is_missing) {
     EXPECT_THROW(locator_writer::build_from_file(locatee(), file(), 100), limestone_io_exception);
 }

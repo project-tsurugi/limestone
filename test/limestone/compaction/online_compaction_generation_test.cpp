@@ -102,8 +102,8 @@ public:
         test_datastore->on_rotate_log_files_callback = nullptr;
     }
 
-    // 世代 1 のコンパクション済み WAL ファイルを持つ永続化データを作って datastore を止め、マニフェストを指定した形式
-    // バージョンに書き換える (旧バージョンの永続化データを模す)。
+    // Makes a log directory with a compacted WAL file of generation 1, stops the datastore, and rewrites the
+    // manifest to the given format version (imitating a log directory of an older version).
     void make_generation_one_logdir_of_version(int persistent_format_version) {
         gen_datastore();
         datastore_->switch_epoch(1);
@@ -115,7 +115,7 @@ public:
         create_file(manifest_path, data_manifest(persistent_format_version));
     }
 
-    // マニフェストの永続化データの形式バージョンを読む。
+    // Reads the persistent format version of the manifest.
     int read_persistent_format_version() {
         std::ifstream ifs(manifest_path.string());
         nlohmann::json j;
@@ -438,9 +438,9 @@ TEST_F(online_compaction_generation_test, orphan_old_generation_from_commit_remo
     EXPECT_EQ(kv_list.size(), 2);
 }
 
-// ロケータファイル (.loc) の起動時の扱い: カタログに登録されたコンパクション済み WAL ファイルのロケータファイルは残り、
-// 登録のない名前のロケータファイルはロケーティファイルの有無によらず孤児として削除される。ロケータファイルは WAL
-// ファイルとして読まれないので、内容が WAL の形式でなくても起動は失敗しない
+// Locator files (.loc) at startup: the locator file of a compacted WAL file recorded by the catalog remains, and
+// a locator file of an unrecorded name is removed as an orphan whether or not its locatee file exists. A locator
+// file is not read as a WAL file, so the startup does not fail even if its content is not in the WAL format
 TEST_F(online_compaction_generation_test, locator_files_follow_the_catalog_at_startup) {
     gen_datastore();
     datastore_->switch_epoch(1);
@@ -456,11 +456,11 @@ TEST_F(online_compaction_generation_test, locator_files_follow_the_catalog_at_st
         std::ofstream ofs((dir / name).string());
         ofs << "not a wal file";
     };
-    write_non_wal(registered + ".loc");                                              // 登録済みのロケータファイル
-    write_non_wal("pwal_0000.compacted.7.loc");                                      // ロケーティファイルのない孤児
-    boost::filesystem::copy_file(dir / registered, dir / "pwal_0000.compacted.8");  // 登録のない世代
-    write_non_wal("pwal_0000.compacted.8.loc");                                      // そのロケータファイル
-    write_non_wal("pwal_0000.carry.7.loc");                                          // carry の名前のロケータファイル
+    write_non_wal(registered + ".loc");                                              // the recorded locator file
+    write_non_wal("pwal_0000.compacted.7.loc");                                      // an orphan without the locatee
+    boost::filesystem::copy_file(dir / registered, dir / "pwal_0000.compacted.8");  // an unrecorded generation
+    write_non_wal("pwal_0000.compacted.8.loc");                                      // its locator file
+    write_non_wal("pwal_0000.carry.7.loc");                                          // a locator file with a carry name
 
     gen_datastore();
 
@@ -476,8 +476,9 @@ TEST_F(online_compaction_generation_test, locator_files_follow_the_catalog_at_st
     EXPECT_EQ(kv_list[0].second, "v1");
 }
 
-// 登録済みのロケータファイルは起動時に datastore のファイルの集合に入るが、コンパクションの入力には選ばれない。
-// 入力が現行のコンパクション済み WAL ファイルだけになるので、コンパクションは実行されず世代は進まない
+// A recorded locator file enters the set of files of the datastore at startup, but is not chosen as an input of
+// the compaction. The only input is then the current compacted WAL file, so the compaction is not performed and
+// the generation does not advance
 TEST_F(online_compaction_generation_test, locator_file_alone_does_not_trigger_compaction) {
     gen_datastore();
     datastore_->switch_epoch(1);
@@ -636,8 +637,9 @@ TEST_F(online_compaction_generation_test, startup_fails_when_orphan_removal_fail
     boost::filesystem::remove_all(orphan_dir);
 }
 
-// 公開後にコンパクション済み WAL ファイルのロケータファイルがあり、datastore に登録されている (バックアップの対象に
-// 含まれる)。次の世代の公開で旧世代のロケータファイルは削除され、登録からも外れる。
+// After the publish, the locator file of the compacted WAL file exists and is registered in the datastore (it is
+// included in the backup). The publish of the next generation removes the locator file of the old generation
+// and drops its registration.
 TEST_F(online_compaction_generation_test, locator_file_is_published_and_the_old_one_is_removed) {
     gen_datastore();
     datastore_->switch_epoch(1);
@@ -649,10 +651,11 @@ TEST_F(online_compaction_generation_test, locator_file_is_published_and_the_old_
     ASSERT_TRUE(boost::filesystem::exists(compacted_1));
     ASSERT_TRUE(boost::filesystem::exists(locator_1));
     {
-        // 終端のロケーティファイルの大きさが公開されたコンパクション済み WAL ファイルの大きさと一致する (読み込みの検査を通る)
+        // The size of the locatee file in the footer matches the size of the published compacted WAL file (it
+        // passes the check of the read)
         locator loc(locator_1, boost::filesystem::file_size(compacted_1));
         EXPECT_EQ(loc.locatee_size(), boost::filesystem::file_size(compacted_1));
-        EXPECT_EQ(loc.record_count(), 1);  // 既定の記録間隔より小さいのでレコード 0 だけ
+        EXPECT_EQ(loc.record_count(), 1);  // only record 0 (smaller than the default record interval)
     }
     EXPECT_NE(datastore_->files().find(locator_1), datastore_->files().end());
     {
@@ -662,7 +665,7 @@ TEST_F(online_compaction_generation_test, locator_file_is_published_and_the_old_
             found = found || entry.source_path() == locator_1;
         }
         EXPECT_TRUE(found);
-        backup->notify_end_backup();  // 終えないと次のコンパクションがスキップされる
+        backup->notify_end_backup();  // the next compaction is skipped unless the backup ends
     }
 
     write_and_make_durable("k2", "v2", 4);
@@ -679,8 +682,9 @@ TEST_F(online_compaction_generation_test, locator_file_is_published_and_the_old_
     EXPECT_EQ(loc.locatee_size(), boost::filesystem::file_size(compacted_2));
 }
 
-// ロケータファイルの一時ファイルを作れないとき (同じ名前のディレクトリを置く)、書きかけのコンパクション済み WAL ファイルと
-// ロケータファイルの一時ファイルはどちらも削除され、次の要求で成功する。
+// If the temporary file of the locator file cannot be created (a directory of the same name is placed), the
+// incomplete temporary files of the compacted WAL file and the locator file are both removed, and the next
+// request succeeds.
 TEST_F(online_compaction_generation_test, locator_temp_write_failure_is_retried_on_the_next_request) {
     gen_datastore();
     datastore_->switch_epoch(1);
@@ -708,7 +712,8 @@ TEST_F(online_compaction_generation_test, locator_temp_write_failure_is_retried_
     EXPECT_TRUE(boost::filesystem::exists(boost::filesystem::path(location) / "pwal_0000.compacted.1.loc"));
 }
 
-// テスト用の設定で記録間隔を小さくすると、少ないデータで複数のレコードが記録される (設定がオンラインコンパクションに届く)。
+// With a small record interval given by the settings for tests, a small amount of data yields several records (the
+// settings reach the online compaction).
 TEST_F(online_compaction_generation_test, locator_settings_for_test_reach_the_compaction) {
     gen_datastore();
     datastore_->get_impl()->set_locator_settings_for_test({64, 1});
@@ -723,14 +728,15 @@ TEST_F(online_compaction_generation_test, locator_settings_for_test_reach_the_co
     const boost::filesystem::path locator_1 = boost::filesystem::path(location) / "pwal_0000.compacted.1.loc";
     ASSERT_TRUE(boost::filesystem::exists(locator_1));
     locator loc(locator_1, boost::filesystem::file_size(compacted_1));
-    // 1 エントリは 64 バイト未満なので、記録間隔 64 バイトごとに最初に始まるエントリが記録される
+    // An entry is less than 64 bytes, so the first entry beginning in each record interval of 64 bytes is recorded
     EXPECT_GE(loc.record_count(), 2);
-    EXPECT_LT(loc.record_count(), 4);  // 1 つのエントリで複数の倍数を越えても記録は 1 つ
-    EXPECT_EQ(loc.position(0), 9);  // marker_begin の直後
+    EXPECT_LT(loc.record_count(), 4);  // an entry that crosses several multiples still yields one record
+    EXPECT_EQ(loc.position(0), 9);  // right after the marker_begin
 }
 
-// 起動時のスナップショットの作成で data/snapshot.loc ができ、スナップショットファイルの大きさと整合する。テスト用の設定は
-// ready() の前に与えるとスナップショットに届く。スナップショットファイルと同じく datastore には登録されない。
+// The snapshot creation at startup makes data/snapshot.loc, consistent with the size of the snapshot file. The
+// settings for tests reach the snapshot if given before ready(). Like the snapshot file, it is not registered in
+// the datastore.
 TEST_F(online_compaction_generation_test, snapshot_locator_file_is_created_at_startup) {
     gen_datastore();
     datastore_->switch_epoch(1);
@@ -758,8 +764,9 @@ TEST_F(online_compaction_generation_test, snapshot_locator_file_is_created_at_st
     EXPECT_EQ(datastore_->files().find(snapshot_locator), datastore_->files().end());
 }
 
-// 8 からの移行で、登録されたコンパクション済み WAL ファイルのロケータファイルが生成され、マニフェストが 9 になる。既存の
-// ロケータファイル (生成の途中で停止した書きかけを含む) は捨てて作り直す。スナップショットのロケータファイルは作らない。
+// The migration from 8 generates the locator file of the recorded compacted WAL file and makes the manifest 9. An
+// existing locator file (including an incomplete one left by a stop during the generation) is discarded and
+// generated again. The locator file of the snapshot is not made.
 TEST_F(online_compaction_generation_test, migration_from_v8_generates_the_locator_file) {
     make_generation_one_logdir_of_version(8);
     const boost::filesystem::path dir{location};
@@ -780,7 +787,7 @@ TEST_F(online_compaction_generation_test, migration_from_v8_generates_the_locato
     EXPECT_FALSE(boost::filesystem::exists(snapshot_locator));
 }
 
-// 7 以下からの移行でも生成され、マニフェストの書き換えは 9 への一度だけである。
+// The migration from 7 or less also generates it, and the manifest is rewritten only once, to 9.
 TEST_F(online_compaction_generation_test, migration_from_v7_generates_the_locator_file) {
     make_generation_one_logdir_of_version(7);
     const boost::filesystem::path dir{location};
@@ -796,7 +803,7 @@ TEST_F(online_compaction_generation_test, migration_from_v7_generates_the_locato
     EXPECT_EQ(loc.record_count(), 1);
 }
 
-// 9 の永続化データでは生成も書き換えもしない (既存のロケータファイルに触れない)。
+// On a log directory of 9, nothing is generated or rewritten (the existing locator file is not touched).
 TEST_F(online_compaction_generation_test, migration_does_nothing_on_v9) {
     make_generation_one_logdir_of_version(9);
     const boost::filesystem::path dir{location};
@@ -810,7 +817,7 @@ TEST_F(online_compaction_generation_test, migration_does_nothing_on_v9) {
     EXPECT_EQ(boost::filesystem::file_size(locator_file), 9);  // "untouched"
 }
 
-// 8 の永続化データで datastore を起動すると、ロケータファイルが生成され、データを読める。
+// Starting the datastore on a log directory of 8 generates the locator file, and the data can be read.
 TEST_F(online_compaction_generation_test, datastore_starts_on_v8_and_generates_the_locator_file) {
     make_generation_one_logdir_of_version(8);
     const boost::filesystem::path dir{location};
@@ -831,7 +838,7 @@ TEST_F(online_compaction_generation_test, datastore_starts_on_v8_and_generates_t
     EXPECT_EQ(loc.record_count(), 1);
 }
 
-// 登録されたコンパクション済み WAL ファイルのロケータファイルが欠けていると、起動に失敗する。
+// The startup fails if the locator file of the recorded compacted WAL file is missing.
 TEST_F(online_compaction_generation_test, datastore_fails_to_start_without_the_locator_file) {
     make_generation_one_logdir_of_version(9);
     boost::filesystem::remove(boost::filesystem::path(location) / "pwal_0000.compacted.1.loc");
@@ -839,7 +846,7 @@ TEST_F(online_compaction_generation_test, datastore_fails_to_start_without_the_l
     EXPECT_THROW(gen_datastore(), limestone_exception);
 }
 
-// 移行で生成したロケータファイルは、起動の直後に取ったバックアップに含まれる。
+// The locator file generated by the migration is included in the backup taken right after the startup.
 TEST_F(online_compaction_generation_test, backup_after_the_migration_contains_the_locator_file) {
     make_generation_one_logdir_of_version(8);
     const boost::filesystem::path locator_file = boost::filesystem::path(location) / "pwal_0000.compacted.1.loc";
@@ -856,7 +863,7 @@ TEST_F(online_compaction_generation_test, backup_after_the_migration_contains_th
     backup->notify_end_backup();
 }
 
-// dblogutil のサブコマンドも移行を通り、ロケータファイルを生成する。
+// The subcommands of dblogutil also go through the migration and generate the locator file.
 TEST_F(online_compaction_generation_test, dblogutil_generates_the_locator_file_on_v8) {
     for (const std::string subcommand : {"inspect", "repair --epoch=3"}) {
         make_generation_one_logdir_of_version(8);
@@ -874,7 +881,8 @@ TEST_F(online_compaction_generation_test, dblogutil_generates_the_locator_file_o
     }
 }
 
-// dblogutil は flock を取れなければ移行しない (他のプロセスが使っている永続化データを書き換えない)。
+// dblogutil does not migrate unless it acquires the flock (it does not rewrite a log directory in use by another
+// process).
 TEST_F(online_compaction_generation_test, dblogutil_does_not_migrate_without_the_lock) {
     make_generation_one_logdir_of_version(8);
     const boost::filesystem::path dir{location};

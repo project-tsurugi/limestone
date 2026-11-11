@@ -20,11 +20,12 @@
 
 namespace limestone::internal {
 
-/// ロケータファイルの設定。
+/// Settings of the locator file.
 struct locator_settings {
-    /// 記録間隔 (バイト)。ロケーティファイルの書き出したバイト数がこの倍数に達するたびにレコードを記録する
+    /// The record interval (bytes). A record is written each time the bytes written to the locatee file reach a
+    /// multiple of this value
     std::uint64_t record_interval_bytes{std::uint64_t{32} * 1024 * 1024};
-    /// 1 つの領域に含めるレコードの数 (R)
+    /// The number of records in one region (R)
     std::size_t region_records{1};
 };
 

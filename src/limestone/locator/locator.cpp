@@ -61,7 +61,7 @@ void locator::read(file_operations& file_ops, std::uint64_t locatee_size) {
         LOG_AND_THROW_IO_EXCEPTION("cannot open locator file: " + file_.string(), errno);
     }
 
-    // ヘッダだけ先に読んで検査する。無関係なファイルを丸ごと読まないため
+    // Read and check the header first, so that an unrelated file is not read as a whole
     std::string header(header_size, '\0');
     if (file_ops.fread(header.data(), 1, header_size, stream.get()) != header_size) {
         const int err = errno;
@@ -79,7 +79,7 @@ void locator::read(file_operations& file_ops, std::uint64_t locatee_size) {
                                 + std::to_string(format_version) + "): " + file_.string());
     }
 
-    // 大きさを検査してから、残り (レコードの列と終端) を読む
+    // Check the size, then read the rest (the records and the footer)
     struct stat st {};
     if (file_ops.fstat(file_ops.fileno(stream.get()), &st) != 0) {
         LOG_AND_THROW_IO_EXCEPTION("cannot stat locator file: " + file_.string(), errno);

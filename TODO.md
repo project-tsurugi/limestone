@@ -143,9 +143,10 @@ master へのマージ前に本ファイルを削除する。
 
 ### ステップ 7: R2 の区切り
 
-* [ ] フルスイート。
-* [ ] scripts/run-clang-tidy-ci.sh。
-* [ ] コメントの英訳 (Q1 で R2 を別 PR にするなら PR の準備もここで)。
+* [x] フルスイート (c9675a9 で ctest 124 件 PASS)。
+* [x] scripts/run-clang-tidy-ci.sh (95 ファイル、警告 0)。
+* [x] コメントの英訳 (ステップ 1〜6 の 30 ファイル。英訳後に ctest 124 件 PASS)。
+* [ ] Q1 で R2 を別 PR にするなら、PR の準備。
 
 ### ステップ 8: log_entry_reader の拡張 (S2 メモ 5.2 節)
 

@@ -58,9 +58,10 @@ manifest::migration_info check_and_migrate_logdir_format(const boost::filesystem
     ensure_compaction_catalog(logdir);
     const int old_version = old_manifest.get_persistent_format_version();
     if (old_version < manifest::default_persistent_format_version) {
-        // 旧バージョンの永続化データには、登録されたコンパクション済み WAL ファイルのロケータファイルがない。マニフェストを
-        // 書き換える前に生成する。生成の途中で停止するとマニフェストは旧バージョンのままなので、次の起動で作り直す
-        // (既存のロケータファイルは書きかけかもしれないので捨てる)
+        // A log directory of an older version has no locator file for the compacted WAL file recorded by the catalog.
+        // Generate it before rewriting the manifest. If the process stops during the generation, the manifest keeps
+        // the old version and the next startup generates it again (an existing locator file may be incomplete, so
+        // it is discarded)
         const compaction_catalog catalog = compaction_catalog::from_catalog_file(logdir);
         bool generated = false;
         for (const auto& info : catalog.get_compacted_files()) {

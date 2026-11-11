@@ -24,52 +24,53 @@
 
 namespace limestone::internal::locator_format {
 
-/// ヘッダの長さ (バイト)
+/// The length of the header (bytes)
 constexpr std::size_t header_size = 4096;
 
-/// レコードの長さ (バイト)。ロケーティファイルの先頭からのバイト位置をリトルエンディアンで持つ
+/// The length of a record (bytes). Holds a byte position from the beginning of the locatee file in little endian
 constexpr std::size_t record_size = 8;
 
-/// 終端の長さ (バイト)。ロケーティファイルの大きさ (8 バイト) と終端のマジック (8 バイト)
+/// The length of the footer (bytes). The size of the locatee file (8 bytes) and the magic of the footer (8 bytes)
 constexpr std::size_t footer_size = 16;
 
-/// ヘッダのマジック。ASCII の "LIMELOC" と 0x00 をリトルエンディアンの整数として読んだ値
+/// The magic of the header. ASCII "LIMELOC" followed by 0x00, read as a little-endian integer
 constexpr std::uint64_t header_magic = 0x00434F4C454D494CULL;
 
-/// 終端のマジック。ヘッダのマジックの最上位ビットを 1 にした値
+/// The magic of the footer. The magic of the header with the most significant bit set to 1
 constexpr std::uint64_t footer_magic = 0x80434F4C454D494CULL;
 
-/// ロケータファイルの形式バージョン。読む側はこの値以外を不正とする
+/// The format version of the locator file. The reader treats any other value as invalid
 constexpr std::uint64_t format_version = 1;
 
-/// ロケータファイルの名前の末尾
+/// The suffix of the name of a locator file
 constexpr std::string_view suffix = ".loc";
 
 /**
- * @brief ロケーティファイルの名前からロケータファイルの名前を作る。
- * @param locatee_name ロケーティファイルの名前
- * @return 名前に .loc を付けたもの
+ * @brief Makes the name of the locator file from the name of the locatee file.
+ * @param locatee_name the name of the locatee file
+ * @return the name with .loc appended
  */
 [[nodiscard]] std::string locator_file_name(std::string_view locatee_name);
 
 /**
- * @brief ロケータファイルの名前からロケーティファイルの名前を作る。
- * @param locator_name ロケータファイルの名前 (.loc で終わること。そうでなければ FATAL ログを書いて abort する)
- * @return 名前から .loc を除いたもの
+ * @brief Makes the name of the locatee file from the name of the locator file.
+ * @param locator_name the name of the locator file (must end with .loc; otherwise writes a FATAL log and aborts)
+ * @return the name with .loc removed
  */
 [[nodiscard]] std::string locatee_file_name(std::string_view locator_name);
 
 /**
- * @brief ロケーティファイルのパスからロケータファイルのパスを作る。同じディレクトリで、名前に .loc を付けたもの。
- * @param locatee ロケーティファイルのパス
- * @return ロケータファイルのパス
+ * @brief Makes the path of the locator file from the path of the locatee file: the same directory, and the name
+ *        with .loc appended.
+ * @param locatee the path of the locatee file
+ * @return the path of the locator file
  */
 [[nodiscard]] boost::filesystem::path locator_file_path(const boost::filesystem::path& locatee);
 
 /**
- * @brief 名前がロケータファイルの名前 (.loc で終わる) かを返す。
- * @param name ファイルの名前 (ディレクトリを含まない)
- * @return .loc で終われば true
+ * @brief Returns whether the name is the name of a locator file (ending with .loc).
+ * @param name the name of the file (without the directory)
+ * @return true if it ends with .loc
  */
 [[nodiscard]] bool is_locator_file_name(std::string_view name);
 

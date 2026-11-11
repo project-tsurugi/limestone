@@ -102,8 +102,8 @@ std::optional<epoch_id_type> last_durable_epoch(const boost::filesystem::path& f
 void setup_initial_logdir(const boost::filesystem::path& logdir);
 
 // Validates the manifest file in the specified log directory and performs repair or migration if necessary.
-// 旧バージョンからの移行では、マニフェストを書き換える前に、コンパクションカタログに登録されたコンパクション済み WAL
-// ファイルのロケータファイルを生成する。
+// On the migration from an older version, generates the locator file of each compacted WAL file recorded by the
+// compaction catalog before rewriting the manifest.
 manifest::migration_info check_and_migrate_logdir_format(const boost::filesystem::path& logdir);
 
 /**

@@ -267,10 +267,10 @@ public:
         parse_error& pe);
 
     /**
-     * @brief ファイルが WAL ファイル (スキャンの対象) かを返す。名前が pwal_ で始まり、ロケータファイルの名前 (.loc で終わる)
-     *        でないもの
-     * @param p ファイルのパス
-     * @return WAL ファイルなら true
+     * @brief Returns whether the file is a WAL file (a target of the scan): its name begins with pwal_ and is not
+     *        the name of a locator file (ending with .loc)
+     * @param p the path of the file
+     * @return true if it is a WAL file
      */
     static bool is_wal(const boost::filesystem::path& p);
     static bool is_detached_wal(const boost::filesystem::path& p) {

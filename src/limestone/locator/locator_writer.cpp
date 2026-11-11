@@ -40,8 +40,8 @@ namespace limestone::internal {
 namespace {
 
 /**
- * @brief ヘッダのバイト列 (マジック、形式バージョン、0 で埋めた予約の領域) を作る。
- * @return ヘッダの長さのバイト列
+ * @brief Makes the bytes of the header (the magic, the format version, and the reserved area filled with 0).
+ * @return the bytes of the length of the header
  */
 std::string header_bytes() {
     std::string header(locator_format::header_size, '\0');

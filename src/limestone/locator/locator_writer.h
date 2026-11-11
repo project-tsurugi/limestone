@@ -25,27 +25,28 @@
 namespace limestone::internal {
 
 /**
- * @brief ロケータファイルを書き出す。
+ * @brief Writes a locator file.
  *
- * 構築時にファイルを作ってヘッダを書き、ロケーティファイルの書き出しに合わせて note_entry() でデータ系のエントリの
- * 開始位置を受け取り、記録間隔の規則に従ってレコードを書く。close() で終端を書いて閉じる (fsync の有無は構築時に指定する)。
- * close() せずに破棄すると、書きかけのファイルが残る (呼び出し側が削除する)。
+ * Creates the file and writes the header at construction, receives the start positions of the data entries by
+ * note_entry() as the locatee file is written, and writes the records according to the rule of the record
+ * interval. close() writes the footer and closes the file (whether to fsync is specified at construction).
+ * If destroyed without close(), an incomplete file remains (the caller removes it).
  *
- * スレッドセーフではない (1 つのスレッドから使う)。
+ * Not thread-safe (use it from one thread).
  */
 class locator_writer {
 public:
     /**
-     * @brief ロケータファイルを作り、ヘッダを書く。
-     * @param file ロケータファイル。存在すれば切り詰める
-     * @param record_interval_bytes 記録間隔 (バイト)。0 なら FATAL ログを書いて abort する
-     * @param sync_on_close close() で fsync するかどうか
-     * @throws limestone_io_exception ファイルを作れないか、ヘッダを書けないとき (errno 付き)
+     * @brief Creates the locator file and writes the header.
+     * @param file the locator file. If it exists, it is truncated
+     * @param record_interval_bytes the record interval (bytes). Writes a FATAL log and aborts if it is 0
+     * @param sync_on_close whether close() performs fsync
+     * @throws limestone_io_exception if the file cannot be created or the header cannot be written (with errno)
      */
     locator_writer(boost::filesystem::path file, std::uint64_t record_interval_bytes, bool sync_on_close);
 
     /**
-     * @brief close() されていなければファイルを閉じる (失敗は無視する)。
+     * @brief Closes the file if close() has not been called (failures are ignored).
      */
     ~locator_writer() = default;
 
@@ -55,41 +56,43 @@ public:
     locator_writer& operator=(locator_writer&&) = delete;
 
     /**
-     * @brief データ系のエントリの開始位置を受け取り、記録の要否を判定してレコードを書く。
+     * @brief Receives the start position of a data entry, decides whether to record it, and writes the record.
      *
-     * 次に記録する閾値を持ち、offset が閾値以上なら記録して、閾値を (offset ÷ 記録間隔 + 1) × 記録間隔に進める。
-     * 初期の閾値は 0 であり、最初に受け取った位置がレコード 0 になる。1 つのエントリで複数の倍数を越えても記録は 1 つになる。
-     * @param offset エントリのロケーティファイルの先頭からのバイト位置。前回の位置より小さければ FATAL ログを書いて
-     *               abort する。close() の後に呼んでも同様
-     * @throws limestone_io_exception レコードを書けないとき (errno 付き)
+     * Holds the threshold of the next record. If offset is the threshold or more, records it and advances the
+     * threshold to (offset / record interval + 1) * record interval. The initial threshold is 0, so the first
+     * position received becomes record 0. An entry that crosses several multiples still yields one record.
+     * @param offset the byte position of the entry from the beginning of the locatee file. Writes a FATAL log and
+     *               aborts if it is less than the previous position, or if called after close()
+     * @throws limestone_io_exception if the record cannot be written (with errno)
      */
     void note_entry(std::uint64_t offset);
 
     /**
-     * @brief 終端を書き、構築時に指定されていれば fsync して、ファイルを閉じる。close() の後に呼ぶと FATAL ログを書いて
-     *        abort する。
-     * @param locatee_size ロケーティファイルの大きさ (バイト)。最後に note_entry() に渡した位置より小さければ FATAL
-     *                     ログを書いて abort する
-     * @throws limestone_io_exception 終端を書けないか、fflush、fsync、fclose に失敗したとき (errno 付き)
+     * @brief Writes the footer, performs fsync if specified at construction, and closes the file. Writes a FATAL
+     *        log and aborts if called after close().
+     * @param locatee_size the size of the locatee file (bytes). Writes a FATAL log and aborts if it is less than
+     *                     the last position passed to note_entry()
+     * @throws limestone_io_exception if the footer cannot be written, or fflush, fsync or fclose fails (with errno)
      */
     void close(std::uint64_t locatee_size);
 
     /**
-     * @brief これまでに書いたレコードの数を返す。
+     * @brief Returns the number of records written so far.
      */
     [[nodiscard]] std::size_t record_count() const noexcept;
 
     /**
-     * @brief 既存のロケーティファイルを先頭から読み、そのロケータファイルを生成する。
+     * @brief Reads an existing locatee file from the beginning and generates its locator file.
      *
-     * データ系のエントリの開始位置を note_entry() に渡し、末尾に達したら close() する (fsync する)。書き出し時に生成するのと
-     * 同じ内容になる。
-     * @param locatee ロケーティファイル。先頭から末尾までエントリが途切れなく並んでいること
-     * @param file 生成するロケータファイル。存在すれば切り詰める
-     * @param record_interval_bytes 記録間隔 (バイト)
-     * @return 書いたレコードの数
-     * @throws limestone_io_exception ロケーティファイルを読めないとき、ロケーティファイルの内容が形式に合わないとき、
-     *         ロケータファイルを書けないとき。このとき書きかけのロケータファイルが残る (呼び出し側が削除する)
+     * Passes the start positions of the data entries to note_entry(), and calls close() at the end (with fsync).
+     * The content is the same as the one generated while the locatee file is written.
+     * @param locatee the locatee file. Its entries must be contiguous from the beginning to the end
+     * @param file the locator file to generate. If it exists, it is truncated
+     * @param record_interval_bytes the record interval (bytes)
+     * @return the number of records written
+     * @throws limestone_io_exception if the locatee file cannot be read, its content does not conform to the
+     *         format, or the locator file cannot be written. An incomplete locator file then remains (the caller
+     *         removes it)
      */
     static std::size_t build_from_file(const boost::filesystem::path& locatee, const boost::filesystem::path& file,
                                        std::uint64_t record_interval_bytes);
@@ -98,9 +101,9 @@ private:
     buffered_output_file file_;
     std::uint64_t record_interval_bytes_;
     bool sync_on_close_;
-    // 次にレコードを記録する位置の閾値
+    // The threshold of the position at which the next record is written
     std::uint64_t next_threshold_{};
-    // 前回 note_entry() に渡された位置。位置が戻っていないことの検査に使う
+    // The position passed to the previous note_entry(). Used to check that the position does not go back
     std::uint64_t last_offset_{};
     std::size_t record_count_{};
 };

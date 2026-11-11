@@ -138,10 +138,10 @@ public:
     /// @brief the parent directory in which the sort creates its working directory (sorting)
     [[nodiscard]] const boost::filesystem::path& sort_work_dir_parent() const noexcept;
 
-    /// @brief ロケータファイルの設定を置き換える (テスト用)。datastore の ready() の前に呼ぶ
+    /// @brief Replaces the settings of the locator file (for tests). Call it before ready() of the datastore
     void set_locator_settings_for_test(const limestone::internal::locator_settings& settings) noexcept;
 
-    /// @brief ロケータファイルの設定 (スナップショットファイルとコンパクション済み WAL ファイルのロケータファイルに使う)
+    /// @brief Settings of the locator file (used for the locator files of the snapshot file and the compacted WAL file)
     [[nodiscard]] const limestone::internal::locator_settings& get_locator_settings() const noexcept;
 
     // Increments the backup counter.
@@ -569,7 +569,7 @@ private:
     std::size_t sort_merge_fanin_{};
     boost::filesystem::path sort_work_dir_parent_{};
 
-    // ロケータファイルの設定。既定値のままで、テストだけが置き換える
+    // Settings of the locator file. They keep the defaults, and only tests replace them
     limestone::internal::locator_settings locator_settings_{};
 
     // Atomic counter for tracking active backup operations.

@@ -408,8 +408,8 @@ bool compaction_catalog::is_compaction_output_filename(const std::string& filena
 }
 
 bool compaction_catalog::is_orphan_compaction_file(const std::string& filename) const {
-    // ロケータファイルは .loc を除いた名前 (ロケーティファイルの名前) で判定する。カタログに登録されたコンパクション済み
-    // WAL ファイルのロケータファイルだけが孤児でなく、ロケーティファイルの有無は見ない
+    // A locator file is judged by the name without .loc (the name of the locatee file). Only the locator file of a
+    // compacted WAL file recorded by the catalog is not an orphan; whether the locatee file exists is not checked
     const bool is_locator = locator_format::is_locator_file_name(filename);
     const std::string target = is_locator ? locator_format::locatee_file_name(filename) : filename;
     if (!is_compaction_output_filename(target)) {
@@ -421,7 +421,7 @@ bool compaction_catalog::is_orphan_compaction_file(const std::string& filename) 
         }
     }
     if (is_locator) {
-        return true;  // carry ファイルにロケータファイルはない
+        return true;  // a carry file has no locator file
     }
     return !(carry_file_.has_value() && carry_file_.value() == filename);
 }

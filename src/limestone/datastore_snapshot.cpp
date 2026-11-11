@@ -133,7 +133,7 @@ compaction_output_result create_compaction_output(compaction_options &options) {
     // On a failure of the writing, the destruction of the writer closes the file; the removal of the temporary file
     // and the retry on the next request are left to the caller. close() performs fsync so that the content reaches
     // the disk before the publishing rename.
-    // ロケータファイルはコンパクション済み WAL ファイルと同じディレクトリに、その名前に .loc を付けた名前で書く
+    // The locator file is written in the same directory as the compacted WAL file, under its name with .loc appended
     boost::filesystem::path locator_file = to_dir / locator_format::locator_file_name(compacted_file_name);
     sort_output_writer output(compacted_file, "compacted file",
                               {log_entry::write_version_handling::oldest, false, true},
@@ -295,7 +295,7 @@ blob_id_type datastore::create_snapshot_and_get_max_blob_id() {
     // remove_entries are needed for the cursor to hide the old values in the compacted WAL file. They are not written
     // if there is no compacted WAL file
     const bool should_write_remove_entry = !compaction_catalog_->get_compacted_files().empty();
-    // スナップショットファイルのロケータファイル (data/snapshot.loc)。スナップショットファイルと同じく add_file しない
+    // The locator file of the snapshot file (data/snapshot.loc). Like the snapshot file, it is not passed to add_file
     boost::filesystem::path snapshot_locator_file = sub_dir / locator_format::locator_file_name(snapshot::file_name_);
     sort_output_writer output(snapshot_file, "snapshot file",
                               {log_entry::write_version_handling::keep, should_write_remove_entry, false},

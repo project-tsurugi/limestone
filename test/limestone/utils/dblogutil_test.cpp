@@ -227,7 +227,8 @@ TEST_F(dblogutil_test, inspect_normal) {
     EXPECT_NE(out.find("\n" "status: OK"), out.npos);
 }
 
-// ロケータファイル (.loc) は WAL ファイルではないので、inspect は読まない (内容が WAL の形式でなくても OK になる)
+// A locator file (.loc) is not a WAL file, so inspect does not read it (the result is OK even if its content is
+// not in the WAL format)
 TEST_F(dblogutil_test, inspect_ignores_locator_files) {
     create_file(boost::filesystem::path(location) / "pwal_0000.compacted.1.loc", "not a wal file");
     auto [rc, out] = inspect("pwal_0000", data_normal);

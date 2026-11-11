@@ -26,13 +26,13 @@ namespace limestone::testing {
 
 namespace lf = limestone::internal::locator_format;
 
-// ロケーティファイルの名前に .loc を付ける
+// Appends .loc to the name of the locatee file
 TEST(locator_format_test, locator_file_name_appends_suffix) {
     EXPECT_EQ(lf::locator_file_name("pwal_0000.compacted.3"), "pwal_0000.compacted.3.loc");
     EXPECT_EQ(lf::locator_file_name("snapshot"), "snapshot.loc");
 }
 
-// ロケータファイルの名前から .loc を除く。.loc で終わらない名前は abort する
+// Removes .loc from the name of the locator file. A name that does not end with .loc aborts
 TEST(locator_format_test, locatee_file_name_removes_suffix) {
     EXPECT_EQ(lf::locatee_file_name("pwal_0000.compacted.3.loc"), "pwal_0000.compacted.3");
     EXPECT_EQ(lf::locatee_file_name("snapshot.loc"), "snapshot");
@@ -40,13 +40,13 @@ TEST(locator_format_test, locatee_file_name_removes_suffix) {
     EXPECT_DEATH(lf::locatee_file_name("pwal_0000.compacted.3"), "not a locator file name");
 }
 
-// パスはディレクトリを保ち、名前だけに .loc を付ける
+// The path keeps the directory, and .loc is appended only to the name
 TEST(locator_format_test, locator_file_path_keeps_directory) {
     const boost::filesystem::path locatee("/var/log/dir/pwal_0000.compacted.3");
     EXPECT_EQ(lf::locator_file_path(locatee), boost::filesystem::path("/var/log/dir/pwal_0000.compacted.3.loc"));
 }
 
-// .loc で終わる名前だけをロケータファイルの名前と判定する
+// Only a name ending with .loc is judged to be the name of a locator file
 TEST(locator_format_test, is_locator_file_name_checks_suffix) {
     EXPECT_TRUE(lf::is_locator_file_name("pwal_0000.compacted.3.loc"));
     EXPECT_TRUE(lf::is_locator_file_name("snapshot.loc"));
@@ -57,7 +57,8 @@ TEST(locator_format_test, is_locator_file_name_checks_suffix) {
     EXPECT_FALSE(lf::is_locator_file_name(""));
 }
 
-// マジックのバイト列は "LIMELOC" に 0x00 (ヘッダ) と 0x80 (終端) を続けたもの。終端はヘッダの最上位ビットを立てた値
+// The bytes of the magic are "LIMELOC" followed by 0x00 (header) or 0x80 (footer). The footer is the header with
+// the most significant bit set
 TEST(locator_format_test, magic_values) {
     const std::string header_bytes("LIMELOC\0", 8);
     const std::string footer_bytes("LIMELOC\x80", 8);

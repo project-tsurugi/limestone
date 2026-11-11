@@ -201,7 +201,7 @@ static constexpr const char* location = "/tmp/dblog_scan_test";
     }
 };
 
-// is_wal は pwal で始まる名前を WAL とし、ロケータファイル (.loc で終わる) を除く
+// is_wal treats a name beginning with pwal as a WAL file, excluding locator files (ending with .loc)
 TEST_F(dblog_scan_test, is_wal_excludes_locator_files) {
     const boost::filesystem::path dir{location};
     EXPECT_TRUE(dblog_scan::is_wal(dir / "pwal_0000"));

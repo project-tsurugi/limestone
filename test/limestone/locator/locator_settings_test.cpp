@@ -23,7 +23,7 @@ namespace limestone::testing {
 
 using limestone::internal::locator_settings;
 
-// 既定値は記録間隔 32 MiB、R = 1
+// The defaults are the record interval of 32 MiB and R = 1
 TEST(locator_settings_test, defaults) {
     const locator_settings settings{};
     EXPECT_EQ(settings.record_interval_bytes, std::uint64_t{32} * 1024 * 1024);

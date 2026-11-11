@@ -692,7 +692,7 @@ int main(char *dir, subcommand mode) {  // NOLINT
                        << " is already in use by another process. Operation aborted.";
             log_and_exit(64);
         }
-        // 移行はファイルを書き換えるので、ロックを取れたことを確かめた後に行う
+        // The migration rewrites files, so it is performed after confirming that the lock is acquired
         check_and_migrate_logdir_format(p);
         dblog_scan ds(p);
         ds.set_thread_num(thread_num);

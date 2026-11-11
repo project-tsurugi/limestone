@@ -51,7 +51,7 @@ void sort_output_writer::write(const log_entry_view& entry) {
         locator_->note_entry(written_bytes_);
     }
     log_entry::write_serialized(file_.stream(), entry, format_.write_version);
-    // write_version の置き換え (oldest) は同じ長さなので、書いた長さはビューの長さに等しい
+    // Replacing the write_version (oldest) keeps the length, so the written length equals the length of the view
     written_bytes_ += entry.serialized_entry().size();
 }
 

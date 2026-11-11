@@ -267,8 +267,8 @@ public:
      * generation, including the unnamed generation-0 form, a carry file of any
      * generation, or a ".prev" remnant of the retired backup scheme) and that this
      * catalog does not record is an orphan.
-     * コンパクション出力の名前に .loc を付けた名前 (ロケータファイル) は、この catalog に登録されたコンパクション済み
-     * WAL ファイルのものだけが孤児でない。ロケーティファイルの有無は見ない。
+     * A name made by appending .loc to the name of a compaction output (a locator file) is not an orphan only if
+     * it belongs to a compacted WAL file recorded by this catalog. Whether the locatee file exists is not checked.
      *
      * @param filename The file name (no directory part).
      * @return true when the file is a compaction-output name not recorded by this catalog.

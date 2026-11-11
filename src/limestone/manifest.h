@@ -176,24 +176,25 @@ public:
 
 
     /**
-     * @brief マニフェストを検査する。バックアップからの修復、読み込み、対応バージョンの検査を行い、書き換えはしない。
+     * @brief Checks the manifest: repairs it from the backup, loads it, and checks that the version is supported.
+     *        Does not rewrite it.
      *
      * @param logdir Path to the log directory containing the manifest file.
-     * @param ops    ファイル操作
-     * @return 読み込んだマニフェスト (書き換える前のバージョンを持つ)
-     * @throws limestone_io_exception 修復のファイル操作に失敗したとき、マニフェストを読めないとき
-     * @throws limestone_exception 対応していないバージョンのとき
+     * @param ops    the file operations
+     * @return the loaded manifest (holding the version before the rewrite)
+     * @throws limestone_io_exception if a file operation of the repair fails or the manifest cannot be read
+     * @throws limestone_exception if the version is not supported
      */
     static manifest check_and_repair(const boost::filesystem::path& logdir, file_operations& ops);
 
     /**
-     * @brief マニフェストを default_persistent_format_version に書き換える。
+     * @brief Rewrites the manifest to default_persistent_format_version.
      *
-     * @param manifest_path マニフェストファイルのパス
-     * @param manifest_backup_path マニフェストのバックアップファイルのパス
-     * @param old_manifest check_and_repair() が返した、書き換える前のマニフェスト
-     * @param ops    ファイル操作
-     * @throws limestone_io_exception ファイル操作に失敗したとき
+     * @param manifest_path the path of the manifest file
+     * @param manifest_backup_path the path of the backup file of the manifest
+     * @param old_manifest the manifest before the rewrite, returned by check_and_repair()
+     * @param ops    the file operations
+     * @throws limestone_io_exception if a file operation fails
      */
     static void migrate_manifest(const boost::filesystem::path& manifest_path, const boost::filesystem::path& manifest_backup_path,
                                  const manifest& old_manifest, file_operations& ops);

@@ -163,8 +163,8 @@
          return sort_work_dir_parent_.empty() ? from_dir_ : sort_work_dir_parent_;
      }
 
-     // コンパクション済み WAL ファイルと一緒に書くロケータファイルの設定を置き換える。この関数を呼ばなければ
-     // locator_settings の既定値のまま
+     // Replaces the settings of the locator file written along with the compacted WAL file. The defaults of
+     // locator_settings stay unless this function is called
      void set_locator_settings(const locator_settings& settings) { locator_settings_ = settings; }
 
      // Getter for the settings of the locator file.
@@ -210,7 +210,7 @@
      std::size_t sort_merge_fanin_{sort_settings{}.merge_fanin};
      boost::filesystem::path sort_work_dir_parent_{};
 
-     // ロケータファイルの設定 (既定値は locator_settings)
+     // Settings of the locator file (the defaults are those of locator_settings)
      locator_settings locator_settings_{};
  };
 
