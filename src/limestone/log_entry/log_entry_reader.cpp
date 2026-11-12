@@ -116,23 +116,21 @@ log_entry_reader::log_entry_reader(boost::filesystem::path file, std::uint64_t s
     }
 }
 
-log_entry_reader::log_entry_reader(int fd, boost::filesystem::path file, std::uint64_t start_offset,
-                                   std::optional<std::uint64_t> end_offset, std::size_t buffer_size)
+log_entry_reader::log_entry_reader(boost::filesystem::path file, std::uint64_t start_offset, std::size_t buffer_size)
     : file_ops_(&real_file_ops_), file_(std::move(file)), buffer_size_(buffer_size) {
     if (buffer_size_ == 0) {
         LOG_LP(FATAL) << "buffer size is 0";
     }
-    open_duplicate(fd, start_offset, end_offset);
+    open_file(start_offset);
 }
 
-log_entry_reader::log_entry_reader(int fd, boost::filesystem::path file, std::uint64_t start_offset,
-                                   std::optional<std::uint64_t> end_offset, std::size_t buffer_size,
+log_entry_reader::log_entry_reader(boost::filesystem::path file, std::uint64_t start_offset, std::size_t buffer_size,
                                    file_operations& file_ops)
     : file_ops_(&file_ops), file_(std::move(file)), buffer_size_(buffer_size) {
     if (buffer_size_ == 0) {
         LOG_LP(FATAL) << "buffer size is 0";
     }
-    open_duplicate(fd, start_offset, end_offset);
+    open_file(start_offset);
 }
 
 log_entry_reader::~log_entry_reader() {
@@ -158,35 +156,6 @@ void log_entry_reader::open_file(std::uint64_t start_offset) {
     if (start_offset > end_offset_) {
         file_ops_->close(fd_);
         LOG_AND_THROW_IO_EXCEPTION_NO_ERRNO("start offset " + std::to_string(start_offset) + " exceeds the file size "
-                                            + std::to_string(end_offset_) + ": " + file_.string());
-    }
-    buffer_offset_ = start_offset;
-}
-
-void log_entry_reader::open_duplicate(int fd, std::uint64_t start_offset, std::optional<std::uint64_t> end_offset) {
-    fd_ = file_ops_->dup(fd);
-    if (fd_ < 0) {
-        const int err = errno;
-        LOG_AND_THROW_IO_EXCEPTION("cannot duplicate the file descriptor: " + file_.string(), err);
-    }
-    struct stat st{};
-    if (file_ops_->fstat(fd_, &st) != 0) {
-        const int err = errno;
-        file_ops_->close(fd_);
-        LOG_AND_THROW_IO_EXCEPTION("cannot get the file status: " + file_.string(), err);
-    }
-    const auto file_size = static_cast<std::uint64_t>(st.st_size);
-    if (end_offset.has_value() && end_offset.value() > file_size) {
-        file_ops_->close(fd_);
-        LOG_AND_THROW_IO_EXCEPTION_NO_ERRNO("end offset " + std::to_string(end_offset.value())
-                                            + " exceeds the file size " + std::to_string(file_size) + ": "
-                                            + file_.string());
-    }
-    end_offset_ = end_offset.value_or(file_size);
-    end_offset_specified_ = end_offset.has_value();
-    if (start_offset > end_offset_) {
-        file_ops_->close(fd_);
-        LOG_AND_THROW_IO_EXCEPTION_NO_ERRNO("start offset " + std::to_string(start_offset) + " exceeds the end offset "
                                             + std::to_string(end_offset_) + ": " + file_.string());
     }
     buffer_offset_ = start_offset;
@@ -271,6 +240,20 @@ void log_entry_reader::wait_and_read(std::size_t required) {
             std::this_thread::sleep_for(wait_interval);
         }
     }
+}
+
+void log_entry_reader::set_range(std::uint64_t start_offset, std::uint64_t end_offset) {
+    if (state_) {
+        LOG_LP(FATAL) << "set_range is not available for a reader of a file being written: " << file_;
+    }
+    if (start_offset > end_offset) {
+        LOG_LP(FATAL) << "start offset " << start_offset << " exceeds end offset " << end_offset << ": " << file_;
+    }
+    buffer_offset_ = start_offset;
+    begin_ = 0;
+    end_ = 0;
+    end_offset_ = end_offset;
+    ranged_ = true;
 }
 
 const boost::filesystem::path& log_entry_reader::file() const noexcept {
@@ -358,8 +341,7 @@ void log_entry_reader::prepare_buffer(std::size_t required) {
 
 std::size_t log_entry_reader::read_into_buffer() {
     std::size_t count = buffer_.size() - end_;
-    if (end_offset_specified_) {
-        // 読み終える位置より後ろを読まない
+    if (ranged_) {
         const std::uint64_t position = buffer_offset_ + end_;
         const std::uint64_t rest = end_offset_ > position ? end_offset_ - position : 0;
         if (rest == 0) {

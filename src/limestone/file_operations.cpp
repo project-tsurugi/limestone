@@ -87,10 +87,6 @@ int real_file_operations::close(int fd) {
     return ::close(fd);
 }
 
-int real_file_operations::dup(int fd) {
-    return ::dup(fd);
-}
-
 ssize_t real_file_operations::pread(int fd, void* buf, size_t count, off_t offset) {
     return ::pread(fd, buf, count, offset);
 }

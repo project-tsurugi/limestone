@@ -14,8 +14,7 @@
  * limitations under the License.
  */
 
-#include <fcntl.h>
-#include <unistd.h>
+#include <sys/stat.h>
 
 #include <algorithm>
 #include <cerrno>
@@ -721,103 +720,149 @@ TEST_F(log_entry_reader_test, status_to_string) {
     EXPECT_EQ(out.str(), "ok end error unknown");
 }
 
-// 読み取り専用で開いたファイル記述子。破棄するときに閉じる
-class opened_fd {
+// システムコールの呼び出しを数えるファイル操作
+class counting_file_operations : public real_file_operations {
 public:
-    explicit opened_fd(const boost::filesystem::path& p) : fd_(::open(p.c_str(), O_RDONLY)) {
-        if (fd_ < 0) {
-            ADD_FAILURE() << "cannot open " << p;
-        }
+    int open(const char* filename, int flags) override {
+        ++others_;
+        return real_file_operations::open(filename, flags);
     }
-    ~opened_fd() { close(); }
-    opened_fd(const opened_fd&) = delete;
-    opened_fd& operator=(const opened_fd&) = delete;
-    opened_fd(opened_fd&&) = delete;
-    opened_fd& operator=(opened_fd&&) = delete;
-
-    [[nodiscard]] int get() const noexcept { return fd_; }
-
-    void close() noexcept {
-        if (fd_ >= 0) {
-            ::close(fd_);
-            fd_ = -1;
-        }
+    int close(int fd) override {
+        ++others_;
+        return real_file_operations::close(fd);
     }
+    int fstat(int fd, struct stat* buf) override {
+        ++others_;
+        return real_file_operations::fstat(fd, buf);
+    }
+    ssize_t pread(int fd, void* buf, size_t count, off_t offset) override {
+        ++preads_;
+        return real_file_operations::pread(fd, buf, count, offset);
+    }
+
+    // pread 以外のシステムコールの回数
+    [[nodiscard]] std::size_t others() const noexcept { return others_; }
+    // pread の回数
+    [[nodiscard]] std::size_t preads() const noexcept { return preads_; }
 
 private:
-    int fd_;
+    std::size_t others_{};
+    std::size_t preads_{};
 };
 
-// ファイル記述子から読める。reader は複製を持つので、呼び出し側が閉じても、ファイルの名前を削除しても読める
-TEST_F(log_entry_reader_test, reads_from_fd_after_close_and_unlink) {
+// バッファの大きさを指定して開いた reader に範囲を設定して読める。範囲の設定では、システムコールを呼ばない
+TEST_F(log_entry_reader_test, reads_the_range_set) {
+    std::string e1 = normal_entry(1, "a", "v", 7, 1);
+    std::string e2 = remove_entry(1, "b", 7, 2);
+    std::string e3 = normal_entry(1, "c", "v", 7, 3);
+    auto p = write_file(marker(2, 7) + e1 + e2 + e3);
+    counting_file_operations ops;
+    {
+        log_entry_reader reader(p, 0, 4096, ops);
+        EXPECT_EQ(reader.file(), p);
+        // 構築では、開く操作とファイルの状態の取得だけを呼ぶ
+        EXPECT_EQ(ops.others(), 2U);
+        EXPECT_EQ(ops.preads(), 0U);
+        reader.set_range(9, 9 + e1.size() + e2.size());
+        EXPECT_EQ(ops.others(), 2U);
+        EXPECT_EQ(ops.preads(), 0U);
+        expect_entry(reader, e1, 9);
+        expect_entry(reader, e2, 9 + e1.size());
+        expect_end(reader, 9 + e1.size() + e2.size());
+        EXPECT_EQ(ops.others(), 2U);
+        EXPECT_EQ(ops.preads(), 1U);
+    }
+    // 破棄では、閉じる操作だけを呼ぶ
+    EXPECT_EQ(ops.others(), 3U);
+}
+
+// 範囲を設定しなければ、バッファの大きさを指定しない reader と同じく、開始位置からファイルの末尾まで読む
+TEST_F(log_entry_reader_test, reads_to_the_end_without_range) {
     std::string e1 = normal_entry(1, "a", "v", 7, 1);
     std::string e2 = remove_entry(1, "b", 7, 2);
     auto p = write_file(marker(2, 7) + e1 + e2);
-    opened_fd fd(p);
-    log_entry_reader reader(fd.get(), p, 9, std::nullopt, 4096);
-    fd.close();
-    boost::filesystem::remove(p);
-    EXPECT_EQ(reader.file(), p);
+    log_entry_reader reader(p, 9, 4096);
     expect_entry(reader, e1, 9);
     expect_entry(reader, e2, 9 + e1.size());
     expect_end(reader, 9 + e1.size() + e2.size());
 }
 
-// 拡張と縮小は、コンストラクタで指定したバッファの大きさを基準にする。バッファの大きさを超えるエントリも読める
-TEST_F(log_entry_reader_test, buffer_size_of_fd_reader) {
+// 開いた後にファイルの名前を削除しても、範囲を設定して読める
+TEST_F(log_entry_reader_test, reads_the_range_after_unlink) {
+    std::string e1 = normal_entry(1, "a", "v", 7, 1);
+    auto p = write_file(e1);
+    log_entry_reader reader(p, 0, 4096);
+    boost::filesystem::remove(p);
+    reader.set_range(0, e1.size());
+    expect_entry(reader, e1, 0);
+    expect_end(reader, e1.size());
+}
+
+// 範囲を設定し直すと、その範囲を先頭から読む。前の範囲の途中でも、手前の位置へも設定し直せる
+TEST_F(log_entry_reader_test, set_range_switches_the_range) {
+    std::string e1 = normal_entry(1, "a", "v", 7, 1);
+    std::string e2 = normal_entry(1, "b", "v", 7, 2);
+    std::string e3 = normal_entry(1, "c", "v", 7, 3);
+    auto p = write_file(e1 + e2 + e3);
+    log_entry_reader reader(p, 0, 4096);
+    const std::uint64_t o2 = e1.size();
+    const std::uint64_t o3 = e1.size() + e2.size();
+    const std::uint64_t size = o3 + e3.size();
+    // 後ろの範囲を最後まで読む
+    reader.set_range(o3, size);
+    expect_entry(reader, e3, o3);
+    expect_end(reader, size);
+    // 手前の範囲に設定し直し、途中まで読む
+    reader.set_range(0, o3);
+    expect_entry(reader, e1, 0);
+    // 読み終える前に設定し直す。前の範囲の残りは読まれず、新しい範囲の先頭から読む
+    reader.set_range(o2, size);
+    expect_entry(reader, e2, o2);
+    expect_entry(reader, e3, o3);
+    expect_end(reader, size);
+}
+
+// バッファの拡張と縮小は、コンストラクタで指定した大きさを基準にする
+TEST_F(log_entry_reader_test, buffer_size_given_to_the_constructor) {
     constexpr std::size_t size = 4096;
     std::string large = normal_entry(1, "key", std::string(size + 100, 'v'), 7, 1);
     std::string small = remove_entry(1, "key", 7, 2);
     auto p = write_file(large + small);
-    opened_fd fd(p);
     recording_file_operations ops;
-    log_entry_reader reader(fd.get(), p, 0, std::nullopt, size, ops);
+    log_entry_reader reader(p, 0, size, ops);
+    reader.set_range(0, large.size() + small.size());
     expect_entry(reader, large, 0);
     expect_entry(reader, small, large.size());
     expect_end(reader, large.size() + small.size());
-    // 1 回目は指定した大きさ、2 回目はエントリの大きさに拡張して残り、3 回目は指定した大きさに縮小した空き全体
-    ASSERT_GE(ops.requests().size(), 3U);
+    // 1 回目は指定した大きさ、2 回目はエントリの大きさに拡張してその残り、3 回目は指定した大きさに縮小した
+    // バッファで、読み終える位置までの残り
+    ASSERT_EQ(ops.requests().size(), 3U);
     EXPECT_EQ(ops.requests()[0], size);
     EXPECT_EQ(ops.requests()[1], large.size() - size);
-    EXPECT_EQ(ops.requests()[2], size);
+    EXPECT_EQ(ops.requests()[2], small.size());
+    // 設定し直しても同じバッファで読む
+    reader.set_range(large.size(), large.size() + small.size());
+    expect_entry(reader, small, large.size());
+    ASSERT_EQ(ops.requests().size(), 4U);
+    EXPECT_EQ(ops.requests()[3], small.size());
 }
 
 // 読み終える位置がエントリの境界なら、そこで end になり、その後ろは読まない (要求したバイト数の合計が範囲の大きさ)
 TEST_F(log_entry_reader_test, end_offset_at_entry_boundary) {
     std::string e1 = normal_entry(1, "a", "v", 7, 1);
-    std::string e2 = normal_entry(1, "b", "v", 7, 2);
-    std::string e3 = normal_entry(1, "c", "v", 7, 3);
-    auto p = write_file(e1 + e2 + e3);
-    opened_fd fd(p);
-    recording_file_operations ops;
-    const std::uint64_t end_offset = e1.size() + e2.size();
-    log_entry_reader reader(fd.get(), p, 0, end_offset, 4096, ops);
-    expect_entry(reader, e1, 0);
-    expect_entry(reader, e2, e1.size());
-    expect_end(reader, end_offset);
-    expect_end(reader, end_offset);
-    std::size_t requested = 0;
-    for (std::size_t r : ops.requests()) {
-        requested += r;
-    }
-    EXPECT_EQ(requested, end_offset);
-}
-
-// 開始位置と読み終える位置の両方を指定すると、その間のエントリだけを読む。バッファの大きさが範囲より小さくても、
-// 読み込みは範囲の残りまでに限る
-TEST_F(log_entry_reader_test, start_and_end_offset_with_small_buffer) {
-    std::string e1 = normal_entry(1, "a", "v", 7, 1);
     std::string e2 = normal_entry(1, "b", std::string(100, 'v'), 7, 2);
     std::string e3 = normal_entry(1, "c", std::string(100, 'v'), 7, 3);
     std::string e4 = normal_entry(1, "d", "v", 7, 4);
     auto p = write_file(e1 + e2 + e3 + e4);
-    opened_fd fd(p);
     recording_file_operations ops;
     const std::uint64_t start_offset = e1.size();
     const std::uint64_t end_offset = e1.size() + e2.size() + e3.size();
-    log_entry_reader reader(fd.get(), p, start_offset, end_offset, 64, ops);
+    // バッファの大きさが範囲より小さくても、読み込みは範囲の残りまでに限る
+    log_entry_reader reader(p, 0, 64, ops);
+    reader.set_range(start_offset, end_offset);
     expect_entry(reader, e2, start_offset);
     expect_entry(reader, e3, start_offset + e2.size());
+    expect_end(reader, end_offset);
     expect_end(reader, end_offset);
     std::size_t requested = 0;
     for (std::size_t r : ops.requests()) {
@@ -830,9 +875,9 @@ TEST_F(log_entry_reader_test, start_and_end_offset_with_small_buffer) {
 TEST_F(log_entry_reader_test, empty_range_is_end) {
     std::string e1 = normal_entry(1, "a", "v", 7, 1);
     auto p = write_file(e1 + e1);
-    opened_fd fd(p);
     recording_file_operations ops;
-    log_entry_reader reader(fd.get(), p, e1.size(), e1.size(), 4096, ops);
+    log_entry_reader reader(p, 0, 4096, ops);
+    reader.set_range(e1.size(), e1.size());
     expect_end(reader, e1.size());
     EXPECT_TRUE(ops.requests().empty());
 }
@@ -842,90 +887,46 @@ TEST_F(log_entry_reader_test, end_offset_in_the_middle_of_entry) {
     std::string e1 = normal_entry(1, "a", "v", 7, 1);
     std::string e2 = normal_entry(1, "b", "v", 7, 2);
     auto p = write_file(e1 + e2);
-    opened_fd fd(p);
     const std::uint64_t end_offset = e1.size() + 5;
-    log_entry_reader reader(fd.get(), p, 0, end_offset, 4096);
+    log_entry_reader reader(p, 0, 4096);
+    reader.set_range(0, end_offset);
     expect_entry(reader, e1, 0);
     expect_error(reader, log_entry::read_error::short_entry, entry_type::normal_entry, e1.size());
     expect_end(reader, end_offset);
+    // エラーの後でも設定し直せる
+    reader.set_range(e1.size(), e1.size() + e2.size());
+    expect_entry(reader, e2, e1.size());
 }
 
-// 読み終える位置がファイルの大きさを超えるか、開始位置が読み終える位置を超えると、errno なしの例外を投げる
-TEST_F(log_entry_reader_test, invalid_range_of_fd_reader_throws) {
+// 範囲がファイルの大きさに収まらなくても例外にはならず、読み込みが尽きた位置で end になる
+TEST_F(log_entry_reader_test, range_beyond_the_file_ends_at_the_file_size) {
     std::string e1 = normal_entry(1, "a", "v", 7, 1);
     auto p = write_file(e1);
-    opened_fd fd(p);
-    try {
-        log_entry_reader reader(fd.get(), p, 0, e1.size() + 1, 4096);
-        FAIL() << "no exception";
-    } catch (const limestone_io_exception& e) {
-        EXPECT_EQ(e.error_code(), 0);
-        EXPECT_NE(std::string(e.what()).find("end offset"), std::string::npos) << e.what();
-    }
-    try {
-        log_entry_reader reader(fd.get(), p, 2, 1, 4096);
-        FAIL() << "no exception";
-    } catch (const limestone_io_exception& e) {
-        EXPECT_EQ(e.error_code(), 0);
-        EXPECT_NE(std::string(e.what()).find("start offset"), std::string::npos) << e.what();
-    }
-    try {
-        log_entry_reader reader(fd.get(), p, e1.size() + 1, std::nullopt, 4096);
-        FAIL() << "no exception";
-    } catch (const limestone_io_exception& e) {
-        EXPECT_EQ(e.error_code(), 0);
-    }
+    log_entry_reader reader(p, 0, 4096);
+    reader.set_range(0, e1.size() + 100);
+    expect_entry(reader, e1, 0);
+    expect_end(reader, e1.size());
+    reader.set_range(e1.size() + 10, e1.size() + 100);
+    expect_end(reader, e1.size() + 10);
 }
 
-// ファイル記述子を複製できなければ errno 付きの例外を投げる。ファイルの状態を取得できなければ、複製を閉じてから
-// errno 付きの例外を投げる
-TEST_F(log_entry_reader_test, dup_and_fstat_failure_of_fd_reader_throw) {
-    class : public real_file_operations {
-    public:
-        int dup(int fd) override {
-            if (fail_dup) {
-                errno = EMFILE;
-                return -1;
-            }
-            duplicated = real_file_operations::dup(fd);
-            return duplicated;
-        }
-        int fstat(int, struct stat*) override {
-            errno = EIO;
-            return -1;
-        }
-        int close(int fd) override {
-            closed = fd;
-            return real_file_operations::close(fd);
-        }
-        bool fail_dup{true};
-        int duplicated{-1};
-        int closed{-1};
-    } ops;
+// 書き込み中のファイルを読む reader では set_range は abort する。開始位置が読み終える位置を超えても abort する。
+// バッファの大きさ 0 も abort する
+TEST_F(log_entry_reader_test, invalid_use_of_set_range_aborts) {
     auto p = write_file(marker(2, 7));
-    opened_fd fd(p);
-    try {
-        log_entry_reader reader(fd.get(), p, 0, std::nullopt, 4096, ops);
-        FAIL() << "no exception";
-    } catch (const limestone_io_exception& e) {
-        EXPECT_EQ(e.error_code(), EMFILE);
-    }
-    ops.fail_dup = false;
-    try {
-        log_entry_reader reader(fd.get(), p, 0, std::nullopt, 4096, ops);
-        FAIL() << "no exception";
-    } catch (const limestone_io_exception& e) {
-        EXPECT_EQ(e.error_code(), EIO);
-    }
-    EXPECT_GE(ops.duplicated, 0);
-    EXPECT_EQ(ops.closed, ops.duplicated);
-}
-
-// バッファの大きさ 0 は abort する
-TEST_F(log_entry_reader_test, zero_buffer_size_aborts) {
-    auto p = write_file(marker(2, 7));
-    opened_fd fd(p);
-    EXPECT_DEATH(log_entry_reader(fd.get(), p, 0, std::nullopt, 0), "buffer size is 0");
+    EXPECT_DEATH(
+        {
+            log_entry_reader reader(p, 0, [] { return file_write_state::written; });
+            reader.set_range(0, 9);
+        },
+        "set_range is not available");
+    EXPECT_DEATH(
+        {
+            log_entry_reader reader(p, 0, 4096);
+            reader.set_range(2, 1);
+        },
+        "start offset 2 exceeds end offset 1");
+    EXPECT_DEATH(log_entry_reader(p, 0, 0), "buffer size is 0");
 }
 
 }  // namespace limestone::testing
