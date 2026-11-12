@@ -45,6 +45,7 @@ public:
 
     using cursor_impl::cursor_impl;
     using cursor_impl::next;
+    using cursor_impl::input_stream;
     using cursor_impl::validate_and_read_stream;
     using cursor_impl::close;
     using cursor_impl::storage;
@@ -330,20 +331,23 @@ TEST_F(cursor_impl_test, validate_stream_eof) {
     }
 
     // Open the empty file with a reader.
-    std::optional<limestone::internal::log_entry_reader> reader;
-    reader.emplace(empty_file);
-
-    // Create dummy log_entry and previous key to pass to validate_and_read_stream.
-    std::optional<limestone::api::log_entry> log_entry;
-    std::string previous_key;
+    cursor_impl_testable::input_stream stream{"empty_stream"};
+    stream.reader.emplace(empty_file);
+    stream.finished = false;
 
     // Use cursor_impl_testable to call validate_and_read_stream.
     cursor_impl_testable test_cursor(empty_file);
-    test_cursor.validate_and_read_stream(reader, "empty_stream", log_entry, previous_key);
+    test_cursor.validate_and_read_stream(stream);
 
-    // Expect that the reader is reset to nullopt due to EOF.
-    EXPECT_FALSE(reader.has_value()) << "reader should be reset when EOF is reached";
-    EXPECT_FALSE(log_entry.has_value());
+    // 末尾に達すると、読み終えた状態になる。reader は開いたまま残る
+    EXPECT_TRUE(stream.finished);
+    EXPECT_TRUE(stream.reader.has_value());
+    EXPECT_FALSE(stream.entry.has_value());
+
+    // 読み終えた後は、呼んでも何もしない
+    test_cursor.validate_and_read_stream(stream);
+    EXPECT_TRUE(stream.finished);
+    EXPECT_FALSE(stream.entry.has_value());
 }
 
 // Validate that a file not matching the format throws
@@ -356,23 +360,20 @@ TEST_F(cursor_impl_test, validate_stream_broken) {
         ofs.close();
     }
 
-    std::optional<limestone::internal::log_entry_reader> reader;
-    reader.emplace(bad_file);
-
-    // Prepare dummy log_entry and previous key.
-    std::optional<limestone::api::log_entry> log_entry;
-    std::string previous_key;
+    cursor_impl_testable::input_stream stream{"bad_stream"};
+    stream.reader.emplace(bad_file);
+    stream.finished = false;
 
     // Use cursor_impl_testable to call validate_and_read_stream.
     cursor_impl_testable test_cursor(bad_file);
     try {
-        test_cursor.validate_and_read_stream(reader, "bad_stream", log_entry, previous_key);
+        test_cursor.validate_and_read_stream(stream);
         FAIL() << "expected limestone_exception";
     } catch (const limestone::limestone_exception& e) {
         // the message names the broken file
         EXPECT_NE(std::string(e.what()).find(bad_file.string()), std::string::npos) << e.what();
     }
-    EXPECT_FALSE(log_entry.has_value());
+    EXPECT_FALSE(stream.entry.has_value());
 }
 
 // Verify while loop processes multiple entries with sorted keys

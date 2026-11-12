@@ -22,6 +22,7 @@
 #include <boost/filesystem.hpp>
 #include <map>
 #include <optional>
+#include <string>
 
 #include "cursor_impl_base.h"
 #include "log_entry/log_entry.h"
@@ -44,22 +45,42 @@ public:
                                                   const std::map<limestone::api::storage_id_type, limestone::api::write_version_type>& clear_storage);
     static std::unique_ptr<cursor> create_cursor(const boost::filesystem::path& snapshot_file, const boost::filesystem::path& compacted_file,
                                                   const std::map<limestone::api::storage_id_type, limestone::api::write_version_type>& clear_storage);
+protected:
+    /// 1 つのファイルを読み進める状態
+    struct input_stream {
+        /// メッセージに使う、ファイルの種類の名前
+        std::string name{};
+        /// ファイルを読む reader。読むファイルがなければ空
+        std::optional<log_entry_reader> reader{};
+        /// 読み終えたかどうか。true なら、これ以上 reader から読まない
+        bool finished{true};
+        /// 読んで、まだ返していないエントリ
+        std::optional<limestone::api::log_entry> entry{};
+        /// 昇順の検査に使う、直前に読んだエントリの key_sid
+        std::string previous_key_sid{};
+    };
+
 private:
     limestone::api::log_entry log_entry_;
-    std::optional<limestone::api::log_entry> snapshot_log_entry_;
-    std::optional<limestone::api::log_entry> compacted_log_entry_;
-    std::optional<log_entry_reader> snapshot_reader_;
-    std::optional<log_entry_reader> compacted_reader_;
-    std::string previous_snapshot_key_sid;
-    std::string previous_compacted_key_sid;
+    input_stream snapshot_{"Snapshot"};
+    input_stream compacted_{"Compacted"};
     std::map<limestone::api::storage_id_type, limestone::api::write_version_type> clear_storage_; 
 
 protected:
     void close() override;
 
     bool next() override;
-    void validate_and_read_stream(std::optional<log_entry_reader>& reader, const std::string& stream_name,
-                                  std::optional<limestone::api::log_entry>& log_entry, std::string& previous_key_sid);
+
+    /**
+     * @brief ファイルから、次に返す候補のエントリを 1 件読んで stream.entry に入れる。
+     *
+     * データ系でないエントリ、直前と同じキーのエントリ、clear_storage の境界より古いエントリは読み飛ばす。ファイルの
+     * 末尾に達したら stream.finished を true にし、stream.entry は空のままにする。stream.finished が true なら何もしない。
+     * @param stream 読み進める状態
+     * @throws limestone_exception ファイルの内容が形式に合わないとき、キーが昇順でないとき
+     * @throws limestone_io_exception 読み込みに失敗したとき
+     */
+    void validate_and_read_stream(input_stream& stream);
 
     [[nodiscard]] limestone::api::storage_id_type storage() const noexcept override;
     void key(std::string& buf) const noexcept override;
