@@ -708,9 +708,18 @@ TEST_F(log_entry_reader_test, read_result_accessor_validity) {
 
     auto error = log_entry_read_result::error(log_entry::read_error{log_entry::read_error::short_entry,
                                                                     entry_type::normal_entry},
-                                              3);
+                                              3, 9);
     EXPECT_EQ(error.offset(), 3U);
+    EXPECT_EQ(error.required(), 9U);
     EXPECT_DEATH((void) error.view(), "log_entry_read_result:view not valid");
+
+    // required() は short_entry のときだけ有効
+    EXPECT_DEATH((void) ok.required(), "log_entry_read_result:required not valid");
+    EXPECT_DEATH((void) end.required(), "log_entry_read_result:required not valid");
+    auto unknown = log_entry_read_result::error(log_entry::read_error{log_entry::read_error::unknown_type,
+                                                                      static_cast<entry_type>(99)},
+                                                3, 0);
+    EXPECT_DEATH((void) unknown.required(), "log_entry_read_result:required not valid");
 }
 
 // the string representation of the result kinds
@@ -896,6 +905,63 @@ TEST_F(log_entry_reader_test, end_offset_in_the_middle_of_entry) {
     // エラーの後でも設定し直せる
     reader.set_range(e1.size(), e1.size() + e2.size());
     expect_entry(reader, e2, e1.size());
+}
+
+// short_entry の結果は解析に必要なバイト数の下限 (required) を持つ。読み終える位置を required まで広げるのを繰り返すと
+// 読める (normal_entry はヘッダの次で全体の長さが確定し、normal_with_blob は blob_count の次でもう 1 段ある)
+TEST_F(log_entry_reader_test, short_entry_has_required) {
+    std::string e1 = normal_entry(1, "key", std::string(100, 'v'), 7, 1);
+    std::string e2 = normal_with_blob(1, "key", std::string(100, 'v'), 7, 2, {11, 12});
+    auto p = write_file(e1 + e2);
+    recording_file_operations ops;
+    log_entry_reader reader(p, 0, 4096, ops);
+
+    // normal_entry: 5 バイト → ヘッダ (9 バイト) → 全体
+    reader.set_range(0, 5);
+    auto r1 = reader.next();
+    ASSERT_EQ(r1.result(), status::error);
+    ASSERT_EQ(r1.error().value(), log_entry::read_error::short_entry);
+    EXPECT_EQ(r1.offset(), 0U);
+    EXPECT_EQ(r1.required(), 9U);
+    reader.set_range(0, r1.required());
+    auto r2 = reader.next();
+    ASSERT_EQ(r2.result(), status::error);
+    ASSERT_EQ(r2.error().value(), log_entry::read_error::short_entry);
+    EXPECT_EQ(r2.required(), e1.size());
+    reader.set_range(0, r2.required());
+    expect_entry(reader, e1, 0);
+
+    // normal_with_blob: ヘッダ → blob_count まで → 全体
+    reader.set_range(e1.size(), e1.size() + 9);
+    auto r3 = reader.next();
+    ASSERT_EQ(r3.result(), status::error);
+    ASSERT_EQ(r3.error().value(), log_entry::read_error::short_entry);
+    EXPECT_EQ(r3.offset(), e1.size());
+    EXPECT_EQ(r3.required(), e2.size() - 2 * 8);
+    reader.set_range(e1.size(), e1.size() + r3.required());
+    auto r4 = reader.next();
+    ASSERT_EQ(r4.result(), status::error);
+    ASSERT_EQ(r4.error().value(), log_entry::read_error::short_entry);
+    EXPECT_EQ(r4.required(), e2.size());
+    reader.set_range(e1.size(), e1.size() + r4.required());
+    expect_entry(reader, e2, e1.size());
+
+    // 読み込みは毎回、設定した範囲の大きさだけ
+    const std::vector<std::size_t> expected{5, 9, e1.size(), 9, e2.size() - 2 * 8, e2.size()};
+    EXPECT_EQ(ops.requests(), expected);
+}
+
+// ファイルがエントリの途中で終わっているときの short_entry も required を持ち、それはファイルの残りより大きい
+TEST_F(log_entry_reader_test, short_entry_at_file_end_has_required) {
+    std::string e1 = normal_entry(1, "key", std::string(100, 'v'), 7, 1);
+    auto p = write_file(e1.substr(0, 20));
+    log_entry_reader reader(p, 0, 4096);
+    auto r = reader.next();
+    ASSERT_EQ(r.result(), status::error);
+    ASSERT_EQ(r.error().value(), log_entry::read_error::short_entry);
+    EXPECT_EQ(r.offset(), 0U);
+    EXPECT_EQ(r.required(), e1.size());
+    expect_end(reader, 20);
 }
 
 // 範囲がファイルの大きさに収まらなくても例外にはならず、読み込みが尽きた位置で end になる

@@ -37,22 +37,23 @@ namespace limestone::internal {
 using limestone::api::log_entry;
 
 log_entry_read_result::log_entry_read_result(status result, const log_entry_view& view, std::uint64_t offset,
-                                             const log_entry::read_error& error) noexcept
-    : result_(result), view_(view), offset_(offset), error_(error) {}
+                                             const log_entry::read_error& error, std::size_t required) noexcept
+    : result_(result), view_(view), offset_(offset), error_(error), required_(required) {}
 
 log_entry_read_result log_entry_read_result::ok(const log_entry_view& view, std::uint64_t offset) {
     if (view.type() == log_entry_view::entry_type::this_id_is_not_used) {
         LOG_LP(FATAL) << "default-constructed view";
     }
-    return {status::ok, view, offset, log_entry::read_error{}};
+    return {status::ok, view, offset, log_entry::read_error{}, 0};
 }
 
 log_entry_read_result log_entry_read_result::end(std::uint64_t offset) noexcept {
-    return {status::end, log_entry_view{}, offset, log_entry::read_error{}};
+    return {status::end, log_entry_view{}, offset, log_entry::read_error{}, 0};
 }
 
-log_entry_read_result log_entry_read_result::error(const log_entry::read_error& error, std::uint64_t offset) noexcept {
-    return {status::error, log_entry_view{}, offset, error};
+log_entry_read_result log_entry_read_result::error(const log_entry::read_error& error, std::uint64_t offset,
+                                                   std::size_t required) noexcept {
+    return {status::error, log_entry_view{}, offset, error, required};
 }
 
 log_entry_read_result::status log_entry_read_result::result() const noexcept {
@@ -75,6 +76,13 @@ log_entry::read_error log_entry_read_result::error() const {
         LOG_LP(FATAL) << "not valid for result " << result_;
     }
     return error_;
+}
+
+std::size_t log_entry_read_result::required() const {
+    if (result_ != status::error || error_.value() != log_entry::read_error::short_entry) {
+        LOG_LP(FATAL) << "not valid for result " << result_;
+    }
+    return required_;
 }
 
 std::string_view to_string_view(log_entry_read_result::status result) noexcept {
@@ -277,7 +285,7 @@ log_entry_read_result log_entry_reader::next() {
             return log_entry_read_result::error(
                 log_entry::read_error{log_entry::read_error::unknown_type,
                                       static_cast<log_entry::entry_type>(parsed.type_value())},
-                offset);
+                offset, 0);
         case log_entry_parse_result::status::short_entry:
             break;
         }
@@ -290,16 +298,16 @@ log_entry_read_result log_entry_reader::next() {
         // if the lower bound exceeds the rest of the file, the rest cannot be read. Even if a length field is broken,
         // no large allocation is made
         if (parsed.required() > remaining_size()) {
-            return end_or_short_entry();
+            return end_or_short_entry(parsed.required());
         }
         prepare_buffer(parsed.required());
         if (read_into_buffer() == 0) {
-            return end_or_short_entry();
+            return end_or_short_entry(parsed.required());
         }
     }
 }
 
-log_entry_read_result log_entry_reader::end_or_short_entry() noexcept {
+log_entry_read_result log_entry_reader::end_or_short_entry(std::size_t required) noexcept {
     const std::uint64_t offset = buffer_offset_ + begin_;
     if (begin_ == end_) {
         return log_entry_read_result::end(offset);
@@ -307,7 +315,7 @@ log_entry_read_result log_entry_reader::end_or_short_entry() noexcept {
     auto result = log_entry_read_result::error(
         log_entry::read_error{log_entry::read_error::short_entry,
                               static_cast<log_entry::entry_type>(static_cast<std::uint8_t>(buffer_[begin_]))},
-        offset);
+        offset, required);
     // empty the buffer and move the read position to the end of the file, so that the next call returns end.
     // std::max is defensive.
     buffer_offset_ = std::max(end_offset_, buffer_offset_ + end_);

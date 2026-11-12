@@ -71,10 +71,11 @@ public:
      * @param error the kind of the failure (short_entry or unknown_type) and the value of the first byte of the entry
      *              that could not be parsed
      * @param offset the position of the first byte of the entry that could not be parsed
+     * @param required short_entry のとき、解析に必要なバイト数の下限 (offset から数える)。unknown_type のときは 0
      * @return the result
      */
     [[nodiscard]] static log_entry_read_result error(const limestone::api::log_entry::read_error& error,
-                                                     std::uint64_t offset) noexcept;
+                                                     std::uint64_t offset, std::size_t required) noexcept;
 
     /**
      * @brief Returns the kind of the result.
@@ -114,17 +115,27 @@ public:
      */
     [[nodiscard]] limestone::api::log_entry::read_error error() const;
 
+    /**
+     * @brief 解析に必要なバイト数の下限 (offset() から数える) を返す。結果が error で、失敗の種類が short_entry の
+     *        ときに有効。
+     *
+     * 値は log_entry_view::parse() の required と同じで、読み込んだ範囲に対する下限である。この分を読んでも、
+     * 長さの項目がまだ読めていなければ、再び short_entry になる。
+     */
+    [[nodiscard]] std::size_t required() const;
+
 private:
     /**
      * @brief Creates a result from the values of its members. Called only by ok(), end() and error().
      */
     log_entry_read_result(status result, const log_entry_view& view, std::uint64_t offset,
-                          const limestone::api::log_entry::read_error& error) noexcept;
+                          const limestone::api::log_entry::read_error& error, std::size_t required) noexcept;
 
     status result_{};
     log_entry_view view_{};
     std::uint64_t offset_{};
     limestone::api::log_entry::read_error error_{};
+    std::size_t required_{};
 };
 
 /**
@@ -332,8 +343,9 @@ private:
      *
      * When returning short_entry, moves the read position to the end of the file so that the next call returns end.
      * Called only while reading a file not being written (one that does not grow while it is read).
+     * @param required 解析に必要なバイト数の下限 (未解析の部分の先頭から数える)。short_entry の結果に入れる
      */
-    [[nodiscard]] log_entry_read_result end_or_short_entry() noexcept;
+    [[nodiscard]] log_entry_read_result end_or_short_entry(std::size_t required) noexcept;
 
     /**
      * @brief Prepares to refill the buffer. Places the unparsed part at the beginning of the buffer, and makes free
