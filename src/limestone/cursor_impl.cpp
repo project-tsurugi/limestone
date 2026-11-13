@@ -58,6 +58,22 @@ cursor_impl::cursor_impl(const boost::filesystem::path& snapshot_file, const boo
     compacted_.finished = false;
 }
 
+cursor_impl::cursor_impl(const boost::filesystem::path& snapshot_file,
+                         const std::optional<boost::filesystem::path>& compacted_file,
+                         std::map<api::storage_id_type, api::write_version_type> clear_storage,
+                         std::shared_ptr<region_allocator> allocator)
+    : clear_storage_(std::move(clear_storage)), allocator_(std::move(allocator)) {
+    if (! allocator_) {
+        LOG_LP(FATAL) << "no region allocator";
+    }
+    // log_entry_reader throws limestone_io_exception if the file cannot be opened.
+    // 領域を受け取るまでは読み終えた状態 (finished) にしておく
+    snapshot_.reader.emplace(snapshot_file);
+    if (compacted_file.has_value()) {
+        compacted_.reader.emplace(*compacted_file);
+    }
+}
+
 void cursor_impl::close() {
     snapshot_.reader = std::nullopt;
     snapshot_.finished = true;
@@ -86,6 +102,15 @@ void cursor_impl::validate_and_read_stream(input_stream& stream) {
         // However, this check should be moved to an earlier point, and if the key order is invalid,
         // a different processing method should be considered instead of aborting immediately.
         const std::string_view key_sid = view.serialized_key_sid();
+        // 領域のキーの範囲: 開始キーより小さいエントリは読み飛ばし、終了キー以上のエントリに達したら読み終える
+        if (start_key_.has_value() && log_entry_format::compare_key_sid(key_sid, *start_key_) < 0) {
+            continue;
+        }
+        if (end_key_.has_value() && log_entry_format::compare_key_sid(key_sid, *end_key_) >= 0) {
+            DVLOG_LP(log_trace) << stream.name << " file reached the end key of the region.";
+            stream.finished = true;
+            return;
+        }
         if (!stream.previous_key_sid.empty()) {
             const int order = log_entry_format::compare_key_sid(key_sid, stream.previous_key_sid);
             if (order < 0) {
@@ -152,8 +177,11 @@ bool cursor_impl::next() {
             validate_and_read_stream(compacted_);
         }
 
-        // Case 1: Both snapshot and compacted are empty, return false
+        // Case 1: Both snapshot and compacted are empty. 次の領域があれば読み続け、なければ false
         if (!snapshot_.entry && !compacted_.entry) {
+            if (acquire_next_range()) {
+                continue;
+            }
             DVLOG_LP(log_trace) << "Both snapshot and compacted streams are closed";
             return false;
         }
@@ -196,6 +224,28 @@ bool cursor_impl::next() {
 }
 
 
+
+bool cursor_impl::acquire_next_range() {
+    if (! allocator_ || ! snapshot_.reader.has_value()) {
+        return false;
+    }
+    log_entry_reader* compacted_reader = compacted_.reader.has_value() ? &*compacted_.reader : nullptr;
+    std::optional<region_range> range = allocator_->allocate(*snapshot_.reader, compacted_reader);
+    if (! range.has_value()) {
+        return false;
+    }
+    snapshot_.reader->set_range(range->snapshot_start, range->snapshot_end);
+    snapshot_.finished = false;
+    snapshot_.previous_key_sid.clear();
+    if (compacted_reader != nullptr) {
+        compacted_reader->set_range(range->compacted_start, range->compacted_end);
+        compacted_.finished = false;
+        compacted_.previous_key_sid.clear();
+    }
+    start_key_ = std::move(range->start_key);
+    end_key_ = std::move(range->end_key);
+    return true;
+}
 
 limestone::api::storage_id_type cursor_impl::storage() const noexcept {
     return log_entry_.storage();

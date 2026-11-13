@@ -21,6 +21,7 @@
 
 #include <boost/filesystem.hpp>
 #include <map>
+#include <memory>
 #include <optional>
 #include <string>
 
@@ -28,6 +29,7 @@
 #include "log_entry/log_entry.h"
 #include "log_entry/log_entry_reader.h"
 #include "log_entry/log_entry_view.h"
+#include "region_allocator.h"
 
 namespace limestone::internal {
 
@@ -41,6 +43,20 @@ public:
     cursor_impl(const boost::filesystem::path& snapshot_file, const boost::filesystem::path& compacted_file,
                 std::map<storage_id_type, write_version_type> clear_storage);
 
+    /**
+     * @brief 領域の割り当てから領域を受け取って読む cursor を作る。
+     *
+     * ファイルはここで開く。領域は next() の中で、読むものがなくなるたびに割り当てに要求し、残りがなくなるまで読む。
+     * 他の cursor と割り当てを共有し、全体でそれぞれの領域を 1 回ずつ読む。
+     * @param snapshot_file スナップショットファイル
+     * @param compacted_file コンパクション済み WAL ファイル。なければ nullopt (割り当てのロケータと一致していること)
+     * @param clear_storage ストレージごとの、これより古いエントリを読み飛ばす write_version
+     * @param allocator 領域の割り当て。空なら FATAL ログを書いて abort する
+     * @throws limestone_io_exception ファイルを開けないとき
+     */
+    cursor_impl(const boost::filesystem::path& snapshot_file, const std::optional<boost::filesystem::path>& compacted_file,
+                std::map<storage_id_type, write_version_type> clear_storage, std::shared_ptr<region_allocator> allocator);
+
     static std::unique_ptr<cursor> create_cursor(const boost::filesystem::path& snapshot_file,
                                                   const std::map<limestone::api::storage_id_type, limestone::api::write_version_type>& clear_storage);
     static std::unique_ptr<cursor> create_cursor(const boost::filesystem::path& snapshot_file, const boost::filesystem::path& compacted_file,
@@ -52,7 +68,7 @@ protected:
         std::string name{};
         /// ファイルを読む reader。読むファイルがなければ空
         std::optional<log_entry_reader> reader{};
-        /// 読み終えたかどうか。true なら、これ以上 reader から読まない
+        /// 今の領域を読み終えたかどうか。true なら、次の領域を受け取るまで reader から読まない
         bool finished{true};
         /// 読んで、まだ返していないエントリ
         std::optional<limestone::api::log_entry> entry{};
@@ -65,6 +81,20 @@ private:
     input_stream snapshot_{"Snapshot"};
     input_stream compacted_{"Compacted"};
     std::map<limestone::api::storage_id_type, limestone::api::write_version_type> clear_storage_; 
+    /// 領域の割り当て。割り当てを渡さずに作った cursor (ファイル全体を読む) では空
+    std::shared_ptr<region_allocator> allocator_{};
+    /// 今の領域の開始キー。これより小さいエントリは読み飛ばす。なければ読み飛ばさない
+    std::optional<std::string> start_key_{};
+    /// 今の領域の終了キー。これ以上のエントリに達したら、そのファイルの今の領域を読み終える。なければ領域の終了位置まで読む
+    std::optional<std::string> end_key_{};
+
+    /**
+     * @brief 割り当てに次の領域を要求し、あれば reader の読む範囲とキーの範囲をその領域に設定する。
+     * @return 次の領域があれば true。割り当てがない (領域を受け取らずに読む cursor)、残りがない、閉じた後なら false
+     * @throws limestone_exception 割り当てのプローブが失敗したとき (ロケータが不正)
+     * @throws limestone_io_exception 読み込みに失敗したとき
+     */
+    bool acquire_next_range();
 
 protected:
     void close() override;
@@ -74,8 +104,9 @@ protected:
     /**
      * @brief ファイルから、次に返す候補のエントリを 1 件読んで stream.entry に入れる。
      *
-     * データ系でないエントリ、直前と同じキーのエントリ、clear_storage の境界より古いエントリは読み飛ばす。ファイルの
-     * 末尾に達したら stream.finished を true にし、stream.entry は空のままにする。stream.finished が true なら何もしない。
+     * データ系でないエントリ、直前と同じキーのエントリ、clear_storage の境界より古いエントリ、開始キーより小さい
+     * エントリは読み飛ばす。領域の終了位置に達したか、終了キー以上のエントリに達したら (今の領域を読み終えたら)
+     * stream.finished を true にし、stream.entry は空のままにする。stream.finished が true なら何もしない。
      * @param stream 読み進める状態
      * @throws limestone_exception ファイルの内容が形式に合わないとき、キーが昇順でないとき
      * @throws limestone_io_exception 読み込みに失敗したとき
