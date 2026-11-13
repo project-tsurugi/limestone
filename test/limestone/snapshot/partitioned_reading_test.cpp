@@ -342,6 +342,36 @@ TEST_F(partitioned_reading_test, sparse_records_and_large_entries) {
     check_all(true, {}, 80);
 }
 
+// the primary file has the same key several times in a row (a compacted WAL file of an old version may have such
+// duplicates, and get_cursor() takes the first occurrence). With record interval 1 the later occurrences are at the
+// positions of records, so the boundaries of the regions fall on them. The outputs must still match get_cursor()
+TEST_F(partitioned_reading_test, duplicate_keys_in_primary) {
+    std::vector<source_entry> snapshot{};
+    std::vector<source_entry> compacted{};
+    for (int i = 0; i < 30; ++i) {
+        compacted.push_back(normal(1, key_of(i), "c1", 1));
+        if (i % 3 == 1) {
+            // the second and third occurrences have other values
+            compacted.push_back(normal(1, key_of(i), "c2", 1));
+            compacted.push_back(normal(1, key_of(i), "c3", 1));
+        }
+        if (i % 5 == 0) {
+            snapshot.push_back(normal(1, key_of(i), "s", 2));
+        }
+    }
+    // a key whose first occurrence is a remove_entry, followed by a normal entry: get_cursor() does not return it
+    compacted.push_back(remove(1, key_of(100), 1));
+    compacted.push_back(normal(1, key_of(100), "c2", 1));
+    place_files(file_bytes(snapshot), file_bytes(compacted), 1);
+    const rows expected = read_reference(true, {});
+    ASSERT_EQ(expected.size(), 30U);
+    for (const row& r : expected) {
+        EXPECT_NE(std::get<2>(r), "c2");
+        EXPECT_NE(std::get<2>(r), "c3");
+    }
+    check_all(true, {}, 30);
+}
+
 // several random distributions of the keys
 TEST_F(partitioned_reading_test, random_distributions) {
     for (unsigned seed = 1; seed <= 6; ++seed) {

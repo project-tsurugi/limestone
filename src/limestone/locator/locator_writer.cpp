@@ -111,11 +111,20 @@ std::size_t locator_writer::build_from_file(const boost::filesystem::path& locat
     using status = log_entry_read_result::status;
     log_entry_reader reader(locatee);
     locator_writer writer(file, record_interval_bytes, true);
+    std::string previous_key_sid{};
     while (true) {
         const log_entry_read_result result = reader.next();
         if (result.result() == status::ok) {
-            if (log_entry_format::is_data_entry(result.view().type())) {
-                writer.note_entry(result.offset());
+            const log_entry_view view = result.view();
+            if (log_entry_format::is_data_entry(view.type())) {
+                // when the same key continues, the second and later entries are not recorded. The cursor takes the
+                // first one, so a record pointing at a later one would lose the first one when the boundary of a
+                // region is placed there
+                const std::string_view key_sid = view.serialized_key_sid();
+                if (key_sid != previous_key_sid) {
+                    writer.note_entry(result.offset());
+                    previous_key_sid.assign(key_sid);
+                }
             }
             continue;
         }

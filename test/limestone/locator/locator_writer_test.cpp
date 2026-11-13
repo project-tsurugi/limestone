@@ -223,6 +223,25 @@ TEST_F(locator_writer_test, build_from_file_matches_writing) {
     EXPECT_EQ(read_file(file()), expected_bytes({9, 69, 99, 146}, 220));
 }
 
+// when the same key continues, build_from_file does not record the second and later entries (with record interval 1,
+// every position is at or above the threshold). A record points at the first occurrence of a key, and the position
+// where another key follows the same key becomes a record
+TEST_F(locator_writer_test, build_from_file_skips_later_occurrences_of_the_same_key) {
+    const std::string m = marker(2, 0);
+    const std::string a1 = normal_entry(1, "a", "v1", 1, 1);
+    const std::string a2 = normal_entry(1, "a", "v2", 1, 2);  // the same key (another value)
+    const std::string b1 = remove_entry(1, "b", 1, 3);
+    const std::string b2 = normal_entry(1, "b", "v", 1, 4);   // the same key (another type)
+    const std::string b3 = normal_entry(1, "b", "v", 1, 5);
+    const std::string c1 = normal_entry(1, "c", "v", 1, 6);
+    const std::string contents = m + a1 + a2 + b1 + b2 + b3 + c1;
+    write_file(locatee(), contents);
+    EXPECT_EQ(locator_writer::build_from_file(locatee(), file(), 1), 3U);
+    const std::uint64_t b_offset = m.size() + a1.size() + a2.size();
+    const std::uint64_t c_offset = b_offset + b1.size() + b2.size() + b3.size();
+    EXPECT_EQ(read_file(file()), expected_bytes({m.size(), b_offset, c_offset}, contents.size()));
+}
+
 // A locatee file with only the marker has 0 records, and the size in the footer is the size of the file
 TEST_F(locator_writer_test, build_from_file_of_marker_only) {
     write_file(locatee(), marker(2, 0));

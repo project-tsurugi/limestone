@@ -85,7 +85,10 @@ public:
      * @brief Reads an existing locatee file from the beginning and generates its locator file.
      *
      * Passes the start positions of the data entries to note_entry(), and calls close() at the end (with fsync).
-     * The content is the same as the one generated while the locatee file is written.
+     * When the same key continues, the second and later entries are not passed (a record points at the first
+     * occurrence of a key).
+     * The content is the same as the one generated while the locatee file is written (whose entries have no
+     * duplicate keys).
      * @param locatee the locatee file. Its entries must be contiguous from the beginning to the end
      * @param file the locator file to generate. If it exists, it is truncated
      * @param record_interval_bytes the record interval (bytes)
