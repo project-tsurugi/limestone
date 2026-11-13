@@ -4,7 +4,6 @@ file(GLOB SOURCES
         "limestone/sort/*.cpp"
         "limestone/locator/*.cpp"
         "limestone/replication/*.cpp"
-        "limestone/partitioned_cursor/*.cpp"
         "limestone/rdma/*.cpp"
 )
 

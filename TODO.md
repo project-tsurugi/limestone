@@ -226,9 +226,9 @@ master へのマージ前に本ファイルを削除する。
 
 ### ステップ 13: 分配の機構の削除 (S2 メモ 5.2 節)
 
-* [ ] src/limestone/partitioned_cursor/ と test/limestone/partitioned_cursor/ を削除し、両 CMakeLists の GLOB の行、
+* [x] src/limestone/partitioned_cursor/ と test/limestone/partitioned_cursor/ を削除し、両 CMakeLists の GLOB の行、
       cursor.h の partitioned_cursor_impl の前方宣言と friend 宣言を削除する。
-* [ ] docs/internal/get_partitioned_cursors.md を region_cursor の説明に書き換える。
+* [x] docs/internal/get_partitioned_cursors.md を新しい機構 (領域の割り当てと cursor_impl) の説明に書き換える。
 
 ### ステップ 14: R3 の総括テスト (S2 メモ 6 節 R3、L3 9.5 節)
 

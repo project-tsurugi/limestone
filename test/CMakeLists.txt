@@ -93,7 +93,6 @@ file(GLOB SRCS
         "limestone/sort/*.cpp"
         "limestone/locator/*.cpp"
         "limestone/utils/*.cpp"
-        "limestone/partitioned_cursor/*.cpp"
         )
 
 foreach(file ${SRCS})
