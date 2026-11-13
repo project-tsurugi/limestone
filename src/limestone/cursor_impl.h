@@ -61,6 +61,14 @@ public:
                                                   const std::map<limestone::api::storage_id_type, limestone::api::write_version_type>& clear_storage);
     static std::unique_ptr<cursor> create_cursor(const boost::filesystem::path& snapshot_file, const boost::filesystem::path& compacted_file,
                                                   const std::map<limestone::api::storage_id_type, limestone::api::write_version_type>& clear_storage);
+    /**
+     * @brief 領域の割り当てから領域を受け取って読む cursor を作り、api::cursor に包んで返す。引数は同じ引数の
+     *        コンストラクタと同じ。
+     */
+    static std::unique_ptr<cursor> create_cursor(const boost::filesystem::path& snapshot_file,
+                                                 const std::optional<boost::filesystem::path>& compacted_file,
+                                                 const std::map<limestone::api::storage_id_type, limestone::api::write_version_type>& clear_storage,
+                                                 std::shared_ptr<region_allocator> allocator);
 protected:
     /// 1 つのファイルを読み進める状態
     struct input_stream {

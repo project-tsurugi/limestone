@@ -15,6 +15,7 @@
  */
 #pragma once
 
+#include <cstddef>
 #include <memory>
 #include <optional>
 #include <string>
@@ -125,8 +126,15 @@ public:
 private:
     std::unique_ptr<internal::snapshot_impl> pimpl;
 
+    /**
+     * @brief スナップショットを作る。datastore だけが呼ぶ。
+     * @param location データの置き場所
+     * @param clear_storage ストレージごとの、これより古いエントリを読み飛ばす write_version
+     * @param compacted_file_name カタログに記録された現在のコンパクション済み WAL ファイルの名前。なければ nullopt
+     * @param region_records get_partitioned_cursors() の領域 1 つのロケータのレコード数
+     */
     explicit snapshot(boost::filesystem::path location, std::map<storage_id_type, write_version_type> clear_storage,
-                      std::optional<std::string> compacted_file_name) noexcept;
+                      std::optional<std::string> compacted_file_name, std::size_t region_records) noexcept;
 
     friend class datastore;
 };

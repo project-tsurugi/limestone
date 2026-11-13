@@ -41,6 +41,16 @@ std::unique_ptr<cursor> cursor_impl::create_cursor(
     return std::unique_ptr<cursor>(new cursor(std::move(impl)));
 }
 
+std::unique_ptr<cursor> cursor_impl::create_cursor(
+    const boost::filesystem::path& snapshot_file,
+    const std::optional<boost::filesystem::path>& compacted_file,
+    const std::map<limestone::api::storage_id_type, limestone::api::write_version_type>& clear_storage,
+    std::shared_ptr<region_allocator> allocator) {
+
+    std::unique_ptr<cursor_impl> impl = std::make_unique<cursor_impl>(snapshot_file, compacted_file, clear_storage, std::move(allocator));
+    return std::unique_ptr<cursor>(new cursor(std::move(impl)));
+}
+
 cursor_impl::cursor_impl(const boost::filesystem::path& snapshot_file, std::map<api::storage_id_type, api::write_version_type> clear_storage)
     : clear_storage_(std::move(clear_storage)) {
     // log_entry_reader throws limestone_io_exception if the file cannot be opened

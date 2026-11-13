@@ -211,16 +211,18 @@ master へのマージ前に本ファイルを削除する。
 
 ### ステップ 12: snapshot_impl::get_partitioned_cursors の置き換え (S2 メモ 5.2 節)
 
-* [ ] locator を読み、領域の割り当てを 1 つ作って、それを共有する n 本の cursor_impl を返す。ファイルは cursor ごとに
+* [x] locator を読み、領域の割り当てを 1 つ作って、それを共有する n 本の cursor_impl を返す。ファイルは cursor ごとに
       開く (n 本の分を、この呼び出しの中でまとめて開く。開いた後は unlink されても読める。開いている最中に unlink されると、
       開けなかった cursor で例外になる)。cursor を作る時点では領域を渡さず、最初の next() で
       要求する。主のレコードが 0 個なら全 cursor がすぐ終端。partitioned_called_ の契約は残す。locator が不正なら
-      limestone_exception。
-* [ ] R (region_records) を datastore_impl から snapshot の private コンストラクタ (公開ヘッダ) を通して snapshot_impl に渡す。
-      公開ヘッダから内部ヘッダの locator_settings は include できないので、R だけを std::size_t で渡す。テスト用の設定で
-      小さい値を与えられるようにする。
-* [ ] 既存の snapshot_impl_test の手作りファイルにロケータファイルを足す (build_from_file で作る。ステップ 6 ではテスト補助を置かなかった)。
-* [ ] get_cursor() と BLOB GC の my_cursor は変えない。
+      limestone_exception。locator の検査に渡すファイルの大きさは boost::filesystem::file_size で取る (呼び出し 1 回につき
+      ファイルごとに 1 回)。
+* [x] R (region_records) を datastore_impl から snapshot の private コンストラクタ (公開ヘッダ) を通して snapshot_impl に渡す。
+      公開ヘッダから内部ヘッダの locator_settings は include できないので、R だけを std::size_t で渡す。テスト用の設定
+      (set_locator_settings_for_test) の値がそのまま届く。
+* [x] 既存の snapshot_impl_test の手作りファイルにロケータファイルを足す (create_log_file の中で build_from_file で作る)。
+      領域が複数で cursor が複数の場合のテストを 1 件足した。
+* [x] get_cursor() と BLOB GC の my_cursor は変えない。
 
 ### ステップ 13: 分配の機構の削除 (S2 メモ 5.2 節)
 
