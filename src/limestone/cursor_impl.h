@@ -130,7 +130,7 @@ protected:
      *         ascending order
      * @throws limestone_io_exception if reading fails
      */
-    void validate_and_read_stream(input_stream& stream);
+    void read_candidate(input_stream& stream);
 
     [[nodiscard]] limestone::api::storage_id_type storage() const noexcept override;
     void key(std::string& buf) const noexcept override;

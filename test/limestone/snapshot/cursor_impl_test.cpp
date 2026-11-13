@@ -46,7 +46,7 @@ public:
     using cursor_impl::cursor_impl;
     using cursor_impl::next;
     using cursor_impl::input_stream;
-    using cursor_impl::validate_and_read_stream;
+    using cursor_impl::read_candidate;
     using cursor_impl::close;
     using cursor_impl::storage;
     using cursor_impl::key;    
@@ -334,9 +334,9 @@ TEST_F(cursor_impl_test, validate_stream_eof) {
     stream.reader.emplace(empty_file);
     stream.finished = false;
 
-    // Use cursor_impl_testable to call validate_and_read_stream.
+    // Use cursor_impl_testable to call read_candidate.
     cursor_impl_testable test_cursor(empty_file);
-    test_cursor.validate_and_read_stream(stream);
+    test_cursor.read_candidate(stream);
 
     // reaching the end makes the stream finished. The reader stays open
     EXPECT_TRUE(stream.finished);
@@ -344,7 +344,7 @@ TEST_F(cursor_impl_test, validate_stream_eof) {
     EXPECT_FALSE(stream.entry.has_value());
 
     // after it is finished, a call does nothing
-    test_cursor.validate_and_read_stream(stream);
+    test_cursor.read_candidate(stream);
     EXPECT_TRUE(stream.finished);
     EXPECT_FALSE(stream.entry.has_value());
 }
@@ -363,10 +363,10 @@ TEST_F(cursor_impl_test, validate_stream_broken) {
     stream.reader.emplace(bad_file);
     stream.finished = false;
 
-    // Use cursor_impl_testable to call validate_and_read_stream.
+    // Use cursor_impl_testable to call read_candidate.
     cursor_impl_testable test_cursor(bad_file);
     try {
-        test_cursor.validate_and_read_stream(stream);
+        test_cursor.read_candidate(stream);
         FAIL() << "expected limestone_exception";
     } catch (const limestone::limestone_exception& e) {
         // the message names the broken file
@@ -448,7 +448,7 @@ TEST_F(cursor_impl_test, while_loop_resets_invalid_entry) {
     // Create a cursor using the snapshot file.
     cursor_impl_testable test_cursor(snapshot_file, clear_storage);
 
-    // Call next(). The while loop in validate_and_read_stream will read the single entry,
+    // Call next(). The while loop in read_candidate will read the single entry,
     // find it non-relevant, reset log_entry, and eventually return false since no further entries exist.
     EXPECT_FALSE(test_cursor.next()) << "Expected next() to return false when only non-relevant entries are present";
 }
@@ -617,7 +617,7 @@ TEST_F(cursor_impl_test, use_compacted_when_snapshot_empty) {
     EXPECT_EQ(key, "compacted_key") << "Expected the entry from the compacted file when snapshot is empty";
 }
 
-// Test case for skipping duplicate key_sid entries in validate_and_read_stream
+// Test case for skipping duplicate key_sid entries in read_candidate
 TEST_F(cursor_impl_test, skip_duplicate_key) {
     entry_maker_.init()
         .add_entry(1, "dup", "first", {1, 0})

@@ -91,7 +91,7 @@ void cursor_impl::close() {
     compacted_.finished = true;
 }
 
-void cursor_impl::validate_and_read_stream(input_stream& stream) {
+void cursor_impl::read_candidate(input_stream& stream) {
     while (! stream.finished && stream.reader.has_value()) {
         const auto read_result = stream.reader->next();
         if (read_result.result() == log_entry_read_result::status::end) {
@@ -180,12 +180,12 @@ bool cursor_impl::next() {
     while (true) {
         // Read from the snapshot stream if the snapshot_.entry is empty
         if (!snapshot_.entry) {
-            validate_and_read_stream(snapshot_);
+            read_candidate(snapshot_);
         }
 
         // Read from the compacted stream if the compacted_.entry is empty
         if (!compacted_.entry) {
-            validate_and_read_stream(compacted_);
+            read_candidate(compacted_);
         }
 
         // Case 1: Both snapshot and compacted are empty. Continue if there is a next region, otherwise return false
