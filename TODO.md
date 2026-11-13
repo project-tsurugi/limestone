@@ -232,22 +232,28 @@ master へのマージ前に本ファイルを削除する。
 
 ### ステップ 14: R3 の総括テスト (S2 メモ 6 節 R3、L3 9.5 節)
 
-* [ ] 必須: n = 1、2、3、8 で、n 本の cursor の出力をすべて集めたものが get_cursor() の出力と件数・内容ともに一致し、
-      各 cursor の出力がキーの昇順であること。記録間隔を小さくして領域を多数作り、R は 1 と 2 以上 (主のレコード数が
-      R で割り切れない場合を含む) の両方で行う。次の場合を含める。
+* [x] 必須 (partitioned_reading_test.cpp。手作りのファイルで snapshot_impl の層): n = 1、2、3、8 で、n 本の cursor の
+      出力をすべて集めたものが get_cursor() の出力と件数・内容ともに一致し、各 cursor の出力がキーの昇順であること。
+      記録間隔を小さくして領域を多数作り、R は 1、2、3 で行う。次の場合を含める。
   * 主のレコードが 0 個の場合、領域が 1 つの場合。
   * 先頭の領域に、副ファイルにだけある小さいキーがある場合。
   * 副ファイルに、領域の境界のキー (開始キー・終了キー) と等しいキーがある場合。
   * 主ファイルがスナップショットファイルの場合、コンパクション済み WAL ファイルの場合、レコード数が同数の場合。
-  * 同じキーが両方にある場合 (スナップショット側が採られること)、remove_entry、clear_storage。
+  * 同じキーが両方にある場合 (スナップショット側が採られること)、remove_entry、clear_storage、blob 付きのエントリ。
   * コンパクション済み WAL ファイルがない場合。
-  * キーの分布を乱数で変えて複数回。
-* [ ] 読み込み量: 領域ごとの reader が終了位置を越えて読まないこと (file_operations の差し替えで読んだバイト数を数える)。
-* [ ] 旧世代の削除との競合: get_partitioned_cursors() の後にコンパクション済み WAL ファイルを削除しても残りの領域を
+  * 記録間隔がエントリより大きい場合、4 KiB を超えるエントリ (プローブの読み直し)。
+  * キーの分布を乱数で変えて複数回 (6 通り)。
+* [x] datastore の層 (partitioned_reading_datastore_test.cpp): datastore に書いて実際に作られたスナップショットファイルと
+      コンパクション済み WAL ファイルを、公開 API の get_partitioned_cursors() で読んで get_cursor() と一致すること。
+* [x] 読み込み量: 領域ごとの reader が終了位置を越えて読まないこと。cursor_impl には file_operations を差し替える口が
+      ないので、プロセスの読み込みバイト数 (/proc/self/io の rchar) の増分で確かめる (領域ごとに 16 MiB 読む量に
+      ならないこと)。
+* [x] 旧世代の削除との競合: get_partitioned_cursors() の後にコンパクション済み WAL ファイルを削除しても残りの領域を
       読めること。
-* [ ] 不正なロケータファイルで snapshot_impl::get_partitioned_cursors() が limestone_exception を投げること
-      (公開 API は abort するので snapshot_impl の層で確かめる)。region_cursor の next() でのプローブの失敗も含める。
-* [ ] 既存の snapshot_impl_test と cursor_impl_test が (ロケータファイルの用意を加えて) 通ること。
+* [x] 不正なロケータファイルで snapshot_impl::get_partitioned_cursors() が limestone_exception を投げること
+      (公開 API は abort するので snapshot_impl の層で確かめる)。cursor の next() でのプローブの失敗 (公開 API では
+      abort) も含める。
+* [x] 既存の snapshot_impl_test と cursor_impl_test が (ロケータファイルの用意を加えて) 通ること (ステップ 12)。
 
 ### ステップ 15: 仕上げ
 
