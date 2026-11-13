@@ -61,7 +61,7 @@ public:
 
     /**
      * @brief Creates a result of kind end (the file ends at an entry boundary).
-     * @param offset the size of the file
+     * @param offset the end position (the size of the file, or the end position set by set_range())
      * @return the result
      */
     [[nodiscard]] static log_entry_read_result end(std::uint64_t offset) noexcept;
@@ -97,7 +97,7 @@ public:
      * - ok: the position of the first byte (the entry type) of the returned entry.
      * - error: the position of the first byte (the entry type) of the entry that could not be parsed. It is not the
      *   position where reading or parsing stopped.
-     * - end: the size of the file.
+     * - end: the end position (the size of the file, or the end position set by set_range()).
      *
      * For ok and error, the bytes from the start position up to just before this position are the entries returned
      * as ok, with no gap between them. The same holds for end, except that for end after short_entry, the bytes of
@@ -155,7 +155,7 @@ private:
 std::ostream& operator<<(std::ostream& out, log_entry_read_result::status result);
 
 /**
- * @brief Reads entries from a file in order from the beginning.
+ * @brief Reads entries from a file in order from the start position.
  *
  * Reads the file into a buffer in large units, and repeats log_entry_view::parse() on it.
  *
@@ -257,9 +257,9 @@ public:
      * - ok: one entry is read. The view is valid until next() is called next.
      * - end: the file ends at an entry boundary.
      * - error: the contents of the file do not match the format. The kind is either an invalid entry type
-     *   (unknown_type) or the file ending in the middle of an entry (short_entry).
+     *   (unknown_type) or the file or the range ending in the middle of an entry (short_entry).
      *
-     * A call after end returns end. A call after short_entry returns end (at the size of the file). A call after
+     * A call after end returns end. A call after short_entry returns end (at the end position). A call after
      * unknown_type returns the same unknown_type.
      *
      * When created with a state function, while the state is writing, it does not return end or short_entry, but

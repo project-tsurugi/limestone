@@ -94,7 +94,7 @@ public:
      * range to them again by set_range().
      * @param snapshot_reader the reader of the snapshot file
      * @param compacted_reader the reader of the compacted WAL file, or nullptr if there is no such file. Writes a
-     *                         FATAL log and aborts if it is nullptr while there is a locator of the file
+     *                         FATAL log and aborts if its presence does not agree with the locator of the file
      * @return the range of the region, or nullopt if none is left
      * @throws limestone_exception if a probed entry cannot be read (the locator is invalid) or is not a data entry
      * @throws limestone_io_exception if reading fails

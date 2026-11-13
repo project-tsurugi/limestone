@@ -449,6 +449,9 @@ TEST_F(partitioned_reading_test, read_amount_is_bounded_by_the_ranges) {
         ADD_FAILURE() << "rchar not found in /proc/self/io";
         return std::uint64_t{0};
     };
+    if (! std::ifstream("/proc/self/io").is_open()) {
+        GTEST_SKIP() << "/proc/self/io cannot be read";
+    }
     const std::uint64_t before = read_rchar();
     EXPECT_EQ(read_partitioned(true, {}, 1, 4), expected);
     const std::uint64_t after = read_rchar();
@@ -476,8 +479,8 @@ TEST_F(partitioned_reading_test, compacted_file_removed_after_cursors_are_create
     const rows expected = read_reference(true, {});
     ASSERT_EQ(expected.size(), 60U);
 
-    snapshot_impl snapshot_impl_(location, {}, compacted_name_if(true), 1);
-    std::vector<std::unique_ptr<api::cursor>> cursors = snapshot_impl_.get_partitioned_cursors(3);
+    snapshot_impl impl(location, {}, compacted_name_if(true), 1);
+    std::vector<std::unique_ptr<api::cursor>> cursors = impl.get_partitioned_cursors(3);
     boost::filesystem::remove(compacted_path());
     boost::filesystem::remove(lf::locator_file_path(compacted_path()));
     rows all{};
@@ -562,8 +565,8 @@ TEST_F(partitioned_reading_test, probe_failure_in_next_aborts) {
         writer.note_entry(e0.size());
         writer.close(compacted_bytes.size());
     }
-    snapshot_impl snapshot_impl_(location, {}, compacted_name_if(true), 1);
-    std::vector<std::unique_ptr<api::cursor>> cursors = snapshot_impl_.get_partitioned_cursors(2);
+    snapshot_impl impl(location, {}, compacted_name_if(true), 1);
+    std::vector<std::unique_ptr<api::cursor>> cursors = impl.get_partitioned_cursors(2);
     EXPECT_DEATH((void) cursors[0]->next(), "is not a data entry");
 }
 

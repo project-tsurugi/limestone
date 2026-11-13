@@ -48,8 +48,10 @@ region_allocator::region_allocator(locator snapshot_locator, std::optional<locat
 
 std::optional<region_range> region_allocator::allocate(log_entry_reader& snapshot_reader,
                                                        log_entry_reader* compacted_reader) {
-    if (compacted_locator_.has_value() && compacted_reader == nullptr) {
-        LOG_LP(FATAL) << "no reader for the compacted file: " << compacted_locator_->file();
+    if (compacted_locator_.has_value() != (compacted_reader != nullptr)) {
+        LOG_LP(FATAL) << "the reader and the locator of the compacted file do not agree: locator "
+                      << (compacted_locator_.has_value() ? "present" : "absent") << ", reader "
+                      << (compacted_reader != nullptr ? "present" : "absent");
     }
     const std::size_t j = next_region_.fetch_add(1);
     if (j >= region_count_) {

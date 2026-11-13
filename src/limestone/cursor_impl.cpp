@@ -107,10 +107,6 @@ void cursor_impl::validate_and_read_stream(input_stream& stream) {
         if (! log_entry_format::is_data_entry(view.type())) {
             continue;
         }
-        // Check if the key_sid is in ascending order
-        // TODO: Key order violation is detected here and the process is aborted.
-        // However, this check should be moved to an earlier point, and if the key order is invalid,
-        // a different processing method should be considered instead of aborting immediately.
         const std::string_view key_sid = view.serialized_key_sid();
         // the key range of the region: skip entries below the start key, and stop at an entry at or above the end key
         if (start_key_.has_value() && log_entry_format::compare_key_sid(key_sid, *start_key_) < 0) {
@@ -121,6 +117,10 @@ void cursor_impl::validate_and_read_stream(input_stream& stream) {
             stream.finished = true;
             return;
         }
+        // Check if the key_sid is in ascending order
+        // TODO: Key order violation is detected here and the process is aborted.
+        // However, this check should be moved to an earlier point, and if the key order is invalid,
+        // a different processing method should be considered instead of aborting immediately.
         if (!stream.previous_key_sid.empty()) {
             const int order = log_entry_format::compare_key_sid(key_sid, stream.previous_key_sid);
             if (order < 0) {

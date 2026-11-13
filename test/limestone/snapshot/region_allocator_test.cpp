@@ -500,14 +500,19 @@ TEST_F(region_allocator_test, probe_fails_on_file_shorter_than_locator) {
     expect_throws([&] { (void) region_allocator::probe(reader, e0.size(), e0.size() + 5000); }, "is cut by the file size");
 }
 
-// invalid uses abort: R = 0, and no reader while there is a locator of the compacted WAL file
+// invalid uses abort: R = 0, and the presence of the reader of the compacted WAL file not agreeing with its locator
+// (in either direction)
 TEST_F(region_allocator_test, invalid_use_aborts) {
     locator snapshot = make_file("snapshot", entries({"k00", "k01"}), 1);
     locator compacted = make_file("compacted", entries({"k00"}), 1);
     EXPECT_DEATH({ region_allocator a(snapshot, std::nullopt, 0); }, "region records is 0");
-    region_allocator allocator(snapshot, compacted, 1);
     log_entry_reader snapshot_reader(path("snapshot"));
-    EXPECT_DEATH((void) allocator.allocate(snapshot_reader, nullptr), "no reader for the compacted file");
+    log_entry_reader compacted_reader(path("compacted"));
+    region_allocator with_compacted(snapshot, compacted, 1);
+    EXPECT_DEATH((void) with_compacted.allocate(snapshot_reader, nullptr), "do not agree: locator present, reader absent");
+    region_allocator without_compacted(snapshot, std::nullopt, 1);
+    EXPECT_DEATH((void) without_compacted.allocate(snapshot_reader, &compacted_reader),
+                 "do not agree: locator absent, reader present");
 }
 
 }  // namespace limestone::testing

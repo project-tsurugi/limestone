@@ -80,7 +80,7 @@ log_entry::read_error log_entry_read_result::error() const {
 
 std::size_t log_entry_read_result::required() const {
     if (result_ != status::error || error_.value() != log_entry::read_error::short_entry) {
-        LOG_LP(FATAL) << "not valid for result " << result_;
+        LOG_LP(FATAL) << "not valid for result " << result_ << " (valid only for short_entry)";
     }
     return required_;
 }
