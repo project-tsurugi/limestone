@@ -81,14 +81,17 @@ protected:
         /// whether the current region has been read to its end. If true, nothing is read from the reader until the
         /// next region is taken
         bool finished{true};
-        /// the entry read and not returned yet
-        std::optional<limestone::api::log_entry> entry{};
+        /// a view of the entry read and not returned yet. It refers to the buffer of the reader, and is valid until
+        /// the reader reads next
+        std::optional<log_entry_view> entry{};
         /// the key_sid of the entry read just before, used for the check of the ascending order
         std::string previous_key_sid{};
     };
 
 private:
-    limestone::api::log_entry log_entry_;
+    /// the current entry (the one returned by the last next()). A view into the buffer of the reader it was read
+    /// from; the reader is not read again before next() is called next, so the view is valid until then
+    log_entry_view current_{};
     input_stream snapshot_{"Snapshot"};
     input_stream compacted_{"Compacted"};
     std::map<limestone::api::storage_id_type, limestone::api::write_version_type> clear_storage_; 
@@ -135,7 +138,6 @@ protected:
     [[nodiscard]] std::vector<limestone::api::blob_id_type> blob_ids() const override;
     [[nodiscard]] limestone::api::log_entry::entry_type type() const override;
     bool is_relevant_entry(const log_entry_view& entry);
-    [[nodiscard]] log_entry& current() override;
     // Making the cursor class a friend so that it can access protected members
     friend class limestone::api::cursor;
 };

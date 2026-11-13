@@ -138,9 +138,10 @@ void cursor_impl::validate_and_read_stream(input_stream& stream) {
         // Update the previous key_sid to the current one
         stream.previous_key_sid.assign(key_sid);
 
-        // Copy only a relevant entry into a log_entry (the view is valid until the next call to next())
+        // keep the view of a relevant entry. The reader is not read again until the entry is consumed, so the view
+        // stays valid
         if (is_relevant_entry(view)) {
-            stream.entry.emplace(view);
+            stream.entry = view;
             return;
         }
     }
@@ -198,34 +199,34 @@ bool cursor_impl::next() {
 
         // Case 2: Either snapshot or compacted has a value, use the one that is not empty
         if (snapshot_.entry && !compacted_.entry) {
-            log_entry_ = std::move(snapshot_.entry.value());
+            current_ = *snapshot_.entry;
             snapshot_.entry = std::nullopt;
         } else if (!snapshot_.entry && compacted_.entry) {
-            log_entry_ = std::move(compacted_.entry.value());
+            current_ = *compacted_.entry;
             compacted_.entry = std::nullopt;
         } else {
             // Case 3: Both snapshot and compacted have values
             const int order = log_entry_format::compare_key_sid(snapshot_.entry->serialized_key_sid(),
                                                                 compacted_.entry->serialized_key_sid());
             if (order < 0) {
-                log_entry_ = std::move(snapshot_.entry.value());
+                current_ = *snapshot_.entry;
                 snapshot_.entry = std::nullopt;
             } else if (order > 0) {
-                log_entry_ = std::move(compacted_.entry.value());
+                current_ = *compacted_.entry;
                 compacted_.entry = std::nullopt;
             } else {
                 // If key_sid is equal, snapshot is always newer by design
                 // Note: If snapshot contains a remove_entry, it will be filtered out 
                 // by the type check at the end of the method
-                log_entry_ = std::move(snapshot_.entry.value());
+                current_ = *snapshot_.entry;
                 snapshot_.entry = std::nullopt;
                 compacted_.entry = std::nullopt;
             }
         }
 
-        // Check if the current log_entry_ is a normal entry or normal_with_blob
-        if (log_entry_.type() == log_entry::entry_type::normal_entry ||
-            log_entry_.type() == log_entry::entry_type::normal_with_blob) {
+        // Check if the current entry is a normal entry or normal_with_blob
+        if (current_.type() == log_entry::entry_type::normal_entry ||
+            current_.type() == log_entry::entry_type::normal_with_blob) {
             return true;
         }
 
@@ -258,27 +259,23 @@ bool cursor_impl::acquire_next_range() {
 }
 
 limestone::api::storage_id_type cursor_impl::storage() const noexcept {
-    return log_entry_.storage();
+    return current_.storage();
 }
 
 void cursor_impl::key(std::string& buf) const noexcept {
-    buf.assign(log_entry_.key());
+    buf.assign(current_.key());
 }
 
 void cursor_impl::value(std::string& buf) const noexcept {
-    buf.assign(log_entry_.value());
+    buf.assign(current_.value());
 }
 
 log_entry::entry_type cursor_impl::type() const {
-    return log_entry_.type();
+    return current_.type();
 }
 
 std::vector<limestone::api::blob_id_type> cursor_impl::blob_ids() const {
-    return log_entry_.blob_ids();
-}
-
-log_entry& cursor_impl::current() {
-    return log_entry_;
+    return current_.blob_ids();
 }
 
 } // namespace limestone::internal

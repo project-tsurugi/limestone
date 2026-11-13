@@ -257,8 +257,9 @@ master へのマージ前に本ファイルを削除する。
 
 ### ステップ 15: 仕上げ
 
-* [ ] フルスイート。scripts/run-clang-tidy-ci.sh。
-* [ ] コメントの英訳。
+* [x] フルスイート。scripts/run-clang-tidy-ci.sh (全ファイルで警告 0)。
+* [x] コメントの英訳 (be7b92b)。/crv による 3 モデルのレビューと対応 (06ab085、c0727d5、6fa16a9。総括は
+      _local/work-notes/crv-summary-20261113-014152.md)。
 * [ ] 本ファイルの 5 節・6 節を整理し、残った課題を issue または申し送りに移す。本ファイルを削除する。
 * [ ] PR を作る (Co-Authored-By・Generated with のフッターは付けない)。
 * [ ] マージ後: tsurugidb への反映 (ユーザが実施。limestone の master を push → tsurugidb で submodule update --remote →
@@ -324,9 +325,8 @@ master へのマージ前に本ファイルを削除する。
   「本体の大きさ未満で狭義に昇順」を検査する (不正条件は 6 つ) ことにした。設計メモ (S2 メモ 5.1 節、不正条件 5 つ) への
   反映候補。
 * S2 メモ 5.2 節の修正候補: R3 の読み取り側の構造 (5 節の 2026-11-11 の記録)。
-* 未決 (2026-11-11 の議論の続き): cursor_impl が、読んだエントリを log_entry を経由せず view のまま持つか。今はエントリ
-  1 件ごとに、log_entry への確保とコピー (stream.entry.emplace)、現在のエントリへのムーブ、前のエントリの解放が起こる。
-  log_entry のムーブは view の付け替えを伴い、無視できない。目標は、エントリ 1 件ごとのコストを上位層の buf へのコピー
-  1 回だけにすること。current() を使う分配の機構を削除した後 (ステップ 13 の後) にできる。
+* 2026-11-13 に実施: cursor_impl が、読んだエントリを log_entry を経由せず view のまま持つ (stream.entry と現在の
+  エントリを log_entry_view に。エントリ 1 件ごとのコストは上位層の buf へのコピー 1 回だけ)。分配の機構だけが使っていた
+  cursor_impl_base::current() は削除した。
 * 未決 (同上): 領域を読むときのバッファの大きさ (今は 16 MiB を cursor の本数 × 2 だけ確保する。小さいほうが速い可能性が
   あり、測定が要る)。

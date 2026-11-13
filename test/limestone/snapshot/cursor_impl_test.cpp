@@ -53,7 +53,6 @@ public:
     using cursor_impl::value;  
     using cursor_impl::type;
     using cursor_impl::blob_ids;
-    using cursor_impl::current;
 
     ~cursor_impl_testable() {
         // Ensure that the close() method is called to release resources.
@@ -735,48 +734,5 @@ TEST_F(cursor_impl_test, snapshot_remove_entry_overrides_compacted_normal) {
 
     EXPECT_FALSE(cursor.next()) << "remove_entry in snapshot should override compacted normal_entry";
 }
-
-TEST_F(cursor_impl_test, current_returns_latest_entry_after_next) {
-    create_log_file("snapshot", entry_maker_.get_default_entries());
-    boost::filesystem::path snapshot_file = boost::filesystem::path(location) / "snapshot";
-
-    cursor_impl_testable cursor(snapshot_file);
-
-    ASSERT_TRUE(cursor.next());
-    const auto& entry1 = cursor.current();
-    EXPECT_EQ(entry1.key(), "key1");
-    EXPECT_EQ(entry1.value(), "value1");
-
-    ASSERT_TRUE(cursor.next());
-    const auto& entry2 = cursor.current();
-    EXPECT_EQ(entry2.key(), "key2");
-    EXPECT_EQ(entry2.value(), "value2");
-
-    EXPECT_FALSE(cursor.next());
-}
-
-// Verify that after moving from current(), the current entry is in the default-constructed state until next()
-TEST_F(cursor_impl_test, current_after_move_is_default_constructed) {
-    create_log_file("snapshot", entry_maker_.get_default_entries());
-    boost::filesystem::path snapshot_file = boost::filesystem::path(location) / "snapshot";
-
-    cursor_impl_testable cursor(snapshot_file);
-
-    ASSERT_TRUE(cursor.next());
-    limestone::api::log_entry taken = std::move(cursor.current());
-    EXPECT_EQ(taken.key(), "key1");
-    EXPECT_EQ(cursor.type(), limestone::api::log_entry::entry_type::this_id_is_not_used);
-    // The datastore threads are running, so use the threadsafe style for the death test
-    const std::string saved_style = ::testing::FLAGS_gtest_death_test_style;
-    ::testing::FLAGS_gtest_death_test_style = "threadsafe";
-    EXPECT_DEATH((void) cursor.storage(), "log_entry_view:storage not valid");
-    ::testing::FLAGS_gtest_death_test_style = saved_style;
-
-    // next() moves to the next entry as usual
-    ASSERT_TRUE(cursor.next());
-    EXPECT_EQ(cursor.current().key(), "key2");
-    EXPECT_FALSE(cursor.next());
-}
-
 
 }  // namespace limestone::testing
