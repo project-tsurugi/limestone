@@ -77,7 +77,7 @@ cursor_impl::cursor_impl(const boost::filesystem::path& snapshot_file,
         LOG_LP(FATAL) << "no region allocator";
     }
     // log_entry_reader throws limestone_io_exception if the file cannot be opened.
-    // 領域を受け取るまでは読み終えた状態 (finished) にしておく
+    // keep the streams finished until a region is taken
     snapshot_.reader.emplace(snapshot_file);
     if (compacted_file.has_value()) {
         compacted_.reader.emplace(*compacted_file);
@@ -112,7 +112,7 @@ void cursor_impl::validate_and_read_stream(input_stream& stream) {
         // However, this check should be moved to an earlier point, and if the key order is invalid,
         // a different processing method should be considered instead of aborting immediately.
         const std::string_view key_sid = view.serialized_key_sid();
-        // 領域のキーの範囲: 開始キーより小さいエントリは読み飛ばし、終了キー以上のエントリに達したら読み終える
+        // the key range of the region: skip entries below the start key, and stop at an entry at or above the end key
         if (start_key_.has_value() && log_entry_format::compare_key_sid(key_sid, *start_key_) < 0) {
             continue;
         }
@@ -187,7 +187,7 @@ bool cursor_impl::next() {
             validate_and_read_stream(compacted_);
         }
 
-        // Case 1: Both snapshot and compacted are empty. 次の領域があれば読み続け、なければ false
+        // Case 1: Both snapshot and compacted are empty. Continue if there is a next region, otherwise return false
         if (!snapshot_.entry && !compacted_.entry) {
             if (acquire_next_range()) {
                 continue;

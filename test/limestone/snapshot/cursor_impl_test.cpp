@@ -339,12 +339,12 @@ TEST_F(cursor_impl_test, validate_stream_eof) {
     cursor_impl_testable test_cursor(empty_file);
     test_cursor.validate_and_read_stream(stream);
 
-    // 末尾に達すると、読み終えた状態になる。reader は開いたまま残る
+    // reaching the end makes the stream finished. The reader stays open
     EXPECT_TRUE(stream.finished);
     EXPECT_TRUE(stream.reader.has_value());
     EXPECT_FALSE(stream.entry.has_value());
 
-    // 読み終えた後は、呼んでも何もしない
+    // after it is finished, a call does nothing
     test_cursor.validate_and_read_stream(stream);
     EXPECT_TRUE(stream.finished);
     EXPECT_FALSE(stream.entry.has_value());

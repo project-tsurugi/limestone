@@ -33,20 +33,20 @@
 namespace limestone::testing {
 
 /**
- * get_partitioned_cursors() の総括テスト (datastore の層)。datastore に書いたエントリから実際に作られたスナップショット
- * ファイルとコンパクション済み WAL ファイル (とそれらのロケータファイル) を、公開 API の get_partitioned_cursors() で読み、
- * get_cursor() の出力と一致することを確かめる。
+ * The overall test of get_partitioned_cursors() at the datastore level. Reads the snapshot file and the compacted WAL
+ * file (and their locator files) actually made from the entries written to the datastore through the public API
+ * get_partitioned_cursors(), and checks that the output matches that of get_cursor().
  */
 class partitioned_reading_datastore_test : public compaction_test {
 public:
     partitioned_reading_datastore_test() : compaction_test("/tmp/partitioned_reading_datastore_test") {}
 
-    /// cursor が返す 1 件 (storage、key、value)
+    /// one row returned by a cursor (storage, key, value)
     using row = std::tuple<std::uint64_t, std::string, std::string>;
     using rows = std::vector<row>;
 
-    // 記録間隔を小さくして (64 バイト、R = 1) datastore を起動する。ready() でスナップショットファイルとそのロケータ
-    // ファイルが作られる
+    // starts the datastore with a small record interval (64 bytes, R = 1). ready() makes the snapshot file and its
+    // locator file
     void start_datastore() {
         limestone::api::configuration conf{};
         conf.set_data_location(location);
@@ -69,7 +69,7 @@ public:
         return buf;
     }
 
-    // 1 つのセッションで keys のエントリを書き、エポックを進める
+    // writes the entries of the keys in one session, and advances the epoch
     void write_entries(int first, int last, const std::string& value, epoch_id_type epoch) {
         lc0_->begin_session();
         for (int i = first; i < last; ++i) {
@@ -100,7 +100,8 @@ public:
         return result;
     }
 
-    // get_cursor() の出力と、n 本の cursor の出力を合わせたものを比べる。各 cursor の出力は昇順であること
+    // compares the output of get_cursor() with the outputs of n cursors together. The output of each cursor must be in
+    // ascending order
     void check_partitioned_matches_full(const std::vector<std::size_t>& ns, std::size_t expected_count) {
         const rows expected = read_all(*datastore_->get_snapshot()->get_cursor());
         ASSERT_EQ(expected.size(), expected_count);
@@ -121,22 +122,22 @@ public:
     }
 };
 
-// コンパクション済み WAL ファイルがなく、スナップショットファイルだけの場合
+// no compacted WAL file, only the snapshot file
 TEST_F(partitioned_reading_datastore_test, snapshot_only) {
     start_datastore();
     datastore_->switch_epoch(1);
     write_entries(0, 300, "a", 1);
-    write_entries(100, 200, "b", 2);  // 上書き
+    write_entries(100, 200, "b", 2);  // overwrite
     remove_entries(0, 300, 7, 3);
     restart_datastore();
     EXPECT_TRUE(compacted_filename().empty());
     EXPECT_TRUE(boost::filesystem::exists(boost::filesystem::path(location) / "data" / "snapshot.loc"));
-    // 300 件のうち 7 の倍数 (43 件) が削除されている
+    // of the 300 entries, the multiples of 7 (43 entries) are removed
     check_partitioned_matches_full({1, 2, 3, 8}, 300 - 43);
 }
 
-// コンパクション済み WAL ファイルがある場合: コンパクションの後に書いたエントリがスナップショットファイルに、前に書いた
-// エントリがコンパクション済み WAL ファイルにある。同じキーの上書きと削除を含む
+// with a compacted WAL file: the entries written after the compaction are in the snapshot file, and those written
+// before are in the compacted WAL file. Includes overwrites and removals of the same keys
 TEST_F(partitioned_reading_datastore_test, with_compacted_file) {
     start_datastore();
     datastore_->switch_epoch(1);
@@ -144,8 +145,8 @@ TEST_F(partitioned_reading_datastore_test, with_compacted_file) {
     write_entries(50, 150, "b", 2);
     run_compact_with_epoch_switch(4);
     ASSERT_FALSE(compacted_filename().empty());
-    write_entries(300, 500, "c", 5);  // 100 件の上書きと 100 件の追加
-    remove_entries(0, 100, 5, 6);      // コンパクション済み側の 20 件を削除
+    write_entries(300, 500, "c", 5);  // 100 overwrites and 100 additions
+    remove_entries(0, 100, 5, 6);      // removes 20 entries of the compacted side
     restart_datastore();
     ASSERT_FALSE(compacted_filename().empty());
     EXPECT_TRUE(boost::filesystem::exists(boost::filesystem::path(location)

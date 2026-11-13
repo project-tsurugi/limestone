@@ -72,7 +72,8 @@ std::vector<std::unique_ptr<limestone::api::cursor>> snapshot_impl::get_partitio
     std::shared_ptr<region_allocator> allocator =
         std::make_shared<region_allocator>(read_locator(snapshot_file), std::move(compacted_locator), region_records_);
 
-    // 全 cursor のファイルをここで開く。開いている最中にファイルが削除されると、開けなかった cursor で例外になる
+    // open the files of all the cursors here. If a file is removed in the meantime, the cursor that cannot open it
+    // throws
     std::vector<std::unique_ptr<la::cursor>> cursors{};
     cursors.reserve(n);
     for (std::size_t i = 0; i < n; ++i) {

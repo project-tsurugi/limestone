@@ -49,7 +49,7 @@ using log_entry_bytes::marker;
 using log_entry_bytes::normal_entry;
 using log_entry_bytes::remove_entry;
 
-/// cursor_impl の protected を呼ぶためのクラス
+/// a class to call the protected members of cursor_impl
 class cursor_impl_range_testable : public cursor_impl {
 public:
     using cursor_impl::cursor_impl;
@@ -68,7 +68,7 @@ class cursor_impl_range_test : public ::testing::Test {
 protected:
     static constexpr const char* location = "/tmp/cursor_impl_range_test";
 
-    /// cursor が返す 1 件 (storage、key、value)
+    /// one row returned by a cursor (storage, key, value)
     using row = std::tuple<std::uint64_t, std::string, std::string>;
     using rows = std::vector<row>;
 
@@ -85,7 +85,7 @@ protected:
         return boost::filesystem::path(location) / name;
     }
 
-    // 内容を書いたファイルを作り、そのパスを返す
+    // makes a file with the contents, and returns its path
     static boost::filesystem::path write_file(const std::string& name, const std::string& bytes) {
         boost::filesystem::path p = path(name);
         std::ofstream out(p.string(), std::ios::binary | std::ios::trunc);
@@ -97,7 +97,7 @@ protected:
         return p;
     }
 
-    // 内容を書いたファイルとそのロケータ (記録間隔 interval) を作り、locator を返す
+    // makes a file with the contents and its locator file (with the record interval), and returns the locator
     static locator make_file(const std::string& name, const std::string& bytes, std::uint64_t interval) {
         boost::filesystem::path locatee = write_file(name, bytes);
         boost::filesystem::path file = lf::locator_file_path(locatee);
@@ -105,7 +105,7 @@ protected:
         return locator{file, bytes.size()};
     }
 
-    // ストレージ 1 の normal_entry。値でどちらのファイルの出力かを見分ける
+    // a normal_entry of storage 1. The value tells which file the output comes from
     static std::string entry(std::string_view key, std::string_view value) {
         return normal_entry(1, key, value, 7, 1);
     }
@@ -118,7 +118,7 @@ protected:
         return bytes;
     }
 
-    // cursor が返す残りをすべて読む
+    // reads all the rest the cursor returns
     static rows read_all(cursor_impl_range_testable& cursor) {
         rows result{};
         while (cursor.next()) {
@@ -131,7 +131,7 @@ protected:
         return result;
     }
 
-    // 領域を受け取らずに読む cursor の出力 (比較の基準)
+    // the output of a cursor that reads without regions (the reference)
     static rows read_full(const std::optional<boost::filesystem::path>& compacted) {
         if (compacted.has_value()) {
             cursor_impl_range_testable cursor(path("snapshot"), *compacted, std::map<api::storage_id_type, api::write_version_type>{});
@@ -148,8 +148,8 @@ protected:
                                                             allocator);
     }
 
-    // 領域ごとの出力を返す。領域数と同じ本数の cursor を作り、まず各 cursor に 1 件ずつ読ませて領域を 1 つずつ
-    // 受け取らせてから、それぞれの残りを読む。cursor i の出力が領域 i の出力になる
+    // returns the output of each region. Makes as many cursors as the regions, first lets each cursor read one row so
+    // that each takes one region, and then reads the rest of each. The output of cursor i is the output of region i
     static std::vector<rows> read_by_region(const std::optional<boost::filesystem::path>& compacted,
                                             const std::shared_ptr<region_allocator>& allocator) {
         const std::size_t n = allocator->region_count();
@@ -173,9 +173,10 @@ protected:
     }
 };
 
-// 1 本の cursor が領域を続けて読むと、領域を受け取らずに読んだ出力と一致する。R が主のレコード数を割り切る場合と
-// 割り切らない場合、領域が 1 つの場合を含む。副ファイルだけにある小さいキー (a00)、同じキーが両方にある場合 (k02、
-// スナップショット側が採られる)、副ファイルだけにある途中のキー (k05) を含む
+// one cursor reading the regions one after another gives the same output as reading without regions. Includes R that
+// divides the number of records of the primary, R that does not, and a single region. Includes a small key only in the
+// secondary file (a00), the same key in both (k02, the snapshot side is taken), and a middle key only in the secondary
+// file (k05)
 TEST_F(cursor_impl_range_test, one_cursor_reads_all_regions) {
     locator snapshot = make_file("snapshot", entries({{"k00", "s"}, {"k02", "s"}, {"k04", "s"}, {"k06", "s"}}), 1);
     locator compacted = make_file("compacted", entries({{"a00", "c"}, {"k02", "c"}, {"k05", "c"}}), 1);
@@ -185,31 +186,33 @@ TEST_F(cursor_impl_range_test, one_cursor_reads_all_regions) {
         auto allocator = std::make_shared<region_allocator>(snapshot, compacted, r);
         std::unique_ptr<cursor_impl_range_testable> cursor = make_cursor(path("compacted"), allocator);
         EXPECT_EQ(read_all(*cursor), expected) << "R = " << r;
-        // 残りがなくなった後は false のまま
+        // stays false after nothing is left
         EXPECT_FALSE(cursor->next()) << "R = " << r;
     }
 }
 
-// 領域ごとの出力。副ファイルの範囲は領域の境界のキーをまたいで重なるが、キーの範囲の判定で 1 回ずつになる
+// the output of each region. The ranges of the secondary file overlap across the boundary keys of the regions, but
+// the check of the key range makes each entry appear once
 TEST_F(cursor_impl_range_test, output_of_each_region) {
     locator snapshot = make_file("snapshot", entries({{"k00", "s"}, {"k02", "s"}, {"k04", "s"}, {"k06", "s"}}), 1);
     locator compacted = make_file("compacted", entries({{"a00", "c"}, {"k02", "c"}, {"k05", "c"}}), 1);
     auto allocator = std::make_shared<region_allocator>(snapshot, compacted, 1);
     ASSERT_EQ(allocator->region_count(), 4U);
     const std::vector<rows> expected{
-        {{1, "a00", "c"}, {1, "k00", "s"}},  // 領域 0: 開始キーなし、終了キー k02
-        {{1, "k02", "s"}},                   // 領域 1: k02 以上 k04 未満。副の範囲は a00 から
-        {{1, "k04", "s"}, {1, "k05", "c"}},  // 領域 2: k04 以上 k06 未満。副の範囲は k02 から末尾
-        {{1, "k06", "s"}},                   // 領域 3: k06 以上、終了キーなし。副の範囲は k05 から末尾
+        {{1, "a00", "c"}, {1, "k00", "s"}},  // region 0: no start key, the end key is k02
+        {{1, "k02", "s"}},                   // region 1: from k02 below k04. The secondary range starts at a00
+        {{1, "k04", "s"}, {1, "k05", "c"}},  // region 2: from k04 below k06. The secondary range is from k02 to the end
+        {{1, "k06", "s"}},                   // region 3: from k06, no end key. The secondary range is from k05 to the end
     };
     EXPECT_EQ(read_by_region(path("compacted"), allocator), expected);
 }
 
-// 副ファイルのレコードが 1 つだけなら、どの領域も副ファイルを先頭から末尾まで読む範囲になり、キーの範囲の判定だけで
-// 出力が決まる。開始キーと等しいキーは含まれ (k02、k04)、終了キーと等しいキーで読み終える
+// if the secondary file has only one record, the range of every region covers the secondary file from the beginning
+// to the end, and only the check of the key range decides the output. A key equal to the start key is included (k02,
+// k04), and reading stops at a key equal to the end key
 TEST_F(cursor_impl_range_test, key_equal_to_boundary) {
     locator snapshot = make_file("snapshot", entries({{"k00", "s"}, {"k02", "s"}, {"k04", "s"}, {"k06", "s"}}), 1);
-    // 記録間隔を大きくして、レコードを位置 0 の 1 つだけにする
+    // a large record interval leaves only one record, at position 0
     locator compacted = make_file("compacted", entries({{"a00", "c"}, {"k02", "c"}, {"k04", "c"}, {"k05", "c"}, {"k07", "c"}}), 1000);
     ASSERT_EQ(compacted.record_count(), 1U);
     auto allocator = std::make_shared<region_allocator>(snapshot, compacted, 1);
@@ -222,7 +225,7 @@ TEST_F(cursor_impl_range_test, key_equal_to_boundary) {
     EXPECT_EQ(read_by_region(path("compacted"), allocator), expected);
 }
 
-// コンパクション済み WAL ファイルがない場合
+// without a compacted WAL file
 TEST_F(cursor_impl_range_test, snapshot_only) {
     locator snapshot = make_file("snapshot", entries({{"k00", "s"}, {"k01", "s"}, {"k02", "s"}, {"k03", "s"}, {"k04", "s"}}), 1);
     const rows expected = read_full(std::nullopt);
@@ -241,7 +244,7 @@ TEST_F(cursor_impl_range_test, snapshot_only) {
     EXPECT_EQ(read_by_region(std::nullopt, allocator2), by_region);
 }
 
-// 主のレコードが 0 個なら、最初の next() から false
+// if the primary has no record, next() is false from the first call
 TEST_F(cursor_impl_range_test, no_records) {
     locator snapshot = make_file("snapshot", "", 1);
     auto allocator = std::make_shared<region_allocator>(snapshot, std::nullopt, 1);
@@ -249,8 +252,8 @@ TEST_F(cursor_impl_range_test, no_records) {
     EXPECT_FALSE(cursor->next());
 }
 
-// 複数の cursor が領域を分担しても、出力を合わせたものは領域を受け取らずに読んだ出力と一致し、各 cursor の出力は
-// キーの昇順。コンパクション済み WAL ファイルが主の場合
+// even when several cursors share the regions, their outputs together are the same as reading without regions, and
+// the output of each cursor is in ascending order of the key. The compacted WAL file is the primary
 TEST_F(cursor_impl_range_test, cursors_share_regions) {
     std::vector<std::pair<std::string, std::string>> snapshot_entries{};
     std::vector<std::pair<std::string, std::string>> compacted_entries{};
@@ -272,7 +275,7 @@ TEST_F(cursor_impl_range_test, cursors_share_regions) {
     for (int i = 0; i < 3; ++i) {
         cursors.push_back(make_cursor(path("compacted"), allocator));
     }
-    // 3 本を少しずつ交互に進める
+    // advance the 3 cursors in turn, a little at a time
     rows all{};
     std::vector<rows> each(3);
     bool progressed = true;
@@ -297,7 +300,7 @@ TEST_F(cursor_impl_range_test, cursors_share_regions) {
     EXPECT_EQ(all, expected);
 }
 
-// 領域をまたいでも、スナップショットの remove_entry がコンパクション済み WAL ファイルの同じキーを打ち消す
+// a remove_entry of the snapshot cancels the same key of the compacted WAL file, also across regions
 TEST_F(cursor_impl_range_test, remove_entry_overrides_compacted) {
     std::string snapshot_bytes = entry("k00", "s") + remove_entry(1, "k02", 7, 1) + entry("k04", "s") + remove_entry(1, "k05", 7, 1);
     locator snapshot = make_file("snapshot", snapshot_bytes, 1);
@@ -310,10 +313,11 @@ TEST_F(cursor_impl_range_test, remove_entry_overrides_compacted) {
     EXPECT_EQ(read_all(*cursor), expected);
 }
 
-// 割り当てのプローブが失敗する (レコードの位置にデータ系でないエントリがある) と、next() が limestone_exception を投げる
+// if a probe of the allocator fails (an entry at the position of a record is not a data entry), next() throws
+// limestone_exception
 TEST_F(cursor_impl_range_test, probe_failure_in_next) {
     locator snapshot = make_file("snapshot", entries({{"k00", "s"}, {"k02", "s"}, {"k04", "s"}}), 1);
-    // 副ファイルのレコード 1 の位置に marker を置く (ロケータは手で書く)
+    // put a marker at the position of record 1 of the secondary file (the locator is written by hand)
     std::string e0 = entry("k01", "c");
     std::string compacted_bytes = e0 + marker(2, 7) + entry("k03", "c");
     boost::filesystem::path locatee = write_file("compacted", compacted_bytes);
@@ -328,7 +332,7 @@ TEST_F(cursor_impl_range_test, probe_failure_in_next) {
     ASSERT_EQ(compacted.record_count(), 2U);
     auto allocator = std::make_shared<region_allocator>(snapshot, compacted, 1);
     std::unique_ptr<cursor_impl_range_testable> cursor = make_cursor(path("compacted"), allocator);
-    // 領域 0 の副の終了位置の二分探索で marker をプローブする
+    // the bisection for the end position of the secondary of region 0 probes the marker
     try {
         (void) cursor->next();
         FAIL() << "no exception";
@@ -339,7 +343,7 @@ TEST_F(cursor_impl_range_test, probe_failure_in_next) {
     }
 }
 
-// 誤った使い方は abort する: 割り当てが空
+// an invalid use aborts: an empty allocator
 TEST_F(cursor_impl_range_test, no_allocator_aborts) {
     (void) make_file("snapshot", entries({{"k00", "s"}}), 1);
     EXPECT_DEATH({

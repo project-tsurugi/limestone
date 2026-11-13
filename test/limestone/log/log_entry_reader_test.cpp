@@ -713,7 +713,7 @@ TEST_F(log_entry_reader_test, read_result_accessor_validity) {
     EXPECT_EQ(error.required(), 9U);
     EXPECT_DEATH((void) error.view(), "log_entry_read_result:view not valid");
 
-    // required() は short_entry のときだけ有効
+    // required() is valid only for short_entry
     EXPECT_DEATH((void) ok.required(), "log_entry_read_result:required not valid");
     EXPECT_DEATH((void) end.required(), "log_entry_read_result:required not valid");
     auto unknown = log_entry_read_result::error(log_entry::read_error{log_entry::read_error::unknown_type,
@@ -729,7 +729,7 @@ TEST_F(log_entry_reader_test, status_to_string) {
     EXPECT_EQ(out.str(), "ok end error unknown");
 }
 
-// システムコールの呼び出しを数えるファイル操作
+// file operations that count the system calls
 class counting_file_operations : public real_file_operations {
 public:
     int open(const char* filename, int flags) override {
@@ -749,9 +749,9 @@ public:
         return real_file_operations::pread(fd, buf, count, offset);
     }
 
-    // pread 以外のシステムコールの回数
+    // the number of system calls other than pread
     [[nodiscard]] std::size_t others() const noexcept { return others_; }
-    // pread の回数
+    // the number of preads
     [[nodiscard]] std::size_t preads() const noexcept { return preads_; }
 
 private:
@@ -759,7 +759,7 @@ private:
     std::size_t preads_{};
 };
 
-// バッファの大きさを指定して開いた reader に範囲を設定して読める。範囲の設定では、システムコールを呼ばない
+// a reader opened with the buffer size reads the range set. Setting the range makes no system call
 TEST_F(log_entry_reader_test, reads_the_range_set) {
     std::string e1 = normal_entry(1, "a", "v", 7, 1);
     std::string e2 = remove_entry(1, "b", 7, 2);
@@ -769,7 +769,7 @@ TEST_F(log_entry_reader_test, reads_the_range_set) {
     {
         log_entry_reader reader(p, 0, 4096, ops);
         EXPECT_EQ(reader.file(), p);
-        // 構築では、開く操作とファイルの状態の取得だけを呼ぶ
+        // the construction calls only open and the status of the file
         EXPECT_EQ(ops.others(), 2U);
         EXPECT_EQ(ops.preads(), 0U);
         reader.set_range(9, 9 + e1.size() + e2.size());
@@ -781,11 +781,11 @@ TEST_F(log_entry_reader_test, reads_the_range_set) {
         EXPECT_EQ(ops.others(), 2U);
         EXPECT_EQ(ops.preads(), 1U);
     }
-    // 破棄では、閉じる操作だけを呼ぶ
+    // the destruction calls only close
     EXPECT_EQ(ops.others(), 3U);
 }
 
-// 範囲を設定しなければ、バッファの大きさを指定しない reader と同じく、開始位置からファイルの末尾まで読む
+// without a range set, reads from the start position to the end of the file, as a reader without the buffer size
 TEST_F(log_entry_reader_test, reads_to_the_end_without_range) {
     std::string e1 = normal_entry(1, "a", "v", 7, 1);
     std::string e2 = remove_entry(1, "b", 7, 2);
@@ -796,7 +796,7 @@ TEST_F(log_entry_reader_test, reads_to_the_end_without_range) {
     expect_end(reader, 9 + e1.size() + e2.size());
 }
 
-// 開いた後にファイルの名前を削除しても、範囲を設定して読める
+// the range set can be read even if the name of the file is removed after it is opened
 TEST_F(log_entry_reader_test, reads_the_range_after_unlink) {
     std::string e1 = normal_entry(1, "a", "v", 7, 1);
     auto p = write_file(e1);
@@ -807,7 +807,8 @@ TEST_F(log_entry_reader_test, reads_the_range_after_unlink) {
     expect_end(reader, e1.size());
 }
 
-// 範囲を設定し直すと、その範囲を先頭から読む。前の範囲の途中でも、手前の位置へも設定し直せる
+// setting the range again reads that range from its beginning. It can be set again in the middle of the previous
+// range, and to a position before it
 TEST_F(log_entry_reader_test, set_range_switches_the_range) {
     std::string e1 = normal_entry(1, "a", "v", 7, 1);
     std::string e2 = normal_entry(1, "b", "v", 7, 2);
@@ -817,21 +818,22 @@ TEST_F(log_entry_reader_test, set_range_switches_the_range) {
     const std::uint64_t o2 = e1.size();
     const std::uint64_t o3 = e1.size() + e2.size();
     const std::uint64_t size = o3 + e3.size();
-    // 後ろの範囲を最後まで読む
+    // read the last range to its end
     reader.set_range(o3, size);
     expect_entry(reader, e3, o3);
     expect_end(reader, size);
-    // 手前の範囲に設定し直し、途中まで読む
+    // set a range before it, and read it halfway
     reader.set_range(0, o3);
     expect_entry(reader, e1, 0);
-    // 読み終える前に設定し直す。前の範囲の残りは読まれず、新しい範囲の先頭から読む
+    // set again before the end. The rest of the previous range is not read, and the new range is read from its
+    // beginning
     reader.set_range(o2, size);
     expect_entry(reader, e2, o2);
     expect_entry(reader, e3, o3);
     expect_end(reader, size);
 }
 
-// バッファの拡張と縮小は、コンストラクタで指定した大きさを基準にする
+// the buffer is expanded and shrunk relative to the size given to the constructor
 TEST_F(log_entry_reader_test, buffer_size_given_to_the_constructor) {
     constexpr std::size_t size = 4096;
     std::string large = normal_entry(1, "key", std::string(size + 100, 'v'), 7, 1);
@@ -843,20 +845,21 @@ TEST_F(log_entry_reader_test, buffer_size_given_to_the_constructor) {
     expect_entry(reader, large, 0);
     expect_entry(reader, small, large.size());
     expect_end(reader, large.size() + small.size());
-    // 1 回目は指定した大きさ、2 回目はエントリの大きさに拡張してその残り、3 回目は指定した大きさに縮小した
-    // バッファで、読み終える位置までの残り
+    // the first read is the given size, the second is the rest of the entry after expanding to its size, and the third
+    // is the rest up to the end position with the buffer shrunk to the given size
     ASSERT_EQ(ops.requests().size(), 3U);
     EXPECT_EQ(ops.requests()[0], size);
     EXPECT_EQ(ops.requests()[1], large.size() - size);
     EXPECT_EQ(ops.requests()[2], small.size());
-    // 設定し直しても同じバッファで読む
+    // the same buffer is used after setting the range again
     reader.set_range(large.size(), large.size() + small.size());
     expect_entry(reader, small, large.size());
     ASSERT_EQ(ops.requests().size(), 4U);
     EXPECT_EQ(ops.requests()[3], small.size());
 }
 
-// 読み終える位置がエントリの境界なら、そこで end になり、その後ろは読まない (要求したバイト数の合計が範囲の大きさ)
+// if the end position is an entry boundary, the result is end there, and nothing after it is read (the total of the
+// requested bytes is the size of the range)
 TEST_F(log_entry_reader_test, end_offset_at_entry_boundary) {
     std::string e1 = normal_entry(1, "a", "v", 7, 1);
     std::string e2 = normal_entry(1, "b", std::string(100, 'v'), 7, 2);
@@ -866,7 +869,7 @@ TEST_F(log_entry_reader_test, end_offset_at_entry_boundary) {
     recording_file_operations ops;
     const std::uint64_t start_offset = e1.size();
     const std::uint64_t end_offset = e1.size() + e2.size() + e3.size();
-    // バッファの大きさが範囲より小さくても、読み込みは範囲の残りまでに限る
+    // even if the buffer size is smaller than the range, each read is limited to the rest of the range
     log_entry_reader reader(p, 0, 64, ops);
     reader.set_range(start_offset, end_offset);
     expect_entry(reader, e2, start_offset);
@@ -880,7 +883,7 @@ TEST_F(log_entry_reader_test, end_offset_at_entry_boundary) {
     EXPECT_EQ(requested, end_offset - start_offset);
 }
 
-// 開始位置と読み終える位置が同じなら、何も読まずに end になる
+// if the start position and the end position are the same, the result is end without reading
 TEST_F(log_entry_reader_test, empty_range_is_end) {
     std::string e1 = normal_entry(1, "a", "v", 7, 1);
     auto p = write_file(e1 + e1);
@@ -891,7 +894,8 @@ TEST_F(log_entry_reader_test, empty_range_is_end) {
     EXPECT_TRUE(ops.requests().empty());
 }
 
-// 読み終える位置がエントリの途中なら、そのエントリは short_entry になり、次は読み終える位置で end になる
+// if the end position is in the middle of an entry, that entry is short_entry, and the next result is end at the end
+// position
 TEST_F(log_entry_reader_test, end_offset_in_the_middle_of_entry) {
     std::string e1 = normal_entry(1, "a", "v", 7, 1);
     std::string e2 = normal_entry(1, "b", "v", 7, 2);
@@ -902,13 +906,14 @@ TEST_F(log_entry_reader_test, end_offset_in_the_middle_of_entry) {
     expect_entry(reader, e1, 0);
     expect_error(reader, log_entry::read_error::short_entry, entry_type::normal_entry, e1.size());
     expect_end(reader, end_offset);
-    // エラーの後でも設定し直せる
+    // the range can be set again after an error
     reader.set_range(e1.size(), e1.size() + e2.size());
     expect_entry(reader, e2, e1.size());
 }
 
-// short_entry の結果は解析に必要なバイト数の下限 (required) を持つ。読み終える位置を required まで広げるのを繰り返すと
-// 読める (normal_entry はヘッダの次で全体の長さが確定し、normal_with_blob は blob_count の次でもう 1 段ある)
+// a short_entry result has the lower bound of the bytes needed to parse (required). Widening the end position to
+// required repeatedly reads the entry (for normal_entry the whole length is known after the header; normal_with_blob
+// has one more step after blob_count)
 TEST_F(log_entry_reader_test, short_entry_has_required) {
     std::string e1 = normal_entry(1, "key", std::string(100, 'v'), 7, 1);
     std::string e2 = normal_with_blob(1, "key", std::string(100, 'v'), 7, 2, {11, 12});
@@ -916,7 +921,7 @@ TEST_F(log_entry_reader_test, short_entry_has_required) {
     recording_file_operations ops;
     log_entry_reader reader(p, 0, 4096, ops);
 
-    // normal_entry: 5 バイト → ヘッダ (9 バイト) → 全体
+    // normal_entry: 5 bytes, then the header (9 bytes), then the whole entry
     reader.set_range(0, 5);
     auto r1 = reader.next();
     ASSERT_EQ(r1.result(), status::error);
@@ -931,7 +936,7 @@ TEST_F(log_entry_reader_test, short_entry_has_required) {
     reader.set_range(0, r2.required());
     expect_entry(reader, e1, 0);
 
-    // normal_with_blob: ヘッダ → blob_count まで → 全体
+    // normal_with_blob: the header, then up to blob_count, then the whole entry
     reader.set_range(e1.size(), e1.size() + 9);
     auto r3 = reader.next();
     ASSERT_EQ(r3.result(), status::error);
@@ -946,12 +951,13 @@ TEST_F(log_entry_reader_test, short_entry_has_required) {
     reader.set_range(e1.size(), e1.size() + r4.required());
     expect_entry(reader, e2, e1.size());
 
-    // 読み込みは毎回、設定した範囲の大きさだけ
+    // each read is exactly the size of the range set
     const std::vector<std::size_t> expected{5, 9, e1.size(), 9, e2.size() - 2 * 8, e2.size()};
     EXPECT_EQ(ops.requests(), expected);
 }
 
-// ファイルがエントリの途中で終わっているときの short_entry も required を持ち、それはファイルの残りより大きい
+// a short_entry of a file that ends in the middle of an entry also has required, which is larger than the rest of the
+// file
 TEST_F(log_entry_reader_test, short_entry_at_file_end_has_required) {
     std::string e1 = normal_entry(1, "key", std::string(100, 'v'), 7, 1);
     auto p = write_file(e1.substr(0, 20));
@@ -964,7 +970,7 @@ TEST_F(log_entry_reader_test, short_entry_at_file_end_has_required) {
     expect_end(reader, 20);
 }
 
-// 範囲がファイルの大きさに収まらなくても例外にはならず、読み込みが尽きた位置で end になる
+// a range beyond the size of the file does not throw, but ends where the data read runs out
 TEST_F(log_entry_reader_test, range_beyond_the_file_ends_at_the_file_size) {
     std::string e1 = normal_entry(1, "a", "v", 7, 1);
     auto p = write_file(e1);
@@ -976,8 +982,8 @@ TEST_F(log_entry_reader_test, range_beyond_the_file_ends_at_the_file_size) {
     expect_end(reader, e1.size() + 10);
 }
 
-// 書き込み中のファイルを読む reader では set_range は abort する。開始位置が読み終える位置を超えても abort する。
-// バッファの大きさ 0 も abort する
+// set_range aborts on a reader of a file being written, and if the start position exceeds the end position. A buffer
+// size of 0 also aborts
 TEST_F(log_entry_reader_test, invalid_use_of_set_range_aborts) {
     auto p = write_file(marker(2, 7));
     EXPECT_DEATH(

@@ -53,21 +53,21 @@ using log_entry_bytes::remove_entry;
 using log_entry_bytes::u64le;
 
 /**
- * get_partitioned_cursors() の総括テスト。手作りのスナップショットファイルとコンパクション済み WAL ファイル (とロケータ
- * ファイル) を置き、snapshot_impl の層で、n 本の cursor の出力を合わせたものが get_cursor() の出力と一致し、各 cursor の
- * 出力がキーの昇順であることを確かめる。
+ * The overall test of get_partitioned_cursors(). Places a hand-made snapshot file and compacted WAL file (and their
+ * locator files), and checks at the snapshot_impl level that the outputs of n cursors together match the output of
+ * get_cursor(), and that the output of each cursor is in ascending order of the key.
  */
 class partitioned_reading_test : public ::testing::Test {
 protected:
     static constexpr const char* location = "/tmp/partitioned_reading_test";
     static constexpr const char* compacted_name = "pwal_0000.compacted";
 
-    /// cursor が返す 1 件 (storage、key、value)
+    /// one row returned by a cursor (storage, key, value)
     using row = std::tuple<std::uint64_t, std::string, std::string>;
     using rows = std::vector<row>;
     using clear_storage_map = std::map<api::storage_id_type, api::write_version_type>;
 
-    /// ファイルに書く 1 件のエントリ (バイト列と、並べ替えに使う serialized key_sid)
+    /// one entry to write to a file (the bytes, and the serialized key_sid used for sorting)
     struct source_entry {
         std::string key_sid;
         std::string bytes;
@@ -106,7 +106,7 @@ protected:
         return {key_sid(storage, key), remove_entry(storage, key, epoch, 0)};
     }
 
-    // エントリを key_sid の順に並べてファイルの内容にする (ファイルの先頭に marker_begin を置く)
+    // makes the contents of a file of the entries sorted by key_sid (with a marker_begin at the beginning)
     static std::string file_bytes(std::vector<source_entry> entries) {
         std::stable_sort(entries.begin(), entries.end(),
                          [](const source_entry& a, const source_entry& b) { return a.key_sid < b.key_sid; });
@@ -126,13 +126,13 @@ protected:
         }
     }
 
-    // ファイルを書き、そのロケータファイルを記録間隔 interval で作る
+    // writes the file and makes its locator file with the record interval
     static void write_with_locator(const boost::filesystem::path& p, const std::string& bytes, std::uint64_t interval) {
         write_file(p, bytes);
         locator_writer::build_from_file(p, lf::locator_file_path(p), interval);
     }
 
-    // スナップショットファイルと (あれば) コンパクション済み WAL ファイルを置く
+    // places the snapshot file and (if any) the compacted WAL file
     static void place_files(const std::string& snapshot_bytes, const std::optional<std::string>& compacted_bytes,
                             std::uint64_t interval) {
         write_with_locator(snapshot_path(), snapshot_bytes, interval);
@@ -163,14 +163,15 @@ protected:
         });
     }
 
-    // get_cursor() の出力 (比較の基準)
+    // the output of get_cursor() (the reference)
     static rows read_reference(bool has_compacted, const clear_storage_map& clear_storage) {
         snapshot_impl snapshot(location, clear_storage, compacted_name_if(has_compacted), 1);
         std::unique_ptr<api::cursor> cursor = snapshot.get_cursor();
         return read_all(*cursor);
     }
 
-    // n 本の cursor で読み、各 cursor の出力が昇順であることを確かめ、すべてを合わせて key_sid の順に並べて返す
+    // reads with n cursors, checks that the output of each cursor is in ascending order, and returns all of them
+    // together sorted by key_sid
     static rows read_partitioned(bool has_compacted, const clear_storage_map& clear_storage, std::size_t region_records,
                                  std::size_t n) {
         snapshot_impl snapshot(location, clear_storage, compacted_name_if(has_compacted), region_records);
@@ -189,8 +190,9 @@ protected:
         return all;
     }
 
-    // 置いたファイルについて、n = 1、2、3、8 と R = 1、2、3 のすべての組で、分割して読んだ出力が get_cursor() の出力と
-    // 一致することを確かめる。expected_count は基準の件数の検算 (負なら検算しない)
+    // checks, for the files placed, that the partitioned reading gives the same output as get_cursor() for every pair
+    // of n = 1, 2, 3, 8 and R = 1, 2, 3. expected_count is a check of the number of rows of the reference (not checked
+    // if negative)
     static void check_all(bool has_compacted, const clear_storage_map& clear_storage, long expected_count) {
         const rows expected = read_reference(has_compacted, clear_storage);
         if (expected_count >= 0) {
@@ -210,7 +212,7 @@ protected:
     }
 };
 
-// 主のレコードが 0 個 (両ファイルにデータエントリがない) なら、全 cursor がすぐ終端
+// if the primary has no record (neither file has a data entry), all the cursors end at once
 TEST_F(partitioned_reading_test, no_records) {
     place_files(file_bytes({}), file_bytes({}), 1);
     check_all(true, {}, 0);
@@ -218,7 +220,7 @@ TEST_F(partitioned_reading_test, no_records) {
     check_all(false, {}, 0);
 }
 
-// 領域が 1 つ (レコードが R 以下)
+// a single region (the records are R or fewer)
 TEST_F(partitioned_reading_test, single_region) {
     place_files(file_bytes({normal(1, "a", "s", 1), normal(1, "c", "s", 1)}),
                 file_bytes({normal(1, "b", "c", 1), normal(1, "d", "c", 1)}), 1);
@@ -229,7 +231,7 @@ TEST_F(partitioned_reading_test, single_region) {
     }
 }
 
-// 先頭の領域に、副ファイルにだけある小さいキーがある。主はスナップショットファイル
+// the first region has small keys only in the secondary file. The primary is the snapshot file
 TEST_F(partitioned_reading_test, small_keys_only_in_secondary) {
     std::vector<source_entry> snapshot{};
     for (int i = 10; i < 40; ++i) {
@@ -240,8 +242,8 @@ TEST_F(partitioned_reading_test, small_keys_only_in_secondary) {
     check_all(true, {}, 32);
 }
 
-// 副ファイルに、領域の境界のキーと等しいキーがある (記録間隔 1、R = 1 では主のすべてのキーが境界)。同じキーは
-// スナップショット側が採られる
+// the secondary file has keys equal to the boundary keys of the regions (with record interval 1 and R = 1, every key
+// of the primary is a boundary). The snapshot side is taken for the same key
 TEST_F(partitioned_reading_test, secondary_keys_equal_to_boundaries) {
     std::vector<source_entry> snapshot{};
     std::vector<source_entry> compacted{};
@@ -260,7 +262,7 @@ TEST_F(partitioned_reading_test, secondary_keys_equal_to_boundaries) {
     check_all(true, {}, 30);
 }
 
-// 主がコンパクション済み WAL ファイル (レコード数が多い)
+// the primary is the compacted WAL file (more records)
 TEST_F(partitioned_reading_test, compacted_is_primary) {
     std::vector<source_entry> snapshot{};
     std::vector<source_entry> compacted{};
@@ -275,7 +277,7 @@ TEST_F(partitioned_reading_test, compacted_is_primary) {
     check_all(true, {}, 51);
 }
 
-// レコード数が同数 (コンパクション済み WAL ファイルが主)
+// the same number of records (the compacted WAL file is the primary)
 TEST_F(partitioned_reading_test, same_record_count) {
     std::vector<source_entry> snapshot{};
     std::vector<source_entry> compacted{};
@@ -287,8 +289,8 @@ TEST_F(partitioned_reading_test, same_record_count) {
     check_all(true, {}, 40);
 }
 
-// remove_entry (スナップショットの remove_entry がコンパクション済み WAL ファイルの同じキーを打ち消す)、clear_storage
-// (ストレージ 2 の境界より古いエントリは両ファイルで読み飛ばす)、blob 付きのエントリ
+// remove_entry (a remove_entry of the snapshot cancels the same key of the compacted WAL file), clear_storage (entries
+// of storage 2 older than the boundary are skipped in both files), and entries with blobs
 TEST_F(partitioned_reading_test, remove_entry_clear_storage_and_blob) {
     std::vector<source_entry> snapshot{};
     std::vector<source_entry> compacted{};
@@ -299,18 +301,19 @@ TEST_F(partitioned_reading_test, remove_entry_clear_storage_and_blob) {
         }
     }
     for (int i = 0; i < 20; ++i) {
-        // ストレージ 2: epoch 3 未満は clear_storage で読み飛ばされる。スナップショットは epoch 3、コンパクション済みは
-        // 偶数番が epoch 2 (読み飛ばし)、奇数番が epoch 4
+        // storage 2: entries below epoch 3 are skipped by clear_storage. The snapshot has epoch 3; in the compacted file
+        // the even numbers have epoch 2 (skipped) and the odd numbers have epoch 4
         snapshot.push_back(i % 3 == 0 ? with_blob(2, key_of(i), "s", 3) : normal(2, key_of(i), "s", 3));
         compacted.push_back(normal(2, key_of(100 + i), "c", i % 2 == 0 ? 2 : 4));
     }
     place_files(file_bytes(snapshot), file_bytes(compacted), 1);
     const clear_storage_map clear_storage{{2, api::write_version_type{3, 0}}};
-    // ストレージ 1: 40 件のうち 10 件が打ち消される。ストレージ 2: スナップショットの 20 件と、コンパクション済みの奇数番 10 件
+    // storage 1: 10 of the 40 entries are cancelled. storage 2: the 20 entries of the snapshot and the 10 odd-numbered
+    // entries of the compacted file
     check_all(true, clear_storage, 30 + 20 + 10);
 }
 
-// コンパクション済み WAL ファイルがない
+// no compacted WAL file
 TEST_F(partitioned_reading_test, snapshot_only) {
     std::vector<source_entry> snapshot{};
     for (int i = 0; i < 37; ++i) {
@@ -320,7 +323,8 @@ TEST_F(partitioned_reading_test, snapshot_only) {
     check_all(false, {}, 37);
 }
 
-// 記録間隔がエントリより大きく、レコードがエントリを飛ばして置かれる場合。4 KiB を超えるエントリ (プローブの読み直し) を含む
+// the record interval is larger than an entry, so the records skip entries. Includes entries larger than 4 KiB (a probe
+// reads again)
 TEST_F(partitioned_reading_test, sparse_records_and_large_entries) {
     std::vector<source_entry> snapshot{};
     std::vector<source_entry> compacted{};
@@ -338,7 +342,7 @@ TEST_F(partitioned_reading_test, sparse_records_and_large_entries) {
     check_all(true, {}, 80);
 }
 
-// キーの分布を乱数で変えて複数回
+// several random distributions of the keys
 TEST_F(partitioned_reading_test, random_distributions) {
     for (unsigned seed = 1; seed <= 6; ++seed) {
         std::mt19937 gen(seed);
@@ -356,20 +360,20 @@ TEST_F(partitioned_reading_test, random_distributions) {
             const int where = where_dist(gen);
             const std::string key = key_of(k);
             if (where < 4) {
-                // スナップショットだけ
+                // only in the snapshot
                 snapshot.push_back(normal(1, key, std::string(static_cast<std::size_t>(len_dist(gen)), 's'), 2));
                 ++expected_count;
             } else if (where < 7) {
-                // コンパクション済みだけ
+                // only in the compacted file
                 compacted.push_back(normal(1, key, std::string(static_cast<std::size_t>(len_dist(gen)), 'c'), 1));
                 ++expected_count;
             } else if (where < 9) {
-                // 両方 (スナップショット側)
+                // in both (the snapshot side)
                 snapshot.push_back(normal(1, key, "s", 2));
                 compacted.push_back(normal(1, key, "c", 1));
                 ++expected_count;
             } else {
-                // コンパクション済みにあり、スナップショットの remove_entry で打ち消される
+                // in the compacted file, cancelled by a remove_entry of the snapshot
                 snapshot.push_back(remove(1, key, 2));
                 compacted.push_back(normal(1, key, "c", 1));
             }
@@ -383,8 +387,9 @@ TEST_F(partitioned_reading_test, random_distributions) {
     }
 }
 
-// 読み込み量: 領域ごとの読み込みが終了位置を越えないこと。プロセスの読み込みバイト数 (/proc/self/io の rchar) の増分が、
-// 2 つのファイルの大きさの合計とプローブの分に収まり、領域ごとにバッファの大きさ (16 MiB) を読む量にならないことで確かめる
+// the amount read: the reading of a region does not go beyond its end position. Checked by the increase of the bytes
+// read by the process (rchar of /proc/self/io) being within the total size of the two files plus the probes, not the
+// amount of reading the buffer size (16 MiB) per region
 TEST_F(partitioned_reading_test, read_amount_is_bounded_by_the_ranges) {
     std::vector<source_entry> snapshot{};
     std::vector<source_entry> compacted{};
@@ -396,7 +401,7 @@ TEST_F(partitioned_reading_test, read_amount_is_bounded_by_the_ranges) {
     }
     const std::string snapshot_bytes = file_bytes(snapshot);
     const std::string compacted_bytes = file_bytes(compacted);
-    // 記録間隔 32 KiB: スナップショット (約 2 MB) のレコードは約 64 個
+    // record interval 32 KiB: the snapshot (about 2 MB) has about 64 records
     place_files(snapshot_bytes, compacted_bytes, 32 * 1024);
     const rows expected = read_reference(true, {});
     ASSERT_EQ(expected.size(), 4000U);
@@ -417,16 +422,16 @@ TEST_F(partitioned_reading_test, read_amount_is_bounded_by_the_ranges) {
     EXPECT_EQ(read_partitioned(true, {}, 1, 4), expected);
     const std::uint64_t after = read_rchar();
     const std::uint64_t read_bytes = after - before;
-    // 測定が働いていること (スナップショットファイルは少なくとも 1 回は読まれる)
+    // the measurement works (the snapshot file is read at least once)
     EXPECT_GE(read_bytes, snapshot_bytes.size()) << "read " << read_bytes << " bytes";
-    // 領域 (約 64 個) ごとに 16 MiB 読む量 (約 1 GiB) にならず、ファイルの合計 (約 2.5 MB) とプローブの分 (領域ごとに
-    // 4 KiB × 十数回) に収まる
+    // not the amount of reading 16 MiB per region (about 64 regions, about 1 GiB), but within the total of the files
+    // (about 2.5 MB) plus the probes (4 KiB times a dozen or so per region)
     EXPECT_LT(read_bytes, snapshot_bytes.size() + compacted_bytes.size() + std::uint64_t{8} * 1024 * 1024)
         << "read " << read_bytes << " bytes";
 }
 
-// 旧世代の削除との競合: get_partitioned_cursors() の後にコンパクション済み WAL ファイル (とそのロケータファイル) を削除しても
-// 残りの領域を読める
+// the removal of the old generation: the remaining regions can be read even if the compacted WAL file (and its locator
+// file) is removed after get_partitioned_cursors()
 TEST_F(partitioned_reading_test, compacted_file_removed_after_cursors_are_created) {
     std::vector<source_entry> snapshot{};
     std::vector<source_entry> compacted{};
@@ -456,11 +461,11 @@ TEST_F(partitioned_reading_test, compacted_file_removed_after_cursors_are_create
     EXPECT_EQ(all, expected);
 }
 
-// 不正なロケータファイル: get_partitioned_cursors() が limestone_exception を投げる (get_cursor() はロケータファイルを
-// 使わないので読める)
+// an invalid locator file: get_partitioned_cursors() throws limestone_exception (get_cursor() does not use the locator
+// file, so it can read)
 TEST_F(partitioned_reading_test, invalid_locator_file_throws) {
     place_files(file_bytes({normal(1, "a", "s", 1)}), file_bytes({normal(1, "b", "c", 1)}), 1);
-    // スナップショットファイルのロケータファイルの先頭 (magic) を壊す
+    // break the beginning (the magic) of the locator file of the snapshot file
     {
         std::fstream f(lf::locator_file_path(snapshot_path()).string(), std::ios::binary | std::ios::in | std::ios::out);
         f.write("xxxx", 4);
@@ -470,7 +475,7 @@ TEST_F(partitioned_reading_test, invalid_locator_file_throws) {
         snapshot_impl snapshot(location, {}, compacted_name_if(true), 1);
         EXPECT_THROW((void) snapshot.get_partitioned_cursors(2), limestone_exception);
     }
-    // 直して、コンパクション済み WAL ファイルの大きさをロケータファイルの終端の値と食い違わせる
+    // repair it, and make the size of the compacted WAL file differ from the value at the end of its locator file
     locator_writer::build_from_file(snapshot_path(), lf::locator_file_path(snapshot_path()), 1);
     {
         std::ofstream f(compacted_path().string(), std::ios::binary | std::ios::app);
@@ -484,10 +489,10 @@ TEST_F(partitioned_reading_test, invalid_locator_file_throws) {
         } catch (const limestone_io_exception& e) {
             FAIL() << "unexpected I/O exception: " << e.what();
         } catch (const limestone_exception&) {
-            // 期待どおり
+            // as expected
         }
     }
-    // ロケータファイルがない (開けない) のは limestone_io_exception
+    // a missing locator file (cannot be opened) is limestone_io_exception
     boost::filesystem::remove(lf::locator_file_path(compacted_path()));
     {
         snapshot_impl snapshot(location, {}, compacted_name_if(true), 1);
@@ -495,15 +500,15 @@ TEST_F(partitioned_reading_test, invalid_locator_file_throws) {
     }
 }
 
-// cursor の next() の中のプローブの失敗 (レコードの位置にデータ系でないエントリがある): 公開 API の cursor::next() は
-// 例外を捕まえて abort する
+// a failure of a probe in next() of a cursor (an entry at the position of a record is not a data entry): the public API
+// cursor::next() catches the exception and aborts
 TEST_F(partitioned_reading_test, probe_failure_in_next_aborts) {
     std::vector<source_entry> snapshot{};
     for (int i = 0; i < 6; ++i) {
         snapshot.push_back(normal(1, key_of(i), "s", 1));
     }
     place_files(file_bytes(snapshot), std::nullopt, 1);
-    // コンパクション済み WAL ファイル: レコード 1 の位置に marker を置く (ロケータファイルは手で書く)
+    // the compacted WAL file: put a marker at the position of record 1 (the locator file is written by hand)
     const std::string e0 = normal_entry(1, key_of(1), "c", 1, 0);
     const std::string compacted_bytes = e0 + marker(2, 1) + normal_entry(1, key_of(3), "c", 1, 0);
     write_file(compacted_path(), compacted_bytes);

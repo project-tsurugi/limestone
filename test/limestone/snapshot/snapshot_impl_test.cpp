@@ -84,7 +84,7 @@ protected:
             throw std::runtime_error("expected pwal_0000 file not found");
         }
 
-        // get_partitioned_cursors が読むロケータファイル (全エントリをレコードにする)
+        // the locator file read by get_partitioned_cursors (every entry is a record)
         limestone::internal::locator_writer::build_from_file(
             target_file, limestone::internal::locator_format::locator_file_path(target_file), 1);
     }
@@ -122,7 +122,8 @@ TEST_F(snapshot_impl_test, get_partitioned_cursors_returns_all_entries) {
     EXPECT_EQ(actual_set, expected_set);
 }
 
-// 領域が複数 (全エントリがレコード、R = 1) で cursor が複数のとき、全 cursor の出力を合わせると全エントリになる
+// with several regions (every entry is a record, R = 1) and several cursors, the outputs of all the cursors together
+// are all the entries
 TEST_F(snapshot_impl_test, get_partitioned_cursors_with_several_regions) {
     std::vector<std::tuple<api::storage_id_type, std::string, std::string, api::write_version_type>> entries{};
     std::set<std::pair<std::string, std::string>> expected_set{};

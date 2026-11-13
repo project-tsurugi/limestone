@@ -33,7 +33,7 @@ region_allocator::region_allocator(locator snapshot_locator, std::optional<locat
     if (region_records_ == 0) {
         LOG_LP(FATAL) << "region records is 0";
     }
-    // レコード数の多いほうが主。同数ならコンパクション済み WAL ファイル
+    // the file with more records is the primary; the compacted WAL file on a tie
     if (compacted_locator_.has_value() && compacted_locator_->record_count() >= snapshot_locator_.record_count()) {
         primary_is_snapshot_ = false;
         primary_ = &*compacted_locator_;
@@ -88,7 +88,8 @@ region_range region_allocator::compute_range(std::size_t j, log_entry_reader& pr
     if (secondary_ != nullptr) {
         const locator& secondary = *secondary_;
         if (start_key.has_value()) {
-            // キーが開始キーより小さい最後のレコード = キーが開始キー以上の最初のレコードの 1 つ前
+            // the last record whose key is below the start key = the one before the first record whose key is at or
+            // above the start key
             const std::size_t k = lower_bound(*secondary_reader, *start_key);
             secondary_start = k == 0 ? 0 : secondary.position(k - 1);
         }
@@ -152,7 +153,7 @@ std::string region_allocator::probe(log_entry_reader& reader, std::uint64_t offs
             return std::string(view.serialized_key_sid());
         }
         case log_entry_read_result::status::end:
-            // 範囲は空でないので、ファイルがロケータの終端の値より小さい
+            // the range is not empty, so the file is smaller than the size recorded in the locator
             LOG_AND_THROW_EXCEPTION("the file is shorter than the locator says at " + std::to_string(offset) + ": "
                                     + reader.file().string());
         case log_entry_read_result::status::error:
@@ -162,8 +163,8 @@ std::string region_allocator::probe(log_entry_reader& reader, std::uint64_t offs
             LOG_AND_THROW_EXCEPTION("the entry at " + std::to_string(offset) + " is broken: " + reader.file().string()
                                     + ": " + read_result.error().message());
         }
-        // 読み終える位置をエントリの必要な分まで広げる。読んだ分より広がらなければ (読み込みが範囲より短く終わった)、
-        // ファイルがロケータの終端の値より小さい
+        // widen the end position to what the entry needs. If it does not go beyond what has been read (the read ended
+        // short of the range), the file is smaller than the size recorded in the locator
         const std::uint64_t required_end = offset + read_result.required();
         if (required_end > file_size || required_end <= end_offset) {
             LOG_AND_THROW_EXCEPTION("the entry at " + std::to_string(offset) + " is cut by the file size "

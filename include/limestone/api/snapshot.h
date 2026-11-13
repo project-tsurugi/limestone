@@ -127,11 +127,11 @@ private:
     std::unique_ptr<internal::snapshot_impl> pimpl;
 
     /**
-     * @brief スナップショットを作る。datastore だけが呼ぶ。
-     * @param location データの置き場所
-     * @param clear_storage ストレージごとの、これより古いエントリを読み飛ばす write_version
-     * @param compacted_file_name カタログに記録された現在のコンパクション済み WAL ファイルの名前。なければ nullopt
-     * @param region_records get_partitioned_cursors() の領域 1 つのロケータのレコード数
+     * @brief Creates a snapshot. Called only by datastore.
+     * @param location the data location
+     * @param clear_storage the write version per storage below which entries are skipped
+     * @param compacted_file_name the name of the current compacted WAL file recorded in the catalog, or nullopt
+     * @param region_records the number of locator records in one region of get_partitioned_cursors()
      */
     explicit snapshot(boost::filesystem::path location, std::map<storage_id_type, write_version_type> clear_storage,
                       std::optional<std::string> compacted_file_name, std::size_t region_records) noexcept;

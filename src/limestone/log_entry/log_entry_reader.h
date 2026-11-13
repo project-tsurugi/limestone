@@ -71,7 +71,8 @@ public:
      * @param error the kind of the failure (short_entry or unknown_type) and the value of the first byte of the entry
      *              that could not be parsed
      * @param offset the position of the first byte of the entry that could not be parsed
-     * @param required short_entry のとき、解析に必要なバイト数の下限 (offset から数える)。unknown_type のときは 0
+     * @param required for short_entry, the lower bound of the number of bytes needed to parse, counted from offset. 0
+     *                 for unknown_type
      * @return the result
      */
     [[nodiscard]] static log_entry_read_result error(const limestone::api::log_entry::read_error& error,
@@ -116,11 +117,11 @@ public:
     [[nodiscard]] limestone::api::log_entry::read_error error() const;
 
     /**
-     * @brief 解析に必要なバイト数の下限 (offset() から数える) を返す。結果が error で、失敗の種類が short_entry の
-     *        ときに有効。
+     * @brief Returns the lower bound of the number of bytes needed to parse, counted from offset(). Valid when the
+     *        result kind is error and the kind of the failure is short_entry.
      *
-     * 値は log_entry_view::parse() の required と同じで、読み込んだ範囲に対する下限である。この分を読んでも、
-     * 長さの項目がまだ読めていなければ、再び short_entry になる。
+     * The value is the same as the required of log_entry_view::parse(): a lower bound for the range read so far. If
+     * the length fields are still not read after reading this much, the result is short_entry again.
      */
     [[nodiscard]] std::size_t required() const;
 
@@ -171,7 +172,8 @@ std::ostream& operator<<(std::ostream& out, log_entry_read_result::status result
  */
 class log_entry_reader {
 public:
-    /// The default size of the buffer (the size read by one read). コンストラクタでバッファの大きさを指定しないときの値
+    /// The default size of the buffer (the size read by one read). Used when a constructor does not take the buffer
+    /// size
     static constexpr std::size_t default_buffer_size = std::size_t{16} * 1024 * 1024;
 
     /// The interval of waiting for more data in a file being written. The state function is called at each wait.
@@ -214,26 +216,26 @@ public:
                      file_operations& file_ops);
 
     /**
-     * @brief ファイルを開き、バッファの大きさを指定して、指定した位置から読む reader を作る。
+     * @brief Opens the file and creates a reader with the given buffer size that starts reading at the given position.
      *
-     * バッファの大きさを指定すること以外は、バッファの大きさを指定しないコンストラクタと同じ。
-     * @param file 読むファイル
-     * @param start_offset 読み始める位置。エントリの先頭であること
-     * @param buffer_size バッファの大きさ (バイト)。1 回の読み込みの大きさであり、これを超えるエントリには一時的に
-     *                    拡張する。0 なら FATAL ログを書いて abort する
-     * @throws limestone_io_exception ファイルを開けないか、状態を取得できないとき (errno 付き)。start_offset が
-     *         ファイルの大きさを超えるとき (errno なし)
+     * The same as the constructor without the buffer size, except that the buffer size is given.
+     * @param file the file to read
+     * @param start_offset the position to start reading at. It must be the beginning of an entry
+     * @param buffer_size the size of the buffer (bytes): the size read by one read. The buffer is expanded temporarily
+     *                    for an entry larger than this. Writes a FATAL log and aborts if it is 0
+     * @throws limestone_io_exception if the file cannot be opened or its status cannot be obtained (with errno), or if
+     *         start_offset exceeds the size of the file (without errno)
      */
     log_entry_reader(boost::filesystem::path file, std::uint64_t start_offset, std::size_t buffer_size);
 
     /**
-     * @brief ファイル操作を差し替えて、バッファの大きさを指定した reader を作る。テスト専用であり、プロダクトコードから
-     *        使わない。
-     * @param file 読むファイル
-     * @param start_offset 読み始める位置。エントリの先頭であること
-     * @param buffer_size バッファの大きさ (バイト)。0 なら FATAL ログを書いて abort する
-     * @param file_ops ファイル操作。このオブジェクトが破棄されるまで有効であること
-     * @throws limestone_io_exception ファイル操作を差し替えないコンストラクタと同じ
+     * @brief Creates a reader with the given buffer size and the file operations replaced. For testing only; must not
+     *        be used by production code.
+     * @param file the file to read
+     * @param start_offset the position to start reading at. It must be the beginning of an entry
+     * @param buffer_size the size of the buffer (bytes). Writes a FATAL log and aborts if it is 0
+     * @param file_ops the file operations. It must be valid until this object is destroyed
+     * @throws limestone_io_exception the same as the constructor without the file operations replaced
      */
     log_entry_reader(boost::filesystem::path file, std::uint64_t start_offset, std::size_t buffer_size,
                      file_operations& file_ops);
@@ -273,18 +275,20 @@ public:
     [[nodiscard]] log_entry_read_result next();
 
     /**
-     * @brief 読む範囲を設定する。次の next() は start_offset のエントリから読む。
+     * @brief Sets the range to read. The next next() reads from the entry at start_offset.
      *
-     * 前の範囲で読み込み済みのデータがバッファに残っていても、それは読まれない。set_range() を呼んだ後は、
-     * それまでに next() が返した view を使ってはならない (view が指すバッファは、次の next() の読み込みで上書きされる)。
-     * バッファの領域はそのまま使う。システムコールは呼ばない。
-     * ファイルを読んでいる間に変化しないものとして扱う reader (状態の関数なしで作った reader) にだけ使える。状態の関数を
-     * 渡して作った reader で呼ぶと FATAL ログを書いて abort する。
-     * 範囲がファイルの大きさに収まることは検査しない。収まらなければ、読み込みが尽きた位置で end か short_entry になる。
-     * @param start_offset 読み始める位置。エントリの先頭であること
-     * @param end_offset 読み終える位置。エントリの境界 (次のエントリの先頭かファイルの末尾) であること。この位置より
-     *                   後ろは読まず、達したら end を返す。エントリの途中なら、そのエントリは short_entry になる。
-     *                   start_offset より小さければ FATAL ログを書いて abort する
+     * The data of the previous range that remains in the buffer is not read. After set_range() is called, the views
+     * returned by next() so far must not be used (the buffer they refer to is overwritten by the read of the next
+     * next()). The area of the buffer is used as it is. No system call is made.
+     * Available only for a reader that treats the file as not changing while it is read (one created without a state
+     * function). Writes a FATAL log and aborts if called on a reader created with a state function.
+     * Does not check that the range is within the size of the file. If it is not, the result is end or short_entry at
+     * the position where the data read runs out.
+     * @param start_offset the position to start reading at. It must be the beginning of an entry
+     * @param end_offset the position to stop reading at. It must be an entry boundary (the beginning of the next entry
+     *                   or the end of the file). Nothing after this position is read, and end is returned when it is
+     *                   reached. If it is in the middle of an entry, that entry is short_entry. Writes a FATAL log and
+     *                   aborts if it is less than start_offset
      */
     void set_range(std::uint64_t start_offset, std::uint64_t end_offset);
 
@@ -343,7 +347,8 @@ private:
      *
      * When returning short_entry, moves the read position to the end of the file so that the next call returns end.
      * Called only while reading a file not being written (one that does not grow while it is read).
-     * @param required 解析に必要なバイト数の下限 (未解析の部分の先頭から数える)。short_entry の結果に入れる
+     * @param required the lower bound of the number of bytes needed to parse, counted from the beginning of the
+     *                 unparsed part. Put in the short_entry result
      */
     [[nodiscard]] log_entry_read_result end_or_short_entry(std::size_t required) noexcept;
 
@@ -356,14 +361,16 @@ private:
     void prepare_buffer(std::size_t required);
 
     /**
-     * @brief Reads into the whole free space of the buffer. set_range() で範囲を設定されたときは、読み終える位置までに限る。
+     * @brief Reads into the whole free space of the buffer. When a range is set by set_range(), reads up to the end
+     *        position only.
      * @return the number of bytes read. 0 means the end of the file
      * @throws limestone_io_exception if reading fails (with errno)
      */
     std::size_t read_into_buffer();
 
     /**
-     * @brief 読み終える位置までの残りの大きさ (end_offset_ から未解析の部分の先頭の位置を引いた値) を返す。
+     * @brief Returns the size of the rest up to the end position (end_offset_ minus the position of the beginning of
+     *        the unparsed part).
      */
     [[nodiscard]] std::uint64_t remaining_size() const noexcept;
 
@@ -376,12 +383,12 @@ private:
     /// whether the state function returned failed. If true, next() throws without calling the state function
     bool failed_{};
     int fd_{-1};
-    /// 読み終える位置。set_range() で設定された位置か、設定されていなければファイルの大きさ (書き込み中のファイルでは、
-    /// 取得し直すたびに更新する)
+    /// the position to stop reading at: the position set by set_range(), or the size of the file if not set (for a
+    /// file being written, updated each time the size is obtained again)
     std::uint64_t end_offset_{};
-    /// set_range() で範囲を設定されたかどうか。true なら、読み込みの量を end_offset_ までに限る
+    /// whether a range is set by set_range(). If true, the amount read is limited to end_offset_
     bool ranged_{};
-    /// 指定されたバッファの大きさ。buffer_ はこれを超えるエントリを読む間だけ、これより大きくなる
+    /// the given buffer size. buffer_ is larger than this only while reading an entry larger than this
     std::size_t buffer_size_{default_buffer_size};
 
     std::string buffer_{};
