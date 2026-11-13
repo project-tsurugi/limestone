@@ -207,6 +207,27 @@ TEST_F(locator_test, rejects_locatee_size_mismatch) {
     EXPECT_NO_THROW(locator(file(), 9));
 }
 
+// Invalid if the value of a record is at or below the previous record (reversed, or the same value)
+TEST_F(locator_test, rejects_records_not_increasing) {
+    std::string bytes = write_valid({0, 100, 250}, 400);
+    // set record 1 (the 8 bytes after the first record following the header) to 300, reversed against record 2 (250)
+    bytes.replace(lf::header_size + lf::record_size, lf::record_size, u64le(300));
+    write_file(file(), bytes);
+    expect_invalid(file(), 400, "the record 2 (250) is not after the record 1 (300)");
+    // the same value is also invalid
+    bytes.replace(lf::header_size + lf::record_size, lf::record_size, u64le(250));
+    write_file(file(), bytes);
+    expect_invalid(file(), 400, "the record 2 (250) is not after the record 1 (250)");
+}
+
+// Invalid if the value of a record is at or beyond the size of the locatee file
+TEST_F(locator_test, rejects_record_beyond_locatee_size) {
+    std::string bytes = write_valid({0, 100, 250}, 400);
+    bytes.replace(lf::header_size + 2 * lf::record_size, lf::record_size, u64le(400));
+    write_file(file(), bytes);
+    expect_invalid(file(), 400, "the record 2 (400) is not within the locatee size 400");
+}
+
 // limestone_io_exception if the file does not exist
 TEST_F(locator_test, throws_when_file_is_missing) {
     EXPECT_THROW(locator(file(), 0), limestone_io_exception);

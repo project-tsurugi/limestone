@@ -17,6 +17,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <fstream>
+#include <iterator>
 #include <map>
 #include <memory>
 #include <optional>
@@ -521,6 +522,19 @@ TEST_F(partitioned_reading_test, invalid_locator_file_throws) {
         } catch (const limestone_exception&) {
             // as expected
         }
+    }
+    // a locator file whose records are not in ascending order (written by hand) is limestone_exception
+    {
+        std::string bytes{};
+        {
+            std::ifstream in(lf::locator_file_path(compacted_path()).string(), std::ios::binary);
+            bytes.assign(std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>());
+        }
+        const std::string reversed = bytes.substr(0, lf::header_size) + u64le(20) + u64le(10)
+                                   + u64le(boost::filesystem::file_size(compacted_path())) + u64le(lf::footer_magic);
+        write_file(lf::locator_file_path(compacted_path()), reversed);
+        snapshot_impl snapshot(location, {}, compacted_name_if(true), 1);
+        EXPECT_THROW((void) snapshot.get_partitioned_cursors(2), limestone_exception);
     }
     // a missing locator file (cannot be opened) is limestone_io_exception
     boost::filesystem::remove(lf::locator_file_path(compacted_path()));

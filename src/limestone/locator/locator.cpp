@@ -113,7 +113,21 @@ void locator::read(file_operations& file_ops, std::uint64_t locatee_size) {
     const std::string_view records = bytes.substr(0, bytes.size() - footer_size);
     positions_.reserve(records.size() / record_size);
     for (std::size_t pos = 0; pos < records.size(); pos += record_size) {
-        positions_.push_back(load_uint64le(records.substr(pos, record_size)));
+        const std::uint64_t position = load_uint64le(records.substr(pos, record_size));
+        // the records must be within the size of the locatee file and strictly ascending. The computation of the range
+        // of a region depends on it (reading from a position outside the file loses entries without an error)
+        if (position >= locatee_size_) {
+            LOG_AND_THROW_EXCEPTION("invalid locator file (the record " + std::to_string(positions_.size()) + " ("
+                                    + std::to_string(position) + ") is not within the locatee size "
+                                    + std::to_string(locatee_size_) + "): " + file_.string());
+        }
+        if (! positions_.empty() && position <= positions_.back()) {
+            LOG_AND_THROW_EXCEPTION("invalid locator file (the record " + std::to_string(positions_.size()) + " ("
+                                    + std::to_string(position) + ") is not after the record "
+                                    + std::to_string(positions_.size() - 1) + " (" + std::to_string(positions_.back())
+                                    + ")): " + file_.string());
+        }
+        positions_.push_back(position);
     }
 }
 

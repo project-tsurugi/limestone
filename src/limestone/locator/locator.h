@@ -28,12 +28,14 @@ namespace limestone::internal {
 /**
  * @brief A locator file that has been read. Holds the records and the size of the locatee file.
  *
- * The whole file is read at construction and is verified to be valid. It is invalid in the following 5 cases.
+ * The whole file is read at construction and is verified to be valid. It is invalid in the following 6 cases.
  * - The magic of the header does not match.
  * - The format version of the header is not 1.
  * - The size of the locator file minus 4096 and 16 is negative or is not a multiple of 8.
  * - The magic of the footer does not match.
  * - The size of the locatee file in the footer does not match the given size of the locatee file.
+ * - The value of a record is at or beyond the size of the locatee file, or is at or below the value of the previous
+ *   record (the records are not strictly ascending).
  */
 class locator {
 public:
