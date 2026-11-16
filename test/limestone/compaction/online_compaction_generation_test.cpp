@@ -23,6 +23,9 @@
 
 #include "compaction_test_fixture.h"
 #include "datastore_impl.h"
+#include "locator/locator.h"
+#include "locator/locator_format.h"
+#include "locator/locator_settings.h"
 
 namespace limestone::testing {
 
@@ -99,6 +102,27 @@ public:
         test_datastore->on_rotate_log_files_callback = nullptr;
     }
 
+    // Makes a log directory with a compacted WAL file of generation 1, stops the datastore, and rewrites the
+    // manifest to the given format version (imitating a log directory of an older version).
+    void make_generation_one_logdir_of_version(int persistent_format_version) {
+        gen_datastore();
+        datastore_->switch_epoch(1);
+        write_and_make_durable("k1", "v1", 1);
+        write_and_make_durable("k2", "v2", 2);
+        run_compact_with_epoch_switch(4);
+        datastore_->shutdown();
+        datastore_ = nullptr;
+        create_file(manifest_path, data_manifest(persistent_format_version));
+    }
+
+    // Reads the persistent format version of the manifest.
+    int read_persistent_format_version() {
+        std::ifstream ifs(manifest_path.string());
+        nlohmann::json j;
+        ifs >> j;
+        return j["persistent_format_version"].get<int>();
+    }
+
     // Puts the captured crash state back into location so that a datastore can start on it.
     void restore_crash_state(const boost::filesystem::path& copy_from) {
         datastore_->shutdown();
@@ -172,6 +196,8 @@ TEST_F(online_compaction_generation_test, migrates_from_generation_zero_legacy_n
     boost::filesystem::path dir{location};
     boost::filesystem::rename(dir / "pwal_0000.compacted.1",
                               dir / compaction_catalog::get_compacted_filename());
+    boost::filesystem::rename(dir / "pwal_0000.compacted.1.loc",
+                              dir / locator_format::locator_file_name(compaction_catalog::get_compacted_filename()));
     {
         compaction_catalog catalog = compaction_catalog::from_catalog_file(dir);
         compaction_catalog rewritten{dir};
@@ -303,6 +329,8 @@ TEST_F(online_compaction_generation_test, double_read_of_migration_window_is_ide
     boost::filesystem::path dir{location};
     boost::filesystem::rename(dir / "pwal_0000.compacted.1",
                               dir / compaction_catalog::get_compacted_filename());
+    boost::filesystem::rename(dir / "pwal_0000.compacted.1.loc",
+                              dir / locator_format::locator_file_name(compaction_catalog::get_compacted_filename()));
     {
         compaction_catalog catalog = compaction_catalog::from_catalog_file(dir);
         compaction_catalog rewritten{dir};
@@ -410,6 +438,76 @@ TEST_F(online_compaction_generation_test, orphan_old_generation_from_commit_remo
     EXPECT_EQ(kv_list.size(), 2);
 }
 
+// Locator files (.loc) at startup: the locator file of a compacted WAL file recorded by the catalog remains, and
+// a locator file of an unrecorded name is removed as an orphan whether or not its locatee file exists. A locator
+// file is not read as a WAL file, so the startup does not fail even if its content is not in the WAL format
+TEST_F(online_compaction_generation_test, locator_files_follow_the_catalog_at_startup) {
+    gen_datastore();
+    datastore_->switch_epoch(1);
+    write_and_make_durable("k1", "v1", 1);
+    run_compact_with_epoch_switch(3);  // generation 1
+    datastore_->shutdown();
+    datastore_ = nullptr;
+
+    boost::filesystem::path dir{location};
+    const std::string registered = "pwal_0000.compacted.1";
+    ASSERT_TRUE(boost::filesystem::exists(dir / registered));
+    auto write_non_wal = [&dir](const std::string& name) {
+        std::ofstream ofs((dir / name).string());
+        ofs << "not a wal file";
+    };
+    write_non_wal(registered + ".loc");                                              // the recorded locator file
+    write_non_wal("pwal_0000.compacted.7.loc");                                      // an orphan without the locatee
+    boost::filesystem::copy_file(dir / registered, dir / "pwal_0000.compacted.8");  // an unrecorded generation
+    write_non_wal("pwal_0000.compacted.8.loc");                                      // its locator file
+    write_non_wal("pwal_0000.carry.7.loc");                                          // a locator file with a carry name
+
+    gen_datastore();
+
+    EXPECT_TRUE(boost::filesystem::exists(dir / (registered + ".loc")));
+    EXPECT_FALSE(boost::filesystem::exists(dir / "pwal_0000.compacted.7.loc"));
+    EXPECT_FALSE(boost::filesystem::exists(dir / "pwal_0000.compacted.8"));
+    EXPECT_FALSE(boost::filesystem::exists(dir / "pwal_0000.compacted.8.loc"));
+    EXPECT_FALSE(boost::filesystem::exists(dir / "pwal_0000.carry.7.loc"));
+
+    std::vector<std::pair<std::string, std::string>> kv_list = restart_datastore_and_read_snapshot();
+    ASSERT_EQ(kv_list.size(), 1);
+    EXPECT_EQ(kv_list[0].first, "k1");
+    EXPECT_EQ(kv_list[0].second, "v1");
+}
+
+// A recorded locator file enters the set of files of the datastore at startup, but is not chosen as an input of
+// the compaction. The only input is then the current compacted WAL file, so the compaction is not performed and
+// the generation does not advance
+TEST_F(online_compaction_generation_test, locator_file_alone_does_not_trigger_compaction) {
+    gen_datastore();
+    datastore_->switch_epoch(1);
+    write_and_make_durable("k1", "v1", 1);
+    run_compact_with_epoch_switch(3);  // generation 1
+    datastore_->shutdown();
+    datastore_ = nullptr;
+
+    boost::filesystem::path dir{location};
+    {
+        std::ofstream ofs((dir / "pwal_0000.compacted.1.loc").string());
+        ofs << "not a wal file";
+    }
+
+    gen_datastore();
+    datastore_->switch_epoch(4);
+    run_compact_with_epoch_switch(6);
+
+    {
+        compaction_catalog catalog = compaction_catalog::from_catalog_file(dir);
+        EXPECT_EQ(catalog.get_generation(), 1);
+        ASSERT_TRUE(catalog.get_current_compacted_file_name().has_value());
+        EXPECT_EQ(catalog.get_current_compacted_file_name().value(), "pwal_0000.compacted.1");
+        EXPECT_EQ(catalog.get_detached_pwals().count("pwal_0000.compacted.1.loc"), 0);
+    }
+    EXPECT_FALSE(boost::filesystem::exists(dir / "pwal_0000.compacted.2"));
+    EXPECT_TRUE(boost::filesystem::exists(dir / "pwal_0000.compacted.1.loc"));
+}
+
 // Migration startup: starting from a crash remnant of an old binary (a ".prev" file
 // plus the registered generation-0 file), the ".prev" file and an unregistered
 // carry-named remnant are removed as orphans, the registered generation-0 file stays,
@@ -427,6 +525,8 @@ TEST_F(online_compaction_generation_test, prev_remnant_and_unregistered_carry_ar
     boost::filesystem::path dir{location};
     boost::filesystem::rename(dir / "pwal_0000.compacted.1",
                               dir / compaction_catalog::get_compacted_filename());
+    boost::filesystem::rename(dir / "pwal_0000.compacted.1.loc",
+                              dir / locator_format::locator_file_name(compaction_catalog::get_compacted_filename()));
     {
         compaction_catalog catalog = compaction_catalog::from_catalog_file(dir);
         compaction_catalog rewritten{dir};
@@ -535,6 +635,269 @@ TEST_F(online_compaction_generation_test, startup_fails_when_orphan_removal_fail
 
     // Cleanup (no datastore was created, so TearDown can remove the location).
     boost::filesystem::remove_all(orphan_dir);
+}
+
+// After the publish, the locator file of the compacted WAL file exists and is registered in the datastore (it is
+// included in the backup). The publish of the next generation removes the locator file of the old generation
+// and drops its registration.
+TEST_F(online_compaction_generation_test, locator_file_is_published_and_the_old_one_is_removed) {
+    gen_datastore();
+    datastore_->switch_epoch(1);
+    write_and_make_durable("k1", "v1", 1);
+    run_compact_with_epoch_switch(3);
+
+    const boost::filesystem::path compacted_1 = boost::filesystem::path(location) / "pwal_0000.compacted.1";
+    const boost::filesystem::path locator_1 = boost::filesystem::path(location) / "pwal_0000.compacted.1.loc";
+    ASSERT_TRUE(boost::filesystem::exists(compacted_1));
+    ASSERT_TRUE(boost::filesystem::exists(locator_1));
+    {
+        // The size of the locatee file in the footer matches the size of the published compacted WAL file (it
+        // passes the check of the read)
+        locator loc(locator_1, boost::filesystem::file_size(compacted_1));
+        EXPECT_EQ(loc.locatee_size(), boost::filesystem::file_size(compacted_1));
+        EXPECT_EQ(loc.record_count(), 1);  // only record 0 (smaller than the default record interval)
+    }
+    EXPECT_NE(datastore_->files().find(locator_1), datastore_->files().end());
+    {
+        auto backup = begin_backup_with_epoch_switch(backup_type::standard, 4);
+        bool found = false;
+        for (const auto& entry : backup->entries()) {
+            found = found || entry.source_path() == locator_1;
+        }
+        EXPECT_TRUE(found);
+        backup->notify_end_backup();  // the next compaction is skipped unless the backup ends
+    }
+
+    write_and_make_durable("k2", "v2", 4);
+    run_compact_with_epoch_switch(6);
+
+    const boost::filesystem::path compacted_2 = boost::filesystem::path(location) / "pwal_0000.compacted.2";
+    const boost::filesystem::path locator_2 = boost::filesystem::path(location) / "pwal_0000.compacted.2.loc";
+    EXPECT_FALSE(boost::filesystem::exists(compacted_1));
+    EXPECT_FALSE(boost::filesystem::exists(locator_1));
+    EXPECT_EQ(datastore_->files().find(locator_1), datastore_->files().end());
+    ASSERT_TRUE(boost::filesystem::exists(locator_2));
+    EXPECT_NE(datastore_->files().find(locator_2), datastore_->files().end());
+    locator loc(locator_2, boost::filesystem::file_size(compacted_2));
+    EXPECT_EQ(loc.locatee_size(), boost::filesystem::file_size(compacted_2));
+}
+
+// If the temporary file of the locator file cannot be created (a directory of the same name is placed), the
+// incomplete temporary files of the compacted WAL file and the locator file are both removed, and the next
+// request succeeds.
+TEST_F(online_compaction_generation_test, locator_temp_write_failure_is_retried_on_the_next_request) {
+    gen_datastore();
+    datastore_->switch_epoch(1);
+    write_and_make_durable("k1", "v1", 1);
+
+    boost::filesystem::path temp_dir =
+        boost::filesystem::path(location) / compaction_catalog::get_compaction_temp_dirname();
+    boost::filesystem::create_directories(temp_dir / "pwal_0000.compacted.1.loc");
+
+    run_compact_with_epoch_switch(3);
+
+    {
+        compaction_catalog catalog = compaction_catalog::from_catalog_file(boost::filesystem::path(location));
+        EXPECT_EQ(catalog.get_generation(), 0);
+    }
+    EXPECT_FALSE(boost::filesystem::exists(temp_dir / "pwal_0000.compacted.1"));
+    EXPECT_FALSE(boost::filesystem::exists(temp_dir / "pwal_0000.compacted.1.loc"));
+    EXPECT_FALSE(boost::filesystem::exists(boost::filesystem::path(location) / "pwal_0000.compacted.1.loc"));
+
+    run_compact_with_epoch_switch(4);
+    {
+        compaction_catalog catalog = compaction_catalog::from_catalog_file(boost::filesystem::path(location));
+        EXPECT_EQ(catalog.get_generation(), 1);
+    }
+    EXPECT_TRUE(boost::filesystem::exists(boost::filesystem::path(location) / "pwal_0000.compacted.1.loc"));
+}
+
+// With a small record interval given by the settings for tests, a small amount of data yields several records (the
+// settings reach the online compaction).
+TEST_F(online_compaction_generation_test, locator_settings_for_test_reach_the_compaction) {
+    gen_datastore();
+    datastore_->get_impl()->set_locator_settings_for_test({64, 1});
+    datastore_->switch_epoch(1);
+    write_and_make_durable("k1", "v1", 1);
+    write_and_make_durable("k2", "v2", 2);
+    write_and_make_durable("k3", "v3", 3);
+    write_and_make_durable("k4", "v4", 4);
+    run_compact_with_epoch_switch(6);
+
+    const boost::filesystem::path compacted_1 = boost::filesystem::path(location) / "pwal_0000.compacted.1";
+    const boost::filesystem::path locator_1 = boost::filesystem::path(location) / "pwal_0000.compacted.1.loc";
+    ASSERT_TRUE(boost::filesystem::exists(locator_1));
+    locator loc(locator_1, boost::filesystem::file_size(compacted_1));
+    // An entry is less than 64 bytes, so the first entry beginning in each record interval of 64 bytes is recorded
+    EXPECT_GE(loc.record_count(), 2);
+    EXPECT_LT(loc.record_count(), 4);  // an entry that crosses several multiples still yields one record
+    EXPECT_EQ(loc.position(0), 9);  // right after the marker_begin
+}
+
+// The snapshot creation at startup makes data/snapshot.loc, consistent with the size of the snapshot file. The
+// settings for tests reach the snapshot if given before ready(). Like the snapshot file, it is not registered in
+// the datastore.
+TEST_F(online_compaction_generation_test, snapshot_locator_file_is_created_at_startup) {
+    gen_datastore();
+    datastore_->switch_epoch(1);
+    write_and_make_durable("k1", "v1", 1);
+    write_and_make_durable("k2", "v2", 2);
+    write_and_make_durable("k3", "v3", 3);
+    datastore_->shutdown();
+    datastore_ = nullptr;
+
+    limestone::api::configuration conf{};
+    conf.set_data_location(location);
+    datastore_ = std::make_unique<limestone::api::datastore_test>(conf);
+    datastore_->get_impl()->set_locator_settings_for_test({64, 1});
+    lc0_ = &datastore_->create_channel();
+    datastore_->ready();
+    datastore_->wait_for_blob_file_garbace_collector();
+
+    const boost::filesystem::path snapshot_file = boost::filesystem::path(location) / "data" / "snapshot";
+    const boost::filesystem::path snapshot_locator = boost::filesystem::path(location) / "data" / "snapshot.loc";
+    ASSERT_TRUE(boost::filesystem::exists(snapshot_file));
+    ASSERT_TRUE(boost::filesystem::exists(snapshot_locator));
+    locator loc(snapshot_locator, boost::filesystem::file_size(snapshot_file));
+    EXPECT_EQ(loc.locatee_size(), boost::filesystem::file_size(snapshot_file));
+    EXPECT_GE(loc.record_count(), 2);
+    EXPECT_EQ(datastore_->files().find(snapshot_locator), datastore_->files().end());
+}
+
+// The migration from 8 generates the locator file of the recorded compacted WAL file and makes the manifest 9. An
+// existing locator file (including an incomplete one left by a stop during the generation) is discarded and
+// generated again. The locator file of the snapshot is not made.
+TEST_F(online_compaction_generation_test, migration_from_v8_generates_the_locator_file) {
+    make_generation_one_logdir_of_version(8);
+    const boost::filesystem::path dir{location};
+    const boost::filesystem::path compacted = dir / "pwal_0000.compacted.1";
+    const boost::filesystem::path locator_file = dir / "pwal_0000.compacted.1.loc";
+    const boost::filesystem::path snapshot_locator = dir / "data" / "snapshot.loc";
+    { std::ofstream ofs(locator_file.string(), std::ios::trunc); ofs << "half-written"; }
+    boost::filesystem::remove(snapshot_locator);
+
+    manifest::migration_info info = check_and_migrate_logdir_format(dir);
+
+    EXPECT_EQ(info.get_old_version(), 8);
+    EXPECT_EQ(info.get_new_version(), 9);
+    EXPECT_EQ(read_persistent_format_version(), 9);
+    locator loc(locator_file, boost::filesystem::file_size(compacted));
+    EXPECT_EQ(loc.record_count(), 1);
+    EXPECT_EQ(loc.position(0), 9);
+    EXPECT_FALSE(boost::filesystem::exists(snapshot_locator));
+}
+
+// The migration from 7 or less also generates it and makes the manifest 9.
+TEST_F(online_compaction_generation_test, migration_from_v7_generates_the_locator_file) {
+    make_generation_one_logdir_of_version(7);
+    const boost::filesystem::path dir{location};
+    const boost::filesystem::path locator_file = dir / "pwal_0000.compacted.1.loc";
+    boost::filesystem::remove(locator_file);
+
+    manifest::migration_info info = check_and_migrate_logdir_format(dir);
+
+    EXPECT_EQ(info.get_old_version(), 7);
+    EXPECT_EQ(info.get_new_version(), 9);
+    EXPECT_EQ(read_persistent_format_version(), 9);
+    locator loc(locator_file, boost::filesystem::file_size(dir / "pwal_0000.compacted.1"));
+    EXPECT_EQ(loc.record_count(), 1);
+}
+
+// On a log directory of 9, nothing is generated or rewritten (the existing locator file is not touched).
+TEST_F(online_compaction_generation_test, migration_does_nothing_on_v9) {
+    make_generation_one_logdir_of_version(9);
+    const boost::filesystem::path dir{location};
+    const boost::filesystem::path locator_file = dir / "pwal_0000.compacted.1.loc";
+    { std::ofstream ofs(locator_file.string(), std::ios::trunc); ofs << "untouched"; }
+
+    manifest::migration_info info = check_and_migrate_logdir_format(dir);
+
+    EXPECT_EQ(info.get_old_version(), 9);
+    EXPECT_EQ(info.get_new_version(), 9);
+    EXPECT_EQ(boost::filesystem::file_size(locator_file), 9);  // "untouched"
+}
+
+// Starting the datastore on a log directory of 8 generates the locator file, and the data can be read.
+TEST_F(online_compaction_generation_test, datastore_starts_on_v8_and_generates_the_locator_file) {
+    make_generation_one_logdir_of_version(8);
+    const boost::filesystem::path dir{location};
+    const boost::filesystem::path locator_file = dir / "pwal_0000.compacted.1.loc";
+    boost::filesystem::remove(locator_file);
+
+    gen_datastore();
+    std::unique_ptr<snapshot> snapshot = datastore_->get_snapshot();
+    std::unique_ptr<cursor> cursor = snapshot->get_cursor();
+    std::size_t entries = 0;
+    while (cursor->next()) {
+        ++entries;
+    }
+
+    EXPECT_EQ(entries, 2);
+    EXPECT_EQ(read_persistent_format_version(), 9);
+    locator loc(locator_file, boost::filesystem::file_size(dir / "pwal_0000.compacted.1"));
+    EXPECT_EQ(loc.record_count(), 1);
+}
+
+// The startup fails if the locator file of the recorded compacted WAL file is missing.
+TEST_F(online_compaction_generation_test, datastore_fails_to_start_without_the_locator_file) {
+    make_generation_one_logdir_of_version(9);
+    boost::filesystem::remove(boost::filesystem::path(location) / "pwal_0000.compacted.1.loc");
+
+    EXPECT_THROW(gen_datastore(), limestone_exception);
+}
+
+// The locator file generated by the migration is included in the backup taken right after the startup.
+TEST_F(online_compaction_generation_test, backup_after_the_migration_contains_the_locator_file) {
+    make_generation_one_logdir_of_version(8);
+    const boost::filesystem::path locator_file = boost::filesystem::path(location) / "pwal_0000.compacted.1.loc";
+    boost::filesystem::remove(locator_file);
+
+    gen_datastore();
+    EXPECT_NE(datastore_->files().find(locator_file), datastore_->files().end());
+    auto backup = begin_backup_with_epoch_switch(backup_type::standard, 5);
+    bool found = false;
+    for (const auto& entry : backup->entries()) {
+        found = found || entry.source_path() == locator_file;
+    }
+    EXPECT_TRUE(found);
+    backup->notify_end_backup();
+}
+
+// The subcommands of dblogutil also go through the migration and generate the locator file.
+TEST_F(online_compaction_generation_test, dblogutil_generates_the_locator_file_on_v8) {
+    for (const std::string subcommand : {"inspect", "repair --epoch=3"}) {
+        make_generation_one_logdir_of_version(8);
+        const boost::filesystem::path dir{location};
+        const boost::filesystem::path locator_file = dir / "pwal_0000.compacted.1.loc";
+        boost::filesystem::remove(locator_file);
+
+        std::string out;
+        invoke(std::string(util_command) + " " + subcommand + " " + dir.string() + " 2>&1", out);
+
+        EXPECT_EQ(read_persistent_format_version(), 9) << subcommand << "\n" << out;
+        EXPECT_TRUE(boost::filesystem::exists(locator_file)) << subcommand << "\n" << out;
+        boost::filesystem::remove_all(dir);
+        boost::filesystem::create_directory(dir);
+    }
+}
+
+// dblogutil does not migrate unless it acquires the flock (it does not rewrite a log directory in use by another
+// process).
+TEST_F(online_compaction_generation_test, dblogutil_does_not_migrate_without_the_lock) {
+    make_generation_one_logdir_of_version(8);
+    const boost::filesystem::path dir{location};
+    const boost::filesystem::path locator_file = dir / "pwal_0000.compacted.1.loc";
+    boost::filesystem::remove(locator_file);
+    int lock_fd = manifest::acquire_lock(dir);
+    ASSERT_NE(lock_fd, -1);
+
+    std::string out;
+    invoke(std::string(util_command) + " inspect " + dir.string() + " 2>&1", out);
+    close(lock_fd);
+
+    EXPECT_NE(out.find("already in use"), std::string::npos) << out;
+    EXPECT_EQ(read_persistent_format_version(), 8);
+    EXPECT_FALSE(boost::filesystem::exists(locator_file));
 }
 
 } // namespace limestone::testing

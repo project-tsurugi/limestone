@@ -18,6 +18,8 @@
 #include <boost/filesystem.hpp>
 #include <list>
 #include <map>
+#include <set>
+#include <string>
 
 #include <limestone/api/blob_id_type.h>
 #include <limestone/api/datastore.h>
@@ -238,7 +240,7 @@ public:
      * A failure of a worker (limestone_exception) aborts the queue to stop the other workers, and is rethrown
      * after all the workers end. If the producer aborts the queue, the workers stop reading the files they are
      * on, and the scan fails with a limestone_exception after all the workers end.
-     * Only the files whose names start with pwal (is_wal) are scanned.
+     * Only the files satisfying is_wal are scanned.
      * @param queue the queue of the input files. The scan does not end until the producer closes or aborts it
      * @param ld_epoch the durable epoch (or the boundary epoch of the compaction)
      * @param add_entry called with each valid entry and the number of the worker that read it
@@ -266,7 +268,13 @@ public:
         const error_report_func_t& report_error,
         parse_error& pe);
 
-    static bool is_wal(const boost::filesystem::path& p) { return p.filename().string().rfind(log_channel_prefix, 0) == 0; }
+    /**
+     * @brief Returns whether the file is a WAL file (a target of the scan): its name begins with pwal_ and is not
+     *        the name of a locator file (ending with .loc)
+     * @param p the path of the file
+     * @return true if it is a WAL file
+     */
+    static bool is_wal(const boost::filesystem::path& p);
     static bool is_detached_wal(const boost::filesystem::path& p) {
         auto filename = p.filename().string();
         return (filename.length() > 9 && filename.rfind(log_channel_prefix, 0) == 0);
@@ -280,10 +288,21 @@ public:
      */
     void rescan_directory_paths();
 
+    /**
+     * @brief Sets the files (by name within the log directory) that rescan_directory_paths() leaves out of the
+     *        path list, so that the scan_pwal_files family does not scan them.
+     *
+     * Takes effect at the next rescan_directory_paths().
+     *
+     * @param file_names the names of the files to leave out
+     */
+    void set_excluded_file_names(std::set<std::string> file_names);
+
 private:
     boost::filesystem::path dblogdir_;
     std::optional<std::reference_wrapper<compaction_options>> options_;
     std::list<boost::filesystem::path> path_list_;
+    std::set<std::string> excluded_file_names_{};
     int thread_num_{1};
     thread_end_hook_t thread_end_hook_{};
     bool fail_fast_{false};

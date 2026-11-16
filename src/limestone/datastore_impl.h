@@ -38,6 +38,7 @@
 #include "blob_file_resolver.h"
 #include "blob_pool_impl.h"
 #include "file_operations.h"
+#include "locator/locator_settings.h"
 #include "manifest.h"
 #include "replication/replica_connector.h"
 #include "replication/replication_endpoint.h"
@@ -136,6 +137,13 @@ public:
 
     /// @brief the parent directory in which the sort creates its working directory (sorting)
     [[nodiscard]] const boost::filesystem::path& sort_work_dir_parent() const noexcept;
+
+    /// @brief Replaces the settings of the locator file (for tests). They also apply to the snapshot at startup if
+    /// set before ready() of the datastore. Do not call it while a compaction is running
+    void set_locator_settings_for_test(const limestone::internal::locator_settings& settings) noexcept;
+
+    /// @brief Settings of the locator file (used for the locator files of the snapshot file and the compacted WAL file)
+    [[nodiscard]] const limestone::internal::locator_settings& get_locator_settings() const noexcept;
 
     // Increments the backup counter.
     void increment_backup_counter() noexcept;
@@ -561,6 +569,9 @@ private:
     std::size_t sort_arena_size_bytes_{};
     std::size_t sort_merge_fanin_{};
     boost::filesystem::path sort_work_dir_parent_{};
+
+    // Settings of the locator file. They keep the defaults, and only tests replace them
+    limestone::internal::locator_settings locator_settings_{};
 
     // Atomic counter for tracking active backup operations.
     std::atomic<int> backup_counter_;

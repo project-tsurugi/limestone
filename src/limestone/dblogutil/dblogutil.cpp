@@ -18,6 +18,7 @@
 #include <unistd.h>
 
 #include <iostream>
+#include <set>
 #include <string>
 #include <stdlib.h>  // NOLINT(*-deprecated-headers): <cstdlib> does not provide std::mkdtemp
 #include <glog/logging.h>
@@ -121,6 +122,16 @@ sort_options parse_sort_options(int thread_num) {
     sort.settings.merge_fanin = FLAGS_sort_merge_fanin;
     sort.work_dir_parent = std::move(work_dir_parent);
     return sort;
+}
+
+// the names of the files recorded by the compaction catalog whose content is in the compacted WAL file: the compacted
+// WAL files and the detached pwals (the inputs of the compaction, which remain until they are deleted by the operator)
+std::set<std::string> compacted_file_names(const compaction_catalog& catalog) {
+    std::set<std::string> names = catalog.get_detached_pwals();
+    for (const compacted_file_info& info : catalog.get_compacted_files()) {
+        names.insert(info.get_file_name());
+    }
+    return names;
 }
 
 void inspect(dblog_scan &ds, std::optional<epoch_id_type> epoch) {
@@ -687,14 +698,21 @@ int main(char *dir, subcommand mode) {  // NOLINT
     }
     try {
         int lock_fd = manifest::acquire_lock(p);
-        check_and_migrate_logdir_format(p);
         if (lock_fd == -1) {
             LOG(ERROR) << "Log directory " << p
                        << " is already in use by another process. Operation aborted.";
             log_and_exit(64);
         }
+        // The migration rewrites files, so it is performed after confirming that the lock is acquired
+        check_and_migrate_logdir_format(p);
         dblog_scan ds(p);
         ds.set_thread_num(thread_num);
+        if (mode == subcommand::cmd_inspect || mode == subcommand::cmd_repair) {
+            // The files whose content is already in the compacted WAL file (the compacted WAL file itself and the
+            // detached pwals recorded by the catalog) are not scanned, as at startup
+            ds.set_excluded_file_names(compacted_file_names(compaction_catalog::from_catalog_file(p)));
+            ds.rescan_directory_paths();
+        }
         if (mode == subcommand::cmd_inspect) inspect(ds, opt_epoch);
         if (mode == subcommand::cmd_repair) repair(ds, opt_epoch);
         if (mode == subcommand::cmd_compaction) compaction(ds, sort);

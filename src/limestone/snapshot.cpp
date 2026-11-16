@@ -27,8 +27,9 @@ using limestone::internal::snapshot_impl;
 
 snapshot::snapshot(boost::filesystem::path location,
                    std::map<storage_id_type, write_version_type> clear_storage,
-                   std::optional<std::string> compacted_file_name) noexcept
-    : pimpl(std::make_unique<snapshot_impl>(std::move(location), std::move(clear_storage), std::move(compacted_file_name))) {
+                   std::optional<std::string> compacted_file_name, std::size_t region_records) noexcept
+    : pimpl(std::make_unique<snapshot_impl>(std::move(location), std::move(clear_storage), std::move(compacted_file_name),
+                                            region_records)) {
 
 }
 

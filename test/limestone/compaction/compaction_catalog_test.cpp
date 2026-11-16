@@ -155,6 +155,25 @@ TEST_F(compaction_catalog_test, create_catalog) {
 
 
 
+// Orphan judgment of locator files (.loc): only the locator file of a compacted WAL file recorded by the catalog
+// is not an orphan. The locator file of a recorded carry file is an orphan (a carry file has no locator file)
+TEST_F(compaction_catalog_test, is_orphan_compaction_file_for_locator_files) {
+    compaction_catalog catalog(test_dir);
+    catalog.update_catalog_file(10, 0, 3, {compacted_file_info{"pwal_0000.compacted.3", 1}},
+                                std::string("pwal_0000.carry.3"), {});
+
+    EXPECT_FALSE(catalog.is_orphan_compaction_file("pwal_0000.compacted.3"));
+    EXPECT_FALSE(catalog.is_orphan_compaction_file("pwal_0000.compacted.3.loc"));
+    EXPECT_FALSE(catalog.is_orphan_compaction_file("pwal_0000.carry.3"));
+    EXPECT_TRUE(catalog.is_orphan_compaction_file("pwal_0000.carry.3.loc"));
+    EXPECT_TRUE(catalog.is_orphan_compaction_file("pwal_0000.compacted.4.loc"));
+    EXPECT_TRUE(catalog.is_orphan_compaction_file("pwal_0000.compacted.loc"));
+    EXPECT_TRUE(catalog.is_orphan_compaction_file("pwal_0000.compacted.prev.loc"));
+    // Names that do not follow the naming rule are out of scope
+    EXPECT_FALSE(catalog.is_orphan_compaction_file(".loc"));
+    EXPECT_FALSE(catalog.is_orphan_compaction_file("pwal_0000.compacted.3.loc.loc"));
+}
+
 TEST_F(compaction_catalog_test, update_catalog) {
     testable_compaction_catalog catalog(test_dir);
 

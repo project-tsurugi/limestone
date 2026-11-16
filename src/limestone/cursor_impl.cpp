@@ -41,68 +41,107 @@ std::unique_ptr<cursor> cursor_impl::create_cursor(
     return std::unique_ptr<cursor>(new cursor(std::move(impl)));
 }
 
+std::unique_ptr<cursor> cursor_impl::create_cursor(
+    const boost::filesystem::path& snapshot_file,
+    const std::optional<boost::filesystem::path>& compacted_file,
+    const std::map<limestone::api::storage_id_type, limestone::api::write_version_type>& clear_storage,
+    std::shared_ptr<region_allocator> allocator) {
+
+    std::unique_ptr<cursor_impl> impl = std::make_unique<cursor_impl>(snapshot_file, compacted_file, clear_storage, std::move(allocator));
+    return std::unique_ptr<cursor>(new cursor(std::move(impl)));
+}
+
 cursor_impl::cursor_impl(const boost::filesystem::path& snapshot_file, std::map<api::storage_id_type, api::write_version_type> clear_storage)
     : clear_storage_(std::move(clear_storage)) {
     // log_entry_reader throws limestone_io_exception if the file cannot be opened
-    snapshot_reader_.emplace(snapshot_file);
+    snapshot_.reader.emplace(snapshot_file);
+    snapshot_.finished = false;
 }
 
 cursor_impl::cursor_impl(const boost::filesystem::path& snapshot_file, const boost::filesystem::path& compacted_file,
                          std::map<api::storage_id_type, api::write_version_type> clear_storage)
     : clear_storage_(std::move(clear_storage)) {
     // log_entry_reader throws limestone_io_exception if the file cannot be opened
-    snapshot_reader_.emplace(snapshot_file);
-    compacted_reader_.emplace(compacted_file);
+    snapshot_.reader.emplace(snapshot_file);
+    snapshot_.finished = false;
+    compacted_.reader.emplace(compacted_file);
+    compacted_.finished = false;
+}
+
+cursor_impl::cursor_impl(const boost::filesystem::path& snapshot_file,
+                         const std::optional<boost::filesystem::path>& compacted_file,
+                         std::map<api::storage_id_type, api::write_version_type> clear_storage,
+                         std::shared_ptr<region_allocator> allocator)
+    : clear_storage_(std::move(clear_storage)), allocator_(std::move(allocator)) {
+    if (! allocator_) {
+        LOG_LP(FATAL) << "no region allocator";
+    }
+    // log_entry_reader throws limestone_io_exception if the file cannot be opened.
+    // keep the streams finished until a region is taken
+    snapshot_.reader.emplace(snapshot_file);
+    if (compacted_file.has_value()) {
+        compacted_.reader.emplace(*compacted_file);
+    }
 }
 
 void cursor_impl::close() {
-    snapshot_reader_ = std::nullopt;
-    compacted_reader_ = std::nullopt;
+    snapshot_.reader = std::nullopt;
+    snapshot_.finished = true;
+    compacted_.reader = std::nullopt;
+    compacted_.finished = true;
 }
 
-void cursor_impl::validate_and_read_stream(std::optional<log_entry_reader>& reader, const std::string& stream_name,
-                                           std::optional<log_entry>& log_entry, std::string& previous_key_sid) {
-    while (reader) {
-        const auto read_result = reader->next();
-        // Close the reader at the end of the file
+void cursor_impl::read_candidate(input_stream& stream) {
+    while (! stream.finished && stream.reader.has_value()) {
+        const auto read_result = stream.reader->next();
         if (read_result.result() == log_entry_read_result::status::end) {
-            DVLOG_LP(log_trace) << stream_name << " file reached the end, closing it.";
-            reader = std::nullopt;
+            DVLOG_LP(log_trace) << stream.name << " file reached the end.";
+            stream.finished = true;
             return;
         }
         if (read_result.result() == log_entry_read_result::status::error) {
-            LOG_AND_THROW_EXCEPTION(stream_name + " file is broken: " + reader->file().string() + " at offset "
+            LOG_AND_THROW_EXCEPTION(stream.name + " file is broken: " + stream.reader->file().string() + " at offset "
                                     + std::to_string(read_result.offset()) + ": " + read_result.error().message());
         }
         const auto view = read_result.view();
         if (! log_entry_format::is_data_entry(view.type())) {
             continue;
         }
+        const std::string_view key_sid = view.serialized_key_sid();
+        // the key range of the region: skip entries below the start key, and stop at an entry at or above the end key
+        if (start_key_.has_value() && log_entry_format::compare_key_sid(key_sid, *start_key_) < 0) {
+            continue;
+        }
+        if (end_key_.has_value() && log_entry_format::compare_key_sid(key_sid, *end_key_) >= 0) {
+            DVLOG_LP(log_trace) << stream.name << " file reached the end key of the region.";
+            stream.finished = true;
+            return;
+        }
         // Check if the key_sid is in ascending order
         // TODO: Key order violation is detected here and the process is aborted.
         // However, this check should be moved to an earlier point, and if the key order is invalid,
         // a different processing method should be considered instead of aborting immediately.
-        const std::string_view key_sid = view.serialized_key_sid();
-        if (!previous_key_sid.empty()) {
-            const int order = log_entry_format::compare_key_sid(key_sid, previous_key_sid);
+        if (!stream.previous_key_sid.empty()) {
+            const int order = log_entry_format::compare_key_sid(key_sid, stream.previous_key_sid);
             if (order < 0) {
-                LOG(ERROR) << "Key order violation in " << stream_name << ": current key_sid (" << key_sid
-                           << ") is smaller than the previous key_sid (" << previous_key_sid << ")";
-                THROW_LIMESTONE_EXCEPTION("Key order violation detected in " + stream_name);
+                LOG(ERROR) << "Key order violation in " << stream.name << ": current key_sid (" << key_sid
+                           << ") is smaller than the previous key_sid (" << stream.previous_key_sid << ")";
+                THROW_LIMESTONE_EXCEPTION("Key order violation detected in " + stream.name);
             }
-            // Skip processing if key_sid is the same as previous_key_sid
+            // Skip processing if key_sid is the same as stream.previous_key_sid
             if (order == 0) {
-                DVLOG_LP(log_trace_fine) << stream_name << " log entry key_sid (" << key_sid
+                DVLOG_LP(log_trace_fine) << stream.name << " log entry key_sid (" << key_sid
                                          << ") is same as previous, skipping.";
                 continue;
             }
         }
         // Update the previous key_sid to the current one
-        previous_key_sid.assign(key_sid);
+        stream.previous_key_sid.assign(key_sid);
 
-        // Copy only a relevant entry into a log_entry (the view is valid until the next call to next())
+        // keep the view of a relevant entry. The reader is not read again until the entry is consumed, so the view
+        // stays valid
         if (is_relevant_entry(view)) {
-            log_entry.emplace(view);
+            stream.entry = view;
             return;
         }
     }
@@ -139,52 +178,55 @@ bool cursor_impl::is_relevant_entry(const log_entry_view& entry) {
 
 bool cursor_impl::next() { 
     while (true) {
-        // Read from the snapshot stream if the snapshot_log_entry_ is empty
-        if (!snapshot_log_entry_) {
-            validate_and_read_stream(snapshot_reader_, "Snapshot", snapshot_log_entry_, previous_snapshot_key_sid);
+        // Read from the snapshot stream if the snapshot_.entry is empty
+        if (!snapshot_.entry) {
+            read_candidate(snapshot_);
         }
 
-        // Read from the compacted stream if the compacted_log_entry_ is empty
-        if (!compacted_log_entry_) {
-            validate_and_read_stream(compacted_reader_, "Compacted", compacted_log_entry_, previous_compacted_key_sid);
+        // Read from the compacted stream if the compacted_.entry is empty
+        if (!compacted_.entry) {
+            read_candidate(compacted_);
         }
 
-        // Case 1: Both snapshot and compacted are empty, return false
-        if (!snapshot_log_entry_ && !compacted_log_entry_) {
+        // Case 1: Both snapshot and compacted are empty. Continue if there is a next region, otherwise return false
+        if (!snapshot_.entry && !compacted_.entry) {
+            if (acquire_next_range()) {
+                continue;
+            }
             DVLOG_LP(log_trace) << "Both snapshot and compacted streams are closed";
             return false;
         }
 
         // Case 2: Either snapshot or compacted has a value, use the one that is not empty
-        if (snapshot_log_entry_ && !compacted_log_entry_) {
-            log_entry_ = std::move(snapshot_log_entry_.value());
-            snapshot_log_entry_ = std::nullopt;
-        } else if (!snapshot_log_entry_ && compacted_log_entry_) {
-            log_entry_ = std::move(compacted_log_entry_.value());
-            compacted_log_entry_ = std::nullopt;
+        if (snapshot_.entry && !compacted_.entry) {
+            current_ = *snapshot_.entry;
+            snapshot_.entry = std::nullopt;
+        } else if (!snapshot_.entry && compacted_.entry) {
+            current_ = *compacted_.entry;
+            compacted_.entry = std::nullopt;
         } else {
             // Case 3: Both snapshot and compacted have values
-            const int order = log_entry_format::compare_key_sid(snapshot_log_entry_->serialized_key_sid(),
-                                                                compacted_log_entry_->serialized_key_sid());
+            const int order = log_entry_format::compare_key_sid(snapshot_.entry->serialized_key_sid(),
+                                                                compacted_.entry->serialized_key_sid());
             if (order < 0) {
-                log_entry_ = std::move(snapshot_log_entry_.value());
-                snapshot_log_entry_ = std::nullopt;
+                current_ = *snapshot_.entry;
+                snapshot_.entry = std::nullopt;
             } else if (order > 0) {
-                log_entry_ = std::move(compacted_log_entry_.value());
-                compacted_log_entry_ = std::nullopt;
+                current_ = *compacted_.entry;
+                compacted_.entry = std::nullopt;
             } else {
                 // If key_sid is equal, snapshot is always newer by design
                 // Note: If snapshot contains a remove_entry, it will be filtered out 
                 // by the type check at the end of the method
-                log_entry_ = std::move(snapshot_log_entry_.value());
-                snapshot_log_entry_ = std::nullopt;
-                compacted_log_entry_ = std::nullopt;
+                current_ = *snapshot_.entry;
+                snapshot_.entry = std::nullopt;
+                compacted_.entry = std::nullopt;
             }
         }
 
-        // Check if the current log_entry_ is a normal entry or normal_with_blob
-        if (log_entry_.type() == log_entry::entry_type::normal_entry ||
-            log_entry_.type() == log_entry::entry_type::normal_with_blob) {
+        // Check if the current entry is a normal entry or normal_with_blob
+        if (current_.type() == log_entry::entry_type::normal_entry ||
+            current_.type() == log_entry::entry_type::normal_with_blob) {
             return true;
         }
 
@@ -194,28 +236,46 @@ bool cursor_impl::next() {
 
 
 
+bool cursor_impl::acquire_next_range() {
+    if (! allocator_ || ! snapshot_.reader.has_value()) {
+        return false;
+    }
+    log_entry_reader* compacted_reader = compacted_.reader.has_value() ? &*compacted_.reader : nullptr;
+    std::optional<region_range> range = allocator_->allocate(*snapshot_.reader, compacted_reader);
+    if (! range.has_value()) {
+        return false;
+    }
+    snapshot_.reader->set_range(range->snapshot_start, range->snapshot_end);
+    snapshot_.finished = false;
+    snapshot_.previous_key_sid.clear();
+    if (compacted_reader != nullptr) {
+        compacted_reader->set_range(range->compacted_start, range->compacted_end);
+        compacted_.finished = false;
+        compacted_.previous_key_sid.clear();
+    }
+    start_key_ = std::move(range->start_key);
+    end_key_ = std::move(range->end_key);
+    return true;
+}
+
 limestone::api::storage_id_type cursor_impl::storage() const noexcept {
-    return log_entry_.storage();
+    return current_.storage();
 }
 
 void cursor_impl::key(std::string& buf) const noexcept {
-    buf.assign(log_entry_.key());
+    buf.assign(current_.key());
 }
 
 void cursor_impl::value(std::string& buf) const noexcept {
-    buf.assign(log_entry_.value());
+    buf.assign(current_.value());
 }
 
 log_entry::entry_type cursor_impl::type() const {
-    return log_entry_.type();
+    return current_.type();
 }
 
 std::vector<limestone::api::blob_id_type> cursor_impl::blob_ids() const {
-    return log_entry_.blob_ids();
-}
-
-log_entry& cursor_impl::current() {
-    return log_entry_;
+    return current_.blob_ids();
 }
 
 } // namespace limestone::internal

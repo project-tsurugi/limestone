@@ -61,7 +61,7 @@ public:
 
     /**
      * @brief Creates a result of kind end (the file ends at an entry boundary).
-     * @param offset the size of the file
+     * @param offset the end position (the size of the file, or the end position set by set_range())
      * @return the result
      */
     [[nodiscard]] static log_entry_read_result end(std::uint64_t offset) noexcept;
@@ -71,10 +71,12 @@ public:
      * @param error the kind of the failure (short_entry or unknown_type) and the value of the first byte of the entry
      *              that could not be parsed
      * @param offset the position of the first byte of the entry that could not be parsed
+     * @param required for short_entry, the lower bound of the number of bytes needed to parse, counted from offset. 0
+     *                 for unknown_type
      * @return the result
      */
     [[nodiscard]] static log_entry_read_result error(const limestone::api::log_entry::read_error& error,
-                                                     std::uint64_t offset) noexcept;
+                                                     std::uint64_t offset, std::size_t required) noexcept;
 
     /**
      * @brief Returns the kind of the result.
@@ -95,7 +97,7 @@ public:
      * - ok: the position of the first byte (the entry type) of the returned entry.
      * - error: the position of the first byte (the entry type) of the entry that could not be parsed. It is not the
      *   position where reading or parsing stopped.
-     * - end: the size of the file.
+     * - end: the end position (the size of the file, or the end position set by set_range()).
      *
      * For ok and error, the bytes from the start position up to just before this position are the entries returned
      * as ok, with no gap between them. The same holds for end, except that for end after short_entry, the bytes of
@@ -114,17 +116,27 @@ public:
      */
     [[nodiscard]] limestone::api::log_entry::read_error error() const;
 
+    /**
+     * @brief Returns the lower bound of the number of bytes needed to parse, counted from offset(). Valid when the
+     *        result kind is error and the kind of the failure is short_entry.
+     *
+     * The value is the same as the required of log_entry_view::parse(): a lower bound for the range read so far. If
+     * the length fields are still not read after reading this much, the result is short_entry again.
+     */
+    [[nodiscard]] std::size_t required() const;
+
 private:
     /**
      * @brief Creates a result from the values of its members. Called only by ok(), end() and error().
      */
     log_entry_read_result(status result, const log_entry_view& view, std::uint64_t offset,
-                          const limestone::api::log_entry::read_error& error) noexcept;
+                          const limestone::api::log_entry::read_error& error, std::size_t required) noexcept;
 
     status result_{};
     log_entry_view view_{};
     std::uint64_t offset_{};
     limestone::api::log_entry::read_error error_{};
+    std::size_t required_{};
 };
 
 /**
@@ -143,7 +155,7 @@ private:
 std::ostream& operator<<(std::ostream& out, log_entry_read_result::status result);
 
 /**
- * @brief Reads entries from a file in order from the beginning.
+ * @brief Reads entries from a file in order from the start position.
  *
  * Reads the file into a buffer in large units, and repeats log_entry_view::parse() on it.
  *
@@ -160,8 +172,9 @@ std::ostream& operator<<(std::ostream& out, log_entry_read_result::status result
  */
 class log_entry_reader {
 public:
-    /// The normal size of the buffer (the size read by one read).
-    static constexpr std::size_t buffer_size = std::size_t{16} * 1024 * 1024;
+    /// The default size of the buffer (the size read by one read). Used when a constructor does not take the buffer
+    /// size
+    static constexpr std::size_t default_buffer_size = std::size_t{16} * 1024 * 1024;
 
     /// The interval of waiting for more data in a file being written. The state function is called at each wait.
     static constexpr std::chrono::milliseconds wait_interval{10};
@@ -203,6 +216,31 @@ public:
                      file_operations& file_ops);
 
     /**
+     * @brief Opens the file and creates a reader with the given buffer size that starts reading at the given position.
+     *
+     * The same as the constructor without the buffer size, except that the buffer size is given.
+     * @param file the file to read
+     * @param start_offset the position to start reading at. It must be the beginning of an entry
+     * @param buffer_size the size of the buffer (bytes): the size read by one read. The buffer is expanded temporarily
+     *                    for an entry larger than this. Writes a FATAL log and aborts if it is 0
+     * @throws limestone_io_exception if the file cannot be opened or its status cannot be obtained (with errno), or if
+     *         start_offset exceeds the size of the file (without errno)
+     */
+    log_entry_reader(boost::filesystem::path file, std::uint64_t start_offset, std::size_t buffer_size);
+
+    /**
+     * @brief Creates a reader with the given buffer size and the file operations replaced. For testing only; must not
+     *        be used by production code.
+     * @param file the file to read
+     * @param start_offset the position to start reading at. It must be the beginning of an entry
+     * @param buffer_size the size of the buffer (bytes). Writes a FATAL log and aborts if it is 0
+     * @param file_ops the file operations. It must be valid until this object is destroyed
+     * @throws limestone_io_exception the same as the constructor without the file operations replaced
+     */
+    log_entry_reader(boost::filesystem::path file, std::uint64_t start_offset, std::size_t buffer_size,
+                     file_operations& file_ops);
+
+    /**
      * @brief Closes the file.
      */
     ~log_entry_reader();
@@ -219,9 +257,9 @@ public:
      * - ok: one entry is read. The view is valid until next() is called next.
      * - end: the file ends at an entry boundary.
      * - error: the contents of the file do not match the format. The kind is either an invalid entry type
-     *   (unknown_type) or the file ending in the middle of an entry (short_entry).
+     *   (unknown_type) or the file or the range ending in the middle of an entry (short_entry).
      *
-     * A call after end returns end. A call after short_entry returns end (at the size of the file). A call after
+     * A call after end returns end. A call after short_entry returns end (at the end position). A call after
      * unknown_type returns the same unknown_type.
      *
      * When created with a state function, while the state is writing, it does not return end or short_entry, but
@@ -235,6 +273,24 @@ public:
      *         read exceeds the size of the file after the state becomes written (without errno)
      */
     [[nodiscard]] log_entry_read_result next();
+
+    /**
+     * @brief Sets the range to read. The next next() reads from the entry at start_offset.
+     *
+     * The data of the previous range that remains in the buffer is not read. After set_range() is called, the views
+     * returned by next() so far must not be used (the buffer they refer to is overwritten by the read of the next
+     * next()). The area of the buffer is used as it is. No system call is made.
+     * Available only for a reader that treats the file as not changing while it is read (one created without a state
+     * function). Writes a FATAL log and aborts if called on a reader created with a state function.
+     * Does not check that the range is within the size of the file. If it is not, the result is end or short_entry at
+     * the position where the data read runs out.
+     * @param start_offset the position to start reading at. It must be the beginning of an entry
+     * @param end_offset the position to stop reading at. It must be an entry boundary (the beginning of the next entry
+     *                   or the end of the file). Nothing after this position is read, and end is returned when it is
+     *                   reached. If it is in the middle of an entry, that entry is short_entry. Writes a FATAL log and
+     *                   aborts if it is less than start_offset
+     */
+    void set_range(std::uint64_t start_offset, std::uint64_t end_offset);
 
     /**
      * @brief Returns the file being read.
@@ -291,8 +347,10 @@ private:
      *
      * When returning short_entry, moves the read position to the end of the file so that the next call returns end.
      * Called only while reading a file not being written (one that does not grow while it is read).
+     * @param required the lower bound of the number of bytes needed to parse, counted from the beginning of the
+     *                 unparsed part. Put in the short_entry result
      */
-    [[nodiscard]] log_entry_read_result end_or_short_entry() noexcept;
+    [[nodiscard]] log_entry_read_result end_or_short_entry(std::size_t required) noexcept;
 
     /**
      * @brief Prepares to refill the buffer. Places the unparsed part at the beginning of the buffer, and makes free
@@ -303,17 +361,18 @@ private:
     void prepare_buffer(std::size_t required);
 
     /**
-     * @brief Reads into the whole free space of the buffer.
+     * @brief Reads into the whole free space of the buffer. When a range is set by set_range(), reads up to the end
+     *        position only.
      * @return the number of bytes read. 0 means the end of the file
      * @throws limestone_io_exception if reading fails (with errno)
      */
     std::size_t read_into_buffer();
 
     /**
-     * @brief Returns the remaining size of the file (the size of the file minus the position of the beginning of the
-     *        unparsed part).
+     * @brief Returns the size of the rest up to the end position (end_offset_ minus the position of the beginning of
+     *        the unparsed part).
      */
-    [[nodiscard]] std::uint64_t remaining_file_size() const noexcept;
+    [[nodiscard]] std::uint64_t remaining_size() const noexcept;
 
     real_file_operations real_file_ops_{};
     file_operations* file_ops_{};
@@ -324,7 +383,13 @@ private:
     /// whether the state function returned failed. If true, next() throws without calling the state function
     bool failed_{};
     int fd_{-1};
-    std::uint64_t file_size_{};
+    /// the position to stop reading at: the position set by set_range(), or the size of the file if not set (for a
+    /// file being written, updated each time the size is obtained again)
+    std::uint64_t end_offset_{};
+    /// whether a range is set by set_range(). If true, the amount read is limited to end_offset_
+    bool ranged_{};
+    /// the given buffer size. buffer_ is larger than this only while reading an entry larger than this
+    std::size_t buffer_size_{default_buffer_size};
 
     std::string buffer_{};
     /// the file position of the beginning of buffer_

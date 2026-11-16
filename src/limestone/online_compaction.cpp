@@ -23,6 +23,7 @@
 #include "limestone_exception_helper.h"
 #include "logging_helper.h"
 #include "compaction_catalog.h"
+#include "locator/locator_format.h"
 
 namespace limestone::internal {
 
@@ -72,7 +73,8 @@ std::set<std::string> select_files_for_compaction(const std::set<boost::filesyst
     std::set<std::string> need_compaction_filenames;
     for (const boost::filesystem::path& path : rotation_end_files) {
         std::string filename = path.filename().string();
-        if (filename.substr(0, 4) == "pwal" && filename.length() > 9 && detached_pwals.find(filename) == detached_pwals.end()) {
+        if (filename.substr(0, 4) == "pwal" && filename.length() > 9 && !locator_format::is_locator_file_name(filename)
+            && detached_pwals.find(filename) == detached_pwals.end()) {
             need_compaction_filenames.insert(filename);
             detached_pwals.insert(filename);
             VLOG_LP(log_debug) << "Selected file for compaction: " << filename;
@@ -82,6 +84,8 @@ std::set<std::string> select_files_for_compaction(const std::set<boost::filesyst
                 reason = "does not start with 'pwal'";
             } else if (filename.length() <= 9) {
                 reason = "filename length is 9 or less";
+            } else if (locator_format::is_locator_file_name(filename)) {
+                reason = "is a locator file";
             } else {
                 reason = "file is already detached";
             }

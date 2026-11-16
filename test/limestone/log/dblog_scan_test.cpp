@@ -201,6 +201,20 @@ static constexpr const char* location = "/tmp/dblog_scan_test";
     }
 };
 
+// is_wal treats a name beginning with pwal as a WAL file, excluding locator files (ending with .loc)
+TEST_F(dblog_scan_test, is_wal_excludes_locator_files) {
+    const boost::filesystem::path dir{location};
+    EXPECT_TRUE(dblog_scan::is_wal(dir / "pwal_0000"));
+    EXPECT_TRUE(dblog_scan::is_wal(dir / "pwal_0000.0123456789.0"));
+    EXPECT_TRUE(dblog_scan::is_wal(dir / "pwal_0000.compacted"));
+    EXPECT_TRUE(dblog_scan::is_wal(dir / "pwal_0000.compacted.3"));
+    EXPECT_FALSE(dblog_scan::is_wal(dir / "pwal_0000.compacted.loc"));
+    EXPECT_FALSE(dblog_scan::is_wal(dir / "pwal_0000.compacted.3.loc"));
+    EXPECT_FALSE(dblog_scan::is_wal(dir / "pwal_0000.loc"));
+    EXPECT_FALSE(dblog_scan::is_wal(dir / "snapshot.loc"));
+    EXPECT_FALSE(dblog_scan::is_wal(dir / "epoch"));
+}
+
 // combination test
 // {inspect-mode, repair(mark)-mode, repair(cut)-mode}
 //   x
@@ -3121,6 +3135,29 @@ TEST_F(dblog_scan_test, max_blob_id_of_scan_pwal_files) {
         (void) ds.scan_pwal_files_throws(ld_epoch, [](log_entry&, int) {});
         EXPECT_EQ(ds.get_max_blob_id(), 40U) << id0 << ", " << id1;
     }
+}
+
+
+// rescan_directory_paths() leaves out the files whose names are set by set_excluded_file_names(), so that the scans
+// of the scan_pwal_files family do not read them. The exclusion takes effect at the next rescan
+TEST_F(dblog_scan_test, rescan_directory_paths_leaves_out_the_excluded_files) {
+    const boost::filesystem::path dir{location};
+    create_file(dir / "pwal_0000", data_normal2);
+    create_file(dir / "pwal_0001", data_normal2);
+    dblog_scan ds{dir};
+    ds.set_thread_num(1);
+    set_inspect_mode(ds);
+    auto count_entries = [&ds]() {
+        std::size_t entries = 0;
+        (void) ds.scan_pwal_files(0x100, [&entries](log_entry&, int) { ++entries; },
+                                  [](log_entry::read_error&) { return false; });
+        return entries;
+    };
+    EXPECT_EQ(count_entries(), 6U);
+    ds.set_excluded_file_names({"pwal_0001"});
+    EXPECT_EQ(count_entries(), 6U);
+    ds.rescan_directory_paths();
+    EXPECT_EQ(count_entries(), 3U);
 }
 
 }  // namespace limestone::testing

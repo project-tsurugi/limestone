@@ -45,14 +45,14 @@ public:
 
     using cursor_impl::cursor_impl;
     using cursor_impl::next;
-    using cursor_impl::validate_and_read_stream;
+    using cursor_impl::input_stream;
+    using cursor_impl::read_candidate;
     using cursor_impl::close;
     using cursor_impl::storage;
     using cursor_impl::key;    
     using cursor_impl::value;  
     using cursor_impl::type;
     using cursor_impl::blob_ids;
-    using cursor_impl::current;
 
     ~cursor_impl_testable() {
         // Ensure that the close() method is called to release resources.
@@ -330,20 +330,23 @@ TEST_F(cursor_impl_test, validate_stream_eof) {
     }
 
     // Open the empty file with a reader.
-    std::optional<limestone::internal::log_entry_reader> reader;
-    reader.emplace(empty_file);
+    cursor_impl_testable::input_stream stream{"empty_stream"};
+    stream.reader.emplace(empty_file);
+    stream.finished = false;
 
-    // Create dummy log_entry and previous key to pass to validate_and_read_stream.
-    std::optional<limestone::api::log_entry> log_entry;
-    std::string previous_key;
-
-    // Use cursor_impl_testable to call validate_and_read_stream.
+    // Use cursor_impl_testable to call read_candidate.
     cursor_impl_testable test_cursor(empty_file);
-    test_cursor.validate_and_read_stream(reader, "empty_stream", log_entry, previous_key);
+    test_cursor.read_candidate(stream);
 
-    // Expect that the reader is reset to nullopt due to EOF.
-    EXPECT_FALSE(reader.has_value()) << "reader should be reset when EOF is reached";
-    EXPECT_FALSE(log_entry.has_value());
+    // reaching the end makes the stream finished. The reader stays open
+    EXPECT_TRUE(stream.finished);
+    EXPECT_TRUE(stream.reader.has_value());
+    EXPECT_FALSE(stream.entry.has_value());
+
+    // after it is finished, a call does nothing
+    test_cursor.read_candidate(stream);
+    EXPECT_TRUE(stream.finished);
+    EXPECT_FALSE(stream.entry.has_value());
 }
 
 // Validate that a file not matching the format throws
@@ -356,23 +359,20 @@ TEST_F(cursor_impl_test, validate_stream_broken) {
         ofs.close();
     }
 
-    std::optional<limestone::internal::log_entry_reader> reader;
-    reader.emplace(bad_file);
+    cursor_impl_testable::input_stream stream{"bad_stream"};
+    stream.reader.emplace(bad_file);
+    stream.finished = false;
 
-    // Prepare dummy log_entry and previous key.
-    std::optional<limestone::api::log_entry> log_entry;
-    std::string previous_key;
-
-    // Use cursor_impl_testable to call validate_and_read_stream.
+    // Use cursor_impl_testable to call read_candidate.
     cursor_impl_testable test_cursor(bad_file);
     try {
-        test_cursor.validate_and_read_stream(reader, "bad_stream", log_entry, previous_key);
+        test_cursor.read_candidate(stream);
         FAIL() << "expected limestone_exception";
     } catch (const limestone::limestone_exception& e) {
         // the message names the broken file
         EXPECT_NE(std::string(e.what()).find(bad_file.string()), std::string::npos) << e.what();
     }
-    EXPECT_FALSE(log_entry.has_value());
+    EXPECT_FALSE(stream.entry.has_value());
 }
 
 // Verify while loop processes multiple entries with sorted keys
@@ -448,7 +448,7 @@ TEST_F(cursor_impl_test, while_loop_resets_invalid_entry) {
     // Create a cursor using the snapshot file.
     cursor_impl_testable test_cursor(snapshot_file, clear_storage);
 
-    // Call next(). The while loop in validate_and_read_stream will read the single entry,
+    // Call next(). The while loop in read_candidate will read the single entry,
     // find it non-relevant, reset log_entry, and eventually return false since no further entries exist.
     EXPECT_FALSE(test_cursor.next()) << "Expected next() to return false when only non-relevant entries are present";
 }
@@ -617,7 +617,7 @@ TEST_F(cursor_impl_test, use_compacted_when_snapshot_empty) {
     EXPECT_EQ(key, "compacted_key") << "Expected the entry from the compacted file when snapshot is empty";
 }
 
-// Test case for skipping duplicate key_sid entries in validate_and_read_stream
+// Test case for skipping duplicate key_sid entries in read_candidate
 TEST_F(cursor_impl_test, skip_duplicate_key) {
     entry_maker_.init()
         .add_entry(1, "dup", "first", {1, 0})
@@ -734,48 +734,5 @@ TEST_F(cursor_impl_test, snapshot_remove_entry_overrides_compacted_normal) {
 
     EXPECT_FALSE(cursor.next()) << "remove_entry in snapshot should override compacted normal_entry";
 }
-
-TEST_F(cursor_impl_test, current_returns_latest_entry_after_next) {
-    create_log_file("snapshot", entry_maker_.get_default_entries());
-    boost::filesystem::path snapshot_file = boost::filesystem::path(location) / "snapshot";
-
-    cursor_impl_testable cursor(snapshot_file);
-
-    ASSERT_TRUE(cursor.next());
-    const auto& entry1 = cursor.current();
-    EXPECT_EQ(entry1.key(), "key1");
-    EXPECT_EQ(entry1.value(), "value1");
-
-    ASSERT_TRUE(cursor.next());
-    const auto& entry2 = cursor.current();
-    EXPECT_EQ(entry2.key(), "key2");
-    EXPECT_EQ(entry2.value(), "value2");
-
-    EXPECT_FALSE(cursor.next());
-}
-
-// Verify that after moving from current(), the current entry is in the default-constructed state until next()
-TEST_F(cursor_impl_test, current_after_move_is_default_constructed) {
-    create_log_file("snapshot", entry_maker_.get_default_entries());
-    boost::filesystem::path snapshot_file = boost::filesystem::path(location) / "snapshot";
-
-    cursor_impl_testable cursor(snapshot_file);
-
-    ASSERT_TRUE(cursor.next());
-    limestone::api::log_entry taken = std::move(cursor.current());
-    EXPECT_EQ(taken.key(), "key1");
-    EXPECT_EQ(cursor.type(), limestone::api::log_entry::entry_type::this_id_is_not_used);
-    // The datastore threads are running, so use the threadsafe style for the death test
-    const std::string saved_style = ::testing::FLAGS_gtest_death_test_style;
-    ::testing::FLAGS_gtest_death_test_style = "threadsafe";
-    EXPECT_DEATH((void) cursor.storage(), "log_entry_view:storage not valid");
-    ::testing::FLAGS_gtest_death_test_style = saved_style;
-
-    // next() moves to the next entry as usual
-    ASSERT_TRUE(cursor.next());
-    EXPECT_EQ(cursor.current().key(), "key2");
-    EXPECT_FALSE(cursor.next());
-}
-
 
 }  // namespace limestone::testing

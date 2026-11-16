@@ -77,18 +77,6 @@ public:
     [[nodiscard]] virtual std::vector<api::blob_id_type> blob_ids() const = 0;
 
     /**
-     * @brief Returns the current entry.
-     *
-     * Valid only after next() returns true. The caller may move from the returned object. After that, until next() is
-     * called, the current entry is in the default-constructed state (type this_id_is_not_used, with all values
-     * invalid): type() returns this_id_is_not_used, and storage(), key(), value() and blob_ids() write a FATAL log and
-     * abort.
-     * @return the current entry
-     */
-    [[nodiscard]] virtual log_entry& current() = 0;
-
-
-    /**
      * @brief Closes the cursor and releases any held resources.
      * @details After calling this method, no further operations on the cursor are valid.
      */

@@ -146,12 +146,7 @@ int manifest::is_supported_version(const boost::filesystem::path& manifest_path,
     }
 }
 
-manifest::migration_info manifest::check_and_migrate(const boost::filesystem::path& logdir) {
-    real_file_operations default_ops;
-    return check_and_migrate(logdir, default_ops);
-}
-
-manifest::migration_info manifest::check_and_migrate(const boost::filesystem::path& logdir, file_operations& ops) {
+manifest manifest::check_and_repair(const boost::filesystem::path& logdir, file_operations& ops) {
     boost::filesystem::path manifest_path = logdir / std::string(file_name);
     boost::filesystem::path manifest_backup_path = logdir / std::string(backup_file_name);
     boost::system::error_code ec;
@@ -196,13 +191,7 @@ manifest::migration_info manifest::check_and_migrate(const boost::filesystem::pa
         THROW_LIMESTONE_EXCEPTION("logdir version mismatch");
     }
 
-    int persistent_version = manifest->get_persistent_format_version();
-    if (persistent_version < default_persistent_format_version) {
-        VLOG_LP(log_info) << "Migrating manifest file (safe double-write: backup then main)"
-                          << " from version " << persistent_version << " to " << default_persistent_format_version;
-        migrate_manifest(manifest_path, manifest_backup_path, *manifest, ops);
-    }
-    return {persistent_version, default_persistent_format_version};
+    return *manifest;
 }
 
 // NOTE:

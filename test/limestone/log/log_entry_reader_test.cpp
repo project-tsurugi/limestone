@@ -14,6 +14,8 @@
  * limitations under the License.
  */
 
+#include <sys/stat.h>
+
 #include <algorithm>
 #include <cerrno>
 #include <cstdint>
@@ -52,7 +54,7 @@ using log_entry_bytes::remove_entry;
 using log_entry_bytes::u32le;
 using log_entry_bytes::u8;
 
-constexpr std::size_t buffer_size = log_entry_reader::buffer_size;
+constexpr std::size_t buffer_size = log_entry_reader::default_buffer_size;
 
 // file operations that record the sizes requested by pread and can limit the amount returned by one call
 class recording_file_operations : public real_file_operations {
@@ -305,7 +307,7 @@ TEST_F(log_entry_reader_test, length_beyond_file_does_not_allocate) {
     }
 }
 
-// refill branches: expands for an entry larger than the normal size, and shrinks to the normal size for a small
+// refill branches: expands for an entry larger than the buffer size, and shrinks to the buffer size for a small
 // entry after it
 TEST_F(log_entry_reader_test, buffer_expands_and_shrinks) {
     std::string large = normal_entry(1, "key", std::string(buffer_size + 100, 'v'), 7, 1);
@@ -316,8 +318,8 @@ TEST_F(log_entry_reader_test, buffer_expands_and_shrinks) {
     expect_entry(reader, large, 0);
     expect_entry(reader, small, large.size());
     expect_end(reader, large.size() + small.size());
-    // 1st: reads the normal size. 2nd: expands to the size of the entry, and reads the rest.
-    // 3rd: reads the whole free space of the buffer shrunk to the normal size (without shrinking, the free space would
+    // 1st: reads the buffer size. 2nd: expands to the size of the entry, and reads the rest.
+    // 3rd: reads the whole free space of the buffer shrunk to the buffer size (without shrinking, the free space would
     // be the size of the entry)
     ASSERT_GE(ops.requests().size(), 3U);
     EXPECT_EQ(ops.requests()[0], buffer_size);
@@ -325,7 +327,7 @@ TEST_F(log_entry_reader_test, buffer_expands_and_shrinks) {
     EXPECT_EQ(ops.requests()[2], buffer_size);
 }
 
-// refill branches: for an entry across the boundary of the normal size, moves the unparsed part to the beginning
+// refill branches: for an entry across the boundary of the buffer size, moves the unparsed part to the beginning
 TEST_F(log_entry_reader_test, buffer_moves_unparsed_to_front) {
     // the first entry fills up to 10 bytes before the boundary, so that the second entry crosses the boundary
     std::string first = normal_entry(1, "key", "", 7, 1);
@@ -337,13 +339,13 @@ TEST_F(log_entry_reader_test, buffer_moves_unparsed_to_front) {
     expect_entry(reader, first, 0);
     expect_entry(reader, second, first.size());
     expect_end(reader, first.size() + second.size());
-    // 2nd: moves the unparsed 10 bytes to the beginning, and reads the rest of the normal-size buffer
+    // 2nd: moves the unparsed 10 bytes to the beginning, and reads the rest of the buffer
     ASSERT_GE(ops.requests().size(), 2U);
     EXPECT_EQ(ops.requests()[0], buffer_size);
     EXPECT_EQ(ops.requests()[1], buffer_size - 10);
 }
 
-// returns short_entry without expanding the buffer if an entry larger than the normal size is cut in the middle
+// returns short_entry without expanding the buffer if an entry larger than the buffer size is cut in the middle
 TEST_F(log_entry_reader_test, truncated_large_entry_does_not_expand) {
     std::string large = normal_entry(1, "key", std::string(buffer_size + 100, 'v'), 7, 1);
     auto p = write_file(large.substr(0, large.size() - 50));
@@ -364,7 +366,7 @@ TEST_F(log_entry_reader_test, buffer_expands_twice_for_blob_ids) {
     log_entry_reader reader(p, 0, nullptr, ops);
     expect_entry(reader, large, 0);
     expect_end(reader, large.size());
-    // 1st: reads the normal size. 2nd: expands up to the end of the BLOB count field, and reads the rest.
+    // 1st: reads the buffer size. 2nd: expands up to the end of the BLOB count field, and reads the rest.
     // 3rd: expands to the size of the entry, and reads the BLOB IDs
     const std::size_t through_blob_count = large.size() - blob_ids.size() * sizeof(std::uint64_t);
     ASSERT_GE(ops.requests().size(), 3U);
@@ -378,7 +380,7 @@ TEST_F(log_entry_reader_test, short_reads_after_expansion) {
     std::string large = normal_entry(1, "key", std::string(buffer_size + 100, 'v'), 7, 1);
     std::string small = remove_entry(1, "key", 7, 2);
     auto p = write_file(large + small);
-    // an amount that does not divide the normal size, so that read boundaries differ from entry boundaries
+    // an amount that does not divide the buffer size, so that read boundaries differ from entry boundaries
     recording_file_operations ops(1000003);
     log_entry_reader reader(p, 0, nullptr, ops);
     expect_entry(reader, large, 0);
@@ -386,7 +388,7 @@ TEST_F(log_entry_reader_test, short_reads_after_expansion) {
     expect_end(reader, large.size() + small.size());
 }
 
-// for an entry that starts in the middle of the buffer and does not fit in the normal size, moves the unparsed part
+// for an entry that starts in the middle of the buffer and does not fit in the buffer size, moves the unparsed part
 // to the beginning of the expanded buffer
 TEST_F(log_entry_reader_test, buffer_expands_from_middle) {
     std::string e1 = marker(2, 7);
@@ -615,9 +617,9 @@ TEST_F(log_entry_reader_test, writing_does_not_allocate_while_waiting) {
     log_entry_reader reader(p, 0, writer.function(), ops);
     expect_entry(reader, large, 0);
     expect_end(reader, large.size());
-    // 1st: reads the normal size (only 100 bytes have arrived). No read while waiting.
+    // 1st: reads the buffer size (only 100 bytes have arrived). No read while waiting.
     // 2nd: after everything arrives, expands to the size of the entry and reads the rest. 3rd: reads into the buffer
-    // shrunk to the normal size
+    // shrunk to the buffer size
     ASSERT_EQ(ops.requests().size(), 3U);
     EXPECT_EQ(ops.requests()[0], buffer_size);
     EXPECT_EQ(ops.requests()[1], large.size() - 100);
@@ -706,9 +708,18 @@ TEST_F(log_entry_reader_test, read_result_accessor_validity) {
 
     auto error = log_entry_read_result::error(log_entry::read_error{log_entry::read_error::short_entry,
                                                                     entry_type::normal_entry},
-                                              3);
+                                              3, 9);
     EXPECT_EQ(error.offset(), 3U);
+    EXPECT_EQ(error.required(), 9U);
     EXPECT_DEATH((void) error.view(), "log_entry_read_result:view not valid");
+
+    // required() is valid only for short_entry
+    EXPECT_DEATH((void) ok.required(), "log_entry_read_result:required not valid");
+    EXPECT_DEATH((void) end.required(), "log_entry_read_result:required not valid");
+    auto unknown = log_entry_read_result::error(log_entry::read_error{log_entry::read_error::unknown_type,
+                                                                      static_cast<entry_type>(99)},
+                                                3, 0);
+    EXPECT_DEATH((void) unknown.required(), "log_entry_read_result:required not valid");
 }
 
 // the string representation of the result kinds
@@ -716,6 +727,278 @@ TEST_F(log_entry_reader_test, status_to_string) {
     std::ostringstream out;
     out << status::ok << ' ' << status::end << ' ' << status::error << ' ' << static_cast<status>(99);
     EXPECT_EQ(out.str(), "ok end error unknown");
+}
+
+// file operations that count the system calls
+class counting_file_operations : public real_file_operations {
+public:
+    int open(const char* filename, int flags) override {
+        ++others_;
+        return real_file_operations::open(filename, flags);
+    }
+    int close(int fd) override {
+        ++others_;
+        return real_file_operations::close(fd);
+    }
+    int fstat(int fd, struct stat* buf) override {
+        ++others_;
+        return real_file_operations::fstat(fd, buf);
+    }
+    ssize_t pread(int fd, void* buf, size_t count, off_t offset) override {
+        ++preads_;
+        return real_file_operations::pread(fd, buf, count, offset);
+    }
+
+    // the number of system calls other than pread
+    [[nodiscard]] std::size_t others() const noexcept { return others_; }
+    // the number of preads
+    [[nodiscard]] std::size_t preads() const noexcept { return preads_; }
+
+private:
+    std::size_t others_{};
+    std::size_t preads_{};
+};
+
+// a reader opened with the buffer size reads the range set. Setting the range makes no system call
+TEST_F(log_entry_reader_test, reads_the_range_set) {
+    std::string e1 = normal_entry(1, "a", "v", 7, 1);
+    std::string e2 = remove_entry(1, "b", 7, 2);
+    std::string e3 = normal_entry(1, "c", "v", 7, 3);
+    auto p = write_file(marker(2, 7) + e1 + e2 + e3);
+    counting_file_operations ops;
+    {
+        log_entry_reader reader(p, 0, 4096, ops);
+        EXPECT_EQ(reader.file(), p);
+        // the construction calls only open and the status of the file
+        EXPECT_EQ(ops.others(), 2U);
+        EXPECT_EQ(ops.preads(), 0U);
+        reader.set_range(9, 9 + e1.size() + e2.size());
+        EXPECT_EQ(ops.others(), 2U);
+        EXPECT_EQ(ops.preads(), 0U);
+        expect_entry(reader, e1, 9);
+        expect_entry(reader, e2, 9 + e1.size());
+        expect_end(reader, 9 + e1.size() + e2.size());
+        EXPECT_EQ(ops.others(), 2U);
+        EXPECT_EQ(ops.preads(), 1U);
+    }
+    // the destruction calls only close
+    EXPECT_EQ(ops.others(), 3U);
+}
+
+// without a range set, reads from the start position to the end of the file, as a reader without the buffer size
+TEST_F(log_entry_reader_test, reads_to_the_end_without_range) {
+    std::string e1 = normal_entry(1, "a", "v", 7, 1);
+    std::string e2 = remove_entry(1, "b", 7, 2);
+    auto p = write_file(marker(2, 7) + e1 + e2);
+    log_entry_reader reader(p, 9, 4096);
+    expect_entry(reader, e1, 9);
+    expect_entry(reader, e2, 9 + e1.size());
+    expect_end(reader, 9 + e1.size() + e2.size());
+}
+
+// the range set can be read even if the name of the file is removed after it is opened
+TEST_F(log_entry_reader_test, reads_the_range_after_unlink) {
+    std::string e1 = normal_entry(1, "a", "v", 7, 1);
+    auto p = write_file(e1);
+    log_entry_reader reader(p, 0, 4096);
+    boost::filesystem::remove(p);
+    reader.set_range(0, e1.size());
+    expect_entry(reader, e1, 0);
+    expect_end(reader, e1.size());
+}
+
+// setting the range again reads that range from its beginning. It can be set again in the middle of the previous
+// range, and to a position before it
+TEST_F(log_entry_reader_test, set_range_switches_the_range) {
+    std::string e1 = normal_entry(1, "a", "v", 7, 1);
+    std::string e2 = normal_entry(1, "b", "v", 7, 2);
+    std::string e3 = normal_entry(1, "c", "v", 7, 3);
+    auto p = write_file(e1 + e2 + e3);
+    log_entry_reader reader(p, 0, 4096);
+    const std::uint64_t o2 = e1.size();
+    const std::uint64_t o3 = e1.size() + e2.size();
+    const std::uint64_t size = o3 + e3.size();
+    // read the last range to its end
+    reader.set_range(o3, size);
+    expect_entry(reader, e3, o3);
+    expect_end(reader, size);
+    // set a range before it, and read it halfway
+    reader.set_range(0, o3);
+    expect_entry(reader, e1, 0);
+    // set again before the end. The rest of the previous range is not read, and the new range is read from its
+    // beginning
+    reader.set_range(o2, size);
+    expect_entry(reader, e2, o2);
+    expect_entry(reader, e3, o3);
+    expect_end(reader, size);
+}
+
+// the buffer is expanded and shrunk relative to the size given to the constructor
+TEST_F(log_entry_reader_test, buffer_size_given_to_the_constructor) {
+    constexpr std::size_t size = 4096;
+    std::string large = normal_entry(1, "key", std::string(size + 100, 'v'), 7, 1);
+    std::string small = remove_entry(1, "key", 7, 2);
+    auto p = write_file(large + small);
+    recording_file_operations ops;
+    log_entry_reader reader(p, 0, size, ops);
+    reader.set_range(0, large.size() + small.size());
+    expect_entry(reader, large, 0);
+    expect_entry(reader, small, large.size());
+    expect_end(reader, large.size() + small.size());
+    // the first read is the given size, the second is the rest of the entry after expanding to its size, and the third
+    // is the rest up to the end position with the buffer shrunk to the given size
+    ASSERT_EQ(ops.requests().size(), 3U);
+    EXPECT_EQ(ops.requests()[0], size);
+    EXPECT_EQ(ops.requests()[1], large.size() - size);
+    EXPECT_EQ(ops.requests()[2], small.size());
+    // the same buffer is used after setting the range again
+    reader.set_range(large.size(), large.size() + small.size());
+    expect_entry(reader, small, large.size());
+    ASSERT_EQ(ops.requests().size(), 4U);
+    EXPECT_EQ(ops.requests()[3], small.size());
+}
+
+// if the end position is an entry boundary, the result is end there, and nothing after it is read (the total of the
+// requested bytes is the size of the range)
+TEST_F(log_entry_reader_test, end_offset_at_entry_boundary) {
+    std::string e1 = normal_entry(1, "a", "v", 7, 1);
+    std::string e2 = normal_entry(1, "b", std::string(100, 'v'), 7, 2);
+    std::string e3 = normal_entry(1, "c", std::string(100, 'v'), 7, 3);
+    std::string e4 = normal_entry(1, "d", "v", 7, 4);
+    auto p = write_file(e1 + e2 + e3 + e4);
+    recording_file_operations ops;
+    const std::uint64_t start_offset = e1.size();
+    const std::uint64_t end_offset = e1.size() + e2.size() + e3.size();
+    // even if the buffer size is smaller than the range, each read is limited to the rest of the range
+    log_entry_reader reader(p, 0, 64, ops);
+    reader.set_range(start_offset, end_offset);
+    expect_entry(reader, e2, start_offset);
+    expect_entry(reader, e3, start_offset + e2.size());
+    expect_end(reader, end_offset);
+    expect_end(reader, end_offset);
+    std::size_t requested = 0;
+    for (std::size_t r : ops.requests()) {
+        requested += r;
+    }
+    EXPECT_EQ(requested, end_offset - start_offset);
+}
+
+// if the start position and the end position are the same, the result is end without reading
+TEST_F(log_entry_reader_test, empty_range_is_end) {
+    std::string e1 = normal_entry(1, "a", "v", 7, 1);
+    auto p = write_file(e1 + e1);
+    recording_file_operations ops;
+    log_entry_reader reader(p, 0, 4096, ops);
+    reader.set_range(e1.size(), e1.size());
+    expect_end(reader, e1.size());
+    EXPECT_TRUE(ops.requests().empty());
+}
+
+// if the end position is in the middle of an entry, that entry is short_entry, and the next result is end at the end
+// position
+TEST_F(log_entry_reader_test, end_offset_in_the_middle_of_entry) {
+    std::string e1 = normal_entry(1, "a", "v", 7, 1);
+    std::string e2 = normal_entry(1, "b", "v", 7, 2);
+    auto p = write_file(e1 + e2);
+    const std::uint64_t end_offset = e1.size() + 5;
+    log_entry_reader reader(p, 0, 4096);
+    reader.set_range(0, end_offset);
+    expect_entry(reader, e1, 0);
+    expect_error(reader, log_entry::read_error::short_entry, entry_type::normal_entry, e1.size());
+    expect_end(reader, end_offset);
+    // the range can be set again after an error
+    reader.set_range(e1.size(), e1.size() + e2.size());
+    expect_entry(reader, e2, e1.size());
+}
+
+// a short_entry result has the lower bound of the bytes needed to parse (required). Widening the end position to
+// required repeatedly reads the entry (for normal_entry the whole length is known after the header; normal_with_blob
+// has one more step after blob_count)
+TEST_F(log_entry_reader_test, short_entry_has_required) {
+    std::string e1 = normal_entry(1, "key", std::string(100, 'v'), 7, 1);
+    std::string e2 = normal_with_blob(1, "key", std::string(100, 'v'), 7, 2, {11, 12});
+    auto p = write_file(e1 + e2);
+    recording_file_operations ops;
+    log_entry_reader reader(p, 0, 4096, ops);
+
+    // normal_entry: 5 bytes, then the header (9 bytes), then the whole entry
+    reader.set_range(0, 5);
+    auto r1 = reader.next();
+    ASSERT_EQ(r1.result(), status::error);
+    ASSERT_EQ(r1.error().value(), log_entry::read_error::short_entry);
+    EXPECT_EQ(r1.offset(), 0U);
+    EXPECT_EQ(r1.required(), 9U);
+    reader.set_range(0, r1.required());
+    auto r2 = reader.next();
+    ASSERT_EQ(r2.result(), status::error);
+    ASSERT_EQ(r2.error().value(), log_entry::read_error::short_entry);
+    EXPECT_EQ(r2.required(), e1.size());
+    reader.set_range(0, r2.required());
+    expect_entry(reader, e1, 0);
+
+    // normal_with_blob: the header, then up to blob_count, then the whole entry
+    reader.set_range(e1.size(), e1.size() + 9);
+    auto r3 = reader.next();
+    ASSERT_EQ(r3.result(), status::error);
+    ASSERT_EQ(r3.error().value(), log_entry::read_error::short_entry);
+    EXPECT_EQ(r3.offset(), e1.size());
+    EXPECT_EQ(r3.required(), e2.size() - 2 * 8);
+    reader.set_range(e1.size(), e1.size() + r3.required());
+    auto r4 = reader.next();
+    ASSERT_EQ(r4.result(), status::error);
+    ASSERT_EQ(r4.error().value(), log_entry::read_error::short_entry);
+    EXPECT_EQ(r4.required(), e2.size());
+    reader.set_range(e1.size(), e1.size() + r4.required());
+    expect_entry(reader, e2, e1.size());
+
+    // each read is exactly the size of the range set
+    const std::vector<std::size_t> expected{5, 9, e1.size(), 9, e2.size() - 2 * 8, e2.size()};
+    EXPECT_EQ(ops.requests(), expected);
+}
+
+// a short_entry of a file that ends in the middle of an entry also has required, which is larger than the rest of the
+// file
+TEST_F(log_entry_reader_test, short_entry_at_file_end_has_required) {
+    std::string e1 = normal_entry(1, "key", std::string(100, 'v'), 7, 1);
+    auto p = write_file(e1.substr(0, 20));
+    log_entry_reader reader(p, 0, 4096);
+    auto r = reader.next();
+    ASSERT_EQ(r.result(), status::error);
+    ASSERT_EQ(r.error().value(), log_entry::read_error::short_entry);
+    EXPECT_EQ(r.offset(), 0U);
+    EXPECT_EQ(r.required(), e1.size());
+    expect_end(reader, 20);
+}
+
+// a range beyond the size of the file does not throw, but ends where the data read runs out
+TEST_F(log_entry_reader_test, range_beyond_the_file_ends_at_the_file_size) {
+    std::string e1 = normal_entry(1, "a", "v", 7, 1);
+    auto p = write_file(e1);
+    log_entry_reader reader(p, 0, 4096);
+    reader.set_range(0, e1.size() + 100);
+    expect_entry(reader, e1, 0);
+    expect_end(reader, e1.size());
+    reader.set_range(e1.size() + 10, e1.size() + 100);
+    expect_end(reader, e1.size() + 10);
+}
+
+// set_range aborts on a reader of a file being written, and if the start position exceeds the end position. A buffer
+// size of 0 also aborts
+TEST_F(log_entry_reader_test, invalid_use_of_set_range_aborts) {
+    auto p = write_file(marker(2, 7));
+    EXPECT_DEATH(
+        {
+            log_entry_reader reader(p, 0, [] { return file_write_state::written; });
+            reader.set_range(0, 9);
+        },
+        "set_range is not available");
+    EXPECT_DEATH(
+        {
+            log_entry_reader reader(p, 0, 4096);
+            reader.set_range(2, 1);
+        },
+        "start offset 2 exceeds end offset 1");
+    EXPECT_DEATH(log_entry_reader(p, 0, 0), "buffer size is 0");
 }
 
 }  // namespace limestone::testing

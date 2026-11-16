@@ -98,7 +98,7 @@ public:
      * @brief Default persistent format version for new manifest files.
      * @note Update this value when upgrading the manifest persistent format version.
      */
-    static constexpr int default_persistent_format_version = 8;
+    static constexpr int default_persistent_format_version = 9;
 
     /**
      * @brief Constructs a manifest object with the default version information.
@@ -176,24 +176,28 @@ public:
 
 
     /**
-     * @brief Validates the manifest file in the specified log directory and performs repair or migration if necessary.
+     * @brief Checks the manifest: repairs it from the backup, loads it, and checks that the version is supported.
+     *        Does not migrate it (the version is left as is).
      *
      * @param logdir Path to the log directory containing the manifest file.
-     * @return migration_info containing information about the migration performed.
+     * @param ops    the file operations
+     * @return the loaded manifest (holding the version before the rewrite)
+     * @throws limestone_io_exception if a file operation of the repair fails or the manifest cannot be read
+     * @throws limestone_exception if the version is not supported
      */
-    static migration_info check_and_migrate(const boost::filesystem::path& logdir);
+    static manifest check_and_repair(const boost::filesystem::path& logdir, file_operations& ops);
 
     /**
-     * @brief Validates and migrates the manifest file, with injectable I/O backend.
+     * @brief Rewrites the manifest to default_persistent_format_version.
      *
-     * @note This overload is intended for unit tests or special environments
-     *       where file-system operations (rename/remove) must be stubbed or mocked.
-     *
-     * @param logdir Path to the log directory containing the manifest file.
-     * @param ops    Custom file_operations implementation (e.g. a test stub).
-     * @return migration_info containing information about the migration performed.
-     */ 
-    static migration_info check_and_migrate(const boost::filesystem::path& logdir, file_operations& ops);
+     * @param manifest_path the path of the manifest file
+     * @param manifest_backup_path the path of the backup file of the manifest
+     * @param old_manifest the manifest before the rewrite, returned by check_and_repair()
+     * @param ops    the file operations
+     * @throws limestone_io_exception if a file operation fails
+     */
+    static void migrate_manifest(const boost::filesystem::path& manifest_path, const boost::filesystem::path& manifest_backup_path,
+                                 const manifest& old_manifest, file_operations& ops);
 
     /**
      * @brief Converts the current object state to a JSON formatted string.
@@ -272,8 +276,6 @@ protected:
 private:
     static bool exists_path(const boost::filesystem::path& path);
     static void write_file_safely(const boost::filesystem::path& file_path, const manifest& m, file_operations& ops); // safe atomic write for manifest
-    static void migrate_manifest(const boost::filesystem::path& manifest_path, const boost::filesystem::path& manifest_backup_path,
-                                 const manifest& old_manifest, file_operations& ops);
     static std::string generate_instance_uuid();
 
     std::string format_version_;
