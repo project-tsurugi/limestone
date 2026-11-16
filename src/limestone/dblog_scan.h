@@ -18,6 +18,8 @@
 #include <boost/filesystem.hpp>
 #include <list>
 #include <map>
+#include <set>
+#include <string>
 
 #include <limestone/api/blob_id_type.h>
 #include <limestone/api/datastore.h>
@@ -286,10 +288,21 @@ public:
      */
     void rescan_directory_paths();
 
+    /**
+     * @brief Sets the files (by name within the log directory) that rescan_directory_paths() leaves out of the
+     *        path list, so that the scan_pwal_files family does not scan them.
+     *
+     * Takes effect at the next rescan_directory_paths().
+     *
+     * @param file_names the names of the files to leave out
+     */
+    void set_excluded_file_names(std::set<std::string> file_names);
+
 private:
     boost::filesystem::path dblogdir_;
     std::optional<std::reference_wrapper<compaction_options>> options_;
     std::list<boost::filesystem::path> path_list_;
+    std::set<std::string> excluded_file_names_{};
     int thread_num_{1};
     thread_end_hook_t thread_end_hook_{};
     bool fail_fast_{false};

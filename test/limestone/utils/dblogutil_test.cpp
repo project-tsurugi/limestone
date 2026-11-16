@@ -21,6 +21,7 @@
 
 #include "dblog_scan.h"
 #include "manifest.h"
+#include "compaction_catalog.h"
 #include "log_entry/log_entry.h"
 #include "limestone/log/testdata.h"
 #include "test_root.h"
@@ -189,6 +190,22 @@ static constexpr const char* location = "/tmp/dblogutil_test";
         assert(data1.size() <= data.size());
         assert(data1 == data2);
         return std::make_tuple(rc, out, rc2, out2);
+    }
+
+    // a log directory of the current format version with pwal_0000 (3 entries), a broken compacted WAL file and a
+    // nondurable detached pwal, both recorded by the compaction catalog
+    void create_files_recorded_by_the_catalog(const boost::filesystem::path& dir) {
+        create_file(dir / "epoch", epoch_0x100_str);
+        create_file(dir / std::string(manifest::file_name), data_manifest(manifest::default_persistent_format_version));
+        create_file(dir / "pwal_0000", data_normal2);
+        create_file(dir / "pwal_0000.compacted.1", data_truncated_normal_entry);
+        create_file(dir / "pwal_0001.0000000000000100.0", data_nondurable);
+        create_file(dir / std::string(compaction_catalog::get_catalog_filename()),
+                    "COMPACTION_CATALOG_HEADER\n"
+                    "COMPACTED_FILE pwal_0000.compacted.1 1\n"
+                    "DETACHED_PWAL pwal_0001.0000000000000100.0\n"
+                    "MAX_EPOCH_ID 256\n"
+                    "COMPACTION_CATALOG_FOOTER\n");
     }
 
     void expect_no_change(std::string_view& from) {
@@ -1049,6 +1066,44 @@ TEST_F(dblogutil_test, repairc_marker_end_partial_zerofill_epoch_ff) {
     EXPECT_EQ(rc2, 0);
     EXPECT_NE(out2.find("\n" "status: OK"), out2.npos);
     expect_cut_at(0, orig_data);
+}
+
+
+// The files recorded by the compaction catalog (the compacted WAL file and the detached pwals, whose content is in
+// the compacted WAL file) are not scanned by inspect and repair. If they were scanned, the broken compacted WAL file
+// and the nondurable detached pwal would change the status, the count and (with --cut) the files
+TEST_F(dblogutil_test, inspect_skips_the_files_recorded_by_the_catalog) {
+    boost::filesystem::path dir{location};
+    create_files_recorded_by_the_catalog(dir);
+    std::string out;
+    int rc = invoke(UTIL_COMMAND " inspect " + dir.string() + " 2>&1", out);
+    EXPECT_EQ(rc, 0);
+    EXPECT_NE(out.find("\n" "status: OK"), out.npos);
+    EXPECT_NE(out.find("\n" "count-durable-wal-entries: 3"), out.npos);  // the entries of pwal_0000 only
+}
+
+TEST_F(dblogutil_test, repairc_skips_the_files_recorded_by_the_catalog) {
+    boost::filesystem::path dir{location};
+    create_files_recorded_by_the_catalog(dir);
+    std::string out;
+    int rc = invoke(UTIL_COMMAND " repair --cut=true " + dir.string() + " 2>&1", out);
+    EXPECT_EQ(rc, 0);
+    EXPECT_NE(out.find("\n" "status: OK"), out.npos);
+    EXPECT_EQ(read_entire_file(dir / "pwal_0000.compacted.1"), std::string(data_truncated_normal_entry));
+    EXPECT_EQ(read_entire_file(dir / "pwal_0001.0000000000000100.0"), std::string(data_nondurable));
+}
+
+// A compaction output not recorded by the catalog is scanned as a WAL file (it is removed as an orphan at startup)
+TEST_F(dblogutil_test, inspect_scans_a_compaction_output_not_recorded_by_the_catalog) {
+    boost::filesystem::path dir{location};
+    create_file(dir / "epoch", epoch_0x100_str);
+    create_file(dir / std::string(manifest::file_name), data_manifest(manifest::default_persistent_format_version));
+    create_file(dir / "pwal_0000", data_normal2);
+    create_file(dir / "pwal_0000.compacted.1", data_truncated_normal_entry);
+    std::string out;
+    int rc = invoke(UTIL_COMMAND " inspect " + dir.string() + " 2>&1", out);
+    EXPECT_NE(rc, 0);
+    EXPECT_EQ(out.find("\n" "status: OK"), out.npos);
 }
 
 } // namespace limestone::testing
