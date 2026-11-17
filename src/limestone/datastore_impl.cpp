@@ -899,6 +899,14 @@ void datastore_impl::set_migration_info(const manifest::migration_info& info) no
     migration_info_ = info;
 }
 
+epoch_id_type datastore_impl::get_startup_durable_epoch() const noexcept {
+    return startup_durable_epoch_;
+}
+
+void datastore_impl::set_startup_durable_epoch(epoch_id_type epoch) noexcept {
+    startup_durable_epoch_ = epoch;
+}
+
 void datastore_impl::generate_hmac_secret_key() {
     // Generate 16 random bytes using OpenSSL RAND_bytes()
     // TODO: Future improvement - throw exception instead of abort when public API allows it

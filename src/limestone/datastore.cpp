@@ -562,8 +562,13 @@ void datastore::ready() {
         next_blob_id_.store(next_blob_id);
 
         online_compaction_worker_future_ = std::async(std::launch::async, &datastore::online_compaction_worker, this);
-        if (epoch_id_switched_.load() != 0) {
-            write_epoch_callback_(epoch_id_informed_.load());
+        // Move the durable epoch into the current epoch file before removing the rotated epoch files. The value to
+        // write is the durable epoch read at startup, not the greatest epoch that appeared in the WAL
+        // (epoch_id_informed_); the latter includes the epochs of the snippets invalidated for being beyond the
+        // durable epoch.
+        epoch_id_type startup_durable_epoch = impl_->get_startup_durable_epoch();
+        if (startup_durable_epoch != 0) {
+            write_epoch_callback_(startup_durable_epoch);
         }
         cleanup_rotated_epoch_files(location_);
         auto migration_info = impl_->get_migration_info();
