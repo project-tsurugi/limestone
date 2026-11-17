@@ -330,6 +330,24 @@ TEST_F(durable_test, ut_last_durable_epoch_normal) {
     EXPECT_EQ(limestone::internal::last_durable_epoch(epoch_file), 42);
 }
 
+// the greatest epoch is returned even with duplicate entries of the same epoch and entries not in ascending order
+TEST_F(durable_test, ut_last_durable_epoch_duplicated_and_unordered) {
+    using namespace limestone::api;
+
+    boost::filesystem::path epoch_file(location);
+    epoch_file /= "epoch";
+    {  // make epoch file for test
+        FILE *f = fopen(epoch_file.c_str(), "w");
+        log_entry::durable_epoch(f, 1);
+        log_entry::durable_epoch(f, 42);
+        log_entry::durable_epoch(f, 42);
+        log_entry::durable_epoch(f, 5);
+        fclose(f);
+    }
+
+    EXPECT_EQ(limestone::internal::last_durable_epoch(epoch_file), 42);
+}
+
 TEST_F(durable_test, ut_last_durable_epoch_broken_trimmed) {
     using namespace limestone::api;
 

@@ -51,6 +51,8 @@ enum class beyond_boundary_handling {
 struct wal_scan_result {
     /// the greatest epoch the scan saw (the return value of dblog_scan)
     limestone::api::epoch_id_type max_appeared_epoch{};
+    /// the boundary epoch the scan used (boundary_epoch of scan())
+    limestone::api::epoch_id_type boundary_epoch{};
     /// the greatest ID of the BLOBs referred to by normal_with_blob (including the entries excluded by the removal of
     /// duplicates and by the range deletions, and the entries of the invalid snippets, which are not made durable or
     /// already invalidated) (dblog_scan::get_max_blob_id()). 0 if none

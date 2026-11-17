@@ -259,6 +259,18 @@ public:
     void set_migration_info(const manifest::migration_info& info) noexcept;
 
     /**
+     * @brief gets the durable epoch read from the epoch files at startup.
+     * @return the durable epoch; 0 before the scan of the WAL at startup, or if no epoch file has a value
+     */
+    [[nodiscard]] epoch_id_type get_startup_durable_epoch() const noexcept;
+
+    /**
+     * @brief sets the durable epoch read from the epoch files at startup.
+     * @param epoch the durable epoch
+     */
+    void set_startup_durable_epoch(epoch_id_type epoch) noexcept;
+
+    /**
      * @brief gets the HMAC secret key for BLOB reference tag generation.
      * @return reference to the HMAC secret key.
      */
@@ -612,6 +624,9 @@ private:
   
     // Migration info for the manifest
     std::optional<manifest::migration_info> migration_info_;
+
+    // the durable epoch read from the epoch files at startup
+    epoch_id_type startup_durable_epoch_{0};
 
     // HMAC secret key for BLOB reference tag generation (16 bytes)
     std::array<std::uint8_t, 16> hmac_secret_key_{};

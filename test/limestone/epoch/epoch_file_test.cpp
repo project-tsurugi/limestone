@@ -379,6 +379,73 @@ TEST_F(epoch_file_test, remove_tmpe_epoch_file_on_boot) {
 }
 
 
+// starting up with a snippet beyond the durable epoch left in the WAL does not advance the durable epoch in the
+// epoch file
+TEST_F(epoch_file_test, ready_keeps_durable_epoch_with_snippet_beyond_it) {
+    // make the epochs up to 42 durable, and shut down leaving a snippet of epoch 43 not durable
+    gen_datastore();
+    datastore_->ready();
+    datastore_->switch_epoch(42);
+    lc0_->begin_session();
+    lc0_->add_entry(3, "k1", "v1", {42, 4});
+    lc0_->end_session();
+    datastore_->switch_epoch(43);
+    lc0_->begin_session();
+    lc0_->add_entry(3, "k2", "v2", {43, 5});
+    lc0_->end_session();
+    datastore_->shutdown();
+    datastore_ = nullptr;
+    ASSERT_EQ(42, last_durable_epoch());
+
+    // over two startups, the durable epoch stays 42 and the entry of epoch 43 does not appear
+    for (int i = 0; i < 2; i++) {
+        gen_datastore();
+        datastore_->ready();
+        EXPECT_EQ(42, last_durable_epoch());
+        // the epoch of the invalidated snippet is not reused
+        EXPECT_EQ(43, datastore_->last_epoch());
+
+        std::unique_ptr<snapshot> snapshot = datastore_->get_snapshot();
+        std::unique_ptr<cursor> cursor = snapshot->get_cursor();
+        std::string buf;
+        ASSERT_TRUE(cursor->next());
+        EXPECT_EQ((cursor->key(buf), buf), "k1");
+        EXPECT_FALSE(cursor->next());
+
+        datastore_->shutdown();
+        datastore_ = nullptr;
+        EXPECT_EQ(42, last_durable_epoch());
+    }
+}
+
+// starting up with a snippet left in the WAL and no durable epoch in any epoch file writes nothing to the epoch file
+TEST_F(epoch_file_test, ready_writes_nothing_without_durable_epoch) {
+    // shut down leaving a snippet of epoch 1 not durable; no epoch has been made durable
+    gen_datastore();
+    datastore_->ready();
+    datastore_->switch_epoch(1);
+    lc0_->begin_session();
+    lc0_->add_entry(3, "k1", "v1", {1, 4});
+    lc0_->end_session();
+    datastore_->shutdown();
+    datastore_ = nullptr;
+    ASSERT_EQ(0, boost::filesystem::file_size(epoch_file_path));
+
+    gen_datastore();
+    datastore_->ready();
+    EXPECT_EQ(0, boost::filesystem::file_size(epoch_file_path));
+    EXPECT_EQ(0, last_durable_epoch());
+    // the epoch of the invalidated snippet is not reused
+    EXPECT_EQ(1, datastore_->last_epoch());
+
+    std::unique_ptr<snapshot> snapshot = datastore_->get_snapshot();
+    std::unique_ptr<cursor> cursor = snapshot->get_cursor();
+    EXPECT_FALSE(cursor->next());
+
+    datastore_->shutdown();
+    datastore_ = nullptr;
+}
+
 
 } // namespace limestone::testing
 
