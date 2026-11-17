@@ -101,6 +101,7 @@ static constexpr const int max_entries_in_epoch_file = 100;
  * @param file the path of the epoch file (must exist)
  * @return the greatest epoch, or std::nullopt if the file has no entry
  * @throws limestone_exception if the file is broken, or contains an entry other than a durable epoch entry
+ * @throws limestone_io_exception if opening or reading the file fails
  */
 std::optional<epoch_id_type> last_durable_epoch(const boost::filesystem::path& file);
 

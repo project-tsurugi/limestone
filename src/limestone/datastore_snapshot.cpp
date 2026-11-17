@@ -279,7 +279,7 @@ blob_id_type datastore::create_snapshot_and_get_max_blob_id() {
     wal_scan_result scanned = scan_wals(logscan, sorter, options, {});
     epoch_id_switched_.store(scanned.max_appeared_epoch);
     epoch_id_informed_.store(scanned.max_appeared_epoch);
-    // the boundary of this scan is the durable epoch read from the epoch file
+    // the boundary of this scan is the durable epoch read from the epoch files
     impl_->set_startup_durable_epoch(scanned.boundary_epoch);
 
     boost::filesystem::path sub_dir = location_ / boost::filesystem::path(std::string(snapshot::subdirectory_name_));
