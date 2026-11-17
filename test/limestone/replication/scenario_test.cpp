@@ -30,6 +30,7 @@
 #include <iterator>
 #include <memory>
 #include <mutex>
+#include <optional>
 #include <sstream>
 #include <thread>
 
@@ -524,17 +525,13 @@ TEST_P(scenario_test, blob_replication_end_to_end) {
     EXPECT_EQ(get_replica_epoch(), 1);
 }
 
-// Both thread and process modes run because either may surface distinct bugs
-// (process-only catches wire/handshake issues; thread-only catches in-process
-// replica_server lifecycle issues and provides a faster dev loop). The RDMA
-// (TCP-less) counterpart of this scenario lives in scenario_tcpless_rdma_test.
 // ending a session in the tcp mode fixes the epoch after the replica has processed the end of the session
 TEST_P(scenario_test, end_session_fixes_epoch_after_replica_ack) {
     gen_datastore(master_location);
     ds->switch_epoch(1);
 
     // the size of the WAL file of the replica when the epoch is fixed (0 if the file does not exist)
-    boost::filesystem::path const replica_pwal = boost::filesystem::path{replica_location} / "pwal_0000";
+    const boost::filesystem::path replica_pwal = boost::filesystem::path{replica_location} / "pwal_0000";
     std::optional<std::uintmax_t> replica_pwal_size_at_epoch_fix;
     ds->on_end_session_finished_epoch_id_store_callback = [&]() {
         boost::system::error_code ec;
@@ -553,6 +550,10 @@ TEST_P(scenario_test, end_session_fixes_epoch_after_replica_ack) {
     ASSERT_EQ(read_replica_pwal00().size(), 1);
 }
 
+// Both thread and process modes run because either may surface distinct bugs
+// (process-only catches wire/handshake issues; thread-only catches in-process
+// replica_server lifecycle issues and provides a faster dev loop). The RDMA
+// (TCP-less) counterpart of this scenario lives in scenario_tcpless_rdma_test.
 INSTANTIATE_TEST_SUITE_P(
     variants,
     scenario_test,
