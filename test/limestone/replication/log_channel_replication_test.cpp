@@ -98,6 +98,7 @@ protected:
     void TearDown() override {
         unsetenv("TSURUGI_REPLICATION_ENDPOINT");
         unsetenv("REPLICATION_RDMA_SLOTS");
+        unsetenv("REPLICATION_ASYNC_SESSION_CLOSE");
         stop_replica_server();
         std::string cmd = "rm -rf " + std::string(base);
         ;
@@ -457,6 +458,45 @@ TEST_F(log_channel_replication_test, rdma_send_buffer_resets_after_threshold_flu
                              write_version_type{api::epoch_id_type{111}, 0U});
     });
     EXPECT_EQ(ptr->send_count_, count_after_first_flush);
+}
+
+// ending a session in the rdma mode fixes the epoch after the flush to the replica
+TEST_F(log_channel_replication_test, rdma_end_session_fixes_epoch_after_flush) {
+    auto connector = begin_session_and_get_connector();
+    auto rdma_stream = std::make_unique<fake_rdma_send_stream>();
+    auto* ptr = rdma_stream.get();
+    log_channel_->get_impl()->set_rdma_send_stream(std::move(rdma_stream));
+
+    std::optional<std::size_t> flush_count_at_epoch_fix;
+    datastore_->on_end_session_finished_epoch_id_store_callback = [&]() {
+        flush_count_at_epoch_fix = ptr->flush_count_;
+    };
+    log_channel_->end_session();
+    datastore_->on_end_session_finished_epoch_id_store_callback = nullptr;
+
+    ASSERT_TRUE(flush_count_at_epoch_fix.has_value());
+    EXPECT_EQ(flush_count_at_epoch_fix.value(), 1U);
+    EXPECT_EQ(log_channel_->finished_epoch_id(), 111);
+}
+
+// with REPLICATION_ASYNC_SESSION_CLOSE too, the epoch is fixed after the flush to the replica
+TEST_F(log_channel_replication_test, rdma_end_session_fixes_epoch_after_flush_async_session_close) {
+    setenv("REPLICATION_ASYNC_SESSION_CLOSE", "1", 1);
+    auto connector = begin_session_and_get_connector();
+    auto rdma_stream = std::make_unique<fake_rdma_send_stream>();
+    auto* ptr = rdma_stream.get();
+    log_channel_->get_impl()->set_rdma_send_stream(std::move(rdma_stream));
+
+    std::optional<std::size_t> flush_count_at_epoch_fix;
+    datastore_->on_end_session_finished_epoch_id_store_callback = [&]() {
+        flush_count_at_epoch_fix = ptr->flush_count_;
+    };
+    log_channel_->end_session();
+    datastore_->on_end_session_finished_epoch_id_store_callback = nullptr;
+
+    ASSERT_TRUE(flush_count_at_epoch_fix.has_value());
+    EXPECT_EQ(flush_count_at_epoch_fix.value(), 1U);
+    EXPECT_EQ(log_channel_->finished_epoch_id(), 111);
 }
 
 TEST_F(log_channel_replication_test, log_channel_add_storage) {
