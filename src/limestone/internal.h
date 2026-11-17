@@ -94,7 +94,14 @@ static constexpr const int max_entries_in_epoch_file = 100;
 
 // from dblog_scan.cpp
 
-// return max epoch in file.
+/**
+ * @brief gets the durable epoch recorded in an epoch file.
+ * @details Returns the greatest epoch among all the entries of the file. Duplicate entries of the same epoch and
+ * entries that are not in ascending order are allowed.
+ * @param file the path of the epoch file (must exist)
+ * @return the greatest epoch, or std::nullopt if the file has no entry
+ * @throws limestone_exception if the file is broken, or contains an entry other than a durable epoch entry
+ */
 std::optional<epoch_id_type> last_durable_epoch(const boost::filesystem::path& file);
 
 // from datastore_format.cpp
