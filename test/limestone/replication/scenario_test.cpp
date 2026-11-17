@@ -30,6 +30,7 @@
 #include <iterator>
 #include <memory>
 #include <mutex>
+#include <optional>
 #include <sstream>
 #include <thread>
 
@@ -449,9 +450,9 @@ TEST_P(scenario_test, minimal_test) {
     }
 }
 
-// The async session close sends the SESSION_END message before finalize_session_file()
-// updates finished_epoch_id_, so its epoch must be read from current_epoch_id_; the
-// replica rejects an END whose epoch differs from the one the session was begun at.
+// The SESSION_END message is sent before finished_epoch_id_ is updated, so its epoch must
+// be read from current_epoch_id_; the replica rejects an END whose epoch differs from the
+// one the session was begun at.
 TEST_P(scenario_test, async_session_close_replicates_session_epoch) {
     setenv("REPLICATION_ASYNC_SESSION_CLOSE", "1", 1);
     gen_datastore(master_location);
@@ -522,6 +523,31 @@ TEST_P(scenario_test, blob_replication_end_to_end) {
     ds->switch_epoch(2);
     EXPECT_EQ(get_master_epoch(), 1);
     EXPECT_EQ(get_replica_epoch(), 1);
+}
+
+// ending a session in the tcp mode fixes the epoch after the replica has processed the end of the session
+TEST_P(scenario_test, end_session_fixes_epoch_after_replica_ack) {
+    gen_datastore(master_location);
+    ds->switch_epoch(1);
+
+    // the size of the WAL file of the replica when the epoch is fixed (0 if the file does not exist)
+    const boost::filesystem::path replica_pwal = boost::filesystem::path{replica_location} / "pwal_0000";
+    std::optional<std::uintmax_t> replica_pwal_size_at_epoch_fix;
+    ds->on_end_session_finished_epoch_id_store_callback = [&]() {
+        boost::system::error_code ec;
+        std::uintmax_t size = boost::filesystem::file_size(replica_pwal, ec);
+        replica_pwal_size_at_epoch_fix = ec ? 0 : size;
+    };
+    lc0_->begin_session();
+    lc0_->add_entry(1, "k1", "v1", {1, 0});
+    lc0_->end_session();
+    ds->on_end_session_finished_epoch_id_store_callback = nullptr;
+
+    // the replica returns the ACK after writing up to the end of the session to its WAL file and fsyncing it
+    ASSERT_TRUE(replica_pwal_size_at_epoch_fix.has_value());
+    EXPECT_GT(replica_pwal_size_at_epoch_fix.value(), 0U);
+    EXPECT_EQ(replica_pwal_size_at_epoch_fix.value(), boost::filesystem::file_size(replica_pwal));
+    ASSERT_EQ(read_replica_pwal00().size(), 1);
 }
 
 // Both thread and process modes run because either may surface distinct bugs

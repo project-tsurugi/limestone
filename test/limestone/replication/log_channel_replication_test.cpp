@@ -17,7 +17,9 @@
 
 #include <algorithm>
 #include <fstream>
+#include <functional>
 #include <map>
+#include <optional>
 
 #include "datastore_impl.h"
 #include "internal.h"
@@ -98,6 +100,7 @@ protected:
     void TearDown() override {
         unsetenv("TSURUGI_REPLICATION_ENDPOINT");
         unsetenv("REPLICATION_RDMA_SLOTS");
+        unsetenv("REPLICATION_ASYNC_SESSION_CLOSE");
         stop_replica_server();
         std::string cmd = "rm -rf " + std::string(base);
         ;
@@ -205,12 +208,17 @@ public:
 
     [[nodiscard]] flush_result flush(std::chrono::milliseconds) noexcept override {
         flush_count_++;
+        if (on_flush_) {
+            on_flush_();
+        }
         return { true, "" };
     }
 
     std::size_t send_count_{};
     std::size_t flush_count_{};
     std::size_t last_payload_size_{};
+    /// @brief called in flush(), after flush_count_ is incremented
+    std::function<void()> on_flush_;
 };
 
 /**
@@ -457,6 +465,59 @@ TEST_F(log_channel_replication_test, rdma_send_buffer_resets_after_threshold_flu
                              write_version_type{api::epoch_id_type{111}, 0U});
     });
     EXPECT_EQ(ptr->send_count_, count_after_first_flush);
+}
+
+// ending a session in the rdma mode makes its epoch durable after the flush to the replica
+TEST_F(log_channel_replication_test, rdma_end_session_makes_epoch_durable_after_flush) {
+    auto connector = begin_session_and_get_connector();
+    auto rdma_stream = std::make_unique<fake_rdma_send_stream>();
+    auto* ptr = rdma_stream.get();
+    log_channel_->get_impl()->set_rdma_send_stream(std::move(rdma_stream));
+    // let the epoch of the session (111) be able to become durable when the session ends
+    datastore_->switch_epoch(112);
+
+    std::optional<epoch_id_type> durable_epoch_at_flush;
+    std::size_t send_count_at_flush = 0;
+    ptr->on_flush_ = [&]() {
+        durable_epoch_at_flush = datastore_->last_epoch();
+        send_count_at_flush = ptr->send_count_;
+    };
+    log_channel_->end_session();
+    ptr->on_flush_ = nullptr;
+
+    // at the flush, SESSION_END has been handed to the send stream, and the epoch of the session is not durable yet
+    ASSERT_TRUE(durable_epoch_at_flush.has_value());
+    EXPECT_LT(durable_epoch_at_flush.value(), 111);
+    EXPECT_EQ(send_count_at_flush, 1U);
+    EXPECT_EQ(ptr->flush_count_, 1U);
+    EXPECT_EQ(datastore_->last_epoch(), 111);
+}
+
+// with REPLICATION_ASYNC_SESSION_CLOSE too, the epoch becomes durable after the flush to the replica
+TEST_F(log_channel_replication_test, rdma_end_session_makes_epoch_durable_after_flush_async_session_close) {
+    setenv("REPLICATION_ASYNC_SESSION_CLOSE", "1", 1);
+    auto connector = begin_session_and_get_connector();
+    auto rdma_stream = std::make_unique<fake_rdma_send_stream>();
+    auto* ptr = rdma_stream.get();
+    log_channel_->get_impl()->set_rdma_send_stream(std::move(rdma_stream));
+    // let the epoch of the session (111) be able to become durable when the session ends
+    datastore_->switch_epoch(112);
+
+    std::optional<epoch_id_type> durable_epoch_at_flush;
+    std::size_t send_count_at_flush = 0;
+    ptr->on_flush_ = [&]() {
+        durable_epoch_at_flush = datastore_->last_epoch();
+        send_count_at_flush = ptr->send_count_;
+    };
+    log_channel_->end_session();
+    ptr->on_flush_ = nullptr;
+
+    // at the flush, SESSION_END has been handed to the send stream, and the epoch of the session is not durable yet
+    ASSERT_TRUE(durable_epoch_at_flush.has_value());
+    EXPECT_LT(durable_epoch_at_flush.value(), 111);
+    EXPECT_EQ(send_count_at_flush, 1U);
+    EXPECT_EQ(ptr->flush_count_, 1U);
+    EXPECT_EQ(datastore_->last_epoch(), 111);
 }
 
 TEST_F(log_channel_replication_test, log_channel_add_storage) {

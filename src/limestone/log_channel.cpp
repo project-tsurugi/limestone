@@ -84,12 +84,6 @@ void log_channel::finalize_session_file() {
     if (fsync(fileno(strm_)) != 0) {
         LOG_AND_THROW_IO_EXCEPTION("fsync failed", errno);
     }
-    envelope_.on_end_session_finished_epoch_id_store(); // for testing
-    finished_epoch_id_.store(current_epoch_id_.load());
-    envelope_.update_min_epoch_id();
-    envelope_.on_end_session_current_epoch_id_store(); // for testing
-    current_epoch_id_.store(UINT64_MAX);
-
     if (fclose(strm_) != 0) {  // NOLINT(*-owning-memory)
         LOG_AND_THROW_IO_EXCEPTION("fclose failed", errno);
     }
@@ -104,35 +98,40 @@ void log_channel::finalize_session_file() {
 void log_channel::end_session() {
     try {
         TRACE_START << "current_epoch_id_=" << current_epoch_id_.load();
+        // finished_epoch_id_ is not updated until the epoch is fixed below, so the session's epoch is read from
+        // current_epoch_id_.
+        bool sent = false;
         if (envelope_.impl_->is_async_session_close_enabled()) {
-            // finished_epoch_id_ is not updated until finalize_session_file(), so the
-            // session's epoch must be read from current_epoch_id_ here.
-            bool sent = impl_->send_replica_message(current_epoch_id_.load(), [&](replication::message_log_entries &msg) {
+            sent = impl_->send_replica_message(current_epoch_id_.load(), [&](replication::message_log_entries &msg) {
                 msg.set_session_end_flag(true);
                 msg.set_flush_flag(true);
             });
             finalize_session_file();
-            if (sent) {
-                if (impl_->has_rdma_send_stream()) {
-                    impl_->flush_rdma_stream();
-                } else {
-                    impl_->wait_for_replica_ack();
-                }
-            }
         } else {
             finalize_session_file();
-            bool sent = impl_->send_replica_message(finished_epoch_id_.load(), [&](replication::message_log_entries &msg) {
+            sent = impl_->send_replica_message(current_epoch_id_.load(), [&](replication::message_log_entries &msg) {
                 msg.set_session_end_flag(true);
                 msg.set_flush_flag(true);
             });
-            if (sent) {
-                if (impl_->has_rdma_send_stream()) {
-                    impl_->flush_rdma_stream();
-                } else {
-                    impl_->wait_for_replica_ack();
-                }
+        }
+        if (sent) {
+            if (impl_->has_rdma_send_stream()) {
+                impl_->flush_rdma_stream();
+            } else {
+                impl_->wait_for_replica_ack();
             }
         }
+
+        // Fix the epoch: mark this session as finished and advance the epoch that can be made durable. This is done
+        // after the flush to the replica / the wait for its ACK, so that the epoch does not become durable before
+        // the replica receives the snippet of this session. The three updates are done together here; updating
+        // only finished_epoch_id_ earlier would let update_min_epoch_id() of another channel regard this session
+        // as finished and fix the epoch.
+        envelope_.on_end_session_finished_epoch_id_store(); // for testing
+        finished_epoch_id_.store(current_epoch_id_.load());
+        envelope_.update_min_epoch_id();
+        envelope_.on_end_session_current_epoch_id_store(); // for testing
+        current_epoch_id_.store(UINT64_MAX);
         TRACE_END;
     } catch (...) {
         TRACE_ABORT;
