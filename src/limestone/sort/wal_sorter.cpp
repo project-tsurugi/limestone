@@ -81,6 +81,7 @@ wal_scan_result wal_sorter::scan(epoch_id_type boundary_epoch, beyond_boundary_h
                  << settings_.arena_size_bytes << " bytes, " << sorted_files_.size() << " sorted files";
     wal_scan_result result;
     result.max_appeared_epoch = max_appeared_epoch;
+    result.boundary_epoch = boundary_epoch;
     result.max_blob_id = scan_->get_max_blob_id();
     result.deletions = deletions_;
     return result;
