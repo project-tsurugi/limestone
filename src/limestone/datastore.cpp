@@ -1138,17 +1138,19 @@ rotation_result datastore::rotate_log_files() {  // NOLINT(readability-function-
             }
         }
 
-        // Lookup table (file name -> channel). The channel set is immutable
-        // after registration completes, so this can be built outside the mutex.
-        std::map<std::string, log_channel*> channel_by_filename;
-        for (auto const& lc : impl_->log_channels()) {
-            channel_by_filename.emplace(lc->file_path().filename().string(), lc.get());
-        }
-
         std::size_t waited_channels = 0;
         std::chrono::steady_clock::time_point wait_begin{};
         {
             std::unique_lock<std::mutex> ul(rotation_state.mutex);
+            // ファイル名からチャネルを引く表。レプリカでは、チャネルの登録がローテーションと並行して起こるので、
+            // 表はこの mutex の中で作る。セッションの開始は、ファイルを開く前にこの mutex を取る。したがって、
+            // 表を作る時点でセッションを開始済みのチャネルは必ず表に載り、下でアクティブと判定される。表に
+            // 載らないチャネルは、下のその場のリネームが終わるまでファイルを開けない (その場のリネームは、
+            // この mutex を一度も手放さずに終える)。
+            std::map<std::string, log_channel*> channel_by_filename;
+            for (log_channel* lc : impl_->registered_log_channels()) {
+                channel_by_filename.emplace(lc->file_path().filename().string(), lc);
+            }
             rotation_state.renamed_files.clear();
             for (auto const& target : targets) {
                 log_channel* channel = nullptr;

@@ -534,6 +534,18 @@ std::vector<std::unique_ptr<log_channel>> const& datastore_impl::log_channels() 
     return log_channels_;
 }
 
+std::vector<log_channel*> datastore_impl::registered_log_channels() {
+    std::vector<log_channel*> result{};
+    {
+        std::scoped_lock<std::mutex> lock(mtx_channel_);
+        result.reserve(log_channels_.size());
+        for (const std::unique_ptr<log_channel>& channel : log_channels_) {
+            result.push_back(channel.get());
+        }
+    }
+    return result;
+}
+
 void datastore_impl::maybe_register_rdma_stream(log_channel& channel, std::size_t id) {
     auto acquire_stream = [&](auto&& acquire_fn) {
         auto stream_result = acquire_fn(static_cast<std::uint16_t>(id));

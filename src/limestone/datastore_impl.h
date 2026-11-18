@@ -251,6 +251,9 @@ public:
      */
     [[nodiscard]] std::vector<std::unique_ptr<log_channel>> const& log_channels() const noexcept;
 
+    /// @brief 登録済みのログチャネルの一覧の写しを返す。登録と排他して読むので、登録と並行して呼べる
+    [[nodiscard]] std::vector<log_channel*> registered_log_channels();
+
     /**
      * @brief Registers the RDMA send stream for the given log channel.
      *
@@ -650,12 +653,14 @@ private:
     std::shared_ptr<replica_connector> control_channel_;
 
     // Log channels registered via register_log_channel(). Registration is separated
-    // from the lock-free read scans (update_min_epoch_id(), rotation/backup, ...) as
+    // from the lock-free read scans (update_min_epoch_id(), backup, ...) as
     // follows: on the master, registration completes before ready() and the scans run
     // only afterwards. On a replica, registration also happens at runtime (TCP on a
     // LOG_CHANNEL_CREATE, RDMA through create_channel() during establishment), but the
     // scanning operations are either master-only or never reach the scan thanks to the
     // early return in update_min_epoch_id() (epoch_id_switched_ stays 0 on a replica).
+    // ローテーションはレプリカでも動くので、排他なしの走査を使わず、registered_log_channels() で
+    // 登録と排他して読む。
     std::vector<std::unique_ptr<log_channel>> log_channels_;
 
     // Next log channel id to assign.
