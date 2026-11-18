@@ -21,6 +21,7 @@
 #include <future>
 #include <memory>
 #include <mutex>
+#include <optional>
 #include <set>
 #include <string>
 #include <thread>
@@ -148,8 +149,21 @@ public:
         }
     }
 
-    [[nodiscard]] static std::uint64_t catalog_generation() {
-        return compaction_catalog::from_catalog_file(boost::filesystem::path(location)).get_generation();
+    // コミット済みのコンパクションの世代。datastore が保持している、コンパクション済み WAL ファイルの名前から
+    // 求める。カタログファイルは読まない (ワーカースレッドが書き換えている最中のファイルを読むと、壊れていると
+    // 判断してバックアップから復元してしまう)
+    [[nodiscard]] std::uint64_t catalog_generation() const {
+        const std::optional<std::string> name = datastore_->get_impl()->get_current_compacted_file_name();
+        if (! name.has_value()) {
+            return 0;
+        }
+        for (std::uint64_t generation = 1; generation < 100; ++generation) {
+            if (name.value() == compaction_catalog::get_compacted_filename_for_generation(generation)) {
+                return generation;
+            }
+        }
+        ADD_FAILURE() << "unexpected name of the compacted WAL file: " << name.value();
+        return 0;
     }
 
     // epoch を進めながら、カタログの世代が expected 以上になるまで待つ。timeout までにならなければ false を返す
