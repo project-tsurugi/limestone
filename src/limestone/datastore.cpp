@@ -1249,6 +1249,10 @@ void datastore::online_compaction_worker() {
 
     boost::filesystem::path start_file = location_ / "ctrl" / "start_compaction";
 
+    const limestone::internal::auto_compaction_settings& auto_compaction = impl_->get_auto_compaction_settings();
+    // 最初の測定は、起動の直後に行う
+    std::chrono::steady_clock::time_point next_measurement = std::chrono::steady_clock::now();
+
     while (!stop_online_compaction_worker_.load()) {
         if (boost::filesystem::exists(start_file)) {
             if (!boost::filesystem::remove(start_file)) {
@@ -1266,6 +1270,35 @@ void datastore::online_compaction_worker() {
                     LOG_LP(INFO) << "online compaction aborted by shutdown: " << e.what();
                 } else {
                     LOG_LP(ERROR) << "failed to compact with online: " << e.what();
+                }
+            }
+        }
+        // 常時コンパクション: 測定の間隔ごとに、コンパクションの入力になっていない WAL の量を測り、閾値を
+        // 超えていればローテーションとコンパクションを実行する。ctrl ファイルの指示と同じスレッドで順に処理する
+        // ので、2 つのコンパクションが並行することはない。
+        if (auto_compaction.threshold_bytes != 0 && std::chrono::steady_clock::now() >= next_measurement) {
+            next_measurement = std::chrono::steady_clock::now() + auto_compaction.measurement_interval;
+            constexpr std::uint64_t mib = std::uint64_t{1024} * 1024;
+            const std::uint64_t amount =
+                limestone::internal::measure_uncompacted_wal_bytes(location_, compaction_catalog_->get_detached_pwals());
+            if (amount > auto_compaction.threshold_bytes) {
+                if (epoch_id_switched_.load() == 0) {
+                    // ローテーションの境界になる epoch がまだない。次の測定を待つ
+                    VLOG_LP(log_info) << "auto compaction postponed: no boundary epoch for the rotation yet";
+                } else {
+                    LOG_LP(INFO) << "the amount of the WAL exceeded the threshold of the auto compaction: amount = "
+                                 << amount / mib << " MiB (" << amount << " bytes), threshold = "
+                                 << auto_compaction.threshold_bytes / mib << " MiB";
+                    try {
+                        run_online_compaction(limestone::internal::compaction_trigger::threshold);
+                    } catch (const limestone_exception& e) {
+                        if (stop_online_compaction_worker_.load()) {
+                            // 通常の shutdown によるローテーションの打ち切りは、異常ではない
+                            LOG_LP(INFO) << "auto compaction aborted by shutdown: " << e.what();
+                        } else {
+                            LOG_LP(ERROR) << "failed to run the auto compaction: " << e.what();
+                        }
+                    }
                 }
             }
         }
