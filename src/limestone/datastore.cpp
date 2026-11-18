@@ -1094,14 +1094,21 @@ rotation_result datastore::rotate_log_files() {  // NOLINT(readability-function-
     TRACE_START;
     std::scoped_lock<std::mutex> lock(rotate_mutex); 
     TRACE << "start rotate_log_files() critical section";
-    auto epoch_id = epoch_id_switched_.load();
+    // ローテーションの境界 epoch。レプリカでは、master から受け取って永続化した最新の GROUP_COMMIT の epoch
+    // (受信 epoch) を使う。レプリカは epoch を自分では進めないので、epoch_id_switched_ は 0 のままである。
+    const bool is_master = impl_->is_master();
+    auto epoch_id = is_master ? epoch_id_switched_.load() : impl_->get_received_epoch();
     if (epoch_id == 0) {
         LOG_AND_THROW_EXCEPTION("rotation requires epoch_id > 0, but got epoch_id = 0");
     }
     TRACE << "epoch_id = " << epoch_id;
     auto& rotation_state = impl_->get_rotation_state();
-    {
-        on_rotate_log_files(); // for testing
+    on_rotate_log_files(); // for testing
+    // レプリカでは、境界 epoch までの永続化の完了を待たない。レプリカの境界 epoch は受信 epoch、つまり、
+    // 受け取った最新の GROUP_COMMIT の epoch である。master は、セッションのログがレプリカで永続化された後に
+    // その epoch を確定して GROUP_COMMIT を送る。したがって、境界 epoch 以下の epoch のセッションは、境界を
+    // 決めた時点で、すべてこのレプリカで永続化を終えている。
+    if (is_master) {
         // Wait until epoch_id_informed_ is less than rotated_epoch_id to ensure safe rotation.
         std::unique_lock<std::mutex> ul(informed_mutex);
         while (epoch_id_informed_.load() < epoch_id && !rotation_state.shutdown_requested.load()) {
