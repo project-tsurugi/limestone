@@ -1436,7 +1436,8 @@ void datastore::run_online_compaction(limestone::internal::compaction_trigger tr
     // check blob file garbage collection runnable
     bool blob_file_gc_runnable = false;
     bool is_active = blob_file_garbage_collector_->is_active();
-    if (boundary_version_copy.get_major() > compaction_catalog_->get_max_epoch_id() && !is_active) {
+    // この判定は master のものである。レプリカは、ローテーションの後に、master から受け取った境界で判定する
+    if (impl_->is_master() && boundary_version_copy.get_major() > compaction_catalog_->get_max_epoch_id() && !is_active) {
         blob_file_gc_runnable = true;
         blob_file_garbage_collector_->shutdown();
     }
@@ -1449,6 +1450,32 @@ void datastore::run_online_compaction(limestone::internal::compaction_trigger tr
     // rotate first
     rotation_result result = rotate_log_files();
     LOG_LP(INFO) << "rotated the log files for the compaction: boundary epoch = " << result.get_epoch_id();
+
+    // レプリカの BLOB ファイルの GC。レプリカは、どの BLOB の ID までが発行済みかを知らないので、GC の境界を自分では
+    // 決められない。master がコンパクションのたびに送る組 (master の境界 epoch E_m、BLOB の ID の境界 G_m) を使う。
+    // このコンパクションの境界 epoch を E_r として、E_m <= E_r であれば、G_m 未満の BLOB のうち生きているものへの
+    // 参照は、すべて E_r 以下の epoch のエントリにあり、このコンパクションの走査で見える。
+    if (! impl_->is_master()) {
+        const std::optional<datastore_impl::compaction_boundary> received = impl_->get_received_compaction_boundary();
+        const bool blob_gc_enabled = impl_->get_auto_compaction_settings().blob_gc;
+        // GC は別のスレッドで動く。実行中に次の GC を始めると、実行中の GC を止めてしまうので、見送る
+        const bool previous_gc_active = blob_file_garbage_collector_->is_active();
+        if (blob_gc_enabled && received.has_value() && received->boundary_epoch <= result.get_epoch_id()
+            && ! previous_gc_active) {
+            blob_file_gc_runnable = true;
+            blob_gc_boundary = received->blob_id_boundary;
+            // GC の走査は、write_version が境界未満のエントリを集める。E_r 以下の epoch のエントリを対象にする
+            boundary_version_copy = write_version_type(result.get_epoch_id() + 1, 0);
+            blob_file_garbage_collector_->shutdown();
+        }
+        VLOG_LP(log_info) << "blob file GC on the replica: enabled = " << blob_gc_enabled
+                          << ", boundary received = " << received.has_value()
+                          << ", master boundary epoch = " << (received.has_value() ? received->boundary_epoch : 0)
+                          << ", blob id boundary = " << (received.has_value() ? received->blob_id_boundary : 0)
+                          << ", boundary epoch = " << result.get_epoch_id()
+                          << ", previous GC active = " << previous_gc_active
+                          << ", runnable = " << blob_file_gc_runnable;
+    }
 
     // select files for compaction
     std::set<std::string> detached_pwals = compaction_catalog_->get_detached_pwals();
