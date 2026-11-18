@@ -848,7 +848,7 @@ std::future<void> datastore::shutdown() noexcept {
 
     stop_online_compaction_worker();
     if (!online_compaction_worker_future_.valid()) {
-        VLOG(log_info) << "/:limestone:datastore:shutdown compaction task is not running. skipping task shutdown.";
+        LOG_LP(INFO) << "the online compaction worker has not been started; no snapshot was released before the shutdown";
     } else {
         VLOG(log_info) << "/:limestone:datastore:shutdown shutdown: waiting for compaction task to stop";
         online_compaction_worker_future_.wait();
