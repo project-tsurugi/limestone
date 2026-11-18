@@ -17,9 +17,11 @@
 #pragma once
 
 #include <string>
+#include <memory>
 #include <vector>
 #include <limestone/api/storage_id_type.h>
 #include <limestone/api/blob_id_type.h>
+#include "compaction_worker_launcher.h"
 #include "log_entry/log_entry.h"
 
 namespace limestone::internal {
@@ -81,6 +83,14 @@ public:
      * @details After calling this method, no further operations on the cursor are valid.
      */
     virtual void close() = 0;
+
+    /**
+     * @brief snapshot と共有する印を設定する。印は、この cursor の破棄まで保持される。
+     */
+    void set_snapshot_use_marker(std::shared_ptr<snapshot_use_marker> marker) noexcept;
+
+private:
+    std::shared_ptr<snapshot_use_marker> snapshot_use_marker_{};
 };
 
 

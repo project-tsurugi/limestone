@@ -51,6 +51,10 @@ std::unique_ptr<cursor> cursor_impl::create_cursor(
     return std::unique_ptr<cursor>(new cursor(std::move(impl)));
 }
 
+void cursor_impl::set_snapshot_use_marker(cursor& target, std::shared_ptr<snapshot_use_marker> marker) noexcept {
+    target.pimpl->set_snapshot_use_marker(std::move(marker));
+}
+
 cursor_impl::cursor_impl(const boost::filesystem::path& snapshot_file, std::map<api::storage_id_type, api::write_version_type> clear_storage)
     : clear_storage_(std::move(clear_storage)) {
     // log_entry_reader throws limestone_io_exception if the file cannot be opened

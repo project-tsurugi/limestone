@@ -28,7 +28,7 @@ issue #143 を解消する。既存の動作を変えるので、最初に行う
 
 - [x] 起動を 1 回だけ行うクラスと、snapshot と cursor が共有する印のクラスを加える
       (compaction_worker_launcher.h/.cpp)。起動と shutdown() を排他する。
-- [~] 印を、snapshot_impl と cursor の実装に持たせる。公開ヘッダは変えない。
+- [x] 印を、snapshot_impl と cursor の実装に持たせる。公開ヘッダは変えない。
 - [ ] ready() からワーカースレッドの起動を外す。get_snapshot() と shared_snapshot() が印を設定する。
 - [ ] shutdown() で以後の起動を無効にする。起動していなければ INFO で記録する (今は詳細のログ)。
 - [ ] ctrl ディレクトリの作成を、ワーカースレッドの先頭から ready() へ移す。
