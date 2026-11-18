@@ -169,6 +169,8 @@ RDMA モードの受信箇所での受信 epoch の更新は、単体のテス�
 - [x] clang-tidy (scripts/run-clang-tidy-ci.sh) の指摘 4 件を直した。lock_guard を scoped_lock に替え (3 件)、
       online_compaction_worker() の複雑度の警告を NOLINT で抑えた (1 件)。後者は、常時コンパクションの分岐を
       別の関数へ分ける方法もある (private メンバ関数を公開ヘッダに 1 つ足すことになる)。
+- [x] レビューの指摘: cursor への印の設定を、作った後に static 関数で行う形から、create_cursor() の引数で渡す形に
+      直した。static の cursor_impl::set_snapshot_use_marker() を削除した。
 
 ## 完了時の作業
 

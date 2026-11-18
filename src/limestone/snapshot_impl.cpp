@@ -48,15 +48,11 @@ std::unique_ptr<cursor> snapshot_impl::get_cursor() const {
     // Whether a compacted file is present is decided by the catalog record passed to
     // the constructor, never by an implicit fallback on its presence on disk. A record
     // whose file is missing is detected by the startup consistency check.
-    std::unique_ptr<cursor> result{};
     if (compacted_file_name_.has_value()) {
         boost::filesystem::path compacted_file = location_ / compacted_file_name_.value();
-        result = cursor_impl::create_cursor(snapshot_file, compacted_file, clear_storage);
-    } else {
-        result = cursor_impl::create_cursor(snapshot_file, clear_storage);
+        return cursor_impl::create_cursor(snapshot_file, compacted_file, clear_storage, use_marker_);
     }
-    cursor_impl::set_snapshot_use_marker(*result, use_marker_);
-    return result;
+    return cursor_impl::create_cursor(snapshot_file, clear_storage, use_marker_);
 }
 
 std::vector<std::unique_ptr<limestone::api::cursor>> snapshot_impl::get_partitioned_cursors(std::size_t n) {
@@ -85,8 +81,7 @@ std::vector<std::unique_ptr<limestone::api::cursor>> snapshot_impl::get_partitio
     std::vector<std::unique_ptr<la::cursor>> cursors{};
     cursors.reserve(n);
     for (std::size_t i = 0; i < n; ++i) {
-        cursors.push_back(cursor_impl::create_cursor(snapshot_file, compacted_file, clear_storage, allocator));
-        cursor_impl::set_snapshot_use_marker(*cursors.back(), use_marker_);
+        cursors.push_back(cursor_impl::create_cursor(snapshot_file, compacted_file, clear_storage, allocator, use_marker_));
     }
     return cursors;
 }

@@ -279,7 +279,7 @@ TEST_F(cursor_impl_test, create_cursor_snapshot_only_clear_storage_filtering) {
     clear_storage[1] = limestone::api::write_version_type(1, 1);
 
     // Use the static create_cursor method to create a cursor instance with snapshot file only.
-    auto cursor_ptr = limestone::internal::cursor_impl::create_cursor(snapshot_file, clear_storage);
+    auto cursor_ptr = limestone::internal::cursor_impl::create_cursor(snapshot_file, clear_storage, {});
 
     // Expect that the cursor returns a valid entry.
     ASSERT_TRUE(cursor_ptr->next()) << "Should read a valid entry after filtering.";
@@ -306,7 +306,7 @@ TEST_F(cursor_impl_test, create_cursor_snapshot_and_compacted_clear_storage_filt
     clear_storage[1] = limestone::api::write_version_type(1, 1);
 
     // Use the static create_cursor method that accepts both snapshot and compacted files.
-    auto cursor_ptr = limestone::internal::cursor_impl::create_cursor(snapshot_file, compacted_file, clear_storage);
+    auto cursor_ptr = limestone::internal::cursor_impl::create_cursor(snapshot_file, compacted_file, clear_storage, {});
 
     // Expect that the cursor returns a valid entry (which should be the one with key "key2").
     ASSERT_TRUE(cursor_ptr->next()) << "Should read a valid entry from combined files after filtering.";
