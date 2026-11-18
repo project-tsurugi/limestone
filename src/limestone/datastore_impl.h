@@ -36,6 +36,7 @@
 #include <boost/filesystem/path.hpp>
 
 #include "blob_file_resolver.h"
+#include "auto_compaction_settings.h"
 #include "blob_pool_impl.h"
 #include "compaction_worker_launcher.h"
 #include "file_operations.h"
@@ -145,6 +146,13 @@ public:
 
     /// @brief Settings of the locator file (used for the locator files of the snapshot file and the compacted WAL file)
     [[nodiscard]] const limestone::internal::locator_settings& get_locator_settings() const noexcept;
+
+    /// @brief 常時コンパクションの設定を置き換える。datastore の構築のときと、テストから呼ぶ。ワーカースレッドの
+    /// 起動の後には呼ばないこと
+    void set_auto_compaction_settings(const limestone::internal::auto_compaction_settings& settings) noexcept;
+
+    /// @brief 常時コンパクションの設定
+    [[nodiscard]] const limestone::internal::auto_compaction_settings& get_auto_compaction_settings() const noexcept;
 
     /// @brief オンラインコンパクションのワーカースレッドの起動を担うオブジェクトを設定する
     void set_compaction_worker_launcher(std::shared_ptr<limestone::internal::compaction_worker_launcher> launcher) noexcept;
@@ -594,6 +602,9 @@ private:
 
     // Settings of the locator file. They keep the defaults, and only tests replace them
     limestone::internal::locator_settings locator_settings_{};
+
+    // 常時コンパクションの設定。datastore の構築で決まり、テストだけが置き換える
+    limestone::internal::auto_compaction_settings auto_compaction_settings_{};
 
     // オンラインコンパクションのワーカースレッドの起動と shutdown を排他する。snapshot の印と共有する
     std::shared_ptr<limestone::internal::compaction_worker_launcher> compaction_worker_launcher_{};

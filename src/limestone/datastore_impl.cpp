@@ -176,6 +176,15 @@ const limestone::internal::locator_settings& datastore_impl::get_locator_setting
     return locator_settings_;
 }
 
+void datastore_impl::set_auto_compaction_settings(
+        const limestone::internal::auto_compaction_settings& settings) noexcept {
+    auto_compaction_settings_ = settings;
+}
+
+const limestone::internal::auto_compaction_settings& datastore_impl::get_auto_compaction_settings() const noexcept {
+    return auto_compaction_settings_;
+}
+
 void datastore_impl::set_compaction_worker_launcher(
         std::shared_ptr<limestone::internal::compaction_worker_launcher> launcher) noexcept {
     compaction_worker_launcher_ = std::move(launcher);

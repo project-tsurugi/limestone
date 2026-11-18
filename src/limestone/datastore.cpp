@@ -174,6 +174,25 @@ datastore::datastore(configuration const& conf) : location_(conf.data_location_)
         LOG(INFO) << "/:limestone:config:datastore setting the sort: arena size = " << sort_arena_size_mb
                   << " MiB, merge fanin = " << sort_merge_fanin
                   << ", work dir = " << impl_->sort_work_dir_parent().string();
+        // 常時コンパクションの設定。未設定の項目は、auto_compaction_settings の既定値で埋める
+        limestone::internal::auto_compaction_settings auto_compaction{};
+        if (conf.auto_compaction_threshold_mb_.has_value()) {
+            const std::size_t threshold_mb = conf.auto_compaction_threshold_mb_.value();
+            if (threshold_mb > std::numeric_limits<std::uint64_t>::max() / mib) {
+                std::string err_msg = "auto_compaction_threshold_mb is too large: " + std::to_string(threshold_mb);
+                LOG_LP(ERROR) << err_msg;
+                throw limestone_exception(exception_type::initialization_failure, err_msg);
+            }
+            auto_compaction.threshold_bytes = std::uint64_t{threshold_mb} * mib;
+        }
+        auto_compaction.delete_detached = conf.auto_compaction_delete_detached_.value_or(auto_compaction.delete_detached);
+        auto_compaction.blob_gc = conf.blob_gc_.value_or(auto_compaction.blob_gc);
+        impl_->set_auto_compaction_settings(auto_compaction);
+        LOG(INFO) << "/:limestone:config:datastore setting the auto compaction: threshold = "
+                  << auto_compaction.threshold_bytes / mib << " MiB"
+                  << (auto_compaction.threshold_bytes == 0 ? " (disabled)" : "")
+                  << ", delete detached = " << (auto_compaction.delete_detached ? "true" : "false")
+                  << ", blob gc = " << (auto_compaction.blob_gc ? "true" : "false");
         LOG(INFO) << "/:limestone:config:datastore setting log location = " << location_.string();
         boost::system::error_code error;
         const bool result_check = boost::filesystem::exists(location_, error);

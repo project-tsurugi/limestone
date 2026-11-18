@@ -47,4 +47,16 @@ void configuration::set_sort_merge_fanin(std::size_t fanin) noexcept {
     sort_merge_fanin_ = fanin;
 }
 
+void configuration::set_auto_compaction_threshold_mb(std::size_t threshold_mb) noexcept {
+    auto_compaction_threshold_mb_ = threshold_mb;
+}
+
+void configuration::set_auto_compaction_delete_detached(bool enabled) noexcept {
+    auto_compaction_delete_detached_ = enabled;
+}
+
+void configuration::set_blob_gc(bool enabled) noexcept {
+    blob_gc_ = enabled;
+}
+
 } // namespace limestone::api

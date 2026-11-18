@@ -86,6 +86,28 @@ public:
      */
     void set_sort_merge_fanin(std::size_t fanin) noexcept;
 
+    /**
+     * @brief setter for auto_compaction_threshold_mb: 常時コンパクションを実行する WAL の量の閾値 (MiB)。
+     *        コンパクションの入力になっていない WAL ファイルの大きさの合計がこの値を超えると、ローテーションと
+     *        コンパクションを自動で実行する
+     * @param threshold_mb 閾値 (MiB)。0 のときは常時コンパクションを行わない
+     */
+    void set_auto_compaction_threshold_mb(std::size_t threshold_mb) noexcept;
+
+    /**
+     * @brief setter for auto_compaction_delete_detached: 常時コンパクションで、コンパクションの入力になって不要に
+     *        なった (detached の) WAL ファイルを削除するか
+     * @param enabled 削除するとき true
+     */
+    void set_auto_compaction_delete_detached(bool enabled) noexcept;
+
+    /**
+     * @brief setter for blob_gc: BLOB ファイルの GC を行うか。起動時の GC と、オンラインコンパクションでの GC の
+     *        両方に適用される。master とレプリカのどちらにも適用される
+     * @param enabled 行うとき true
+     */
+    void set_blob_gc(bool enabled) noexcept;
+
 private:
     boost::filesystem::path data_location_{};
 
@@ -98,6 +120,11 @@ private:
     std::optional<std::size_t> sort_arena_size_mb_{};
     boost::filesystem::path sort_work_dir_{};
     std::optional<std::size_t> sort_merge_fanin_{};
+
+    // nullopt は未設定を表す。未設定の項目は、datastore が既定値で埋める
+    std::optional<std::size_t> auto_compaction_threshold_mb_{};
+    std::optional<bool> auto_compaction_delete_detached_{};
+    std::optional<bool> blob_gc_{};
 
     friend class datastore;
 };
