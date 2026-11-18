@@ -155,6 +155,24 @@ public:
     /// @brief 受信 epoch を更新する。GROUP_COMMIT の epoch を epoch ファイルに書いた後に呼ぶ
     void set_received_epoch(epoch_id_type epoch) noexcept;
 
+    /// @brief コントロールチャネルへの送信を直列にする mutex。GROUP_COMMIT は送信から ACK 待ちまでを、
+    /// コンパクション境界メッセージは送信を、この mutex の中で行う
+    [[nodiscard]] std::mutex& control_channel_send_mutex() noexcept;
+
+    /**
+     * @brief コンパクション境界メッセージをレプリカへ送る。
+     * @details レプリケーション構成の master で、レプリカが接続されているときだけ送る。応答は待たない。
+     * disable_compaction_boundary_send() の後は何もしない。tcp モードでの送信の失敗は ERROR のログを書いて
+     * 戻り、RDMA モードでの失敗は FATAL のログを書いて abort する (GROUP_COMMIT の送信と同じ扱い)。
+     * @param boundary_epoch コンパクションの境界 epoch
+     * @param blob_id_boundary BLOB ファイルの GC の境界にした BLOB の ID
+     * @attention この関数はスレッドセーフである。
+     */
+    void send_compaction_boundary(epoch_id_type boundary_epoch, blob_id_type blob_id_boundary);
+
+    /// @brief コンパクション境界メッセージの送信を、以後は無効にする。戻った時点で、実行中の送信はない
+    void disable_compaction_boundary_send();
+
     /// @brief master から受け取ったコンパクションの境界。BLOB ファイルの GC の境界を決めるのに使う
     struct compaction_boundary {
         epoch_id_type boundary_epoch{0};  ///< master のコンパクションの境界 epoch
@@ -642,6 +660,12 @@ private:
 
     // レプリカの受信 epoch。受信スレッドが書き、オンラインコンパクションのワーカースレッドが読む
     std::atomic<epoch_id_type> received_epoch_{0};
+
+    // コントロールチャネルへの送信を直列にする。送信するスレッドは、GROUP_COMMIT を送るスレッドと、
+    // コンパクション境界メッセージを送るオンラインコンパクションのワーカースレッドである
+    std::mutex mtx_control_channel_send_{};
+    // コンパクション境界メッセージの送信を無効にしたか。mtx_control_channel_send_ で保護する
+    bool compaction_boundary_send_disabled_{false};
 
     // レプリカが master から受け取った最新のコンパクションの境界。受信スレッドが書き、オンラインコンパクションの
     // ワーカースレッドが読む。2 つの値を組として読み書きするので、mutex で保護する。永続化しない

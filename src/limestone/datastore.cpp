@@ -579,17 +579,25 @@ blob_id_type datastore::create_snapshot_and_get_max_blob_id_with_wal_started_log
 
 void datastore::persist_and_propagate_epoch_id(epoch_id_type epoch_id) {
     TRACE_START << "epoch_id=" << epoch_id;
-    if (impl_->is_async_group_commit_enabled()) {
-        bool sent = impl_->propagate_group_commit(epoch_id);
-        persist_epoch_id(epoch_id);
-        if (sent) {
-            impl_->wait_for_propagated_group_commit_ack();
-        }
-    } else {
-        persist_epoch_id(epoch_id);
-        bool sent = impl_->propagate_group_commit(epoch_id);
-        if (sent) {
-            impl_->wait_for_propagated_group_commit_ack();
+    {
+        // GROUP_COMMIT の送信から ACK 待ちまでを、コントロールチャネルへの他の送信 (オンラインコンパクションの
+        // ワーカースレッドが送るコンパクション境界メッセージ) と排他する。RDMA モードの送信ストリームは
+        // スレッドセーフでなく、tcp モードでは GROUP_COMMIT の送信と ACK の受信が同じソケットで対になっている。
+        // この関数を呼ぶ側が mtx_epoch_file_ を持っていることがあるので、mutex を取る順序は、mtx_epoch_file_、
+        // この mutex の順である。
+        std::scoped_lock<std::mutex> lock(impl_->control_channel_send_mutex());
+        if (impl_->is_async_group_commit_enabled()) {
+            bool sent = impl_->propagate_group_commit(epoch_id);
+            persist_epoch_id(epoch_id);
+            if (sent) {
+                impl_->wait_for_propagated_group_commit_ack();
+            }
+        } else {
+            persist_epoch_id(epoch_id);
+            bool sent = impl_->propagate_group_commit(epoch_id);
+            if (sent) {
+                impl_->wait_for_propagated_group_commit_ack();
+            }
         }
     }
     TRACE_END;
@@ -901,6 +909,11 @@ std::future<void> datastore::shutdown() noexcept {
     if (impl_->get_compaction_worker_launcher()) {
         impl_->get_compaction_worker_launcher()->close();
     }
+
+    // コンパクション境界メッセージの送信を、以後は無効にする。下でコントロールチャネルを閉じ、RDMA の送信
+    // ストリームを解放するが、オンラインコンパクションのワーカースレッドを止めるのはその後である。戻った時点で
+    // 実行中の送信はなく、進行中のコンパクションが完了しても、解放済みのチャネルには送らない。
+    impl_->disable_compaction_boundary_send();
 
     // shutdown replication control channel
     if (impl_->is_replication_configured() && impl_->is_master()) {

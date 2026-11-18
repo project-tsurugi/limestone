@@ -43,6 +43,7 @@
 #include <limestone_exception_helper.h>
 #include <replication/message_session_begin.h>
 #include <replication/message_log_channel_create.h>
+#include <replication/message_compaction_boundary.h>
 #include <replication/message_group_commit.h>
 #include <replication/message_error.h>
 #include <replication/replication_message.h>
@@ -182,6 +183,57 @@ epoch_id_type datastore_impl::get_received_epoch() const noexcept {
 
 void datastore_impl::set_received_epoch(epoch_id_type epoch) noexcept {
     received_epoch_.store(epoch);
+}
+
+std::mutex& datastore_impl::control_channel_send_mutex() noexcept {
+    return mtx_control_channel_send_;
+}
+
+void datastore_impl::send_compaction_boundary(epoch_id_type boundary_epoch, blob_id_type blob_id_boundary) {
+    if (! is_master_ || ! replica_exists_.load(std::memory_order_acquire)) {
+        return;
+    }
+    TRACE_START << "boundary_epoch=" << boundary_epoch << ", blob_id_boundary=" << blob_id_boundary;
+    message_compaction_boundary message{boundary_epoch, blob_id_boundary};
+    {
+        std::scoped_lock<std::mutex> lock(mtx_control_channel_send_);
+        if (compaction_boundary_send_disabled_) {
+            TRACE_END << "the send is disabled";
+            return;
+        }
+        if (replication_config_result_.config.mode() == replication_mode::rdma) {
+            if (! rdma_control_send_stream_) {
+                LOG_LP(ERROR) << "RDMA control channel send stream is not initialized.";
+                return;
+            }
+            replication_message_io io{std::string{}};
+            replication_message::send(io, message);
+            // 応答のないメッセージなので、flush で完了を待たない
+            auto result = rdma_control_send_stream_->send_all_bytes(io.get_out_view());
+            if (! result.success) {
+                // GROUP_COMMIT の送信の失敗と同じ理由で、続行できない (送信のリングを全チャネルが共有している)
+                LOG_LP(FATAL) << "Failed to send the compaction boundary message over the RDMA control channel: "
+                              << result.error_message;
+            }
+        } else {
+            if (! control_channel_) {
+                LOG_LP(ERROR) << "Control channel is not initialized.";
+                return;
+            }
+            if (! control_channel_->send_message(message)) {
+                LOG_LP(ERROR) << "Failed to send the compaction boundary message to replica.";
+                return;
+            }
+        }
+    }
+    TRACE_END;
+}
+
+void datastore_impl::disable_compaction_boundary_send() {
+    {
+        std::scoped_lock<std::mutex> lock(mtx_control_channel_send_);
+        compaction_boundary_send_disabled_ = true;
+    }
 }
 
 std::optional<datastore_impl::compaction_boundary> datastore_impl::get_received_compaction_boundary() {
@@ -429,6 +481,8 @@ bool datastore_impl::propagate_group_commit_rdma(uint64_t epoch_id) {
     // already serialized by the CAS in update_min_epoch_id() and runs inside the
     // scoped_lock of mtx_epoch_file_ (plus one pre-threading call in ready()). If that
     // premise ever breaks, multiple threads would touch this stream concurrently.
+    // コンパクション境界メッセージの送信 (別のスレッド) とは、呼び出し側が持つ control_channel_send_mutex() で
+    // 排他している。
     auto result = rdma_control_send_stream_->send_all_bytes(io.get_out_view());
     if (!result.success) {
         // acquire_frame_buffer() absorbs backpressure by blocking, so a failure means
