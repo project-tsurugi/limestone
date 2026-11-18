@@ -148,6 +148,13 @@ public:
     /// @brief Settings of the locator file (used for the locator files of the snapshot file and the compacted WAL file)
     [[nodiscard]] const limestone::internal::locator_settings& get_locator_settings() const noexcept;
 
+    /// @brief レプリカが master から受け取って永続化した、最新の GROUP_COMMIT の epoch。レプリカの起動時は、
+    /// 走査の境界にした durable epoch である。master の役割では 0 のままである
+    [[nodiscard]] epoch_id_type get_received_epoch() const noexcept;
+
+    /// @brief 受信 epoch を更新する。GROUP_COMMIT の epoch を epoch ファイルに書いた後に呼ぶ
+    void set_received_epoch(epoch_id_type epoch) noexcept;
+
     /// @brief 常時コンパクションの設定を置き換える。datastore の構築のときと、テストから呼ぶ。ワーカースレッドの
     /// 起動の後には呼ばないこと
     void set_auto_compaction_settings(const limestone::internal::auto_compaction_settings& settings) noexcept;
@@ -617,6 +624,9 @@ private:
 
     // Settings of the locator file. They keep the defaults, and only tests replace them
     limestone::internal::locator_settings locator_settings_{};
+
+    // レプリカの受信 epoch。受信スレッドが書き、オンラインコンパクションのワーカースレッドが読む
+    std::atomic<epoch_id_type> received_epoch_{0};
 
     // 常時コンパクションの設定。datastore の構築で決まり、テストだけが置き換える
     limestone::internal::auto_compaction_settings auto_compaction_settings_{};

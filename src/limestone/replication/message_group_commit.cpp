@@ -17,6 +17,7 @@
 #include "replication/message_group_commit.h"
 
 #include "control_channel_handler_resources.h"
+#include "datastore_impl.h"
 #include "limestone_exception_helper.h"
 #include "replication/message_ack.h"
 #include "replication_message_io.h"
@@ -52,6 +53,9 @@ void message_group_commit::post_receive(handler_resources& resources) {
     auto& cch_resources = dynamic_cast<control_channel_handler_resources&>(resources);
     auto& datastore = cch_resources.get_datastore();
     datastore.persist_and_propagate_epoch_id(epoch_number_);
+    // 受信 epoch は、epoch ファイルへの書き込みの後に進める。レプリカのローテーションは、この epoch までの
+    // セッションがすべて永続化されていることを前提にする
+    datastore.get_impl()->set_received_epoch(epoch_number_);
 
     // Send acknowledgment
     message_ack ack;

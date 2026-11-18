@@ -637,6 +637,9 @@ void replica_server::handle_rdma_control_event(rdma_data_event const& event) {
             // master-side flush() implies the epoch has been persisted here. No
             // response message is sent.
             datastore_->persist_and_propagate_epoch_id(group_commit->epoch_number());
+            // 受信 epoch は、epoch ファイルへの書き込みの後に進める。レプリカのローテーションは、この epoch までの
+            // セッションがすべて永続化されていることを前提にする
+            datastore_->get_impl()->set_received_epoch(group_commit->epoch_number());
         } catch (std::exception const& e) {
             LOG_LP(FATAL) << "Failed to process the RDMA control frame: " << e.what();
         }

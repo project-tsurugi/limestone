@@ -176,6 +176,14 @@ const limestone::internal::locator_settings& datastore_impl::get_locator_setting
     return locator_settings_;
 }
 
+epoch_id_type datastore_impl::get_received_epoch() const noexcept {
+    return received_epoch_.load();
+}
+
+void datastore_impl::set_received_epoch(epoch_id_type epoch) noexcept {
+    received_epoch_.store(epoch);
+}
+
 void datastore_impl::set_auto_compaction_settings(
         const limestone::internal::auto_compaction_settings& settings) noexcept {
     auto_compaction_settings_ = settings;
