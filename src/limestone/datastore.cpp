@@ -1317,7 +1317,7 @@ int64_t datastore::current_unix_epoch_in_millis() {
     return std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::system_clock::now().time_since_epoch()).count();
 }
 
-void datastore::online_compaction_worker() {
+void datastore::online_compaction_worker() {  // NOLINT(readability-function-cognitive-complexity)
     pthread_setname_np(pthread_self(), "cmpctn_worker");
     LOG_LP(INFO) << "online compaction worker started...";
 

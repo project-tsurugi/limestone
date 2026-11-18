@@ -164,10 +164,16 @@ RDMA モードの受信箇所での受信 epoch の更新は、単体のテス�
 - [ ] master とレプリカで常時コンパクションを有効にした動作の確認。
 - [ ] 初回起動 (ログディレクトリが空) と再起動の両方で、ワーカースレッドが起動することの確認。
 
+## ステップ 1〜9 の後に行ったこと
+
+- [x] clang-tidy (scripts/run-clang-tidy-ci.sh) の指摘 4 件を直した。lock_guard を scoped_lock に替え (3 件)、
+      online_compaction_worker() の複雑度の警告を NOLINT で抑えた (1 件)。後者は、常時コンパクションの分岐を
+      別の関数へ分ける方法もある (private メンバ関数を公開ヘッダに 1 つ足すことになる)。
+
 ## 完了時の作業
 
 - [ ] コメントの英訳。
-- [ ] clang-tidy (scripts/run-clang-tidy-ci.sh)、フルスイート。
+- [ ] clang-tidy (scripts/run-clang-tidy-ci.sh)、フルスイート (英訳の後にもう一度)。
 - [ ] レビュー (/crv) と対応。
 - [ ] TODO.md の削除。
 - [ ] PR の作成 (issue #143 と #145 を閉じる)。

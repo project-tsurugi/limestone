@@ -29,7 +29,7 @@ compaction_worker_launcher::compaction_worker_launcher(std::function<void()> sta
 
 void compaction_worker_launcher::launch() noexcept {
     {
-        std::lock_guard<std::mutex> lock(mutex_);
+        std::scoped_lock<std::mutex> lock(mutex_);
         if (launched_ || closed_) {
             return;
         }
@@ -45,14 +45,14 @@ void compaction_worker_launcher::launch() noexcept {
 
 void compaction_worker_launcher::close() noexcept {
     {
-        std::lock_guard<std::mutex> lock(mutex_);
+        std::scoped_lock<std::mutex> lock(mutex_);
         closed_ = true;
     }
 }
 
 bool compaction_worker_launcher::launched() noexcept {
     {
-        std::lock_guard<std::mutex> lock(mutex_);
+        std::scoped_lock<std::mutex> lock(mutex_);
         return launched_;
     }
 }
