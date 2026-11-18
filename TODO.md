@@ -57,7 +57,7 @@ shutdown() の時点の INFO のログは、テストでは確かめていない
 
 ### 3. 設定項目と定数 [x]
 
-- [x] configuration に 3 項目の setter を加える (閾値、detached の WAL ファイルの削除、BLOB の GC)。
+- [x] configuration に 3 項目の setter を加える (閾値、detached の WAL ファイルの削除、コンパクションでの BLOB の GC)。
 - [x] 値が設定されていないときに、datastore の構築で環境変数を読む (暫定)。
       LIMESTONE_AUTO_COMPACTION_THRESHOLD_MB、LIMESTONE_AUTO_COMPACTION_DELETE_DETACHED、LIMESTONE_BLOB_GC。
 - [x] 値が数値でないとき、閾値が負のときは、起動を失敗させる。
@@ -171,6 +171,9 @@ RDMA モードの受信箇所での受信 epoch の更新は、単体のテス�
       別の関数へ分ける方法もある (private メンバ関数を公開ヘッダに 1 つ足すことになる)。
 - [x] レビューの指摘: cursor への印の設定を、作った後に static 関数で行う形から、create_cursor() の引数で渡す形に
       直した。static の cursor_impl::set_snapshot_use_marker() を削除した。
+- [x] レビューの指摘: BLOB の GC を行うかの設定を、レプリカ限定から、master とレプリカの両方に効く設定に変えた。
+      master では、起動時の GC と、コンパクションでの GC (契機によらない) の両方に効く。setter は set_blob_gc()、
+      環境変数は LIMESTONE_BLOB_GC に改名した。設計メモと L3 (10.3 節、10.4 節、12.5 節) にも反映した。
 
 ## 完了時の作業
 

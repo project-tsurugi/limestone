@@ -618,6 +618,51 @@ TEST_F(compaction_blob_gc_test, blob_gc_executes_after_new_backup_test) {
     EXPECT_TRUE(boost::filesystem::exists(path2002_));
 }
 
+// 設定で無効にしたとき、起動時の BLOB ファイルの GC は行われない。参照されなくなった BLOB ファイルが、再起動の後も残る
+TEST_F(compaction_blob_gc_test, startup_gc_does_not_run_when_disabled) {
+    gen_datastore();
+    prepare_blob_gc_test_data();
+    run_compact_with_epoch_switch(5);
+    ASSERT_TRUE(boost::filesystem::exists(path2001_));
+    ASSERT_TRUE(boost::filesystem::exists(path2002_));
 
+    // blob_key1 を BLOB なしで上書きして、2001 と 2002 への参照をなくす
+    datastore_->switch_epoch(6);
+    lc0_->begin_session();
+    lc0_->add_entry(1, "blob_key1", "blob_value1_noblob", {6, 0});
+    lc0_->end_session();
+    datastore_->switch_epoch(7);
+
+    datastore_->shutdown();
+    datastore_ = nullptr;
+    limestone::api::configuration conf{};
+    conf.set_data_location(location);
+    conf.set_blob_gc(false);
+    gen_datastore(conf);
+    datastore_->wait_for_blob_file_garbace_collector();
+
+    EXPECT_TRUE(boost::filesystem::exists(path2001_));
+    EXPECT_TRUE(boost::filesystem::exists(path2002_));
+    EXPECT_TRUE(boost::filesystem::exists(path1003_));
+}
+
+// 設定で無効にしたとき、master のコンパクションは BLOB ファイルの GC を行わない。コンパクションそのものは行う
+TEST_F(compaction_blob_gc_test, blob_gc_does_not_run_when_disabled) {
+    limestone::api::configuration conf{};
+    conf.set_data_location(location);
+    conf.set_blob_gc(false);
+    gen_datastore(conf);
+    prepare_blob_gc_test_data();
+
+    run_compact_with_epoch_switch(5);
+    datastore_->wait_for_blob_file_garbace_collector();
+
+    EXPECT_TRUE(datastore_->get_impl()->get_current_compacted_file_name().has_value());
+    EXPECT_TRUE(boost::filesystem::exists(path1001_));
+    EXPECT_TRUE(boost::filesystem::exists(path1002_));
+    EXPECT_TRUE(boost::filesystem::exists(path1003_));
+    EXPECT_TRUE(boost::filesystem::exists(path2001_));
+    EXPECT_TRUE(boost::filesystem::exists(path2002_));
+}
 
 }  // namespace limestone::testing

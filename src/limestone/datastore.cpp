@@ -616,7 +616,13 @@ void datastore::ready() {
             std::max(create_snapshot_and_get_max_blob_id_with_wal_started_log(), compaction_catalog_->get_max_blob_id());
         blob_id_type next_blob_id = max_blob_id + 1;
         blob_file_garbage_collector_ = std::make_unique<blob_file_garbage_collector>(impl_->blob_file_resolver());
-        blob_file_garbage_collector_->scan_blob_files(next_blob_id);
+        // 起動時の BLOB ファイルの GC。設定で無効のときは、走査を始めない
+        const bool blob_gc_enabled = impl_->get_auto_compaction_settings().blob_gc;
+        if (blob_gc_enabled) {
+            blob_file_garbage_collector_->scan_blob_files(next_blob_id);
+        } else {
+            LOG_LP(INFO) << "the BLOB file GC at startup is disabled";
+        }
 
         // Build the compacted path from the catalog record. With no record, pass the
         // well-known name that the migration rule assigns to generation 0; the orphan
@@ -626,7 +632,9 @@ void datastore::ready() {
         boost::filesystem::path compacted_file =
             location_ / compacted_file_name.value_or(compaction_catalog::get_compacted_filename());
         boost::filesystem::path snapshot_file = location_ / std::string(snapshot::subdirectory_name_) / std::string(snapshot::file_name_);
-        blob_file_garbage_collector_->scan_snapshot(snapshot_file, compacted_file);
+        if (blob_gc_enabled) {
+            blob_file_garbage_collector_->scan_snapshot(snapshot_file, compacted_file);
+        }
 
         next_blob_id_.store(next_blob_id);
 
@@ -1436,12 +1444,14 @@ void datastore::run_online_compaction(limestone::internal::compaction_trigger tr
     // check blob file garbage collection runnable
     bool blob_file_gc_runnable = false;
     bool is_active = blob_file_garbage_collector_->is_active();
+    const bool blob_gc_enabled = impl_->get_auto_compaction_settings().blob_gc;
     // この判定は master のものである。レプリカは、ローテーションの後に、master から受け取った境界で判定する
-    if (impl_->is_master() && boundary_version_copy.get_major() > compaction_catalog_->get_max_epoch_id() && !is_active) {
+    if (blob_gc_enabled && impl_->is_master() && boundary_version_copy.get_major() > compaction_catalog_->get_max_epoch_id() && !is_active) {
         blob_file_gc_runnable = true;
         blob_file_garbage_collector_->shutdown();
     }
-    VLOG_LP(log_info) << "blob_gc_boundary: " << blob_gc_boundary
+    VLOG_LP(log_info) << "blob_gc_enabled: " << blob_gc_enabled
+                            << ", blob_gc_boundary: " << blob_gc_boundary
                             << ", boundary_version_copy.get_major(): " << boundary_version_copy.get_major()
                             << ", compaction_catalog_->get_max_epoch_id(): " << compaction_catalog_->get_max_epoch_id()
                             << ", blob_file_garbage_collector_->is_active(): " << is_active
@@ -1457,7 +1467,6 @@ void datastore::run_online_compaction(limestone::internal::compaction_trigger tr
     // 参照は、すべて E_r 以下の epoch のエントリにあり、このコンパクションの走査で見える。
     if (! impl_->is_master()) {
         const std::optional<datastore_impl::compaction_boundary> received = impl_->get_received_compaction_boundary();
-        const bool blob_gc_enabled = impl_->get_auto_compaction_settings().blob_gc;
         // GC は別のスレッドで動く。実行中に次の GC を始めると、実行中の GC を止めてしまうので、見送る
         const bool previous_gc_active = blob_file_garbage_collector_->is_active();
         if (blob_gc_enabled && received.has_value() && received->boundary_epoch <= result.get_epoch_id()
