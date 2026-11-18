@@ -108,7 +108,8 @@ issue #145 を解消する。
 - [x] 起動時の走査は、epoch_id_switched_ と epoch_id_informed_ を設定しない (レプリカでは 0 のまま保つ)。
 - [x] 受信 epoch を atomic で持ち、GROUP_COMMIT の epoch を epoch ファイルに書いた後に更新する
       (tcp モードと RDMA モードの 2 か所)。
-- [ ] tgreplica が起動処理を呼び、完了の後に接続の受け付けを始める。待ち受けの開始を INFO で記録する。
+- [x] tgreplica が起動処理を呼び、完了の後に接続の受け付けを始める。待ち受けの開始を INFO で記録する。
+      RDMA モードには、待ち受けの開始の INFO が既にある。tcp モードに加えた。
 - [ ] テスト: 走査の結果。受信 epoch の初期値と更新。空の永続化データでの起動。
 
 メモ: 起動処理は、datastore_impl ではなく datastore のメンバ関数 start_as_replica() にした (公開ヘッダに、

@@ -58,6 +58,9 @@ void replica_server::initialize(const boost::filesystem::path& location, limesto
     conf.set_data_location(std::filesystem::path(location.native()));
     datastore_ = std::make_unique<limestone::api::datastore>(conf);
     datastore_->get_impl()->set_replica_role();
+    // レプリカの起動処理。master からの接続の受け付け (start_listener()、establish_rdma_session()) は、
+    // この完了の後に始まる
+    datastore_->start_as_replica();
 
     handler_factories_[message_type_id::SESSION_BEGIN] = [this](replication_message_io& io) {
         return std::make_shared<control_channel_handler>(*this, io);
@@ -113,6 +116,7 @@ void replica_server::initialize(const boost::filesystem::path& location, limesto
          return false;
      }
 
+     LOG_LP(INFO) << "Listening for the master: port=" << ntohs(listen_addr.sin_port);
      return true;
  }
  
