@@ -1656,6 +1656,11 @@ void datastore::run_online_compaction(limestone::internal::compaction_trigger tr
                                                                            - compaction_start).count()
                  << " ms";
 
+    // コンパクションの境界をレプリカへ知らせる。レプリカは、自身のコンパクションで BLOB ファイルの GC の境界を
+    // 決めるのに使う。BLOB の ID の境界は、ローテーションの前に求めた値である。レプリケーション構成の master で、
+    // レプリカが接続されているときだけ送られる
+    impl_->send_compaction_boundary(result.get_epoch_id(), blob_gc_boundary);
+
     // detached の WAL ファイルの削除。常時コンパクションだけが行う。対象は、カタログの detached の一覧にあって
     // 実在するファイルのすべてである (この時点の detached_pwals)。今回のコンパクションの入力だけでなく、以前の
     // コンパクションで detached になって残っているファイルも含む。したがって、削除に失敗したファイルや、削除の
