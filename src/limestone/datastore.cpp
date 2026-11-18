@@ -42,6 +42,7 @@
 #include "log_entry/log_entry.h"
 #include "online_compaction.h"
 #include "compaction_catalog.h"
+#include "auto_compaction_config_loader.h"
 #include "compaction_options.h"
 #include "compaction_trigger.h"
 #include "compaction_worker_launcher.h"
@@ -176,8 +177,32 @@ datastore::datastore(configuration const& conf) : location_(conf.data_location_)
                   << ", work dir = " << impl_->sort_work_dir_parent().string();
         // 常時コンパクションの設定。未設定の項目は、auto_compaction_settings の既定値で埋める
         limestone::internal::auto_compaction_settings auto_compaction{};
-        if (conf.auto_compaction_threshold_mb_.has_value()) {
-            const std::size_t threshold_mb = conf.auto_compaction_threshold_mb_.value();
+        std::optional<std::size_t> auto_compaction_threshold_mb = conf.auto_compaction_threshold_mb_;
+        std::optional<bool> auto_compaction_delete_detached = conf.auto_compaction_delete_detached_;
+        std::optional<bool> blob_gc = conf.blob_gc_;
+        // 暫定: configuration に設定されていない項目があるときは、環境変数から読む。上位が設定ファイルの値を
+        // configuration に渡すようになったら、この読み込みを外す。3 項目とも設定されていれば、環境変数は読まない
+        if (! auto_compaction_threshold_mb.has_value() || ! auto_compaction_delete_detached.has_value()
+            || ! blob_gc.has_value()) {
+            const limestone::internal::auto_compaction_config_parse_result env_result =
+                limestone::internal::load_auto_compaction_config_from_environment();
+            if (! env_result.ok) {
+                std::string err_msg = "invalid auto compaction configuration: " + env_result.error_message;
+                LOG_LP(ERROR) << err_msg;
+                throw limestone_exception(exception_type::initialization_failure, err_msg);
+            }
+            if (! auto_compaction_threshold_mb.has_value()) {
+                auto_compaction_threshold_mb = env_result.config.threshold_mb;
+            }
+            if (! auto_compaction_delete_detached.has_value()) {
+                auto_compaction_delete_detached = env_result.config.delete_detached;
+            }
+            if (! blob_gc.has_value()) {
+                blob_gc = env_result.config.blob_gc;
+            }
+        }
+        if (auto_compaction_threshold_mb.has_value()) {
+            const std::size_t threshold_mb = auto_compaction_threshold_mb.value();
             if (threshold_mb > std::numeric_limits<std::uint64_t>::max() / mib) {
                 std::string err_msg = "auto_compaction_threshold_mb is too large: " + std::to_string(threshold_mb);
                 LOG_LP(ERROR) << err_msg;
@@ -185,8 +210,8 @@ datastore::datastore(configuration const& conf) : location_(conf.data_location_)
             }
             auto_compaction.threshold_bytes = std::uint64_t{threshold_mb} * mib;
         }
-        auto_compaction.delete_detached = conf.auto_compaction_delete_detached_.value_or(auto_compaction.delete_detached);
-        auto_compaction.blob_gc = conf.blob_gc_.value_or(auto_compaction.blob_gc);
+        auto_compaction.delete_detached = auto_compaction_delete_detached.value_or(auto_compaction.delete_detached);
+        auto_compaction.blob_gc = blob_gc.value_or(auto_compaction.blob_gc);
         impl_->set_auto_compaction_settings(auto_compaction);
         LOG(INFO) << "/:limestone:config:datastore setting the auto compaction: threshold = "
                   << auto_compaction.threshold_bytes / mib << " MiB"

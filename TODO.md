@@ -58,9 +58,9 @@ shutdown() の時点の INFO のログは、テストでは確かめていない
 ### 3. 設定項目と定数 [~]
 
 - [x] configuration に 3 項目の setter を加える (閾値、detached の WAL ファイルの削除、BLOB の GC)。
-- [ ] 値が設定されていないときに、datastore の構築で環境変数を読む (暫定)。
+- [x] 値が設定されていないときに、datastore の構築で環境変数を読む (暫定)。
       LIMESTONE_AUTO_COMPACTION_THRESHOLD_MB、LIMESTONE_AUTO_COMPACTION_DELETE_DETACHED、LIMESTONE_BLOB_GC。
-- [ ] 値が数値でないとき、閾値が負のときは、起動を失敗させる。
+- [x] 値が数値でないとき、閾値が負のときは、起動を失敗させる。
 - [x] 測定の間隔 (10 秒) を定数の構造体に持ち、テストからだけ変えられるようにする。
 - [ ] テスト: 設定の誤り。configuration の値が環境変数より優先される。
 
