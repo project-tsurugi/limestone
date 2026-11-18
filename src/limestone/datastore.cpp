@@ -93,6 +93,20 @@ void write_epoch_to_file_internal(const std::string& file_path, epoch_id_type ep
     }
 }
 
+// コンパクションが実行中であることの印。破棄のときに、コンパクションの実行を終える
+class compaction_running_mark {
+public:
+    explicit compaction_running_mark(datastore_impl& impl) noexcept : impl_(impl) {}
+    ~compaction_running_mark() noexcept { impl_.end_compaction(); }
+    compaction_running_mark(const compaction_running_mark&) = delete;
+    compaction_running_mark& operator=(const compaction_running_mark&) = delete;
+    compaction_running_mark(compaction_running_mark&&) = delete;
+    compaction_running_mark& operator=(compaction_running_mark&&) = delete;
+
+private:
+    datastore_impl& impl_;
+};
+
 } // namespace
 
 
@@ -920,6 +934,7 @@ std::future<void> datastore::shutdown() noexcept {
 // old interface
 backup& datastore::begin_backup() {
     try {
+        impl_->start_backup_exclusion(blob_file_garbage_collector_.get());
         auto tmp_files = get_files();
         
         // Use blob_file_scanner to add blob files to the backup target
@@ -939,6 +954,7 @@ backup& datastore::begin_backup() {
 
 std::unique_ptr<backup_detail> datastore::begin_backup(backup_type btype) {  // NOLINT(readability-function-cognitive-complexity)
     try {
+        impl_->start_backup_exclusion(blob_file_garbage_collector_.get());
         rotate_epoch_file();
         rotation_result result = rotate_log_files();
 
@@ -1330,11 +1346,13 @@ void datastore::run_online_compaction(limestone::internal::compaction_trigger tr
     // Mutual exclusion with a backup: if the removal of the old generation ran between
     // the enumeration and the copy of a backup, the copy of an enumerated file would
     // fail. Compaction is therefore not run during a backup (as blob GC is not).
-    if (impl_->is_backup_in_progress()) {
+    // コンパクションの実行中に始まるバックアップは、コンパクションの完了を待つ
+    if (! impl_->try_begin_compaction()) {
         LOG_LP(INFO) << "online compaction skipped because a backup is in progress";
         TRACE_END << "return compact_with_online() without compaction (backup in progress)";
         return;
     }
+    compaction_running_mark running_mark(*impl_);
 
     // Take the blob GC boundary and the boundary_version before the rotation. The GC
     // boundary is the minimum of the current next_blob_id and the next_blob_id at the

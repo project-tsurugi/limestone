@@ -13,7 +13,13 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
+#include <chrono>
+#include <future>
+
+#include <boost/filesystem.hpp>
 #include <gtest/gtest.h>
+#include "blob_file_garbage_collector.h"
+#include "blob_file_resolver.h"
 #include "datastore_impl.h"
 
 namespace limestone::api {
@@ -68,6 +74,52 @@ TEST_F(backup_counter_test, backup_counter_does_not_go_negative) {
     
     // Ensure that backup is not in progress
     EXPECT_FALSE(datastore.is_backup_in_progress());
+}
+
+// バックアップの開始は、実行中の BLOB ファイルの GC を止め、バックアップ中にする
+TEST_F(backup_counter_test, start_backup_exclusion_stops_running_blob_gc) {
+    const boost::filesystem::path location{"/tmp/backup_counter_test"};
+    boost::filesystem::remove_all(location);
+    limestone::internal::blob_file_resolver resolver(location);
+    ASSERT_TRUE(boost::filesystem::create_directories(resolver.get_blob_root()));
+    limestone::internal::blob_file_garbage_collector gc(resolver);
+    // 走査だけを始める。GC は、削除の対象から外す BLOB の一覧を待つ状態で、実行中のままになる
+    gc.scan_blob_files(1);
+    ASSERT_TRUE(gc.is_active());
+    datastore_impl datastore;
+
+    datastore.start_backup_exclusion(&gc);
+
+    EXPECT_FALSE(gc.is_active());
+    EXPECT_TRUE(datastore.is_backup_in_progress());
+    boost::filesystem::remove_all(location);
+}
+
+// GC を行うオブジェクトがなくても、バックアップ中にする
+TEST_F(backup_counter_test, start_backup_exclusion_without_blob_gc) {
+    datastore_impl datastore;
+
+    datastore.start_backup_exclusion(nullptr);
+
+    EXPECT_TRUE(datastore.is_backup_in_progress());
+}
+
+// コンパクションは、バックアップ中には始まらない。バックアップの開始は、コンパクションの完了を待つ
+TEST_F(backup_counter_test, compaction_and_backup_exclude_each_other) {
+    datastore_impl datastore;
+
+    datastore.increment_backup_counter();
+    EXPECT_FALSE(datastore.try_begin_compaction());
+    datastore.decrement_backup_counter();
+
+    ASSERT_TRUE(datastore.try_begin_compaction());
+    std::future<void> backup = std::async(std::launch::async, [&datastore]() { datastore.increment_backup_counter(); });
+    EXPECT_EQ(backup.wait_for(std::chrono::milliseconds(200)), std::future_status::timeout);
+    EXPECT_FALSE(datastore.is_backup_in_progress());
+
+    datastore.end_compaction();
+    backup.get();
+    EXPECT_TRUE(datastore.is_backup_in_progress());
 }
 
 } // namespace limestone::api

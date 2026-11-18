@@ -35,6 +35,7 @@
 
 #include <boost/filesystem/path.hpp>
 
+#include "blob_file_garbage_collector.h"
 #include "blob_file_resolver.h"
 #include "auto_compaction_settings.h"
 #include "blob_pool_impl.h"
@@ -164,6 +165,7 @@ public:
     [[nodiscard]] std::shared_ptr<limestone::internal::snapshot_use_marker> create_snapshot_use_marker() const;
 
     // Increments the backup counter.
+    // コンパクションが実行中であれば、その完了を待ってから加算する
     void increment_backup_counter() noexcept;
 
     // Decrements the backup counter.
@@ -171,6 +173,19 @@ public:
 
     // Returns true if a backup operation is in progress.
     [[nodiscard]] bool is_backup_in_progress() const noexcept;
+
+    /// @brief バックアップを始める前に、コンパクションと BLOB ファイルの GC との排他を始める。
+    /// コンパクションが実行中であれば、その完了を待つ。バックアップの数を加算し、実行中の GC を止める。
+    /// バックアップの対象を列挙する前に呼ぶ
+    /// @param gc BLOB ファイルの GC を行うオブジェクト。なければ nullptr
+    void start_backup_exclusion(limestone::internal::blob_file_garbage_collector* gc);
+
+    /// @brief コンパクションの実行を始める。バックアップ中であれば始めない
+    /// @return 始めたら true。true を受け取った側は、コンパクションの後に end_compaction() を呼ぶ
+    [[nodiscard]] bool try_begin_compaction() noexcept;
+
+    /// @brief コンパクションの実行を終える。完了を待っているバックアップの開始を再開させる
+    void end_compaction() noexcept;
 
     // Returns true if a replica exists.
     [[nodiscard]] bool has_replica() const noexcept;
@@ -611,6 +626,11 @@ private:
 
     // Atomic counter for tracking active backup operations.
     std::atomic<int> backup_counter_;
+    // バックアップとコンパクションを排他する。バックアップの数の加算と、コンパクションの実行中の印の読み書きを、
+    // この mutex の中で行う
+    std::mutex mtx_backup_compaction_{};
+    std::condition_variable cv_backup_compaction_{};
+    bool compaction_running_{false};
     std::atomic<bool> replica_exists_;
 
     // Role flag (true = master, false = replica)

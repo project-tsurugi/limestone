@@ -204,7 +204,11 @@ std::shared_ptr<limestone::internal::snapshot_use_marker> datastore_impl::create
 
 // Increments the backup counter.
 void datastore_impl::increment_backup_counter() noexcept {
-    backup_counter_.fetch_add(1, std::memory_order_acq_rel);
+    {
+        std::unique_lock<std::mutex> lock(mtx_backup_compaction_);
+        cv_backup_compaction_.wait(lock, [this]() { return ! compaction_running_; });
+        backup_counter_.fetch_add(1, std::memory_order_acq_rel);
+    }
     LOG_LP(INFO) << "Beginning backup; active backup count: " << backup_counter_.load(std::memory_order_acquire);
 }
 
@@ -219,6 +223,33 @@ bool datastore_impl::is_backup_in_progress() const noexcept {
     int count = backup_counter_.load(std::memory_order_acquire);
     VLOG_LP(log_trace) << "Checking if backup is in progress; active backup count: " << count;
     return count > 0;
+}
+
+void datastore_impl::start_backup_exclusion(limestone::internal::blob_file_garbage_collector* gc) {
+    increment_backup_counter();
+    // バックアップの数を加算した後は、新しい GC は始まらない。実行中の GC は、バックアップが列挙したファイルを
+    // 削除しうるので、止める。消し残したファイルは、次のコンパクションの GC が削除する
+    if (gc != nullptr && gc->is_active()) {
+        LOG_LP(INFO) << "stopping the BLOB file GC because a backup begins";
+        gc->shutdown();
+    }
+}
+
+bool datastore_impl::try_begin_compaction() noexcept {
+    std::scoped_lock<std::mutex> lock(mtx_backup_compaction_);
+    if (backup_counter_.load(std::memory_order_acquire) > 0) {
+        return false;
+    }
+    compaction_running_ = true;
+    return true;
+}
+
+void datastore_impl::end_compaction() noexcept {
+    {
+        std::scoped_lock<std::mutex> lock(mtx_backup_compaction_);
+        compaction_running_ = false;
+    }
+    cv_backup_compaction_.notify_all();
 }
 
 // Returns true if a replica exists.
