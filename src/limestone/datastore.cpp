@@ -43,6 +43,7 @@
 #include "online_compaction.h"
 #include "compaction_catalog.h"
 #include "compaction_options.h"
+#include "compaction_trigger.h"
 #include "compaction_worker_launcher.h"
 #include "locator/locator_format.h"
 #include "sort/sort_buffer.h"
@@ -1241,9 +1242,13 @@ void datastore::stop_online_compaction_worker() {
     cv_online_compaction_worker_.notify_all();
 }
 
-void datastore::compact_with_online() {  // NOLINT(readability-function-cognitive-complexity)
-    TRACE_START;
+void datastore::compact_with_online() {
     check_after_ready(static_cast<const char*>(__func__));
+    run_online_compaction(limestone::internal::compaction_trigger::ctrl_file);
+}
+
+void datastore::run_online_compaction([[maybe_unused]] limestone::internal::compaction_trigger trigger) {  // NOLINT(readability-function-cognitive-complexity)
+    TRACE_START;
 
     // Mutual exclusion with a backup: if the removal of the old generation ran between
     // the enumeration and the copy of a backup, the copy of an enumerated file would

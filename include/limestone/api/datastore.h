@@ -15,6 +15,7 @@
  */
 #pragma once
 
+#include <cstdint>
 #include <memory>
 #include <future>
 #include <atomic>
@@ -46,6 +47,7 @@ namespace limestone::internal {
     class compaction_catalog;
     class blob_file_resolver; 
     class blob_file_garbage_collector;
+    enum class compaction_trigger : std::uint8_t;
 }
 namespace limestone::api {
 
@@ -485,6 +487,14 @@ private:
     void online_compaction_worker();
 
     void stop_online_compaction_worker();
+
+    /**
+     * @brief ローテーションとオンラインコンパクションを実行する。
+     * @param trigger 実行の契機
+     * @throws limestone_exception ローテーションの境界 epoch が 0 のとき、ローテーションが shutdown によって
+     *         打ち切られたとき
+     */
+    void run_online_compaction(limestone::internal::compaction_trigger trigger);
 
     // used for backup
     //   (old) full backup :   target is entire <files_>

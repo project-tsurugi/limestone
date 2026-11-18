@@ -44,14 +44,16 @@ issue #143 を解消する。既存の動作を変えるので、最初に行う
 メモ: テストの 4 項目は 1 つのファイル (compaction_worker_start_test.cpp) なので、1 つのコミットにした。
 shutdown() の時点の INFO のログは、テストでは確かめていない (ログを検査する仕組みを使っていない)。
 
-### 2. コンパクションの本体を内部の関数へ移す [ ]
+### 2. コンパクションの本体を内部の関数へ移す [x]
 
 動作を変えない。別のコミットにする。
 
-- [ ] compact_with_online() の本体を、契機 (ctrl ファイルの指示、常時コンパクション) を引数に取る内部の
+- [x] compact_with_online() の本体を、契機 (ctrl ファイルの指示、常時コンパクション) を引数に取る内部の
       関数へ移す。既定引数は使わない。
-- [ ] check_after_ready() の検査は compact_with_online() に残す。内部の関数とその先に同じ検査がないかを
+- [x] check_after_ready() の検査は compact_with_online() に残す。内部の関数とその先に同じ検査がないかを
       確かめる。
+
+メモ: 内部の関数 (run_online_compaction()) とその先 (rotate_log_files() など) に、ready の検査はなかった。
 
 ### 3. 設定項目と定数 [ ]
 
