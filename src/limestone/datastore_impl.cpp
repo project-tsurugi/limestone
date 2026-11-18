@@ -176,6 +176,23 @@ const limestone::internal::locator_settings& datastore_impl::get_locator_setting
     return locator_settings_;
 }
 
+void datastore_impl::set_compaction_worker_launcher(
+        std::shared_ptr<limestone::internal::compaction_worker_launcher> launcher) noexcept {
+    compaction_worker_launcher_ = std::move(launcher);
+}
+
+const std::shared_ptr<limestone::internal::compaction_worker_launcher>&
+datastore_impl::get_compaction_worker_launcher() const noexcept {
+    return compaction_worker_launcher_;
+}
+
+std::shared_ptr<limestone::internal::snapshot_use_marker> datastore_impl::create_snapshot_use_marker() const {
+    if (!compaction_worker_launcher_) {
+        return {};
+    }
+    return std::make_shared<limestone::internal::snapshot_use_marker>(compaction_worker_launcher_);
+}
+
 // Increments the backup counter.
 void datastore_impl::increment_backup_counter() noexcept {
     backup_counter_.fetch_add(1, std::memory_order_acq_rel);

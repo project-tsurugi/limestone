@@ -43,6 +43,7 @@
 #include "online_compaction.h"
 #include "compaction_catalog.h"
 #include "compaction_options.h"
+#include "compaction_worker_launcher.h"
 #include "locator/locator_format.h"
 #include "sort/sort_buffer.h"
 #include "sort/sort_settings.h"
@@ -55,6 +56,7 @@
 #include "manifest.h"
 #include "log_channel_impl.h"
 #include "dblog_scan.h"
+#include "snapshot_impl.h"
 
 namespace {
 
@@ -561,7 +563,11 @@ void datastore::ready() {
 
         next_blob_id_.store(next_blob_id);
 
-        online_compaction_worker_future_ = std::async(std::launch::async, &datastore::online_compaction_worker, this);
+        // ワーカースレッドはここでは起動しない。起動するのは、snapshot と、そこから取得した cursor がすべて
+        // 破棄された時点である。初期化のための snapshot の読み取りと、コンパクションが並行しないようにする。
+        impl_->set_compaction_worker_launcher(std::make_shared<limestone::internal::compaction_worker_launcher>([this]() {
+            online_compaction_worker_future_ = std::async(std::launch::async, &datastore::online_compaction_worker, this);
+        }));
         // Move the durable epoch into the current epoch file before removing the rotated epoch files. The value to
         // write is the durable epoch read at startup, not the greatest epoch that appeared in the WAL
         // (epoch_id_informed_); the latter includes the epochs of the snippets invalidated for being beyond the
@@ -603,14 +609,18 @@ void datastore::ready() {
 
 std::unique_ptr<snapshot> datastore::get_snapshot() const {
     check_after_ready(static_cast<const char*>(__func__));
-    return std::unique_ptr<snapshot>(new snapshot(location_, clear_storage, impl_->get_current_compacted_file_name(),
+    std::unique_ptr<snapshot> result(new snapshot(location_, clear_storage, impl_->get_current_compacted_file_name(),
                                                   impl_->get_locator_settings().region_records));
+    result->pimpl->set_use_marker(impl_->create_snapshot_use_marker());
+    return result;
 }
 
 std::shared_ptr<snapshot> datastore::shared_snapshot() const {
     check_after_ready(static_cast<const char*>(__func__));
-    return std::shared_ptr<snapshot>(new snapshot(location_, clear_storage, impl_->get_current_compacted_file_name(),
+    std::shared_ptr<snapshot> result(new snapshot(location_, clear_storage, impl_->get_current_compacted_file_name(),
                                                   impl_->get_locator_settings().region_records));
+    result->pimpl->set_use_marker(impl_->create_snapshot_use_marker());
+    return result;
 }
 
 log_channel& datastore::create_channel() {
@@ -785,6 +795,13 @@ void datastore::add_snapshot_callback(std::function<void(write_version_type)> ca
 std::future<void> datastore::shutdown() noexcept {
     VLOG_LP(log_info) << "start";
     state_ = state::shutdown;
+
+    // オンラインコンパクションのワーカースレッドの起動を、以後は無効にする。これより後に破棄された snapshot や
+    // cursor は、ワーカースレッドを起動しない。close() から戻った時点で実行中の起動はないので、後で行う
+    // ワーカースレッドの停止は、起動と競合しない。
+    if (impl_->get_compaction_worker_launcher()) {
+        impl_->get_compaction_worker_launcher()->close();
+    }
 
     // shutdown replication control channel
     if (impl_->is_replication_configured() && impl_->is_master()) {

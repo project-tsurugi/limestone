@@ -37,6 +37,7 @@
 
 #include "blob_file_resolver.h"
 #include "blob_pool_impl.h"
+#include "compaction_worker_launcher.h"
 #include "file_operations.h"
 #include "locator/locator_settings.h"
 #include "manifest.h"
@@ -144,6 +145,15 @@ public:
 
     /// @brief Settings of the locator file (used for the locator files of the snapshot file and the compacted WAL file)
     [[nodiscard]] const limestone::internal::locator_settings& get_locator_settings() const noexcept;
+
+    /// @brief オンラインコンパクションのワーカースレッドの起動を担うオブジェクトを設定する
+    void set_compaction_worker_launcher(std::shared_ptr<limestone::internal::compaction_worker_launcher> launcher) noexcept;
+
+    /// @brief ワーカースレッドの起動を担うオブジェクト。設定されていなければ空
+    [[nodiscard]] const std::shared_ptr<limestone::internal::compaction_worker_launcher>& get_compaction_worker_launcher() const noexcept;
+
+    /// @brief snapshot に設定する印を作る。ワーカースレッドの起動を担うオブジェクトが設定されていなければ空を返す
+    [[nodiscard]] std::shared_ptr<limestone::internal::snapshot_use_marker> create_snapshot_use_marker() const;
 
     // Increments the backup counter.
     void increment_backup_counter() noexcept;
@@ -584,6 +594,9 @@ private:
 
     // Settings of the locator file. They keep the defaults, and only tests replace them
     limestone::internal::locator_settings locator_settings_{};
+
+    // オンラインコンパクションのワーカースレッドの起動と shutdown を排他する。snapshot の印と共有する
+    std::shared_ptr<limestone::internal::compaction_worker_launcher> compaction_worker_launcher_{};
 
     // Atomic counter for tracking active backup operations.
     std::atomic<int> backup_counter_;
