@@ -369,6 +369,19 @@ public:
      */
     virtual void persist_and_propagate_epoch_id(epoch_id_type epoch_id);
 
+    /**
+     * @brief レプリカとして動かすための起動処理を行う。ready() の代わりに呼ぶ。
+     *
+     * durable epoch を超えるスニペットを無効化し、その durable epoch を受信 epoch の初期値にする。
+     * スナップショットファイルは作らない。
+     *
+     * NOTE: This method is intended for internal use only.
+     *
+     * @throws limestone_exception WAL ファイルの形式が不正なとき、epoch ファイルを読めないとき
+     * @throws limestone_io_exception 入出力に失敗したとき
+     */
+    void start_as_replica();
+
 protected:  // for tests
     std::vector<std::unique_ptr<log_channel>> const& log_channels_for_tests() const noexcept;
     auto epoch_id_informed_for_tests() const noexcept { return epoch_id_informed_.load(); }

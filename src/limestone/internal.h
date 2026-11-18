@@ -160,6 +160,23 @@ std::set<std::string> assemble_snapshot_input_filenames(const std::unique_ptr<co
 
 std::set<std::string> assemble_snapshot_input_filenames(const std::unique_ptr<compaction_catalog>& compaction_catalog, const boost::filesystem::path& location);
 
+/**
+ * @brief durable epoch を超えるスニペットを無効化する (レプリカの起動時の走査)。
+ *
+ * カタログに記録されたコンパクション済み WAL ファイルと detached の WAL ファイルを除く、ログディレクトリの
+ * WAL ファイルとキャリーファイルを走査し、epoch ファイルから読んだ durable epoch を超えるスニペットの marker を
+ * 書き換える。エントリは集めず、スナップショットファイルも作らない。
+ *
+ * @param compaction_catalog コンパクションカタログ
+ * @param location ログディレクトリ
+ * @param thread_num 走査のスレッド数
+ * @return 走査の境界にした durable epoch。epoch ファイルに記録がなければ 0
+ * @throws limestone_exception WAL ファイルの形式が不正なとき、epoch ファイルを読めないとき
+ * @throws limestone_io_exception 入出力に失敗したとき
+ */
+epoch_id_type invalidate_nondurable_snippets(const std::unique_ptr<compaction_catalog>& compaction_catalog,
+                                             const boost::filesystem::path& location, int thread_num);
+
 void cleanup_rotated_epoch_files(const boost::filesystem::path& directory);
 
 // filepath.cpp

@@ -103,13 +103,18 @@ issue #145 を解消する。
 
 ### 7. レプリカの起動処理と受信 epoch [~]
 
-- [ ] レプリカの起動処理を datastore_impl に加える。順序は、走査 → 受信 epoch の初期値 → BLOB の GC の
+- [x] レプリカの起動処理を datastore_impl に加える。順序は、走査 → 受信 epoch の初期値 → BLOB の GC の
       オブジェクトの作成 → 形式バージョンの移行に伴うローテーション。この時点ではワーカースレッドを起動しない。
-- [ ] 起動時の走査は、epoch_id_switched_ と epoch_id_informed_ を設定しない (レプリカでは 0 のまま保つ)。
+- [x] 起動時の走査は、epoch_id_switched_ と epoch_id_informed_ を設定しない (レプリカでは 0 のまま保つ)。
 - [x] 受信 epoch を atomic で持ち、GROUP_COMMIT の epoch を epoch ファイルに書いた後に更新する
       (tcp モードと RDMA モードの 2 か所)。
 - [ ] tgreplica が起動処理を呼び、完了の後に接続の受け付けを始める。待ち受けの開始を INFO で記録する。
 - [ ] テスト: 走査の結果。受信 epoch の初期値と更新。空の永続化データでの起動。
+
+メモ: 起動処理は、datastore_impl ではなく datastore のメンバ関数 start_as_replica() にした (公開ヘッダに、
+内部用の公開関数を 1 つ加えた。persist_and_propagate_epoch_id() と同じ扱い)。起動処理が使う状態 (カタログ、
+BLOB の GC のオブジェクト、スレッド数) が datastore の private メンバであり、datastore_impl からは届かないため。
+失敗は、ready() のように abort せず、例外で呼び出し元 (tgreplica) に返す。tgreplica は理由を表示して終了できる。
 
 ### 8. レプリカのローテーションとコンパクション [ ]
 

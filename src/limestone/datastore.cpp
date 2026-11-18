@@ -670,6 +670,36 @@ void datastore::ready() {
     }
 }
 
+void datastore::start_as_replica() {
+    TRACE_START;
+    // 以下の順序には意味がある。
+    // 1. durable epoch を超えるスニペットを無効化する。master からログは届いたが、その epoch の GROUP_COMMIT が
+    //    届く前に停止すると、このスニペットが残る。残したまま受信を再開すると、durable epoch がその epoch を
+    //    追い越した後の走査が、このスニペットを有効なデータとして読んでしまう。
+    //    master の ready() も同じ無効化を行うが、ready() はスナップショットファイルの作成など、レプリカに
+    //    不要な処理も行うので、呼ばない。
+    //    epoch_id_switched_ と epoch_id_informed_ には何も設定しない。レプリカでは、どちらも 0 のまま保つ
+    //    (update_min_epoch_id() がこれを前提に、レプリカでは何もせずに戻る)。
+    const epoch_id_type durable_epoch =
+        limestone::internal::invalidate_nondurable_snippets(compaction_catalog_, location_, recover_max_parallelism_);
+    // 2. 走査の境界にした durable epoch が、受信 epoch の初期値になる
+    impl_->set_received_epoch(durable_epoch);
+    // 3. BLOB ファイルの GC のオブジェクトを作る。GC の走査は、ここでは行わない
+    blob_file_garbage_collector_ = std::make_unique<blob_file_garbage_collector>(impl_->blob_file_resolver());
+    // 4. 形式バージョンの移行に伴うローテーション。ローテーションの排他もカタログも使わずにリネームするので、
+    //    オンラインコンパクションのワーカースレッドの起動より前に行う
+    auto migration_info = impl_->get_migration_info();
+    if (migration_info.has_value() && migration_info->requires_rotation()) {
+        LOG(INFO) << "Manifest migration requires WAL rotation.";
+        dblog_scan ds(location_);
+        ds.set_file_operations(impl_->file_ops());
+        ds.detach_wal_files();
+        LOG(INFO) << "WAL rotation completed.";
+    }
+    LOG_LP(INFO) << "started as a replica: received epoch = " << durable_epoch;
+    TRACE_END;
+}
+
 std::unique_ptr<snapshot> datastore::get_snapshot() const {
     check_after_ready(static_cast<const char*>(__func__));
     std::unique_ptr<snapshot> result(new snapshot(location_, clear_storage, impl_->get_current_compacted_file_name(),

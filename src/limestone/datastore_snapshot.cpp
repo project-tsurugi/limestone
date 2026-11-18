@@ -226,6 +226,18 @@ std::set<std::string> assemble_snapshot_input_filenames(
     return assemble_snapshot_input_filenames(compaction_catalog, location, file_ops);
 }
 
+epoch_id_type invalidate_nondurable_snippets(const std::unique_ptr<compaction_catalog>& compaction_catalog,
+                                             const boost::filesystem::path& location, int thread_num) {
+    std::set<std::string> file_names = assemble_snapshot_input_filenames(compaction_catalog, location);
+    compaction_options options(location, thread_num, file_names);
+    dblog_scan logscan = make_dblog_scan(options);
+    logscan.set_thread_num(thread_num);
+    const epoch_id_type durable_epoch = logscan.last_durable_epoch_in_dir();
+    // エントリは使わない。走査の目的は、durable epoch を超えるスニペットの無効化だけである
+    logscan.scan_pwal_files_throws(durable_epoch, [](log_entry&, int) {});
+    return durable_epoch;
+}
+
 std::set<boost::filesystem::path> filter_epoch_files(const boost::filesystem::path& directory) {
     std::set<boost::filesystem::path> epoch_files;
     for (const auto& entry : boost::filesystem::directory_iterator(directory)) {
