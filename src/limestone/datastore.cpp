@@ -563,6 +563,10 @@ void datastore::ready() {
 
         next_blob_id_.store(next_blob_id);
 
+        // ctrl ディレクトリは、ワーカースレッドではなくここで作る。ctrl ディレクトリを要求するスクリプトが、
+        // ワーカースレッドの起動を待たずに使えるようにする。
+        ensure_directory_exists(location_ / "ctrl");
+
         // ワーカースレッドはここでは起動しない。起動するのは、snapshot と、そこから取得した cursor がすべて
         // 破棄された時点である。初期化のための snapshot の読み取りと、コンパクションが並行しないようにする。
         impl_->set_compaction_worker_launcher(std::make_shared<limestone::internal::compaction_worker_launcher>([this]() {
@@ -1198,17 +1202,7 @@ void datastore::online_compaction_worker() {
     pthread_setname_np(pthread_self(), "cmpctn_worker");
     LOG_LP(INFO) << "online compaction worker started...";
 
-    boost::filesystem::path ctrl_dir = location_ / "ctrl";
-    boost::filesystem::path start_file = ctrl_dir / "start_compaction";
-
-
-    ensure_directory_exists(ctrl_dir);
-    if (!boost::filesystem::exists(ctrl_dir)) {
-        if (!boost::filesystem::create_directory(ctrl_dir)) {
-            LOG_LP(ERROR) << "failed to create directory: " << ctrl_dir.string();
-            return;
-        } 
-    }
+    boost::filesystem::path start_file = location_ / "ctrl" / "start_compaction";
 
     while (!stop_online_compaction_worker_.load()) {
         if (boost::filesystem::exists(start_file)) {
