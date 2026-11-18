@@ -696,6 +696,12 @@ void datastore::start_as_replica() {
         ds.detach_wal_files();
         LOG(INFO) << "WAL rotation completed.";
     }
+    // 5. オンラインコンパクションのワーカースレッドを起動する。レプリカは snapshot を作成しないので、ここで
+    //    直接起動する
+    impl_->set_compaction_worker_launcher(std::make_shared<limestone::internal::compaction_worker_launcher>([this]() {
+        online_compaction_worker_future_ = std::async(std::launch::async, &datastore::online_compaction_worker, this);
+    }));
+    impl_->get_compaction_worker_launcher()->launch();
     LOG_LP(INFO) << "started as a replica: received epoch = " << durable_epoch;
     TRACE_END;
 }

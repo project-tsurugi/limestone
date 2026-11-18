@@ -373,7 +373,7 @@ public:
      * @brief レプリカとして動かすための起動処理を行う。ready() の代わりに呼ぶ。
      *
      * durable epoch を超えるスニペットを無効化し、その durable epoch を受信 epoch の初期値にする。
-     * スナップショットファイルは作らない。
+     * スナップショットファイルは作らない。最後に、オンラインコンパクションのワーカースレッドを起動する。
      *
      * NOTE: This method is intended for internal use only.
      *
