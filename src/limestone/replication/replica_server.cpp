@@ -36,6 +36,7 @@
 #include "log_channel_handler.h"
 #include "logging_helper.h"
 #include "message_error.h"
+#include "message_compaction_boundary.h"
 #include "message_group_commit.h"
 #include "rdma_log_channel_receiver.h"
 #include "limestone_exception_helper.h"
@@ -625,6 +626,16 @@ void replica_server::handle_rdma_control_event(rdma_data_event const& event) {
             std::string const payload(event.payload.begin(), event.payload.end());
             replication_message_io io{payload};
             auto message = replication_message::receive(io);
+            if (message->get_message_type_id() == message_type_id::COMPACTION_BOUNDARY) {
+                auto* boundary = dynamic_cast<message_compaction_boundary*>(message.get());
+                if (boundary == nullptr) {
+                    LOG_LP(FATAL) << "Failed to cast the control message to message_compaction_boundary.";
+                }
+                datastore_->get_impl()->set_received_compaction_boundary(
+                    {boundary->boundary_epoch(), boundary->blob_id_boundary()});
+                TRACE_END;
+                return;
+            }
             if (message->get_message_type_id() != message_type_id::GROUP_COMMIT) {
                 // Dropping the frame and returning would send the transport ACK and let
                 // the master's flush() succeed while nothing was persisted, so stop

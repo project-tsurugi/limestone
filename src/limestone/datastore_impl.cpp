@@ -184,6 +184,20 @@ void datastore_impl::set_received_epoch(epoch_id_type epoch) noexcept {
     received_epoch_.store(epoch);
 }
 
+std::optional<datastore_impl::compaction_boundary> datastore_impl::get_received_compaction_boundary() {
+    {
+        std::scoped_lock<std::mutex> lock(mtx_received_compaction_boundary_);
+        return received_compaction_boundary_;
+    }
+}
+
+void datastore_impl::set_received_compaction_boundary(const compaction_boundary& boundary) {
+    {
+        std::scoped_lock<std::mutex> lock(mtx_received_compaction_boundary_);
+        received_compaction_boundary_ = boundary;
+    }
+}
+
 void datastore_impl::set_auto_compaction_settings(
         const limestone::internal::auto_compaction_settings& settings) noexcept {
     auto_compaction_settings_ = settings;

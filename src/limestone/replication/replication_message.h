@@ -36,6 +36,7 @@ enum class message_type_id : uint8_t {
     SESSION_END = 0x02,
     GROUP_COMMIT = 0x03,
     // 0x04 は欠番である。使われないまま廃止したメッセージ型の番号であり、再利用しない
+    COMPACTION_BOUNDARY = 0x05,
 
     // Log‑channel requests
     LOG_CHANNEL_CREATE = 0x10,
@@ -62,7 +63,7 @@ enum class response_type : uint8_t {
     RESPONSE_TYPE_ERROR = 1
 };
 
-constexpr uint64_t replication_protocol_version = 2;
+constexpr uint64_t replication_protocol_version = 3;
 
 // Upper bound each blocking RDMA handshake operation waits for its message exchange
 // with the handshake daemon, shared by the master and replica sides. The accept-side

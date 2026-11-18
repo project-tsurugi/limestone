@@ -155,6 +155,18 @@ public:
     /// @brief 受信 epoch を更新する。GROUP_COMMIT の epoch を epoch ファイルに書いた後に呼ぶ
     void set_received_epoch(epoch_id_type epoch) noexcept;
 
+    /// @brief master から受け取ったコンパクションの境界。BLOB ファイルの GC の境界を決めるのに使う
+    struct compaction_boundary {
+        epoch_id_type boundary_epoch{0};  ///< master のコンパクションの境界 epoch
+        blob_id_type blob_id_boundary{0};  ///< master が BLOB ファイルの GC の境界にした BLOB の ID
+    };
+
+    /// @brief master から受け取った最新のコンパクションの境界を返す。受け取っていなければ nullopt
+    [[nodiscard]] std::optional<compaction_boundary> get_received_compaction_boundary();
+
+    /// @brief master から受け取ったコンパクションの境界を保持する。前に保持していたものは捨てる
+    void set_received_compaction_boundary(const compaction_boundary& boundary);
+
     /// @brief 常時コンパクションの設定を置き換える。datastore の構築のときと、テストから呼ぶ。ワーカースレッドの
     /// 起動の後には呼ばないこと
     void set_auto_compaction_settings(const limestone::internal::auto_compaction_settings& settings) noexcept;
@@ -630,6 +642,11 @@ private:
 
     // レプリカの受信 epoch。受信スレッドが書き、オンラインコンパクションのワーカースレッドが読む
     std::atomic<epoch_id_type> received_epoch_{0};
+
+    // レプリカが master から受け取った最新のコンパクションの境界。受信スレッドが書き、オンラインコンパクションの
+    // ワーカースレッドが読む。2 つの値を組として読み書きするので、mutex で保護する。永続化しない
+    std::mutex mtx_received_compaction_boundary_{};
+    std::optional<compaction_boundary> received_compaction_boundary_{};
 
     // 常時コンパクションの設定。datastore の構築で決まり、テストだけが置き換える
     limestone::internal::auto_compaction_settings auto_compaction_settings_{};
