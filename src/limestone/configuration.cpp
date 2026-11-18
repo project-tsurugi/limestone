@@ -59,4 +59,44 @@ void configuration::set_blob_gc(bool enabled) noexcept {
     blob_gc_ = enabled;
 }
 
+const boost::filesystem::path& configuration::get_data_location() const noexcept {
+    return data_location_;
+}
+
+const std::string& configuration::get_instance_id() const noexcept {
+    return instance_id_;
+}
+
+const std::string& configuration::get_db_name() const noexcept {
+    return db_name_;
+}
+
+std::optional<int> configuration::get_recover_max_parallelism() const noexcept {
+    return recover_max_parallelism_;
+}
+
+std::optional<std::size_t> configuration::get_sort_arena_size_mb() const noexcept {
+    return sort_arena_size_mb_;
+}
+
+const boost::filesystem::path& configuration::get_sort_work_dir() const noexcept {
+    return sort_work_dir_;
+}
+
+std::optional<std::size_t> configuration::get_sort_merge_fanin() const noexcept {
+    return sort_merge_fanin_;
+}
+
+std::optional<std::size_t> configuration::get_auto_compaction_threshold_mb() const noexcept {
+    return auto_compaction_threshold_mb_;
+}
+
+std::optional<bool> configuration::get_auto_compaction_delete_detached() const noexcept {
+    return auto_compaction_delete_detached_;
+}
+
+std::optional<bool> configuration::get_blob_gc() const noexcept {
+    return blob_gc_;
+}
+
 } // namespace limestone::api

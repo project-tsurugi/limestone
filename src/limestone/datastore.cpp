@@ -118,10 +118,10 @@ datastore::datastore() noexcept: impl_(std::make_unique<datastore_impl>()) {
 }
 
 
-datastore::datastore(configuration const& conf) : location_(conf.data_location_), impl_(std::make_unique<datastore_impl>()) { // NOLINT(readability-function-cognitive-complexity)
+datastore::datastore(configuration const& conf) : location_(conf.get_data_location()), impl_(std::make_unique<datastore_impl>()) { // NOLINT(readability-function-cognitive-complexity)
     try {
-        impl_->set_instance_id(conf.instance_id_);
-        impl_->set_db_name(conf.db_name_);
+        impl_->set_instance_id(conf.get_instance_id());
+        impl_->set_db_name(conf.get_db_name());
         impl_->set_pid(::getpid());
         auto const& repl_result = impl_->get_replication_config_result();
         if (!repl_result.ok) {
@@ -153,9 +153,9 @@ datastore::datastore(configuration const& conf) : location_(conf.data_location_)
         // the items of the settings of the sort that are not set are filled in with the defaults of sort_settings
         constexpr std::size_t mib = std::size_t{1024} * 1024;
         const sort_settings sort_defaults{};
-        const int sort_threads = conf.recover_max_parallelism_.value_or(sort_defaults.threads);
-        const std::size_t sort_arena_size_mb = conf.sort_arena_size_mb_.value_or(sort_defaults.arena_size_bytes / mib);
-        const std::size_t sort_merge_fanin = conf.sort_merge_fanin_.value_or(sort_defaults.merge_fanin);
+        const int sort_threads = conf.get_recover_max_parallelism().value_or(sort_defaults.threads);
+        const std::size_t sort_arena_size_mb = conf.get_sort_arena_size_mb().value_or(sort_defaults.arena_size_bytes / mib);
+        const std::size_t sort_merge_fanin = conf.get_sort_merge_fanin().value_or(sort_defaults.merge_fanin);
         // recover_max_parallelism is the number of threads of the sort; a value below 1 is a misconfiguration. It is
         // checked before the lock of the log directory is taken (a throw after that would not release the lock)
         if (sort_threads < 1) {
@@ -178,22 +178,22 @@ datastore::datastore(configuration const& conf) : location_(conf.data_location_)
             throw limestone_exception(exception_type::initialization_failure, err_msg);
         }
         boost::system::error_code sort_work_dir_error;
-        if (! conf.sort_work_dir_.empty()
-            && ! boost::filesystem::is_directory(conf.sort_work_dir_, sort_work_dir_error)) {
-            std::string err_msg = "sort_work_dir is not an existing directory: " + conf.sort_work_dir_.string();
+        if (! conf.get_sort_work_dir().empty()
+            && ! boost::filesystem::is_directory(conf.get_sort_work_dir(), sort_work_dir_error)) {
+            std::string err_msg = "sort_work_dir is not an existing directory: " + conf.get_sort_work_dir().string();
             LOG_LP(ERROR) << err_msg;
             throw limestone_exception(exception_type::initialization_failure, err_msg);
         }
         impl_->set_sort_settings(sort_arena_size_mb * mib, sort_merge_fanin,
-                                 conf.sort_work_dir_.empty() ? location_ : conf.sort_work_dir_);
+                                 conf.get_sort_work_dir().empty() ? location_ : conf.get_sort_work_dir());
         LOG(INFO) << "/:limestone:config:datastore setting the sort: arena size = " << sort_arena_size_mb
                   << " MiB, merge fanin = " << sort_merge_fanin
                   << ", work dir = " << impl_->sort_work_dir_parent().string();
         // 常時コンパクションの設定。未設定の項目は、auto_compaction_settings の既定値で埋める
         limestone::internal::auto_compaction_settings auto_compaction{};
-        std::optional<std::size_t> auto_compaction_threshold_mb = conf.auto_compaction_threshold_mb_;
-        std::optional<bool> auto_compaction_delete_detached = conf.auto_compaction_delete_detached_;
-        std::optional<bool> blob_gc = conf.blob_gc_;
+        std::optional<std::size_t> auto_compaction_threshold_mb = conf.get_auto_compaction_threshold_mb();
+        std::optional<bool> auto_compaction_delete_detached = conf.get_auto_compaction_delete_detached();
+        std::optional<bool> blob_gc = conf.get_blob_gc();
         // 暫定: configuration に設定されていない項目があるときは、環境変数から読む。上位が設定ファイルの値を
         // configuration に渡すようになったら、この読み込みを外す。3 項目とも設定されていれば、環境変数は読まない
         if (! auto_compaction_threshold_mb.has_value() || ! auto_compaction_delete_detached.has_value()

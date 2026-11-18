@@ -26,8 +26,6 @@
 
 namespace limestone::api {
 
-class datastore;
-
 /**
  * @brief configuration for datastore
  *
@@ -108,6 +106,66 @@ public:
      */
     void set_blob_gc(bool enabled) noexcept;
 
+    /**
+     * @brief getter for data_location
+     * @return the data location
+     */
+    [[nodiscard]] const boost::filesystem::path& get_data_location() const noexcept;
+
+    /**
+     * @brief getter for instance_id
+     * @return the instance id
+     */
+    [[nodiscard]] const std::string& get_instance_id() const noexcept;
+
+    /**
+     * @brief getter for db_name
+     * @return the database name
+     */
+    [[nodiscard]] const std::string& get_db_name() const noexcept;
+
+    /**
+     * @brief getter for recover_max_parallelism
+     * @return the number of threads of the sort, or std::nullopt if not set
+     */
+    [[nodiscard]] std::optional<int> get_recover_max_parallelism() const noexcept;
+
+    /**
+     * @brief getter for sort_arena_size_mb
+     * @return the size of the buffer per thread of the sort in MiB, or std::nullopt if not set
+     */
+    [[nodiscard]] std::optional<std::size_t> get_sort_arena_size_mb() const noexcept;
+
+    /**
+     * @brief getter for sort_work_dir
+     * @return the directory under which the sort creates its working directory, or an empty path if not set
+     */
+    [[nodiscard]] const boost::filesystem::path& get_sort_work_dir() const noexcept;
+
+    /**
+     * @brief getter for sort_merge_fanin
+     * @return the fan-in of the merge of the sort, or std::nullopt if not set
+     */
+    [[nodiscard]] std::optional<std::size_t> get_sort_merge_fanin() const noexcept;
+
+    /**
+     * @brief getter for auto_compaction_threshold_mb
+     * @return 常時コンパクションの閾値 (MiB)。未設定のときは std::nullopt
+     */
+    [[nodiscard]] std::optional<std::size_t> get_auto_compaction_threshold_mb() const noexcept;
+
+    /**
+     * @brief getter for auto_compaction_delete_detached
+     * @return 常時コンパクションで detached の WAL ファイルを削除するか。未設定のときは std::nullopt
+     */
+    [[nodiscard]] std::optional<bool> get_auto_compaction_delete_detached() const noexcept;
+
+    /**
+     * @brief getter for blob_gc
+     * @return BLOB ファイルの GC を行うか。未設定のときは std::nullopt
+     */
+    [[nodiscard]] std::optional<bool> get_blob_gc() const noexcept;
+
 private:
     boost::filesystem::path data_location_{};
 
@@ -125,8 +183,6 @@ private:
     std::optional<std::size_t> auto_compaction_threshold_mb_{};
     std::optional<bool> auto_compaction_delete_detached_{};
     std::optional<bool> blob_gc_{};
-
-    friend class datastore;
 };
 
 } // namespace limestone::api

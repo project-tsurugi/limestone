@@ -174,6 +174,8 @@ RDMA モードの受信箇所での受信 epoch の更新は、単体のテス�
 - [x] レビューの指摘: BLOB の GC を行うかの設定を、レプリカ限定から、master とレプリカの両方に効く設定に変えた。
       master では、起動時の GC と、コンパクションでの GC (契機によらない) の両方に効く。setter は set_blob_gc()、
       環境変数は LIMESTONE_BLOB_GC に改名した。設計メモと L3 (10.3 節、10.4 節、12.5 節) にも反映した。
+- [x] レビューの指摘: configuration に項目ごとの getter を足し、datastore が friend として private メンバを読む形を
+      やめた (friend の宣言を削除)。動作を変えないリファクタリング。
 
 ## 完了時の作業
 
