@@ -16,6 +16,8 @@
 #pragma once
 
 #include <cstdint>
+#include <ostream>
+#include <string_view>
 
 namespace limestone::internal {
 
@@ -28,5 +30,17 @@ enum class compaction_trigger : std::uint8_t {
     /// WAL の量が閾値を超えたこと (常時コンパクション)
     threshold,
 };
+
+/**
+ * @brief 契機の名前を返す。
+ * @param trigger 契機
+ * @return ログに書く名前
+ */
+[[nodiscard]] std::string_view to_string_view(compaction_trigger trigger) noexcept;
+
+/**
+ * @brief 契機の名前をストリームに書く。
+ */
+std::ostream& operator<<(std::ostream& out, compaction_trigger trigger);
 
 } // namespace limestone::internal

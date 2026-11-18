@@ -1324,7 +1324,7 @@ void datastore::compact_with_online() {
     run_online_compaction(limestone::internal::compaction_trigger::ctrl_file);
 }
 
-void datastore::run_online_compaction([[maybe_unused]] limestone::internal::compaction_trigger trigger) {  // NOLINT(readability-function-cognitive-complexity)
+void datastore::run_online_compaction(limestone::internal::compaction_trigger trigger) {  // NOLINT(readability-function-cognitive-complexity)
     TRACE_START;
 
     // Mutual exclusion with a backup: if the removal of the old generation ran between
@@ -1366,6 +1366,7 @@ void datastore::run_online_compaction([[maybe_unused]] limestone::internal::comp
 
     // rotate first
     rotation_result result = rotate_log_files();
+    LOG_LP(INFO) << "rotated the log files for the compaction: boundary epoch = " << result.get_epoch_id();
 
     // select files for compaction
     std::set<std::string> detached_pwals = compaction_catalog_->get_detached_pwals();
@@ -1420,6 +1421,19 @@ void datastore::run_online_compaction([[maybe_unused]] limestone::internal::comp
     std::string compacted_file_name = compaction_catalog::get_compacted_filename_for_generation(new_generation);
     std::string carry_file_name = compaction_catalog::get_carry_filename_for_generation(new_generation);
     options.set_output_file_names(compacted_file_name, carry_file_name);
+
+    // 入力の量は、ログのためだけに求める。大きさを取れないファイルは数えない
+    std::uint64_t input_bytes = 0;
+    for (const std::string& filename : need_compaction_filenames) {
+        boost::system::error_code size_error;
+        const boost::uintmax_t size = boost::filesystem::file_size(location_ / filename, size_error);
+        if (! size_error) {
+            input_bytes += size;
+        }
+    }
+    const std::chrono::steady_clock::time_point compaction_start = std::chrono::steady_clock::now();
+    LOG_LP(INFO) << "compaction started: trigger = " << trigger << ", generation = " << new_generation
+                 << ", input = " << need_compaction_filenames.size() << " files, " << input_bytes << " bytes";
     // The locator file of the compacted WAL file (create_compaction_output writes it under the same naming rule)
     std::string locator_file_name = locator_format::locator_file_name(compacted_file_name);
 
@@ -1554,7 +1568,11 @@ void datastore::run_online_compaction([[maybe_unused]] limestone::internal::comp
         LOG_LP(FATAL) << "online compaction failed at the publish/commit/delete phase: " << e.what();
     }
 
-    LOG_LP(INFO) << "compaction finished";
+    LOG_LP(INFO) << "compaction finished: trigger = " << trigger << ", generation = " << new_generation
+                 << ", elapsed = "
+                 << std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now()
+                                                                           - compaction_start).count()
+                 << " ms";
 
     // blob files garbage collection
     VLOG_LP(log_info) << "options.is_gc_enabled(): " << options.is_gc_enabled() << ", impl_->is_backup_in_progress(): " << impl_->is_backup_in_progress();
