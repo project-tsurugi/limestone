@@ -31,7 +31,7 @@ namespace limestone::internal {
 struct auto_compaction_config {
     std::optional<std::uint64_t> threshold_mb{};  ///< LIMESTONE_AUTO_COMPACTION_THRESHOLD_MB
     std::optional<bool> delete_detached{};        ///< LIMESTONE_AUTO_COMPACTION_DELETE_DETACHED
-    std::optional<bool> blob_gc{};        ///< LIMESTONE_BLOB_GC
+    std::optional<bool> blob_gc{};                ///< LIMESTONE_BLOB_GC
 };
 
 /**

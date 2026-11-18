@@ -40,8 +40,9 @@ void show_usage(const std::string& program_name) {
               << std::endl;
     std::cerr << "      The sort creates its working directory sorting-XXXXXX under LIMESTONE_SORT_WORK_DIR"
               << " and removes it when it ends (a crash may leave it)." << std::endl;
-    std::cerr << "      The auto compaction can be configured with LIMESTONE_AUTO_COMPACTION_THRESHOLD_MB," << std::endl;
-    std::cerr << "      LIMESTONE_AUTO_COMPACTION_DELETE_DETACHED and LIMESTONE_BLOB_GC." << std::endl;
+    std::cerr << "      The auto compaction can be configured with LIMESTONE_AUTO_COMPACTION_THRESHOLD_MB" << std::endl;
+    std::cerr << "      and LIMESTONE_AUTO_COMPACTION_DELETE_DETACHED." << std::endl;
+    std::cerr << "      The BLOB file GC can be disabled with LIMESTONE_BLOB_GC=0." << std::endl;
 }
 
 /**

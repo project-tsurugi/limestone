@@ -176,6 +176,7 @@ RDMA モードの受信箇所での受信 epoch の更新は、単体のテス�
       環境変数は LIMESTONE_BLOB_GC に改名した。設計メモと L3 (10.3 節、10.4 節、12.5 節) にも反映した。
 - [x] レビューの指摘: configuration に項目ごとの getter を足し、datastore が friend として private メンバを読む形を
       やめた (friend の宣言を削除)。動作を変えないリファクタリング。
+- [x] レビューの指摘: tgreplica の usage で、LIMESTONE_BLOB_GC を常時コンパクションの設定と分けて書いた。コメントの桁を揃えた。
 
 ## 完了時の作業
 
