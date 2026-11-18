@@ -1384,7 +1384,7 @@ void datastore::run_online_compaction(limestone::internal::compaction_trigger tr
     if (need_compaction_filenames.empty() ||
         (need_compaction_filenames.size() == 1 && current_compacted_file_name.has_value() &&
          need_compaction_filenames.find(current_compacted_file_name.value()) != need_compaction_filenames.end())) {
-        VLOG_LP(log_debug) << "no files to compact";
+        LOG_LP(INFO) << "compaction skipped: no files to compact (trigger = " << trigger << ")";
         TRACE_END << "return compact_with_online() without compaction";
         return;
     }
