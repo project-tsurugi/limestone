@@ -1592,6 +1592,32 @@ void datastore::run_online_compaction(limestone::internal::compaction_trigger tr
                                                                            - compaction_start).count()
                  << " ms";
 
+    // detached の WAL ファイルの削除。常時コンパクションだけが行う。対象は、カタログの detached の一覧にあって
+    // 実在するファイルのすべてである (この時点の detached_pwals)。今回のコンパクションの入力だけでなく、以前の
+    // コンパクションで detached になって残っているファイルも含む。したがって、削除に失敗したファイルや、削除の
+    // 途中で停止して残ったファイルは、次の常時コンパクションで削除される。
+    // 削除したファイルの名前は、カタログの一覧には残る。次のコンパクションが、実在しない名前を一覧から外す。
+    if (trigger == limestone::internal::compaction_trigger::threshold
+        && impl_->get_auto_compaction_settings().delete_detached) {
+        std::size_t removed_count = 0;
+        for (const std::string& filename : detached_pwals) {
+            boost::filesystem::path detached_path = location_ / filename;
+            boost::system::error_code remove_error;
+            impl_->file_ops().remove(detached_path, remove_error);
+            if (remove_error) {
+                // 残ったファイルは、次の常時コンパクションで再び削除の対象になる
+                LOG_LP(ERROR) << "failed to remove the detached WAL file '" << detached_path.string()
+                              << "': " << remove_error.message();
+                continue;
+            }
+            // バックアップは files_ からファイルを列挙するので、削除したファイルを外す
+            subtract_file(detached_path);
+            ++removed_count;
+        }
+        LOG_LP(INFO) << "removed the detached WAL files: " << removed_count << " of " << detached_pwals.size()
+                     << " files";
+    }
+
     // blob files garbage collection
     VLOG_LP(log_info) << "options.is_gc_enabled(): " << options.is_gc_enabled() << ", impl_->is_backup_in_progress(): " << impl_->is_backup_in_progress();
     if (options.is_gc_enabled() && !impl_->is_backup_in_progress()) {
