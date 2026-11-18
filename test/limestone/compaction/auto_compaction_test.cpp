@@ -13,15 +13,25 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
+#include <array>
+#include <atomic>
 #include <chrono>
 #include <cstdint>
+#include <cstdio>
+#include <future>
 #include <memory>
+#include <mutex>
+#include <set>
 #include <string>
 #include <thread>
+#include <tuple>
+#include <vector>
 
 #include <boost/filesystem.hpp>
 #include <boost/filesystem/fstream.hpp>
 
+#include <limestone/api/backup_detail.h>
+#include <limestone/api/cursor.h>
 #include <limestone/api/snapshot.h>
 
 #include "test_root.h"
@@ -29,8 +39,41 @@
 #include "auto_compaction_settings.h"
 #include "compaction_catalog.h"
 #include "datastore_impl.h"
+#include "file_operations.h"
+#include "internal.h"
+#include "locator/locator_format.h"
 
 namespace limestone::testing {
+
+namespace {
+
+// 指定した名前のファイルの削除だけを失敗させる file_operations
+class remove_failing_file_operations : public limestone::internal::real_file_operations {
+public:
+    void remove(const boost::filesystem::path& path, boost::system::error_code& ec) override {
+        {
+            std::lock_guard<std::mutex> lock(mutex_);
+            if (path.filename().string() == failing_name_) {
+                ec = boost::system::errc::make_error_code(boost::system::errc::permission_denied);
+                return;
+            }
+        }
+        real_file_operations::remove(path, ec);
+    }
+
+    void fail_for(const std::string& name) {
+        {
+            std::lock_guard<std::mutex> lock(mutex_);
+            failing_name_ = name;
+        }
+    }
+
+private:
+    std::mutex mutex_{};
+    std::string failing_name_{};
+};
+
+}  // namespace
 
 using limestone::api::epoch_id_type;
 using limestone::internal::auto_compaction_settings;
@@ -54,6 +97,7 @@ public:
 
     void TearDown() override {
         datastore_ = nullptr;
+        limestone::api::datastore_impl::set_file_operations_for_test(nullptr);
         boost::filesystem::remove_all(location);
     }
 
@@ -119,6 +163,73 @@ public:
             std::this_thread::sleep_for(std::chrono::milliseconds(20));
         }
         return catalog_generation() >= expected;
+    }
+
+    // ログディレクトリにある、ローテーション済みの WAL ファイルの名前
+    [[nodiscard]] static std::set<std::string> rotated_wal_files() {
+        std::set<std::string> result{};
+        for (const boost::filesystem::directory_entry& entry :
+             boost::filesystem::directory_iterator(boost::filesystem::path(location))) {
+            const std::string name = entry.path().filename().string();
+            if (name.rfind("pwal_", 0) == 0 && ! limestone::internal::is_unrotated_pwal_name(name)
+                && ! compaction_catalog::is_compaction_output_filename(name)
+                && ! limestone::internal::locator_format::is_locator_file_name(name)) {
+                result.insert(name);
+            }
+        }
+        return result;
+    }
+
+    // epoch を進めながら、ローテーション済みの WAL ファイルが expected と一致するまで待つ
+    [[nodiscard]] bool wait_for_rotated_wal_files(const std::set<std::string>& expected,
+                                                  std::chrono::milliseconds timeout) {
+        const std::chrono::steady_clock::time_point deadline = std::chrono::steady_clock::now() + timeout;
+        while (std::chrono::steady_clock::now() < deadline) {
+            if (rotated_wal_files() == expected) {
+                return true;
+            }
+            advance_epoch();
+            std::this_thread::sleep_for(std::chrono::milliseconds(20));
+        }
+        return rotated_wal_files() == expected;
+    }
+
+    // ctrl ファイルの指示と同じコンパクションを、ワーカースレッドを通さずに実行する
+    void run_requested_compaction() {
+        std::future<void> future = std::async(std::launch::async, [this]() { datastore_->compact_with_online(); });
+        while (future.wait_for(std::chrono::milliseconds(20)) != std::future_status::ready) {
+            advance_epoch();
+        }
+        future.get();
+    }
+
+    // files_ (バックアップが列挙するファイル) に、ローテーション済みの WAL ファイルがいくつあるか
+    [[nodiscard]] std::size_t rotated_wal_files_in_backup_targets() const {
+        std::size_t count = 0;
+        for (const boost::filesystem::path& path : datastore_->files()) {
+            const std::string name = path.filename().string();
+            if (name.rfind("pwal_", 0) == 0 && ! limestone::internal::is_unrotated_pwal_name(name)
+                && ! compaction_catalog::is_compaction_output_filename(name)
+                && ! limestone::internal::locator_format::is_locator_file_name(name)) {
+                ++count;
+            }
+        }
+        return count;
+    }
+
+    // snapshot が返すエントリ (キーと値) をすべて読む
+    [[nodiscard]] std::vector<std::tuple<std::string, std::string>> read_all_entries() {
+        std::vector<std::tuple<std::string, std::string>> result{};
+        std::unique_ptr<limestone::api::snapshot> snapshot = datastore_->get_snapshot();
+        std::unique_ptr<limestone::api::cursor> cursor = snapshot->get_cursor();
+        while (cursor->next()) {
+            std::string key{};
+            std::string value{};
+            cursor->key(key);
+            cursor->value(value);
+            result.emplace_back(key, value);
+        }
+        return result;
     }
 
     std::unique_ptr<limestone::api::datastore_test> datastore_{};
@@ -264,6 +375,167 @@ TEST_F(auto_compaction_test, shutdown_while_worker_is_running) {
 
     start_worker();
     datastore_->shutdown();
+}
+
+// 常時コンパクションは、既定では detached の WAL ファイルを削除する。削除したファイルは、バックアップの対象から外れる
+TEST_F(auto_compaction_test, removes_detached_wal_files_by_default) {
+    start_datastore(eager_settings());
+    advance_epoch();
+    write_entry("k1", "v1");
+
+    start_worker();
+
+    ASSERT_TRUE(wait_for_generation(1, std::chrono::seconds(10)));
+    EXPECT_TRUE(wait_for_rotated_wal_files({}, std::chrono::seconds(10)));
+    datastore_->shutdown();
+    EXPECT_EQ(rotated_wal_files_in_backup_targets(), 0U);
+}
+
+// 削除の設定を無効にすると、detached の WAL ファイルは残る
+TEST_F(auto_compaction_test, keeps_detached_wal_files_when_disabled) {
+    auto_compaction_settings settings = eager_settings();
+    settings.delete_detached = false;
+    start_datastore(settings);
+    advance_epoch();
+    write_entry("k1", "v1");
+
+    start_worker();
+
+    ASSERT_TRUE(wait_for_generation(1, std::chrono::seconds(10)));
+    datastore_->shutdown();
+    EXPECT_EQ(rotated_wal_files().size(), 1U);
+    EXPECT_EQ(rotated_wal_files_in_backup_targets(), 1U);
+}
+
+// ctrl ファイルの指示によるコンパクションは、detached の WAL ファイルを削除しない。残ったファイルは、次の
+// 常時コンパクションが削除する
+TEST_F(auto_compaction_test, removes_wal_files_detached_by_earlier_compactions) {
+    start_datastore(eager_settings());
+    advance_epoch();
+    write_entry("k1", "v1");
+
+    run_requested_compaction();
+    ASSERT_EQ(catalog_generation(), 1U);
+    ASSERT_EQ(rotated_wal_files().size(), 1U);
+
+    write_entry("k2", "v2");
+    start_worker();
+
+    ASSERT_TRUE(wait_for_generation(2, std::chrono::seconds(10)));
+    EXPECT_TRUE(wait_for_rotated_wal_files({}, std::chrono::seconds(10)));
+    datastore_->shutdown();
+}
+
+// コンパクションの実行中に始めたバックアップは、コンパクションの完了を待つ。バックアップの対象には、
+// コンパクションが削除したファイルが入らない
+TEST_F(auto_compaction_test, backup_waits_for_running_compaction) {
+    start_datastore(eager_settings());
+    advance_epoch();
+    write_entry("k1", "v1");
+    // コンパクションを、カタログの更新の後、削除の前で止める
+    std::promise<void> reached{};
+    std::promise<void> release{};
+    std::shared_future<void> released = release.get_future().share();
+    std::atomic<bool> fired{false};
+    datastore_->get_impl()->set_on_compaction_after_commit_for_test([&reached, released, &fired]() {
+        if (! fired.exchange(true)) {
+            reached.set_value();
+            released.wait();
+        }
+    });
+
+    start_worker();
+    std::future<void> reached_future = reached.get_future();
+    while (reached_future.wait_for(std::chrono::milliseconds(20)) != std::future_status::ready) {
+        advance_epoch();
+    }
+    const std::set<std::string> detached = rotated_wal_files();
+    ASSERT_EQ(detached.size(), 1U);
+
+    std::future<std::unique_ptr<limestone::api::backup_detail>> backup = std::async(
+        std::launch::async, [this]() { return datastore_->begin_backup(limestone::api::backup_type::standard); });
+    advance_epochs_for(std::chrono::milliseconds(300));
+    EXPECT_NE(backup.wait_for(std::chrono::milliseconds(0)), std::future_status::ready);
+
+    release.set_value();
+    while (backup.wait_for(std::chrono::milliseconds(20)) != std::future_status::ready) {
+        advance_epoch();
+    }
+    std::unique_ptr<limestone::api::backup_detail> detail = backup.get();
+    for (const limestone::api::backup_detail::entry& entry : detail->entries()) {
+        EXPECT_EQ(detached.count(entry.source_path().filename().string()), 0U);
+        EXPECT_TRUE(boost::filesystem::exists(entry.source_path()));
+    }
+    for (const std::string& name : detached) {
+        EXPECT_FALSE(boost::filesystem::exists(boost::filesystem::path(location) / name));
+    }
+    detail->notify_end_backup();
+    datastore_->shutdown();
+}
+
+// 削除に失敗したファイルがあっても、残りは削除される。失敗したファイルは、次の常時コンパクションが削除する
+TEST_F(auto_compaction_test, continues_after_a_removal_failure) {
+    remove_failing_file_operations ops{};
+    limestone::api::datastore_impl::set_file_operations_for_test(&ops);
+    start_datastore(eager_settings());
+    advance_epoch();
+    write_entry("k1", "v1");
+
+    run_requested_compaction();
+    const std::set<std::string> left = rotated_wal_files();
+    ASSERT_EQ(left.size(), 1U);
+    ops.fail_for(*left.begin());
+
+    write_entry("k2", "v2");
+    start_worker();
+
+    ASSERT_TRUE(wait_for_generation(2, std::chrono::seconds(10)));
+    EXPECT_TRUE(wait_for_rotated_wal_files(left, std::chrono::seconds(10)));
+
+    ops.fail_for("");
+    write_entry("k3", "v3");
+
+    ASSERT_TRUE(wait_for_generation(3, std::chrono::seconds(10)));
+    EXPECT_TRUE(wait_for_rotated_wal_files({}, std::chrono::seconds(10)));
+    datastore_->shutdown();
+}
+
+// detached の WAL ファイルを削除した後の永続化データで、次のコンパクション、再起動、tglogutil の inspect が
+// 正常に動く
+TEST_F(auto_compaction_test, data_is_usable_after_removal) {
+    start_datastore(eager_settings());
+    advance_epoch();
+    write_entry("k1", "v1");
+    start_worker();
+    ASSERT_TRUE(wait_for_generation(1, std::chrono::seconds(10)));
+    ASSERT_TRUE(wait_for_rotated_wal_files({}, std::chrono::seconds(10)));
+
+    // 次のコンパクション。カタログの detached の一覧には、削除したファイルの名前が残っている
+    write_entry("k2", "v2");
+    ASSERT_TRUE(wait_for_generation(2, std::chrono::seconds(10)));
+    ASSERT_TRUE(wait_for_rotated_wal_files({}, std::chrono::seconds(10)));
+    datastore_->shutdown();
+    datastore_ = nullptr;
+
+    // tglogutil の inspect
+    {
+        const std::string command = std::string("../src/tglogutil inspect ") + location + " 2>&1";
+        FILE* pipe = popen(command.c_str(), "r");
+        ASSERT_NE(pipe, nullptr);
+        std::string output{};
+        std::array<char, 4096> buffer{};
+        std::size_t read_size = 0;
+        while ((read_size = fread(buffer.data(), 1, buffer.size(), pipe)) > 0) {
+            output.append(buffer.data(), read_size);
+        }
+        EXPECT_EQ(pclose(pipe), 0) << output;
+    }
+
+    // 再起動
+    auto_compaction_settings settings{};
+    start_datastore(settings);
+    const std::vector<std::tuple<std::string, std::string>> expected{{"k1", "v1"}, {"k2", "v2"}};
+    EXPECT_EQ(read_all_entries(), expected);
 }
 
 }  // namespace limestone::testing
