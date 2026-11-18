@@ -35,7 +35,7 @@ enum class message_type_id : uint8_t {
     SESSION_BEGIN = 0x01,
     SESSION_END = 0x02,
     GROUP_COMMIT = 0x03,
-    GC_BOUNDARY_SWITCH = 0x04,
+    // 0x04 は欠番である。使われないまま廃止したメッセージ型の番号であり、再利用しない
 
     // Log‑channel requests
     LOG_CHANNEL_CREATE = 0x10,

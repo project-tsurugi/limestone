@@ -14,7 +14,6 @@
  * limitations under the License.
  */
 #include "replication/message_group_commit.h"
-#include "replication/message_gc_boundary_switch.h"
 #include "replication/replication_message.h"
 #include "replication/handler_resources.h"
 #include "replication/control_channel_handler_resources.h"

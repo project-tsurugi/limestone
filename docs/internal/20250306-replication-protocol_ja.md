@@ -13,7 +13,6 @@
 * 以下のプロトコルが未実装
   * プロトコル：レプリケーションセッション終了
   * プロトコル：セーフスナップショット切り替え
-  * プロトコル：GC境界切り替え
   * ログチャネル破棄
   * プロトコル：ログチャネル書き出し
     * ログエントリ送付の`LOG_OPERATION_FLUSH`で代替
@@ -194,35 +193,7 @@ TBD (このフェーズでは発行しない)
 
 ### プロトコル：GC境界切り替え
 
-* 概要
-  * ログエントリの GC 境界を設定する
-* 開始ステート
-  * `CONTROL`
-* 終端ステート
-  * `CONTROL`
-
-マスターからの送信:
-
-```c
-struct request.gc_boundary_switch {
-    u1 command_type = CONTROL_COMMAND_TYPE_GC_BOUNDARY_SWITCH;
-    u16 write_version;
-}
-```
-
-| フィールド名 | 説明 |
-|:--|:--|
-| `write_version` | GC 境界として設定するライトバージョン番号 |
-
-レプリカからの返信:
-
-```c
-// 成功時
-struct response.gc_boundary_switch_ok = ack;
-
-// 失敗時
-struct response.gc_boundary_switch_error = error;
-```
+廃止した。実装されないまま使われなかったプロトコルであり、メッセージ型の番号 (0x04) は欠番とする。
 
 ### プロトコル：ログチャネル作成
 
