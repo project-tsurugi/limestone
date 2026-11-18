@@ -1308,8 +1308,12 @@ void datastore::online_compaction_worker() {
     // 最初の測定は、起動の直後に行う
     std::chrono::steady_clock::time_point next_measurement = std::chrono::steady_clock::now();
 
+    const bool is_master = impl_->is_master();
+
     while (!stop_online_compaction_worker_.load()) {
-        if (boost::filesystem::exists(start_file)) {
+        // ctrl ファイルの指示は、master の役割のときだけ扱う。レプリカのコンパクションの契機は、常時
+        // コンパクションだけである
+        if (is_master && boost::filesystem::exists(start_file)) {
             if (!boost::filesystem::remove(start_file)) {
                 LOG_LP(ERROR) << "failed to remove file: " << start_file.string();
                 return;
@@ -1337,7 +1341,9 @@ void datastore::online_compaction_worker() {
             const std::uint64_t amount =
                 limestone::internal::measure_uncompacted_wal_bytes(location_, compaction_catalog_->get_detached_pwals());
             if (amount > auto_compaction.threshold_bytes) {
-                if (epoch_id_switched_.load() == 0) {
+                const epoch_id_type boundary_epoch =
+                    is_master ? epoch_id_switched_.load() : impl_->get_received_epoch();
+                if (boundary_epoch == 0) {
                     // ローテーションの境界になる epoch がまだない。次の測定を待つ
                     VLOG_LP(log_info) << "auto compaction postponed: no boundary epoch for the rotation yet";
                 } else {
