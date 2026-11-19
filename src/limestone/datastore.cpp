@@ -24,6 +24,7 @@
 #include <cstdlib>
 #include <limits>
 #include <map>
+#include <string_view>
 
 #include <boost/filesystem/fstream.hpp>
 
@@ -1346,6 +1347,9 @@ void datastore::online_compaction_worker() {  // NOLINT(readability-function-cog
     std::chrono::steady_clock::time_point next_measurement = std::chrono::steady_clock::now();
 
     const bool is_master = impl_->is_master();
+    // 常時コンパクションを前回の測定で見送った理由。見送らなかったときは空である。同じ理由が続く間は、
+    // 見送りのログを繰り返さない
+    std::string_view last_postponement_reason{};
 
     while (!stop_online_compaction_worker_.load()) {
         // ctrl ファイルの指示は、master の役割のときだけ扱う。レプリカのコンパクションの契機は、常時
@@ -1377,12 +1381,16 @@ void datastore::online_compaction_worker() {  // NOLINT(readability-function-cog
             constexpr std::uint64_t mib = std::uint64_t{1024} * 1024;
             const std::uint64_t amount =
                 limestone::internal::measure_uncompacted_wal_bytes(location_, compaction_catalog_->get_detached_pwals());
+            std::string_view postponement_reason{};
             if (amount > auto_compaction.threshold_bytes) {
                 const epoch_id_type boundary_epoch =
                     is_master ? epoch_id_switched_.load() : impl_->get_received_epoch();
                 if (boundary_epoch == 0) {
                     // ローテーションの境界になる epoch がまだない。次の測定を待つ
-                    VLOG_LP(log_info) << "auto compaction postponed: no boundary epoch for the rotation yet";
+                    postponement_reason = "no boundary epoch for the rotation yet";
+                } else if (impl_->is_backup_in_progress()) {
+                    // バックアップ中は実行できない。次の測定を待つ
+                    postponement_reason = "a backup is in progress";
                 } else {
                     LOG_LP(INFO) << "the amount of the WAL exceeded the threshold of the auto compaction: amount = "
                                  << amount / mib << " MiB (" << amount << " bytes), threshold = "
@@ -1399,6 +1407,10 @@ void datastore::online_compaction_worker() {  // NOLINT(readability-function-cog
                     }
                 }
             }
+            if (! postponement_reason.empty() && postponement_reason != last_postponement_reason) {
+                VLOG_LP(log_info) << "auto compaction postponed: " << postponement_reason;
+            }
+            last_postponement_reason = postponement_reason;
         }
         {
             std::unique_lock<std::mutex> lock(mtx_online_compaction_worker_);
