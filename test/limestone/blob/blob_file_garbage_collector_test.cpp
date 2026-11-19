@@ -290,6 +290,43 @@ TEST_F(blob_file_garbage_collector_test, add_gc_exempt_blob_id_adds_id_correctly
     EXPECT_EQ(actual_ids, expected_ids);
 }
 
+// close() の後は、GC を始める・進める関数は何もしない。BLOB ファイルは削除されず、例外も出ない
+TEST_F(blob_file_garbage_collector_test, nothing_starts_after_close) {
+    create_blob_file(*resolver_, 101);
+    create_blob_file(*resolver_, 102);
+
+    gc_->close();
+
+    gc_->scan_blob_files(200);
+    gc_->start_add_gc_exempt_blob_ids();
+    gc_->add_gc_exempt_blob_id(102);
+    gc_->finalize_add_gc_exempt_blob_ids();
+    EXPECT_FALSE(gc_->is_active());
+    gc_->scan_snapshot(snapshot_path, compacted_path);
+    EXPECT_FALSE(gc_->is_active());
+
+    gc_->wait_for_all_threads();
+    EXPECT_TRUE(boost::filesystem::exists(resolver_->resolve_path(101)));
+    EXPECT_TRUE(boost::filesystem::exists(resolver_->resolve_path(102)));
+}
+
+// GC を始めた後で close() すると、始まっていた処理は止まり、残りの呼び出しは何もしない
+TEST_F(blob_file_garbage_collector_test, close_in_the_middle_of_the_start_sequence) {
+    create_blob_file(*resolver_, 101);
+    create_blob_file(*resolver_, 102);
+    gc_->scan_blob_files(200);
+    gc_->start_add_gc_exempt_blob_ids();
+
+    gc_->close();
+
+    gc_->add_gc_exempt_blob_id(102);
+    gc_->finalize_add_gc_exempt_blob_ids();
+    EXPECT_FALSE(gc_->is_active());
+    gc_->wait_for_all_threads();
+    EXPECT_TRUE(boost::filesystem::exists(resolver_->resolve_path(101)));
+    EXPECT_TRUE(boost::filesystem::exists(resolver_->resolve_path(102)));
+}
+
 TEST_F(blob_file_garbage_collector_test, finalize_scan_and_cleanup_deletes_non_exempt_files) {
     FLAGS_v = 100;
     // Arrange:

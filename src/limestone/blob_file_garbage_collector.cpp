@@ -66,6 +66,11 @@
  }
 
  void blob_file_garbage_collector::scan_blob_files(blob_id_type boundary) {
+     // close() の後は始めない。検査とスレッドの起動を、shutdown() と排他する
+     std::scoped_lock<std::mutex> lock(shutdown_mutex_);
+     if (closed_) {
+         return;
+     }
      state_machine_.start_blob_scan();
      boundary_ = boundary;
      blob_file_scan_thread_ = std::thread(&blob_file_garbage_collector::scan_directory, this);
@@ -99,6 +104,11 @@
 }
   
  void blob_file_garbage_collector::add_gc_exempt_blob_id(blob_id_type id) {
+    // shutdown() は gc_exempt_blob_ を作り直すので、追加を shutdown() と排他する
+    std::scoped_lock<std::mutex> lock(shutdown_mutex_);
+    if (closed_) {
+        return;
+    }
     VLOG_LP(log_trace) << "Adding blob id to gc_exempt_blob_: " << id;
     if (state_machine_.get_snapshot_scan_mode() != blob_file_gc_state_machine::snapshot_scan_mode::external) {
         throw std::logic_error("Cannot add GC exempt blob id before starting the scan.");
@@ -236,6 +246,15 @@ void blob_file_garbage_collector::wait_for_cleanup() {
      VLOG_LP(log_trace) << "Shutdown complete.";
  }
 
+void blob_file_garbage_collector::close() {
+    {
+        std::scoped_lock<std::mutex> lock(shutdown_mutex_);
+        closed_ = true;
+    }
+    // これより後に GC を始める呼び出しはない。実行中の処理を止める
+    shutdown();
+}
+
 void blob_file_garbage_collector::wait_for_all_threads() {
     if (blob_file_scan_thread_.joinable()) {
         blob_file_scan_thread_.join();
@@ -249,6 +268,10 @@ void blob_file_garbage_collector::wait_for_all_threads() {
 }
 
 void blob_file_garbage_collector::scan_snapshot(const boost::filesystem::path &snapshot_file, const boost::filesystem::path &compacted_file) {
+    std::scoped_lock<std::mutex> lock(shutdown_mutex_);
+    if (closed_) {
+        return;
+    }
     state_machine_.start_snapshot_scan(blob_file_gc_state_machine::snapshot_scan_mode::internal);
     std::unique_ptr<my_cursor> cur;
     std::map<storage_id_type, write_version_type> clear_storage_map{};
@@ -287,10 +310,18 @@ void blob_file_garbage_collector::scan_snapshot(const boost::filesystem::path &s
 }
 
 void blob_file_garbage_collector::start_add_gc_exempt_blob_ids() {
+    std::scoped_lock<std::mutex> lock(shutdown_mutex_);
+    if (closed_) {
+        return;
+    }
     state_machine_.start_snapshot_scan(blob_file_gc_state_machine::snapshot_scan_mode::external);
 }
 
 void blob_file_garbage_collector::finalize_add_gc_exempt_blob_ids() {
+    std::scoped_lock<std::mutex> lock(shutdown_mutex_);
+    if (closed_) {
+        return;
+    }
     state_machine_.complete_snapshot_scan(blob_file_gc_state_machine::snapshot_scan_mode::external);
     finalize_scan_and_cleanup(); 
     snapshot_scan_cv_.notify_all();

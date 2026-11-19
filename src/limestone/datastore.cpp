@@ -953,8 +953,10 @@ std::future<void> datastore::shutdown() noexcept {
     impl_->shutdown_rdma_sender();
     impl_->shutdown_rdma_ack_receiver();
 
+    // BLOB ファイルの GC を完全に停止する。オンラインコンパクションのワーカースレッドを止めるのはこの後であり、
+    // 進行中のコンパクションが完了しても、GC は始まらない
     if (blob_file_garbage_collector_) {
-        blob_file_garbage_collector_->shutdown();
+        blob_file_garbage_collector_->close();
     }
 
     // Make an in-flight rotation request give up: once shirakami stops on

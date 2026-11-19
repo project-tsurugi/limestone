@@ -646,6 +646,39 @@ TEST_F(compaction_blob_gc_test, startup_gc_does_not_run_when_disabled) {
     EXPECT_TRUE(boost::filesystem::exists(path1003_));
 }
 
+// コンパクションがコミットまで進んだ時点で shutdown() すると、そのコンパクションは完了するが、BLOB ファイルの GC は
+// 始まらない。shutdown() の後に BLOB ファイルが削除されることはない
+TEST_F(compaction_blob_gc_test, blob_gc_does_not_start_after_shutdown) {
+    gen_datastore();
+    prepare_blob_gc_test_data();
+    std::atomic<bool> commit_reached{false};
+    std::atomic<bool> release_requested{false};
+    datastore_->get_impl()->set_on_compaction_after_commit_for_test([&commit_reached, &release_requested]() {
+        commit_reached.store(true);
+        while (! release_requested.load()) {
+            std::this_thread::sleep_for(std::chrono::milliseconds(10));
+        }
+    });
+    std::thread compaction_thread([this]() { run_compact_with_epoch_switch(5); });
+    const std::chrono::steady_clock::time_point deadline = std::chrono::steady_clock::now() + std::chrono::seconds(10);
+    while (! commit_reached.load() && std::chrono::steady_clock::now() < deadline) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    }
+    EXPECT_TRUE(commit_reached.load());
+
+    datastore_->shutdown();
+    release_requested.store(true);
+    compaction_thread.join();
+
+    datastore_->wait_for_blob_file_garbace_collector();
+    EXPECT_TRUE(datastore_->get_impl()->get_current_compacted_file_name().has_value());
+    EXPECT_TRUE(boost::filesystem::exists(path1001_));
+    EXPECT_TRUE(boost::filesystem::exists(path1002_));
+    EXPECT_TRUE(boost::filesystem::exists(path1003_));
+    EXPECT_TRUE(boost::filesystem::exists(path2001_));
+    EXPECT_TRUE(boost::filesystem::exists(path2002_));
+}
+
 // 設定で無効にしたとき、master のコンパクションは BLOB ファイルの GC を行わない。コンパクションそのものは行う
 TEST_F(compaction_blob_gc_test, blob_gc_does_not_run_when_disabled) {
     limestone::api::configuration conf{};
