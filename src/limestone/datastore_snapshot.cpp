@@ -233,7 +233,7 @@ epoch_id_type invalidate_nondurable_snippets(const std::unique_ptr<compaction_ca
     dblog_scan logscan = make_dblog_scan(options);
     logscan.set_thread_num(thread_num);
     const epoch_id_type durable_epoch = logscan.last_durable_epoch_in_dir();
-    // エントリは使わない。走査の目的は、durable epoch を超えるスニペットの無効化だけである
+    // The entries are not used. The scan only invalidates the snippets beyond the durable epoch
     logscan.scan_pwal_files_throws(durable_epoch, [](log_entry&, int) {});
     return durable_epoch;
 }

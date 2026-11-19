@@ -24,9 +24,9 @@
 namespace limestone::internal {
 
 /**
- * @brief 環境変数から読んだコンパクションと BLOB ファイルの GC の設定。
+ * @brief The settings of the compaction and the BLOB file GC read from the environment variables.
  *
- * 設定されていない項目は nullopt であり、configuration の既定のままになる。
+ * An item that is not set is nullopt, and the configuration keeps its default for it.
  */
 struct compaction_config {
     std::optional<std::uint64_t> threshold_mb{};  ///< LIMESTONE_AUTO_COMPACTION_THRESHOLD_MB
@@ -35,28 +35,30 @@ struct compaction_config {
 };
 
 /**
- * @brief 設定されている項目を configuration に入れる。
- * @param config 読んだ設定
- * @param conf 設定を入れる configuration
+ * @brief Puts the items that are set into a configuration.
+ * @param config the settings read
+ * @param conf the configuration to put the settings into
  */
 void apply_compaction_config(const compaction_config& config, limestone::api::configuration& conf);
 
 /**
- * @brief コンパクションと BLOB ファイルの GC の設定を読んだ結果。
+ * @brief The result of reading the settings of the compaction and the BLOB file GC.
  */
 struct compaction_config_parse_result {
-    bool ok{false};                   ///< 読み込みに成功したか
-    std::string error_message{};      ///< 失敗の理由。ok のときは空
-    compaction_config config{};  ///< 読んだ設定。ok でないときは既定
+    bool ok{false};               ///< whether the read succeeded
+    std::string error_message{};  ///< the reason for the failure; empty if ok
+    compaction_config config{};   ///< the settings read; the defaults if not ok
 };
 
 /**
- * @brief コンパクションと BLOB ファイルの GC の設定を環境変数から読む。
+ * @brief Reads the settings of the compaction and the BLOB file GC from the environment variables.
  *
- * どの変数も 10 進の非負の整数であり、それ以外の文字列 (符号つき、空文字列を含む) は失敗になる。
- * LIMESTONE_AUTO_COMPACTION_THRESHOLD_MB は閾値 (MiB) で、0 は常時コンパクションを行わないことを表す。
- * LIMESTONE_AUTO_COMPACTION_DELETE_DETACHED と LIMESTONE_BLOB_GC は、0 が無効、0 以外が有効を表す。
- * @return 読んだ設定、または失敗の理由
+ * Every variable is a non-negative decimal integer; any other string (including a signed number and an empty
+ * string) is a failure.
+ * LIMESTONE_AUTO_COMPACTION_THRESHOLD_MB is the threshold in MiB, and 0 disables the auto compaction.
+ * For LIMESTONE_AUTO_COMPACTION_DELETE_DETACHED and LIMESTONE_BLOB_GC, 0 means disabled and any other value
+ * means enabled.
+ * @return the settings read, or the reason for the failure
  */
 [[nodiscard]] compaction_config_parse_result load_compaction_config_from_environment();
 

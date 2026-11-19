@@ -20,14 +20,14 @@ namespace limestone::testing {
 using limestone::api::blob_id_type;
 
 /**
- * レプリカのコンパクションでの BLOB ファイルの GC のテスト。GC の境界は、master から受け取ったコンパクションの
- * 境界 (master の境界 epoch E_m、BLOB の ID の境界 G_m) で決まる。
+ * Tests of the BLOB file GC in a compaction on the replica. The boundary of the GC is decided by the compaction
+ * boundary received from the master (the boundary epoch of the master E_m and the BLOB ID boundary G_m).
  */
 class replica_blob_gc_test : public replica_compaction_base_test {
 public:
     replica_blob_gc_test() : replica_compaction_base_test("/tmp/replica_blob_gc_test") {}
 
-    // master から複製された BLOB ファイルを作る
+    // Creates a BLOB file replicated from the master
     [[nodiscard]] boost::filesystem::path create_blob_file(blob_id_type blob_id) const {
         const boost::filesystem::path path = datastore_->get_impl()->resolve_blob_path(blob_id);
         boost::filesystem::create_directories(path.parent_path());
@@ -36,7 +36,7 @@ public:
         return path;
     }
 
-    // master から、BLOB を持つ 1 セッション分のログを受け取ったことにする
+    // Imitates the reception of the logs of one session with a BLOB from the master
     static void receive_session_with_blob(log_channel& channel, epoch_id_type epoch, const std::string& key,
                                           const std::string& value, blob_id_type blob_id) {
         channel.get_impl()->begin_session_at(epoch);
@@ -44,8 +44,8 @@ public:
         channel.get_impl()->end_session_at(epoch);
     }
 
-    // epoch 1 で k1 (BLOB 1001) と k2 (BLOB 1002) を、epoch 2 で k1 (BLOB 2001) を受け取る。BLOB 1001 は、
-    // どのエントリからも参照されなくなる。BLOB 3001 は、どのエントリからも参照されない
+    // Receives k1 (BLOB 1001) and k2 (BLOB 1002) at epoch 1, and k1 (BLOB 2001) at epoch 2. BLOB 1001 is no
+    // longer referenced by any entry. BLOB 3001 is referenced by no entry
     void receive_entries_with_blobs() {
         log_channel& channel = datastore_->create_channel();
         path1001_ = create_blob_file(1001);
@@ -57,7 +57,7 @@ public:
         receive_session_with_blob(channel, 2, "k1", "v1-2", 2001);
     }
 
-    // epoch 2 を境界にしたコンパクションを実行させる
+    // Makes a compaction run with epoch 2 as the boundary
     void compact_at_epoch_2() {
         receive_group_commit(2);
         ASSERT_TRUE(wait_for_generation(1, std::chrono::seconds(10)));
@@ -75,10 +75,10 @@ public:
         return ! boost::filesystem::exists(path);
     }
 
-    // GC が行われなかったことを確かめる。GC は別のスレッドで動くので、しばらく待ってから停止して確かめる
+    // Checks that the GC did not run. The GC runs on other threads, so wait for a while and stop before checking
     void expect_no_blob_file_removed() {
         std::this_thread::sleep_for(std::chrono::milliseconds(500));
-        // GC が誤って始まっていれば、削除まで終わらせてから確かめる
+        // If the GC has started by mistake, let it finish the removal before checking
         datastore_->wait_for_blob_file_garbace_collector();
         stop();
         EXPECT_TRUE(boost::filesystem::exists(path1001_));
@@ -87,7 +87,7 @@ public:
         EXPECT_TRUE(boost::filesystem::exists(path3001_));
     }
 
-    // G_m = 3000 の GC が行われたことを確かめる。G_m 未満で参照されない BLOB 1001 だけが削除される
+    // Checks that the GC with G_m = 3000 ran. Only BLOB 1001, which is below G_m and not referenced, is removed
     void expect_unreferenced_blob_below_boundary_removed() {
         EXPECT_TRUE(wait_until_removed(path1001_, std::chrono::seconds(10)));
         stop();
@@ -103,7 +103,7 @@ public:
     boost::filesystem::path path3001_{};
 };
 
-// E_m = E_r のとき、GC が行われる。G_m 未満で参照されない BLOB ファイルだけが削除される
+// The GC runs when E_m = E_r. Only the BLOB files below G_m and not referenced are removed
 TEST_F(replica_blob_gc_test, runs_when_master_boundary_epoch_equals_boundary_epoch) {
     start_replica(eager_settings());
     receive_entries_with_blobs();
@@ -114,7 +114,7 @@ TEST_F(replica_blob_gc_test, runs_when_master_boundary_epoch_equals_boundary_epo
     expect_unreferenced_blob_below_boundary_removed();
 }
 
-// E_m < E_r のとき、GC が行われる
+// The GC runs when E_m < E_r
 TEST_F(replica_blob_gc_test, runs_when_master_boundary_epoch_is_below_boundary_epoch) {
     start_replica(eager_settings());
     receive_entries_with_blobs();
@@ -125,8 +125,8 @@ TEST_F(replica_blob_gc_test, runs_when_master_boundary_epoch_is_below_boundary_e
     expect_unreferenced_blob_below_boundary_removed();
 }
 
-// G_m 以上の BLOB ファイルは、参照されていなくても削除されない。G_m 未満で参照されない BLOB ファイルがなければ、
-// 何も削除されない
+// The BLOB files at or above G_m are not removed even if they are not referenced. If no BLOB file is below G_m
+// and unreferenced, nothing is removed
 TEST_F(replica_blob_gc_test, keeps_blob_files_at_or_above_blob_id_boundary) {
     start_replica(eager_settings());
     receive_entries_with_blobs();
@@ -137,7 +137,7 @@ TEST_F(replica_blob_gc_test, keeps_blob_files_at_or_above_blob_id_boundary) {
     expect_no_blob_file_removed();
 }
 
-// E_m が E_r より大きいとき、GC は行われない
+// The GC does not run when E_m is greater than E_r
 TEST_F(replica_blob_gc_test, does_not_run_when_master_boundary_epoch_is_beyond_boundary_epoch) {
     start_replica(eager_settings());
     receive_entries_with_blobs();
@@ -148,7 +148,7 @@ TEST_F(replica_blob_gc_test, does_not_run_when_master_boundary_epoch_is_beyond_b
     expect_no_blob_file_removed();
 }
 
-// master からコンパクションの境界を受け取っていないとき、GC は行われない
+// The GC does not run when no compaction boundary has been received from the master
 TEST_F(replica_blob_gc_test, does_not_run_without_received_boundary) {
     start_replica(eager_settings());
     receive_entries_with_blobs();
@@ -158,7 +158,7 @@ TEST_F(replica_blob_gc_test, does_not_run_without_received_boundary) {
     expect_no_blob_file_removed();
 }
 
-// 設定で無効にしたとき、GC は行われない
+// The GC does not run when the setting disables it
 TEST_F(replica_blob_gc_test, does_not_run_when_disabled) {
     compaction_settings settings = eager_settings();
     settings.blob_gc = false;
@@ -171,7 +171,7 @@ TEST_F(replica_blob_gc_test, does_not_run_when_disabled) {
     expect_no_blob_file_removed();
 }
 
-// GC の後の永続化データから起動すると、残ったエントリを読める
+// At a startup from the persistent data after the GC, the remaining entries can be read
 TEST_F(replica_blob_gc_test, data_is_readable_after_gc) {
     start_replica(eager_settings());
     receive_entries_with_blobs();

@@ -142,10 +142,11 @@ public:
     void shutdown();
 
     /**
-     * @brief GC を完全に停止する。実行中の処理を止め、以後は GC を始めない。
+     * @brief Stops the garbage collection for good: stops the ongoing tasks and never starts the GC again.
      *
-     * この関数の後は、scan_blob_files()、scan_snapshot()、start_add_gc_exempt_blob_ids()、add_gc_exempt_blob_id()、
-     * finalize_add_gc_exempt_blob_ids() は、何もせずに戻る。shutdown() と違い、その後に GC を始め直せない。
+     * After this function, scan_blob_files(), scan_snapshot(), start_add_gc_exempt_blob_ids(),
+     * add_gc_exempt_blob_id(), and finalize_add_gc_exempt_blob_ids() return without doing anything. Unlike
+     * shutdown(), the GC cannot be started again afterwards.
      */
     void close();
 
@@ -264,7 +265,7 @@ private:
     mutable std::mutex mutex_;                      ///< Mutex for synchronizing access to state variables.
     std::unique_ptr<file_operations> file_ops_;     ///< Pointer to the file_operations implementation.
     std::mutex shutdown_mutex_;                     ///< Mutex to ensure shutdown() is executed exclusively.
-    bool closed_{false};                            ///< close() が呼ばれたか。shutdown_mutex_ で保護する
+    bool closed_{false};                            ///< Whether close() has been called. Protected by shutdown_mutex_.
     std::atomic_bool shutdown_requested_{false};    ///< Shutdown flag indicating if shutdown has been requested.
 
     /**

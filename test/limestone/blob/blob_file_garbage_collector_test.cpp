@@ -290,7 +290,8 @@ TEST_F(blob_file_garbage_collector_test, add_gc_exempt_blob_id_adds_id_correctly
     EXPECT_EQ(actual_ids, expected_ids);
 }
 
-// close() の後は、GC を始める・進める関数は何もしない。BLOB ファイルは削除されず、例外も出ない
+// After close(), the functions that start or advance the GC do nothing. No BLOB file is removed and no
+// exception is thrown
 TEST_F(blob_file_garbage_collector_test, nothing_starts_after_close) {
     create_blob_file(*resolver_, 101);
     create_blob_file(*resolver_, 102);
@@ -310,7 +311,7 @@ TEST_F(blob_file_garbage_collector_test, nothing_starts_after_close) {
     EXPECT_TRUE(boost::filesystem::exists(resolver_->resolve_path(102)));
 }
 
-// GC を始めた後で close() すると、始まっていた処理は止まり、残りの呼び出しは何もしない
+// close() after the GC has started stops what was started, and the remaining calls do nothing
 TEST_F(blob_file_garbage_collector_test, close_in_the_middle_of_the_start_sequence) {
     create_blob_file(*resolver_, 101);
     create_blob_file(*resolver_, 102);

@@ -618,7 +618,8 @@ TEST_F(compaction_blob_gc_test, blob_gc_executes_after_new_backup_test) {
     EXPECT_TRUE(boost::filesystem::exists(path2002_));
 }
 
-// 設定で無効にしたとき、起動時の BLOB ファイルの GC は行われない。参照されなくなった BLOB ファイルが、再起動の後も残る
+// When the setting disables it, the BLOB file GC at startup does not run. The BLOB files no longer referenced
+// remain after a restart
 TEST_F(compaction_blob_gc_test, startup_gc_does_not_run_when_disabled) {
     gen_datastore();
     prepare_blob_gc_test_data();
@@ -626,7 +627,7 @@ TEST_F(compaction_blob_gc_test, startup_gc_does_not_run_when_disabled) {
     ASSERT_TRUE(boost::filesystem::exists(path2001_));
     ASSERT_TRUE(boost::filesystem::exists(path2002_));
 
-    // blob_key1 を BLOB なしで上書きして、2001 と 2002 への参照をなくす
+    // Overwrite blob_key1 without a BLOB, which removes the references to 2001 and 2002
     datastore_->switch_epoch(6);
     lc0_->begin_session();
     lc0_->add_entry(1, "blob_key1", "blob_value1_noblob", {6, 0});
@@ -646,8 +647,8 @@ TEST_F(compaction_blob_gc_test, startup_gc_does_not_run_when_disabled) {
     EXPECT_TRUE(boost::filesystem::exists(path1003_));
 }
 
-// コンパクションがコミットまで進んだ時点で shutdown() すると、そのコンパクションは完了するが、BLOB ファイルの GC は
-// 始まらない。shutdown() の後に BLOB ファイルが削除されることはない
+// When shutdown() is called after a compaction has reached its commit, the compaction completes but the BLOB
+// file GC does not start. No BLOB file is removed after shutdown()
 TEST_F(compaction_blob_gc_test, blob_gc_does_not_start_after_shutdown) {
     gen_datastore();
     prepare_blob_gc_test_data();
@@ -679,7 +680,8 @@ TEST_F(compaction_blob_gc_test, blob_gc_does_not_start_after_shutdown) {
     EXPECT_TRUE(boost::filesystem::exists(path2002_));
 }
 
-// 設定で無効にしたとき、master のコンパクションは BLOB ファイルの GC を行わない。コンパクションそのものは行う
+// When the setting disables it, a compaction on the master does not run the BLOB file GC. The compaction
+// itself runs
 TEST_F(compaction_blob_gc_test, blob_gc_does_not_run_when_disabled) {
     limestone::api::configuration conf{};
     conf.set_data_location(location);

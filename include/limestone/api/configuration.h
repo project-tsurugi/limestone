@@ -85,24 +85,24 @@ public:
     void set_sort_merge_fanin(std::size_t fanin) noexcept;
 
     /**
-     * @brief setter for auto_compaction_threshold_mb: 常時コンパクションを実行する WAL の量の閾値 (MiB)。
-     *        コンパクションの入力になっていない WAL ファイルの大きさの合計がこの値を超えると、ローテーションと
-     *        コンパクションを自動で実行する
-     * @param threshold_mb 閾値 (MiB)。0 のときは常時コンパクションを行わない
+     * @brief setter for auto_compaction_threshold_mb: the threshold of the amount of the WAL at which the auto
+     *        compaction runs, in MiB. When the total size of the WAL files that have not been the input of a
+     *        compaction exceeds this value, a rotation and a compaction run automatically
+     * @param threshold_mb the threshold in MiB. 0 disables the auto compaction
      */
     void set_auto_compaction_threshold_mb(std::size_t threshold_mb) noexcept;
 
     /**
-     * @brief setter for auto_compaction_delete_detached: 常時コンパクションで、コンパクションの入力になって不要に
-     *        なった (detached の) WAL ファイルを削除するか
-     * @param enabled 削除するとき true
+     * @brief setter for auto_compaction_delete_detached: whether the auto compaction removes the WAL files that
+     *        have been the input of a compaction and are no longer needed (the detached WAL files)
+     * @param enabled true to remove them
      */
     void set_auto_compaction_delete_detached(bool enabled) noexcept;
 
     /**
-     * @brief setter for blob_gc: BLOB ファイルの GC を行うか。起動時の GC と、オンラインコンパクションでの GC の
-     *        両方に適用される。master とレプリカのどちらにも適用される
-     * @param enabled 行うとき true
+     * @brief setter for blob_gc: whether the BLOB file GC runs. It applies to both the GC at startup and the GC in
+     *        an online compaction, on the master and on the replica
+     * @param enabled true to run the GC
      */
     void set_blob_gc(bool enabled) noexcept;
 
@@ -150,19 +150,19 @@ public:
 
     /**
      * @brief getter for auto_compaction_threshold_mb
-     * @return 常時コンパクションの閾値 (MiB)。未設定のときは std::nullopt
+     * @return the threshold of the auto compaction in MiB, or std::nullopt if not set
      */
     [[nodiscard]] std::optional<std::size_t> get_auto_compaction_threshold_mb() const noexcept;
 
     /**
      * @brief getter for auto_compaction_delete_detached
-     * @return 常時コンパクションで detached の WAL ファイルを削除するか。未設定のときは std::nullopt
+     * @return whether the auto compaction removes the detached WAL files, or std::nullopt if not set
      */
     [[nodiscard]] std::optional<bool> get_auto_compaction_delete_detached() const noexcept;
 
     /**
      * @brief getter for blob_gc
-     * @return BLOB ファイルの GC を行うか。未設定のときは std::nullopt
+     * @return whether the BLOB file GC runs, or std::nullopt if not set
      */
     [[nodiscard]] std::optional<bool> get_blob_gc() const noexcept;
 
@@ -179,7 +179,7 @@ private:
     boost::filesystem::path sort_work_dir_{};
     std::optional<std::size_t> sort_merge_fanin_{};
 
-    // nullopt は未設定を表す。未設定の項目は、datastore が既定値で埋める
+    // nullopt means that the item is not set; the datastore fills in the items not set with the defaults
     std::optional<std::size_t> auto_compaction_threshold_mb_{};
     std::optional<bool> auto_compaction_delete_detached_{};
     std::optional<bool> blob_gc_{};

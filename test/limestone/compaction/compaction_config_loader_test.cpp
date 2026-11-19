@@ -71,7 +71,7 @@ protected:
         return conf;
     }
 
-    // datastore を構築して、決まった常時コンパクションの設定を返す
+    // Constructs a datastore and returns the settings it decided
     static compaction_settings settings_of(const limestone::api::configuration& conf) {
         std::unique_ptr<limestone::api::datastore_test> datastore =
             std::make_unique<limestone::api::datastore_test>(conf);
@@ -81,7 +81,7 @@ protected:
     constexpr static std::uint64_t mib = std::uint64_t{1024} * 1024;
 };
 
-// 環境変数がどれも設定されていないときは、どの項目も未設定になる
+// When no environment variable is set, no item is set
 TEST_F(compaction_config_loader_test, nothing_set) {
     const compaction_config_parse_result result = load_compaction_config_from_environment();
 
@@ -91,7 +91,7 @@ TEST_F(compaction_config_loader_test, nothing_set) {
     EXPECT_FALSE(result.config.blob_gc.has_value());
 }
 
-// 設定された値を読む。真偽の項目は、0 が無効、0 以外が有効である
+// The values set are read. For a boolean item, 0 means disabled and any other value means enabled
 TEST_F(compaction_config_loader_test, values_are_read) {
     set_env(threshold_env, "512");
     set_env(delete_detached_env, "0");
@@ -105,7 +105,7 @@ TEST_F(compaction_config_loader_test, values_are_read) {
     EXPECT_EQ(result.config.blob_gc, std::optional<bool>{true});
 }
 
-// 10 進の非負の整数でない値は、どの変数でも失敗になる
+// A value that is not a non-negative decimal integer is a failure for every variable
 TEST_F(compaction_config_loader_test, invalid_values_fail) {
     for (const char* name : {threshold_env, delete_detached_env, blob_gc_env}) {
         for (const char* value : {"", "abc", "-1", "+1", "1.5", " 1", "1 ", "true", "99999999999999999999999"}) {
@@ -120,7 +120,7 @@ TEST_F(compaction_config_loader_test, invalid_values_fail) {
     }
 }
 
-// 読んだ設定のうち、設定されている項目だけが configuration に入る
+// Only the items that are set among the settings read are put into the configuration
 TEST_F(compaction_config_loader_test, apply_puts_only_the_items_set) {
     set_env(threshold_env, "3");
     const compaction_config_parse_result result = load_compaction_config_from_environment();
@@ -136,7 +136,7 @@ TEST_F(compaction_config_loader_test, apply_puts_only_the_items_set) {
     EXPECT_TRUE(settings.blob_gc);
 }
 
-// 読んだ設定の 3 項目とも設定されているときは、3 項目とも configuration に入る
+// When all the three items of the settings read are set, all of them are put into the configuration
 TEST_F(compaction_config_loader_test, apply_puts_all_the_items) {
     set_env(threshold_env, "3");
     set_env(delete_detached_env, "0");
@@ -154,7 +154,8 @@ TEST_F(compaction_config_loader_test, apply_puts_all_the_items) {
     EXPECT_FALSE(settings.blob_gc);
 }
 
-// 何も設定されていないときの既定は、常時コンパクションが無効、削除と GC が有効、測定の間隔が 10 秒である
+// The defaults when nothing is set: the auto compaction is disabled, the removal and the GC are enabled, and
+// the measurement interval is 10 seconds
 TEST_F(compaction_config_loader_test, datastore_defaults) {
     const compaction_settings settings = settings_of(make_conf());
 
@@ -164,7 +165,7 @@ TEST_F(compaction_config_loader_test, datastore_defaults) {
     EXPECT_EQ(settings.measurement_interval, std::chrono::seconds(10));
 }
 
-// configuration に設定されていない項目は、datastore が環境変数から読む
+// The datastore reads the items not set in the configuration from the environment variables
 TEST_F(compaction_config_loader_test, datastore_reads_environment) {
     set_env(threshold_env, "16");
     set_env(delete_detached_env, "0");
@@ -177,7 +178,8 @@ TEST_F(compaction_config_loader_test, datastore_reads_environment) {
     EXPECT_FALSE(settings.blob_gc);
 }
 
-// configuration に設定した値は、環境変数より優先される。設定していない項目だけが環境変数から決まる
+// A value set in the configuration takes precedence over the environment variable. Only the items not set
+// are decided by the environment variables
 TEST_F(compaction_config_loader_test, configuration_takes_precedence) {
     set_env(threshold_env, "16");
     set_env(delete_detached_env, "0");
@@ -191,7 +193,7 @@ TEST_F(compaction_config_loader_test, configuration_takes_precedence) {
     EXPECT_TRUE(settings.blob_gc);
 }
 
-// 環境変数の値が誤っているときは、datastore の構築が失敗する
+// The construction of the datastore fails when the value of an environment variable is wrong
 TEST_F(compaction_config_loader_test, datastore_fails_with_invalid_environment) {
     set_env(threshold_env, "-1");
 
@@ -205,7 +207,7 @@ TEST_F(compaction_config_loader_test, datastore_fails_with_invalid_environment) 
     }
 }
 
-// 閾値が大きすぎて、バイトに直すと桁あふれするときは、datastore の構築が失敗する
+// The construction of the datastore fails when the threshold is so large that it overflows in bytes
 TEST_F(compaction_config_loader_test, datastore_fails_with_too_large_threshold) {
     limestone::api::configuration conf = make_conf();
     conf.set_auto_compaction_threshold_mb(std::numeric_limits<std::size_t>::max());
@@ -221,7 +223,7 @@ TEST_F(compaction_config_loader_test, datastore_fails_with_too_large_threshold) 
     }
 }
 
-// 3 項目とも configuration に設定されているときは、環境変数を読まない
+// The environment variables are not read when all the three items are set in the configuration
 TEST_F(compaction_config_loader_test, environment_is_not_read_when_all_items_are_set) {
     set_env(threshold_env, "invalid");
 

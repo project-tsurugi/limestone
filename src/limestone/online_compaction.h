@@ -67,16 +67,16 @@ void safe_rename(const boost::filesystem::path& from, const boost::filesystem::p
 std::set<std::string> select_files_for_compaction(const std::set<boost::filesystem::path>& rotation_end_files, std::set<std::string>& detached_pwals);
 
 /**
- * @brief コンパクションの入力になっていない WAL ファイルの大きさの合計を測る。
+ * @brief Measures the total size of the WAL files that have not been the input of a compaction.
  *
- * ログディレクトリの直下にある、ローテーション前の WAL ファイルと、ローテーション済みの WAL ファイルのうち
- * detached_pwals にないものを対象にする。コンパクション済み WAL ファイル、キャリーファイル、ロケータファイルは
- * 対象にしない。走査の途中で消えたファイルは数えない。ディレクトリを走査できないときは、ERROR のログを書いて、
- * それまでの合計を返す。
+ * The targets are, directly under the log directory, the unrotated WAL files and the rotated WAL files that are
+ * not in detached_pwals. The compacted WAL file, the carry file, and the locator file are not targets. A file
+ * that disappears during the scan is not counted. If the directory cannot be scanned, an ERROR log is written and
+ * the total so far is returned.
  *
- * @param location ログディレクトリ
- * @param detached_pwals detached の WAL ファイルの名前 (コンパクションの入力になったもの)
- * @return 大きさの合計 (バイト)
+ * @param location the log directory
+ * @param detached_pwals the names of the detached WAL files (those that have been the input of a compaction)
+ * @return the total size in bytes
  */
 [[nodiscard]] std::uint64_t measure_uncompacted_wal_bytes(const boost::filesystem::path& location,
                                                           const std::set<std::string>& detached_pwals) noexcept;

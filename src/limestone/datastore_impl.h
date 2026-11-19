@@ -148,61 +148,63 @@ public:
     /// @brief Settings of the locator file (used for the locator files of the snapshot file and the compacted WAL file)
     [[nodiscard]] const limestone::internal::locator_settings& get_locator_settings() const noexcept;
 
-    /// @brief レプリカが master から受け取って永続化した、最新の GROUP_COMMIT の epoch。レプリカの起動時は、
-    /// 走査の境界にした durable epoch である。master の役割では 0 のままである
+    /// @brief The epoch of the latest GROUP_COMMIT that the replica received from the master and persisted. At
+    /// the startup of the replica, it is the durable epoch used as the boundary of the scan. It stays 0 in the
+    /// master role
     [[nodiscard]] epoch_id_type get_received_epoch() const noexcept;
 
-    /// @brief 受信 epoch を更新する。GROUP_COMMIT の epoch を epoch ファイルに書いた後に呼ぶ
+    /// @brief Updates the received epoch. Call it after the epoch of GROUP_COMMIT is written to the epoch file
     void set_received_epoch(epoch_id_type epoch) noexcept;
 
-    /// @brief コントロールチャネルへの送信を直列にする mutex。GROUP_COMMIT は送信から ACK 待ちまでを、
-    /// コンパクション境界メッセージは送信を、この mutex の中で行う
+    /// @brief The mutex that serializes the sends on the control channel. GROUP_COMMIT holds it from the send to
+    /// the wait for the ACK, and a compaction boundary message holds it during the send
     [[nodiscard]] std::mutex& control_channel_send_mutex() noexcept;
 
     /**
-     * @brief コンパクション境界メッセージをレプリカへ送る。
-     * @details レプリケーション構成の master で、レプリカが接続されているときだけ送る。応答は待たない。
-     * disable_compaction_boundary_send() の後は何もしない。tcp モードでの送信の失敗は ERROR のログを書いて
-     * 戻り、RDMA モードでの失敗は FATAL のログを書いて abort する (GROUP_COMMIT の送信と同じ扱い)。
-     * @param boundary_epoch コンパクションの境界 epoch
-     * @param blob_id_boundary BLOB ファイルの GC の境界にした BLOB の ID
-     * @attention この関数はスレッドセーフである。
+     * @brief Sends a compaction boundary message to the replica.
+     * @details Sends it only on the master of a replication configuration, while a replica is connected. No
+     * response is awaited. Does nothing after disable_compaction_boundary_send(). A failed send writes an ERROR
+     * log and returns in the TCP mode, and writes a FATAL log and aborts in the RDMA mode (as the send of
+     * GROUP_COMMIT does).
+     * @param boundary_epoch the boundary epoch of the compaction
+     * @param blob_id_boundary the BLOB ID used as the boundary of the BLOB file GC
+     * @attention this function is thread-safe.
      */
     void send_compaction_boundary(epoch_id_type boundary_epoch, blob_id_type blob_id_boundary);
 
-    /// @brief コンパクション境界メッセージの送信を、以後は無効にする。戻った時点で、実行中の送信はない
+    /// @brief Disables the send of a compaction boundary message from now on. No send is in progress when this
+    /// function returns
     void disable_compaction_boundary_send();
 
-    /// @brief master から受け取ったコンパクションの境界。BLOB ファイルの GC の境界を決めるのに使う
+    /// @brief A compaction boundary received from the master. Used to decide the boundary of the BLOB file GC
     struct compaction_boundary {
-        epoch_id_type boundary_epoch{0};  ///< master のコンパクションの境界 epoch
-        blob_id_type blob_id_boundary{0};  ///< master が BLOB ファイルの GC の境界にした BLOB の ID
+        epoch_id_type boundary_epoch{0};   ///< the boundary epoch of the compaction on the master
+        blob_id_type blob_id_boundary{0};  ///< the BLOB ID the master used as the boundary of the BLOB file GC
     };
 
-    /// @brief master から受け取った最新のコンパクションの境界を返す。受け取っていなければ nullopt
+    /// @brief Returns the latest compaction boundary received from the master, or nullopt if none was received
     [[nodiscard]] std::optional<compaction_boundary> get_received_compaction_boundary();
 
-    /// @brief master から受け取ったコンパクションの境界を保持する。前に保持していたものは捨てる
+    /// @brief Keeps a compaction boundary received from the master, discarding the one kept before
     void set_received_compaction_boundary(const compaction_boundary& boundary);
 
-    /// @brief コンパクションと BLOB ファイルの GC の設定を置き換える。datastore の構築のときと、テストから呼ぶ。ワーカースレッドの
-    /// 起動の後には呼ばないこと
+    /// @brief Replaces the settings of the compaction and the BLOB file GC. Called at the construction of the
+    /// datastore and from tests. Do not call it after the worker thread is started
     void set_compaction_settings(const limestone::internal::compaction_settings& settings) noexcept;
 
-    /// @brief コンパクションと BLOB ファイルの GC の設定
+    /// @brief Returns the settings of the compaction and the BLOB file GC
     [[nodiscard]] const limestone::internal::compaction_settings& get_compaction_settings() const noexcept;
 
-    /// @brief オンラインコンパクションのワーカースレッドの起動を担うオブジェクトを設定する
+    /// @brief Sets the launcher of the online compaction worker thread
     void set_compaction_worker_launcher(std::shared_ptr<limestone::internal::compaction_worker_launcher> launcher) noexcept;
 
-    /// @brief ワーカースレッドの起動を担うオブジェクト。設定されていなければ空
+    /// @brief Returns the launcher of the worker thread; empty if not set
     [[nodiscard]] const std::shared_ptr<limestone::internal::compaction_worker_launcher>& get_compaction_worker_launcher() const noexcept;
 
-    /// @brief snapshot に設定する印を作る。ワーカースレッドの起動を担うオブジェクトが設定されていなければ空を返す
+    /// @brief Creates the marker to set on a snapshot. Returns an empty pointer if the launcher is not set
     [[nodiscard]] std::shared_ptr<limestone::internal::snapshot_use_marker> create_snapshot_use_marker() const;
 
-    // Increments the backup counter.
-    // コンパクションが実行中であれば、その完了を待ってから加算する
+    // Increments the backup counter. If a compaction is running, waits for it to complete first.
     void increment_backup_counter() noexcept;
 
     // Decrements the backup counter.
@@ -211,17 +213,17 @@ public:
     // Returns true if a backup operation is in progress.
     [[nodiscard]] bool is_backup_in_progress() const noexcept;
 
-    /// @brief バックアップを始める前に、コンパクションと BLOB ファイルの GC との排他を始める。
-    /// コンパクションが実行中であれば、その完了を待つ。バックアップの数を加算し、実行中の GC を止める。
-    /// バックアップの対象を列挙する前に呼ぶ
-    /// @param gc BLOB ファイルの GC を行うオブジェクト。なければ nullptr
+    /// @brief Begins the exclusion of the compaction and the BLOB file GC before a backup begins.
+    /// If a compaction is running, waits for it to complete. Increments the backup counter and stops a running
+    /// GC. Call it before the targets of the backup are enumerated
+    /// @param gc the BLOB file garbage collector, or nullptr if there is none
     void start_backup_exclusion(limestone::internal::blob_file_garbage_collector* gc);
 
-    /// @brief コンパクションの実行を始める。バックアップ中であれば始めない
-    /// @return 始めたら true。true を受け取った側は、コンパクションの後に end_compaction() を呼ぶ
+    /// @brief Begins the run of a compaction. Does not begin it while a backup is in progress
+    /// @return true if begun. The caller that receives true calls end_compaction() after the compaction
     [[nodiscard]] bool try_begin_compaction() noexcept;
 
-    /// @brief コンパクションの実行を終える。完了を待っているバックアップの開始を再開させる
+    /// @brief Ends the run of a compaction, and lets the backups waiting for its completion begin
     void end_compaction() noexcept;
 
     // Returns true if a replica exists.
@@ -281,7 +283,8 @@ public:
      */
     [[nodiscard]] std::vector<std::unique_ptr<log_channel>> const& log_channels() const noexcept;
 
-    /// @brief 登録済みのログチャネルの一覧の写しを返す。登録と排他して読むので、登録と並行して呼べる
+    /// @brief Returns a copy of the list of the registered log channels. It reads the list excluding the
+    /// registration, so it can be called concurrently with a registration
     [[nodiscard]] std::vector<log_channel*> registered_log_channels();
 
     /**
@@ -658,30 +661,33 @@ private:
     // Settings of the locator file. They keep the defaults, and only tests replace them
     limestone::internal::locator_settings locator_settings_{};
 
-    // レプリカの受信 epoch。受信スレッドが書き、オンラインコンパクションのワーカースレッドが読む
+    // The received epoch of the replica. Written by the receive thread and read by the online compaction worker
     std::atomic<epoch_id_type> received_epoch_{0};
 
-    // コントロールチャネルへの送信を直列にする。送信するスレッドは、GROUP_COMMIT を送るスレッドと、
-    // コンパクション境界メッセージを送るオンラインコンパクションのワーカースレッドである
+    // Serializes the sends on the control channel. The senders are the threads that send GROUP_COMMIT and the
+    // online compaction worker, which sends a compaction boundary message
     std::mutex mtx_control_channel_send_{};
-    // コンパクション境界メッセージの送信を無効にしたか。mtx_control_channel_send_ で保護する
+    // Whether the send of a compaction boundary message is disabled. Protected by mtx_control_channel_send_
     bool compaction_boundary_send_disabled_{false};
 
-    // レプリカが master から受け取った最新のコンパクションの境界。受信スレッドが書き、オンラインコンパクションの
-    // ワーカースレッドが読む。2 つの値を組として読み書きするので、mutex で保護する。永続化しない
+    // The latest compaction boundary the replica received from the master. Written by the receive thread and
+    // read by the online compaction worker. The two values are read and written as a pair, so a mutex protects
+    // them. It is not persisted
     std::mutex mtx_received_compaction_boundary_{};
     std::optional<compaction_boundary> received_compaction_boundary_{};
 
-    // コンパクションと BLOB ファイルの GC の設定。datastore の構築で決まり、テストだけが置き換える
+    // The settings of the compaction and the BLOB file GC. Decided at the construction of the datastore; only
+    // tests replace them
     limestone::internal::compaction_settings compaction_settings_{};
 
-    // オンラインコンパクションのワーカースレッドの起動と shutdown を排他する。snapshot の印と共有する
+    // Makes the start of the online compaction worker and the shutdown exclude each other. Shared with the
+    // markers of the snapshots
     std::shared_ptr<limestone::internal::compaction_worker_launcher> compaction_worker_launcher_{};
 
     // Atomic counter for tracking active backup operations.
     std::atomic<int> backup_counter_;
-    // バックアップとコンパクションを排他する。バックアップの数の加算と、コンパクションの実行中の印の読み書きを、
-    // この mutex の中で行う
+    // Makes a backup and a compaction exclude each other. The increment of the backup counter, and the reads and
+    // writes of the flag of a running compaction, are done under this mutex
     std::mutex mtx_backup_compaction_{};
     std::condition_variable cv_backup_compaction_{};
     bool compaction_running_{false};
@@ -700,8 +706,8 @@ private:
     // LOG_CHANNEL_CREATE, RDMA through create_channel() during establishment), but the
     // scanning operations are either master-only or never reach the scan thanks to the
     // early return in update_min_epoch_id() (epoch_id_switched_ stays 0 on a replica).
-    // ローテーションはレプリカでも動くので、排他なしの走査を使わず、registered_log_channels() で
-    // 登録と排他して読む。
+    // A rotation also runs on the replica, so it does not use the lock-free scan; it reads the list excluding
+    // the registration, with registered_log_channels().
     std::vector<std::unique_ptr<log_channel>> log_channels_;
 
     // Next log channel id to assign.

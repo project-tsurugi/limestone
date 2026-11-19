@@ -20,16 +20,16 @@
 
 namespace limestone::internal {
 
-/// コンパクションと BLOB ファイルの GC の設定。
+/// @brief The settings of the compaction and the BLOB file GC.
 struct compaction_settings {
-    /// 常時コンパクションを実行する WAL の量の閾値 (バイト)。0 のときは常時コンパクションを行わない
+    /// The threshold of the amount of the WAL at which the auto compaction runs, in bytes. 0 disables it
     std::uint64_t threshold_bytes{0};
-    /// 常時コンパクションで、detached の WAL ファイルを削除するか
+    /// Whether the auto compaction removes the detached WAL files
     bool delete_detached{true};
-    /// BLOB ファイルの GC を行うか。起動時の GC と、オンラインコンパクションでの GC の両方に効く。コンパクションの契機と
-    /// 役割 (master、レプリカ) によらない
+    /// Whether the BLOB file GC runs. It applies to both the GC at startup and the GC in an online compaction,
+    /// whichever the trigger of the compaction and the role (master or replica) are
     bool blob_gc{true};
-    /// WAL の量を測定する間隔。プロダクトコードでは既定値のまま使い、テストだけが変える
+    /// The interval of the measurement of the amount of the WAL. Only tests change it from the default
     std::chrono::milliseconds measurement_interval{std::chrono::seconds(10)};
 };
 

@@ -53,8 +53,8 @@ void message_group_commit::post_receive(handler_resources& resources) {
     auto& cch_resources = dynamic_cast<control_channel_handler_resources&>(resources);
     auto& datastore = cch_resources.get_datastore();
     datastore.persist_and_propagate_epoch_id(epoch_number_);
-    // 受信 epoch は、epoch ファイルへの書き込みの後に進める。レプリカのローテーションは、この epoch までの
-    // セッションがすべて永続化されていることを前提にする
+    // The received epoch is advanced after the write to the epoch file. A rotation on the replica assumes that
+    // every session up to this epoch has been persisted
     datastore.get_impl()->set_received_epoch(epoch_number_);
 
     // Send acknowledgment

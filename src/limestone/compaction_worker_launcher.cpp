@@ -36,7 +36,7 @@ void compaction_worker_launcher::launch() noexcept {
         try {
             start_();
         } catch (const std::exception& e) {
-            // 呼び出し元は snapshot や cursor のデストラクタであり、失敗に対処する手段がない
+            // The caller is the destructor of a snapshot or a cursor, which has no means to handle the failure
             LOG_LP(FATAL) << "failed to start the online compaction worker: " << e.what();
         }
         launched_ = true;

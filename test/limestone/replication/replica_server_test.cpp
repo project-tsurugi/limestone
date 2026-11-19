@@ -543,8 +543,8 @@ TEST_F(replica_server_test, on_rdma_receive_routes_control_event_and_persists_ep
     EXPECT_EQ(get_epoch(location1), 9U);
 }
 
-// COMPACTION_BOUNDARY の制御フレームを受け取ると、レプリカは最新の境界を保持する。GROUP_COMMIT と混ざっても、
-// それぞれが処理される
+// On receiving a control frame of COMPACTION_BOUNDARY, the replica keeps the latest boundary. Mixed with
+// GROUP_COMMIT, each of them is processed
 TEST_F(replica_server_test, on_rdma_receive_keeps_the_latest_compaction_boundary) {
     replica_server server;
     server.initialize(location1);

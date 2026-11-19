@@ -182,7 +182,7 @@ RDMA モードの受信箇所での受信 epoch の更新は、単体のテス�
       ローテーション、閾値の桁あふれ、環境変数の 3 項目の反映、tcp モードでの境界メッセージの送信の失敗 (チャネルを
       開く前、レプリカの停止の後)。常時コンパクションが shutdown 以外の理由で失敗したときの ERROR の行は、通す手段が
       ないので残した (ローテーションのリネームの失敗は、例外でなく abort になる)。
-- [~] レビュー (/crv、まとめは crv-summary-20261119-081240.md) の指摘への対応。残りは @brief だけ。
+- [x] レビュー (/crv、まとめは _local/work-notes/crv-summary-20261119-081240.md) の指摘への対応。
   - [x] 形式バージョンの移行に伴うローテーションが files_ を更新しない (既存のバグ)。移行した起動では、リネームした
         ファイルがコンパクションの入力に選ばれず、常時コンパクションが測定のたびに繰り返される。
         detach_wal_files() が行ったリネームを返し、ready() と start_as_replica() が files_ に反映する形に直した。
@@ -199,7 +199,7 @@ RDMA モードの受信箇所での受信 epoch の更新は、単体のテス�
         レプリカの GC が行われなかったことの検査が、固定の待ちだけに頼っていた。
   - [x] 規約。レプリカのテストの基底のフィクスチャを replica_compaction_base_test に改名した。テストの lock_guard を
         scoped_lock に替えた。
-  - [ ] 規約。@brief のない関数・クラスに @brief を足す (コメントの英訳のときに行う)。compaction_worker_launcher と
+  - [x] 規約。@brief のない関数・クラスに @brief を足す (コメントの英訳のときに行った)。compaction_worker_launcher と
         snapshot_use_marker のコンストラクタ・デストラクタ、create_cursor() の 2 つ、message_compaction_boundary の
         コンストラクタと getter、compaction_running_mark。
   - [x] nothing_is_sent_after_shutdown は、送信を無効にする印がなくても通る (閉じたチャネルへの送信が失敗するため)。
@@ -214,7 +214,7 @@ RDMA モードの受信箇所での受信 epoch の更新は、単体のテス�
 
 ## 完了時の作業
 
-- [ ] コメントの英訳。
+- [x] コメントの英訳。
 - [ ] clang-tidy (scripts/run-clang-tidy-ci.sh)、フルスイート (英訳の後にもう一度)。
 - [ ] レビュー (/crv) と対応。
 - [ ] TODO.md の削除。

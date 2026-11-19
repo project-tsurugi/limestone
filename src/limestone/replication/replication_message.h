@@ -35,7 +35,7 @@ enum class message_type_id : uint8_t {
     SESSION_BEGIN = 0x01,
     SESSION_END = 0x02,
     GROUP_COMMIT = 0x03,
-    // 0x04 は欠番である。使われないまま廃止したメッセージ型の番号であり、再利用しない
+    // 0x04 is retired: it is the id of a message type removed without ever being used, and is not reused
     COMPACTION_BOUNDARY = 0x05,
 
     // Log‑channel requests

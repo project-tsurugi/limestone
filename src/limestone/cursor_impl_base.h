@@ -85,7 +85,7 @@ public:
     virtual void close() = 0;
 
     /**
-     * @brief snapshot と共有する印を設定する。印は、この cursor の破棄まで保持される。
+     * @brief Sets the marker shared with the snapshot. The marker is kept until this cursor is destroyed.
      */
     void set_snapshot_use_marker(std::shared_ptr<snapshot_use_marker> marker) noexcept;
 

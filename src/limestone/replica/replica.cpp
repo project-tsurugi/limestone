@@ -111,7 +111,7 @@ int main(int argc, char* argv[]) {
     limestone::api::configuration conf{};
     limestone::replication::apply_sort_config(sort_result.config, conf);
 
-    // コンパクションと BLOB ファイルの GC の設定 (環境変数)
+    // The settings of the compaction and the BLOB file GC (environment variables)
     auto const auto_compaction_result = limestone::internal::load_compaction_config_from_environment();
     if (!auto_compaction_result.ok) {
         std::cerr << "Error: invalid auto compaction configuration: " << auto_compaction_result.error_message

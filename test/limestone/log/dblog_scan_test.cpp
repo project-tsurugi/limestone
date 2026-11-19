@@ -912,7 +912,7 @@ TEST_F(dblog_scan_test, detach_wal_files_renamne_pwal_0000) {
         EXPECT_EQ(wal_files.size(), 1);
         EXPECT_NE(wal_files.at(0), p0_attached);
         EXPECT_GT(wal_files.at(0).filename().string().length(), 10);
-        // 行ったリネームが返る
+        // The renames performed are returned
         ASSERT_EQ(renamed_files.size(), 1);
         EXPECT_EQ(renamed_files.at(0).from, p0_attached);
         EXPECT_EQ(renamed_files.at(0).to, wal_files.at(0));

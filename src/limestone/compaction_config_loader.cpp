@@ -28,9 +28,9 @@ constexpr const char* delete_detached_env_name = "LIMESTONE_AUTO_COMPACTION_DELE
 constexpr const char* blob_gc_env_name = "LIMESTONE_BLOB_GC";
 
 /**
- * @brief 10 進の非負の整数を読む。符号、空白、後続の文字は許さない。
- * @param text 読む文字列
- * @return 値。形式が誤っているか、uint64 に収まらないときは nullopt
+ * @brief Parses a non-negative decimal integer. No sign, whitespace, or trailing character is allowed.
+ * @param text the string to parse
+ * @return the value, or nullopt if the string is malformed or the value does not fit in uint64
  */
 std::optional<std::uint64_t> parse_unsigned(const std::string& text) {
     if (text.empty() || text.find_first_not_of("0123456789") != std::string::npos) {
@@ -45,17 +45,17 @@ std::optional<std::uint64_t> parse_unsigned(const std::string& text) {
 }
 
 /**
- * @brief 環境変数から 10 進の非負の整数を読んだ結果。
+ * @brief The result of reading a non-negative decimal integer from an environment variable.
  */
 struct unsigned_env_value {
-    bool ok{false};                       ///< 形式が正しいか (設定されていないときも true)
-    std::optional<std::uint64_t> value{};  ///< 値。設定されていないときは nullopt
+    bool ok{false};                        ///< whether the value is well-formed (also true if the variable is not set)
+    std::optional<std::uint64_t> value{};  ///< the value, or nullopt if the variable is not set
 };
 
 /**
- * @brief 環境変数から 10 進の非負の整数を読む。
- * @param name 環境変数の名前
- * @return 読んだ結果
+ * @brief Reads a non-negative decimal integer from an environment variable.
+ * @param name the name of the environment variable
+ * @return the result of the read
  */
 unsigned_env_value read_unsigned_env(const char* name) {
     const char* env = std::getenv(name);
@@ -67,9 +67,9 @@ unsigned_env_value read_unsigned_env(const char* name) {
 }
 
 /**
- * @brief 失敗の結果を作る。
- * @param name 値が誤っている環境変数の名前
- * @return ok が false で、設定が既定の結果
+ * @brief Makes the result of a failure.
+ * @param name the name of the environment variable whose value is wrong
+ * @return a result whose ok is false and whose settings are the defaults
  */
 compaction_config_parse_result fail(const char* name) {
     return {false, std::string(name) + " is not a valid non-negative integer: " + std::getenv(name),

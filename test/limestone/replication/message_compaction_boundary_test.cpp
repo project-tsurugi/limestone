@@ -52,7 +52,7 @@ protected:
     std::unique_ptr<api::datastore_test> datastore_;
 };
 
-// 符号化して復号すると、境界 epoch と BLOB の ID の境界が保たれる
+// Encoding and decoding preserves the boundary epoch and the BLOB ID boundary
 TEST_F(message_compaction_boundary_test, round_trip) {
     const std::uint64_t epoch = std::numeric_limits<std::uint64_t>::max() - 1;
     const std::uint64_t blob_id = 0x0123456789abcdefULL;
@@ -71,12 +71,13 @@ TEST_F(message_compaction_boundary_test, round_trip) {
     EXPECT_EQ(received->blob_id_boundary(), blob_id);
 }
 
-// 型の番号は 0x05 である
+// The type id is 0x05
 TEST_F(message_compaction_boundary_test, type_id) {
     EXPECT_EQ(static_cast<std::uint8_t>(message_type_id::COMPACTION_BOUNDARY), 0x05);
 }
 
-// 受け取った境界は datastore に保持される。応答は送られない。後から受け取った境界が、前の境界を置き換える
+// The received boundary is kept in the datastore. No response is sent. A boundary received later replaces the
+// earlier one
 TEST_F(message_compaction_boundary_test, post_receive_keeps_the_latest_boundary) {
     ASSERT_FALSE(datastore_->get_impl()->get_received_compaction_boundary().has_value());
     replication_message_io io("");

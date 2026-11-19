@@ -33,8 +33,8 @@ using limestone::api::epoch_id_type;
 using limestone::internal::compaction_worker_launcher;
 
 /**
- * オンラインコンパクションのワーカースレッドが起動する時点のテスト。ワーカースレッドは ready() では起動せず、
- * snapshot と、そこから取得した cursor がすべて破棄された時点で起動する。
+ * Tests of when the online compaction worker thread starts. The worker thread does not start in ready(); it
+ * starts when a snapshot and all the cursors obtained from it are destroyed.
  */
 class compaction_worker_start_test : public ::testing::Test {
 public:
@@ -58,7 +58,7 @@ public:
         datastore_->ready();
     }
 
-    // エントリを 1 つ書いて再起動する。再起動の後の snapshot は、このエントリを含む
+    // Writes one entry and restarts. The snapshot after the restart contains this entry
     void write_entry_and_restart() {
         datastore_->switch_epoch(1);
         lc0_->begin_session();
@@ -78,7 +78,7 @@ public:
     limestone::api::log_channel* lc0_{};
 };
 
-// ready() の直後には、ワーカースレッドは起動していない
+// The worker thread has not started right after ready()
 TEST_F(compaction_worker_start_test, not_started_right_after_ready) {
     start_datastore();
 
@@ -86,7 +86,7 @@ TEST_F(compaction_worker_start_test, not_started_right_after_ready) {
     EXPECT_FALSE(launcher()->launched());
 }
 
-// ready() の後には、ワーカースレッドが起動していなくても ctrl ディレクトリがある
+// The ctrl directory exists after ready() even though the worker thread has not started
 TEST_F(compaction_worker_start_test, ctrl_directory_exists_after_ready) {
     start_datastore();
 
@@ -94,7 +94,8 @@ TEST_F(compaction_worker_start_test, ctrl_directory_exists_after_ready) {
     EXPECT_FALSE(launcher()->launched());
 }
 
-// snapshot と、そこから取得したすべての cursor を破棄した時点で起動する。cursor が残っている間は起動しない
+// It starts when the snapshot and all the cursors obtained from it are destroyed. It does not start while a
+// cursor remains
 TEST_F(compaction_worker_start_test, starts_when_snapshot_and_all_cursors_are_released) {
     start_datastore();
     write_entry_and_restart();
@@ -120,7 +121,7 @@ TEST_F(compaction_worker_start_test, starts_when_snapshot_and_all_cursors_are_re
     EXPECT_TRUE(launcher()->launched());
 }
 
-// cursor を先にすべて破棄したときは、snapshot の破棄で起動する
+// When all the cursors are destroyed first, it starts at the destruction of the snapshot
 TEST_F(compaction_worker_start_test, starts_when_snapshot_is_released_last) {
     start_datastore();
 
@@ -133,7 +134,7 @@ TEST_F(compaction_worker_start_test, starts_when_snapshot_is_released_last) {
     EXPECT_TRUE(launcher()->launched());
 }
 
-// shared_snapshot() の snapshot でも、同じ時点で起動する
+// It starts at the same point with a snapshot of shared_snapshot()
 TEST_F(compaction_worker_start_test, starts_with_shared_snapshot) {
     start_datastore();
 
@@ -149,7 +150,7 @@ TEST_F(compaction_worker_start_test, starts_with_shared_snapshot) {
     EXPECT_TRUE(launcher()->launched());
 }
 
-// 空のログディレクトリで、cursor を取得せずに snapshot を破棄しても起動する
+// It also starts when, with an empty log directory, the snapshot is destroyed without obtaining a cursor
 TEST_F(compaction_worker_start_test, starts_with_empty_log_directory) {
     start_datastore();
 
@@ -162,7 +163,7 @@ TEST_F(compaction_worker_start_test, starts_with_empty_log_directory) {
     EXPECT_TRUE(launcher()->launched());
 }
 
-// 起動の後に snapshot の取得と破棄を繰り返しても、正常に動く
+// Creating and destroying snapshots repeatedly after the start works normally
 TEST_F(compaction_worker_start_test, repeated_snapshots_after_start) {
     start_datastore();
 
@@ -176,7 +177,7 @@ TEST_F(compaction_worker_start_test, repeated_snapshots_after_start) {
     datastore_->shutdown();
 }
 
-// snapshot を取得しないまま shutdown() しても、正常に終了する。ワーカースレッドは起動しないままである
+// shutdown() without creating a snapshot completes normally. The worker thread stays unstarted
 TEST_F(compaction_worker_start_test, shutdown_without_snapshot) {
     start_datastore();
     std::shared_ptr<compaction_worker_launcher> kept = launcher();
@@ -186,7 +187,7 @@ TEST_F(compaction_worker_start_test, shutdown_without_snapshot) {
     EXPECT_FALSE(kept->launched());
 }
 
-// shutdown() の後に snapshot と cursor を破棄しても、ワーカースレッドは起動しない
+// Destroying the snapshot and the cursors after shutdown() does not start the worker thread
 TEST_F(compaction_worker_start_test, release_after_shutdown_does_not_start) {
     start_datastore();
     std::shared_ptr<compaction_worker_launcher> kept = launcher();
@@ -200,7 +201,7 @@ TEST_F(compaction_worker_start_test, release_after_shutdown_does_not_start) {
     EXPECT_FALSE(kept->launched());
 }
 
-// datastore を snapshot より先に破棄しても、異常が起きない
+// Destroying the datastore before the snapshot causes no anomaly
 TEST_F(compaction_worker_start_test, datastore_destroyed_before_snapshot) {
     start_datastore();
     std::shared_ptr<compaction_worker_launcher> kept = launcher();
@@ -214,8 +215,8 @@ TEST_F(compaction_worker_start_test, datastore_destroyed_before_snapshot) {
     EXPECT_FALSE(kept->launched());
 }
 
-// snapshot の破棄と shutdown() を並行させても、待たれないワーカースレッドが残らない。
-// 残った場合は、破棄済みの datastore に触れるか、テストプロセスの終了を妨げる
+// Destroying a snapshot concurrently with shutdown() leaves no worker thread that nobody waits for.
+// If one were left, it would touch the destroyed datastore or keep the test process from exiting
 TEST_F(compaction_worker_start_test, release_concurrent_with_shutdown) {
     for (int i = 0; i < 20; ++i) {
         start_datastore();

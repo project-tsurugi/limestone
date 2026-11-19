@@ -34,7 +34,7 @@ namespace limestone::testing {
 using limestone::api::epoch_id_type;
 
 /**
- * レプリカの起動処理 (datastore::start_as_replica()) のテスト。
+ * Tests of the startup processing of the replica (datastore::start_as_replica()).
  */
 class replica_startup_test : public ::testing::Test {
 public:
@@ -50,7 +50,7 @@ public:
         boost::filesystem::remove_all(location);
     }
 
-    // master として起動する
+    // Starts as a master
     void start_as_master() {
         limestone::api::configuration conf{};
         conf.set_data_location(location);
@@ -59,7 +59,7 @@ public:
         datastore_->ready();
     }
 
-    // レプリカとして起動する (ready() は呼ばない)
+    // Starts as a replica (ready() is not called)
     void start_as_replica() {
         limestone::api::configuration conf{};
         conf.set_data_location(location);
@@ -73,8 +73,8 @@ public:
         datastore_ = nullptr;
     }
 
-    // epoch 1 のエントリ (durable) と、epoch 2 のエントリ (durable でない) を持つ永続化データを作る。
-    // durable epoch は 1 である
+    // Creates the persistent data that has an entry of epoch 1 (durable) and an entry of epoch 2 (not durable).
+    // The durable epoch is 1
     void make_data_with_nondurable_snippet() {
         start_as_master();
         datastore_->switch_epoch(1);
@@ -85,7 +85,7 @@ public:
         lc0_->begin_session();
         lc0_->add_entry(1, "k2", "v2", {2, 0});
         lc0_->end_session();
-        // epoch 3 へ進めないので、epoch 2 は durable にならない
+        // The epoch is not advanced to 3, so epoch 2 does not become durable
         stop();
     }
 
@@ -115,7 +115,7 @@ public:
     limestone::api::log_channel* lc0_{};
 };
 
-// 空の永続化データで起動できる。受信 epoch は 0 である
+// It can start with empty persistent data. The received epoch is 0
 TEST_F(replica_startup_test, starts_with_empty_data) {
     start_as_replica();
 
@@ -124,8 +124,8 @@ TEST_F(replica_startup_test, starts_with_empty_data) {
     stop();
 }
 
-// 起動時の走査は、durable epoch を超えるスニペットを無効化する。受信 epoch は durable epoch になる。
-// スナップショットファイルは作らず、epoch_id_switched_ と epoch_id_informed_ は 0 のままである
+// The scan at startup invalidates the snippets beyond the durable epoch. The received epoch becomes the durable
+// epoch. The snapshot file is not created, and epoch_id_switched_ and epoch_id_informed_ stay 0
 TEST_F(replica_startup_test, invalidates_snippets_beyond_durable_epoch) {
     make_data_with_nondurable_snippet();
     boost::filesystem::remove_all(snapshot_dir_);
@@ -142,19 +142,19 @@ TEST_F(replica_startup_test, invalidates_snippets_beyond_durable_epoch) {
     EXPECT_NE(wal_after, wal_before);
     stop();
 
-    // 無効化の後は、もう一度起動しても WAL ファイルは変わらない
+    // After the invalidation, another startup does not change the WAL files
     start_as_replica();
     EXPECT_EQ(datastore_->get_impl()->get_received_epoch(), 1U);
     EXPECT_EQ(read_file(wal_file_), wal_after);
     stop();
 
-    // 残るのは、durable なエントリだけである
+    // Only the durable entry remains
     start_as_master();
     const std::vector<std::tuple<std::string, std::string>> expected{{"k1", "v1"}};
     EXPECT_EQ(read_all_entries(), expected);
 }
 
-// すべてのスニペットが durable であれば、WAL ファイルは書き換えられない
+// When every snippet is durable, the WAL files are not rewritten
 TEST_F(replica_startup_test, keeps_durable_snippets) {
     start_as_master();
     datastore_->switch_epoch(1);

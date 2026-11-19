@@ -208,10 +208,11 @@ void datastore_impl::send_compaction_boundary(epoch_id_type boundary_epoch, blob
             }
             replication_message_io io{std::string{}};
             replication_message::send(io, message);
-            // 応答のないメッセージなので、flush で完了を待たない
+            // The message has no response, so the completion is not awaited with flush()
             auto result = rdma_control_send_stream_->send_all_bytes(io.get_out_view());
             if (! result.success) {
-                // GROUP_COMMIT の送信の失敗と同じ理由で、続行できない (送信のリングを全チャネルが共有している)
+                // Cannot continue, for the same reason as a failed send of GROUP_COMMIT (every channel shares
+                // the send ring)
                 LOG_LP(FATAL) << "Failed to send the compaction boundary message over the RDMA control channel: "
                               << result.error_message;
             }
@@ -301,8 +302,8 @@ bool datastore_impl::is_backup_in_progress() const noexcept {
 
 void datastore_impl::start_backup_exclusion(limestone::internal::blob_file_garbage_collector* gc) {
     increment_backup_counter();
-    // バックアップの数を加算した後は、新しい GC は始まらない。実行中の GC は、バックアップが列挙したファイルを
-    // 削除しうるので、止める。消し残したファイルは、次のコンパクションの GC が削除する
+    // No new GC starts after the backup counter is incremented. A running GC is stopped, because it could
+    // remove the files the backup has enumerated. The files it leaves are removed by the GC of the next compaction
     if (gc != nullptr && gc->is_active()) {
         LOG_LP(INFO) << "stopping the BLOB file GC because a backup begins";
         gc->shutdown();
@@ -481,8 +482,8 @@ bool datastore_impl::propagate_group_commit_rdma(uint64_t epoch_id) {
     // already serialized by the CAS in update_min_epoch_id() and runs inside the
     // scoped_lock of mtx_epoch_file_ (plus one pre-threading call in ready()). If that
     // premise ever breaks, multiple threads would touch this stream concurrently.
-    // コンパクション境界メッセージの送信 (別のスレッド) とは、呼び出し側が持つ control_channel_send_mutex() で
-    // 排他している。
+    // The send of a compaction boundary message, which runs on another thread, is excluded by
+    // control_channel_send_mutex() that the caller holds.
     auto result = rdma_control_send_stream_->send_all_bytes(io.get_out_view());
     if (!result.success) {
         // acquire_frame_buffer() absorbs backpressure by blocking, so a failure means

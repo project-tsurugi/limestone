@@ -27,7 +27,7 @@ namespace limestone::testing {
 using limestone::internal::compaction_worker_launcher;
 using limestone::internal::snapshot_use_marker;
 
-// launch() を繰り返しても、起動の関数は 1 回だけ呼ばれる
+// The start function is called only once even if launch() is repeated
 TEST(compaction_worker_launcher_test, launch_starts_only_once) {
     std::atomic<int> started{0};
     compaction_worker_launcher launcher([&started]() { started.fetch_add(1); });
@@ -40,7 +40,7 @@ TEST(compaction_worker_launcher_test, launch_starts_only_once) {
     EXPECT_TRUE(launcher.launched());
 }
 
-// close() の後の launch() は何もしない
+// launch() after close() does nothing
 TEST(compaction_worker_launcher_test, launch_does_nothing_after_close) {
     std::atomic<int> started{0};
     compaction_worker_launcher launcher([&started]() { started.fetch_add(1); });
@@ -52,7 +52,7 @@ TEST(compaction_worker_launcher_test, launch_does_nothing_after_close) {
     EXPECT_FALSE(launcher.launched());
 }
 
-// launch() の後の close() は、起動済みの状態を変えない
+// close() after launch() does not change the started state
 TEST(compaction_worker_launcher_test, close_keeps_launched) {
     std::atomic<int> started{0};
     compaction_worker_launcher launcher([&started]() { started.fetch_add(1); });
@@ -64,7 +64,7 @@ TEST(compaction_worker_launcher_test, close_keeps_launched) {
     EXPECT_TRUE(launcher.launched());
 }
 
-// 複数のスレッドから同時に launch() しても、起動の関数は 1 回だけ呼ばれる
+// The start function is called only once even if launch() is called from several threads at the same time
 TEST(compaction_worker_launcher_test, concurrent_launch_starts_only_once) {
     std::atomic<int> started{0};
     compaction_worker_launcher launcher([&started]() { started.fetch_add(1); });
@@ -80,7 +80,7 @@ TEST(compaction_worker_launcher_test, concurrent_launch_starts_only_once) {
     EXPECT_EQ(started.load(), 1);
 }
 
-// 印は、最後の所有者が手放したときに起動を求める
+// The marker requests the start when its last owner releases it
 TEST(compaction_worker_launcher_test, marker_launches_when_last_owner_releases) {
     std::atomic<int> started{0};
     std::shared_ptr<compaction_worker_launcher> launcher =
@@ -96,7 +96,7 @@ TEST(compaction_worker_launcher_test, marker_launches_when_last_owner_releases) 
     EXPECT_EQ(started.load(), 1);
 }
 
-// close() の後に破棄された印は、起動の関数を呼ばない
+// A marker destroyed after close() does not call the start function
 TEST(compaction_worker_launcher_test, marker_does_nothing_after_close) {
     std::atomic<int> started{0};
     std::shared_ptr<compaction_worker_launcher> launcher =

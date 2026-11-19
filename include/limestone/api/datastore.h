@@ -360,15 +360,15 @@ public:
     virtual void persist_and_propagate_epoch_id(epoch_id_type epoch_id);
 
     /**
-     * @brief レプリカとして動かすための起動処理を行う。ready() の代わりに呼ぶ。
+     * @brief Performs the startup processing to run as a replica. Call it instead of ready().
      *
-     * durable epoch を超えるスニペットを無効化し、その durable epoch を受信 epoch の初期値にする。
-     * スナップショットファイルは作らない。最後に、オンラインコンパクションのワーカースレッドを起動する。
+     * Invalidates the snippets beyond the durable epoch, and takes that durable epoch as the initial value of the
+     * received epoch. It does not create the snapshot file. At its end, it starts the online compaction worker.
      *
      * NOTE: This method is intended for internal use only.
      *
-     * @throws limestone_exception WAL ファイルの形式が不正なとき、epoch ファイルを読めないとき
-     * @throws limestone_io_exception 入出力に失敗したとき
+     * @throws limestone_exception if a WAL file is malformed, or the epoch file cannot be read
+     * @throws limestone_io_exception if an I/O operation fails
      */
     void start_as_replica();
 
@@ -493,10 +493,10 @@ private:
     void stop_online_compaction_worker();
 
     /**
-     * @brief ローテーションとオンラインコンパクションを実行する。
-     * @param trigger 実行の契機
-     * @throws limestone_exception ローテーションの境界 epoch が 0 のとき、ローテーションが shutdown によって
-     *         打ち切られたとき
+     * @brief Runs a rotation and an online compaction.
+     * @param trigger what triggered the run
+     * @throws limestone_exception if the boundary epoch of the rotation is 0, or the rotation is given up because
+     *         of a shutdown
      */
     void run_online_compaction(limestone::internal::compaction_trigger trigger);
 

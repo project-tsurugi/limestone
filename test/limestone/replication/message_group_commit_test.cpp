@@ -75,7 +75,7 @@ TEST_F(message_group_commit_test, post_receive) {
 
 namespace {
 
-// persist_and_propagate_epoch_id() が呼ばれた時点の受信 epoch を記録する datastore
+// A datastore that records the received epoch at the time persist_and_propagate_epoch_id() is called
 class received_epoch_recording_datastore : public api::datastore_test {
 public:
     explicit received_epoch_recording_datastore(const api::configuration& conf) : datastore_test(conf) {}
@@ -90,7 +90,7 @@ public:
 
 }  // namespace
 
-// 受信 epoch は、GROUP_COMMIT の epoch を epoch ファイルに書いた後に進む
+// The received epoch advances after the epoch of GROUP_COMMIT is written to the epoch file
 TEST_F(message_group_commit_test, post_receive_advances_received_epoch_after_persist) {
     datastore_.reset();
     limestone::api::configuration conf{};

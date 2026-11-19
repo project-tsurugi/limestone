@@ -64,7 +64,7 @@ public:
     [[nodiscard]] std::unique_ptr<cursor> get_cursor() const;
 
     /**
-     * @brief 印を設定する。印は、この snapshot と、以後に取得する cursor が共有する。
+     * @brief Sets the marker. The marker is shared by this snapshot and the cursors obtained from it afterwards.
      */
     void set_use_marker(std::shared_ptr<snapshot_use_marker> marker) noexcept;
 

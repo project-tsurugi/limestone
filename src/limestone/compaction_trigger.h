@@ -22,24 +22,24 @@
 namespace limestone::internal {
 
 /**
- * @brief オンラインコンパクションを実行する契機。
+ * @brief What triggers an online compaction.
  */
 enum class compaction_trigger : std::uint8_t {
-    /// ctrl ファイルによる指示
+    /// A request by the ctrl file
     ctrl_file,
-    /// WAL の量が閾値を超えたこと (常時コンパクション)
+    /// The amount of the WAL exceeding the threshold (the auto compaction)
     threshold,
 };
 
 /**
- * @brief 契機の名前を返す。
- * @param trigger 契機
- * @return ログに書く名前
+ * @brief Returns the name of a trigger.
+ * @param trigger the trigger
+ * @return the name to write to the log
  */
 [[nodiscard]] std::string_view to_string_view(compaction_trigger trigger) noexcept;
 
 /**
- * @brief 契機の名前をストリームに書く。
+ * @brief Writes the name of a trigger to a stream.
  */
 std::ostream& operator<<(std::ostream& out, compaction_trigger trigger);
 

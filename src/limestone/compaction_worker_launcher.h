@@ -22,33 +22,35 @@
 namespace limestone::internal {
 
 /**
- * @brief オンラインコンパクションのワーカースレッドを 1 回だけ起動する。
- * @details launch() と close() は排他される。close() の後の launch() は何もしない。
+ * @brief Starts the online compaction worker thread only once.
+ * @details launch() and close() exclude each other. launch() after close() does nothing.
  */
 class compaction_worker_launcher {
 public:
     /**
-     * @param start ワーカースレッドを起動する関数。launch() から高々 1 回呼ばれる
+     * @brief Constructs a launcher.
+     * @param start the function that starts the worker thread. launch() calls it at most once
      */
     explicit compaction_worker_launcher(std::function<void()> start);
 
     /**
-     * @brief ワーカースレッドを起動する。
-     * @details 起動済みのとき、close() の後は何もしない。起動に失敗したときは FATAL のログを書いて abort する。
-     * @attention この関数はスレッドセーフである。
+     * @brief Starts the worker thread.
+     * @details Does nothing if the thread has been started, or after close(). If the start fails, writes a FATAL
+     *          log and aborts.
+     * @attention this function is thread-safe.
      */
     void launch() noexcept;
 
     /**
-     * @brief 以後の launch() を無効にする。
-     * @details 戻った時点で、実行中の launch() はない。
-     * @attention この関数はスレッドセーフである。
+     * @brief Disables launch() from now on.
+     * @details No launch() is in progress when this function returns.
+     * @attention this function is thread-safe.
      */
     void close() noexcept;
 
     /**
-     * @brief ワーカースレッドを起動したかを返す。
-     * @attention この関数はスレッドセーフである。
+     * @brief Returns whether the worker thread has been started.
+     * @attention this function is thread-safe.
      */
     [[nodiscard]] bool launched() noexcept;
 
@@ -60,12 +62,20 @@ private:
 };
 
 /**
- * @brief snapshot と、そこから取得した cursor が共有する印。
- * @details 破棄されるときに、ワーカースレッドの起動を求める。
+ * @brief A marker shared by a snapshot and the cursors obtained from it.
+ * @details Requests the start of the worker thread when it is destroyed.
  */
 class snapshot_use_marker {
 public:
+    /**
+     * @brief Constructs a marker.
+     * @param launcher the launcher to request the start from
+     */
     explicit snapshot_use_marker(std::shared_ptr<compaction_worker_launcher> launcher) noexcept;
+
+    /**
+     * @brief Requests the start of the worker thread from the launcher.
+     */
     ~snapshot_use_marker();
 
     snapshot_use_marker(const snapshot_use_marker&) = delete;

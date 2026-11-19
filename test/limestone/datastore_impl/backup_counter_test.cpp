@@ -76,14 +76,14 @@ TEST_F(backup_counter_test, backup_counter_does_not_go_negative) {
     EXPECT_FALSE(datastore.is_backup_in_progress());
 }
 
-// バックアップの開始は、実行中の BLOB ファイルの GC を止め、バックアップ中にする
+// The start of a backup stops a running BLOB file GC, and makes a backup in progress
 TEST_F(backup_counter_test, start_backup_exclusion_stops_running_blob_gc) {
     const boost::filesystem::path location{"/tmp/backup_counter_test"};
     boost::filesystem::remove_all(location);
     limestone::internal::blob_file_resolver resolver(location);
     ASSERT_TRUE(boost::filesystem::create_directories(resolver.get_blob_root()));
     limestone::internal::blob_file_garbage_collector gc(resolver);
-    // 走査だけを始める。GC は、削除の対象から外す BLOB の一覧を待つ状態で、実行中のままになる
+    // Start only the scan. The GC stays running, waiting for the list of the BLOBs exempt from the removal
     gc.scan_blob_files(1);
     ASSERT_TRUE(gc.is_active());
     datastore_impl datastore;
@@ -95,7 +95,7 @@ TEST_F(backup_counter_test, start_backup_exclusion_stops_running_blob_gc) {
     boost::filesystem::remove_all(location);
 }
 
-// GC を行うオブジェクトがなくても、バックアップ中にする
+// It makes a backup in progress even without a garbage collector
 TEST_F(backup_counter_test, start_backup_exclusion_without_blob_gc) {
     datastore_impl datastore;
 
@@ -104,7 +104,7 @@ TEST_F(backup_counter_test, start_backup_exclusion_without_blob_gc) {
     EXPECT_TRUE(datastore.is_backup_in_progress());
 }
 
-// コンパクションは、バックアップ中には始まらない。バックアップの開始は、コンパクションの完了を待つ
+// A compaction does not begin during a backup. The start of a backup waits for a compaction to complete
 TEST_F(backup_counter_test, compaction_and_backup_exclude_each_other) {
     datastore_impl datastore;
 

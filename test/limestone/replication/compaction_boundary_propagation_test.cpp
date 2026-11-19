@@ -39,8 +39,8 @@ using limestone::api::datastore_impl;
 using limestone::api::epoch_id_type;
 
 /**
- * コンパクション境界メッセージが、master からレプリカへ tcp モードのコントロールチャネルで届くことのテスト。
- * レプリカは、同じプロセスのスレッドで動かす。
+ * Tests that a compaction boundary message reaches the replica from the master over the control channel of the
+ * TCP mode. The replica runs on a thread of the same process.
  */
 class compaction_boundary_propagation_test : public ::testing::Test {
 protected:
@@ -90,7 +90,8 @@ protected:
         advance_epoch();
     }
 
-    // master でコンパクションを実行する。ローテーションは境界 epoch までの永続化を待つので、待つ間は epoch を進める
+    // Runs a compaction on the master. The rotation waits for the persistence up to the boundary epoch, so the
+    // epoch is advanced while waiting
     void run_compaction_on_master() {
         std::future<void> future = std::async(std::launch::async, [this]() { master_->compact_with_online(); });
         while (future.wait_for(std::chrono::milliseconds(20)) != std::future_status::ready) {
@@ -103,7 +104,7 @@ protected:
         return server_.get_datastore().get_impl()->get_received_compaction_boundary();
     }
 
-    // レプリカが、BLOB の ID の境界が expected である境界を保持するまで待つ
+    // Waits until the replica keeps a boundary whose BLOB ID boundary is expected
     [[nodiscard]] bool wait_for_replica_blob_id_boundary(std::uint64_t expected, std::chrono::milliseconds timeout) {
         const std::chrono::steady_clock::time_point deadline = std::chrono::steady_clock::now() + timeout;
         while (std::chrono::steady_clock::now() < deadline) {
@@ -123,8 +124,8 @@ protected:
     epoch_id_type epoch_{0};
 };
 
-// master は、コンパクションの完了のたびに、境界 epoch と BLOB の ID の境界をレプリカへ送る。レプリカは最新の
-// 1 組を保持する
+// Each time a compaction completes, the master sends the boundary epoch and the BLOB ID boundary to the replica.
+// The replica keeps the latest pair
 TEST_F(compaction_boundary_propagation_test, master_sends_the_boundary_after_each_compaction) {
     advance_epoch();
     write_entry("k1", "v1");
@@ -146,7 +147,7 @@ TEST_F(compaction_boundary_propagation_test, master_sends_the_boundary_after_eac
     EXPECT_GT(replica_boundary()->boundary_epoch, first_boundary_epoch);
 }
 
-// 対象がなくてスキップしたコンパクションでは、境界は送られない
+// No boundary is sent by a compaction skipped for having no target
 TEST_F(compaction_boundary_propagation_test, skipped_compaction_sends_nothing) {
     advance_epoch();
     write_entry("k1", "v1");
@@ -154,19 +155,20 @@ TEST_F(compaction_boundary_propagation_test, skipped_compaction_sends_nothing) {
     run_compaction_on_master();
     ASSERT_TRUE(wait_for_replica_blob_id_boundary(1234, std::chrono::seconds(10)));
 
-    // 新しい WAL がないので、このコンパクションはスキップされる
+    // There is no new WAL, so this compaction is skipped
     master_->set_next_blob_id(5678);
     run_compaction_on_master();
 
-    // 後続の GROUP_COMMIT がレプリカに届いた時点で、境界メッセージが送られていれば届いている
+    // When the following GROUP_COMMIT has reached the replica, a boundary message would have reached it too if
+    // one had been sent
     write_entry("k2", "v2");
     advance_epoch();
     EXPECT_EQ(get_epoch(replica_location), get_epoch(master_location));
     EXPECT_EQ(replica_boundary()->blob_id_boundary, 1234U);
 }
 
-// GROUP_COMMIT とコンパクション境界メッセージを並行して送っても、メッセージが壊れない。GROUP_COMMIT の応答の
-// 対応もずれない
+// Sending GROUP_COMMIT and compaction boundary messages concurrently does not corrupt the messages, and the
+// responses to GROUP_COMMIT stay paired
 TEST_F(compaction_boundary_propagation_test, concurrent_with_group_commit) {
     constexpr std::uint64_t count = 300;
     advance_epoch();
@@ -184,14 +186,14 @@ TEST_F(compaction_boundary_propagation_test, concurrent_with_group_commit) {
 
     ASSERT_TRUE(wait_for_replica_blob_id_boundary(count * 10, std::chrono::seconds(10)));
     EXPECT_EQ(replica_boundary()->boundary_epoch, count);
-    // master が最後に確定した epoch が、レプリカの epoch ファイルに届いている
+    // The last epoch the master fixed has reached the epoch file of the replica
     const epoch_id_type master_durable_epoch = get_epoch(master_location);
     EXPECT_GE(master_durable_epoch, count);
     EXPECT_EQ(get_epoch(replica_location), master_durable_epoch);
     EXPECT_EQ(server_.get_datastore().get_impl()->get_received_epoch(), master_durable_epoch);
 }
 
-// shutdown() の後は、コンパクション境界メッセージを送らない (閉じたコントロールチャネルに触れない)
+// No compaction boundary message reaches the replica after shutdown()
 TEST_F(compaction_boundary_propagation_test, nothing_is_sent_after_shutdown) {
     advance_epoch();
     master_->get_impl()->send_compaction_boundary(1, 10);
@@ -204,7 +206,8 @@ TEST_F(compaction_boundary_propagation_test, nothing_is_sent_after_shutdown) {
     EXPECT_EQ(replica_boundary()->blob_id_boundary, 10U);
 }
 
-// コントロールチャネルを開く前 (ready() の前) に送っても、異常が起きない。レプリカには届かない
+// A send before the control channel is opened (before ready()) causes no anomaly. It does not reach the
+// replica
 TEST_F(compaction_boundary_propagation_test, send_before_control_channel_is_opened) {
     master_ = nullptr;
     limestone::api::configuration conf{};
@@ -217,7 +220,7 @@ TEST_F(compaction_boundary_propagation_test, send_before_control_channel_is_open
     EXPECT_FALSE(replica_boundary().has_value());
 }
 
-// レプリカが停止した後に送っても、異常が起きない。送信の失敗は、master の動作を止めない
+// A send after the replica stopped causes no anomaly. A failed send does not stop the master
 TEST_F(compaction_boundary_propagation_test, send_after_replica_stopped) {
     advance_epoch();
     master_->get_impl()->send_compaction_boundary(1, 10);
@@ -225,14 +228,14 @@ TEST_F(compaction_boundary_propagation_test, send_after_replica_stopped) {
     server_.shutdown();
     replica_thread_.join();
 
-    // 相手が閉じたソケットへの書き込みは、最初の何回かは成功することがあるので、繰り返し送る
+    // The first few writes to a socket closed by the peer may succeed, so send repeatedly
     for (std::uint64_t i = 2; i < 50; ++i) {
         master_->get_impl()->send_compaction_boundary(i, i * 10);
         std::this_thread::sleep_for(std::chrono::milliseconds(10));
     }
 }
 
-// shutdown() と並行して送っても、異常が起きない
+// A send concurrent with shutdown() causes no anomaly
 TEST_F(compaction_boundary_propagation_test, send_concurrent_with_shutdown) {
     advance_epoch();
     std::atomic<bool> stop_requested{false};

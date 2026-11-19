@@ -94,7 +94,9 @@ void write_epoch_to_file_internal(const std::string& file_path, epoch_id_type ep
     }
 }
 
-// コンパクションが実行中であることの印。破棄のときに、コンパクションの実行を終える
+/**
+ * @brief The mark of a running compaction. Ends the run of the compaction when it is destroyed.
+ */
 class compaction_running_mark {
 public:
     explicit compaction_running_mark(datastore_impl& impl) noexcept : impl_(impl) {}
@@ -190,13 +192,15 @@ datastore::datastore(configuration const& conf) : location_(conf.get_data_locati
         LOG(INFO) << "/:limestone:config:datastore setting the sort: arena size = " << sort_arena_size_mb
                   << " MiB, merge fanin = " << sort_merge_fanin
                   << ", work dir = " << impl_->sort_work_dir_parent().string();
-        // コンパクションと BLOB ファイルの GC の設定。未設定の項目は、compaction_settings の既定値で埋める
+        // The settings of the compaction and the BLOB file GC. The items not set are filled in with the defaults
+        // of compaction_settings
         limestone::internal::compaction_settings auto_compaction{};
         std::optional<std::size_t> auto_compaction_threshold_mb = conf.get_auto_compaction_threshold_mb();
         std::optional<bool> auto_compaction_delete_detached = conf.get_auto_compaction_delete_detached();
         std::optional<bool> blob_gc = conf.get_blob_gc();
-        // 暫定: configuration に設定されていない項目があるときは、環境変数から読む。上位が設定ファイルの値を
-        // configuration に渡すようになったら、この読み込みを外す。3 項目とも設定されていれば、環境変数は読まない
+        // Provisional: when an item is not set in the configuration, read the environment variables. Remove this
+        // once the upper layer passes the values of the configuration file to the configuration. The environment
+        // variables are not read when all the three items are set
         if (! auto_compaction_threshold_mb.has_value() || ! auto_compaction_delete_detached.has_value()
             || ! blob_gc.has_value()) {
             const limestone::internal::compaction_config_parse_result env_result =
@@ -581,11 +585,11 @@ blob_id_type datastore::create_snapshot_and_get_max_blob_id_with_wal_started_log
 void datastore::persist_and_propagate_epoch_id(epoch_id_type epoch_id) {
     TRACE_START << "epoch_id=" << epoch_id;
     {
-        // GROUP_COMMIT の送信から ACK 待ちまでを、コントロールチャネルへの他の送信 (オンラインコンパクションの
-        // ワーカースレッドが送るコンパクション境界メッセージ) と排他する。RDMA モードの送信ストリームは
-        // スレッドセーフでなく、tcp モードでは GROUP_COMMIT の送信と ACK の受信が同じソケットで対になっている。
-        // この関数を呼ぶ側が mtx_epoch_file_ を持っていることがあるので、mutex を取る順序は、mtx_epoch_file_、
-        // この mutex の順である。
+        // From the send of GROUP_COMMIT to the wait for its ACK, exclude the other send on the control channel
+        // (the compaction boundary message sent by the online compaction worker). The send stream of the RDMA mode
+        // is not thread-safe, and in the TCP mode the send of GROUP_COMMIT pairs with the reception of its ACK on
+        // the same socket. The caller of this function may hold mtx_epoch_file_, so the mutexes are taken in the
+        // order of mtx_epoch_file_ and then this mutex.
         std::scoped_lock<std::mutex> lock(impl_->control_channel_send_mutex());
         if (impl_->is_async_group_commit_enabled()) {
             bool sent = impl_->propagate_group_commit(epoch_id);
@@ -617,7 +621,7 @@ void datastore::ready() {
             std::max(create_snapshot_and_get_max_blob_id_with_wal_started_log(), compaction_catalog_->get_max_blob_id());
         blob_id_type next_blob_id = max_blob_id + 1;
         blob_file_garbage_collector_ = std::make_unique<blob_file_garbage_collector>(impl_->blob_file_resolver());
-        // 起動時の BLOB ファイルの GC。設定で無効のときは、走査を始めない
+        // The BLOB file GC at startup. When the setting disables it, the scans are not started
         const bool blob_gc_enabled = impl_->get_compaction_settings().blob_gc;
         if (blob_gc_enabled) {
             blob_file_garbage_collector_->scan_blob_files(next_blob_id);
@@ -639,12 +643,13 @@ void datastore::ready() {
 
         next_blob_id_.store(next_blob_id);
 
-        // ctrl ディレクトリは、ワーカースレッドではなくここで作る。ctrl ディレクトリを要求するスクリプトが、
-        // ワーカースレッドの起動を待たずに使えるようにする。
+        // The ctrl directory is created here, not by the worker thread, so that a script that requires the ctrl
+        // directory can use it without waiting for the worker thread to start.
         ensure_directory_exists(location_ / "ctrl");
 
-        // ワーカースレッドはここでは起動しない。起動するのは、snapshot と、そこから取得した cursor がすべて
-        // 破棄された時点である。初期化のための snapshot の読み取りと、コンパクションが並行しないようにする。
+        // The worker thread is not started here. It is started when a snapshot and all the cursors obtained from
+        // it are destroyed, so that the read of the snapshot for the initialization does not run concurrently
+        // with a compaction.
         impl_->set_compaction_worker_launcher(std::make_shared<limestone::internal::compaction_worker_launcher>([this]() {
             online_compaction_worker_future_ = std::async(std::launch::async, &datastore::online_compaction_worker, this);
         }));
@@ -662,7 +667,8 @@ void datastore::ready() {
             LOG(INFO) << "Manifest migration requires WAL rotation.";
             dblog_scan ds(location_);
             ds.set_file_operations(impl_->file_ops());
-            // リネームの結果を files_ に反映する。コンパクションの入力とバックアップの対象は、files_ から選ぶ
+            // Apply the renames to files_. The input of a compaction and the targets of a backup are selected
+            // from files_
             for (const dblog_scan::renamed_wal_file& renamed : ds.detach_wal_files()) {
                 subtract_file(renamed.from);
                 add_file(renamed.to);
@@ -693,36 +699,37 @@ void datastore::ready() {
 
 void datastore::start_as_replica() {
     TRACE_START;
-    // 以下の順序には意味がある。
-    // 1. durable epoch を超えるスニペットを無効化する。master からログは届いたが、その epoch の GROUP_COMMIT が
-    //    届く前に停止すると、このスニペットが残る。残したまま受信を再開すると、durable epoch がその epoch を
-    //    追い越した後の走査が、このスニペットを有効なデータとして読んでしまう。
-    //    master の ready() も同じ無効化を行うが、ready() はスナップショットファイルの作成など、レプリカに
-    //    不要な処理も行うので、呼ばない。
-    //    epoch_id_switched_ と epoch_id_informed_ には何も設定しない。レプリカでは、どちらも 0 のまま保つ
-    //    (update_min_epoch_id() がこれを前提に、レプリカでは何もせずに戻る)。
+    // The order below matters.
+    // 1. Invalidate the snippets beyond the durable epoch. Such a snippet remains when the replica stops after a
+    //    log arrived from the master and before the GROUP_COMMIT of its epoch arrived. If it were left and the
+    //    reception resumed, a scan after the durable epoch passed that epoch would read it as valid data.
+    //    ready() of the master performs the same invalidation, but it is not called here because it also does
+    //    what the replica does not need, such as creating the snapshot file.
+    //    Nothing is set to epoch_id_switched_ and epoch_id_informed_. Both stay 0 on the replica
+    //    (update_min_epoch_id() relies on this and returns without doing anything on the replica).
     const epoch_id_type durable_epoch =
         limestone::internal::invalidate_nondurable_snippets(compaction_catalog_, location_, recover_max_parallelism_);
-    // 2. 走査の境界にした durable epoch が、受信 epoch の初期値になる
+    // 2. The durable epoch used as the boundary of the scan becomes the initial value of the received epoch
     impl_->set_received_epoch(durable_epoch);
-    // 3. BLOB ファイルの GC のオブジェクトを作る。GC の走査は、ここでは行わない
+    // 3. Create the BLOB file garbage collector. The scans of the GC are not performed here
     blob_file_garbage_collector_ = std::make_unique<blob_file_garbage_collector>(impl_->blob_file_resolver());
-    // 4. 形式バージョンの移行に伴うローテーション。ローテーションの排他もカタログも使わずにリネームするので、
-    //    オンラインコンパクションのワーカースレッドの起動より前に行う
+    // 4. The rotation required by the migration of the format version. It renames the files without the
+    //    exclusion of the rotation and without the catalog, so it is done before the online compaction worker
+    //    is started
     auto migration_info = impl_->get_migration_info();
     if (migration_info.has_value() && migration_info->requires_rotation()) {
         LOG(INFO) << "Manifest migration requires WAL rotation.";
         dblog_scan ds(location_);
         ds.set_file_operations(impl_->file_ops());
-        // リネームの結果を files_ に反映する。コンパクションの入力は、files_ から選ぶ
+        // Apply the renames to files_. The input of a compaction is selected from files_
         for (const dblog_scan::renamed_wal_file& renamed : ds.detach_wal_files()) {
             subtract_file(renamed.from);
             add_file(renamed.to);
         }
         LOG(INFO) << "WAL rotation completed.";
     }
-    // 5. オンラインコンパクションのワーカースレッドを起動する。レプリカは snapshot を作成しないので、ここで
-    //    直接起動する
+    // 5. Start the online compaction worker. The replica creates no snapshot, so the worker is started
+    //    directly here
     impl_->set_compaction_worker_launcher(std::make_shared<limestone::internal::compaction_worker_launcher>([this]() {
         online_compaction_worker_future_ = std::async(std::launch::async, &datastore::online_compaction_worker, this);
     }));
@@ -920,16 +927,17 @@ std::future<void> datastore::shutdown() noexcept {
     VLOG_LP(log_info) << "start";
     state_ = state::shutdown;
 
-    // オンラインコンパクションのワーカースレッドの起動を、以後は無効にする。これより後に破棄された snapshot や
-    // cursor は、ワーカースレッドを起動しない。close() から戻った時点で実行中の起動はないので、後で行う
-    // ワーカースレッドの停止は、起動と競合しない。
+    // Disable the start of the online compaction worker from now on. A snapshot or a cursor destroyed after this
+    // does not start the worker. No start is in progress when close() returns, so the stop of the worker below
+    // does not race with a start.
     if (impl_->get_compaction_worker_launcher()) {
         impl_->get_compaction_worker_launcher()->close();
     }
 
-    // コンパクション境界メッセージの送信を、以後は無効にする。下でコントロールチャネルを閉じ、RDMA の送信
-    // ストリームを解放するが、オンラインコンパクションのワーカースレッドを止めるのはその後である。戻った時点で
-    // 実行中の送信はなく、進行中のコンパクションが完了しても、解放済みのチャネルには送らない。
+    // Disable the send of a compaction boundary message from now on. The control channel is closed and the RDMA
+    // send streams are released below, while the online compaction worker is stopped only after that. No send is
+    // in progress when this returns, and a compaction in progress does not send to the released channel when it
+    // completes.
     impl_->disable_compaction_boundary_send();
 
     // shutdown replication control channel
@@ -954,8 +962,8 @@ std::future<void> datastore::shutdown() noexcept {
     impl_->shutdown_rdma_sender();
     impl_->shutdown_rdma_ack_receiver();
 
-    // BLOB ファイルの GC を完全に停止する。オンラインコンパクションのワーカースレッドを止めるのはこの後であり、
-    // 進行中のコンパクションが完了しても、GC は始まらない
+    // Stop the BLOB file GC for good. The online compaction worker is stopped only after this, and a compaction
+    // in progress does not start the GC when it completes
     if (blob_file_garbage_collector_) {
         blob_file_garbage_collector_->close();
     }
@@ -1132,8 +1140,9 @@ rotation_result datastore::rotate_log_files() {  // NOLINT(readability-function-
     TRACE_START;
     std::scoped_lock<std::mutex> lock(rotate_mutex); 
     TRACE << "start rotate_log_files() critical section";
-    // ローテーションの境界 epoch。レプリカでは、master から受け取って永続化した最新の GROUP_COMMIT の epoch
-    // (受信 epoch) を使う。レプリカは epoch を自分では進めないので、epoch_id_switched_ は 0 のままである。
+    // The boundary epoch of the rotation. The replica uses the epoch of the latest GROUP_COMMIT it received from
+    // the master and persisted (the received epoch). The replica does not advance the epoch by itself, so
+    // epoch_id_switched_ stays 0.
     const bool is_master = impl_->is_master();
     auto epoch_id = is_master ? epoch_id_switched_.load() : impl_->get_received_epoch();
     if (epoch_id == 0) {
@@ -1142,10 +1151,11 @@ rotation_result datastore::rotate_log_files() {  // NOLINT(readability-function-
     TRACE << "epoch_id = " << epoch_id;
     auto& rotation_state = impl_->get_rotation_state();
     on_rotate_log_files(); // for testing
-    // レプリカでは、境界 epoch までの永続化の完了を待たない。レプリカの境界 epoch は受信 epoch、つまり、
-    // 受け取った最新の GROUP_COMMIT の epoch である。master は、セッションのログがレプリカで永続化された後に
-    // その epoch を確定して GROUP_COMMIT を送る。したがって、境界 epoch 以下の epoch のセッションは、境界を
-    // 決めた時点で、すべてこのレプリカで永続化を終えている。
+    // The replica does not wait for the persistence up to the boundary epoch to complete. The boundary epoch of
+    // the replica is the received epoch, that is, the epoch of the latest GROUP_COMMIT received. The master fixes
+    // an epoch and sends its GROUP_COMMIT only after the logs of the sessions have been persisted on the replica.
+    // Therefore every session of an epoch at or below the boundary epoch has already been persisted on this
+    // replica when the boundary is decided.
     if (is_master) {
         // Wait until epoch_id_informed_ is less than rotated_epoch_id to ensure safe rotation.
         std::unique_lock<std::mutex> ul(informed_mutex);
@@ -1180,11 +1190,11 @@ rotation_result datastore::rotate_log_files() {  // NOLINT(readability-function-
         std::chrono::steady_clock::time_point wait_begin{};
         {
             std::unique_lock<std::mutex> ul(rotation_state.mutex);
-            // ファイル名からチャネルを引く表。レプリカでは、チャネルの登録がローテーションと並行して起こるので、
-            // 表はこの mutex の中で作る。セッションの開始は、ファイルを開く前にこの mutex を取る。したがって、
-            // 表を作る時点でセッションを開始済みのチャネルは必ず表に載り、下でアクティブと判定される。表に
-            // 載らないチャネルは、下のその場のリネームが終わるまでファイルを開けない (その場のリネームは、
-            // この mutex を一度も手放さずに終える)。
+            // Lookup table (file name -> channel). On the replica, a channel is registered concurrently with a
+            // rotation, so the table is built under this mutex. A session takes this mutex before it opens its
+            // file. Therefore a channel that has begun a session when the table is built is always in the table
+            // and is judged active below. A channel not in the table cannot open its file until the immediate
+            // renames below finish (they finish without ever releasing this mutex).
             std::map<std::string, log_channel*> channel_by_filename;
             for (log_channel* lc : impl_->registered_log_channels()) {
                 channel_by_filename.emplace(lc->file_path().filename().string(), lc);
@@ -1343,17 +1353,17 @@ void datastore::online_compaction_worker() {  // NOLINT(readability-function-cog
     boost::filesystem::path start_file = location_ / "ctrl" / "start_compaction";
 
     const limestone::internal::compaction_settings& auto_compaction = impl_->get_compaction_settings();
-    // 最初の測定は、起動の直後に行う
+    // The first measurement is taken right after the start
     std::chrono::steady_clock::time_point next_measurement = std::chrono::steady_clock::now();
 
     const bool is_master = impl_->is_master();
-    // 常時コンパクションを前回の測定で見送った理由。見送らなかったときは空である。同じ理由が続く間は、
-    // 見送りのログを繰り返さない
+    // The reason why the auto compaction was postponed at the previous measurement; empty if it was not
+    // postponed. The log of the postponement is not repeated while the same reason continues
     std::string_view last_postponement_reason{};
 
     while (!stop_online_compaction_worker_.load()) {
-        // ctrl ファイルの指示は、master の役割のときだけ扱う。レプリカのコンパクションの契機は、常時
-        // コンパクションだけである
+        // The request by the ctrl file is handled only in the master role. On the replica, the auto compaction
+        // is the only trigger of a compaction
         if (is_master && boost::filesystem::exists(start_file)) {
             if (!boost::filesystem::remove(start_file)) {
                 LOG_LP(ERROR) << "failed to remove file: " << start_file.string();
@@ -1373,9 +1383,10 @@ void datastore::online_compaction_worker() {  // NOLINT(readability-function-cog
                 }
             }
         }
-        // 常時コンパクション: 測定の間隔ごとに、コンパクションの入力になっていない WAL の量を測り、閾値を
-        // 超えていればローテーションとコンパクションを実行する。ctrl ファイルの指示と同じスレッドで順に処理する
-        // ので、2 つのコンパクションが並行することはない。
+        // The auto compaction: at every measurement interval, measure the amount of the WAL that has not been
+        // the input of a compaction, and run a rotation and a compaction if it exceeds the threshold. This is
+        // handled on the same thread as the request by the ctrl file, one after another, so two compactions
+        // never run concurrently.
         if (auto_compaction.threshold_bytes != 0 && std::chrono::steady_clock::now() >= next_measurement) {
             next_measurement = std::chrono::steady_clock::now() + auto_compaction.measurement_interval;
             constexpr std::uint64_t mib = std::uint64_t{1024} * 1024;
@@ -1386,10 +1397,10 @@ void datastore::online_compaction_worker() {  // NOLINT(readability-function-cog
                 const epoch_id_type boundary_epoch =
                     is_master ? epoch_id_switched_.load() : impl_->get_received_epoch();
                 if (boundary_epoch == 0) {
-                    // ローテーションの境界になる epoch がまだない。次の測定を待つ
+                    // There is no epoch yet to be the boundary of the rotation. Wait for the next measurement
                     postponement_reason = "no boundary epoch for the rotation yet";
                 } else if (impl_->is_backup_in_progress()) {
-                    // バックアップ中は実行できない。次の測定を待つ
+                    // It cannot run during a backup. Wait for the next measurement
                     postponement_reason = "a backup is in progress";
                 } else {
                     LOG_LP(INFO) << "the amount of the WAL exceeded the threshold of the auto compaction: amount = "
@@ -1399,7 +1410,7 @@ void datastore::online_compaction_worker() {  // NOLINT(readability-function-cog
                         run_online_compaction(limestone::internal::compaction_trigger::threshold);
                     } catch (const limestone_exception& e) {
                         if (stop_online_compaction_worker_.load()) {
-                            // 通常の shutdown によるローテーションの打ち切りは、異常ではない
+                            // A rotation given up by a normal shutdown is not an anomaly
                             LOG_LP(INFO) << "auto compaction aborted by shutdown: " << e.what();
                         } else {
                             LOG_LP(ERROR) << "failed to run the auto compaction: " << e.what();
@@ -1439,8 +1450,8 @@ void datastore::run_online_compaction(limestone::internal::compaction_trigger tr
 
     // Mutual exclusion with a backup: if the removal of the old generation ran between
     // the enumeration and the copy of a backup, the copy of an enumerated file would
-    // fail. Compaction is therefore not run during a backup (as blob GC is not).
-    // コンパクションの実行中に始まるバックアップは、コンパクションの完了を待つ
+    // fail. Compaction is therefore not run during a backup (as blob GC is not), and a
+    // backup that begins while a compaction is running waits for the compaction to complete.
     if (! impl_->try_begin_compaction()) {
         LOG_LP(INFO) << "online compaction skipped because a backup is in progress";
         TRACE_END << "return compact_with_online() without compaction (backup in progress)";
@@ -1467,7 +1478,8 @@ void datastore::run_online_compaction(limestone::internal::compaction_trigger tr
     bool blob_file_gc_runnable = false;
     bool is_active = blob_file_garbage_collector_->is_active();
     const bool blob_gc_enabled = impl_->get_compaction_settings().blob_gc;
-    // この判定は master のものである。レプリカは、ローテーションの後に、master から受け取った境界で判定する
+    // This decision is that of the master. The replica decides after the rotation, with the boundary received
+    // from the master
     if (blob_gc_enabled && impl_->is_master() && boundary_version_copy.get_major() > compaction_catalog_->get_max_epoch_id() && !is_active) {
         blob_file_gc_runnable = true;
         blob_file_garbage_collector_->shutdown();
@@ -1483,19 +1495,22 @@ void datastore::run_online_compaction(limestone::internal::compaction_trigger tr
     rotation_result result = rotate_log_files();
     LOG_LP(INFO) << "rotated the log files for the compaction: boundary epoch = " << result.get_epoch_id();
 
-    // レプリカの BLOB ファイルの GC。レプリカは、どの BLOB の ID までが発行済みかを知らないので、GC の境界を自分では
-    // 決められない。master がコンパクションのたびに送る組 (master の境界 epoch E_m、BLOB の ID の境界 G_m) を使う。
-    // このコンパクションの境界 epoch を E_r として、E_m <= E_r であれば、G_m 未満の BLOB のうち生きているものへの
-    // 参照は、すべて E_r 以下の epoch のエントリにあり、このコンパクションの走査で見える。
+    // The BLOB file GC on the replica. The replica does not know up to which BLOB ID has been issued, so it cannot
+    // decide the boundary of the GC by itself. It uses the pair the master sends at each compaction (the boundary
+    // epoch of the master E_m and the BLOB ID boundary G_m). Let E_r be the boundary epoch of this compaction. If
+    // E_m <= E_r, every reference to a live BLOB below G_m is in an entry of an epoch at or below E_r, and is
+    // visible to the scan of this compaction.
     if (! impl_->is_master()) {
         const std::optional<datastore_impl::compaction_boundary> received = impl_->get_received_compaction_boundary();
-        // GC は別のスレッドで動く。実行中に次の GC を始めると、実行中の GC を止めてしまうので、見送る
+        // The GC runs on other threads. Starting the next GC while one is running would stop the running one,
+        // so the GC is skipped
         const bool previous_gc_active = blob_file_garbage_collector_->is_active();
         if (blob_gc_enabled && received.has_value() && received->boundary_epoch <= result.get_epoch_id()
             && ! previous_gc_active) {
             blob_file_gc_runnable = true;
             blob_gc_boundary = received->blob_id_boundary;
-            // GC の走査は、write_version が境界未満のエントリを集める。E_r 以下の epoch のエントリを対象にする
+            // The scan of the GC collects the entries whose write_version is below the boundary. Target the
+            // entries of the epochs at or below E_r
             boundary_version_copy = write_version_type(result.get_epoch_id() + 1, 0);
             blob_file_garbage_collector_->shutdown();
         }
@@ -1562,7 +1577,7 @@ void datastore::run_online_compaction(limestone::internal::compaction_trigger tr
     std::string carry_file_name = compaction_catalog::get_carry_filename_for_generation(new_generation);
     options.set_output_file_names(compacted_file_name, carry_file_name);
 
-    // 入力の量は、ログのためだけに求める。大きさを取れないファイルは数えない
+    // The amount of the input is computed only for the log. A file whose size cannot be taken is not counted
     std::uint64_t input_bytes = 0;
     for (const std::string& filename : need_compaction_filenames) {
         boost::system::error_code size_error;
@@ -1714,16 +1729,18 @@ void datastore::run_online_compaction(limestone::internal::compaction_trigger tr
                                                                            - compaction_start).count()
                  << " ms";
 
-    // コンパクションの境界をレプリカへ知らせる。レプリカは、自身のコンパクションで BLOB ファイルの GC の境界を
-    // 決めるのに使う。BLOB の ID の境界は、ローテーションの前に求めた値である。レプリケーション構成の master で、
-    // レプリカが接続されているときだけ送られる
+    // Notify the replica of the boundary of the compaction. The replica uses it to decide the boundary of the
+    // BLOB file GC in its own compaction. The BLOB ID boundary is the value taken before the rotation. The message
+    // is sent only on the master of a replication configuration, while a replica is connected
     impl_->send_compaction_boundary(result.get_epoch_id(), blob_gc_boundary);
 
-    // detached の WAL ファイルの削除。常時コンパクションだけが行う。対象は、カタログの detached の一覧にあって
-    // 実在するファイルのすべてである (この時点の detached_pwals)。今回のコンパクションの入力だけでなく、以前の
-    // コンパクションで detached になって残っているファイルも含む。したがって、削除に失敗したファイルや、削除の
-    // 途中で停止して残ったファイルは、次の常時コンパクションで削除される。
-    // 削除したファイルの名前は、カタログの一覧には残る。次のコンパクションが、実在しない名前を一覧から外す。
+    // The removal of the detached WAL files. Only the auto compaction does it. The targets are all the files
+    // that are in the detached list of the catalog and exist (detached_pwals at this point): not only the input
+    // of this compaction but also the files detached by earlier compactions and left. Therefore a file whose
+    // removal failed, or a file left because the process stopped in the middle of the removal, is removed by the
+    // next auto compaction.
+    // The names of the removed files stay in the list of the catalog. The next compaction drops the names that
+    // do not exist from the list.
     if (trigger == limestone::internal::compaction_trigger::threshold
         && impl_->get_compaction_settings().delete_detached) {
         std::size_t removed_count = 0;
@@ -1732,12 +1749,12 @@ void datastore::run_online_compaction(limestone::internal::compaction_trigger tr
             boost::system::error_code remove_error;
             impl_->file_ops().remove(detached_path, remove_error);
             if (remove_error) {
-                // 残ったファイルは、次の常時コンパクションで再び削除の対象になる
+                // The file left is a target of the removal again in the next auto compaction
                 LOG_LP(ERROR) << "failed to remove the detached WAL file '" << detached_path.string()
                               << "': " << remove_error.message();
                 continue;
             }
-            // バックアップは files_ からファイルを列挙するので、削除したファイルを外す
+            // A backup enumerates the files from files_, so drop the removed file from it
             subtract_file(detached_path);
             ++removed_count;
         }

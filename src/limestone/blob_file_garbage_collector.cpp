@@ -66,7 +66,7 @@
  }
 
  void blob_file_garbage_collector::scan_blob_files(blob_id_type boundary) {
-     // close() の後は始めない。検査とスレッドの起動を、shutdown() と排他する
+     // Nothing starts after close(). The check and the start of the thread exclude shutdown()
      std::scoped_lock<std::mutex> lock(shutdown_mutex_);
      if (closed_) {
          return;
@@ -104,7 +104,7 @@
 }
   
  void blob_file_garbage_collector::add_gc_exempt_blob_id(blob_id_type id) {
-    // shutdown() は gc_exempt_blob_ を作り直すので、追加を shutdown() と排他する
+    // shutdown() recreates gc_exempt_blob_, so the addition excludes shutdown()
     std::scoped_lock<std::mutex> lock(shutdown_mutex_);
     if (closed_) {
         return;
@@ -251,7 +251,7 @@ void blob_file_garbage_collector::close() {
         std::scoped_lock<std::mutex> lock(shutdown_mutex_);
         closed_ = true;
     }
-    // これより後に GC を始める呼び出しはない。実行中の処理を止める
+    // No call starts the GC from here on. Stop the ongoing tasks
     shutdown();
 }
 

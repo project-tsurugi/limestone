@@ -312,7 +312,7 @@ TEST_F(rdma_establish_session_test, ready_establishes_session_with_log_channels)
     impl->wait_for_propagated_group_commit_ack();
     EXPECT_EQ(captured->flush_count_, 1U);
 
-    // コンパクション境界メッセージは、同じストリームへ送られる。応答のないメッセージなので、flush はしない
+    // A compaction boundary message is sent to the same stream. It has no response, so flush() is not called
     impl->send_compaction_boundary(7U, 123U);
     ASSERT_EQ(captured->submitted_.size(), 2U);
     std::string const boundary_payload(captured->submitted_[1].begin(), captured->submitted_[1].end());
@@ -327,7 +327,7 @@ TEST_F(rdma_establish_session_test, ready_establishes_session_with_log_channels)
     EXPECT_EQ(boundary->blob_id_boundary(), 123U);
     EXPECT_EQ(captured->flush_count_, 1U);
 
-    // 送信を無効にした後は、ストリームに触れない
+    // After the send is disabled, the stream is not touched
     impl->disable_compaction_boundary_send();
     impl->send_compaction_boundary(8U, 456U);
     EXPECT_EQ(captured->submitted_.size(), 2U);

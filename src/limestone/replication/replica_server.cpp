@@ -59,8 +59,8 @@ void replica_server::initialize(const boost::filesystem::path& location, limesto
     conf.set_data_location(std::filesystem::path(location.native()));
     datastore_ = std::make_unique<limestone::api::datastore>(conf);
     datastore_->get_impl()->set_replica_role();
-    // レプリカの起動処理。master からの接続の受け付け (start_listener()、establish_rdma_session()) は、
-    // この完了の後に始まる
+    // The startup processing of the replica. The acceptance of the connection from the master
+    // (start_listener(), establish_rdma_session()) begins after this completes
     datastore_->start_as_replica();
 
     handler_factories_[message_type_id::SESSION_BEGIN] = [this](replication_message_io& io) {
@@ -652,8 +652,8 @@ void replica_server::handle_rdma_control_event(rdma_data_event const& event) {
             // master-side flush() implies the epoch has been persisted here. No
             // response message is sent.
             datastore_->persist_and_propagate_epoch_id(group_commit->epoch_number());
-            // 受信 epoch は、epoch ファイルへの書き込みの後に進める。レプリカのローテーションは、この epoch までの
-            // セッションがすべて永続化されていることを前提にする
+            // The received epoch is advanced after the write to the epoch file. A rotation on the replica
+            // assumes that every session up to this epoch has been persisted
             datastore_->get_impl()->set_received_epoch(group_commit->epoch_number());
         } catch (std::exception const& e) {
             LOG_LP(FATAL) << "Failed to process the RDMA control frame: " << e.what();

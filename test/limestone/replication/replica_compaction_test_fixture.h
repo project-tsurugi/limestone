@@ -49,8 +49,9 @@ using limestone::internal::compaction_settings;
 using limestone::internal::compaction_catalog;
 
 /**
- * レプリカでのローテーションとコンパクションのテスト。master からの受信は、ネットワークを使わずに、受信の
- * ハンドラと同じ呼び出し (セッションの開始と終了、GROUP_COMMIT の epoch の永続化と受信 epoch の更新) で模擬する。
+ * The fixture of the tests of the rotation and the compaction on the replica. The reception from the master is
+ * imitated, without the network, by the calls the receive handlers make (the begin and the end of a session, and
+ * the persistence of the epoch of GROUP_COMMIT followed by the update of the received epoch).
  */
 class replica_compaction_base_test : public ::testing::Test {
 public:
@@ -58,7 +59,7 @@ public:
 
     const char* location;
 
-    // 「実行されない」ことを確かめるときに待つ時間。ワーカースレッドのループの周期 (1 秒) より長くする
+    // The time to wait when checking that nothing runs. Longer than the period of the loop of the worker (1 second)
     static constexpr std::chrono::milliseconds quiet_period{1500};
 
     void SetUp() override {
@@ -71,7 +72,8 @@ public:
         boost::filesystem::remove_all(location);
     }
 
-    // 閾値を 1 バイトにした設定。エントリを 1 つ書けば、WAL の量が閾値を超える。測定の間隔は短くする
+    // The settings with the threshold of one byte: writing one entry makes the amount of the WAL exceed it. The
+    // measurement interval is short
     static compaction_settings eager_settings() {
         compaction_settings settings{};
         settings.threshold_bytes = 1;
@@ -79,7 +81,7 @@ public:
         return settings;
     }
 
-    // レプリカの datastore を作る。起動処理はまだ行わない
+    // Creates the datastore of a replica. The startup processing is not performed yet
     void create_replica(const compaction_settings& settings) {
         limestone::api::configuration conf{};
         conf.set_data_location(location);
@@ -98,7 +100,7 @@ public:
         datastore_ = nullptr;
     }
 
-    // master から 1 セッション分のログを受け取ったことにする
+    // Imitates the reception of the logs of one session from the master
     static void receive_session(log_channel& channel, epoch_id_type epoch, const std::string& key,
                                 const std::string& value) {
         channel.get_impl()->begin_session_at(epoch);
@@ -106,13 +108,14 @@ public:
         channel.get_impl()->end_session_at(epoch);
     }
 
-    // master から GROUP_COMMIT を受け取ったことにする
+    // Imitates the reception of GROUP_COMMIT from the master
     void receive_group_commit(epoch_id_type epoch) {
         datastore_->persist_and_propagate_epoch_id(epoch);
         datastore_->get_impl()->set_received_epoch(epoch);
     }
 
-    // コミット済みのコンパクションの世代 (datastore が保持している、コンパクション済み WAL ファイルの名前から求める)
+    // The generation of the committed compaction (taken from the name of the compacted WAL file that the
+    // datastore holds)
     [[nodiscard]] std::uint64_t generation() const {
         const std::optional<std::string> name = datastore_->get_impl()->get_current_compacted_file_name();
         if (! name.has_value()) {
@@ -138,7 +141,7 @@ public:
         return generation() >= expected;
     }
 
-    // ログディレクトリにある、ローテーション済みの WAL ファイルの名前
+    // The names of the rotated WAL files in the log directory
     [[nodiscard]] std::set<std::string> rotated_wal_files() const {
         std::set<std::string> result{};
         for (const boost::filesystem::directory_entry& entry :
@@ -153,7 +156,7 @@ public:
         return result;
     }
 
-    // master として起動し直して、snapshot が返すエントリ (キーと値) をすべて読む
+    // Restarts as a master, and reads all the entries (keys and values) the snapshot returns
     [[nodiscard]] std::vector<std::tuple<std::string, std::string>> restart_as_master_and_read() {
         limestone::api::configuration conf{};
         conf.set_data_location(location);

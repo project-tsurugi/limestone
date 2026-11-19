@@ -49,7 +49,7 @@ namespace limestone::testing {
 
 namespace {
 
-// 指定した名前のファイルの削除だけを失敗させる file_operations
+// file_operations that fails only the removal of the file with the given name
 class remove_failing_file_operations : public limestone::internal::real_file_operations {
 public:
     void remove(const boost::filesystem::path& path, boost::system::error_code& ec) override {
@@ -82,14 +82,14 @@ using limestone::internal::compaction_settings;
 using limestone::internal::compaction_catalog;
 
 /**
- * 常時コンパクションのテスト。オンラインコンパクションのワーカースレッドが、WAL の量が閾値を超えたときに
- * ローテーションとコンパクションを実行することを、カタログの世代の変化で確かめる。
+ * Tests of the auto compaction. They check, by the change of the generation of the catalog, that the online
+ * compaction worker runs a rotation and a compaction when the amount of the WAL exceeds the threshold.
  */
 class auto_compaction_test : public ::testing::Test {
 public:
     static constexpr const char* location = "/tmp/auto_compaction_test";
 
-    // 「実行されない」ことを確かめるときに待つ時間。ワーカースレッドのループの周期 (1 秒) より長くする
+    // The time to wait when checking that nothing runs. Longer than the period of the loop of the worker (1 second)
     static constexpr std::chrono::milliseconds quiet_period{1500};
 
     void SetUp() override {
@@ -103,7 +103,7 @@ public:
         boost::filesystem::remove_all(location);
     }
 
-    // datastore を起動する。ワーカースレッドはまだ起動しない
+    // Starts the datastore. The worker thread is not started yet
     void start_datastore(const compaction_settings& settings) {
         limestone::api::configuration conf{};
         conf.set_data_location(location);
@@ -113,12 +113,13 @@ public:
         datastore_->ready();
     }
 
-    // snapshot を取得して破棄し、ワーカースレッドを起動する
+    // Creates a snapshot and destroys it, which starts the worker thread
     void start_worker() {
         std::unique_ptr<limestone::api::snapshot> snapshot = datastore_->get_snapshot();
     }
 
-    // 閾値を 1 バイトにした設定。エントリを 1 つ書けば、WAL の量が閾値を超える。測定の間隔は短くする
+    // The settings with the threshold of one byte: writing one entry makes the amount of the WAL exceed it. The
+    // measurement interval is short
     static compaction_settings eager_settings() {
         compaction_settings settings{};
         settings.threshold_bytes = 1;
@@ -126,14 +127,14 @@ public:
         return settings;
     }
 
-    // epoch を 1 つ進める。ローテーションは、境界 epoch までの永続化の完了を待つ。実際の運用では上位が epoch を
-    // 進め続けるので、テストでも待つ間は進め続ける
+    // Advances the epoch by one. A rotation waits for the persistence up to the boundary epoch to complete. In
+    // production the upper layer keeps advancing the epoch, so the tests also keep advancing it while they wait
     void advance_epoch() {
         ++epoch_;
         datastore_->switch_epoch(epoch_);
     }
 
-    // 現在の epoch でエントリを 1 つ書き、epoch を進める
+    // Writes one entry at the current epoch, and advances the epoch
     void write_entry(const std::string& key, const std::string& value) {
         lc0_->begin_session();
         lc0_->add_entry(1, key, value, {epoch_, 0});
@@ -141,7 +142,7 @@ public:
         advance_epoch();
     }
 
-    // epoch を進めながら、指定の時間だけ待つ
+    // Waits for the given duration, advancing the epoch
     void advance_epochs_for(std::chrono::milliseconds duration) {
         const std::chrono::steady_clock::time_point deadline = std::chrono::steady_clock::now() + duration;
         while (std::chrono::steady_clock::now() < deadline) {
@@ -150,9 +151,9 @@ public:
         }
     }
 
-    // コミット済みのコンパクションの世代。datastore が保持している、コンパクション済み WAL ファイルの名前から
-    // 求める。カタログファイルは読まない (ワーカースレッドが書き換えている最中のファイルを読むと、壊れていると
-    // 判断してバックアップから復元してしまう)
+    // The generation of the committed compaction, taken from the name of the compacted WAL file that the
+    // datastore holds. The catalog file is not read (reading it while the worker is rewriting it would take it as
+    // broken and restore it from its backup)
     [[nodiscard]] std::uint64_t catalog_generation() const {
         const std::optional<std::string> name = datastore_->get_impl()->get_current_compacted_file_name();
         if (! name.has_value()) {
@@ -167,7 +168,8 @@ public:
         return 0;
     }
 
-    // epoch を進めながら、カタログの世代が expected 以上になるまで待つ。timeout までにならなければ false を返す
+    // Waits, advancing the epoch, until the generation of the catalog reaches expected or more. Returns false if
+    // it does not by the timeout
     [[nodiscard]] bool wait_for_generation(std::uint64_t expected, std::chrono::milliseconds timeout) {
         const std::chrono::steady_clock::time_point deadline = std::chrono::steady_clock::now() + timeout;
         while (std::chrono::steady_clock::now() < deadline) {
@@ -180,7 +182,7 @@ public:
         return catalog_generation() >= expected;
     }
 
-    // ログディレクトリにある、ローテーション済みの WAL ファイルの名前
+    // The names of the rotated WAL files in the log directory
     [[nodiscard]] static std::set<std::string> rotated_wal_files() {
         std::set<std::string> result{};
         for (const boost::filesystem::directory_entry& entry :
@@ -195,7 +197,7 @@ public:
         return result;
     }
 
-    // epoch を進めながら、ローテーション済みの WAL ファイルが expected と一致するまで待つ
+    // Waits, advancing the epoch, until the rotated WAL files are equal to expected
     [[nodiscard]] bool wait_for_rotated_wal_files(const std::set<std::string>& expected,
                                                   std::chrono::milliseconds timeout) {
         const std::chrono::steady_clock::time_point deadline = std::chrono::steady_clock::now() + timeout;
@@ -209,7 +211,7 @@ public:
         return rotated_wal_files() == expected;
     }
 
-    // ctrl ファイルの指示と同じコンパクションを、ワーカースレッドを通さずに実行する
+    // Runs the same compaction as the request by the ctrl file, without going through the worker thread
     void run_requested_compaction() {
         std::future<void> future = std::async(std::launch::async, [this]() { datastore_->compact_with_online(); });
         while (future.wait_for(std::chrono::milliseconds(20)) != std::future_status::ready) {
@@ -218,7 +220,7 @@ public:
         future.get();
     }
 
-    // files_ (バックアップが列挙するファイル) に、ローテーション済みの WAL ファイルがいくつあるか
+    // The number of the rotated WAL files in files_ (the files a backup enumerates)
     [[nodiscard]] std::size_t rotated_wal_files_in_backup_targets() const {
         std::size_t count = 0;
         for (const boost::filesystem::path& path : datastore_->files()) {
@@ -232,7 +234,7 @@ public:
         return count;
     }
 
-    // snapshot が返すエントリ (キーと値) をすべて読む
+    // Reads all the entries (keys and values) the snapshot returns
     [[nodiscard]] std::vector<std::tuple<std::string, std::string>> read_all_entries() {
         std::vector<std::tuple<std::string, std::string>> result{};
         std::unique_ptr<limestone::api::snapshot> snapshot = datastore_->get_snapshot();
@@ -252,7 +254,7 @@ public:
     epoch_id_type epoch_{0};
 };
 
-// WAL の量が閾値を超えると、常時コンパクションが実行される
+// The auto compaction runs when the amount of the WAL exceeds the threshold
 TEST_F(auto_compaction_test, runs_when_threshold_is_exceeded) {
     start_datastore(eager_settings());
     advance_epoch();
@@ -264,7 +266,7 @@ TEST_F(auto_compaction_test, runs_when_threshold_is_exceeded) {
     EXPECT_TRUE(wait_for_generation(1, std::chrono::seconds(10)));
 }
 
-// 閾値が 0 (既定) のときは、常時コンパクションは実行されない
+// The auto compaction does not run when the threshold is 0 (the default)
 TEST_F(auto_compaction_test, does_not_run_with_zero_threshold) {
     compaction_settings settings{};
     settings.measurement_interval = std::chrono::milliseconds(50);
@@ -279,7 +281,7 @@ TEST_F(auto_compaction_test, does_not_run_with_zero_threshold) {
     EXPECT_EQ(catalog_generation(), 0U);
 }
 
-// WAL の量が閾値以下のときは、常時コンパクションは実行されない
+// The auto compaction does not run when the amount of the WAL is at or below the threshold
 TEST_F(auto_compaction_test, does_not_run_below_threshold) {
     compaction_settings settings = eager_settings();
     settings.threshold_bytes = std::uint64_t{1024} * 1024;
@@ -293,7 +295,7 @@ TEST_F(auto_compaction_test, does_not_run_below_threshold) {
     EXPECT_EQ(catalog_generation(), 0U);
 }
 
-// WAL ファイルが 1 つもない状態では、何も実行されず、誤りにもならない
+// With no WAL file at all, nothing runs and no error occurs
 TEST_F(auto_compaction_test, does_nothing_without_wal_files) {
     start_datastore(eager_settings());
     advance_epoch();
@@ -305,10 +307,10 @@ TEST_F(auto_compaction_test, does_nothing_without_wal_files) {
     datastore_->shutdown();
 }
 
-// ローテーションの境界 epoch が 0 の間は実行されない。epoch が進むと実行される
+// It does not run while the boundary epoch of the rotation is 0. It runs once the epoch advances
 TEST_F(auto_compaction_test, waits_while_boundary_epoch_is_zero) {
     start_datastore(eager_settings());
-    // 閾値を超える量の、WAL ファイルの名前を持つファイルを置く。中身は読まれない
+    // Place a file that has the name of a WAL file and is larger than the threshold. Its content is not read
     {
         boost::filesystem::ofstream stream(boost::filesystem::path(location) / "pwal_0009.1700000000000.0",
                                            std::ios::binary);
@@ -327,26 +329,26 @@ TEST_F(auto_compaction_test, waits_while_boundary_epoch_is_zero) {
     EXPECT_TRUE(wait_for_generation(1, std::chrono::seconds(10)));
 }
 
-// 測定は、測定の間隔より短い間隔では行われない
+// A measurement is not taken at an interval shorter than the measurement interval
 TEST_F(auto_compaction_test, measures_at_the_measurement_interval) {
     compaction_settings settings = eager_settings();
     settings.measurement_interval = std::chrono::seconds(4);
     start_datastore(settings);
     advance_epoch();
 
-    // 最初の測定は、起動の直後に行われる。この時点では WAL がない
+    // The first measurement is taken right after the start. There is no WAL at this point
     start_worker();
     std::this_thread::sleep_for(std::chrono::milliseconds(500));
     write_entry("k1", "v1");
 
-    // 次の測定までは、閾値を超えていても実行されない
+    // Until the next measurement, it does not run even though the threshold is exceeded
     advance_epochs_for(quiet_period);
     EXPECT_EQ(catalog_generation(), 0U);
 
     EXPECT_TRUE(wait_for_generation(1, std::chrono::seconds(10)));
 }
 
-// バックアップ中は、常時コンパクションは実行されない。バックアップが終わると実行される
+// The auto compaction does not run during a backup. It runs after the backup ends
 TEST_F(auto_compaction_test, does_not_run_during_backup) {
     start_datastore(eager_settings());
     advance_epoch();
@@ -361,7 +363,7 @@ TEST_F(auto_compaction_test, does_not_run_during_backup) {
     EXPECT_TRUE(wait_for_generation(1, std::chrono::seconds(10)));
 }
 
-// ctrl ファイルの指示と閾値の超過が重なっても、順に処理される
+// A request by the ctrl file and an excess over the threshold at the same time are handled one after another
 TEST_F(auto_compaction_test, ctrl_file_request_and_threshold_are_handled_in_order) {
     start_datastore(eager_settings());
     advance_epoch();
@@ -376,13 +378,13 @@ TEST_F(auto_compaction_test, ctrl_file_request_and_threshold_are_handled_in_orde
     EXPECT_TRUE(wait_for_generation(1, std::chrono::seconds(10)));
     EXPECT_FALSE(boost::filesystem::exists(start_file));
 
-    // 続けて書いた分も、次の測定でコンパクションされる
+    // What is written next is also compacted at the next measurement
     write_entry("k2", "v2");
     EXPECT_TRUE(wait_for_generation(2, std::chrono::seconds(10)));
     datastore_->shutdown();
 }
 
-// 常時コンパクションの実行中に shutdown() しても、正常に終了する
+// shutdown() right after the worker starts with the auto compaction pending completes normally
 TEST_F(auto_compaction_test, shutdown_while_worker_is_running) {
     start_datastore(eager_settings());
     advance_epoch();
@@ -392,9 +394,9 @@ TEST_F(auto_compaction_test, shutdown_while_worker_is_running) {
     datastore_->shutdown();
 }
 
-// 形式バージョンの移行に伴うローテーションでリネームした WAL ファイルは、その起動の中で、バックアップの対象と
-// 常時コンパクションの入力になる。入力にならないと、WAL の量が閾値を下回らず、測定のたびにコンパクションが
-// 繰り返される
+// The WAL files renamed by the rotation for the migration of the format version become, within that run, the
+// targets of a backup and the input of the auto compaction. If they did not become the input, the amount of the
+// WAL would never fall below the threshold and a compaction would be repeated at every measurement
 TEST_F(auto_compaction_test, wal_files_rotated_for_format_version_migration_are_compacted) {
     start_datastore(compaction_settings{});
     advance_epoch();
@@ -414,19 +416,21 @@ TEST_F(auto_compaction_test, wal_files_rotated_for_format_version_migration_are_
 
     start_worker();
     ASSERT_TRUE(wait_for_generation(1, std::chrono::seconds(10)));
-    // リネームしたファイルは、入力になった後、削除される。残っていれば、次の測定でもう一度実行される
+    // The renamed file is removed after it becomes the input. If it were left, a compaction would run again at
+    // the next measurement
     advance_epochs_for(quiet_period);
     EXPECT_EQ(catalog_generation(), 1U);
     EXPECT_TRUE(rotated_wal_files().empty());
     datastore_->shutdown();
 }
 
-// 終了する。コンパクションは行われない
+// shutdown() while the rotation of the auto compaction is waiting gives up the rotation and completes normally.
+// No compaction is performed
 TEST_F(auto_compaction_test, shutdown_while_rotation_is_waiting) {
     start_datastore(eager_settings());
     advance_epoch();
     write_entry("k1", "v1");
-    // セッションを終了しないので、ローテーションは永続化の完了を待ち続ける
+    // The session is not ended, so the rotation keeps waiting for the persistence to complete
     lc0_->begin_session();
     lc0_->add_entry(1, "k2", "v2", {epoch_, 0});
     std::atomic<bool> rotation_started{false};
@@ -446,7 +450,8 @@ TEST_F(auto_compaction_test, shutdown_while_rotation_is_waiting) {
     EXPECT_TRUE(rotated_wal_files().empty());
 }
 
-// 常時コンパクションは、既定では detached の WAL ファイルを削除する。削除したファイルは、バックアップの対象から外れる
+// The auto compaction removes the detached WAL files by default. The removed files are no longer targets of a
+// backup
 TEST_F(auto_compaction_test, removes_detached_wal_files_by_default) {
     start_datastore(eager_settings());
     advance_epoch();
@@ -460,7 +465,7 @@ TEST_F(auto_compaction_test, removes_detached_wal_files_by_default) {
     EXPECT_EQ(rotated_wal_files_in_backup_targets(), 0U);
 }
 
-// 削除の設定を無効にすると、detached の WAL ファイルは残る
+// When the setting of the removal is disabled, the detached WAL files remain
 TEST_F(auto_compaction_test, keeps_detached_wal_files_when_disabled) {
     compaction_settings settings = eager_settings();
     settings.delete_detached = false;
@@ -476,8 +481,8 @@ TEST_F(auto_compaction_test, keeps_detached_wal_files_when_disabled) {
     EXPECT_EQ(rotated_wal_files_in_backup_targets(), 1U);
 }
 
-// ctrl ファイルの指示によるコンパクションは、detached の WAL ファイルを削除しない。残ったファイルは、次の
-// 常時コンパクションが削除する
+// A compaction requested by the ctrl file does not remove the detached WAL files. The next auto compaction
+// removes the files left
 TEST_F(auto_compaction_test, removes_wal_files_detached_by_earlier_compactions) {
     start_datastore(eager_settings());
     advance_epoch();
@@ -495,13 +500,13 @@ TEST_F(auto_compaction_test, removes_wal_files_detached_by_earlier_compactions) 
     datastore_->shutdown();
 }
 
-// コンパクションの実行中に始めたバックアップは、コンパクションの完了を待つ。バックアップの対象には、
-// コンパクションが削除したファイルが入らない
+// A backup begun while a compaction is running waits for the compaction to complete. The targets of the backup
+// do not include the files the compaction removed
 TEST_F(auto_compaction_test, backup_waits_for_running_compaction) {
     start_datastore(eager_settings());
     advance_epoch();
     write_entry("k1", "v1");
-    // コンパクションを、カタログの更新の後、削除の前で止める
+    // Stop the compaction after the update of the catalog and before the removal
     std::promise<void> reached{};
     std::promise<void> release{};
     std::shared_future<void> released = release.get_future().share();
@@ -542,7 +547,8 @@ TEST_F(auto_compaction_test, backup_waits_for_running_compaction) {
     datastore_->shutdown();
 }
 
-// 削除に失敗したファイルがあっても、残りは削除される。失敗したファイルは、次の常時コンパクションが削除する
+// Even if the removal of a file fails, the rest are removed. The next auto compaction removes the file that
+// failed
 TEST_F(auto_compaction_test, continues_after_a_removal_failure) {
     remove_failing_file_operations ops{};
     limestone::api::datastore_impl::set_file_operations_for_test(&ops);
@@ -569,8 +575,8 @@ TEST_F(auto_compaction_test, continues_after_a_removal_failure) {
     datastore_->shutdown();
 }
 
-// detached の WAL ファイルを削除した後の永続化データで、次のコンパクション、再起動、tglogutil の inspect が
-// 正常に動く
+// With the persistent data after the detached WAL files are removed, the next compaction, a restart, and
+// inspect of tglogutil work normally
 TEST_F(auto_compaction_test, data_is_usable_after_removal) {
     start_datastore(eager_settings());
     advance_epoch();
@@ -579,14 +585,14 @@ TEST_F(auto_compaction_test, data_is_usable_after_removal) {
     ASSERT_TRUE(wait_for_generation(1, std::chrono::seconds(10)));
     ASSERT_TRUE(wait_for_rotated_wal_files({}, std::chrono::seconds(10)));
 
-    // 次のコンパクション。カタログの detached の一覧には、削除したファイルの名前が残っている
+    // The next compaction. The detached list of the catalog still has the names of the removed files
     write_entry("k2", "v2");
     ASSERT_TRUE(wait_for_generation(2, std::chrono::seconds(10)));
     ASSERT_TRUE(wait_for_rotated_wal_files({}, std::chrono::seconds(10)));
     datastore_->shutdown();
     datastore_ = nullptr;
 
-    // tglogutil の inspect
+    // inspect of tglogutil
     {
         const std::string command = std::string("../src/tglogutil inspect ") + location + " 2>&1";
         FILE* pipe = popen(command.c_str(), "r");
@@ -600,7 +606,7 @@ TEST_F(auto_compaction_test, data_is_usable_after_removal) {
         EXPECT_EQ(pclose(pipe), 0) << output;
     }
 
-    // 再起動
+    // Restart
     compaction_settings settings{};
     start_datastore(settings);
     const std::vector<std::tuple<std::string, std::string>> expected{{"k1", "v1"}, {"k2", "v2"}};

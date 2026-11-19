@@ -104,14 +104,14 @@ std::uint64_t measure_uncompacted_wal_bytes(const boost::filesystem::path& locat
     const boost::filesystem::directory_iterator end{};
     while (! error && it != end) {
         const std::string filename = it->path().filename().string();
-        // ローテーション済みの WAL ファイルは、ローテーション前の名前に接尾辞が付いた名前を持つ。同じく "pwal" で
-        // 始まるコンパクションの出力 (コンパクション済み WAL ファイル、キャリーファイル) とロケータファイルを除く
+        // A rotated WAL file has the unrotated name followed by a suffix. Exclude the outputs of a compaction (the
+        // compacted WAL file and the carry file) and the locator file, whose names also begin with "pwal"
         const bool is_rotated_wal = filename.rfind("pwal", 0) == 0 && ! is_unrotated_pwal_name(filename)
                                     && ! compaction_catalog::is_compaction_output_filename(filename)
                                     && ! locator_format::is_locator_file_name(filename);
         if (is_unrotated_pwal_name(filename)
             || (is_rotated_wal && detached_pwals.find(filename) == detached_pwals.end())) {
-            // 走査とこの時点の間に、ローテーションや削除で消えたファイルは数えない
+            // A file that a rotation or a removal took away between the scan and this point is not counted
             boost::system::error_code size_error;
             const boost::uintmax_t size = boost::filesystem::file_size(it->path(), size_error);
             if (! size_error) {

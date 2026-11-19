@@ -156,18 +156,17 @@ public:
     void set_file_operations(file_operations& ops) noexcept;
 
     /**
-     * @brief detach_wal_files() が行った 1 つのリネーム。
+     * @brief A rename performed by detach_wal_files().
      */
     struct renamed_wal_file {
-        boost::filesystem::path from;  ///< リネームの前のパス
-        boost::filesystem::path to;    ///< リネームの後のパス
+        boost::filesystem::path from;  ///< the path before the rename
+        boost::filesystem::path to;    ///< the path after the rename
     };
 
     /**
-     * @brief ログディレクトリにある、ローテーション前の名前の WAL ファイルを、すべてローテーション済みの名前に
-     *        リネームする。
-     * @param skip_empty_files true のとき、空のファイルはリネームしない
-     * @return 行ったリネーム
+     * @brief Renames all the WAL files with unrotated names in the log directory to rotated names.
+     * @param skip_empty_files if true, empty files are not renamed
+     * @return the renames performed
      */
     std::vector<renamed_wal_file> detach_wal_files(bool skip_empty_files = true);
 

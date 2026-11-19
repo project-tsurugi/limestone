@@ -24,7 +24,7 @@ public:
     replica_compaction_test() : replica_compaction_base_test("/tmp/replica_compaction_test") {}
 };
 
-// レプリカの起動処理は、ワーカースレッドを起動する。ctrl ディレクトリは作らない
+// The startup processing of the replica starts the worker thread. It does not create the ctrl directory
 TEST_F(replica_compaction_test, startup_starts_the_worker) {
     start_replica(compaction_settings{});
 
@@ -34,8 +34,9 @@ TEST_F(replica_compaction_test, startup_starts_the_worker) {
     stop();
 }
 
-// 受信 epoch が 0 の間は、WAL の量が閾値を超えていても実行されない。GROUP_COMMIT を受け取ると、受信 epoch を
-// 境界にしてローテーションとコンパクションが行われる。境界 epoch を超えるエントリは、キャリーファイルへ送られる
+// While the received epoch is 0, nothing runs even though the amount of the WAL exceeds the threshold. Once a
+// GROUP_COMMIT is received, a rotation and a compaction run with the received epoch as the boundary. The entries
+// beyond the boundary epoch are sent to the carry file
 TEST_F(replica_compaction_test, rotates_and_compacts_at_received_epoch) {
     start_replica(eager_settings());
     log_channel& channel = datastore_->create_channel();
@@ -54,14 +55,15 @@ TEST_F(replica_compaction_test, rotates_and_compacts_at_received_epoch) {
     EXPECT_EQ(datastore_->epoch_id_switched(), 0U);
     EXPECT_EQ(datastore_->epoch_id_informed(), 0U);
 
-    // epoch 3 のエントリは、GROUP_COMMIT(3) を受け取った後の起動で読める
+    // The entry of epoch 3 can be read at a startup after GROUP_COMMIT(3) is received
     receive_group_commit(3);
     stop();
     const std::vector<std::tuple<std::string, std::string>> expected{{"k1", "v1"}, {"k2", "v2"}, {"k3", "v3"}};
     EXPECT_EQ(restart_as_master_and_read(), expected);
 }
 
-// GROUP_COMMIT を受け取っていない epoch のエントリは、コンパクションの後も、起動時に無効として扱われる
+// The entries of an epoch whose GROUP_COMMIT has not been received are treated as invalid at startup, even
+// after a compaction
 TEST_F(replica_compaction_test, entries_beyond_received_epoch_stay_nondurable) {
     start_replica(eager_settings());
     log_channel& channel = datastore_->create_channel();
@@ -76,7 +78,8 @@ TEST_F(replica_compaction_test, entries_beyond_received_epoch_stay_nondurable) {
     EXPECT_EQ(restart_as_master_and_read(), expected);
 }
 
-// 起動時の受信 epoch (durable epoch) を境界にして、起動の直後からコンパクションが行われる
+// A compaction runs right after the startup, with the received epoch at startup (the durable epoch) as the
+// boundary
 TEST_F(replica_compaction_test, compacts_after_restart_with_initial_received_epoch) {
     start_replica(compaction_settings{});
     log_channel& channel = datastore_->create_channel();
@@ -93,7 +96,7 @@ TEST_F(replica_compaction_test, compacts_after_restart_with_initial_received_epo
     EXPECT_EQ(restart_as_master_and_read(), expected);
 }
 
-// レプリカは ctrl/start_compaction を無視する。ファイルは残り、コンパクションは実行されない
+// The replica ignores ctrl/start_compaction. The file remains and no compaction runs
 TEST_F(replica_compaction_test, ignores_ctrl_file) {
     compaction_settings settings{};
     settings.measurement_interval = std::chrono::milliseconds(50);
@@ -114,10 +117,10 @@ TEST_F(replica_compaction_test, ignores_ctrl_file) {
     stop();
 }
 
-// ローテーションと並行して登録され、セッションを開始したログチャネルのファイルは、その場ではリネームされない。
-// リネームはチャネルに委ねられ、ローテーションはセッションの終了を待つ
+// The file of a log channel that is registered and begins a session concurrently with a rotation is not renamed
+// on the spot. The rename is delegated to the channel, and the rotation waits for the session to end
 TEST_F(replica_compaction_test, channel_registered_during_rotation_is_not_renamed_on_the_spot) {
-    // 前回の実行で残った、ローテーション前の WAL ファイルを作る
+    // Create an unrotated WAL file left by the previous run
     start_replica(compaction_settings{});
     {
         log_channel& channel = datastore_->create_channel();
@@ -126,8 +129,8 @@ TEST_F(replica_compaction_test, channel_registered_during_rotation_is_not_rename
     }
     stop();
 
-    // ローテーションが始まった時点で、チャネルを登録してセッションを開始する。このチャネルは、残っていた
-    // ファイルと同じ名前のファイルに追記する
+    // When the rotation starts, register a channel and begin a session. This channel appends to the file with
+    // the same name as the file left
     create_replica(eager_settings());
     std::atomic<log_channel*> late_channel{nullptr};
     datastore_->on_rotate_log_files_callback = [this, &late_channel]() {
@@ -147,7 +150,7 @@ TEST_F(replica_compaction_test, channel_registered_during_rotation_is_not_rename
     }
     ASSERT_NE(late_channel.load(), nullptr);
 
-    // セッションが続いている間は、ファイルはリネームされず、ローテーションは完了しない
+    // While the session continues, the file is not renamed and the rotation does not complete
     std::this_thread::sleep_for(std::chrono::milliseconds(500));
     EXPECT_TRUE(rotated_wal_files().empty());
     EXPECT_EQ(generation(), 0U);
@@ -161,13 +164,13 @@ TEST_F(replica_compaction_test, channel_registered_during_rotation_is_not_rename
     EXPECT_EQ(restart_as_master_and_read(), expected);
 }
 
-// ローテーションがセッションの終了を待っている間に shutdown() すると、ローテーションは打ち切られ、正常に終了する。
-// コンパクションは行われず、永続化データはそのまま読める
+// shutdown() while the rotation is waiting for a session to end gives up the rotation and completes normally.
+// No compaction is performed, and the persistent data can be read as it is
 TEST_F(replica_compaction_test, shutdown_while_rotation_is_waiting) {
     start_replica(eager_settings());
     log_channel& channel = datastore_->create_channel();
     receive_session(channel, 1, "k1", "v1");
-    // セッションを終了しないので、ローテーションはこのチャネルのリネームを待ち続ける
+    // The session is not ended, so the rotation keeps waiting for the rename by this channel
     channel.get_impl()->begin_session_at(2);
     channel.add_entry(1, "k2", "v2", {2, 0});
     std::atomic<bool> rotation_started{false};
@@ -190,8 +193,8 @@ TEST_F(replica_compaction_test, shutdown_while_rotation_is_waiting) {
     EXPECT_EQ(restart_as_master_and_read(), expected);
 }
 
-// 形式バージョンの移行に伴うローテーションが要るときは、起動処理が、残っている WAL ファイルをローテーションして
-// から、ワーカースレッドを起動する
+// When the migration of the format version requires a rotation, the startup processing rotates the WAL files
+// left and then starts the worker thread
 TEST_F(replica_compaction_test, startup_rotates_wal_files_for_format_version_migration) {
     start_replica(compaction_settings{});
     {
@@ -214,8 +217,9 @@ TEST_F(replica_compaction_test, startup_rotates_wal_files_for_format_version_mig
     EXPECT_EQ(restart_as_master_and_read(), expected);
 }
 
-// 形式バージョンの移行に伴うローテーションでリネームした WAL ファイルは、その起動の中で、常時コンパクションの
-// 入力になる。入力にならないと、WAL の量が閾値を下回らず、測定のたびにコンパクションが繰り返される
+// The WAL files renamed by the rotation for the migration of the format version become, within that run, the
+// input of the auto compaction. If they did not, the amount of the WAL would never fall below the threshold and
+// a compaction would be repeated at every measurement
 TEST_F(replica_compaction_test, wal_files_rotated_for_format_version_migration_are_compacted) {
     start_replica(compaction_settings{});
     {
@@ -230,7 +234,8 @@ TEST_F(replica_compaction_test, wal_files_rotated_for_format_version_migration_a
     datastore_->start_as_replica();
 
     ASSERT_TRUE(wait_for_generation(1, std::chrono::seconds(10)));
-    // リネームしたファイルは、入力になった後、削除される。残っていれば、次の測定でもう一度実行される
+    // The renamed file is removed after it becomes the input. If it were left, a compaction would run again at
+    // the next measurement
     std::this_thread::sleep_for(quiet_period);
     EXPECT_EQ(generation(), 1U);
     EXPECT_TRUE(rotated_wal_files().empty());
@@ -239,11 +244,11 @@ TEST_F(replica_compaction_test, wal_files_rotated_for_format_version_migration_a
     EXPECT_EQ(restart_as_master_and_read(), expected);
 }
 
-// 常時コンパクションを行ったレプリカの永続化データから起動したとき、cursor が返すエントリの列が、常時
-// コンパクションを行わなかった場合と同一である
+// At a startup from the persistent data of a replica that ran the auto compaction, the sequence of the entries
+// the cursor returns is the same as when the auto compaction did not run
 TEST_F(replica_compaction_test, entries_are_the_same_with_and_without_auto_compaction) {
-    // 同じ受信の列を、指定の設定のレプリカに与えて、その永続化データから読めるエントリを返す。途中で
-    // コンパクションが 2 回行われるように、GROUP_COMMIT の後で待つ
+    // Gives the same sequence of receptions to a replica with the given settings, and returns the entries that
+    // can be read from its persistent data. It waits after each GROUP_COMMIT so that a compaction runs twice
     auto run = [this](const compaction_settings& settings, bool expect_compaction) {
         boost::filesystem::remove_all(location);
         boost::filesystem::create_directory(location);
@@ -276,7 +281,7 @@ TEST_F(replica_compaction_test, entries_are_the_same_with_and_without_auto_compa
     const std::vector<std::tuple<std::string, std::string>> with_compaction = run(eager_settings(), true);
     const std::vector<std::tuple<std::string, std::string>> without_compaction = run(compaction_settings{}, false);
 
-    // epoch 5 は GROUP_COMMIT を受け取っていないので、どちらでも読めない
+    // The GROUP_COMMIT of epoch 5 has not been received, so its entry cannot be read in either case
     const std::vector<std::tuple<std::string, std::string>> expected{
         {"a", "a2"}, {"b", "b4"}, {"c", "c3"}, {"d", "d4"}};
     EXPECT_EQ(with_compaction, expected);

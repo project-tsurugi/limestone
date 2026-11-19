@@ -60,13 +60,15 @@ public:
                 std::map<storage_id_type, write_version_type> clear_storage, std::shared_ptr<region_allocator> allocator);
 
     /**
-     * @param marker snapshot と共有する印。cursor の破棄まで保持される。空でもよい
+     * @brief Creates a cursor that reads the snapshot file, and wraps it in api::cursor.
+     * @param marker the marker shared with the snapshot. It is kept until the cursor is destroyed. May be empty
      */
     static std::unique_ptr<cursor> create_cursor(const boost::filesystem::path& snapshot_file,
                                                   const std::map<limestone::api::storage_id_type, limestone::api::write_version_type>& clear_storage,
                                                   std::shared_ptr<snapshot_use_marker> marker);
     /**
-     * @param marker snapshot と共有する印。cursor の破棄まで保持される。空でもよい
+     * @brief Creates a cursor that reads the snapshot file and the compacted file, and wraps it in api::cursor.
+     * @param marker the marker shared with the snapshot. It is kept until the cursor is destroyed. May be empty
      */
     static std::unique_ptr<cursor> create_cursor(const boost::filesystem::path& snapshot_file, const boost::filesystem::path& compacted_file,
                                                   const std::map<limestone::api::storage_id_type, limestone::api::write_version_type>& clear_storage,
@@ -74,7 +76,7 @@ public:
     /**
      * @brief Creates a cursor that reads the regions handed out by the region allocator, and wraps it in api::cursor.
      *        The arguments are the same as those of the constructor with the same arguments.
-     * @param marker snapshot と共有する印。cursor の破棄まで保持される。空でもよい
+     * @param marker the marker shared with the snapshot. It is kept until the cursor is destroyed. May be empty
      */
     static std::unique_ptr<cursor> create_cursor(const boost::filesystem::path& snapshot_file,
                                                  const std::optional<boost::filesystem::path>& compacted_file,

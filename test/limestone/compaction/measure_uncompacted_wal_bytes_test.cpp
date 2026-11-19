@@ -44,7 +44,7 @@ protected:
         boost::filesystem::remove_all(location);
     }
 
-    // 指定の大きさのファイルを作る
+    // Creates a file of the given size
     void create_file(const std::string& name, std::size_t size) const {
         boost::filesystem::ofstream stream(location / name, std::ios::binary);
         stream << std::string(size, 'x');
@@ -52,12 +52,12 @@ protected:
     }
 };
 
-// ファイルが 1 つもないときは 0 を返す
+// Returns 0 when there is no file
 TEST_F(measure_uncompacted_wal_bytes_test, empty_directory) {
     EXPECT_EQ(measure_uncompacted_wal_bytes(location, {}), 0U);
 }
 
-// ローテーション前の WAL ファイルと、ローテーション済みの WAL ファイルを数える
+// The unrotated WAL files and the rotated WAL files are counted
 TEST_F(measure_uncompacted_wal_bytes_test, counts_unrotated_and_rotated_wal_files) {
     create_file("pwal_0000", 10);
     create_file("pwal_0001", 20);
@@ -67,7 +67,7 @@ TEST_F(measure_uncompacted_wal_bytes_test, counts_unrotated_and_rotated_wal_file
     EXPECT_EQ(measure_uncompacted_wal_bytes(location, {}), 4330U);
 }
 
-// detached の一覧にあるローテーション済みの WAL ファイルは数えない
+// The rotated WAL files in the detached list are not counted
 TEST_F(measure_uncompacted_wal_bytes_test, excludes_detached_wal_files) {
     create_file("pwal_0000", 10);
     create_file("pwal_0000.1700000000000.1", 300);
@@ -77,7 +77,7 @@ TEST_F(measure_uncompacted_wal_bytes_test, excludes_detached_wal_files) {
     EXPECT_EQ(measure_uncompacted_wal_bytes(location, detached), 4010U);
 }
 
-// コンパクション済み WAL ファイル、キャリーファイル、ロケータファイル、WAL でないファイルは数えない
+// The compacted WAL file, the carry file, the locator file, and the files that are not WAL are not counted
 TEST_F(measure_uncompacted_wal_bytes_test, excludes_files_other_than_wal_files) {
     create_file("pwal_0000", 10);
     const std::string compacted_generation_0 = compaction_catalog::get_compacted_filename();
@@ -95,7 +95,7 @@ TEST_F(measure_uncompacted_wal_bytes_test, excludes_files_other_than_wal_files) 
     EXPECT_EQ(measure_uncompacted_wal_bytes(location, {}), 10U);
 }
 
-// ログディレクトリがないときは、例外を投げずに 0 を返す
+// Returns 0 without throwing when the log directory does not exist
 TEST_F(measure_uncompacted_wal_bytes_test, missing_directory) {
     EXPECT_EQ(measure_uncompacted_wal_bytes(location / "missing", {}), 0U);
 }

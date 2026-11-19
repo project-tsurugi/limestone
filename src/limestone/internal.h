@@ -161,18 +161,18 @@ std::set<std::string> assemble_snapshot_input_filenames(const std::unique_ptr<co
 std::set<std::string> assemble_snapshot_input_filenames(const std::unique_ptr<compaction_catalog>& compaction_catalog, const boost::filesystem::path& location);
 
 /**
- * @brief durable epoch を超えるスニペットを無効化する (レプリカの起動時の走査)。
+ * @brief Invalidates the snippets beyond the durable epoch (the scan at the startup of the replica).
  *
- * カタログに記録されたコンパクション済み WAL ファイルと detached の WAL ファイルを除く、ログディレクトリの
- * WAL ファイルとキャリーファイルを走査し、epoch ファイルから読んだ durable epoch を超えるスニペットの marker を
- * 書き換える。エントリは集めず、スナップショットファイルも作らない。
+ * Scans the WAL files and the carry file in the log directory, except the compacted WAL file and the detached WAL
+ * files recorded in the catalog, and rewrites the marker of each snippet beyond the durable epoch read from the
+ * epoch file. It does not collect the entries and does not create the snapshot file.
  *
- * @param compaction_catalog コンパクションカタログ
- * @param location ログディレクトリ
- * @param thread_num 走査のスレッド数
- * @return 走査の境界にした durable epoch。epoch ファイルに記録がなければ 0
- * @throws limestone_exception WAL ファイルの形式が不正なとき、epoch ファイルを読めないとき
- * @throws limestone_io_exception 入出力に失敗したとき
+ * @param compaction_catalog the compaction catalog
+ * @param location the log directory
+ * @param thread_num the number of threads of the scan
+ * @return the durable epoch used as the boundary of the scan, or 0 if the epoch file has no record
+ * @throws limestone_exception if a WAL file is malformed, or the epoch file cannot be read
+ * @throws limestone_io_exception if an I/O operation fails
  */
 epoch_id_type invalidate_nondurable_snippets(const std::unique_ptr<compaction_catalog>& compaction_catalog,
                                              const boost::filesystem::path& location, int thread_num);
