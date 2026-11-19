@@ -23,9 +23,9 @@ using limestone::api::blob_id_type;
  * レプリカのコンパクションでの BLOB ファイルの GC のテスト。GC の境界は、master から受け取ったコンパクションの
  * 境界 (master の境界 epoch E_m、BLOB の ID の境界 G_m) で決まる。
  */
-class replica_blob_gc_test : public replica_compaction_test_fixture {
+class replica_blob_gc_test : public replica_compaction_base_test {
 public:
-    replica_blob_gc_test() : replica_compaction_test_fixture("/tmp/replica_blob_gc_test") {}
+    replica_blob_gc_test() : replica_compaction_base_test("/tmp/replica_blob_gc_test") {}
 
     // master から複製された BLOB ファイルを作る
     [[nodiscard]] boost::filesystem::path create_blob_file(blob_id_type blob_id) const {
@@ -78,6 +78,8 @@ public:
     // GC が行われなかったことを確かめる。GC は別のスレッドで動くので、しばらく待ってから停止して確かめる
     void expect_no_blob_file_removed() {
         std::this_thread::sleep_for(std::chrono::milliseconds(500));
+        // GC が誤って始まっていれば、削除まで終わらせてから確かめる
+        datastore_->wait_for_blob_file_garbace_collector();
         stop();
         EXPECT_TRUE(boost::filesystem::exists(path1001_));
         EXPECT_TRUE(boost::filesystem::exists(path1002_));

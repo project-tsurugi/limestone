@@ -54,7 +54,7 @@ class remove_failing_file_operations : public limestone::internal::real_file_ope
 public:
     void remove(const boost::filesystem::path& path, boost::system::error_code& ec) override {
         {
-            std::lock_guard<std::mutex> lock(mutex_);
+            std::scoped_lock<std::mutex> lock(mutex_);
             if (path.filename().string() == failing_name_) {
                 ec = boost::system::errc::make_error_code(boost::system::errc::permission_denied);
                 return;
@@ -65,7 +65,7 @@ public:
 
     void fail_for(const std::string& name) {
         {
-            std::lock_guard<std::mutex> lock(mutex_);
+            std::scoped_lock<std::mutex> lock(mutex_);
             failing_name_ = name;
         }
     }
@@ -118,7 +118,7 @@ public:
         std::unique_ptr<limestone::api::snapshot> snapshot = datastore_->get_snapshot();
     }
 
-    // 1 バイトでも WAL があれば閾値を超える設定。測定の間隔は短くする
+    // 閾値を 1 バイトにした設定。エントリを 1 つ書けば、WAL の量が閾値を超える。測定の間隔は短くする
     static auto_compaction_settings eager_settings() {
         auto_compaction_settings settings{};
         settings.threshold_bytes = 1;
@@ -312,7 +312,7 @@ TEST_F(auto_compaction_test, waits_while_boundary_epoch_is_zero) {
     {
         boost::filesystem::ofstream stream(boost::filesystem::path(location) / "pwal_0009.1700000000000.0",
                                            std::ios::binary);
-        stream << "x";
+        stream << "the content is not read; it only has to be larger than the threshold";
     }
     ASSERT_EQ(datastore_->epoch_id_switched(), 0U);
 

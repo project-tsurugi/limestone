@@ -52,9 +52,9 @@ using limestone::internal::compaction_catalog;
  * レプリカでのローテーションとコンパクションのテスト。master からの受信は、ネットワークを使わずに、受信の
  * ハンドラと同じ呼び出し (セッションの開始と終了、GROUP_COMMIT の epoch の永続化と受信 epoch の更新) で模擬する。
  */
-class replica_compaction_test_fixture : public ::testing::Test {
+class replica_compaction_base_test : public ::testing::Test {
 public:
-    explicit replica_compaction_test_fixture(const char* location) : location(location) {}
+    explicit replica_compaction_base_test(const char* location) : location(location) {}
 
     const char* location;
 
@@ -71,7 +71,7 @@ public:
         boost::filesystem::remove_all(location);
     }
 
-    // 1 バイトでも WAL があれば閾値を超える設定。測定の間隔は短くする
+    // 閾値を 1 バイトにした設定。エントリを 1 つ書けば、WAL の量が閾値を超える。測定の間隔は短くする
     static auto_compaction_settings eager_settings() {
         auto_compaction_settings settings{};
         settings.threshold_bytes = 1;

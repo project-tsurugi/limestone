@@ -19,9 +19,9 @@
 
 namespace limestone::testing {
 
-class replica_compaction_test : public replica_compaction_test_fixture {
+class replica_compaction_test : public replica_compaction_base_test {
 public:
-    replica_compaction_test() : replica_compaction_test_fixture("/tmp/replica_compaction_test") {}
+    replica_compaction_test() : replica_compaction_base_test("/tmp/replica_compaction_test") {}
 };
 
 // レプリカの起動処理は、ワーカースレッドを起動する。ctrl ディレクトリは作らない
