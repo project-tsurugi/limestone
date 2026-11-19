@@ -43,7 +43,7 @@
 #include "log_entry/log_entry.h"
 #include "online_compaction.h"
 #include "compaction_catalog.h"
-#include "auto_compaction_config_loader.h"
+#include "compaction_config_loader.h"
 #include "compaction_options.h"
 #include "compaction_trigger.h"
 #include "compaction_worker_launcher.h"
@@ -190,8 +190,8 @@ datastore::datastore(configuration const& conf) : location_(conf.get_data_locati
         LOG(INFO) << "/:limestone:config:datastore setting the sort: arena size = " << sort_arena_size_mb
                   << " MiB, merge fanin = " << sort_merge_fanin
                   << ", work dir = " << impl_->sort_work_dir_parent().string();
-        // 常時コンパクションの設定。未設定の項目は、auto_compaction_settings の既定値で埋める
-        limestone::internal::auto_compaction_settings auto_compaction{};
+        // コンパクションと BLOB ファイルの GC の設定。未設定の項目は、compaction_settings の既定値で埋める
+        limestone::internal::compaction_settings auto_compaction{};
         std::optional<std::size_t> auto_compaction_threshold_mb = conf.get_auto_compaction_threshold_mb();
         std::optional<bool> auto_compaction_delete_detached = conf.get_auto_compaction_delete_detached();
         std::optional<bool> blob_gc = conf.get_blob_gc();
@@ -199,8 +199,8 @@ datastore::datastore(configuration const& conf) : location_(conf.get_data_locati
         // configuration に渡すようになったら、この読み込みを外す。3 項目とも設定されていれば、環境変数は読まない
         if (! auto_compaction_threshold_mb.has_value() || ! auto_compaction_delete_detached.has_value()
             || ! blob_gc.has_value()) {
-            const limestone::internal::auto_compaction_config_parse_result env_result =
-                limestone::internal::load_auto_compaction_config_from_environment();
+            const limestone::internal::compaction_config_parse_result env_result =
+                limestone::internal::load_compaction_config_from_environment();
             if (! env_result.ok) {
                 std::string err_msg = "invalid auto compaction configuration: " + env_result.error_message;
                 LOG_LP(ERROR) << err_msg;
@@ -227,7 +227,7 @@ datastore::datastore(configuration const& conf) : location_(conf.get_data_locati
         }
         auto_compaction.delete_detached = auto_compaction_delete_detached.value_or(auto_compaction.delete_detached);
         auto_compaction.blob_gc = blob_gc.value_or(auto_compaction.blob_gc);
-        impl_->set_auto_compaction_settings(auto_compaction);
+        impl_->set_compaction_settings(auto_compaction);
         LOG(INFO) << "/:limestone:config:datastore setting the auto compaction: threshold = "
                   << auto_compaction.threshold_bytes / mib << " MiB"
                   << (auto_compaction.threshold_bytes == 0 ? " (disabled)" : "")
@@ -618,7 +618,7 @@ void datastore::ready() {
         blob_id_type next_blob_id = max_blob_id + 1;
         blob_file_garbage_collector_ = std::make_unique<blob_file_garbage_collector>(impl_->blob_file_resolver());
         // 起動時の BLOB ファイルの GC。設定で無効のときは、走査を始めない
-        const bool blob_gc_enabled = impl_->get_auto_compaction_settings().blob_gc;
+        const bool blob_gc_enabled = impl_->get_compaction_settings().blob_gc;
         if (blob_gc_enabled) {
             blob_file_garbage_collector_->scan_blob_files(next_blob_id);
         } else {
@@ -1342,7 +1342,7 @@ void datastore::online_compaction_worker() {  // NOLINT(readability-function-cog
 
     boost::filesystem::path start_file = location_ / "ctrl" / "start_compaction";
 
-    const limestone::internal::auto_compaction_settings& auto_compaction = impl_->get_auto_compaction_settings();
+    const limestone::internal::compaction_settings& auto_compaction = impl_->get_compaction_settings();
     // 最初の測定は、起動の直後に行う
     std::chrono::steady_clock::time_point next_measurement = std::chrono::steady_clock::now();
 
@@ -1466,7 +1466,7 @@ void datastore::run_online_compaction(limestone::internal::compaction_trigger tr
     // check blob file garbage collection runnable
     bool blob_file_gc_runnable = false;
     bool is_active = blob_file_garbage_collector_->is_active();
-    const bool blob_gc_enabled = impl_->get_auto_compaction_settings().blob_gc;
+    const bool blob_gc_enabled = impl_->get_compaction_settings().blob_gc;
     // この判定は master のものである。レプリカは、ローテーションの後に、master から受け取った境界で判定する
     if (blob_gc_enabled && impl_->is_master() && boundary_version_copy.get_major() > compaction_catalog_->get_max_epoch_id() && !is_active) {
         blob_file_gc_runnable = true;
@@ -1725,7 +1725,7 @@ void datastore::run_online_compaction(limestone::internal::compaction_trigger tr
     // 途中で停止して残ったファイルは、次の常時コンパクションで削除される。
     // 削除したファイルの名前は、カタログの一覧には残る。次のコンパクションが、実在しない名前を一覧から外す。
     if (trigger == limestone::internal::compaction_trigger::threshold
-        && impl_->get_auto_compaction_settings().delete_detached) {
+        && impl_->get_compaction_settings().delete_detached) {
         std::size_t removed_count = 0;
         for (const std::string& filename : detached_pwals) {
             boost::filesystem::path detached_path = location_ / filename;

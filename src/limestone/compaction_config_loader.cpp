@@ -13,7 +13,7 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-#include "auto_compaction_config_loader.h"
+#include "compaction_config_loader.h"
 
 #include <cerrno>
 #include <cstdlib>
@@ -71,14 +71,14 @@ unsigned_env_value read_unsigned_env(const char* name) {
  * @param name 値が誤っている環境変数の名前
  * @return ok が false で、設定が既定の結果
  */
-auto_compaction_config_parse_result fail(const char* name) {
+compaction_config_parse_result fail(const char* name) {
     return {false, std::string(name) + " is not a valid non-negative integer: " + std::getenv(name),
-            auto_compaction_config{}};
+            compaction_config{}};
 }
 
 }  // namespace
 
-void apply_auto_compaction_config(const auto_compaction_config& config, limestone::api::configuration& conf) {
+void apply_compaction_config(const compaction_config& config, limestone::api::configuration& conf) {
     if (config.threshold_mb.has_value()) {
         conf.set_auto_compaction_threshold_mb(config.threshold_mb.value());
     }
@@ -90,8 +90,8 @@ void apply_auto_compaction_config(const auto_compaction_config& config, limeston
     }
 }
 
-auto_compaction_config_parse_result load_auto_compaction_config_from_environment() {
-    auto_compaction_config config{};
+compaction_config_parse_result load_compaction_config_from_environment() {
+    compaction_config config{};
 
     const unsigned_env_value threshold_mb = read_unsigned_env(threshold_mb_env_name);
     if (! threshold_mb.ok) {

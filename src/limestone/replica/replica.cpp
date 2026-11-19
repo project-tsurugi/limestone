@@ -22,7 +22,7 @@
 #include <limestone/api/configuration.h>
 #include <limestone/api/limestone_exception.h>
 #include <replication/replication_config_loader.h>
-#include "auto_compaction_config_loader.h"
+#include "compaction_config_loader.h"
 #include "replication/sort_config_loader.h"
 #include "replication/replication_endpoint.h"
 #include "replication/replica_server.h"
@@ -111,15 +111,15 @@ int main(int argc, char* argv[]) {
     limestone::api::configuration conf{};
     limestone::replication::apply_sort_config(sort_result.config, conf);
 
-    // 常時コンパクションの設定 (環境変数)
-    auto const auto_compaction_result = limestone::internal::load_auto_compaction_config_from_environment();
+    // コンパクションと BLOB ファイルの GC の設定 (環境変数)
+    auto const auto_compaction_result = limestone::internal::load_compaction_config_from_environment();
     if (!auto_compaction_result.ok) {
         std::cerr << "Error: invalid auto compaction configuration: " << auto_compaction_result.error_message
                   << std::endl;
         show_usage(program_name);
         return 1;
     }
-    limestone::internal::apply_auto_compaction_config(auto_compaction_result.config, conf);
+    limestone::internal::apply_compaction_config(auto_compaction_result.config, conf);
 
     if (config.mode() == limestone::replication::replication_mode::rdma) {
         limestone::replication::replica_server server{};

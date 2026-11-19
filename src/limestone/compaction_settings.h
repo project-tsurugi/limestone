@@ -20,8 +20,8 @@
 
 namespace limestone::internal {
 
-/// 常時コンパクションの設定。
-struct auto_compaction_settings {
+/// コンパクションと BLOB ファイルの GC の設定。
+struct compaction_settings {
     /// 常時コンパクションを実行する WAL の量の閾値 (バイト)。0 のときは常時コンパクションを行わない
     std::uint64_t threshold_bytes{0};
     /// 常時コンパクションで、detached の WAL ファイルを削除するか

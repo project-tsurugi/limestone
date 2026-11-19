@@ -34,7 +34,7 @@
 
 #include "test_root.h"
 
-#include "auto_compaction_settings.h"
+#include "compaction_settings.h"
 #include "compaction_catalog.h"
 #include "datastore_impl.h"
 #include "internal.h"
@@ -45,7 +45,7 @@ namespace limestone::testing {
 
 using limestone::api::epoch_id_type;
 using limestone::api::log_channel;
-using limestone::internal::auto_compaction_settings;
+using limestone::internal::compaction_settings;
 using limestone::internal::compaction_catalog;
 
 /**
@@ -72,23 +72,23 @@ public:
     }
 
     // 閾値を 1 バイトにした設定。エントリを 1 つ書けば、WAL の量が閾値を超える。測定の間隔は短くする
-    static auto_compaction_settings eager_settings() {
-        auto_compaction_settings settings{};
+    static compaction_settings eager_settings() {
+        compaction_settings settings{};
         settings.threshold_bytes = 1;
         settings.measurement_interval = std::chrono::milliseconds(50);
         return settings;
     }
 
     // レプリカの datastore を作る。起動処理はまだ行わない
-    void create_replica(const auto_compaction_settings& settings) {
+    void create_replica(const compaction_settings& settings) {
         limestone::api::configuration conf{};
         conf.set_data_location(location);
         datastore_ = std::make_unique<limestone::api::datastore_test>(conf);
-        datastore_->get_impl()->set_auto_compaction_settings(settings);
+        datastore_->get_impl()->set_compaction_settings(settings);
         datastore_->get_impl()->set_replica_role();
     }
 
-    void start_replica(const auto_compaction_settings& settings) {
+    void start_replica(const compaction_settings& settings) {
         create_replica(settings);
         datastore_->start_as_replica();
     }

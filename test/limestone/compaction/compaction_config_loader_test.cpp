@@ -13,7 +13,7 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-#include "auto_compaction_config_loader.h"
+#include "compaction_config_loader.h"
 
 #include <cstdlib>
 #include <limits>
@@ -32,14 +32,14 @@ namespace limestone::testing {
 
 using limestone::api::exception_type;
 using limestone::api::limestone_exception;
-using limestone::internal::apply_auto_compaction_config;
-using limestone::internal::auto_compaction_config_parse_result;
-using limestone::internal::auto_compaction_settings;
-using limestone::internal::load_auto_compaction_config_from_environment;
+using limestone::internal::apply_compaction_config;
+using limestone::internal::compaction_config_parse_result;
+using limestone::internal::compaction_settings;
+using limestone::internal::load_compaction_config_from_environment;
 
-class auto_compaction_config_loader_test : public ::testing::Test {
+class compaction_config_loader_test : public ::testing::Test {
 protected:
-    static constexpr const char* location = "/tmp/auto_compaction_config_loader_test";
+    static constexpr const char* location = "/tmp/compaction_config_loader_test";
     static constexpr const char* threshold_env = "LIMESTONE_AUTO_COMPACTION_THRESHOLD_MB";
     static constexpr const char* delete_detached_env = "LIMESTONE_AUTO_COMPACTION_DELETE_DETACHED";
     static constexpr const char* blob_gc_env = "LIMESTONE_BLOB_GC";
@@ -72,18 +72,18 @@ protected:
     }
 
     // datastore を構築して、決まった常時コンパクションの設定を返す
-    static auto_compaction_settings settings_of(const limestone::api::configuration& conf) {
+    static compaction_settings settings_of(const limestone::api::configuration& conf) {
         std::unique_ptr<limestone::api::datastore_test> datastore =
             std::make_unique<limestone::api::datastore_test>(conf);
-        return datastore->get_impl()->get_auto_compaction_settings();
+        return datastore->get_impl()->get_compaction_settings();
     }
 
     constexpr static std::uint64_t mib = std::uint64_t{1024} * 1024;
 };
 
 // 環境変数がどれも設定されていないときは、どの項目も未設定になる
-TEST_F(auto_compaction_config_loader_test, nothing_set) {
-    const auto_compaction_config_parse_result result = load_auto_compaction_config_from_environment();
+TEST_F(compaction_config_loader_test, nothing_set) {
+    const compaction_config_parse_result result = load_compaction_config_from_environment();
 
     ASSERT_TRUE(result.ok);
     EXPECT_FALSE(result.config.threshold_mb.has_value());
@@ -92,12 +92,12 @@ TEST_F(auto_compaction_config_loader_test, nothing_set) {
 }
 
 // 設定された値を読む。真偽の項目は、0 が無効、0 以外が有効である
-TEST_F(auto_compaction_config_loader_test, values_are_read) {
+TEST_F(compaction_config_loader_test, values_are_read) {
     set_env(threshold_env, "512");
     set_env(delete_detached_env, "0");
     set_env(blob_gc_env, "2");
 
-    const auto_compaction_config_parse_result result = load_auto_compaction_config_from_environment();
+    const compaction_config_parse_result result = load_compaction_config_from_environment();
 
     ASSERT_TRUE(result.ok);
     EXPECT_EQ(result.config.threshold_mb, std::optional<std::uint64_t>{512});
@@ -106,13 +106,13 @@ TEST_F(auto_compaction_config_loader_test, values_are_read) {
 }
 
 // 10 進の非負の整数でない値は、どの変数でも失敗になる
-TEST_F(auto_compaction_config_loader_test, invalid_values_fail) {
+TEST_F(compaction_config_loader_test, invalid_values_fail) {
     for (const char* name : {threshold_env, delete_detached_env, blob_gc_env}) {
         for (const char* value : {"", "abc", "-1", "+1", "1.5", " 1", "1 ", "true", "99999999999999999999999"}) {
             clear_env();
             set_env(name, value);
 
-            const auto_compaction_config_parse_result result = load_auto_compaction_config_from_environment();
+            const compaction_config_parse_result result = load_compaction_config_from_environment();
 
             EXPECT_FALSE(result.ok) << name << "=" << value;
             EXPECT_NE(result.error_message.find(name), std::string::npos) << result.error_message;
@@ -121,15 +121,15 @@ TEST_F(auto_compaction_config_loader_test, invalid_values_fail) {
 }
 
 // 読んだ設定のうち、設定されている項目だけが configuration に入る
-TEST_F(auto_compaction_config_loader_test, apply_puts_only_the_items_set) {
+TEST_F(compaction_config_loader_test, apply_puts_only_the_items_set) {
     set_env(threshold_env, "3");
-    const auto_compaction_config_parse_result result = load_auto_compaction_config_from_environment();
+    const compaction_config_parse_result result = load_compaction_config_from_environment();
     ASSERT_TRUE(result.ok);
     clear_env();
 
     limestone::api::configuration conf = make_conf();
-    apply_auto_compaction_config(result.config, conf);
-    const auto_compaction_settings settings = settings_of(conf);
+    apply_compaction_config(result.config, conf);
+    const compaction_settings settings = settings_of(conf);
 
     EXPECT_EQ(settings.threshold_bytes, 3 * mib);
     EXPECT_TRUE(settings.delete_detached);
@@ -137,17 +137,17 @@ TEST_F(auto_compaction_config_loader_test, apply_puts_only_the_items_set) {
 }
 
 // 読んだ設定の 3 項目とも設定されているときは、3 項目とも configuration に入る
-TEST_F(auto_compaction_config_loader_test, apply_puts_all_the_items) {
+TEST_F(compaction_config_loader_test, apply_puts_all_the_items) {
     set_env(threshold_env, "3");
     set_env(delete_detached_env, "0");
     set_env(blob_gc_env, "0");
-    const auto_compaction_config_parse_result result = load_auto_compaction_config_from_environment();
+    const compaction_config_parse_result result = load_compaction_config_from_environment();
     ASSERT_TRUE(result.ok);
     clear_env();
 
     limestone::api::configuration conf = make_conf();
-    apply_auto_compaction_config(result.config, conf);
-    const auto_compaction_settings settings = settings_of(conf);
+    apply_compaction_config(result.config, conf);
+    const compaction_settings settings = settings_of(conf);
 
     EXPECT_EQ(settings.threshold_bytes, 3 * mib);
     EXPECT_FALSE(settings.delete_detached);
@@ -155,8 +155,8 @@ TEST_F(auto_compaction_config_loader_test, apply_puts_all_the_items) {
 }
 
 // 何も設定されていないときの既定は、常時コンパクションが無効、削除と GC が有効、測定の間隔が 10 秒である
-TEST_F(auto_compaction_config_loader_test, datastore_defaults) {
-    const auto_compaction_settings settings = settings_of(make_conf());
+TEST_F(compaction_config_loader_test, datastore_defaults) {
+    const compaction_settings settings = settings_of(make_conf());
 
     EXPECT_EQ(settings.threshold_bytes, 0U);
     EXPECT_TRUE(settings.delete_detached);
@@ -165,12 +165,12 @@ TEST_F(auto_compaction_config_loader_test, datastore_defaults) {
 }
 
 // configuration に設定されていない項目は、datastore が環境変数から読む
-TEST_F(auto_compaction_config_loader_test, datastore_reads_environment) {
+TEST_F(compaction_config_loader_test, datastore_reads_environment) {
     set_env(threshold_env, "16");
     set_env(delete_detached_env, "0");
     set_env(blob_gc_env, "0");
 
-    const auto_compaction_settings settings = settings_of(make_conf());
+    const compaction_settings settings = settings_of(make_conf());
 
     EXPECT_EQ(settings.threshold_bytes, 16 * mib);
     EXPECT_FALSE(settings.delete_detached);
@@ -178,13 +178,13 @@ TEST_F(auto_compaction_config_loader_test, datastore_reads_environment) {
 }
 
 // configuration に設定した値は、環境変数より優先される。設定していない項目だけが環境変数から決まる
-TEST_F(auto_compaction_config_loader_test, configuration_takes_precedence) {
+TEST_F(compaction_config_loader_test, configuration_takes_precedence) {
     set_env(threshold_env, "16");
     set_env(delete_detached_env, "0");
 
     limestone::api::configuration conf = make_conf();
     conf.set_auto_compaction_threshold_mb(4);
-    const auto_compaction_settings settings = settings_of(conf);
+    const compaction_settings settings = settings_of(conf);
 
     EXPECT_EQ(settings.threshold_bytes, 4 * mib);
     EXPECT_FALSE(settings.delete_detached);
@@ -192,7 +192,7 @@ TEST_F(auto_compaction_config_loader_test, configuration_takes_precedence) {
 }
 
 // 環境変数の値が誤っているときは、datastore の構築が失敗する
-TEST_F(auto_compaction_config_loader_test, datastore_fails_with_invalid_environment) {
+TEST_F(compaction_config_loader_test, datastore_fails_with_invalid_environment) {
     set_env(threshold_env, "-1");
 
     try {
@@ -206,7 +206,7 @@ TEST_F(auto_compaction_config_loader_test, datastore_fails_with_invalid_environm
 }
 
 // 閾値が大きすぎて、バイトに直すと桁あふれするときは、datastore の構築が失敗する
-TEST_F(auto_compaction_config_loader_test, datastore_fails_with_too_large_threshold) {
+TEST_F(compaction_config_loader_test, datastore_fails_with_too_large_threshold) {
     limestone::api::configuration conf = make_conf();
     conf.set_auto_compaction_threshold_mb(std::numeric_limits<std::size_t>::max());
 
@@ -222,14 +222,14 @@ TEST_F(auto_compaction_config_loader_test, datastore_fails_with_too_large_thresh
 }
 
 // 3 項目とも configuration に設定されているときは、環境変数を読まない
-TEST_F(auto_compaction_config_loader_test, environment_is_not_read_when_all_items_are_set) {
+TEST_F(compaction_config_loader_test, environment_is_not_read_when_all_items_are_set) {
     set_env(threshold_env, "invalid");
 
     limestone::api::configuration conf = make_conf();
     conf.set_auto_compaction_threshold_mb(1);
     conf.set_auto_compaction_delete_detached(false);
     conf.set_blob_gc(false);
-    const auto_compaction_settings settings = settings_of(conf);
+    const compaction_settings settings = settings_of(conf);
 
     EXPECT_EQ(settings.threshold_bytes, 1 * mib);
     EXPECT_FALSE(settings.delete_detached);

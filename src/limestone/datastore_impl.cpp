@@ -250,13 +250,13 @@ void datastore_impl::set_received_compaction_boundary(const compaction_boundary&
     }
 }
 
-void datastore_impl::set_auto_compaction_settings(
-        const limestone::internal::auto_compaction_settings& settings) noexcept {
-    auto_compaction_settings_ = settings;
+void datastore_impl::set_compaction_settings(
+        const limestone::internal::compaction_settings& settings) noexcept {
+    compaction_settings_ = settings;
 }
 
-const limestone::internal::auto_compaction_settings& datastore_impl::get_auto_compaction_settings() const noexcept {
-    return auto_compaction_settings_;
+const limestone::internal::compaction_settings& datastore_impl::get_compaction_settings() const noexcept {
+    return compaction_settings_;
 }
 
 void datastore_impl::set_compaction_worker_launcher(

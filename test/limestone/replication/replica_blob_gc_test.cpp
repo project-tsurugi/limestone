@@ -160,7 +160,7 @@ TEST_F(replica_blob_gc_test, does_not_run_without_received_boundary) {
 
 // 設定で無効にしたとき、GC は行われない
 TEST_F(replica_blob_gc_test, does_not_run_when_disabled) {
-    auto_compaction_settings settings = eager_settings();
+    compaction_settings settings = eager_settings();
     settings.blob_gc = false;
     start_replica(settings);
     receive_entries_with_blobs();

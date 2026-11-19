@@ -37,7 +37,7 @@
 
 #include "blob_file_garbage_collector.h"
 #include "blob_file_resolver.h"
-#include "auto_compaction_settings.h"
+#include "compaction_settings.h"
 #include "blob_pool_impl.h"
 #include "compaction_worker_launcher.h"
 #include "file_operations.h"
@@ -185,12 +185,12 @@ public:
     /// @brief master から受け取ったコンパクションの境界を保持する。前に保持していたものは捨てる
     void set_received_compaction_boundary(const compaction_boundary& boundary);
 
-    /// @brief 常時コンパクションの設定を置き換える。datastore の構築のときと、テストから呼ぶ。ワーカースレッドの
+    /// @brief コンパクションと BLOB ファイルの GC の設定を置き換える。datastore の構築のときと、テストから呼ぶ。ワーカースレッドの
     /// 起動の後には呼ばないこと
-    void set_auto_compaction_settings(const limestone::internal::auto_compaction_settings& settings) noexcept;
+    void set_compaction_settings(const limestone::internal::compaction_settings& settings) noexcept;
 
-    /// @brief 常時コンパクションの設定
-    [[nodiscard]] const limestone::internal::auto_compaction_settings& get_auto_compaction_settings() const noexcept;
+    /// @brief コンパクションと BLOB ファイルの GC の設定
+    [[nodiscard]] const limestone::internal::compaction_settings& get_compaction_settings() const noexcept;
 
     /// @brief オンラインコンパクションのワーカースレッドの起動を担うオブジェクトを設定する
     void set_compaction_worker_launcher(std::shared_ptr<limestone::internal::compaction_worker_launcher> launcher) noexcept;
@@ -672,8 +672,8 @@ private:
     std::mutex mtx_received_compaction_boundary_{};
     std::optional<compaction_boundary> received_compaction_boundary_{};
 
-    // 常時コンパクションの設定。datastore の構築で決まり、テストだけが置き換える
-    limestone::internal::auto_compaction_settings auto_compaction_settings_{};
+    // コンパクションと BLOB ファイルの GC の設定。datastore の構築で決まり、テストだけが置き換える
+    limestone::internal::compaction_settings compaction_settings_{};
 
     // オンラインコンパクションのワーカースレッドの起動と shutdown を排他する。snapshot の印と共有する
     std::shared_ptr<limestone::internal::compaction_worker_launcher> compaction_worker_launcher_{};

@@ -37,7 +37,7 @@
 
 #include "test_root.h"
 
-#include "auto_compaction_settings.h"
+#include "compaction_settings.h"
 #include "compaction_catalog.h"
 #include "datastore_impl.h"
 #include "file_operations.h"
@@ -78,7 +78,7 @@ private:
 }  // namespace
 
 using limestone::api::epoch_id_type;
-using limestone::internal::auto_compaction_settings;
+using limestone::internal::compaction_settings;
 using limestone::internal::compaction_catalog;
 
 /**
@@ -104,11 +104,11 @@ public:
     }
 
     // datastore を起動する。ワーカースレッドはまだ起動しない
-    void start_datastore(const auto_compaction_settings& settings) {
+    void start_datastore(const compaction_settings& settings) {
         limestone::api::configuration conf{};
         conf.set_data_location(location);
         datastore_ = std::make_unique<limestone::api::datastore_test>(conf);
-        datastore_->get_impl()->set_auto_compaction_settings(settings);
+        datastore_->get_impl()->set_compaction_settings(settings);
         lc0_ = &datastore_->create_channel();
         datastore_->ready();
     }
@@ -119,8 +119,8 @@ public:
     }
 
     // 閾値を 1 バイトにした設定。エントリを 1 つ書けば、WAL の量が閾値を超える。測定の間隔は短くする
-    static auto_compaction_settings eager_settings() {
-        auto_compaction_settings settings{};
+    static compaction_settings eager_settings() {
+        compaction_settings settings{};
         settings.threshold_bytes = 1;
         settings.measurement_interval = std::chrono::milliseconds(50);
         return settings;
@@ -266,7 +266,7 @@ TEST_F(auto_compaction_test, runs_when_threshold_is_exceeded) {
 
 // 閾値が 0 (既定) のときは、常時コンパクションは実行されない
 TEST_F(auto_compaction_test, does_not_run_with_zero_threshold) {
-    auto_compaction_settings settings{};
+    compaction_settings settings{};
     settings.measurement_interval = std::chrono::milliseconds(50);
     ASSERT_EQ(settings.threshold_bytes, 0U);
     start_datastore(settings);
@@ -281,7 +281,7 @@ TEST_F(auto_compaction_test, does_not_run_with_zero_threshold) {
 
 // WAL の量が閾値以下のときは、常時コンパクションは実行されない
 TEST_F(auto_compaction_test, does_not_run_below_threshold) {
-    auto_compaction_settings settings = eager_settings();
+    compaction_settings settings = eager_settings();
     settings.threshold_bytes = std::uint64_t{1024} * 1024;
     start_datastore(settings);
     advance_epoch();
@@ -329,7 +329,7 @@ TEST_F(auto_compaction_test, waits_while_boundary_epoch_is_zero) {
 
 // 測定は、測定の間隔より短い間隔では行われない
 TEST_F(auto_compaction_test, measures_at_the_measurement_interval) {
-    auto_compaction_settings settings = eager_settings();
+    compaction_settings settings = eager_settings();
     settings.measurement_interval = std::chrono::seconds(4);
     start_datastore(settings);
     advance_epoch();
@@ -396,7 +396,7 @@ TEST_F(auto_compaction_test, shutdown_while_worker_is_running) {
 // 常時コンパクションの入力になる。入力にならないと、WAL の量が閾値を下回らず、測定のたびにコンパクションが
 // 繰り返される
 TEST_F(auto_compaction_test, wal_files_rotated_for_format_version_migration_are_compacted) {
-    start_datastore(auto_compaction_settings{});
+    start_datastore(compaction_settings{});
     advance_epoch();
     write_entry("k1", "v1");
     datastore_->shutdown();
@@ -405,7 +405,7 @@ TEST_F(auto_compaction_test, wal_files_rotated_for_format_version_migration_are_
     limestone::api::configuration conf{};
     conf.set_data_location(location);
     datastore_ = std::make_unique<limestone::api::datastore_test>(conf);
-    datastore_->get_impl()->set_auto_compaction_settings(eager_settings());
+    datastore_->get_impl()->set_compaction_settings(eager_settings());
     datastore_->get_impl()->set_migration_info(limestone::internal::manifest::migration_info(5, 6));
     lc0_ = &datastore_->create_channel();
     datastore_->ready();
@@ -462,7 +462,7 @@ TEST_F(auto_compaction_test, removes_detached_wal_files_by_default) {
 
 // 削除の設定を無効にすると、detached の WAL ファイルは残る
 TEST_F(auto_compaction_test, keeps_detached_wal_files_when_disabled) {
-    auto_compaction_settings settings = eager_settings();
+    compaction_settings settings = eager_settings();
     settings.delete_detached = false;
     start_datastore(settings);
     advance_epoch();
@@ -601,7 +601,7 @@ TEST_F(auto_compaction_test, data_is_usable_after_removal) {
     }
 
     // 再起動
-    auto_compaction_settings settings{};
+    compaction_settings settings{};
     start_datastore(settings);
     const std::vector<std::tuple<std::string, std::string>> expected{{"k1", "v1"}, {"k2", "v2"}};
     EXPECT_EQ(read_all_entries(), expected);

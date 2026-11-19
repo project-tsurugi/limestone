@@ -26,7 +26,7 @@ public:
 
 // レプリカの起動処理は、ワーカースレッドを起動する。ctrl ディレクトリは作らない
 TEST_F(replica_compaction_test, startup_starts_the_worker) {
-    start_replica(auto_compaction_settings{});
+    start_replica(compaction_settings{});
 
     ASSERT_TRUE(datastore_->get_impl()->get_compaction_worker_launcher());
     EXPECT_TRUE(datastore_->get_impl()->get_compaction_worker_launcher()->launched());
@@ -78,7 +78,7 @@ TEST_F(replica_compaction_test, entries_beyond_received_epoch_stay_nondurable) {
 
 // 起動時の受信 epoch (durable epoch) を境界にして、起動の直後からコンパクションが行われる
 TEST_F(replica_compaction_test, compacts_after_restart_with_initial_received_epoch) {
-    start_replica(auto_compaction_settings{});
+    start_replica(compaction_settings{});
     log_channel& channel = datastore_->create_channel();
     receive_session(channel, 1, "k1", "v1");
     receive_group_commit(1);
@@ -95,7 +95,7 @@ TEST_F(replica_compaction_test, compacts_after_restart_with_initial_received_epo
 
 // レプリカは ctrl/start_compaction を無視する。ファイルは残り、コンパクションは実行されない
 TEST_F(replica_compaction_test, ignores_ctrl_file) {
-    auto_compaction_settings settings{};
+    compaction_settings settings{};
     settings.measurement_interval = std::chrono::milliseconds(50);
     start_replica(settings);
     log_channel& channel = datastore_->create_channel();
@@ -118,7 +118,7 @@ TEST_F(replica_compaction_test, ignores_ctrl_file) {
 // リネームはチャネルに委ねられ、ローテーションはセッションの終了を待つ
 TEST_F(replica_compaction_test, channel_registered_during_rotation_is_not_renamed_on_the_spot) {
     // 前回の実行で残った、ローテーション前の WAL ファイルを作る
-    start_replica(auto_compaction_settings{});
+    start_replica(compaction_settings{});
     {
         log_channel& channel = datastore_->create_channel();
         receive_session(channel, 1, "k1", "v1");
@@ -193,7 +193,7 @@ TEST_F(replica_compaction_test, shutdown_while_rotation_is_waiting) {
 // 形式バージョンの移行に伴うローテーションが要るときは、起動処理が、残っている WAL ファイルをローテーションして
 // から、ワーカースレッドを起動する
 TEST_F(replica_compaction_test, startup_rotates_wal_files_for_format_version_migration) {
-    start_replica(auto_compaction_settings{});
+    start_replica(compaction_settings{});
     {
         log_channel& channel = datastore_->create_channel();
         receive_session(channel, 1, "k1", "v1");
@@ -202,7 +202,7 @@ TEST_F(replica_compaction_test, startup_rotates_wal_files_for_format_version_mig
     stop();
     ASSERT_TRUE(rotated_wal_files().empty());
 
-    create_replica(auto_compaction_settings{});
+    create_replica(compaction_settings{});
     datastore_->get_impl()->set_migration_info(limestone::internal::manifest::migration_info(5, 6));
     datastore_->start_as_replica();
 
@@ -217,7 +217,7 @@ TEST_F(replica_compaction_test, startup_rotates_wal_files_for_format_version_mig
 // 形式バージョンの移行に伴うローテーションでリネームした WAL ファイルは、その起動の中で、常時コンパクションの
 // 入力になる。入力にならないと、WAL の量が閾値を下回らず、測定のたびにコンパクションが繰り返される
 TEST_F(replica_compaction_test, wal_files_rotated_for_format_version_migration_are_compacted) {
-    start_replica(auto_compaction_settings{});
+    start_replica(compaction_settings{});
     {
         log_channel& channel = datastore_->create_channel();
         receive_session(channel, 1, "k1", "v1");
@@ -244,7 +244,7 @@ TEST_F(replica_compaction_test, wal_files_rotated_for_format_version_migration_a
 TEST_F(replica_compaction_test, entries_are_the_same_with_and_without_auto_compaction) {
     // 同じ受信の列を、指定の設定のレプリカに与えて、その永続化データから読めるエントリを返す。途中で
     // コンパクションが 2 回行われるように、GROUP_COMMIT の後で待つ
-    auto run = [this](const auto_compaction_settings& settings, bool expect_compaction) {
+    auto run = [this](const compaction_settings& settings, bool expect_compaction) {
         boost::filesystem::remove_all(location);
         boost::filesystem::create_directory(location);
         start_replica(settings);
@@ -274,7 +274,7 @@ TEST_F(replica_compaction_test, entries_are_the_same_with_and_without_auto_compa
     };
 
     const std::vector<std::tuple<std::string, std::string>> with_compaction = run(eager_settings(), true);
-    const std::vector<std::tuple<std::string, std::string>> without_compaction = run(auto_compaction_settings{}, false);
+    const std::vector<std::tuple<std::string, std::string>> without_compaction = run(compaction_settings{}, false);
 
     // epoch 5 は GROUP_COMMIT を受け取っていないので、どちらでも読めない
     const std::vector<std::tuple<std::string, std::string>> expected{

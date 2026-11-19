@@ -202,6 +202,13 @@ RDMA モードの受信箇所での受信 epoch の更新は、単体のテス�
   - [ ] 規約。@brief のない関数・クラスに @brief を足す (コメントの英訳のときに行う)。compaction_worker_launcher と
         snapshot_use_marker のコンストラクタ・デストラクタ、create_cursor() の 2 つ、message_compaction_boundary の
         コンストラクタと getter、compaction_running_mark。
+  - [x] nothing_is_sent_after_shutdown は、送信を無効にする印がなくても通る (閉じたチャネルへの送信が失敗するため)。
+        印を見分ける検査を、RDMA のセッション確立のテスト (記録用の送信ストリーム) に足した。RDMA モードの送信の
+        正常の経路も、これで通る。
+  - [x] auto_compaction_settings と、環境変数を読む側の名前を、compaction_settings / compaction_config に改名した
+        (BLOB ファイルの GC の設定が、常時コンパクションに限らなくなったため)。
+  - メモ: build/ は RDMA が無効 (ENABLE_RDMA=OFF) で、RDMA のテストは中身が空のまま「通った」と数えられる。
+    RDMA 有効のビルドは build-rdma/。節目の確認は、両方で行う。
   - 見送った指摘と理由は、まとめのファイルにある。設計メモの側を直すもの: 2 節の「すべて破棄された時点」の文言、
     起動処理の置き場所、shutdown() でのチャネルの解放と送信の mutex、環境変数を読む条件。
 
