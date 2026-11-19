@@ -254,16 +254,6 @@ public:
     void recover(const epoch_tag&) const noexcept;
 
     /**
-     * @brief Performs online log file compaction.
-     *
-     * This function compacts log files that have been rotated and are no longer subject to new entries.
-     *
-     * @exception limestone_exception Thrown if an I/O error occurs during the compaction process.
-     * @attention this function should be called before the ready() is called.
-     */
-    void compact_with_online();
-
-    /**
      * @brief acquires a new empty BLOB pool.
      * @details This pool is used for temporary registration of BLOBs,
      *      and all BLOBs that are not fully registered will become unavailable when the pool is destroyed.
@@ -398,6 +388,7 @@ protected:  // for tests
     }
     write_version_type get_available_boundary_version_for_tests() const noexcept { return available_boundary_version_; }
     void wait_for_blob_file_garbace_collector_for_tests() const noexcept;
+    void compact_with_online_for_tests();
 
 
     // These virtual methods are hooks for testing thread synchronization.

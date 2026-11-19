@@ -1359,7 +1359,7 @@ void datastore::online_compaction_worker() {  // NOLINT(readability-function-cog
             // rotation waits); otherwise stop_online_compaction_worker() cannot
             // set the stop flag and shutdown() blocks behind the rotation wait.
             try {
-                compact_with_online();
+                run_online_compaction(limestone::internal::compaction_trigger::ctrl_file);
             } catch (const limestone_exception& e) {
                 if (stop_online_compaction_worker_.load()) {
                     // A rotation given up by a normal shutdown is not an anomaly.
@@ -1417,7 +1417,7 @@ void datastore::stop_online_compaction_worker() {
     cv_online_compaction_worker_.notify_all();
 }
 
-void datastore::compact_with_online() {
+void datastore::compact_with_online_for_tests() {
     check_after_ready(static_cast<const char*>(__func__));
     run_online_compaction(limestone::internal::compaction_trigger::ctrl_file);
 }

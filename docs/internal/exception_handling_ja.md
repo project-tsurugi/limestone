@@ -33,7 +33,6 @@ Limnestoneの処理の中で、I/Oエラーが発生すると、std::runtime_err
 * datastore::ready()
 * datastore::switch_epoch()
 * datastore::begin_backup()
-* datastore::compact_with_online()
 
 ※ 次のメソッドも、本質的にlimestone_excptioneをスローする可能性があるが、現在の実装ではスローしない。
 
