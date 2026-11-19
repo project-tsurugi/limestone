@@ -906,12 +906,16 @@ TEST_F(dblog_scan_test, detach_wal_files_renamne_pwal_0000) {
         ASSERT_EQ(wal_files.at(0), p0_attached);
     }
     dblog_scan ds{boost::filesystem::path(location)};
-    ds.detach_wal_files();
+    const std::vector<dblog_scan::renamed_wal_file> renamed_files = ds.detach_wal_files();
     {  // rotated
         auto wal_files = list_dir();
         EXPECT_EQ(wal_files.size(), 1);
         EXPECT_NE(wal_files.at(0), p0_attached);
         EXPECT_GT(wal_files.at(0).filename().string().length(), 10);
+        // 行ったリネームが返る
+        ASSERT_EQ(renamed_files.size(), 1);
+        EXPECT_EQ(renamed_files.at(0).from, p0_attached);
+        EXPECT_EQ(renamed_files.at(0).to, wal_files.at(0));
     }
 }
 
@@ -925,7 +929,8 @@ TEST_F(dblog_scan_test, detach_wal_files_skip_rename_empty_pwal) {
         ASSERT_EQ(wal_files.at(0), p0_attached_empty);
     }
     dblog_scan ds{boost::filesystem::path(location)};
-    ds.detach_wal_files();
+    const std::vector<dblog_scan::renamed_wal_file> renamed_files = ds.detach_wal_files();
+    EXPECT_TRUE(renamed_files.empty());
     {  // no change
         auto wal_files = list_dir();
         EXPECT_EQ(wal_files.size(), 1);

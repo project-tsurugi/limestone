@@ -43,6 +43,7 @@
 #include "file_operations.h"
 #include "internal.h"
 #include "locator/locator_format.h"
+#include "manifest.h"
 
 namespace limestone::testing {
 
@@ -391,7 +392,35 @@ TEST_F(auto_compaction_test, shutdown_while_worker_is_running) {
     datastore_->shutdown();
 }
 
-// 常時コンパクションのローテーションが待っている間に shutdown() すると、ローテーションは打ち切られ、正常に
+// 形式バージョンの移行に伴うローテーションでリネームした WAL ファイルは、その起動の中で、バックアップの対象と
+// 常時コンパクションの入力になる。入力にならないと、WAL の量が閾値を下回らず、測定のたびにコンパクションが
+// 繰り返される
+TEST_F(auto_compaction_test, wal_files_rotated_for_format_version_migration_are_compacted) {
+    start_datastore(auto_compaction_settings{});
+    advance_epoch();
+    write_entry("k1", "v1");
+    datastore_->shutdown();
+    datastore_ = nullptr;
+
+    limestone::api::configuration conf{};
+    conf.set_data_location(location);
+    datastore_ = std::make_unique<limestone::api::datastore_test>(conf);
+    datastore_->get_impl()->set_auto_compaction_settings(eager_settings());
+    datastore_->get_impl()->set_migration_info(limestone::internal::manifest::migration_info(5, 6));
+    lc0_ = &datastore_->create_channel();
+    datastore_->ready();
+    EXPECT_EQ(rotated_wal_files().size(), 1U);
+    EXPECT_EQ(rotated_wal_files_in_backup_targets(), 1U);
+
+    start_worker();
+    ASSERT_TRUE(wait_for_generation(1, std::chrono::seconds(10)));
+    // リネームしたファイルは、入力になった後、削除される。残っていれば、次の測定でもう一度実行される
+    advance_epochs_for(quiet_period);
+    EXPECT_EQ(catalog_generation(), 1U);
+    EXPECT_TRUE(rotated_wal_files().empty());
+    datastore_->shutdown();
+}
+
 // 終了する。コンパクションは行われない
 TEST_F(auto_compaction_test, shutdown_while_rotation_is_waiting) {
     start_datastore(eager_settings());

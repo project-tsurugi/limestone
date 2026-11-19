@@ -661,7 +661,11 @@ void datastore::ready() {
             LOG(INFO) << "Manifest migration requires WAL rotation.";
             dblog_scan ds(location_);
             ds.set_file_operations(impl_->file_ops());
-            ds.detach_wal_files();
+            // リネームの結果を files_ に反映する。コンパクションの入力とバックアップの対象は、files_ から選ぶ
+            for (const dblog_scan::renamed_wal_file& renamed : ds.detach_wal_files()) {
+                subtract_file(renamed.from);
+                add_file(renamed.to);
+            }
             LOG(INFO) << "WAL rotation completed.";
         }
 
@@ -709,7 +713,11 @@ void datastore::start_as_replica() {
         LOG(INFO) << "Manifest migration requires WAL rotation.";
         dblog_scan ds(location_);
         ds.set_file_operations(impl_->file_ops());
-        ds.detach_wal_files();
+        // リネームの結果を files_ に反映する。コンパクションの入力は、files_ から選ぶ
+        for (const dblog_scan::renamed_wal_file& renamed : ds.detach_wal_files()) {
+            subtract_file(renamed.from);
+            add_file(renamed.to);
+        }
         LOG(INFO) << "WAL rotation completed.";
     }
     // 5. オンラインコンパクションのワーカースレッドを起動する。レプリカは snapshot を作成しないので、ここで

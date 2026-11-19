@@ -214,6 +214,31 @@ TEST_F(replica_compaction_test, startup_rotates_wal_files_for_format_version_mig
     EXPECT_EQ(restart_as_master_and_read(), expected);
 }
 
+// 形式バージョンの移行に伴うローテーションでリネームした WAL ファイルは、その起動の中で、常時コンパクションの
+// 入力になる。入力にならないと、WAL の量が閾値を下回らず、測定のたびにコンパクションが繰り返される
+TEST_F(replica_compaction_test, wal_files_rotated_for_format_version_migration_are_compacted) {
+    start_replica(auto_compaction_settings{});
+    {
+        log_channel& channel = datastore_->create_channel();
+        receive_session(channel, 1, "k1", "v1");
+        receive_group_commit(1);
+    }
+    stop();
+
+    create_replica(eager_settings());
+    datastore_->get_impl()->set_migration_info(limestone::internal::manifest::migration_info(5, 6));
+    datastore_->start_as_replica();
+
+    ASSERT_TRUE(wait_for_generation(1, std::chrono::seconds(10)));
+    // リネームしたファイルは、入力になった後、削除される。残っていれば、次の測定でもう一度実行される
+    std::this_thread::sleep_for(quiet_period);
+    EXPECT_EQ(generation(), 1U);
+    EXPECT_TRUE(rotated_wal_files().empty());
+    stop();
+    const std::vector<std::tuple<std::string, std::string>> expected{{"k1", "v1"}};
+    EXPECT_EQ(restart_as_master_and_read(), expected);
+}
+
 // 常時コンパクションを行ったレプリカの永続化データから起動したとき、cursor が返すエントリの列が、常時
 // コンパクションを行わなかった場合と同一である
 TEST_F(replica_compaction_test, entries_are_the_same_with_and_without_auto_compaction) {

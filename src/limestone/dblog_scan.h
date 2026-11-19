@@ -20,6 +20,7 @@
 #include <map>
 #include <set>
 #include <string>
+#include <vector>
 
 #include <limestone/api/blob_id_type.h>
 #include <limestone/api/datastore.h>
@@ -154,7 +155,21 @@ public:
      */
     void set_file_operations(file_operations& ops) noexcept;
 
-    void detach_wal_files(bool skip_empty_files = true);
+    /**
+     * @brief detach_wal_files() が行った 1 つのリネーム。
+     */
+    struct renamed_wal_file {
+        boost::filesystem::path from;  ///< リネームの前のパス
+        boost::filesystem::path to;    ///< リネームの後のパス
+    };
+
+    /**
+     * @brief ログディレクトリにある、ローテーション前の名前の WAL ファイルを、すべてローテーション済みの名前に
+     *        リネームする。
+     * @param skip_empty_files true のとき、空のファイルはリネームしない
+     * @return 行ったリネーム
+     */
+    std::vector<renamed_wal_file> detach_wal_files(bool skip_empty_files = true);
 
     enum class process_at_nondurable {
         ignore,
