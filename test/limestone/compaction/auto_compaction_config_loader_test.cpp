@@ -16,6 +16,7 @@
 #include "auto_compaction_config_loader.h"
 
 #include <cstdlib>
+#include <limits>
 #include <memory>
 #include <string>
 
@@ -135,6 +136,24 @@ TEST_F(auto_compaction_config_loader_test, apply_puts_only_the_items_set) {
     EXPECT_TRUE(settings.blob_gc);
 }
 
+// 読んだ設定の 3 項目とも設定されているときは、3 項目とも configuration に入る
+TEST_F(auto_compaction_config_loader_test, apply_puts_all_the_items) {
+    set_env(threshold_env, "3");
+    set_env(delete_detached_env, "0");
+    set_env(blob_gc_env, "0");
+    const auto_compaction_config_parse_result result = load_auto_compaction_config_from_environment();
+    ASSERT_TRUE(result.ok);
+    clear_env();
+
+    limestone::api::configuration conf = make_conf();
+    apply_auto_compaction_config(result.config, conf);
+    const auto_compaction_settings settings = settings_of(conf);
+
+    EXPECT_EQ(settings.threshold_bytes, 3 * mib);
+    EXPECT_FALSE(settings.delete_detached);
+    EXPECT_FALSE(settings.blob_gc);
+}
+
 // 何も設定されていないときの既定は、常時コンパクションが無効、削除と GC が有効、測定の間隔が 10 秒である
 TEST_F(auto_compaction_config_loader_test, datastore_defaults) {
     const auto_compaction_settings settings = settings_of(make_conf());
@@ -183,6 +202,22 @@ TEST_F(auto_compaction_config_loader_test, datastore_fails_with_invalid_environm
     } catch (const limestone_exception& e) {
         EXPECT_EQ(e.type(), exception_type::initialization_failure);
         EXPECT_NE(std::string(e.what()).find(threshold_env), std::string::npos) << e.what();
+    }
+}
+
+// 閾値が大きすぎて、バイトに直すと桁あふれするときは、datastore の構築が失敗する
+TEST_F(auto_compaction_config_loader_test, datastore_fails_with_too_large_threshold) {
+    limestone::api::configuration conf = make_conf();
+    conf.set_auto_compaction_threshold_mb(std::numeric_limits<std::size_t>::max());
+
+    try {
+        std::unique_ptr<limestone::api::datastore_test> datastore =
+            std::make_unique<limestone::api::datastore_test>(conf);
+        FAIL() << "the construction must fail";
+    } catch (const limestone_exception& e) {
+        EXPECT_EQ(e.type(), exception_type::initialization_failure);
+        EXPECT_NE(std::string(e.what()).find("auto_compaction_threshold_mb is too large"), std::string::npos)
+            << e.what();
     }
 }
 

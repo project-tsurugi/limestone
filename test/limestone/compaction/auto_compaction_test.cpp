@@ -391,6 +391,32 @@ TEST_F(auto_compaction_test, shutdown_while_worker_is_running) {
     datastore_->shutdown();
 }
 
+// 常時コンパクションのローテーションが待っている間に shutdown() すると、ローテーションは打ち切られ、正常に
+// 終了する。コンパクションは行われない
+TEST_F(auto_compaction_test, shutdown_while_rotation_is_waiting) {
+    start_datastore(eager_settings());
+    advance_epoch();
+    write_entry("k1", "v1");
+    // セッションを終了しないので、ローテーションは永続化の完了を待ち続ける
+    lc0_->begin_session();
+    lc0_->add_entry(1, "k2", "v2", {epoch_, 0});
+    std::atomic<bool> rotation_started{false};
+    datastore_->on_rotate_log_files_callback = [&rotation_started]() { rotation_started.store(true); };
+
+    start_worker();
+    const std::chrono::steady_clock::time_point deadline = std::chrono::steady_clock::now() + std::chrono::seconds(10);
+    while (! rotation_started.load() && std::chrono::steady_clock::now() < deadline) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(20));
+    }
+    ASSERT_TRUE(rotation_started.load());
+    std::this_thread::sleep_for(std::chrono::milliseconds(100));
+
+    datastore_->shutdown();
+
+    EXPECT_EQ(catalog_generation(), 0U);
+    EXPECT_TRUE(rotated_wal_files().empty());
+}
+
 // 常時コンパクションは、既定では detached の WAL ファイルを削除する。削除したファイルは、バックアップの対象から外れる
 TEST_F(auto_compaction_test, removes_detached_wal_files_by_default) {
     start_datastore(eager_settings());

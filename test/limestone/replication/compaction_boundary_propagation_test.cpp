@@ -204,6 +204,34 @@ TEST_F(compaction_boundary_propagation_test, nothing_is_sent_after_shutdown) {
     EXPECT_EQ(replica_boundary()->blob_id_boundary, 10U);
 }
 
+// コントロールチャネルを開く前 (ready() の前) に送っても、異常が起きない。レプリカには届かない
+TEST_F(compaction_boundary_propagation_test, send_before_control_channel_is_opened) {
+    master_ = nullptr;
+    limestone::api::configuration conf{};
+    conf.set_data_location(master_location);
+    master_ = std::make_unique<limestone::api::datastore_test>(conf);
+
+    master_->get_impl()->send_compaction_boundary(1, 10);
+
+    std::this_thread::sleep_for(std::chrono::milliseconds(200));
+    EXPECT_FALSE(replica_boundary().has_value());
+}
+
+// レプリカが停止した後に送っても、異常が起きない。送信の失敗は、master の動作を止めない
+TEST_F(compaction_boundary_propagation_test, send_after_replica_stopped) {
+    advance_epoch();
+    master_->get_impl()->send_compaction_boundary(1, 10);
+    ASSERT_TRUE(wait_for_replica_blob_id_boundary(10, std::chrono::seconds(10)));
+    server_.shutdown();
+    replica_thread_.join();
+
+    // 相手が閉じたソケットへの書き込みは、最初の何回かは成功することがあるので、繰り返し送る
+    for (std::uint64_t i = 2; i < 50; ++i) {
+        master_->get_impl()->send_compaction_boundary(i, i * 10);
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    }
+}
+
 // shutdown() と並行して送っても、異常が起きない
 TEST_F(compaction_boundary_propagation_test, send_concurrent_with_shutdown) {
     advance_epoch();

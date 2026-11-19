@@ -15,6 +15,8 @@
  */
 #include "replica_compaction_test_fixture.h"
 
+#include "manifest.h"
+
 namespace limestone::testing {
 
 class replica_compaction_test : public replica_compaction_test_fixture {
@@ -156,6 +158,59 @@ TEST_F(replica_compaction_test, channel_registered_during_rotation_is_not_rename
     receive_group_commit(2);
     stop();
     const std::vector<std::tuple<std::string, std::string>> expected{{"k1", "v1"}, {"k2", "v2"}};
+    EXPECT_EQ(restart_as_master_and_read(), expected);
+}
+
+// ローテーションがセッションの終了を待っている間に shutdown() すると、ローテーションは打ち切られ、正常に終了する。
+// コンパクションは行われず、永続化データはそのまま読める
+TEST_F(replica_compaction_test, shutdown_while_rotation_is_waiting) {
+    start_replica(eager_settings());
+    log_channel& channel = datastore_->create_channel();
+    receive_session(channel, 1, "k1", "v1");
+    // セッションを終了しないので、ローテーションはこのチャネルのリネームを待ち続ける
+    channel.get_impl()->begin_session_at(2);
+    channel.add_entry(1, "k2", "v2", {2, 0});
+    std::atomic<bool> rotation_started{false};
+    datastore_->on_rotate_log_files_callback = [&rotation_started]() { rotation_started.store(true); };
+
+    receive_group_commit(1);
+    const std::chrono::steady_clock::time_point deadline = std::chrono::steady_clock::now() + std::chrono::seconds(10);
+    while (! rotation_started.load() && std::chrono::steady_clock::now() < deadline) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(20));
+    }
+    ASSERT_TRUE(rotation_started.load());
+    std::this_thread::sleep_for(std::chrono::milliseconds(100));
+
+    datastore_->shutdown();
+
+    EXPECT_EQ(generation(), 0U);
+    EXPECT_TRUE(rotated_wal_files().empty());
+    datastore_ = nullptr;
+    const std::vector<std::tuple<std::string, std::string>> expected{{"k1", "v1"}};
+    EXPECT_EQ(restart_as_master_and_read(), expected);
+}
+
+// 形式バージョンの移行に伴うローテーションが要るときは、起動処理が、残っている WAL ファイルをローテーションして
+// から、ワーカースレッドを起動する
+TEST_F(replica_compaction_test, startup_rotates_wal_files_for_format_version_migration) {
+    start_replica(auto_compaction_settings{});
+    {
+        log_channel& channel = datastore_->create_channel();
+        receive_session(channel, 1, "k1", "v1");
+        receive_group_commit(1);
+    }
+    stop();
+    ASSERT_TRUE(rotated_wal_files().empty());
+
+    create_replica(auto_compaction_settings{});
+    datastore_->get_impl()->set_migration_info(limestone::internal::manifest::migration_info(5, 6));
+    datastore_->start_as_replica();
+
+    EXPECT_EQ(rotated_wal_files().size(), 1U);
+    ASSERT_TRUE(datastore_->get_impl()->get_compaction_worker_launcher());
+    EXPECT_TRUE(datastore_->get_impl()->get_compaction_worker_launcher()->launched());
+    stop();
+    const std::vector<std::tuple<std::string, std::string>> expected{{"k1", "v1"}};
     EXPECT_EQ(restart_as_master_and_read(), expected);
 }
 
