@@ -14,12 +14,12 @@
  * limitations under the License.
  */
 #include "replication/message_group_commit.h"
-#include "replication/message_gc_boundary_switch.h"
 #include "replication/replication_message.h"
 #include "replication/handler_resources.h"
 #include "replication/control_channel_handler_resources.h"
 #include "gtest/gtest.h"
 #include "test_root.h"
+#include "datastore_impl.h"
 #include "replication_test_helper.h"
 
 namespace limestone::testing {
@@ -71,6 +71,42 @@ TEST_F(message_group_commit_test, post_receive) {
     control_channel_handler_resources resources(io, dummy_server, *datastore_);
     msg.post_receive(resources);
     EXPECT_EQ(get_epoch(base_location), 999);
+}
+
+namespace {
+
+// A datastore that records the received epoch at the time persist_and_propagate_epoch_id() is called
+class received_epoch_recording_datastore : public api::datastore_test {
+public:
+    explicit received_epoch_recording_datastore(const api::configuration& conf) : datastore_test(conf) {}
+
+    void persist_and_propagate_epoch_id(api::epoch_id_type epoch_id) override {
+        received_epoch_at_persist = get_impl()->get_received_epoch();
+        datastore_test::persist_and_propagate_epoch_id(epoch_id);
+    }
+
+    api::epoch_id_type received_epoch_at_persist{UINT64_MAX};
+};
+
+}  // namespace
+
+// The received epoch advances after the epoch of GROUP_COMMIT is written to the epoch file
+TEST_F(message_group_commit_test, post_receive_advances_received_epoch_after_persist) {
+    datastore_.reset();
+    limestone::api::configuration conf{};
+    conf.set_data_location(base_location);
+    received_epoch_recording_datastore datastore{conf};
+    ASSERT_EQ(datastore.get_impl()->get_received_epoch(), 0U);
+
+    message_group_commit msg(999);
+    replication_message_io io("");
+    replica_server dummy_server{};
+    control_channel_handler_resources resources(io, dummy_server, datastore);
+    msg.post_receive(resources);
+
+    EXPECT_EQ(datastore.received_epoch_at_persist, 0U);
+    EXPECT_EQ(get_epoch(base_location), 999);
+    EXPECT_EQ(datastore.get_impl()->get_received_epoch(), 999U);
 }
 
 }  // namespace limestone::testing

@@ -13,7 +13,6 @@
 * 以下のプロトコルが未実装
   * プロトコル：レプリケーションセッション終了
   * プロトコル：セーフスナップショット切り替え
-  * プロトコル：GC境界切り替え
   * ログチャネル破棄
   * プロトコル：ログチャネル書き出し
     * ログエントリ送付の`LOG_OPERATION_FLUSH`で代替
@@ -194,8 +193,13 @@ TBD (このフェーズでは発行しない)
 
 ### プロトコル：GC境界切り替え
 
+廃止した。実装されないまま使われなかったプロトコルであり、メッセージ型の番号 (0x04) は欠番とする。
+
+### プロトコル：コンパクション境界通知
+
 * 概要
-  * ログエントリの GC 境界を設定する
+  * マスターのコンパクションの境界をレプリカに通知する
+  * レプリカは、最新の 1 組を保持し、自身のコンパクションで BLOB ファイルの GC の境界を決めるのに使う
 * 開始ステート
   * `CONTROL`
 * 終端ステート
@@ -204,25 +208,21 @@ TBD (このフェーズでは発行しない)
 マスターからの送信:
 
 ```c
-struct request.gc_boundary_switch {
-    u1 command_type = CONTROL_COMMAND_TYPE_GC_BOUNDARY_SWITCH;
-    u16 write_version;
+struct request.compaction_boundary {
+    u1 command_type = CONTROL_COMMAND_TYPE_COMPACTION_BOUNDARY; // 0x05
+    u8 boundary_epoch;
+    u8 blob_id_boundary;
 }
 ```
 
 | フィールド名 | 説明 |
 |:--|:--|
-| `write_version` | GC 境界として設定するライトバージョン番号 |
+| `boundary_epoch` | マスターのコンパクションの境界にしたエポック番号 |
+| `blob_id_boundary` | マスターが BLOB ファイルの GC の境界にした BLOB の ID |
 
-レプリカからの返信:
+レプリカからの返信はない。
 
-```c
-// 成功時
-struct response.gc_boundary_switch_ok = ack;
-
-// 失敗時
-struct response.gc_boundary_switch_error = error;
-```
+このメッセージの追加に伴い、プロトコルバージョン番号を 3 にした。
 
 ### プロトコル：ログチャネル作成
 

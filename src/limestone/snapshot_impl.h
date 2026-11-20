@@ -28,6 +28,7 @@
 #include <string_view>
 #include <vector>
 
+#include "compaction_worker_launcher.h"
 #include "locator/locator.h"
 
 namespace limestone::internal {
@@ -62,6 +63,11 @@ public:
     std::vector<std::unique_ptr<limestone::api::cursor>> get_partitioned_cursors(std::size_t n);
     [[nodiscard]] std::unique_ptr<cursor> get_cursor() const;
 
+    /**
+     * @brief Sets the marker. The marker is shared by this snapshot and the cursors obtained from it afterwards.
+     */
+    void set_use_marker(std::shared_ptr<snapshot_use_marker> marker) noexcept;
+
 private:
     /**
      * @brief Reads the locator file of the file.
@@ -75,6 +81,7 @@ private:
     std::optional<std::string> compacted_file_name_;  ///< name of the current compacted file recorded in the catalog; std::nullopt if there is none
     std::size_t region_records_;
     std::atomic<bool> partitioned_called_{false};
+    std::shared_ptr<snapshot_use_marker> use_marker_{};
 };
 
 } // namespace limestone::internal

@@ -22,6 +22,7 @@
 #include <limestone/api/configuration.h>
 #include <limestone/api/limestone_exception.h>
 #include <replication/replication_config_loader.h>
+#include "compaction_config_loader.h"
 #include "replication/sort_config_loader.h"
 #include "replication/replication_endpoint.h"
 #include "replication/replica_server.h"
@@ -39,6 +40,9 @@ void show_usage(const std::string& program_name) {
               << std::endl;
     std::cerr << "      The sort creates its working directory sorting-XXXXXX under LIMESTONE_SORT_WORK_DIR"
               << " and removes it when it ends (a crash may leave it)." << std::endl;
+    std::cerr << "      The auto compaction can be configured with LIMESTONE_AUTO_COMPACTION_THRESHOLD_MB" << std::endl;
+    std::cerr << "      and LIMESTONE_AUTO_COMPACTION_DELETE_DETACHED." << std::endl;
+    std::cerr << "      The BLOB file GC can be disabled with LIMESTONE_BLOB_GC=0." << std::endl;
 }
 
 /**
@@ -106,6 +110,16 @@ int main(int argc, char* argv[]) {
     }
     limestone::api::configuration conf{};
     limestone::replication::apply_sort_config(sort_result.config, conf);
+
+    // The settings of the compaction and the BLOB file GC (environment variables)
+    auto const auto_compaction_result = limestone::internal::load_compaction_config_from_environment();
+    if (!auto_compaction_result.ok) {
+        std::cerr << "Error: invalid auto compaction configuration: " << auto_compaction_result.error_message
+                  << std::endl;
+        show_usage(program_name);
+        return 1;
+    }
+    limestone::internal::apply_compaction_config(auto_compaction_result.config, conf);
 
     if (config.mode() == limestone::replication::replication_mode::rdma) {
         limestone::replication::replica_server server{};

@@ -160,6 +160,23 @@ std::set<std::string> assemble_snapshot_input_filenames(const std::unique_ptr<co
 
 std::set<std::string> assemble_snapshot_input_filenames(const std::unique_ptr<compaction_catalog>& compaction_catalog, const boost::filesystem::path& location);
 
+/**
+ * @brief Invalidates the snippets beyond the durable epoch (the scan at the startup of the replica).
+ *
+ * Scans the WAL files and the carry file in the log directory, except the compacted WAL file and the detached WAL
+ * files recorded in the catalog, and rewrites the marker of each snippet beyond the durable epoch read from the
+ * epoch file. It does not collect the entries and does not create the snapshot file.
+ *
+ * @param compaction_catalog the compaction catalog
+ * @param location the log directory
+ * @param thread_num the number of threads of the scan
+ * @return the durable epoch used as the boundary of the scan, or 0 if the epoch file has no record
+ * @throws limestone_exception if a WAL file is malformed, or the epoch file cannot be read
+ * @throws limestone_io_exception if an I/O operation fails
+ */
+epoch_id_type invalidate_nondurable_snippets(const std::unique_ptr<compaction_catalog>& compaction_catalog,
+                                             const boost::filesystem::path& location, int thread_num);
+
 void cleanup_rotated_epoch_files(const boost::filesystem::path& directory);
 
 // filepath.cpp

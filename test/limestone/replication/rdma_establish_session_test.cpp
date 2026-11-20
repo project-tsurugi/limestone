@@ -37,6 +37,7 @@
 #include <rdma/rdma_handshake_payload.h>
 #include <rdma/rdma_frame_buffer_base.h>
 #include <rdma/rdma_send_stream_base.h>
+#include <replication/message_compaction_boundary.h>
 #include <replication/message_group_commit.h>
 #include <replication/replication_message.h>
 #include <replication/replication_message_io.h>
@@ -310,6 +311,26 @@ TEST_F(rdma_establish_session_test, ready_establishes_session_with_log_channels)
     EXPECT_EQ(captured->flush_count_, 0U);
     impl->wait_for_propagated_group_commit_ack();
     EXPECT_EQ(captured->flush_count_, 1U);
+
+    // A compaction boundary message is sent to the same stream. It has no response, so flush() is not called
+    impl->send_compaction_boundary(7U, 123U);
+    ASSERT_EQ(captured->submitted_.size(), 2U);
+    std::string const boundary_payload(captured->submitted_[1].begin(), captured->submitted_[1].end());
+    limestone::replication::replication_message_io boundary_io{boundary_payload};
+    auto boundary_message = limestone::replication::replication_message::receive(boundary_io);
+    ASSERT_EQ(boundary_message->get_message_type_id(),
+        limestone::replication::message_type_id::COMPACTION_BOUNDARY);
+    auto* boundary =
+        dynamic_cast<limestone::replication::message_compaction_boundary*>(boundary_message.get());
+    ASSERT_NE(boundary, nullptr);
+    EXPECT_EQ(boundary->boundary_epoch(), 7U);
+    EXPECT_EQ(boundary->blob_id_boundary(), 123U);
+    EXPECT_EQ(captured->flush_count_, 1U);
+
+    // After the send is disabled, the stream is not touched
+    impl->disable_compaction_boundary_send();
+    impl->send_compaction_boundary(8U, 456U);
+    EXPECT_EQ(captured->submitted_.size(), 2U);
 
     ds->shutdown().wait();
 }

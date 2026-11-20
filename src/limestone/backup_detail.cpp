@@ -37,7 +37,6 @@
       , ds_impl_(&ds_impl)
  {
      configuration_id_ = "0";
-     ds_impl_->increment_backup_counter();
  }
  
  void backup_detail::notify_end_backup() noexcept {

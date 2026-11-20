@@ -43,6 +43,7 @@
 #include <limestone_exception_helper.h>
 #include <replication/message_session_begin.h>
 #include <replication/message_log_channel_create.h>
+#include <replication/message_compaction_boundary.h>
 #include <replication/message_group_commit.h>
 #include <replication/message_error.h>
 #include <replication/replication_message.h>
@@ -176,9 +177,113 @@ const limestone::internal::locator_settings& datastore_impl::get_locator_setting
     return locator_settings_;
 }
 
+epoch_id_type datastore_impl::get_received_epoch() const noexcept {
+    return received_epoch_.load();
+}
+
+void datastore_impl::set_received_epoch(epoch_id_type epoch) noexcept {
+    received_epoch_.store(epoch);
+}
+
+std::mutex& datastore_impl::control_channel_send_mutex() noexcept {
+    return mtx_control_channel_send_;
+}
+
+void datastore_impl::send_compaction_boundary(epoch_id_type boundary_epoch, blob_id_type blob_id_boundary) {
+    if (! is_master_ || ! replica_exists_.load(std::memory_order_acquire)) {
+        return;
+    }
+    TRACE_START << "boundary_epoch=" << boundary_epoch << ", blob_id_boundary=" << blob_id_boundary;
+    message_compaction_boundary message{boundary_epoch, blob_id_boundary};
+    {
+        std::scoped_lock<std::mutex> lock(mtx_control_channel_send_);
+        if (compaction_boundary_send_disabled_) {
+            TRACE_END << "the send is disabled";
+            return;
+        }
+        if (replication_config_result_.config.mode() == replication_mode::rdma) {
+            if (! rdma_control_send_stream_) {
+                LOG_LP(ERROR) << "RDMA control channel send stream is not initialized.";
+                return;
+            }
+            replication_message_io io{std::string{}};
+            replication_message::send(io, message);
+            // The message has no response, so the completion is not awaited with flush()
+            auto result = rdma_control_send_stream_->send_all_bytes(io.get_out_view());
+            if (! result.success) {
+                // Cannot continue, for the same reason as a failed send of GROUP_COMMIT (every channel shares
+                // the send ring)
+                LOG_LP(FATAL) << "Failed to send the compaction boundary message over the RDMA control channel: "
+                              << result.error_message;
+            }
+        } else {
+            if (! control_channel_) {
+                LOG_LP(ERROR) << "Control channel is not initialized.";
+                return;
+            }
+            if (! control_channel_->send_message(message)) {
+                LOG_LP(ERROR) << "Failed to send the compaction boundary message to replica.";
+                return;
+            }
+        }
+    }
+    TRACE_END;
+}
+
+void datastore_impl::disable_compaction_boundary_send() {
+    {
+        std::scoped_lock<std::mutex> lock(mtx_control_channel_send_);
+        compaction_boundary_send_disabled_ = true;
+    }
+}
+
+std::optional<datastore_impl::compaction_boundary> datastore_impl::get_received_compaction_boundary() {
+    {
+        std::scoped_lock<std::mutex> lock(mtx_received_compaction_boundary_);
+        return received_compaction_boundary_;
+    }
+}
+
+void datastore_impl::set_received_compaction_boundary(const compaction_boundary& boundary) {
+    {
+        std::scoped_lock<std::mutex> lock(mtx_received_compaction_boundary_);
+        received_compaction_boundary_ = boundary;
+    }
+}
+
+void datastore_impl::set_compaction_settings(
+        const limestone::internal::compaction_settings& settings) noexcept {
+    compaction_settings_ = settings;
+}
+
+const limestone::internal::compaction_settings& datastore_impl::get_compaction_settings() const noexcept {
+    return compaction_settings_;
+}
+
+void datastore_impl::set_compaction_worker_launcher(
+        std::shared_ptr<limestone::internal::compaction_worker_launcher> launcher) noexcept {
+    compaction_worker_launcher_ = std::move(launcher);
+}
+
+const std::shared_ptr<limestone::internal::compaction_worker_launcher>&
+datastore_impl::get_compaction_worker_launcher() const noexcept {
+    return compaction_worker_launcher_;
+}
+
+std::shared_ptr<limestone::internal::snapshot_use_marker> datastore_impl::create_snapshot_use_marker() const {
+    if (!compaction_worker_launcher_) {
+        return {};
+    }
+    return std::make_shared<limestone::internal::snapshot_use_marker>(compaction_worker_launcher_);
+}
+
 // Increments the backup counter.
 void datastore_impl::increment_backup_counter() noexcept {
-    backup_counter_.fetch_add(1, std::memory_order_acq_rel);
+    {
+        std::unique_lock<std::mutex> lock(mtx_backup_compaction_);
+        cv_backup_compaction_.wait(lock, [this]() { return ! compaction_running_; });
+        backup_counter_.fetch_add(1, std::memory_order_acq_rel);
+    }
     LOG_LP(INFO) << "Beginning backup; active backup count: " << backup_counter_.load(std::memory_order_acquire);
 }
 
@@ -193,6 +298,33 @@ bool datastore_impl::is_backup_in_progress() const noexcept {
     int count = backup_counter_.load(std::memory_order_acquire);
     VLOG_LP(log_trace) << "Checking if backup is in progress; active backup count: " << count;
     return count > 0;
+}
+
+void datastore_impl::start_backup_exclusion(limestone::internal::blob_file_garbage_collector* gc) {
+    increment_backup_counter();
+    // No new GC starts after the backup counter is incremented. A running GC is stopped, because it could
+    // remove the files the backup has enumerated. The files it leaves are removed by the GC of the next compaction
+    if (gc != nullptr && gc->is_active()) {
+        LOG_LP(INFO) << "stopping the BLOB file GC because a backup begins";
+        gc->shutdown();
+    }
+}
+
+bool datastore_impl::try_begin_compaction() noexcept {
+    std::scoped_lock<std::mutex> lock(mtx_backup_compaction_);
+    if (backup_counter_.load(std::memory_order_acquire) > 0) {
+        return false;
+    }
+    compaction_running_ = true;
+    return true;
+}
+
+void datastore_impl::end_compaction() noexcept {
+    {
+        std::scoped_lock<std::mutex> lock(mtx_backup_compaction_);
+        compaction_running_ = false;
+    }
+    cv_backup_compaction_.notify_all();
 }
 
 // Returns true if a replica exists.
@@ -350,6 +482,8 @@ bool datastore_impl::propagate_group_commit_rdma(uint64_t epoch_id) {
     // already serialized by the CAS in update_min_epoch_id() and runs inside the
     // scoped_lock of mtx_epoch_file_ (plus one pre-threading call in ready()). If that
     // premise ever breaks, multiple threads would touch this stream concurrently.
+    // The send of a compaction boundary message, which runs on another thread, is excluded by
+    // control_channel_send_mutex() that the caller holds.
     auto result = rdma_control_send_stream_->send_all_bytes(io.get_out_view());
     if (!result.success) {
         // acquire_frame_buffer() absorbs backpressure by blocking, so a failure means
@@ -467,6 +601,18 @@ log_channel& datastore_impl::register_log_channel(
 
 std::vector<std::unique_ptr<log_channel>> const& datastore_impl::log_channels() const noexcept {
     return log_channels_;
+}
+
+std::vector<log_channel*> datastore_impl::registered_log_channels() {
+    std::vector<log_channel*> result{};
+    {
+        std::scoped_lock<std::mutex> lock(mtx_channel_);
+        result.reserve(log_channels_.size());
+        for (const std::unique_ptr<log_channel>& channel : log_channels_) {
+            result.push_back(channel.get());
+        }
+    }
+    return result;
 }
 
 void datastore_impl::maybe_register_rdma_stream(log_channel& channel, std::size_t id) {

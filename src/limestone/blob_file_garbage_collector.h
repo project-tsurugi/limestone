@@ -142,6 +142,15 @@ public:
     void shutdown();
 
     /**
+     * @brief Stops the garbage collection for good: stops the ongoing tasks and never starts the GC again.
+     *
+     * After this function, scan_blob_files(), scan_snapshot(), start_add_gc_exempt_blob_ids(),
+     * add_gc_exempt_blob_id(), and finalize_add_gc_exempt_blob_ids() return without doing anything. Unlike
+     * shutdown(), the GC cannot be started again afterwards.
+     */
+    void close();
+
+    /**
      * Determines if any blob file operations are currently in progress.
      *
      * Returns true if blob file scanning, snapshot scanning, or cleanup has been started.
@@ -256,6 +265,7 @@ private:
     mutable std::mutex mutex_;                      ///< Mutex for synchronizing access to state variables.
     std::unique_ptr<file_operations> file_ops_;     ///< Pointer to the file_operations implementation.
     std::mutex shutdown_mutex_;                     ///< Mutex to ensure shutdown() is executed exclusively.
+    bool closed_{false};                            ///< Whether close() has been called. Protected by shutdown_mutex_.
     std::atomic_bool shutdown_requested_{false};    ///< Shutdown flag indicating if shutdown has been requested.
 
     /**

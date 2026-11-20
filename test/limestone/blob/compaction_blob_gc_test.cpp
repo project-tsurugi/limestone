@@ -618,6 +618,86 @@ TEST_F(compaction_blob_gc_test, blob_gc_executes_after_new_backup_test) {
     EXPECT_TRUE(boost::filesystem::exists(path2002_));
 }
 
+// When the setting disables it, the BLOB file GC at startup does not run. The BLOB files no longer referenced
+// remain after a restart
+TEST_F(compaction_blob_gc_test, startup_gc_does_not_run_when_disabled) {
+    gen_datastore();
+    prepare_blob_gc_test_data();
+    run_compact_with_epoch_switch(5);
+    ASSERT_TRUE(boost::filesystem::exists(path2001_));
+    ASSERT_TRUE(boost::filesystem::exists(path2002_));
 
+    // Overwrite blob_key1 without a BLOB, which removes the references to 2001 and 2002
+    datastore_->switch_epoch(6);
+    lc0_->begin_session();
+    lc0_->add_entry(1, "blob_key1", "blob_value1_noblob", {6, 0});
+    lc0_->end_session();
+    datastore_->switch_epoch(7);
+
+    datastore_->shutdown();
+    datastore_ = nullptr;
+    limestone::api::configuration conf{};
+    conf.set_data_location(location);
+    conf.set_blob_gc(false);
+    gen_datastore(conf);
+    datastore_->wait_for_blob_file_garbace_collector();
+
+    EXPECT_TRUE(boost::filesystem::exists(path2001_));
+    EXPECT_TRUE(boost::filesystem::exists(path2002_));
+    EXPECT_TRUE(boost::filesystem::exists(path1003_));
+}
+
+// When shutdown() is called after a compaction has reached its commit, the compaction completes but the BLOB
+// file GC does not start. No BLOB file is removed after shutdown()
+TEST_F(compaction_blob_gc_test, blob_gc_does_not_start_after_shutdown) {
+    gen_datastore();
+    prepare_blob_gc_test_data();
+    std::atomic<bool> commit_reached{false};
+    std::atomic<bool> release_requested{false};
+    datastore_->get_impl()->set_on_compaction_after_commit_for_test([&commit_reached, &release_requested]() {
+        commit_reached.store(true);
+        while (! release_requested.load()) {
+            std::this_thread::sleep_for(std::chrono::milliseconds(10));
+        }
+    });
+    std::thread compaction_thread([this]() { run_compact_with_epoch_switch(5); });
+    const std::chrono::steady_clock::time_point deadline = std::chrono::steady_clock::now() + std::chrono::seconds(10);
+    while (! commit_reached.load() && std::chrono::steady_clock::now() < deadline) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    }
+    EXPECT_TRUE(commit_reached.load());
+
+    datastore_->shutdown();
+    release_requested.store(true);
+    compaction_thread.join();
+
+    datastore_->wait_for_blob_file_garbace_collector();
+    EXPECT_TRUE(datastore_->get_impl()->get_current_compacted_file_name().has_value());
+    EXPECT_TRUE(boost::filesystem::exists(path1001_));
+    EXPECT_TRUE(boost::filesystem::exists(path1002_));
+    EXPECT_TRUE(boost::filesystem::exists(path1003_));
+    EXPECT_TRUE(boost::filesystem::exists(path2001_));
+    EXPECT_TRUE(boost::filesystem::exists(path2002_));
+}
+
+// When the setting disables it, a compaction on the master does not run the BLOB file GC. The compaction
+// itself runs
+TEST_F(compaction_blob_gc_test, blob_gc_does_not_run_when_disabled) {
+    limestone::api::configuration conf{};
+    conf.set_data_location(location);
+    conf.set_blob_gc(false);
+    gen_datastore(conf);
+    prepare_blob_gc_test_data();
+
+    run_compact_with_epoch_switch(5);
+    datastore_->wait_for_blob_file_garbace_collector();
+
+    EXPECT_TRUE(datastore_->get_impl()->get_current_compacted_file_name().has_value());
+    EXPECT_TRUE(boost::filesystem::exists(path1001_));
+    EXPECT_TRUE(boost::filesystem::exists(path1002_));
+    EXPECT_TRUE(boost::filesystem::exists(path1003_));
+    EXPECT_TRUE(boost::filesystem::exists(path2001_));
+    EXPECT_TRUE(boost::filesystem::exists(path2002_));
+}
 
 }  // namespace limestone::testing

@@ -18,6 +18,7 @@
 #define ONLINE_COMPACTION_H
 
 #include <boost/filesystem.hpp>
+#include <cstdint>
 #include <set>
 #include <string>
 #include <vector>
@@ -64,6 +65,21 @@ void safe_rename(const boost::filesystem::path& from, const boost::filesystem::p
  * @return A set of filenames that have been selected for compaction.
  */
 std::set<std::string> select_files_for_compaction(const std::set<boost::filesystem::path>& rotation_end_files, std::set<std::string>& detached_pwals);
+
+/**
+ * @brief Measures the total size of the WAL files that have not been the input of a compaction.
+ *
+ * The targets are, directly under the log directory, the unrotated WAL files and the rotated WAL files that are
+ * not in detached_pwals. The compacted WAL file, the carry file, and the locator file are not targets. A file
+ * that disappears during the scan is not counted. If the directory cannot be scanned, an ERROR log is written and
+ * the total so far is returned.
+ *
+ * @param location the log directory
+ * @param detached_pwals the names of the detached WAL files (those that have been the input of a compaction)
+ * @return the total size in bytes
+ */
+[[nodiscard]] std::uint64_t measure_uncompacted_wal_bytes(const boost::filesystem::path& location,
+                                                          const std::set<std::string>& detached_pwals) noexcept;
 
 /**
  * @brief Ensures that a directory exists, creating it if necessary.

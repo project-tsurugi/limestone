@@ -26,18 +26,22 @@ using limestone::api::write_version_type;
 
 std::unique_ptr<cursor> cursor_impl::create_cursor(
     const boost::filesystem::path& snapshot_file,
-    const std::map<limestone::api::storage_id_type, limestone::api::write_version_type>& clear_storage) {
+    const std::map<limestone::api::storage_id_type, limestone::api::write_version_type>& clear_storage,
+    std::shared_ptr<snapshot_use_marker> marker) {
 
     auto impl = std::make_unique<cursor_impl>(snapshot_file, clear_storage);
+    impl->set_snapshot_use_marker(std::move(marker));
     return std::unique_ptr<cursor>(new cursor(std::move(impl)));
 }
 
 std::unique_ptr<cursor> cursor_impl::create_cursor(
     const boost::filesystem::path& snapshot_file,
     const boost::filesystem::path& compacted_file,
-    const std::map<limestone::api::storage_id_type, limestone::api::write_version_type>& clear_storage) {
+    const std::map<limestone::api::storage_id_type, limestone::api::write_version_type>& clear_storage,
+    std::shared_ptr<snapshot_use_marker> marker) {
 
     auto impl = std::make_unique<cursor_impl>(snapshot_file, compacted_file, clear_storage);
+    impl->set_snapshot_use_marker(std::move(marker));
     return std::unique_ptr<cursor>(new cursor(std::move(impl)));
 }
 
@@ -45,9 +49,11 @@ std::unique_ptr<cursor> cursor_impl::create_cursor(
     const boost::filesystem::path& snapshot_file,
     const std::optional<boost::filesystem::path>& compacted_file,
     const std::map<limestone::api::storage_id_type, limestone::api::write_version_type>& clear_storage,
-    std::shared_ptr<region_allocator> allocator) {
+    std::shared_ptr<region_allocator> allocator,
+    std::shared_ptr<snapshot_use_marker> marker) {
 
     std::unique_ptr<cursor_impl> impl = std::make_unique<cursor_impl>(snapshot_file, compacted_file, clear_storage, std::move(allocator));
+    impl->set_snapshot_use_marker(std::move(marker));
     return std::unique_ptr<cursor>(new cursor(std::move(impl)));
 }
 

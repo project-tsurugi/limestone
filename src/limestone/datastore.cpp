@@ -24,6 +24,7 @@
 #include <cstdlib>
 #include <limits>
 #include <map>
+#include <string_view>
 
 #include <boost/filesystem/fstream.hpp>
 
@@ -42,7 +43,10 @@
 #include "log_entry/log_entry.h"
 #include "online_compaction.h"
 #include "compaction_catalog.h"
+#include "compaction_config_loader.h"
 #include "compaction_options.h"
+#include "compaction_trigger.h"
+#include "compaction_worker_launcher.h"
 #include "locator/locator_format.h"
 #include "sort/sort_buffer.h"
 #include "sort/sort_settings.h"
@@ -55,6 +59,7 @@
 #include "manifest.h"
 #include "log_channel_impl.h"
 #include "dblog_scan.h"
+#include "snapshot_impl.h"
 
 namespace {
 
@@ -89,6 +94,22 @@ void write_epoch_to_file_internal(const std::string& file_path, epoch_id_type ep
     }
 }
 
+/**
+ * @brief The mark of a running compaction. Ends the run of the compaction when it is destroyed.
+ */
+class compaction_running_mark {
+public:
+    explicit compaction_running_mark(datastore_impl& impl) noexcept : impl_(impl) {}
+    ~compaction_running_mark() noexcept { impl_.end_compaction(); }
+    compaction_running_mark(const compaction_running_mark&) = delete;
+    compaction_running_mark& operator=(const compaction_running_mark&) = delete;
+    compaction_running_mark(compaction_running_mark&&) = delete;
+    compaction_running_mark& operator=(compaction_running_mark&&) = delete;
+
+private:
+    datastore_impl& impl_;
+};
+
 } // namespace
 
 
@@ -100,10 +121,10 @@ datastore::datastore() noexcept: impl_(std::make_unique<datastore_impl>()) {
 }
 
 
-datastore::datastore(configuration const& conf) : location_(conf.data_location_), impl_(std::make_unique<datastore_impl>()) { // NOLINT(readability-function-cognitive-complexity)
+datastore::datastore(configuration const& conf) : location_(conf.get_data_location()), impl_(std::make_unique<datastore_impl>()) { // NOLINT(readability-function-cognitive-complexity)
     try {
-        impl_->set_instance_id(conf.instance_id_);
-        impl_->set_db_name(conf.db_name_);
+        impl_->set_instance_id(conf.get_instance_id());
+        impl_->set_db_name(conf.get_db_name());
         impl_->set_pid(::getpid());
         auto const& repl_result = impl_->get_replication_config_result();
         if (!repl_result.ok) {
@@ -135,9 +156,9 @@ datastore::datastore(configuration const& conf) : location_(conf.data_location_)
         // the items of the settings of the sort that are not set are filled in with the defaults of sort_settings
         constexpr std::size_t mib = std::size_t{1024} * 1024;
         const sort_settings sort_defaults{};
-        const int sort_threads = conf.recover_max_parallelism_.value_or(sort_defaults.threads);
-        const std::size_t sort_arena_size_mb = conf.sort_arena_size_mb_.value_or(sort_defaults.arena_size_bytes / mib);
-        const std::size_t sort_merge_fanin = conf.sort_merge_fanin_.value_or(sort_defaults.merge_fanin);
+        const int sort_threads = conf.get_recover_max_parallelism().value_or(sort_defaults.threads);
+        const std::size_t sort_arena_size_mb = conf.get_sort_arena_size_mb().value_or(sort_defaults.arena_size_bytes / mib);
+        const std::size_t sort_merge_fanin = conf.get_sort_merge_fanin().value_or(sort_defaults.merge_fanin);
         // recover_max_parallelism is the number of threads of the sort; a value below 1 is a misconfiguration. It is
         // checked before the lock of the log directory is taken (a throw after that would not release the lock)
         if (sort_threads < 1) {
@@ -160,17 +181,62 @@ datastore::datastore(configuration const& conf) : location_(conf.data_location_)
             throw limestone_exception(exception_type::initialization_failure, err_msg);
         }
         boost::system::error_code sort_work_dir_error;
-        if (! conf.sort_work_dir_.empty()
-            && ! boost::filesystem::is_directory(conf.sort_work_dir_, sort_work_dir_error)) {
-            std::string err_msg = "sort_work_dir is not an existing directory: " + conf.sort_work_dir_.string();
+        if (! conf.get_sort_work_dir().empty()
+            && ! boost::filesystem::is_directory(conf.get_sort_work_dir(), sort_work_dir_error)) {
+            std::string err_msg = "sort_work_dir is not an existing directory: " + conf.get_sort_work_dir().string();
             LOG_LP(ERROR) << err_msg;
             throw limestone_exception(exception_type::initialization_failure, err_msg);
         }
         impl_->set_sort_settings(sort_arena_size_mb * mib, sort_merge_fanin,
-                                 conf.sort_work_dir_.empty() ? location_ : conf.sort_work_dir_);
+                                 conf.get_sort_work_dir().empty() ? location_ : conf.get_sort_work_dir());
         LOG(INFO) << "/:limestone:config:datastore setting the sort: arena size = " << sort_arena_size_mb
                   << " MiB, merge fanin = " << sort_merge_fanin
                   << ", work dir = " << impl_->sort_work_dir_parent().string();
+        // The settings of the compaction and the BLOB file GC. The items not set are filled in with the defaults
+        // of compaction_settings
+        limestone::internal::compaction_settings auto_compaction{};
+        std::optional<std::size_t> auto_compaction_threshold_mb = conf.get_auto_compaction_threshold_mb();
+        std::optional<bool> auto_compaction_delete_detached = conf.get_auto_compaction_delete_detached();
+        std::optional<bool> blob_gc = conf.get_blob_gc();
+        // Provisional: when an item is not set in the configuration, read the environment variables. Remove this
+        // once the upper layer passes the values of the configuration file to the configuration. The environment
+        // variables are not read when all the three items are set
+        if (! auto_compaction_threshold_mb.has_value() || ! auto_compaction_delete_detached.has_value()
+            || ! blob_gc.has_value()) {
+            const limestone::internal::compaction_config_parse_result env_result =
+                limestone::internal::load_compaction_config_from_environment();
+            if (! env_result.ok) {
+                std::string err_msg = "invalid auto compaction configuration: " + env_result.error_message;
+                LOG_LP(ERROR) << err_msg;
+                throw limestone_exception(exception_type::initialization_failure, err_msg);
+            }
+            if (! auto_compaction_threshold_mb.has_value()) {
+                auto_compaction_threshold_mb = env_result.config.threshold_mb;
+            }
+            if (! auto_compaction_delete_detached.has_value()) {
+                auto_compaction_delete_detached = env_result.config.delete_detached;
+            }
+            if (! blob_gc.has_value()) {
+                blob_gc = env_result.config.blob_gc;
+            }
+        }
+        if (auto_compaction_threshold_mb.has_value()) {
+            const std::size_t threshold_mb = auto_compaction_threshold_mb.value();
+            if (threshold_mb > std::numeric_limits<std::uint64_t>::max() / mib) {
+                std::string err_msg = "auto_compaction_threshold_mb is too large: " + std::to_string(threshold_mb);
+                LOG_LP(ERROR) << err_msg;
+                throw limestone_exception(exception_type::initialization_failure, err_msg);
+            }
+            auto_compaction.threshold_bytes = std::uint64_t{threshold_mb} * mib;
+        }
+        auto_compaction.delete_detached = auto_compaction_delete_detached.value_or(auto_compaction.delete_detached);
+        auto_compaction.blob_gc = blob_gc.value_or(auto_compaction.blob_gc);
+        impl_->set_compaction_settings(auto_compaction);
+        LOG(INFO) << "/:limestone:config:datastore setting the auto compaction: threshold = "
+                  << auto_compaction.threshold_bytes / mib << " MiB"
+                  << (auto_compaction.threshold_bytes == 0 ? " (disabled)" : "")
+                  << ", delete detached = " << (auto_compaction.delete_detached ? "true" : "false")
+                  << ", blob gc = " << (auto_compaction.blob_gc ? "true" : "false");
         LOG(INFO) << "/:limestone:config:datastore setting log location = " << location_.string();
         boost::system::error_code error;
         const bool result_check = boost::filesystem::exists(location_, error);
@@ -518,17 +584,25 @@ blob_id_type datastore::create_snapshot_and_get_max_blob_id_with_wal_started_log
 
 void datastore::persist_and_propagate_epoch_id(epoch_id_type epoch_id) {
     TRACE_START << "epoch_id=" << epoch_id;
-    if (impl_->is_async_group_commit_enabled()) {
-        bool sent = impl_->propagate_group_commit(epoch_id);
-        persist_epoch_id(epoch_id);
-        if (sent) {
-            impl_->wait_for_propagated_group_commit_ack();
-        }
-    } else {
-        persist_epoch_id(epoch_id);
-        bool sent = impl_->propagate_group_commit(epoch_id);
-        if (sent) {
-            impl_->wait_for_propagated_group_commit_ack();
+    {
+        // From the send of GROUP_COMMIT to the wait for its ACK, exclude the other send on the control channel
+        // (the compaction boundary message sent by the online compaction worker). The send stream of the RDMA mode
+        // is not thread-safe, and in the TCP mode the send of GROUP_COMMIT pairs with the reception of its ACK on
+        // the same socket. The caller of this function may hold mtx_epoch_file_, so the mutexes are taken in the
+        // order of mtx_epoch_file_ and then this mutex.
+        std::scoped_lock<std::mutex> lock(impl_->control_channel_send_mutex());
+        if (impl_->is_async_group_commit_enabled()) {
+            bool sent = impl_->propagate_group_commit(epoch_id);
+            persist_epoch_id(epoch_id);
+            if (sent) {
+                impl_->wait_for_propagated_group_commit_ack();
+            }
+        } else {
+            persist_epoch_id(epoch_id);
+            bool sent = impl_->propagate_group_commit(epoch_id);
+            if (sent) {
+                impl_->wait_for_propagated_group_commit_ack();
+            }
         }
     }
     TRACE_END;
@@ -547,7 +621,13 @@ void datastore::ready() {
             std::max(create_snapshot_and_get_max_blob_id_with_wal_started_log(), compaction_catalog_->get_max_blob_id());
         blob_id_type next_blob_id = max_blob_id + 1;
         blob_file_garbage_collector_ = std::make_unique<blob_file_garbage_collector>(impl_->blob_file_resolver());
-        blob_file_garbage_collector_->scan_blob_files(next_blob_id);
+        // The BLOB file GC at startup. When the setting disables it, the scans are not started
+        const bool blob_gc_enabled = impl_->get_compaction_settings().blob_gc;
+        if (blob_gc_enabled) {
+            blob_file_garbage_collector_->scan_blob_files(next_blob_id);
+        } else {
+            LOG_LP(INFO) << "the BLOB file GC at startup is disabled";
+        }
 
         // Build the compacted path from the catalog record. With no record, pass the
         // well-known name that the migration rule assigns to generation 0; the orphan
@@ -557,11 +637,22 @@ void datastore::ready() {
         boost::filesystem::path compacted_file =
             location_ / compacted_file_name.value_or(compaction_catalog::get_compacted_filename());
         boost::filesystem::path snapshot_file = location_ / std::string(snapshot::subdirectory_name_) / std::string(snapshot::file_name_);
-        blob_file_garbage_collector_->scan_snapshot(snapshot_file, compacted_file);
+        if (blob_gc_enabled) {
+            blob_file_garbage_collector_->scan_snapshot(snapshot_file, compacted_file);
+        }
 
         next_blob_id_.store(next_blob_id);
 
-        online_compaction_worker_future_ = std::async(std::launch::async, &datastore::online_compaction_worker, this);
+        // The ctrl directory is created here, not by the worker thread, so that a script that requires the ctrl
+        // directory can use it without waiting for the worker thread to start.
+        ensure_directory_exists(location_ / "ctrl");
+
+        // The worker thread is not started here. It is started when a snapshot and all the cursors obtained from
+        // it are destroyed, so that the read of the snapshot for the initialization does not run concurrently
+        // with a compaction.
+        impl_->set_compaction_worker_launcher(std::make_shared<limestone::internal::compaction_worker_launcher>([this]() {
+            online_compaction_worker_future_ = std::async(std::launch::async, &datastore::online_compaction_worker, this);
+        }));
         // Move the durable epoch into the current epoch file before removing the rotated epoch files. The value to
         // write is the durable epoch read at startup, not the greatest epoch that appeared in the WAL
         // (epoch_id_informed_); the latter includes the epochs of the snippets invalidated for being beyond the
@@ -576,7 +667,12 @@ void datastore::ready() {
             LOG(INFO) << "Manifest migration requires WAL rotation.";
             dblog_scan ds(location_);
             ds.set_file_operations(impl_->file_ops());
-            ds.detach_wal_files();
+            // Apply the renames to files_. The input of a compaction and the targets of a backup are selected
+            // from files_
+            for (const dblog_scan::renamed_wal_file& renamed : ds.detach_wal_files()) {
+                subtract_file(renamed.from);
+                add_file(renamed.to);
+            }
             LOG(INFO) << "WAL rotation completed.";
         }
 
@@ -601,16 +697,61 @@ void datastore::ready() {
     }
 }
 
+void datastore::start_as_replica() {
+    TRACE_START;
+    // The order below matters.
+    // 1. Invalidate the snippets beyond the durable epoch. Such a snippet remains when the replica stops after a
+    //    log arrived from the master and before the GROUP_COMMIT of its epoch arrived. If it were left and the
+    //    reception resumed, a scan after the durable epoch passed that epoch would read it as valid data.
+    //    ready() of the master performs the same invalidation, but it is not called here because it also does
+    //    what the replica does not need, such as creating the snapshot file.
+    //    Nothing is set to epoch_id_switched_ and epoch_id_informed_. Both stay 0 on the replica
+    //    (update_min_epoch_id() relies on this and returns without doing anything on the replica).
+    const epoch_id_type durable_epoch =
+        limestone::internal::invalidate_nondurable_snippets(compaction_catalog_, location_, recover_max_parallelism_);
+    // 2. The durable epoch used as the boundary of the scan becomes the initial value of the received epoch
+    impl_->set_received_epoch(durable_epoch);
+    // 3. Create the BLOB file garbage collector. The scans of the GC are not performed here
+    blob_file_garbage_collector_ = std::make_unique<blob_file_garbage_collector>(impl_->blob_file_resolver());
+    // 4. The rotation required by the migration of the format version. It renames the files without the
+    //    exclusion of the rotation and without the catalog, so it is done before the online compaction worker
+    //    is started
+    auto migration_info = impl_->get_migration_info();
+    if (migration_info.has_value() && migration_info->requires_rotation()) {
+        LOG(INFO) << "Manifest migration requires WAL rotation.";
+        dblog_scan ds(location_);
+        ds.set_file_operations(impl_->file_ops());
+        // Apply the renames to files_. The input of a compaction is selected from files_
+        for (const dblog_scan::renamed_wal_file& renamed : ds.detach_wal_files()) {
+            subtract_file(renamed.from);
+            add_file(renamed.to);
+        }
+        LOG(INFO) << "WAL rotation completed.";
+    }
+    // 5. Start the online compaction worker. The replica creates no snapshot, so the worker is started
+    //    directly here
+    impl_->set_compaction_worker_launcher(std::make_shared<limestone::internal::compaction_worker_launcher>([this]() {
+        online_compaction_worker_future_ = std::async(std::launch::async, &datastore::online_compaction_worker, this);
+    }));
+    impl_->get_compaction_worker_launcher()->launch();
+    LOG_LP(INFO) << "started as a replica: received epoch = " << durable_epoch;
+    TRACE_END;
+}
+
 std::unique_ptr<snapshot> datastore::get_snapshot() const {
     check_after_ready(static_cast<const char*>(__func__));
-    return std::unique_ptr<snapshot>(new snapshot(location_, clear_storage, impl_->get_current_compacted_file_name(),
+    std::unique_ptr<snapshot> result(new snapshot(location_, clear_storage, impl_->get_current_compacted_file_name(),
                                                   impl_->get_locator_settings().region_records));
+    result->pimpl->set_use_marker(impl_->create_snapshot_use_marker());
+    return result;
 }
 
 std::shared_ptr<snapshot> datastore::shared_snapshot() const {
     check_after_ready(static_cast<const char*>(__func__));
-    return std::shared_ptr<snapshot>(new snapshot(location_, clear_storage, impl_->get_current_compacted_file_name(),
+    std::shared_ptr<snapshot> result(new snapshot(location_, clear_storage, impl_->get_current_compacted_file_name(),
                                                   impl_->get_locator_settings().region_records));
+    result->pimpl->set_use_marker(impl_->create_snapshot_use_marker());
+    return result;
 }
 
 log_channel& datastore::create_channel() {
@@ -786,6 +927,19 @@ std::future<void> datastore::shutdown() noexcept {
     VLOG_LP(log_info) << "start";
     state_ = state::shutdown;
 
+    // Disable the start of the online compaction worker from now on. A snapshot or a cursor destroyed after this
+    // does not start the worker. No start is in progress when close() returns, so the stop of the worker below
+    // does not race with a start.
+    if (impl_->get_compaction_worker_launcher()) {
+        impl_->get_compaction_worker_launcher()->close();
+    }
+
+    // Disable the send of a compaction boundary message from now on. The control channel is closed and the RDMA
+    // send streams are released below, while the online compaction worker is stopped only after that. No send is
+    // in progress when this returns, and a compaction in progress does not send to the released channel when it
+    // completes.
+    impl_->disable_compaction_boundary_send();
+
     // shutdown replication control channel
     if (impl_->is_replication_configured() && impl_->is_master()) {
         auto control_channel = impl_->get_control_channel();
@@ -808,8 +962,10 @@ std::future<void> datastore::shutdown() noexcept {
     impl_->shutdown_rdma_sender();
     impl_->shutdown_rdma_ack_receiver();
 
+    // Stop the BLOB file GC for good. The online compaction worker is stopped only after this, and a compaction
+    // in progress does not start the GC when it completes
     if (blob_file_garbage_collector_) {
-        blob_file_garbage_collector_->shutdown();
+        blob_file_garbage_collector_->close();
     }
 
     // Make an in-flight rotation request give up: once shirakami stops on
@@ -831,7 +987,7 @@ std::future<void> datastore::shutdown() noexcept {
 
     stop_online_compaction_worker();
     if (!online_compaction_worker_future_.valid()) {
-        VLOG(log_info) << "/:limestone:datastore:shutdown compaction task is not running. skipping task shutdown.";
+        LOG_LP(INFO) << "the online compaction worker has not been started; no snapshot was released before the shutdown";
     } else {
         VLOG(log_info) << "/:limestone:datastore:shutdown shutdown: waiting for compaction task to stop";
         online_compaction_worker_future_.wait();
@@ -854,6 +1010,7 @@ std::future<void> datastore::shutdown() noexcept {
 // old interface
 backup& datastore::begin_backup() {
     try {
+        impl_->start_backup_exclusion(blob_file_garbage_collector_.get());
         auto tmp_files = get_files();
         
         // Use blob_file_scanner to add blob files to the backup target
@@ -873,6 +1030,7 @@ backup& datastore::begin_backup() {
 
 std::unique_ptr<backup_detail> datastore::begin_backup(backup_type btype) {  // NOLINT(readability-function-cognitive-complexity)
     try {
+        impl_->start_backup_exclusion(blob_file_garbage_collector_.get());
         rotate_epoch_file();
         rotation_result result = rotate_log_files();
 
@@ -982,14 +1140,23 @@ rotation_result datastore::rotate_log_files() {  // NOLINT(readability-function-
     TRACE_START;
     std::scoped_lock<std::mutex> lock(rotate_mutex); 
     TRACE << "start rotate_log_files() critical section";
-    auto epoch_id = epoch_id_switched_.load();
+    // The boundary epoch of the rotation. The replica uses the epoch of the latest GROUP_COMMIT it received from
+    // the master and persisted (the received epoch). The replica does not advance the epoch by itself, so
+    // epoch_id_switched_ stays 0.
+    const bool is_master = impl_->is_master();
+    auto epoch_id = is_master ? epoch_id_switched_.load() : impl_->get_received_epoch();
     if (epoch_id == 0) {
         LOG_AND_THROW_EXCEPTION("rotation requires epoch_id > 0, but got epoch_id = 0");
     }
     TRACE << "epoch_id = " << epoch_id;
     auto& rotation_state = impl_->get_rotation_state();
-    {
-        on_rotate_log_files(); // for testing
+    on_rotate_log_files(); // for testing
+    // The replica does not wait for the persistence up to the boundary epoch to complete. The boundary epoch of
+    // the replica is the received epoch, that is, the epoch of the latest GROUP_COMMIT received. The master fixes
+    // an epoch and sends its GROUP_COMMIT only after the logs of the sessions have been persisted on the replica.
+    // Therefore every session of an epoch at or below the boundary epoch has already been persisted on this
+    // replica when the boundary is decided.
+    if (is_master) {
         // Wait until epoch_id_informed_ is less than rotated_epoch_id to ensure safe rotation.
         std::unique_lock<std::mutex> ul(informed_mutex);
         while (epoch_id_informed_.load() < epoch_id && !rotation_state.shutdown_requested.load()) {
@@ -1019,17 +1186,19 @@ rotation_result datastore::rotate_log_files() {  // NOLINT(readability-function-
             }
         }
 
-        // Lookup table (file name -> channel). The channel set is immutable
-        // after registration completes, so this can be built outside the mutex.
-        std::map<std::string, log_channel*> channel_by_filename;
-        for (auto const& lc : impl_->log_channels()) {
-            channel_by_filename.emplace(lc->file_path().filename().string(), lc.get());
-        }
-
         std::size_t waited_channels = 0;
         std::chrono::steady_clock::time_point wait_begin{};
         {
             std::unique_lock<std::mutex> ul(rotation_state.mutex);
+            // Lookup table (file name -> channel). On the replica, a channel is registered concurrently with a
+            // rotation, so the table is built under this mutex. A session takes this mutex before it opens its
+            // file. Therefore a channel that has begun a session when the table is built is always in the table
+            // and is judged active below. A channel not in the table cannot open its file until the immediate
+            // renames below finish (they finish without ever releasing this mutex).
+            std::map<std::string, log_channel*> channel_by_filename;
+            for (log_channel* lc : impl_->registered_log_channels()) {
+                channel_by_filename.emplace(lc->file_path().filename().string(), lc);
+            }
             rotation_state.renamed_files.clear();
             for (auto const& target : targets) {
                 log_channel* channel = nullptr;
@@ -1177,24 +1346,25 @@ int64_t datastore::current_unix_epoch_in_millis() {
     return std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::system_clock::now().time_since_epoch()).count();
 }
 
-void datastore::online_compaction_worker() {
+void datastore::online_compaction_worker() {  // NOLINT(readability-function-cognitive-complexity)
     pthread_setname_np(pthread_self(), "cmpctn_worker");
     LOG_LP(INFO) << "online compaction worker started...";
 
-    boost::filesystem::path ctrl_dir = location_ / "ctrl";
-    boost::filesystem::path start_file = ctrl_dir / "start_compaction";
+    boost::filesystem::path start_file = location_ / "ctrl" / "start_compaction";
 
+    const limestone::internal::compaction_settings& auto_compaction = impl_->get_compaction_settings();
+    // The first measurement is taken right after the start
+    std::chrono::steady_clock::time_point next_measurement = std::chrono::steady_clock::now();
 
-    ensure_directory_exists(ctrl_dir);
-    if (!boost::filesystem::exists(ctrl_dir)) {
-        if (!boost::filesystem::create_directory(ctrl_dir)) {
-            LOG_LP(ERROR) << "failed to create directory: " << ctrl_dir.string();
-            return;
-        } 
-    }
+    const bool is_master = impl_->is_master();
+    // The reason why the auto compaction was postponed at the previous measurement; empty if it was not
+    // postponed. The log of the postponement is not repeated while the same reason continues
+    std::string_view last_postponement_reason{};
 
     while (!stop_online_compaction_worker_.load()) {
-        if (boost::filesystem::exists(start_file)) {
+        // The request by the ctrl file is handled only in the master role. On the replica, the auto compaction
+        // is the only trigger of a compaction
+        if (is_master && boost::filesystem::exists(start_file)) {
             if (!boost::filesystem::remove(start_file)) {
                 LOG_LP(ERROR) << "failed to remove file: " << start_file.string();
                 return;
@@ -1203,7 +1373,7 @@ void datastore::online_compaction_worker() {
             // rotation waits); otherwise stop_online_compaction_worker() cannot
             // set the stop flag and shutdown() blocks behind the rotation wait.
             try {
-                compact_with_online();
+                run_online_compaction(limestone::internal::compaction_trigger::ctrl_file);
             } catch (const limestone_exception& e) {
                 if (stop_online_compaction_worker_.load()) {
                     // A rotation given up by a normal shutdown is not an anomaly.
@@ -1212,6 +1382,46 @@ void datastore::online_compaction_worker() {
                     LOG_LP(ERROR) << "failed to compact with online: " << e.what();
                 }
             }
+        }
+        // The auto compaction: at every measurement interval, measure the amount of the WAL that has not been
+        // the input of a compaction, and run a rotation and a compaction if it exceeds the threshold. This is
+        // handled on the same thread as the request by the ctrl file, one after another, so two compactions
+        // never run concurrently.
+        if (auto_compaction.threshold_bytes != 0 && std::chrono::steady_clock::now() >= next_measurement) {
+            next_measurement = std::chrono::steady_clock::now() + auto_compaction.measurement_interval;
+            constexpr std::uint64_t mib = std::uint64_t{1024} * 1024;
+            const std::uint64_t amount =
+                limestone::internal::measure_uncompacted_wal_bytes(location_, compaction_catalog_->get_detached_pwals());
+            std::string_view postponement_reason{};
+            if (amount > auto_compaction.threshold_bytes) {
+                const epoch_id_type boundary_epoch =
+                    is_master ? epoch_id_switched_.load() : impl_->get_received_epoch();
+                if (boundary_epoch == 0) {
+                    // There is no epoch yet to be the boundary of the rotation. Wait for the next measurement
+                    postponement_reason = "no boundary epoch for the rotation yet";
+                } else if (impl_->is_backup_in_progress()) {
+                    // It cannot run during a backup. Wait for the next measurement
+                    postponement_reason = "a backup is in progress";
+                } else {
+                    LOG_LP(INFO) << "the amount of the WAL exceeded the threshold of the auto compaction: amount = "
+                                 << amount / mib << " MiB (" << amount << " bytes), threshold = "
+                                 << auto_compaction.threshold_bytes / mib << " MiB";
+                    try {
+                        run_online_compaction(limestone::internal::compaction_trigger::threshold);
+                    } catch (const limestone_exception& e) {
+                        if (stop_online_compaction_worker_.load()) {
+                            // A rotation given up by a normal shutdown is not an anomaly
+                            LOG_LP(INFO) << "auto compaction aborted by shutdown: " << e.what();
+                        } else {
+                            LOG_LP(ERROR) << "failed to run the auto compaction: " << e.what();
+                        }
+                    }
+                }
+            }
+            if (! postponement_reason.empty() && postponement_reason != last_postponement_reason) {
+                VLOG_LP(log_info) << "auto compaction postponed: " << postponement_reason;
+            }
+            last_postponement_reason = postponement_reason;
         }
         {
             std::unique_lock<std::mutex> lock(mtx_online_compaction_worker_);
@@ -1230,18 +1440,24 @@ void datastore::stop_online_compaction_worker() {
     cv_online_compaction_worker_.notify_all();
 }
 
-void datastore::compact_with_online() {  // NOLINT(readability-function-cognitive-complexity)
-    TRACE_START;
+void datastore::compact_with_online_for_tests() {
     check_after_ready(static_cast<const char*>(__func__));
+    run_online_compaction(limestone::internal::compaction_trigger::ctrl_file);
+}
+
+void datastore::run_online_compaction(limestone::internal::compaction_trigger trigger) {  // NOLINT(readability-function-cognitive-complexity)
+    TRACE_START;
 
     // Mutual exclusion with a backup: if the removal of the old generation ran between
     // the enumeration and the copy of a backup, the copy of an enumerated file would
-    // fail. Compaction is therefore not run during a backup (as blob GC is not).
-    if (impl_->is_backup_in_progress()) {
+    // fail. Compaction is therefore not run during a backup (as blob GC is not), and a
+    // backup that begins while a compaction is running waits for the compaction to complete.
+    if (! impl_->try_begin_compaction()) {
         LOG_LP(INFO) << "online compaction skipped because a backup is in progress";
         TRACE_END << "return compact_with_online() without compaction (backup in progress)";
         return;
     }
+    compaction_running_mark running_mark(*impl_);
 
     // Take the blob GC boundary and the boundary_version before the rotation. The GC
     // boundary is the minimum of the current next_blob_id and the next_blob_id at the
@@ -1261,11 +1477,15 @@ void datastore::compact_with_online() {  // NOLINT(readability-function-cognitiv
     // check blob file garbage collection runnable
     bool blob_file_gc_runnable = false;
     bool is_active = blob_file_garbage_collector_->is_active();
-    if (boundary_version_copy.get_major() > compaction_catalog_->get_max_epoch_id() && !is_active) {
+    const bool blob_gc_enabled = impl_->get_compaction_settings().blob_gc;
+    // This decision is that of the master. The replica decides after the rotation, with the boundary received
+    // from the master
+    if (blob_gc_enabled && impl_->is_master() && boundary_version_copy.get_major() > compaction_catalog_->get_max_epoch_id() && !is_active) {
         blob_file_gc_runnable = true;
         blob_file_garbage_collector_->shutdown();
     }
-    VLOG_LP(log_info) << "blob_gc_boundary: " << blob_gc_boundary
+    VLOG_LP(log_info) << "blob_gc_enabled: " << blob_gc_enabled
+                            << ", blob_gc_boundary: " << blob_gc_boundary
                             << ", boundary_version_copy.get_major(): " << boundary_version_copy.get_major()
                             << ", compaction_catalog_->get_max_epoch_id(): " << compaction_catalog_->get_max_epoch_id()
                             << ", blob_file_garbage_collector_->is_active(): " << is_active
@@ -1273,6 +1493,35 @@ void datastore::compact_with_online() {  // NOLINT(readability-function-cognitiv
 
     // rotate first
     rotation_result result = rotate_log_files();
+    LOG_LP(INFO) << "rotated the log files for the compaction: boundary epoch = " << result.get_epoch_id();
+
+    // The BLOB file GC on the replica. The replica does not know up to which BLOB ID has been issued, so it cannot
+    // decide the boundary of the GC by itself. It uses the pair the master sends at each compaction (the boundary
+    // epoch of the master E_m and the BLOB ID boundary G_m). Let E_r be the boundary epoch of this compaction. If
+    // E_m <= E_r, every reference to a live BLOB below G_m is in an entry of an epoch at or below E_r, and is
+    // visible to the scan of this compaction.
+    if (! impl_->is_master()) {
+        const std::optional<datastore_impl::compaction_boundary> received = impl_->get_received_compaction_boundary();
+        // The GC runs on other threads. Starting the next GC while one is running would stop the running one,
+        // so the GC is skipped
+        const bool previous_gc_active = blob_file_garbage_collector_->is_active();
+        if (blob_gc_enabled && received.has_value() && received->boundary_epoch <= result.get_epoch_id()
+            && ! previous_gc_active) {
+            blob_file_gc_runnable = true;
+            blob_gc_boundary = received->blob_id_boundary;
+            // The scan of the GC collects the entries whose write_version is below the boundary. Target the
+            // entries of the epochs at or below E_r
+            boundary_version_copy = write_version_type(result.get_epoch_id() + 1, 0);
+            blob_file_garbage_collector_->shutdown();
+        }
+        VLOG_LP(log_info) << "blob file GC on the replica: enabled = " << blob_gc_enabled
+                          << ", boundary received = " << received.has_value()
+                          << ", master boundary epoch = " << (received.has_value() ? received->boundary_epoch : 0)
+                          << ", blob id boundary = " << (received.has_value() ? received->blob_id_boundary : 0)
+                          << ", boundary epoch = " << result.get_epoch_id()
+                          << ", previous GC active = " << previous_gc_active
+                          << ", runnable = " << blob_file_gc_runnable;
+    }
 
     // select files for compaction
     std::set<std::string> detached_pwals = compaction_catalog_->get_detached_pwals();
@@ -1290,7 +1539,7 @@ void datastore::compact_with_online() {  // NOLINT(readability-function-cognitiv
     if (need_compaction_filenames.empty() ||
         (need_compaction_filenames.size() == 1 && current_compacted_file_name.has_value() &&
          need_compaction_filenames.find(current_compacted_file_name.value()) != need_compaction_filenames.end())) {
-        VLOG_LP(log_debug) << "no files to compact";
+        LOG_LP(INFO) << "compaction skipped: no files to compact (trigger = " << trigger << ")";
         TRACE_END << "return compact_with_online() without compaction";
         return;
     }
@@ -1327,6 +1576,19 @@ void datastore::compact_with_online() {  // NOLINT(readability-function-cognitiv
     std::string compacted_file_name = compaction_catalog::get_compacted_filename_for_generation(new_generation);
     std::string carry_file_name = compaction_catalog::get_carry_filename_for_generation(new_generation);
     options.set_output_file_names(compacted_file_name, carry_file_name);
+
+    // The amount of the input is computed only for the log. A file whose size cannot be taken is not counted
+    std::uint64_t input_bytes = 0;
+    for (const std::string& filename : need_compaction_filenames) {
+        boost::system::error_code size_error;
+        const boost::uintmax_t size = boost::filesystem::file_size(location_ / filename, size_error);
+        if (! size_error) {
+            input_bytes += size;
+        }
+    }
+    const std::chrono::steady_clock::time_point compaction_start = std::chrono::steady_clock::now();
+    LOG_LP(INFO) << "compaction started: trigger = " << trigger << ", generation = " << new_generation
+                 << ", input = " << need_compaction_filenames.size() << " files, " << input_bytes << " bytes";
     // The locator file of the compacted WAL file (create_compaction_output writes it under the same naming rule)
     std::string locator_file_name = locator_format::locator_file_name(compacted_file_name);
 
@@ -1461,7 +1723,44 @@ void datastore::compact_with_online() {  // NOLINT(readability-function-cognitiv
         LOG_LP(FATAL) << "online compaction failed at the publish/commit/delete phase: " << e.what();
     }
 
-    LOG_LP(INFO) << "compaction finished";
+    LOG_LP(INFO) << "compaction finished: trigger = " << trigger << ", generation = " << new_generation
+                 << ", elapsed = "
+                 << std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now()
+                                                                           - compaction_start).count()
+                 << " ms";
+
+    // Notify the replica of the boundary of the compaction. The replica uses it to decide the boundary of the
+    // BLOB file GC in its own compaction. The BLOB ID boundary is the value taken before the rotation. The message
+    // is sent only on the master of a replication configuration, while a replica is connected
+    impl_->send_compaction_boundary(result.get_epoch_id(), blob_gc_boundary);
+
+    // The removal of the detached WAL files. Only the auto compaction does it. The targets are all the files
+    // that are in the detached list of the catalog and exist (detached_pwals at this point): not only the input
+    // of this compaction but also the files detached by earlier compactions and left. Therefore a file whose
+    // removal failed, or a file left because the process stopped in the middle of the removal, is removed by the
+    // next auto compaction.
+    // The names of the removed files stay in the list of the catalog. The next compaction drops the names that
+    // do not exist from the list.
+    if (trigger == limestone::internal::compaction_trigger::threshold
+        && impl_->get_compaction_settings().delete_detached) {
+        std::size_t removed_count = 0;
+        for (const std::string& filename : detached_pwals) {
+            boost::filesystem::path detached_path = location_ / filename;
+            boost::system::error_code remove_error;
+            impl_->file_ops().remove(detached_path, remove_error);
+            if (remove_error) {
+                // The file left is a target of the removal again in the next auto compaction
+                LOG_LP(ERROR) << "failed to remove the detached WAL file '" << detached_path.string()
+                              << "': " << remove_error.message();
+                continue;
+            }
+            // A backup enumerates the files from files_, so drop the removed file from it
+            subtract_file(detached_path);
+            ++removed_count;
+        }
+        LOG_LP(INFO) << "removed the detached WAL files: " << removed_count << " of " << detached_pwals.size()
+                     << " files";
+    }
 
     // blob files garbage collection
     VLOG_LP(log_info) << "options.is_gc_enabled(): " << options.is_gc_enabled() << ", impl_->is_backup_in_progress(): " << impl_->is_backup_in_progress();

@@ -15,6 +15,7 @@
  */
 #pragma once
 
+#include <cstdint>
 #include <memory>
 #include <future>
 #include <atomic>
@@ -46,6 +47,7 @@ namespace limestone::internal {
     class compaction_catalog;
     class blob_file_resolver; 
     class blob_file_garbage_collector;
+    enum class compaction_trigger : std::uint8_t;
 }
 namespace limestone::api {
 
@@ -252,16 +254,6 @@ public:
     void recover(const epoch_tag&) const noexcept;
 
     /**
-     * @brief Performs online log file compaction.
-     *
-     * This function compacts log files that have been rotated and are no longer subject to new entries.
-     *
-     * @exception limestone_exception Thrown if an I/O error occurs during the compaction process.
-     * @attention this function should be called before the ready() is called.
-     */
-    void compact_with_online();
-
-    /**
      * @brief acquires a new empty BLOB pool.
      * @details This pool is used for temporary registration of BLOBs,
      *      and all BLOBs that are not fully registered will become unavailable when the pool is destroyed.
@@ -367,6 +359,19 @@ public:
      */
     virtual void persist_and_propagate_epoch_id(epoch_id_type epoch_id);
 
+    /**
+     * @brief Performs the startup processing to run as a replica. Call it instead of ready().
+     *
+     * Invalidates the snippets beyond the durable epoch, and takes that durable epoch as the initial value of the
+     * received epoch. It does not create the snapshot file. At its end, it starts the online compaction worker.
+     *
+     * NOTE: This method is intended for internal use only.
+     *
+     * @throws limestone_exception if a WAL file is malformed, or the epoch file cannot be read
+     * @throws limestone_io_exception if an I/O operation fails
+     */
+    void start_as_replica();
+
 protected:  // for tests
     std::vector<std::unique_ptr<log_channel>> const& log_channels_for_tests() const noexcept;
     auto epoch_id_informed_for_tests() const noexcept { return epoch_id_informed_.load(); }
@@ -383,6 +388,7 @@ protected:  // for tests
     }
     write_version_type get_available_boundary_version_for_tests() const noexcept { return available_boundary_version_; }
     void wait_for_blob_file_garbace_collector_for_tests() const noexcept;
+    void compact_with_online_for_tests();
 
 
     // These virtual methods are hooks for testing thread synchronization.
@@ -485,6 +491,14 @@ private:
     void online_compaction_worker();
 
     void stop_online_compaction_worker();
+
+    /**
+     * @brief Runs a rotation and an online compaction.
+     * @param trigger what triggered the run
+     * @throws limestone_exception if the boundary epoch of the rotation is 0, or the rotation is given up because
+     *         of a shutdown
+     */
+    void run_online_compaction(limestone::internal::compaction_trigger trigger);
 
     // used for backup
     //   (old) full backup :   target is entire <files_>

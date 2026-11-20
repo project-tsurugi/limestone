@@ -275,7 +275,6 @@ public:
      */
     [[nodiscard]] bool is_orphan_compaction_file(const std::string& filename) const;
 
-private:
     /**
      * @brief Tells whether the name has the form of a compaction output.
      *
@@ -288,6 +287,7 @@ private:
      */
     [[nodiscard]] static bool is_compaction_output_filename(const std::string& filename);
 
+private:
     // Constants
     static constexpr const char *COMPACTION_CATALOG_FILENAME = "compaction_catalog";              ///< Name of the catalog file
     static constexpr const char *COMPACTION_CATALOG_BACKUP_FILENAME = "compaction_catalog.back";  ///< Name of the backup catalog file

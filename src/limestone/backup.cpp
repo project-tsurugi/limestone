@@ -24,7 +24,6 @@ backup::backup(const std::set<boost::filesystem::path>& files, datastore_impl& d
     for(auto& e : files) {
         files_.emplace_back(e);
     }
-    ds_impl_->increment_backup_counter();
 }
 
 backup::~backup() noexcept = default;

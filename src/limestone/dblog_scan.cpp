@@ -116,7 +116,7 @@ epoch_id_type dblog_scan::last_durable_epoch_in_dir() {
 
 
 
-void dblog_scan::detach_wal_files(bool skip_empty_files) {
+std::vector<dblog_scan::renamed_wal_file> dblog_scan::detach_wal_files(bool skip_empty_files) {
     // rotate_attached_wal_files
     std::vector<boost::filesystem::path> attached_files;
     for (const boost::filesystem::path& p : boost::filesystem::directory_iterator(dblogdir_)) {
@@ -127,9 +127,11 @@ void dblog_scan::detach_wal_files(bool skip_empty_files) {
             attached_files.emplace_back(p);
         }
     }
+    std::vector<renamed_wal_file> renamed_files{};
     if (attached_files.empty()) {
-        return;
+        return renamed_files;
     }
+    renamed_files.reserve(attached_files.size());
     for (const boost::filesystem::path& p : attached_files) {
         std::stringstream ssbase;
         auto unix_epoch = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::system_clock::now().time_since_epoch()).count();
@@ -140,6 +142,7 @@ void dblog_scan::detach_wal_files(bool skip_empty_files) {
             if (!boost::filesystem::exists(new_file)) {
                 boost::filesystem::rename(p, new_file);
                 VLOG_LP(50) << "rename " << p << " to " << new_file;
+                renamed_files.push_back({p, new_file});
                 break;
             }
         }
@@ -150,6 +153,7 @@ void dblog_scan::detach_wal_files(bool skip_empty_files) {
     if (ops.fsync_directory(dblogdir_) != 0) {
         LOG_AND_THROW_IO_EXCEPTION("Failed to fsync directory: " + dblogdir_.string(), errno);
     }
+    return renamed_files;
 }
 
 void dblog_scan::set_file_operations(file_operations& ops) noexcept {

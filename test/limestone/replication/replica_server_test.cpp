@@ -23,11 +23,13 @@
 #include <boost/filesystem.hpp>
 #include <chrono>
 #include <future>
+#include <optional>
 #include <thread>
 
 #include "rdma/rdma_receiver_base.h"
 #include "rdma/rdma_sender_base.h"
 #include "replication/channel_handler_base.h"
+#include "replication/message_compaction_boundary.h"
 #include "replication/message_error.h"
 #include "replication/message_group_commit.h"
 #include "replication/message_session_begin.h"
@@ -38,6 +40,7 @@
 #include "replication/rdma_log_channel_receiver.h"
 #include "noop_rdma_mocks.h"
 #include "replication_test_helper.h"
+#include "datastore_impl.h"
 namespace limestone::testing {
 
 using namespace limestone::replication;
@@ -538,6 +541,30 @@ TEST_F(replica_server_test, on_rdma_receive_routes_control_event_and_persists_ep
     auto ev2 = make_control_event(control_id, 1U, serialize_control_message(message_group_commit{9}));
     server.on_rdma_receive(rdma_receive_event{ev2});
     EXPECT_EQ(get_epoch(location1), 9U);
+}
+
+// On receiving a control frame of COMPACTION_BOUNDARY, the replica keeps the latest boundary. Mixed with
+// GROUP_COMMIT, each of them is processed
+TEST_F(replica_server_test, on_rdma_receive_keeps_the_latest_compaction_boundary) {
+    replica_server server;
+    server.initialize(location1);
+    server.set_rdma_control_channel_id_for_test(control_id);
+    ASSERT_FALSE(server.get_datastore().get_impl()->get_received_compaction_boundary().has_value());
+
+    auto ev1 = make_control_event(control_id, 0U, serialize_control_message(message_compaction_boundary{5, 100}));
+    server.on_rdma_receive(rdma_receive_event{ev1});
+    auto ev2 = make_control_event(control_id, 1U, serialize_control_message(message_group_commit{7}));
+    server.on_rdma_receive(rdma_receive_event{ev2});
+    auto ev3 = make_control_event(control_id, 2U, serialize_control_message(message_compaction_boundary{6, 120}));
+    server.on_rdma_receive(rdma_receive_event{ev3});
+
+    const std::optional<limestone::api::datastore_impl::compaction_boundary> kept =
+        server.get_datastore().get_impl()->get_received_compaction_boundary();
+    ASSERT_TRUE(kept.has_value());
+    EXPECT_EQ(kept->boundary_epoch, 6U);
+    EXPECT_EQ(kept->blob_id_boundary, 120U);
+    EXPECT_EQ(get_epoch(location1), 7U);
+    EXPECT_EQ(server.get_datastore().get_impl()->get_received_epoch(), 7U);
 }
 
 TEST_F(replica_server_test, control_frame_version_mismatch_is_fatal) {

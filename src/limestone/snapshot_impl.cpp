@@ -37,6 +37,10 @@ snapshot_impl::snapshot_impl(boost::filesystem::path location,
       compacted_file_name_(std::move(compacted_file_name)), region_records_(region_records) {
 }
 
+void snapshot_impl::set_use_marker(std::shared_ptr<snapshot_use_marker> marker) noexcept {
+    use_marker_ = std::move(marker);
+}
+
 std::unique_ptr<cursor> snapshot_impl::get_cursor() const {
     namespace la = limestone::api;
     boost::filesystem::path snapshot_file = location_ / std::string(la::snapshot::subdirectory_name_) / std::string(la::snapshot::file_name_);
@@ -46,9 +50,9 @@ std::unique_ptr<cursor> snapshot_impl::get_cursor() const {
     // whose file is missing is detected by the startup consistency check.
     if (compacted_file_name_.has_value()) {
         boost::filesystem::path compacted_file = location_ / compacted_file_name_.value();
-        return cursor_impl::create_cursor(snapshot_file, compacted_file, clear_storage);
+        return cursor_impl::create_cursor(snapshot_file, compacted_file, clear_storage, use_marker_);
     }
-    return cursor_impl::create_cursor(snapshot_file, clear_storage);
+    return cursor_impl::create_cursor(snapshot_file, clear_storage, use_marker_);
 }
 
 std::vector<std::unique_ptr<limestone::api::cursor>> snapshot_impl::get_partitioned_cursors(std::size_t n) {
@@ -77,7 +81,7 @@ std::vector<std::unique_ptr<limestone::api::cursor>> snapshot_impl::get_partitio
     std::vector<std::unique_ptr<la::cursor>> cursors{};
     cursors.reserve(n);
     for (std::size_t i = 0; i < n; ++i) {
-        cursors.push_back(cursor_impl::create_cursor(snapshot_file, compacted_file, clear_storage, allocator));
+        cursors.push_back(cursor_impl::create_cursor(snapshot_file, compacted_file, clear_storage, allocator, use_marker_));
     }
     return cursors;
 }

@@ -26,8 +26,6 @@
 
 namespace limestone::api {
 
-class datastore;
-
 /**
  * @brief configuration for datastore
  *
@@ -86,6 +84,88 @@ public:
      */
     void set_sort_merge_fanin(std::size_t fanin) noexcept;
 
+    /**
+     * @brief setter for auto_compaction_threshold_mb: the threshold of the amount of the WAL at which the auto
+     *        compaction runs, in MiB. When the total size of the WAL files that have not been the input of a
+     *        compaction exceeds this value, a rotation and a compaction run automatically
+     * @param threshold_mb the threshold in MiB. 0 disables the auto compaction
+     */
+    void set_auto_compaction_threshold_mb(std::size_t threshold_mb) noexcept;
+
+    /**
+     * @brief setter for auto_compaction_delete_detached: whether the auto compaction removes the WAL files that
+     *        have been the input of a compaction and are no longer needed (the detached WAL files)
+     * @param enabled true to remove them
+     */
+    void set_auto_compaction_delete_detached(bool enabled) noexcept;
+
+    /**
+     * @brief setter for blob_gc: whether the BLOB file GC runs. It applies to both the GC at startup and the GC in
+     *        an online compaction, on the master and on the replica
+     * @param enabled true to run the GC
+     */
+    void set_blob_gc(bool enabled) noexcept;
+
+    /**
+     * @brief getter for data_location
+     * @return the data location
+     */
+    [[nodiscard]] const boost::filesystem::path& get_data_location() const noexcept;
+
+    /**
+     * @brief getter for instance_id
+     * @return the instance id
+     */
+    [[nodiscard]] const std::string& get_instance_id() const noexcept;
+
+    /**
+     * @brief getter for db_name
+     * @return the database name
+     */
+    [[nodiscard]] const std::string& get_db_name() const noexcept;
+
+    /**
+     * @brief getter for recover_max_parallelism
+     * @return the number of threads of the sort, or std::nullopt if not set
+     */
+    [[nodiscard]] std::optional<int> get_recover_max_parallelism() const noexcept;
+
+    /**
+     * @brief getter for sort_arena_size_mb
+     * @return the size of the buffer per thread of the sort in MiB, or std::nullopt if not set
+     */
+    [[nodiscard]] std::optional<std::size_t> get_sort_arena_size_mb() const noexcept;
+
+    /**
+     * @brief getter for sort_work_dir
+     * @return the directory under which the sort creates its working directory, or an empty path if not set
+     */
+    [[nodiscard]] const boost::filesystem::path& get_sort_work_dir() const noexcept;
+
+    /**
+     * @brief getter for sort_merge_fanin
+     * @return the fan-in of the merge of the sort, or std::nullopt if not set
+     */
+    [[nodiscard]] std::optional<std::size_t> get_sort_merge_fanin() const noexcept;
+
+    /**
+     * @brief getter for auto_compaction_threshold_mb
+     * @return the threshold of the auto compaction in MiB, or std::nullopt if not set
+     */
+    [[nodiscard]] std::optional<std::size_t> get_auto_compaction_threshold_mb() const noexcept;
+
+    /**
+     * @brief getter for auto_compaction_delete_detached
+     * @return whether the auto compaction removes the detached WAL files, or std::nullopt if not set
+     */
+    [[nodiscard]] std::optional<bool> get_auto_compaction_delete_detached() const noexcept;
+
+    /**
+     * @brief getter for blob_gc
+     * @return whether the BLOB file GC runs, or std::nullopt if not set
+     */
+    [[nodiscard]] std::optional<bool> get_blob_gc() const noexcept;
+
 private:
     boost::filesystem::path data_location_{};
 
@@ -99,7 +179,10 @@ private:
     boost::filesystem::path sort_work_dir_{};
     std::optional<std::size_t> sort_merge_fanin_{};
 
-    friend class datastore;
+    // nullopt means that the item is not set; the datastore fills in the items not set with the defaults
+    std::optional<std::size_t> auto_compaction_threshold_mb_{};
+    std::optional<bool> auto_compaction_delete_detached_{};
+    std::optional<bool> blob_gc_{};
 };
 
 } // namespace limestone::api

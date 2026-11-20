@@ -35,8 +35,11 @@
 
 #include <boost/filesystem/path.hpp>
 
+#include "blob_file_garbage_collector.h"
 #include "blob_file_resolver.h"
+#include "compaction_settings.h"
 #include "blob_pool_impl.h"
+#include "compaction_worker_launcher.h"
 #include "file_operations.h"
 #include "locator/locator_settings.h"
 #include "manifest.h"
@@ -145,7 +148,63 @@ public:
     /// @brief Settings of the locator file (used for the locator files of the snapshot file and the compacted WAL file)
     [[nodiscard]] const limestone::internal::locator_settings& get_locator_settings() const noexcept;
 
-    // Increments the backup counter.
+    /// @brief The epoch of the latest GROUP_COMMIT that the replica received from the master and persisted. At
+    /// the startup of the replica, it is the durable epoch used as the boundary of the scan. It stays 0 in the
+    /// master role
+    [[nodiscard]] epoch_id_type get_received_epoch() const noexcept;
+
+    /// @brief Updates the received epoch. Call it after the epoch of GROUP_COMMIT is written to the epoch file
+    void set_received_epoch(epoch_id_type epoch) noexcept;
+
+    /// @brief The mutex that serializes the sends on the control channel. GROUP_COMMIT holds it from the send to
+    /// the wait for the ACK, and a compaction boundary message holds it during the send
+    [[nodiscard]] std::mutex& control_channel_send_mutex() noexcept;
+
+    /**
+     * @brief Sends a compaction boundary message to the replica.
+     * @details Sends it only on the master of a replication configuration, while a replica is connected. No
+     * response is awaited. Does nothing after disable_compaction_boundary_send(). A failed send writes an ERROR
+     * log and returns in the TCP mode, and writes a FATAL log and aborts in the RDMA mode (as the send of
+     * GROUP_COMMIT does).
+     * @param boundary_epoch the boundary epoch of the compaction
+     * @param blob_id_boundary the BLOB ID used as the boundary of the BLOB file GC
+     * @attention this function is thread-safe.
+     */
+    void send_compaction_boundary(epoch_id_type boundary_epoch, blob_id_type blob_id_boundary);
+
+    /// @brief Disables the send of a compaction boundary message from now on. No send is in progress when this
+    /// function returns
+    void disable_compaction_boundary_send();
+
+    /// @brief A compaction boundary received from the master. Used to decide the boundary of the BLOB file GC
+    struct compaction_boundary {
+        epoch_id_type boundary_epoch{0};   ///< the boundary epoch of the compaction on the master
+        blob_id_type blob_id_boundary{0};  ///< the BLOB ID the master used as the boundary of the BLOB file GC
+    };
+
+    /// @brief Returns the latest compaction boundary received from the master, or nullopt if none was received
+    [[nodiscard]] std::optional<compaction_boundary> get_received_compaction_boundary();
+
+    /// @brief Keeps a compaction boundary received from the master, discarding the one kept before
+    void set_received_compaction_boundary(const compaction_boundary& boundary);
+
+    /// @brief Replaces the settings of the compaction and the BLOB file GC. Called at the construction of the
+    /// datastore and from tests. Do not call it after the worker thread is started
+    void set_compaction_settings(const limestone::internal::compaction_settings& settings) noexcept;
+
+    /// @brief Returns the settings of the compaction and the BLOB file GC
+    [[nodiscard]] const limestone::internal::compaction_settings& get_compaction_settings() const noexcept;
+
+    /// @brief Sets the launcher of the online compaction worker thread
+    void set_compaction_worker_launcher(std::shared_ptr<limestone::internal::compaction_worker_launcher> launcher) noexcept;
+
+    /// @brief Returns the launcher of the worker thread; empty if not set
+    [[nodiscard]] const std::shared_ptr<limestone::internal::compaction_worker_launcher>& get_compaction_worker_launcher() const noexcept;
+
+    /// @brief Creates the marker to set on a snapshot. Returns an empty pointer if the launcher is not set
+    [[nodiscard]] std::shared_ptr<limestone::internal::snapshot_use_marker> create_snapshot_use_marker() const;
+
+    // Increments the backup counter. If a compaction is running, waits for it to complete first.
     void increment_backup_counter() noexcept;
 
     // Decrements the backup counter.
@@ -153,6 +212,19 @@ public:
 
     // Returns true if a backup operation is in progress.
     [[nodiscard]] bool is_backup_in_progress() const noexcept;
+
+    /// @brief Begins the exclusion of the compaction and the BLOB file GC before a backup begins.
+    /// If a compaction is running, waits for it to complete. Increments the backup counter and stops a running
+    /// GC. Call it before the targets of the backup are enumerated
+    /// @param gc the BLOB file garbage collector, or nullptr if there is none
+    void start_backup_exclusion(limestone::internal::blob_file_garbage_collector* gc);
+
+    /// @brief Begins the run of a compaction. Does not begin it while a backup is in progress
+    /// @return true if begun. The caller that receives true calls end_compaction() after the compaction
+    [[nodiscard]] bool try_begin_compaction() noexcept;
+
+    /// @brief Ends the run of a compaction, and lets the backups waiting for its completion begin
+    void end_compaction() noexcept;
 
     // Returns true if a replica exists.
     [[nodiscard]] bool has_replica() const noexcept;
@@ -210,6 +282,10 @@ public:
      * @return Channels indexed by their channel id.
      */
     [[nodiscard]] std::vector<std::unique_ptr<log_channel>> const& log_channels() const noexcept;
+
+    /// @brief Returns a copy of the list of the registered log channels. It reads the list excluding the
+    /// registration, so it can be called concurrently with a registration
+    [[nodiscard]] std::vector<log_channel*> registered_log_channels();
 
     /**
      * @brief Registers the RDMA send stream for the given log channel.
@@ -585,8 +661,36 @@ private:
     // Settings of the locator file. They keep the defaults, and only tests replace them
     limestone::internal::locator_settings locator_settings_{};
 
+    // The received epoch of the replica. Written by the receive thread and read by the online compaction worker
+    std::atomic<epoch_id_type> received_epoch_{0};
+
+    // Serializes the sends on the control channel. The senders are the threads that send GROUP_COMMIT and the
+    // online compaction worker, which sends a compaction boundary message
+    std::mutex mtx_control_channel_send_{};
+    // Whether the send of a compaction boundary message is disabled. Protected by mtx_control_channel_send_
+    bool compaction_boundary_send_disabled_{false};
+
+    // The latest compaction boundary the replica received from the master. Written by the receive thread and
+    // read by the online compaction worker. The two values are read and written as a pair, so a mutex protects
+    // them. It is not persisted
+    std::mutex mtx_received_compaction_boundary_{};
+    std::optional<compaction_boundary> received_compaction_boundary_{};
+
+    // The settings of the compaction and the BLOB file GC. Decided at the construction of the datastore; only
+    // tests replace them
+    limestone::internal::compaction_settings compaction_settings_{};
+
+    // Makes the start of the online compaction worker and the shutdown exclude each other. Shared with the
+    // markers of the snapshots
+    std::shared_ptr<limestone::internal::compaction_worker_launcher> compaction_worker_launcher_{};
+
     // Atomic counter for tracking active backup operations.
     std::atomic<int> backup_counter_;
+    // Makes a backup and a compaction exclude each other. The increment of the backup counter, and the reads and
+    // writes of the flag of a running compaction, are done under this mutex
+    std::mutex mtx_backup_compaction_{};
+    std::condition_variable cv_backup_compaction_{};
+    bool compaction_running_{false};
     std::atomic<bool> replica_exists_;
 
     // Role flag (true = master, false = replica)
@@ -596,12 +700,14 @@ private:
     std::shared_ptr<replica_connector> control_channel_;
 
     // Log channels registered via register_log_channel(). Registration is separated
-    // from the lock-free read scans (update_min_epoch_id(), rotation/backup, ...) as
+    // from the lock-free read scans (update_min_epoch_id(), backup, ...) as
     // follows: on the master, registration completes before ready() and the scans run
     // only afterwards. On a replica, registration also happens at runtime (TCP on a
     // LOG_CHANNEL_CREATE, RDMA through create_channel() during establishment), but the
     // scanning operations are either master-only or never reach the scan thanks to the
     // early return in update_min_epoch_id() (epoch_id_switched_ stays 0 on a replica).
+    // A rotation also runs on the replica, so it does not use the lock-free scan; it reads the list excluding
+    // the registration, with registered_log_channels().
     std::vector<std::unique_ptr<log_channel>> log_channels_;
 
     // Next log channel id to assign.

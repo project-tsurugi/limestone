@@ -17,6 +17,7 @@
 #include "replication/message_group_commit.h"
 
 #include "control_channel_handler_resources.h"
+#include "datastore_impl.h"
 #include "limestone_exception_helper.h"
 #include "replication/message_ack.h"
 #include "replication_message_io.h"
@@ -52,6 +53,9 @@ void message_group_commit::post_receive(handler_resources& resources) {
     auto& cch_resources = dynamic_cast<control_channel_handler_resources&>(resources);
     auto& datastore = cch_resources.get_datastore();
     datastore.persist_and_propagate_epoch_id(epoch_number_);
+    // The received epoch is advanced after the write to the epoch file. A rotation on the replica assumes that
+    // every session up to this epoch has been persisted
+    datastore.get_impl()->set_received_epoch(epoch_number_);
 
     // Send acknowledgment
     message_ack ack;
